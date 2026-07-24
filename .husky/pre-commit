@@ -1,0 +1,4 @@
+# Husky pre-commit
+pnpm format:check || exit 1
+pnpm lint:check || exit 1
+pnpm type:check || exit 1
