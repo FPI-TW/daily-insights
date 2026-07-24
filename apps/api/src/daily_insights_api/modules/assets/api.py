@@ -1,13 +1,15 @@
 import hashlib
 import uuid
 from collections.abc import Iterable
-from datetime import date
+from datetime import date, timedelta
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.enums import AssetKind, AssetStatus
-from daily_insights_api.modules.assets.object_store import ObjectRef
+from daily_insights_api.modules.assets.models import Asset
+from daily_insights_api.modules.assets.object_store import ObjectRef, ObjectStore
 
 Locale = Literal["zh-TW", "zh-CN", "en"]
 MigrationStatus = Literal["planned", "verified", "cutover", "failed"]
@@ -178,3 +180,54 @@ def _migration_idempotency_key(
         )
     )
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+async def load_asset_for_signing(
+    database: AsyncSession,
+    asset_id: uuid.UUID,
+) -> AssetForSigning | None:
+    from daily_insights_api.modules.assets.service import (
+        load_asset_for_signing as load,
+    )
+
+    return await load(database, asset_id)
+
+
+async def sign_asset_download(
+    store: ObjectStore,
+    asset: AssetForSigning,
+    *,
+    expires_in: timedelta,
+) -> SignedAsset:
+    from daily_insights_api.modules.assets.service import sign_asset_download as sign
+
+    return await sign(store, asset, expires_in=expires_in)
+
+
+__all__ = [
+    "ALLOWED_PODCAST_AUDIO_MIME_TYPES",
+    "Asset",
+    "AssetForSigning",
+    "AssetMigrationInput",
+    "AssetMigrationResult",
+    "AssetStatus",
+    "MigratedObject",
+    "ObjectRef",
+    "ObjectStore",
+    "SignedAsset",
+    "canonical_podcast_audio_key",
+    "load_asset_for_signing",
+    "migrate_podcast_assets",
+    "sign_asset_download",
+]
+
+
+async def migrate_podcast_assets(
+    store: ObjectStore,
+    entries: tuple[AssetMigrationInput, ...],
+    *,
+    dry_run: bool,
+) -> AssetMigrationResult:
+    from daily_insights_api.modules.assets.service import migrate_podcast_assets as migrate
+
+    return await migrate(store, entries, dry_run=dry_run)

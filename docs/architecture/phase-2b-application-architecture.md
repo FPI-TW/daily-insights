@@ -1,7 +1,7 @@
 # Phase 2B 完整應用架構
 
-狀態：本階段的程式碼與本機驗收已完成。尚未 commit、push、建立 PR、部署或
-連線正式 R2；下一個產品階段是 Phase 3 Podcast 先行版。
+狀態：本階段的程式碼與本機驗收已完成。Phase 3 Podcast 先行版已在此基礎上
+開始實作。
 
 ## 已完成範圍
 
@@ -41,8 +41,8 @@
   上游故障讓 last-known-good 報告與既有內容一起下線。結構化 HTTP/module
   event 會遮罩 credential、token、password 等敏感欄位。
 
-本階段沒有實作 Podcast 列表、詳情、播放器或內容管理 HTTP API，也沒有實作
-報告、聊天或一般資產管理介面。
+本階段的原始驗收不包含 Podcast 列表、詳情、播放器或內容管理 HTTP API；
+這些功能現已由後續 Phase 3 變更實作。報告、聊天與一般資產管理介面仍未完成。
 
 ## 驗收證據
 

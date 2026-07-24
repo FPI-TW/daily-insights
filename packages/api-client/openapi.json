@@ -743,6 +743,418 @@
         "title": "OrganizationUpdate",
         "type": "object"
       },
+      "PodcastAudioImportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm_replacement": {
+            "default": false,
+            "title": "Confirm Replacement",
+            "type": "boolean"
+          },
+          "expected_current_version": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Current Version"
+          },
+          "expected_mime_type": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Expected Mime Type",
+            "type": "string"
+          },
+          "locale": {
+            "default": "zh-TW",
+            "enum": ["zh-TW", "zh-CN", "en"],
+            "title": "Locale",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "source_bucket": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Source Bucket",
+            "type": "string"
+          },
+          "source_key": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Source Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_bucket",
+          "source_key",
+          "expected_mime_type",
+          "reason"
+        ],
+        "title": "PodcastAudioImportRequest",
+        "type": "object"
+      },
+      "PodcastAudioPlaybackResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "format": "uuid",
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "episode_id": {
+            "format": "uuid",
+            "title": "Episode Id",
+            "type": "string"
+          },
+          "expires_in_seconds": {
+            "title": "Expires In Seconds",
+            "type": "integer"
+          },
+          "requested_locale": {
+            "enum": ["zh-TW", "zh-CN", "en"],
+            "title": "Requested Locale",
+            "type": "string"
+          },
+          "resolved_locale": {
+            "enum": ["zh-TW", "zh-CN", "en"],
+            "title": "Resolved Locale",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "episode_id",
+          "requested_locale",
+          "resolved_locale",
+          "asset_id",
+          "url",
+          "expires_in_seconds"
+        ],
+        "title": "PodcastAudioPlaybackResponse",
+        "type": "object"
+      },
+      "PodcastAudioVariantResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "format": "uuid",
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "locale": {
+            "enum": ["zh-TW", "zh-CN", "en"],
+            "title": "Locale",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": ["asset_id", "locale", "version", "is_active"],
+        "title": "PodcastAudioVariantResponse",
+        "type": "object"
+      },
+      "PodcastEpisodeAdminResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "audio_variants": {
+            "items": {
+              "$ref": "#/components/schemas/PodcastAudioVariantResponse"
+            },
+            "title": "Audio Variants",
+            "type": "array"
+          },
+          "cover_asset_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Asset Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "metadata": {
+            "items": {
+              "$ref": "#/components/schemas/PodcastMetadata"
+            },
+            "title": "Metadata",
+            "type": "array"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "status": {
+            "enum": ["draft", "published"],
+            "title": "Status",
+            "type": "string"
+          },
+          "trading_date": {
+            "format": "date",
+            "title": "Trading Date",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "trading_date",
+          "status",
+          "version",
+          "metadata",
+          "audio_variants",
+          "cover_asset_id",
+          "published_at"
+        ],
+        "title": "PodcastEpisodeAdminResponse",
+        "type": "object"
+      },
+      "PodcastEpisodeCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/PodcastMetadataSet"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "trading_date": {
+            "format": "date",
+            "title": "Trading Date",
+            "type": "string"
+          }
+        },
+        "required": ["trading_date", "metadata", "reason"],
+        "title": "PodcastEpisodeCreate",
+        "type": "object"
+      },
+      "PodcastEpisodeDetailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cover_asset_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Asset Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "locale": {
+            "enum": ["zh-TW", "zh-CN", "en"],
+            "title": "Locale",
+            "type": "string"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "trading_date": {
+            "format": "date",
+            "title": "Trading Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "trading_date",
+          "title",
+          "summary",
+          "locale",
+          "cover_asset_id",
+          "published_at"
+        ],
+        "title": "PodcastEpisodeDetailResponse",
+        "type": "object"
+      },
+      "PodcastEpisodeSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cover_asset_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Asset Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "locale": {
+            "enum": ["zh-TW", "zh-CN", "en"],
+            "title": "Locale",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "trading_date": {
+            "format": "date",
+            "title": "Trading Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "trading_date",
+          "title",
+          "summary",
+          "locale",
+          "cover_asset_id"
+        ],
+        "title": "PodcastEpisodeSummaryResponse",
+        "type": "object"
+      },
+      "PodcastEpisodeUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/PodcastMetadataSet"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": ["expected_version", "metadata", "reason"],
+        "title": "PodcastEpisodeUpdate",
+        "type": "object"
+      },
+      "PodcastMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "locale": {
+            "enum": ["zh-TW", "zh-CN", "en"],
+            "title": "Locale",
+            "type": "string"
+          },
+          "summary": {
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": ["locale", "title", "summary"],
+        "title": "PodcastMetadata",
+        "type": "object"
+      },
+      "PodcastMetadataSet": {
+        "additionalProperties": false,
+        "properties": {
+          "values": {
+            "items": {
+              "$ref": "#/components/schemas/PodcastMetadata"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": ["values"],
+        "title": "PodcastMetadataSet",
+        "type": "object"
+      },
+      "PodcastPublicationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": ["expected_version", "reason"],
+        "title": "PodcastPublicationRequest",
+        "type": "object"
+      },
       "PresentationContract": {
         "additionalProperties": false,
         "properties": {
@@ -1892,6 +2304,352 @@
         "tags": ["administration"]
       }
     },
+    "/api/admin/podcasts": {
+      "get": {
+        "operationId": "admin_podcasts_list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PodcastEpisodeAdminResponse"
+                  },
+                  "title": "Response Admin Podcasts List",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Admin List",
+        "tags": ["podcasts"]
+      },
+      "post": {
+        "operationId": "admin_podcasts_create",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PodcastEpisodeCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PodcastEpisodeAdminResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Create",
+        "tags": ["podcasts"]
+      }
+    },
+    "/api/admin/podcasts/{episode_id}": {
+      "put": {
+        "operationId": "admin_podcasts_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "episode_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Episode Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PodcastEpisodeUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PodcastEpisodeAdminResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Update",
+        "tags": ["podcasts"]
+      }
+    },
+    "/api/admin/podcasts/{episode_id}/audio-imports": {
+      "post": {
+        "operationId": "admin_podcasts_import_audio",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "episode_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Episode Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PodcastAudioImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PodcastEpisodeAdminResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Import Audio",
+        "tags": ["podcasts"]
+      }
+    },
+    "/api/admin/podcasts/{episode_id}/publish": {
+      "post": {
+        "operationId": "admin_podcasts_publish",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "episode_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Episode Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PodcastPublicationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PodcastEpisodeAdminResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Publish",
+        "tags": ["podcasts"]
+      }
+    },
+    "/api/admin/podcasts/{episode_id}/unpublish": {
+      "post": {
+        "operationId": "admin_podcasts_unpublish",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "episode_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Episode Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PodcastPublicationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PodcastEpisodeAdminResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Unpublish",
+        "tags": ["podcasts"]
+      }
+    },
     "/api/auth/change-password": {
       "post": {
         "operationId": "auth_change_password",
@@ -2134,6 +2892,156 @@
         },
         "summary": "List Visible Markets",
         "tags": ["markets"]
+      }
+    },
+    "/api/podcasts": {
+      "get": {
+        "operationId": "podcasts_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "locale",
+            "required": false,
+            "schema": {
+              "default": "zh-TW",
+              "enum": ["zh-TW", "zh-CN", "en"],
+              "title": "Locale",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PodcastEpisodeSummaryResponse"
+                  },
+                  "title": "Response Podcasts List",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Customer List",
+        "tags": ["podcasts"]
+      }
+    },
+    "/api/podcasts/{episode_id}": {
+      "get": {
+        "operationId": "podcasts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "episode_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Episode Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "locale",
+            "required": false,
+            "schema": {
+              "default": "zh-TW",
+              "enum": ["zh-TW", "zh-CN", "en"],
+              "title": "Locale",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PodcastEpisodeDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Customer Detail",
+        "tags": ["podcasts"]
+      }
+    },
+    "/api/podcasts/{episode_id}/audio-url": {
+      "post": {
+        "operationId": "podcasts_create_audio_url",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "episode_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Episode Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "locale",
+            "required": false,
+            "schema": {
+              "default": "zh-TW",
+              "enum": ["zh-TW", "zh-CN", "en"],
+              "title": "Locale",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PodcastAudioPlaybackResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Customer Audio Url",
+        "tags": ["podcasts"]
       }
     },
     "/api/reports": {

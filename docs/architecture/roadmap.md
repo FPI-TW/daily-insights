@@ -129,8 +129,8 @@ administration, or Podcast presentation.
 
 ## Phase 3 — Podcast pilot
 
-Implementation status: planned as the first customer-facing vertical slice.
-Detailed scope and decision gates are recorded in
+Implementation status: implemented locally; live R2 and browser acceptance are
+still pending. Detailed scope, evidence, and remaining gates are recorded in
 [`podcast-pilot.md`](podcast-pilot.md).
 
 Deliver:

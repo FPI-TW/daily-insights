@@ -43,6 +43,16 @@ export function AppShell({
           {t("brand")}
         </Link>
         <nav aria-label={t("account")}>
+          {user.system_role === "org_member" && (
+            <Link to="/$locale/podcasts" params={{ locale }}>
+              {t("podcastNav")}
+            </Link>
+          )}
+          {user.system_role !== "org_member" && (
+            <Link to="/$locale/back-office/podcasts" params={{ locale }}>
+              {t("podcastNav")}
+            </Link>
+          )}
           <span>{user.display_name}</span>
           <LocaleSwitcher locale={locale} />
           <ThemeToggle />

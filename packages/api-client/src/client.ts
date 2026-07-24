@@ -3,6 +3,16 @@ import {
   apiErrorSchema,
   authenticationSchema,
   csrfTokenSchema,
+  podcastAudioPlaybackSchema,
+  type PodcastAudioImportInput,
+  podcastEpisodeAdminListSchema,
+  podcastEpisodeAdminSchema,
+  type PodcastEpisodeCreateInput,
+  podcastEpisodeDetailSchema,
+  podcastEpisodeListSchema,
+  type PodcastEpisodeUpdateInput,
+  type Locale,
+  type PodcastPublicationInput,
   userSchema,
 } from "./schemas"
 
@@ -10,7 +20,8 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly requestId: string | null,
-    message: string
+    message: string,
+    readonly detail: unknown = message
   ) {
     super(message)
     this.name = "ApiError"
@@ -42,13 +53,15 @@ async function parseResponse<T>(
     const parsed = apiErrorSchema.safeParse(
       await response.json().catch(() => ({}))
     )
-    const detail =
-      parsed.success && typeof parsed.data.detail === "string"
-        ? parsed.data.detail
+    const detail = parsed.success ? parsed.data.detail : undefined
+    const message =
+      typeof detail === "string"
+        ? detail
         : `API request failed (${response.status})`
     throw new ApiError(
       response.status,
       response.headers.get("X-Request-ID"),
+      message,
       detail
     )
   }
@@ -109,6 +122,118 @@ export function createAuthClient(transport: ApiTransport) {
           "Unable to sign out"
         )
       }
+    },
+  }
+}
+
+export function createPodcastClient(transport: ApiTransport) {
+  return {
+    async list(locale: Locale) {
+      const query = new URLSearchParams({ locale })
+      return parseResponse(
+        await transport(`/api/podcasts?${query}`),
+        podcastEpisodeListSchema
+      )
+    },
+    async get(episodeId: string, locale: Locale) {
+      const query = new URLSearchParams({ locale })
+      return parseResponse(
+        await transport(`/api/podcasts/${episodeId}?${query}`),
+        podcastEpisodeDetailSchema
+      )
+    },
+    async createAudioUrl(episodeId: string, locale: Locale) {
+      const query = new URLSearchParams({ locale })
+      return parseResponse(
+        await transport(`/api/podcasts/${episodeId}/audio-url?${query}`, {
+          method: "POST",
+        }),
+        podcastAudioPlaybackSchema
+      )
+    },
+  }
+}
+
+function mutationHeaders(csrfToken: string) {
+  return {
+    "Content-Type": "application/json",
+    "X-CSRF-Token": csrfToken,
+  }
+}
+
+export function createPodcastAdminClient(transport: ApiTransport) {
+  return {
+    async list() {
+      return parseResponse(
+        await transport("/api/admin/podcasts"),
+        podcastEpisodeAdminListSchema
+      )
+    },
+    async create(input: PodcastEpisodeCreateInput, csrfToken: string) {
+      return parseResponse(
+        await transport("/api/admin/podcasts", {
+          method: "POST",
+          headers: mutationHeaders(csrfToken),
+          body: JSON.stringify(input),
+        }),
+        podcastEpisodeAdminSchema
+      )
+    },
+    async update(
+      episodeId: string,
+      input: PodcastEpisodeUpdateInput,
+      csrfToken: string
+    ) {
+      return parseResponse(
+        await transport(`/api/admin/podcasts/${episodeId}`, {
+          method: "PUT",
+          headers: mutationHeaders(csrfToken),
+          body: JSON.stringify(input),
+        }),
+        podcastEpisodeAdminSchema
+      )
+    },
+    async publish(
+      episodeId: string,
+      input: PodcastPublicationInput,
+      csrfToken: string
+    ) {
+      return parseResponse(
+        await transport(`/api/admin/podcasts/${episodeId}/publish`, {
+          method: "POST",
+          headers: mutationHeaders(csrfToken),
+          body: JSON.stringify(input),
+        }),
+        podcastEpisodeAdminSchema
+      )
+    },
+    async unpublish(
+      episodeId: string,
+      input: PodcastPublicationInput,
+      csrfToken: string
+    ) {
+      return parseResponse(
+        await transport(`/api/admin/podcasts/${episodeId}/unpublish`, {
+          method: "POST",
+          headers: mutationHeaders(csrfToken),
+          body: JSON.stringify(input),
+        }),
+        podcastEpisodeAdminSchema
+      )
+    },
+    async importAudio(
+      episodeId: string,
+      input: PodcastAudioImportInput,
+      csrfToken: string
+    ) {
+      return parseResponse(
+        await transport(`/api/admin/podcasts/${episodeId}/audio-imports`, {
+          method: "POST",
+          headers: mutationHeaders(csrfToken),
+          body: JSON.stringify(input),
+        }),
+        podcastEpisodeAdminSchema
+      )
     },
   }
 }

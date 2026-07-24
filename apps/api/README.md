@@ -60,6 +60,22 @@ OpenAPI、回應或結構化 log。
 
 容器內部另有不帶 `/api` 前綴的等價端點，且不會出現在 OpenAPI。
 
+## Phase 3：Podcast 先行版
+
+客戶 Podcast API：
+
+- `GET /api/podcasts?locale=zh-TW`
+- `GET /api/podcasts/{episode_id}?locale=zh-TW`
+- `POST /api/podcasts/{episode_id}/audio-url?locale=zh-TW`
+
+內部 Podcast API 位於 `/api/admin/podcasts`。`admin` 可建立、編輯、發布與
+下架；`admin` 與 `asset_manager` 可將已手動上傳的來源 object 登記為版本化
+音檔。登記流程會複製到後端產生的 canonical key，核對 size、MIME type 與
+SHA-256 後才更新 active mapping，不會刪除來源或舊版本。
+
+客戶只能取得已發布內容與短效、object-scoped R2 URL。`zh-CN` 或 `en` 沒有
+對應音檔時只會回退至 `zh-TW`，回應會同時標明 requested 與 resolved locale。
+
 ## Phase 1：身份與租戶
 
 Phase 1 包含：

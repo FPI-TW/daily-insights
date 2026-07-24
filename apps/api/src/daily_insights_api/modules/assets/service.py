@@ -1,6 +1,10 @@
 import hashlib
+import uuid
 from collections.abc import AsyncIterator
 from datetime import timedelta
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.enums import AssetKind, AssetStatus
 from daily_insights_api.core.observability import emit_event
@@ -13,6 +17,7 @@ from daily_insights_api.modules.assets.api import (
     SignedAsset,
     migration_idempotency_key,
 )
+from daily_insights_api.modules.assets.models import Asset
 from daily_insights_api.modules.assets.object_store import ObjectMetadata, ObjectStore
 
 
@@ -22,6 +27,24 @@ class AssetNotSignableError(RuntimeError):
 
 class AssetMigrationError(RuntimeError):
     pass
+
+
+async def load_asset_for_signing(
+    database: AsyncSession,
+    asset_id: uuid.UUID,
+) -> AssetForSigning | None:
+    asset = await database.scalar(select(Asset).where(Asset.id == asset_id))
+    if asset is None or asset.sha256 is None:
+        return None
+    return AssetForSigning(
+        id=asset.id,
+        ref={"bucket": asset.bucket, "key": asset.object_key},
+        kind=asset.kind,
+        status=asset.status,
+        mime_type=asset.mime_type,
+        size_bytes=asset.size_bytes,
+        sha256=asset.sha256,
+    )
 
 
 async def sign_asset_download(

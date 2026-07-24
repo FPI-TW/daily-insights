@@ -11,7 +11,7 @@ docker run --rm \
 config_file="infra/nginx/conf.d/default.conf"
 grep -q 'proxy_buffering off;' "$config_file"
 grep -q 'X-Accel-Buffering "no"' "$config_file"
-grep -q 'location ~ \^/api/assets/' "$config_file"
+grep -q 'location ~ \^/api/podcasts/' "$config_file"
 grep -q 'client_max_body_size 16k;' "$config_file"
 
 if grep -Eq 'proxy_pass .*r2|R2_(ACCESS|SECRET|ACCOUNT)' infra/nginx/*.conf infra/nginx/conf.d/*.conf

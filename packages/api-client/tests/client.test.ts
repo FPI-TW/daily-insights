@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { createAuthClient, createBrowserTransport } from "../src"
+import {
+  createAuthClient,
+  createBrowserTransport,
+  createPodcastClient,
+} from "../src"
 import { createServerTransport } from "../src/server"
 
 describe("API client trust boundary", () => {
@@ -58,5 +62,39 @@ describe("API client trust boundary", () => {
     expect(forwarded.has("authorization")).toBe(false)
     expect(forwarded.has("host")).toBe(false)
     expect(forwarded.has("x-forwarded-for")).toBe(false)
+  })
+
+  it("validates localized Podcast catalog responses", async () => {
+    const client = createPodcastClient(async () =>
+      Response.json([
+        {
+          id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
+          trading_date: "2026-07-24",
+          title: "市場晨報",
+          summary: "今日摘要",
+          locale: "zh-TW",
+          cover_asset_id: null,
+        },
+      ])
+    )
+
+    await expect(client.list("zh-TW")).resolves.toHaveLength(1)
+  })
+
+  it("rejects an invalid Podcast locale returned by the API", async () => {
+    const client = createPodcastClient(async () =>
+      Response.json([
+        {
+          id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
+          trading_date: "2026-07-24",
+          title: "Market Brief",
+          summary: "Summary",
+          locale: "fr",
+          cover_asset_id: null,
+        },
+      ])
+    )
+
+    await expect(client.list("en")).rejects.toMatchObject({ status: 502 })
   })
 })

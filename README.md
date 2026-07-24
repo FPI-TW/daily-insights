@@ -53,7 +53,9 @@ make bootstrap-admin EMAIL=admin@example.com NAME="Admin"
 
 指令只會顯示一次隨機臨時密碼；管理員登入後必須立即更改。
 
-架構文件所描述的是目標設計；領域出現在文件中，不代表相關功能已經完成。
+目前已完成身份／租戶、結構化報告基礎與 Podcast 先行版的本機實作。正式 R2
+音檔與 browser E2E 驗收狀態請以各階段文件為準；領域出現在文件中不代表已經
+完成上線驗收。
 
 ## Git hooks
 

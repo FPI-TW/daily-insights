@@ -1,7 +1,33 @@
 # Podcast 先行版
 
-狀態：已確認為完整應用架構完成後的第一個客戶端垂直切片。八大市場正式內容與
-報告前端在此期間維持 pending。
+狀態：本機功能已完成第一輪實作與整合測試；正式 R2 音檔、browser E2E 與
+Phase 4 上線驗收尚未執行。八大市場正式內容與報告前端在此期間維持 pending。
+
+## 實作狀態
+
+目前已完成：
+
+- `admin` 建立、編輯、發布及下架 episode，`admin` 與 `asset_manager`
+  可登記手動上傳的 R2 audio；
+- 同交易日唯一性、完整三語 metadata、發布前 `zh-TW` active audio 驗證；
+- 同 locale 替換警告、明確確認、expected current version 與新 canonical
+  object key；
+- 客戶共用 catalog、detail、`zh-CN`／`en` 到 `zh-TW` fallback，以及短效
+  signed URL；
+- TanStack Start 三語客戶頁、responsive list/detail、原生 audio element、
+  loading/empty/failure state 與依 user/episode/resolved locale 隔離的
+  `localStorage` 進度；
+- 內部 Podcast 後台、三語 metadata 表單、R2 object 登記及發布控制；
+- PostgreSQL + fake R2 端到端測試，覆蓋建立、發布拒絕、音檔登記、角色限制、
+  locale fallback、替換保留舊版本及下架。
+
+尚待正式環境或 browser 驗收：
+
+- 目前設定的 R2 bucket 可連線及列舉，但 bucket 為空，尚無真實音檔可執行
+  HEAD、copy、checksum、signed URL 與實際播放驗證；
+- 尚未加入 Playwright，因此鍵盤操作、不同 viewport、signed URL 到期及
+  R2/network failure 仍需在 Phase 4 前以實際 browser 驗收；
+- back-office 初版只接受已存在 R2 source key，不提供 browser upload。
 
 ## 目標
 

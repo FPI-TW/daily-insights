@@ -146,6 +146,92 @@ export interface paths {
     patch: operations["update_member_api_admin_organizations__organization_id__members__user_id__patch"]
     trace?: never
   }
+  "/api/admin/podcasts": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Admin List */
+    get: operations["admin_podcasts_list"]
+    put?: never
+    /** Admin Create */
+    post: operations["admin_podcasts_create"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/podcasts/{episode_id}": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Admin Update */
+    put: operations["admin_podcasts_update"]
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/podcasts/{episode_id}/audio-imports": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Admin Import Audio */
+    post: operations["admin_podcasts_import_audio"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/podcasts/{episode_id}/publish": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Admin Publish */
+    post: operations["admin_podcasts_publish"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/podcasts/{episode_id}/unpublish": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Admin Unpublish */
+    post: operations["admin_podcasts_unpublish"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/auth/change-password": {
     parameters: {
       query?: never
@@ -283,6 +369,57 @@ export interface paths {
     get: operations["list_visible_markets_api_markets_get"]
     put?: never
     post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/podcasts": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Customer List */
+    get: operations["podcasts_list"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/podcasts/{episode_id}": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Customer Detail */
+    get: operations["podcasts_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/podcasts/{episode_id}/audio-url": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Customer Audio Url */
+    post: operations["podcasts_create_audio_url"]
     delete?: never
     options?: never
     head?: never
@@ -598,6 +735,198 @@ export interface components {
       /** Slug */
       slug?: string | null
       status?: components["schemas"]["OrganizationStatus"] | null
+    }
+    /** PodcastAudioImportRequest */
+    PodcastAudioImportRequest: {
+      /**
+       * Confirm Replacement
+       * @default false
+       */
+      confirm_replacement: boolean
+      /** Expected Current Version */
+      expected_current_version?: number | null
+      /** Expected Mime Type */
+      expected_mime_type: string
+      /**
+       * Locale
+       * @default zh-TW
+       * @enum {string}
+       */
+      locale: "zh-TW" | "zh-CN" | "en"
+      /** Reason */
+      reason: string
+      /** Source Bucket */
+      source_bucket: string
+      /** Source Key */
+      source_key: string
+    }
+    /** PodcastAudioPlaybackResponse */
+    PodcastAudioPlaybackResponse: {
+      /**
+       * Asset Id
+       * Format: uuid
+       */
+      asset_id: string
+      /**
+       * Episode Id
+       * Format: uuid
+       */
+      episode_id: string
+      /** Expires In Seconds */
+      expires_in_seconds: number
+      /**
+       * Requested Locale
+       * @enum {string}
+       */
+      requested_locale: "zh-TW" | "zh-CN" | "en"
+      /**
+       * Resolved Locale
+       * @enum {string}
+       */
+      resolved_locale: "zh-TW" | "zh-CN" | "en"
+      /** Url */
+      url: string
+    }
+    /** PodcastAudioVariantResponse */
+    PodcastAudioVariantResponse: {
+      /**
+       * Asset Id
+       * Format: uuid
+       */
+      asset_id: string
+      /** Is Active */
+      is_active: boolean
+      /**
+       * Locale
+       * @enum {string}
+       */
+      locale: "zh-TW" | "zh-CN" | "en"
+      /** Version */
+      version: number
+    }
+    /** PodcastEpisodeAdminResponse */
+    PodcastEpisodeAdminResponse: {
+      /** Audio Variants */
+      audio_variants: components["schemas"]["PodcastAudioVariantResponse"][]
+      /** Cover Asset Id */
+      cover_asset_id: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Metadata */
+      metadata: components["schemas"]["PodcastMetadata"][]
+      /** Published At */
+      published_at: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "draft" | "published"
+      /**
+       * Trading Date
+       * Format: date
+       */
+      trading_date: string
+      /** Version */
+      version: number
+    }
+    /** PodcastEpisodeCreate */
+    PodcastEpisodeCreate: {
+      metadata: components["schemas"]["PodcastMetadataSet"]
+      /** Reason */
+      reason: string
+      /**
+       * Trading Date
+       * Format: date
+       */
+      trading_date: string
+    }
+    /** PodcastEpisodeDetailResponse */
+    PodcastEpisodeDetailResponse: {
+      /** Cover Asset Id */
+      cover_asset_id: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /**
+       * Locale
+       * @enum {string}
+       */
+      locale: "zh-TW" | "zh-CN" | "en"
+      /**
+       * Published At
+       * Format: date-time
+       */
+      published_at: string
+      /** Summary */
+      summary: string
+      /** Title */
+      title: string
+      /**
+       * Trading Date
+       * Format: date
+       */
+      trading_date: string
+    }
+    /** PodcastEpisodeSummaryResponse */
+    PodcastEpisodeSummaryResponse: {
+      /** Cover Asset Id */
+      cover_asset_id: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /**
+       * Locale
+       * @enum {string}
+       */
+      locale: "zh-TW" | "zh-CN" | "en"
+      /** Summary */
+      summary: string
+      /** Title */
+      title: string
+      /**
+       * Trading Date
+       * Format: date
+       */
+      trading_date: string
+    }
+    /** PodcastEpisodeUpdate */
+    PodcastEpisodeUpdate: {
+      /** Expected Version */
+      expected_version: number
+      metadata: components["schemas"]["PodcastMetadataSet"]
+      /** Reason */
+      reason: string
+    }
+    /** PodcastMetadata */
+    PodcastMetadata: {
+      /**
+       * Locale
+       * @enum {string}
+       */
+      locale: "zh-TW" | "zh-CN" | "en"
+      /** Summary */
+      summary: string
+      /** Title */
+      title: string
+    }
+    /** PodcastMetadataSet */
+    PodcastMetadataSet: {
+      /** Values */
+      values: components["schemas"]["PodcastMetadata"][]
+    }
+    /** PodcastPublicationRequest */
+    PodcastPublicationRequest: {
+      /** Expected Version */
+      expected_version: number
+      /** Reason */
+      reason: string
     }
     /** PresentationContract */
     PresentationContract: {
@@ -1245,6 +1574,209 @@ export interface operations {
       }
     }
   }
+  admin_podcasts_list: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["PodcastEpisodeAdminResponse"][]
+        }
+      }
+    }
+  }
+  admin_podcasts_create: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PodcastEpisodeCreate"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["PodcastEpisodeAdminResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  admin_podcasts_update: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        episode_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PodcastEpisodeUpdate"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["PodcastEpisodeAdminResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  admin_podcasts_import_audio: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        episode_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PodcastAudioImportRequest"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["PodcastEpisodeAdminResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  admin_podcasts_publish: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        episode_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PodcastPublicationRequest"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["PodcastEpisodeAdminResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  admin_podcasts_unpublish: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        episode_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PodcastPublicationRequest"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["PodcastEpisodeAdminResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
   auth_change_password: {
     parameters: {
       query?: never
@@ -1447,6 +1979,103 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["MarketResponse"][]
+        }
+      }
+    }
+  }
+  podcasts_list: {
+    parameters: {
+      query?: {
+        locale?: "zh-TW" | "zh-CN" | "en"
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["PodcastEpisodeSummaryResponse"][]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  podcasts_get: {
+    parameters: {
+      query?: {
+        locale?: "zh-TW" | "zh-CN" | "en"
+      }
+      header?: never
+      path: {
+        episode_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["PodcastEpisodeDetailResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  podcasts_create_audio_url: {
+    parameters: {
+      query?: {
+        locale?: "zh-TW" | "zh-CN" | "en"
+      }
+      header?: never
+      path: {
+        episode_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["PodcastAudioPlaybackResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
         }
       }
     }

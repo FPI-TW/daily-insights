@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { Link, createFileRoute } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 
 export const Route = createFileRoute("/$locale/_authenticated/back-office/")({
@@ -6,7 +6,7 @@ export const Route = createFileRoute("/$locale/_authenticated/back-office/")({
 })
 
 function BackOfficeHome() {
-  const { user } = Route.useRouteContext()
+  const { locale, user } = Route.useRouteContext()
   const { t } = useTranslation()
   return (
     <main className="shell-card">
@@ -16,6 +16,9 @@ function BackOfficeHome() {
         <dt>{t("role")}</dt>
         <dd>{user.system_role}</dd>
       </dl>
+      <Link to="/$locale/back-office/podcasts" params={{ locale }}>
+        {t("podcastAdminTitle")}
+      </Link>
     </main>
   )
 }
