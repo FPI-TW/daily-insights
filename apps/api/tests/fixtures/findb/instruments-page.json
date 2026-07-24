@@ -1,0 +1,32 @@
+{
+  "success": true,
+  "data": [
+    {
+      "instrument_id": "00000000-0000-0000-0000-000000000001",
+      "asset_class": "equity",
+      "market": "US",
+      "symbol": "EXAMPLE",
+      "status": "active",
+      "name": "Synthetic Example",
+      "currency": "USD",
+      "timezone": "America/New_York",
+      "listed_date": "2020-01-02",
+      "delisted_date": null,
+      "first_trade_date": "2020-01-02",
+      "latest_trade_date": "2026-07-23",
+      "latest_price": "100.90",
+      "future_additive_field": "accepted"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "page_size": 100,
+    "total_records": 1,
+    "total_pages": 1,
+    "next_cursor": null,
+    "future_pagination_field": true
+  },
+  "future_envelope_field": {
+    "version": 2
+  }
+}

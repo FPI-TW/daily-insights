@@ -22,7 +22,11 @@ EXPECTED_TABLES = {
     "model_configurations",
     "organization_market_policies",
     "organizations",
+    "publication_source_runs",
+    "report_pipeline_runs",
+    "report_publications",
     "sessions",
+    "source_runs",
     "users",
 }
 

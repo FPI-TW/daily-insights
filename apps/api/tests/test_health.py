@@ -58,6 +58,8 @@ async def test_phase1_openapi_exposes_only_supported_identity_flows() -> None:
         "/api/admin/organizations",
         "/api/admin/internal-users",
         "/api/markets",
+        "/api/reports",
+        "/api/reports/{market_code}/latest",
     } <= paths
     assert not any(
         "register" in path or "forgot" in path or "reset-password" in path for path in paths

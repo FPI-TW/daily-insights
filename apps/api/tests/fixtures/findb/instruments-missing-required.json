@@ -1,0 +1,18 @@
+{
+  "success": true,
+  "data": [
+    {
+      "asset_class": "equity",
+      "market": "US",
+      "symbol": "BROKEN",
+      "status": "active"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "page_size": 100,
+    "total_records": 1,
+    "total_pages": 1,
+    "next_cursor": null
+  }
+}

@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     login_rate_limit_attempts: int = Field(default=5, gt=0)
     login_rate_limit_window_seconds: int = Field(default=5 * 60, gt=0)
     trusted_proxy_cidrs: str = "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+    findb_base_url: str = "https://findb.tingfong.com"
+    findb_api_key: SecretStr | None = None
+    findb_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    findb_retry_attempts: int = Field(default=3, ge=1, le=10)
+    report_freshness_max_age_days: int = Field(default=3, ge=1, le=30)
 
     @model_validator(mode="after")
     def require_external_database_configuration(self) -> Self:

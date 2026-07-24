@@ -33,7 +33,8 @@ services:
     environment:
       DAILY_INSIGHTS_ENVIRONMENT: ${APP_ENV:?set APP_ENV in .env}
       DAILY_INSIGHTS_DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
-      FINDB_BASE_URL: ${FINDB_BASE_URL:-https://findb.tingfong.com}
+      DAILY_INSIGHTS_FINDB_BASE_URL: ${FINDB_BASE_URL:-https://findb.tingfong.com}
+      DAILY_INSIGHTS_FINDB_API_KEY: ${FINDB_API_KEY:-}
     command:
       [
         "sh",

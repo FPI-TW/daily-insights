@@ -7,6 +7,8 @@ from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.identity.session_models import LoginThrottle, Session
 from daily_insights_api.modules.markets.models import Market, OrganizationMarketPolicy
 from daily_insights_api.modules.model_runtime.models import GenerationRecord, ModelConfiguration
+from daily_insights_api.modules.operations.models import ReportPipelineRun, SourceRun
+from daily_insights_api.modules.reports.models import PublicationSourceRun, ReportPublication
 from daily_insights_api.modules.tenancy.models import Membership, Organization
 
 __all__ = [
@@ -21,6 +23,10 @@ __all__ = [
     "ModelConfiguration",
     "Organization",
     "OrganizationMarketPolicy",
+    "PublicationSourceRun",
+    "ReportPipelineRun",
+    "ReportPublication",
     "Session",
+    "SourceRun",
     "User",
 ]

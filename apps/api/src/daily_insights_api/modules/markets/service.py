@@ -7,6 +7,32 @@ from daily_insights_api.modules.markets.models import Market, OrganizationMarket
 from daily_insights_api.modules.markets.schemas import MarketResponse
 
 
+async def visible_market_codes(
+    database: AsyncSession,
+    organization_id: uuid.UUID,
+) -> set[str]:
+    hidden_codes = set(
+        (
+            await database.scalars(
+                select(OrganizationMarketPolicy.market_code).where(
+                    OrganizationMarketPolicy.organization_id == organization_id,
+                    OrganizationMarketPolicy.is_visible.is_(False),
+                )
+            )
+        ).all()
+    )
+    all_codes = set((await database.scalars(select(Market.code))).all())
+    return all_codes - hidden_codes
+
+
+async def is_market_visible(
+    database: AsyncSession,
+    organization_id: uuid.UUID,
+    market_code: str,
+) -> bool:
+    return market_code in await visible_market_codes(database, organization_id)
+
+
 async def market_responses(
     database: AsyncSession,
     organization_id: uuid.UUID,

@@ -1,0 +1,30 @@
+{
+  "success": true,
+  "data": [
+    {
+      "instrument_id": "00000000-0000-0000-0000-000000000001",
+      "symbol": "EXAMPLE",
+      "name": "Synthetic Example",
+      "market": "US",
+      "trade_date": "2026-07-23",
+      "open": "100.10",
+      "high": "101.20",
+      "low": "99.80",
+      "close": "100.90",
+      "volume": 1234,
+      "total_ticks": 456,
+      "turnover": "124530.60",
+      "source": "synthetic-fixture",
+      "created_at": "2026-07-24T00:00:00Z",
+      "updated_at": "2026-07-24T00:05:00+00:00",
+      "future_additive_field": 42
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "page_size": 100,
+    "total_records": 1,
+    "total_pages": 1,
+    "next_cursor": null
+  }
+}

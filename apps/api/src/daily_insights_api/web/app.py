@@ -16,6 +16,7 @@ from daily_insights_api.core.database import (
 from daily_insights_api.modules.admin.router import router as admin_router
 from daily_insights_api.modules.identity.router import router as identity_router
 from daily_insights_api.modules.markets.router import router as markets_router
+from daily_insights_api.modules.reports.router import router as reports_router
 
 ReadinessChecker = Callable[[], Awaitable[bool]]
 
@@ -79,6 +80,7 @@ def create_app(
     app.include_router(identity_router)
     app.include_router(admin_router)
     app.include_router(markets_router)
+    app.include_router(reports_router)
 
     @app.get("/health/live", response_model=HealthResponse, include_in_schema=False)
     @app.get("/api/health/live", response_model=HealthResponse)

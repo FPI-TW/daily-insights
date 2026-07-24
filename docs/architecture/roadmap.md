@@ -54,6 +54,12 @@ Accept when:
 
 ## Phase 2 — provider and report pipeline
 
+Implementation status: foundation complete. The provider adapter, immutable
+publication contract, database-backed orchestration primitives, and customer
+read API are implemented. Formal eight-market content, production scheduling
+and alerts, and the report UI remain blocked or scheduled for later work as
+documented in [`phase-2-data-reports.md`](phase-2-data-reports.md).
+
 Deliver:
 
 - FinDB adapter and normalized DTOs;

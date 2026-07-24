@@ -63,7 +63,8 @@ make bootstrap-admin EMAIL=admin@example.com NAME="Admin"
 - `pre-push`：執行 pre-commit 的全部檢查，並額外執行測試。
 
 `pre-push` 會透過 Docker 建立一次性的 PostgreSQL，確保 Phase 1
-整合測試不會因本機未設定測試資料庫而被略過；測試結束後容器會自動移除。
+與 Phase 2 整合測試不會因本機未設定測試資料庫而被略過；測試結束後容器會
+自動移除。
 
 若未透過 `pnpm install` 初始化環境，可手動啟用：
 
@@ -89,4 +90,5 @@ Compose 設定僅用於開發環境，不代表正式環境拓撲。正式部署
 - [已確認決策與待確認事項](docs/architecture/product-decisions.md)
 - [系統與領域邊界](docs/architecture/system-architecture.md)
 - [分階段實作與驗收路線圖](docs/architecture/roadmap.md)
+- [Phase 2 資料來源與結構化報告](docs/architecture/phase-2-data-reports.md)
 - [正式環境維運操作手冊](docs/runbooks/production.md)
