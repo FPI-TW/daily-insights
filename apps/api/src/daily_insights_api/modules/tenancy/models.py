@@ -11,13 +11,11 @@ from daily_insights_api.core.models import Base, TimestampMixin, UUIDPrimaryKeyM
 
 class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "organizations"
-    __table_args__ = (
-        CheckConstraint("seat_limit IS NULL OR seat_limit > 0", name="seat_limit_positive"),
-    )
+    __table_args__ = (CheckConstraint("seat_limit > 0", name="seat_limit_positive"),)
 
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
-    seat_limit: Mapped[int | None]
+    seat_limit: Mapped[int] = mapped_column(nullable=False)
     status: Mapped[OrganizationStatus] = mapped_column(
         Enum(
             OrganizationStatus,

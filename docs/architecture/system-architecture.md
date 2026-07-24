@@ -85,6 +85,17 @@ committed in one database transaction where atomicity matters.
   affected read and generation context.
 - Market and tenant identifiers are derived from authenticated membership, not
   trusted request headers supplied by a browser.
+- `organizations.seat_limit` is a required positive contractual limit.
+  Membership creation locks the organization/member-count decision and fails
+  atomically when the limit is reached. Admin limit changes are audited with
+  their contract reference and before/after values.
+- Every existing membership consumes a seat even when its user is suspended.
+  Only removing the membership releases the seat.
+- Accounts are admin-provisioned; there is no public registration. A random
+  temporary password is stored only as a hash and must be changed after the
+  first successful login before normal application access is granted. Its
+  plaintext is shown once to the creating admin for secure out-of-band
+  delivery and is never retrievable.
 - Global model configuration is versioned. A generation snapshots all facts
   needed for historical attribution; changing the active pointer never mutates
   past rows.
@@ -134,6 +145,10 @@ later, but private-by-default is the baseline.
   policy.
 - Prefer secure, HTTP-only, same-site session cookies with rotation and
   revocation over browser-managed bearer tokens.
+- The initial release uses out-of-band temporary-password delivery and has no
+  email or self-service forgot-password dependency. A later security milestone
+  adds password recovery and mandatory MFA for `admin`; its email delivery uses
+  Amazon SES in `ap-southeast-1`.
 - Health endpoints distinguish liveness from readiness. Readiness includes the
   database and critical startup configuration, not every optional upstream.
 - Structured logs carry a request ID from nginx through API calls. Metrics

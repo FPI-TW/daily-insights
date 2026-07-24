@@ -58,7 +58,7 @@ def upgrade() -> None:
         "organizations",
         sa.Column("name", sa.String(length=200), nullable=False),
         sa.Column("slug", sa.String(length=100), nullable=False),
-        sa.Column("seat_limit", sa.Integer(), nullable=True),
+        sa.Column("seat_limit", sa.Integer(), nullable=False),
         sa.Column("status", organization_status, server_default="active", nullable=False),
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column(
@@ -74,7 +74,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.CheckConstraint(
-            "seat_limit IS NULL OR seat_limit > 0",
+            "seat_limit > 0",
             name=op.f("ck_organizations_seat_limit_positive"),
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_organizations")),
@@ -86,9 +86,15 @@ def upgrade() -> None:
         "users",
         sa.Column("email", sa.String(length=320), nullable=False),
         sa.Column("display_name", sa.String(length=200), nullable=False),
-        sa.Column("password_hash", sa.String(length=255), nullable=True),
+        sa.Column("password_hash", sa.String(length=255), nullable=False),
+        sa.Column(
+            "must_change_password",
+            sa.Boolean(),
+            server_default=sa.text("true"),
+            nullable=False,
+        ),
         sa.Column("system_role", system_role, server_default="org_member", nullable=False),
-        sa.Column("status", user_status, server_default="invited", nullable=False),
+        sa.Column("status", user_status, server_default="active", nullable=False),
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column(
             "created_at",

@@ -14,11 +14,39 @@ not requirements until accepted.
   reports, PDFs, and R2 metadata are neither migrated nor deleted.
 - An `Organization` represents a customer company. Users join an organization
   through membership; a customer does not administer its own organization.
+- Every organization has a positive contractual `seat_limit`. It is a hard
+  upper bound, not a display-only member count. Creating a membership at the
+  limit is rejected atomically.
+- Suspended users continue to occupy a seat. A seat is released only when the
+  membership is removed; temporarily suspending an account cannot be used to
+  provision beyond the contract limit.
+- An internal `admin` may change `seat_limit` after a renewal or contract
+  addendum. The change records actor, reason, contract reference, timestamp,
+  and before/after values in the audit trail.
 - The internal back office has two privileged roles:
   - `admin`: organization and member CRUD, organization market visibility,
     shared asset management, model configuration, and conversation viewing.
   - `asset_manager`: shared R2 asset maintenance only.
 - `org_member` is a customer-facing member with no back-office permissions.
+
+### Identity provisioning
+
+- Public self-registration is not allowed.
+- An internal `admin` creates member accounts. The system generates a
+  cryptographically random temporary password; only its hash is persisted and
+  the plaintext is displayed once to the creating admin for delivery through
+  the team's existing secure out-of-band channel. It cannot be retrieved
+  later.
+- A provisioned account is active but marked as requiring a password change.
+  The user must replace the temporary password after the first successful
+  login before accessing other product capabilities.
+- The initial release does not send account email.
+- The initial release does not provide a forgot-password or self-service
+  password-reset flow. This is confirmed follow-up work and does not block the
+  initial release.
+- Admin MFA is a confirmed post-initial-release security requirement. Email
+  delivery for that future flow uses Amazon SES in Singapore
+  (`ap-southeast-1`). Neither MFA nor SES blocks the initial release.
 
 ### Eight-market policy
 
@@ -105,10 +133,6 @@ These are the implementation baseline unless a later ADR supersedes them:
 These do not block the Phase 0 foundation, but must be resolved before the
 named capability is accepted:
 
-- Whether membership has a contractual `seat_limit`, and whether exceeding it
-  is blocked or merely alerted.
-- Invitation/email provider, password-reset policy, and whether MFA is
-  mandatory for `admin`.
 - Exact asset operations for `asset_manager`, maximum upload size, supported
   MIME types, malware scanning, versioning, and deletion/recovery policy.
 - Which derived indicators and report formulas exist, who approves them, and

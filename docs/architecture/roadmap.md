@@ -26,8 +26,10 @@ Accept when:
 
 Deliver:
 
-- user, organization, membership, invitation/reset, and session models;
+- admin-provisioned user, organization, membership, password-change, and
+  session models;
 - `admin`, `asset_manager`, and `org_member` authorization;
+- contractual seat-limit enforcement with audited renewal/addendum changes;
 - canonical eight-market catalog and default-visible org restrictions;
 - admin organization/member/policy API and audit events.
 
@@ -37,10 +39,14 @@ Accept when:
 - customers cannot mutate organization or market policy;
 - policy is enforced in API fixtures across all eight markets;
 - admin changes include actor, reason, timestamp, and before/after evidence;
+- concurrent membership creation cannot exceed an organization's positive
+  `seat_limit`;
+- suspended users continue to consume a seat and only membership removal
+  releases it;
+- public registration is unavailable, temporary passwords are never persisted
+  as plaintext or retrievable after their one-time display to the admin, and
+  normal access is blocked until the initial password is changed;
 - session rotation, revocation, CSRF, password, and rate-limit tests pass.
-
-Blocking decisions: membership/seat-limit behavior, email provider, and MFA
-policy.
 
 ## Phase 2 — provider and report pipeline
 
@@ -134,3 +140,14 @@ Accept when:
 
 There is no legacy-data migration or destructive legacy cleanup in this
 roadmap.
+
+## Confirmed post-initial-release security work
+
+- Require MFA for every `admin` account, including recovery and factor-reset
+  audit procedures.
+- Add a secure forgot-password and password-reset flow; the initial release
+  intentionally has no self-service recovery.
+- Use Amazon SES in AWS Singapore (`ap-southeast-1`) for password-recovery and
+  MFA-related email.
+- Add SES delivery monitoring, bounce/complaint handling, and alerting before
+  enabling the email-dependent flow.

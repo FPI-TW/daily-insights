@@ -57,6 +57,29 @@ def test_email_is_canonicalized_by_database_constraint() -> None:
     assert user_table.columns["email"].unique
 
 
+def test_contract_seat_limit_is_required_and_positive() -> None:
+    organization_table = Base.metadata.tables["organizations"]
+    constraint_sql = {
+        str(constraint.sqltext)
+        for constraint in organization_table.constraints
+        if hasattr(constraint, "sqltext")
+    }
+    assert not organization_table.columns["seat_limit"].nullable
+    assert "seat_limit > 0" in constraint_sql
+
+
+def test_admin_provisioned_user_requires_initial_password_change() -> None:
+    user_table = Base.metadata.tables["users"]
+    password_change_default = user_table.columns["must_change_password"].server_default
+    status_default = user_table.columns["status"].server_default
+    assert not user_table.columns["password_hash"].nullable
+    assert not user_table.columns["must_change_password"].nullable
+    assert isinstance(password_change_default, DefaultClause)
+    assert str(password_change_default.arg) == "true"
+    assert isinstance(status_default, DefaultClause)
+    assert str(status_default.arg) == "active"
+
+
 def test_conversation_references_membership_pair() -> None:
     conversation_table = Base.metadata.tables["conversations"]
     composite_targets = {

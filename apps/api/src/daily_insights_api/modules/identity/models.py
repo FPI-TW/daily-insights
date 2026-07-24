@@ -1,4 +1,4 @@
-from sqlalchemy import CheckConstraint, Enum, String
+from sqlalchemy import Boolean, CheckConstraint, Enum, String, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from daily_insights_api.core.enums import SystemRole, UserStatus
@@ -11,7 +11,13 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True)
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    password_hash: Mapped[str | None] = mapped_column(String(255))
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=true(),
+    )
     system_role: Mapped[SystemRole] = mapped_column(
         Enum(SystemRole, name="system_role", values_callable=lambda enum: [e.value for e in enum]),
         nullable=False,
@@ -22,7 +28,7 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[UserStatus] = mapped_column(
         Enum(UserStatus, name="user_status", values_callable=lambda enum: [e.value for e in enum]),
         nullable=False,
-        default=UserStatus.INVITED,
-        server_default=UserStatus.INVITED.value,
+        default=UserStatus.ACTIVE,
+        server_default=UserStatus.ACTIVE.value,
         index=True,
     )
