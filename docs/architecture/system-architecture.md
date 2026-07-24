@@ -30,7 +30,7 @@ directly between the browser and R2. R2 credentials never reach the browser.
 
 ```text
 apps/web
-  customer UI, report/chart rendering, chat, internal back office
+  customer Podcast/report/chat UI and internal back office
 
 apps/api
   one deployable process, one transaction boundary, one migration graph
@@ -40,6 +40,7 @@ apps/api
     market_policy  catalog and organization visibility
     reports        report versions and localized presentation contracts
     data_sources   provider adapters and normalized source DTOs
+    podcasts       episode catalog, publication lifecycle, localized metadata
     chat           conversations, messages, generation records, SSE
     assets         R2 metadata, authorization, signed URL lifecycle
     admin          privileged use cases composed from domain services
@@ -67,6 +68,7 @@ committed in one database transaction where atomicity matters.
 | Market policy | canonical market catalog, org visibility and audit reason                  | browser-only feature flags         |
 | Data sources  | provider clients, normalization, source provenance                         | durable raw-provider warehouse     |
 | Reports       | derived facts, report/publication versions, localized narrative/chart DTOs | provider-specific response models  |
+| Podcasts      | episode identity, localized metadata, ordering and publication lifecycle   | R2 credentials or object bytes     |
 | Chat          | message ordering, generation state/facts, streaming                        | mutable global model secret/config |
 | Assets        | object metadata, categories, signed access, lifecycle                      | raw R2 credentials in clients      |
 | Admin         | privileged workflows                                                       | duplicate authorization rules      |
@@ -105,6 +107,23 @@ committed in one database transaction where atomicity matters.
   presentation fields for `zh-TW`, `zh-CN`, and `en`.
 - R2 object keys are generated server-side. Metadata, authorization, checksum,
   MIME type, size, and lifecycle state live in PostgreSQL.
+- Podcast episodes reference asset IDs rather than raw R2 keys. Publishing
+  requires complete localized metadata and active media; playback authorization
+  is checked before each short-lived URL is issued.
+- Podcast audio locale is modeled on an episode-to-asset variant relation, not
+  inferred from object keys. Existing unlocalized objects are copied to
+  canonical locale-aware keys and registered as `zh-TW` only after checksum
+  verification; locale resolution is exact-match then `zh-TW` fallback.
+- Podcast episode identity is the admin-specified unique trading date. Replacing
+  an existing locale creates a new backend-named asset/version and atomically
+  changes the active relation after explicit confirmation; R2 bytes are not
+  overwritten in place.
+- Podcast playback progress is browser-owned state keyed by authenticated user,
+  episode, and resolved audio locale. It is validated at the localStorage trust
+  boundary and is not duplicated in PostgreSQL.
+- R2 migration is copy/verify/cutover, not move-in-place. A manifest and
+  reconciliation gate precede active mapping changes; old-path deletion is a
+  separate manual operation after verified cutover.
 
 ## External boundaries
 

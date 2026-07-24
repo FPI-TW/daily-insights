@@ -56,18 +56,19 @@ Accept when:
 
 Implementation status: foundation complete. The provider adapter, immutable
 publication contract, database-backed orchestration primitives, and customer
-read API are implemented. Formal eight-market content, production scheduling
-and alerts, and the report UI remain blocked or scheduled for later work as
-documented in [`phase-2-data-reports.md`](phase-2-data-reports.md).
+read API are implemented. Formal eight-market content and the customer report
+UI are explicitly pending and move to Phase 6B. Production scheduling and
+alerts remain production-readiness work. See
+[`phase-2-data-reports.md`](phase-2-data-reports.md).
 
 Deliver:
 
 - FinDB adapter and normalized DTOs;
-- daily orchestration with idempotency, freshness, stale/error states, and
-  alerts;
+- daily orchestration primitives with idempotency, fencing, freshness, and
+  stale/error states;
 - versioned derived publications, provenance, chart contracts, and localized
   content;
-- customer report/chart API and UI without PDF as the primary report.
+- policy-aware customer report/chart read API.
 
 Accept when:
 
@@ -76,12 +77,132 @@ Accept when:
 - repeated daily jobs cannot duplicate a publication;
 - incomplete input cannot create a new publication;
 - last published data remains readable and visibly stale during an outage;
-- all report and chart surfaces honor org market policy and three locales.
+- the report read API honors org market policy and three locales.
 
 Blocking decisions: formulas/derived indicators, editorial workflow, and final
 FinDB semantics.
 
-## Phase 3 — chat and model operations
+## Phase 2B — complete application architecture
+
+Implementation status: next. This phase completes the deployable architecture
+before another customer feature is built. It establishes real module contracts,
+schema ownership, authorization boundaries, and runtime composition; it must
+not add empty placeholder screens and call them complete.
+
+Deliver:
+
+- public application interfaces and dependency rules for identity, tenancy,
+  markets, reports, data sources, podcasts, assets, chat, admin, audit, and
+  operations;
+- migration-backed foundation tables for podcast catalog/lifecycle, shared
+  assets, model configuration, conversations/generations, and operational job
+  metadata where not already present;
+- locale-aware Podcast audio-variant mapping backed by verified canonical
+  copies, unique trading-date identity, replacement versioning, and a
+  browser-local playback-progress contract;
+- idempotent R2 copy/verify/cutover tooling with a migration manifest,
+  checksum reconciliation, dry-run output, and no automatic source deletion;
+- R2 object-store interface, signed-media access contract, and production
+  configuration validation without exposing credentials;
+- generated or schema-checked API client boundary for the web application;
+- authenticated TanStack Start application shell, customer/back-office route
+  separation, three-locale routing, shared loading/error states, and permission
+  guards;
+- nginx contracts for ordinary API requests, signed-media authorization, and
+  future SSE traffic;
+- module-level observability events and health/readiness ownership.
+
+Accept when:
+
+- architecture tests reject forbidden imports and cross-module table writes;
+- all foundation tables are covered by migration upgrade/check/downgrade tests;
+- production startup fails closed when mandatory database, session, R2, or
+  provider configuration is invalid;
+- customer and back-office route trees cannot cross authorization boundaries;
+- OpenAPI/client contract drift is detected in CI;
+- no browser bundle contains database, provider, model, or R2 credentials;
+- Podcast can be implemented through public module interfaces without adding a
+  second service or bypassing authorization.
+
+This phase does not implement report content, report UI, chat UI, general asset
+administration, or Podcast presentation.
+
+## Phase 3 — Podcast pilot
+
+Implementation status: planned as the first customer-facing vertical slice.
+Detailed scope and decision gates are recorded in
+[`podcast-pilot.md`](podcast-pilot.md).
+
+Deliver:
+
+- internal Podcast episode management for `admin`, plus the approved R2
+  maintenance workflow for `admin` and `asset_manager`;
+- shared episode metadata and complete `zh-TW`, `zh-CN`, and `en`
+  presentation;
+- customer episode list, episode detail, cover artwork, and accessible audio
+  player in TanStack Start;
+- API-authorized, short-lived R2 media URLs with object-scoped access;
+- migration of existing/manually uploaded R2 objects to backend-generated
+  canonical keys without an upload API;
+- draft/published lifecycle, date ordering, locale audio fallback, playback
+  progress, and unavailable-media handling;
+- audit evidence for privileged publication and asset changes.
+
+Accept when:
+
+- an unauthorized or suspended user cannot list an episode or obtain a media
+  URL;
+- customers cannot upload, publish, unpublish, or mutate Podcast content;
+- `asset_manager` capabilities remain limited to the approved Podcast/asset
+  workflow and cannot administer organizations or conversations;
+- every published episode has complete three-locale metadata and a valid,
+  active `zh-TW` audio asset;
+- selecting `zh-CN` or `en` plays the matching variant when present and
+  otherwise resolves to `zh-TW`;
+- duplicate trading-date/locale replacement requires explicit confirmation,
+  uses a new backend-generated key, and preserves the previous object/version;
+- legacy R2 cutover cannot occur until every manifest entry passes
+  size/MIME/SHA-256 verification; old-path cleanup remains a manual post-cutover
+  action;
+- expired, quarantined, missing, or unpublished media cannot receive a new
+  signed URL;
+- the player works through a short-lived URL without proxying audio bytes
+  through nginx/API, and R2 credentials never reach the browser;
+- list/detail/player states pass responsive, keyboard, loading, empty, and
+  failure-state tests.
+
+## Phase 4 — Podcast pilot production readiness and cutover
+
+Deliver:
+
+- EC2/RDS deployment automation and systemd-managed Compose/application
+  lifecycle;
+- Cloudflare DNS/TLS, AWS security groups, secrets, observability, alarms;
+- database backup/restore and incident runbooks;
+- Podcast/R2 capacity and failure testing using a fresh production database,
+  verified canonical copies of approved Podcast objects, and a dedicated prefix
+  for all target objects.
+
+Accept when:
+
+- EC2 replacement/reboot automatically restores healthy service;
+- alarms reach the on-call destination during a controlled failure;
+- an RDS point-in-time restore is timed and verified in isolation;
+- no database or application origin port is publicly reachable except nginx
+  from the approved Cloudflare/origin path;
+- Podcast metadata, signing failures, missing objects, and application health
+  have owned alerts;
+- a load test demonstrates the agreed sub-1,000-user target with recorded
+  headroom for page reads and signed-media issuance;
+- authentication, tenant isolation, three locales, back-office Podcast
+  publication, and private audio playback pass the production smoke test;
+- rollback and DNS/origin cutover are rehearsed without touching legacy data.
+
+This phase launches only the approved Podcast pilot. Chat, eight-market report
+content, and report UI do not block it. There is no legacy-data migration or
+destructive legacy cleanup.
+
+## Phase 5 — chat and model operations
 
 Deliver:
 
@@ -106,13 +227,19 @@ Accept when:
 Blocking decisions: provider privacy/cross-border terms and PDPA retention
 review.
 
-## Phase 4 — shared asset administration
+## Phase 6 — pending product surfaces
+
+This phase remains pending until the relevant product/data decisions are
+approved. Podcast delivery does not implicitly approve either workstream.
+
+### Phase 6A — shared asset administration expansion
 
 Deliver:
 
-- R2 adapter, asset metadata, internal upload/update/download/lifecycle APIs;
-- back-office UI for `admin` and `asset_manager`;
-- private signed download URLs and common audio/image/PDF presentation.
+- extend the Podcast asset slice to general audio/image/PDF/downloadable-file
+  management;
+- complete internal upload/update/download/lifecycle back-office workflows;
+- private signed download URLs and reusable asset presentation components.
 
 Accept when:
 
@@ -126,30 +253,27 @@ Accept when:
 Blocking decisions: exact operations, upload limits, scanning, versioning, and
 deletion/recovery.
 
-## Phase 5 — production readiness and cutover
+### Phase 6B — eight-market report content and customer UI
 
 Deliver:
 
-- EC2/RDS deployment automation and systemd-managed Compose/application
-  lifecycle;
-- Cloudflare DNS/TLS, AWS security groups, secrets, observability, alarms;
-- database backup/restore and incident runbooks;
-- capacity and failure testing; fresh production database/R2 namespace.
+- approved eight-market dataset mappings and provider coverage;
+- versioned formulas/derived indicators and editorial workflow;
+- customer report/chart interface using structured data rather than PDF as the
+  primary presentation;
+- complete three-locale report narrative, labels, units, and failure states.
 
 Accept when:
 
-- EC2 replacement/reboot automatically restores healthy service;
-- alarms reach the on-call destination during a controlled failure;
-- an RDS point-in-time restore is timed and verified in isolation;
-- no database or application origin port is publicly reachable except nginx
-  from the approved Cloudflare/origin path;
-- daily freshness and provider-failure alerts work;
-- a load test demonstrates the agreed sub-1,000-user/SSE target with recorded
-  headroom;
-- rollback and DNS/origin cutover are rehearsed without touching legacy data.
+- every market has approved source, cutoff, freshness, missing-data, and
+  correction semantics;
+- calculations are reproducible from versioned inputs and derivation rules;
+- report/chart surfaces enforce tenant market policy and three locales;
+- provider outage behavior keeps the last successful publication visibly
+  stale without publishing incomplete data.
 
-There is no legacy-data migration or destructive legacy cleanup in this
-roadmap.
+Blocking decisions: the open items in
+[`phase-2-data-reports.md`](phase-2-data-reports.md).
 
 ## Confirmed post-initial-release security work
 

@@ -101,6 +101,28 @@ and Traditional Chinese, Simplified Chinese, and English labels for all eight.
 - Cloudflare R2 stores internally managed audio and static/downloadable files,
   including images and PDFs.
 - Assets are shared across customers. There is no customer upload capability.
+- After the complete application architecture is established, Podcast is the
+  first customer-facing vertical slice.
+- Formal eight-market content and the customer report interface remain pending
+  during the Podcast pilot.
+- Every authenticated organization shares one Podcast catalog; market
+  visibility policy does not filter Podcast episodes.
+- Initial Podcast audio already in R2 is copied to backend-generated,
+  locale-aware canonical keys. The active mapping changes only after complete
+  size/MIME/checksum reconciliation. The application never automatically
+  deletes source objects; internal staff manually remove old-path copies after
+  verified cutover. The initial release has no upload API.
+- Podcast metadata supports all three locales. Audio may vary by locale;
+  `zh-TW` is required and is the deterministic fallback when the selected page
+  locale has no matching audio.
+- The customer surface uses the native HTML audio element, retains playback
+  progress in browser localStorage, and provides no product download or
+  offline-listening workflow.
+- Podcast uses one admin-specified unique `trading_date` and has no
+  show/series, season, episode number, or scheduled publication in the pilot.
+- A duplicate `trading_date + locale` media operation warns before logical
+  replacement. Confirmed replacement creates a new backend-named object/version
+  and switches the active mapping without rewriting the previous R2 object.
 - nginx replaces the previous gateway and is the single public application/API
   ingress.
 - The production region is AWS Singapore (`ap-southeast-1`).

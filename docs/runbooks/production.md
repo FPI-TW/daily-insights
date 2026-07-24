@@ -18,8 +18,11 @@ This is a recommendation and readiness checklist. It does not deploy anything.
 - Cloudflare manages public DNS, edge TLS/WAF, and proxies only to nginx.
 - Cloudflare R2 remains the asset store. Authorized private downloads use
   short-lived signed R2 URLs and therefore bypass the EC2/nginx data path.
-- No legacy database or R2 namespace is reused. Existing systems remain
-  untouched.
+- No legacy database is reused. Approved existing Podcast objects in R2 are
+  copied to a dedicated application prefix, verified, and cut over without
+  modifying the source objects. Internal staff manually remove old-path objects
+  only after migration reconciliation and playback checks; unrelated objects
+  remain untouched.
 
 Lightsail is not the production baseline because RDS networking, IAM,
 CloudWatch, security-group control, and future scaling are clearer with EC2.
@@ -120,23 +123,51 @@ and escalation timing. A dashboard without notification is not an alarm.
    through systemd/Compose.
 5. Require readiness from database, API, web, and nginx before switching
    traffic.
-6. Smoke-test authentication, tenant/market isolation, one report in each
-   locale, SSE chat, admin authorization, and a private asset download.
+6. For the Podcast pilot, smoke-test authentication, tenant isolation, all
+   three locales, Podcast publication, admin authorization, and private audio
+   playback, including locale fallback and browser-local progress restoration.
+   Add report and SSE chat smoke tests only when those surfaces enter the
+   deployed release.
 7. Roll back to the prior compatible image on application failure. Database
    restore is an incident action, not a routine code rollback.
 
 Use Cloudflare's proxied DNS with a conservative TTL during initial cutover.
 Cutover must not modify or delete the legacy services or data.
 
+## Podcast R2 migration
+
+1. Export and review a source inventory. Attach one trading date and locale to
+   each source key; reject duplicates or ambiguous mappings.
+2. Run migration tooling in dry-run mode and review every generated canonical
+   target key.
+3. Copy objects without deleting or overwriting source keys. An existing target
+   with a different checksum is a hard failure.
+4. Verify source/target size, MIME type, and SHA-256; do not treat ETag alone as
+   a content checksum.
+5. Reconcile manifest count, total bytes, checksums, and episode/locale
+   coverage. Exercise signed playback from the canonical target paths.
+6. Require explicit admin cutover before canonical assets become active.
+7. Export the verified old-path removal manifest. Internal staff manually
+   remove only those source keys, then record post-cleanup HEAD results. The
+   application and migration tool never perform this deletion.
+
+Until step 6, retrying migration must be idempotent and customer playback must
+continue using the previously active state. A partial copy or failed
+reconciliation is not a successful migration.
+
 ## Capacity and recovery exercises
 
-- Load-test realistic report reads plus long-lived SSE connections. The
-  acceptance target is the agreed sub-1,000 concurrency with explicit CPU,
-  memory, database, connection, and latency headroom.
-- Test FinDB unavailability: last published data remains visible and stale,
-  new incomplete publication is blocked, and an alert fires.
-- Test model timeout, client disconnect, process restart, EC2 reboot, disk
-  pressure, expired R2 URL, and RDS fail/restore procedures.
+- For the Podcast pilot, load-test catalog/detail reads and signed-media URL
+  issuance. Add realistic report reads and long-lived SSE connections when
+  those surfaces enter the deployed release. Every release records explicit
+  CPU, memory, database, connection, and latency headroom against the agreed
+  sub-1,000 concurrency.
+- For the Podcast pilot, test process restart, EC2 reboot, disk pressure,
+  missing/quarantined R2 objects, expired signed URLs, and RDS fail/restore
+  procedures.
+- Add FinDB outage/publication-freshness exercises when reports are deployed,
+  and model timeout/client-disconnect/SSE cleanup exercises when chat is
+  deployed.
 - Define measured RTO/RPO after the first restore and host-recovery exercises;
   “downtime accepted” is not a substitute for observed recovery time.
 
@@ -149,4 +180,6 @@ Cutover must not modify or delete the legacy services or data.
 - capacity report for web/API/SSE/database;
 - deployment and rollback transcript;
 - PDPA retention and model-provider cross-border review;
-- confirmation that no legacy data was migrated or deleted.
+- confirmation that no legacy database data was migrated or deleted, canonical
+  Podcast copies passed reconciliation, and old-path cleanup matched the
+  approved removal manifest without touching unrelated objects.
