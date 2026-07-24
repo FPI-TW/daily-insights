@@ -1,68 +1,79 @@
 # Daily Insights
 
-Daily Insights is the fresh-start monorepo for a multilingual market-reporting
-product. The target system combines the existing report UI concepts with a new
-modular-monolith API. Previous `report-*` services are reference material only;
-their data and runtime contracts are not migrated into this workspace.
+Daily Insights 是重新啟動的多語系市場報告產品 monorepo。本專案整合既有報告前端的概念，並以模組化單體架構重新建置 API。先前的 `report-*` 服務僅作為需求與設計參考，其資料及執行期契約不會遷移至此工作區。
 
-## Target workspace
+## 工作區結構
 
 ```text
 apps/
-  web/              TanStack Start customer and internal-admin UI
-  api/              Modular-monolith API
+  web/              TanStack Start 客戶端與內部管理後台
+  api/              模組化單體 API
 packages/
-  api-client/       Generated or shared API contracts
+  api-client/       產生或共用的 API 契約
 docs/
-  architecture/     Decisions, boundaries, and delivery roadmap
-  runbooks/         Operational procedures
+  architecture/     架構決策、邊界與開發路線圖
+  runbooks/         維運操作手冊
 infra/
-  nginx/            Development ingress foundation
+  nginx/            開發環境入口基礎設定
 ```
 
-See [system architecture](docs/architecture/system-architecture.md) and the
-[implementation roadmap](docs/architecture/roadmap.md) before adding a domain
-or service.
+新增領域或服務前，請先閱讀[系統架構](docs/architecture/system-architecture.md)與[實作路線圖](docs/architecture/roadmap.md)。
 
-## Current foundation
+## 初始化與開發
 
-The TanStack Start application lives in `apps/web`. The modular FastAPI
-foundation lives in `apps/api`. Frontend workspace commands are available from
-the repository root:
+TanStack Start 應用程式位於 `apps/web`，模組化 FastAPI 基礎位於 `apps/api`。首次取得專案後，在根目錄執行：
 
 ```bash
-pnpm install
-pnpm dev
-pnpm format:check
-pnpm lint:check
-pnpm type:check
-pnpm test
-pnpm build
+make init
 ```
 
-Do not infer that the product domains described in the architecture documents
-are implemented merely because they appear in the target design.
+此指令會建立未追蹤的 `.env`、安裝 pnpm 與 uv 依賴，並啟用版本控制內的 Git hooks。請先替換 `.env` 中的 `CHANGE_ME` 預留值，再啟動完整開發環境：
 
-## Development infrastructure foundation
+```bash
+make dev
+```
 
-Copy `.env.example` to `.env` and replace every placeholder before starting
-the full stack:
+常用指令：
+
+```bash
+make help          # 顯示全部指令
+make dev-web       # 僅啟動 TanStack Start
+make dev-api       # 僅啟動 FastAPI
+make check         # 執行格式、lint、型別、測試與建置
+make stop          # 停止 Compose 開發環境
+```
+
+架構文件所描述的是目標設計；領域出現在文件中，不代表相關功能已經完成。
+
+## Git hooks
+
+專案使用版本控制內的原生 Git hooks，設定位於 `.githooks/`。執行 `make init` 或 `pnpm install` 時，會自動將此儲存庫的 `core.hooksPath` 設為 `.githooks`。
+
+- `pre-commit`：檢查格式、lint 與型別。
+- `pre-push`：執行 pre-commit 的全部檢查，並額外執行測試。
+
+若未透過 `pnpm install` 初始化環境，可手動啟用：
+
+```bash
+git config core.hooksPath .githooks
+```
+
+## 開發環境基礎設施
+
+`make init` 會在 `.env` 不存在時由 `.env.example` 建立一份，且不會覆寫既有設定。替換所有預留值後，可透過 Make 指令管理完整服務：
 
 ```bash
 docker compose config
-docker compose up --build
+make dev
 ```
 
-The development ingress listens on `http://localhost:8080` by default. Only
-nginx is exposed; PostgreSQL remains on the internal Compose network.
+開發環境入口預設為 `http://localhost:8080`。只有 nginx 對外開放，PostgreSQL 保留在 Compose 內部網路。
 
-The Compose file is a development foundation, not the production topology.
-Production guidance is in the
-[Singapore deployment runbook](docs/runbooks/production.md).
+Compose 設定僅用於開發環境，不代表正式環境拓撲。正式部署方式請參考[新加坡部署操作手冊](docs/runbooks/production.md)。
 
-## Architecture references
+## 架構文件
 
-- [Confirmed decisions and open items](docs/architecture/product-decisions.md)
-- [System and domain boundaries](docs/architecture/system-architecture.md)
-- [Phased implementation and acceptance roadmap](docs/architecture/roadmap.md)
-- [Production operations runbook](docs/runbooks/production.md)
+- [已確認決策與待確認事項](docs/architecture/product-decisions.md)
+- [系統與領域邊界](docs/architecture/system-architecture.md)
+- [分階段實作與驗收路線圖](docs/architecture/roadmap.md)
+- [正式環境維運操作手冊](docs/runbooks/production.md)

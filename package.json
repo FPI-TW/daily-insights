@@ -33,9 +33,6 @@
     "test:watch": "pnpm --filter @daily-insights/web test:watch",
     "test:coverage": "pnpm --filter @daily-insights/web test:coverage",
     "check": "pnpm format:check && pnpm lint:check && pnpm type:check && pnpm test && pnpm build",
-    "prepare": "husky"
-  },
-  "devDependencies": {
-    "husky": "^9.1.7"
+    "prepare": "git config core.hooksPath .githooks"
   }
 }
