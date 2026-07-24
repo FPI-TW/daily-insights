@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
   "alembic>=1.16,<2",
+  "boto3>=1.40,<2",
   "fastapi>=0.116,<1",
   "httpx>=0.28,<1",
   "psycopg[binary]>=3.2,<4",
@@ -24,6 +25,7 @@ dev = [
   "pytest>=8.4,<9",
   "pytest-asyncio>=1.1,<2",
   "ruff>=0.12,<1",
+  "types-boto3[s3]>=1.40,<2",
 ]
 
 [tool.hatch.build.targets.wheel]

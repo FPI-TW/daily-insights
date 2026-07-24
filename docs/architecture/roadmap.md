@@ -84,10 +84,10 @@ FinDB semantics.
 
 ## Phase 2B — complete application architecture
 
-Implementation status: next. This phase completes the deployable architecture
-before another customer feature is built. It establishes real module contracts,
-schema ownership, authorization boundaries, and runtime composition; it must
-not add empty placeholder screens and call them complete.
+Implementation status: complete in the current Phase 2B change set. Acceptance
+evidence and remaining production risks are recorded in
+[`phase-2b-application-architecture.md`](phase-2b-application-architecture.md).
+Phase 3 Podcast pilot implementation is now the next product phase.
 
 Deliver:
 

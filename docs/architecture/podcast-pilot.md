@@ -117,8 +117,10 @@ copy/verify 狀態與時間：
 1. inventory 舊 objects，人工補上 trading date 與 locale；目前全部為
    `zh-TW`；
 2. 對 source 執行 HEAD，拒絕不存在、零 bytes 或不允許的 MIME type；
-3. 由後端產生 canonical target key，使用 R2 server-side copy，且不得覆寫
-   已存在但 checksum 不同的 target；
+3. 由後端產生 canonical target key，使用 `If-None-Match: *` conditional
+   object create 原子建立 target；因 R2/S3 `CopyObject` 沒有 destination
+   precondition，工具會以受控串流讀取 source 並寫入 target，避免
+   HEAD-then-copy 競態覆寫已存在的不同內容；
 4. 對 source 與 target 驗證 size、MIME type 與 SHA-256。ETag 不得單獨視為
    checksum，因 multipart object 的 ETag 不保證等於內容 MD5；
 5. 只有 verified object 才建立 active asset/audio-variant candidate；

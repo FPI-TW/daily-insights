@@ -43,7 +43,7 @@ class Message(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     conversation_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="RESTRICT"), nullable=False
     )
     sequence_number: Mapped[int]
     role: Mapped[MessageRole] = mapped_column(

@@ -3,7 +3,8 @@
 export pnpm_config_verify_deps_before_run := false
 
 .PHONY: help init dev dev-detached dev-web dev-api stop restart logs ps \
-	migrate bootstrap-admin format format-check lint type-check test test-db check build
+	migrate bootstrap-admin format format-check lint type-check test test-db \
+	check-nginx check build
 
 help: ## 顯示可用指令
 	@awk 'BEGIN {FS = ":.*## "; printf "Daily Insights 開發指令：\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -70,7 +71,10 @@ test: ## 執行 Web 與 API 測試
 test-db: ## 以隔離 PostgreSQL 執行 Web 與 API 完整測試
 	./scripts/test-with-postgres.sh
 
-check: ## 執行所有品質檢查、測試與建置
+check-nginx: ## 驗證 nginx API、signed URL 與 SSE transport 契約
+	./scripts/check-nginx-contract.sh
+
+check: check-nginx ## 執行所有品質檢查、測試、建置與 nginx 契約驗證
 	pnpm check
 
 build: ## 建置 Web 與 API

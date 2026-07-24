@@ -1,5 +1,7 @@
+import re
 from functools import lru_cache
 from typing import Literal, Self
+from urllib.parse import urlparse
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -10,6 +12,7 @@ LOCAL_DATABASE_URL = (
 )
 LOCAL_SESSION_SECRET = "development-only-session-secret-change-me"
 LOCAL_PASSWORD_PEPPER = "development-only-password-pepper-change-me"
+PLACEHOLDER_MARKERS = ("change_me", "change-me", "development-only")
 
 
 class Settings(BaseSettings):
@@ -34,6 +37,11 @@ class Settings(BaseSettings):
     findb_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     findb_retry_attempts: int = Field(default=3, ge=1, le=10)
     report_freshness_max_age_days: int = Field(default=3, ge=1, le=30)
+    r2_endpoint_url: str | None = None
+    r2_bucket_name: str | None = None
+    r2_access_key_id: SecretStr | None = None
+    r2_secret_access_key: SecretStr | None = None
+    r2_signed_url_ttl_seconds: int = Field(default=900, ge=60, le=3600)
 
     @model_validator(mode="after")
     def require_external_database_configuration(self) -> Self:
@@ -60,14 +68,52 @@ class Settings(BaseSettings):
                 )
             if session_secret == password_pepper:
                 raise ValueError("session_secret and password_pepper must be different")
-            insecure_markers = ("change_me", "change-me", "development-only")
             if any(
                 marker in value.lower()
-                for marker in insecure_markers
+                for marker in PLACEHOLDER_MARKERS
                 for value in (session_secret, password_pepper)
             ):
                 raise ValueError("deployment secrets must not use placeholders")
+            self._validate_production_external_services()
         return self
+
+    def _validate_production_external_services(self) -> None:
+        findb_url = urlparse(self.findb_base_url)
+        if findb_url.scheme != "https" or not findb_url.netloc:
+            raise ValueError("findb_base_url must be an absolute HTTPS URL")
+        if self.findb_api_key is None or _is_placeholder(self.findb_api_key.get_secret_value()):
+            raise ValueError("findb_api_key is required and cannot be a placeholder")
+
+        required_r2_values = {
+            "r2_endpoint_url": self.r2_endpoint_url,
+            "r2_bucket_name": self.r2_bucket_name,
+            "r2_access_key_id": (
+                self.r2_access_key_id.get_secret_value()
+                if self.r2_access_key_id is not None
+                else None
+            ),
+            "r2_secret_access_key": (
+                self.r2_secret_access_key.get_secret_value()
+                if self.r2_secret_access_key is not None
+                else None
+            ),
+        }
+        missing = [name for name, value in required_r2_values.items() if not value]
+        if missing:
+            raise ValueError(f"missing mandatory R2 configuration: {', '.join(sorted(missing))}")
+        endpoint = urlparse(self.r2_endpoint_url or "")
+        if endpoint.scheme != "https" or not endpoint.netloc:
+            raise ValueError("r2_endpoint_url must be an absolute HTTPS URL")
+        for name, value in required_r2_values.items():
+            if value is not None and _is_placeholder(value):
+                raise ValueError(f"{name} cannot contain a placeholder")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", self.r2_bucket_name or ""):
+            raise ValueError("r2_bucket_name must be a valid 3-63 character bucket name")
+
+
+def _is_placeholder(value: str) -> bool:
+    lowered = value.lower()
+    return any(marker in lowered for marker in PLACEHOLDER_MARKERS)
 
 
 @lru_cache

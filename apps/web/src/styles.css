@@ -204,6 +204,145 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: 1px solid var(--chip-line);
+  border-radius: 0.75rem;
+  background: var(--chip-bg);
+  color: var(--sea-ink);
+  padding: 0.65rem 1rem;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--header-bg);
+  padding: 0.85rem max(1rem, calc((100% - 68rem) / 2));
+  backdrop-filter: blur(14px);
+}
+
+.app-header nav {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.locale-switcher {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.locale-switcher a {
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  text-decoration: none;
+}
+
+.locale-switcher a[aria-current="page"] {
+  background: var(--chip-bg);
+  color: var(--sea-ink);
+  font-weight: 800;
+}
+
+.brand {
+  color: var(--sea-ink);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.auth-page {
+  display: grid;
+  min-height: 100svh;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.auth-card,
+.shell-card {
+  width: min(100%, 36rem);
+  border: 1px solid var(--line);
+  border-radius: 1.25rem;
+  background: var(--surface-strong);
+  box-shadow: 0 22px 44px rgb(30 90 72 / 10%);
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+}
+
+.auth-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.auth-card label {
+  display: grid;
+  gap: 0.4rem;
+  font-weight: 600;
+}
+
+.auth-card input {
+  min-height: 2.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--surface);
+  color: var(--sea-ink);
+  padding: 0 0.8rem;
+}
+
+.shell-card {
+  margin: clamp(2rem, 7vw, 5rem) auto;
+}
+
+.shell-card dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.5rem 1rem;
+}
+
+.shell-card dt,
+.eyebrow {
+  color: var(--kicker);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.shell-card dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 42rem) {
+  .app-header,
+  .app-header nav {
+    align-items: flex-start;
+  }
+
+  .app-header {
+    flex-direction: column;
+  }
+
+  .app-header nav {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+}
+
 body::before {
   content: "";
   position: fixed;

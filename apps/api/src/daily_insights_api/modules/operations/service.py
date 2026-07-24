@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.modules.operations.models import ReportPipelineRun, SourceRun
-from daily_insights_api.modules.reports.contracts import PublicationBundle
+from daily_insights_api.modules.reports.api import PublicationBundle
 from daily_insights_api.modules.reports.models import (
     PublicationSourceRun,
     ReportPublication,

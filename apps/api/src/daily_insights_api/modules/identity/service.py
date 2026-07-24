@@ -28,3 +28,14 @@ def create_session(
     )
     database.add(session)
     return session, token, csrf_token
+
+
+def rotate_csrf_token(session: Session, settings: Settings) -> str:
+    """Replace the per-session CSRF secret and return it exactly once."""
+    assert settings.session_secret is not None
+    csrf_token = generate_session_token()
+    session.csrf_token_hash = hash_token(
+        csrf_token,
+        settings.session_secret.get_secret_value(),
+    )
+    return csrf_token

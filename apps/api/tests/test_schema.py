@@ -11,7 +11,10 @@ from daily_insights_api.core.models import Base
 from daily_insights_api.modules.markets.catalog import MARKETS
 
 EXPECTED_TABLES = {
+    "active_model_configuration",
     "assets",
+    "asset_migration_entries",
+    "asset_migration_manifests",
     "audit_events",
     "conversations",
     "generation_records",
@@ -22,6 +25,9 @@ EXPECTED_TABLES = {
     "model_configurations",
     "organization_market_policies",
     "organizations",
+    "podcast_episode_audio_variants",
+    "podcast_episode_translations",
+    "podcast_episodes",
     "publication_source_runs",
     "report_pipeline_runs",
     "report_publications",
@@ -132,21 +138,25 @@ def test_conversation_references_membership_pair() -> None:
     assert ("memberships.organization_id", "memberships.user_id") in composite_targets
 
 
-def test_only_one_active_model_configuration_index_is_partial() -> None:
-    table = Base.metadata.tables["model_configurations"]
-    index = next(
-        index for index in table.indexes if index.name == "uq_model_configurations_single_active"
-    )
-    assert index.unique
-    assert str(index.dialect_options["postgresql"]["where"]) == "is_active"
+def test_only_one_active_model_configuration_uses_singleton_pointer() -> None:
+    pointer = Base.metadata.tables["active_model_configuration"]
+    assert set(pointer.primary_key.columns.keys()) == {"singleton_id"}
+    constraint_sql = {
+        str(constraint.sqltext)
+        for constraint in pointer.constraints
+        if hasattr(constraint, "sqltext")
+    }
+    assert "singleton_id = 1" in constraint_sql
+    target = next(iter(pointer.columns["model_configuration_id"].foreign_keys))
+    assert target.target_fullname == "model_configurations.id"
+    assert target.ondelete == "RESTRICT"
 
 
 def test_model_configuration_is_global_only() -> None:
     columns = Base.metadata.tables["model_configurations"].columns
     assert "organization_id" not in columns
-    assert {"provider", "requested_model", "prompt_version", "version", "is_active"} <= set(
-        columns.keys()
-    )
+    assert "is_active" not in columns
+    assert {"provider", "requested_model", "prompt_version", "version"} <= set(columns.keys())
 
 
 def test_generation_record_snapshots_reproducibility_fields() -> None:

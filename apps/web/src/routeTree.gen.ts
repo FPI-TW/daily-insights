@@ -10,43 +10,149 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AboutRouteImport } from './routes/about'
+import { Route as LocaleRouteImport } from './routes/$locale'
+import { Route as LocaleIndexRouteImport } from './routes/$locale.index'
+import { Route as LocaleAuthenticatedRouteImport } from './routes/$locale._authenticated'
+import { Route as LocaleChangePasswordRouteImport } from './routes/$locale.change-password'
+import { Route as LocaleLoginRouteImport } from './routes/$locale.login'
+import { Route as LocaleAuthenticatedCustomerRouteImport } from './routes/$locale._authenticated._customer'
+import { Route as LocaleAuthenticatedBackOfficeRouteImport } from './routes/$locale._authenticated.back-office'
+import { Route as LocaleAuthenticatedCustomerAccountRouteImport } from './routes/$locale._authenticated._customer.account'
+import { Route as LocaleAuthenticatedBackOfficeIndexRouteImport } from './routes/$locale._authenticated.back-office.index'
+import { Route as LocaleAuthenticatedBackOfficeAdminRouteImport } from './routes/$locale._authenticated.back-office.admin'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AboutRoute = AboutRouteImport.update({
-  id: '/about',
-  path: '/about',
+const LocaleRoute = LocaleRouteImport.update({
+  id: '/$locale',
+  path: '/$locale',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LocaleIndexRoute = LocaleIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => LocaleRoute,
+} as any)
+const LocaleAuthenticatedRoute = LocaleAuthenticatedRouteImport.update({
+  id: '/_authenticated',
+  getParentRoute: () => LocaleRoute,
+} as any)
+const LocaleChangePasswordRoute = LocaleChangePasswordRouteImport.update({
+  id: '/change-password',
+  path: '/change-password',
+  getParentRoute: () => LocaleRoute,
+} as any)
+const LocaleLoginRoute = LocaleLoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => LocaleRoute,
+} as any)
+const LocaleAuthenticatedCustomerRoute =
+  LocaleAuthenticatedCustomerRouteImport.update({
+    id: '/_customer',
+    getParentRoute: () => LocaleAuthenticatedRoute,
+  } as any)
+const LocaleAuthenticatedBackOfficeRoute =
+  LocaleAuthenticatedBackOfficeRouteImport.update({
+    id: '/back-office',
+    path: '/back-office',
+    getParentRoute: () => LocaleAuthenticatedRoute,
+  } as any)
+const LocaleAuthenticatedCustomerAccountRoute =
+  LocaleAuthenticatedCustomerAccountRouteImport.update({
+    id: '/account',
+    path: '/account',
+    getParentRoute: () => LocaleAuthenticatedCustomerRoute,
+  } as any)
+const LocaleAuthenticatedBackOfficeIndexRoute =
+  LocaleAuthenticatedBackOfficeIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => LocaleAuthenticatedBackOfficeRoute,
+  } as any)
+const LocaleAuthenticatedBackOfficeAdminRoute =
+  LocaleAuthenticatedBackOfficeAdminRouteImport.update({
+    id: '/admin',
+    path: '/admin',
+    getParentRoute: () => LocaleAuthenticatedBackOfficeRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/about': typeof AboutRoute
+  '/$locale': typeof LocaleRouteWithChildren
+  '/$locale/change-password': typeof LocaleChangePasswordRoute
+  '/$locale/login': typeof LocaleLoginRoute
+  '/$locale/': typeof LocaleIndexRoute
+  '/$locale/back-office': typeof LocaleAuthenticatedBackOfficeRouteWithChildren
+  '/$locale/account': typeof LocaleAuthenticatedCustomerAccountRoute
+  '/$locale/back-office/admin': typeof LocaleAuthenticatedBackOfficeAdminRoute
+  '/$locale/back-office/': typeof LocaleAuthenticatedBackOfficeIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/about': typeof AboutRoute
+  '/$locale': typeof LocaleIndexRoute
+  '/$locale/change-password': typeof LocaleChangePasswordRoute
+  '/$locale/login': typeof LocaleLoginRoute
+  '/$locale/account': typeof LocaleAuthenticatedCustomerAccountRoute
+  '/$locale/back-office/admin': typeof LocaleAuthenticatedBackOfficeAdminRoute
+  '/$locale/back-office': typeof LocaleAuthenticatedBackOfficeIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/about': typeof AboutRoute
+  '/$locale': typeof LocaleRouteWithChildren
+  '/$locale/_authenticated': typeof LocaleAuthenticatedRouteWithChildren
+  '/$locale/change-password': typeof LocaleChangePasswordRoute
+  '/$locale/login': typeof LocaleLoginRoute
+  '/$locale/': typeof LocaleIndexRoute
+  '/$locale/_authenticated/_customer': typeof LocaleAuthenticatedCustomerRouteWithChildren
+  '/$locale/_authenticated/back-office': typeof LocaleAuthenticatedBackOfficeRouteWithChildren
+  '/$locale/_authenticated/_customer/account': typeof LocaleAuthenticatedCustomerAccountRoute
+  '/$locale/_authenticated/back-office/admin': typeof LocaleAuthenticatedBackOfficeAdminRoute
+  '/$locale/_authenticated/back-office/': typeof LocaleAuthenticatedBackOfficeIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/about'
+  fullPaths:
+    | '/'
+    | '/$locale'
+    | '/$locale/change-password'
+    | '/$locale/login'
+    | '/$locale/'
+    | '/$locale/back-office'
+    | '/$locale/account'
+    | '/$locale/back-office/admin'
+    | '/$locale/back-office/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/about'
-  id: '__root__' | '/' | '/about'
+  to:
+    | '/'
+    | '/$locale'
+    | '/$locale/change-password'
+    | '/$locale/login'
+    | '/$locale/account'
+    | '/$locale/back-office/admin'
+    | '/$locale/back-office'
+  id:
+    | '__root__'
+    | '/'
+    | '/$locale'
+    | '/$locale/_authenticated'
+    | '/$locale/change-password'
+    | '/$locale/login'
+    | '/$locale/'
+    | '/$locale/_authenticated/_customer'
+    | '/$locale/_authenticated/back-office'
+    | '/$locale/_authenticated/_customer/account'
+    | '/$locale/_authenticated/back-office/admin'
+    | '/$locale/_authenticated/back-office/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AboutRoute: typeof AboutRoute
+  LocaleRoute: typeof LocaleRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -58,19 +164,147 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/about': {
-      id: '/about'
-      path: '/about'
-      fullPath: '/about'
-      preLoaderRoute: typeof AboutRouteImport
+    '/$locale': {
+      id: '/$locale'
+      path: '/$locale'
+      fullPath: '/$locale'
+      preLoaderRoute: typeof LocaleRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/$locale/': {
+      id: '/$locale/'
+      path: '/'
+      fullPath: '/$locale/'
+      preLoaderRoute: typeof LocaleIndexRouteImport
+      parentRoute: typeof LocaleRoute
+    }
+    '/$locale/_authenticated': {
+      id: '/$locale/_authenticated'
+      path: ''
+      fullPath: '/$locale'
+      preLoaderRoute: typeof LocaleAuthenticatedRouteImport
+      parentRoute: typeof LocaleRoute
+    }
+    '/$locale/change-password': {
+      id: '/$locale/change-password'
+      path: '/change-password'
+      fullPath: '/$locale/change-password'
+      preLoaderRoute: typeof LocaleChangePasswordRouteImport
+      parentRoute: typeof LocaleRoute
+    }
+    '/$locale/login': {
+      id: '/$locale/login'
+      path: '/login'
+      fullPath: '/$locale/login'
+      preLoaderRoute: typeof LocaleLoginRouteImport
+      parentRoute: typeof LocaleRoute
+    }
+    '/$locale/_authenticated/_customer': {
+      id: '/$locale/_authenticated/_customer'
+      path: ''
+      fullPath: '/$locale'
+      preLoaderRoute: typeof LocaleAuthenticatedCustomerRouteImport
+      parentRoute: typeof LocaleAuthenticatedRoute
+    }
+    '/$locale/_authenticated/back-office': {
+      id: '/$locale/_authenticated/back-office'
+      path: '/back-office'
+      fullPath: '/$locale/back-office'
+      preLoaderRoute: typeof LocaleAuthenticatedBackOfficeRouteImport
+      parentRoute: typeof LocaleAuthenticatedRoute
+    }
+    '/$locale/_authenticated/_customer/account': {
+      id: '/$locale/_authenticated/_customer/account'
+      path: '/account'
+      fullPath: '/$locale/account'
+      preLoaderRoute: typeof LocaleAuthenticatedCustomerAccountRouteImport
+      parentRoute: typeof LocaleAuthenticatedCustomerRoute
+    }
+    '/$locale/_authenticated/back-office/': {
+      id: '/$locale/_authenticated/back-office/'
+      path: '/'
+      fullPath: '/$locale/back-office/'
+      preLoaderRoute: typeof LocaleAuthenticatedBackOfficeIndexRouteImport
+      parentRoute: typeof LocaleAuthenticatedBackOfficeRoute
+    }
+    '/$locale/_authenticated/back-office/admin': {
+      id: '/$locale/_authenticated/back-office/admin'
+      path: '/admin'
+      fullPath: '/$locale/back-office/admin'
+      preLoaderRoute: typeof LocaleAuthenticatedBackOfficeAdminRouteImport
+      parentRoute: typeof LocaleAuthenticatedBackOfficeRoute
     }
   }
 }
 
+interface LocaleAuthenticatedCustomerRouteChildren {
+  LocaleAuthenticatedCustomerAccountRoute: typeof LocaleAuthenticatedCustomerAccountRoute
+}
+
+const LocaleAuthenticatedCustomerRouteChildren: LocaleAuthenticatedCustomerRouteChildren =
+  {
+    LocaleAuthenticatedCustomerAccountRoute:
+      LocaleAuthenticatedCustomerAccountRoute,
+  }
+
+const LocaleAuthenticatedCustomerRouteWithChildren =
+  LocaleAuthenticatedCustomerRoute._addFileChildren(
+    LocaleAuthenticatedCustomerRouteChildren,
+  )
+
+interface LocaleAuthenticatedBackOfficeRouteChildren {
+  LocaleAuthenticatedBackOfficeAdminRoute: typeof LocaleAuthenticatedBackOfficeAdminRoute
+  LocaleAuthenticatedBackOfficeIndexRoute: typeof LocaleAuthenticatedBackOfficeIndexRoute
+}
+
+const LocaleAuthenticatedBackOfficeRouteChildren: LocaleAuthenticatedBackOfficeRouteChildren =
+  {
+    LocaleAuthenticatedBackOfficeAdminRoute:
+      LocaleAuthenticatedBackOfficeAdminRoute,
+    LocaleAuthenticatedBackOfficeIndexRoute:
+      LocaleAuthenticatedBackOfficeIndexRoute,
+  }
+
+const LocaleAuthenticatedBackOfficeRouteWithChildren =
+  LocaleAuthenticatedBackOfficeRoute._addFileChildren(
+    LocaleAuthenticatedBackOfficeRouteChildren,
+  )
+
+interface LocaleAuthenticatedRouteChildren {
+  LocaleAuthenticatedCustomerRoute: typeof LocaleAuthenticatedCustomerRouteWithChildren
+  LocaleAuthenticatedBackOfficeRoute: typeof LocaleAuthenticatedBackOfficeRouteWithChildren
+}
+
+const LocaleAuthenticatedRouteChildren: LocaleAuthenticatedRouteChildren = {
+  LocaleAuthenticatedCustomerRoute:
+    LocaleAuthenticatedCustomerRouteWithChildren,
+  LocaleAuthenticatedBackOfficeRoute:
+    LocaleAuthenticatedBackOfficeRouteWithChildren,
+}
+
+const LocaleAuthenticatedRouteWithChildren =
+  LocaleAuthenticatedRoute._addFileChildren(LocaleAuthenticatedRouteChildren)
+
+interface LocaleRouteChildren {
+  LocaleAuthenticatedRoute: typeof LocaleAuthenticatedRouteWithChildren
+  LocaleChangePasswordRoute: typeof LocaleChangePasswordRoute
+  LocaleLoginRoute: typeof LocaleLoginRoute
+  LocaleIndexRoute: typeof LocaleIndexRoute
+}
+
+const LocaleRouteChildren: LocaleRouteChildren = {
+  LocaleAuthenticatedRoute: LocaleAuthenticatedRouteWithChildren,
+  LocaleChangePasswordRoute: LocaleChangePasswordRoute,
+  LocaleLoginRoute: LocaleLoginRoute,
+  LocaleIndexRoute: LocaleIndexRoute,
+}
+
+const LocaleRouteWithChildren =
+  LocaleRoute._addFileChildren(LocaleRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AboutRoute: AboutRoute,
+  LocaleRoute: LocaleRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

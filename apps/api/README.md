@@ -13,7 +13,10 @@
 - 模型選擇為全系統設定，組織與使用者不能自行覆寫。
 - 組織沒有市場政策資料時代表預設可見；存在的資料列是經稽核的合約限制。
 
-本專案視為重新啟動，不遷移舊資料庫或物件。
+本專案視為重新啟動，不遷移舊資料庫。Podcast 核准沿用的既有 R2 物件是
+例外：受控工具會將它們複製到後端產生的新路徑，逐檔核對 size、MIME type
+與 SHA-256，整批 reconciliation 完成後才切換資料庫 mapping。工具不會刪除
+來源物件；舊路徑只會在人工確認後由內部人員手動清理。
 
 ## 本機指令
 
@@ -42,12 +45,18 @@ uv run uvicorn daily_insights_api.main:app --reload
 整合測試。
 
 `DAILY_INSIGHTS_DATABASE_URL` 只會在 `development` 或 `test` 使用本機
-預設值；staging 與 production 必須明確提供。
+預設值；staging 與 production 必須明確提供資料庫、獨立 session/password
+secret、FinDB API key，以及完整 R2 endpoint、bucket 與 access credentials。
+缺漏、placeholder、非 HTTPS 外部端點或不合理的 signed URL TTL 都會在程序
+啟動前 fail closed。所有 credential 都使用 secret 型別，禁止出現在
+OpenAPI、回應或結構化 log。
 
 健康檢查：
 
 - `GET /api/health/live`：程序存活狀態。
-- `GET /api/health/ready`：包含資料庫連線的 readiness；不可用時回傳 `503`。
+- `GET /api/health/ready`：回傳由 operations 模組擁有的 component readiness；
+  目前包含資料庫連線，不可用時回傳 `503`。FinDB/R2 的短暫故障不會讓已發布
+  內容失去服務能力，會由各自的模組事件與告警呈現。
 
 容器內部另有不帶 `/api` 前綴的等價端點，且不會出現在 OpenAPI。
 

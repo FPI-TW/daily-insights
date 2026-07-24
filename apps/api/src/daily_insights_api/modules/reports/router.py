@@ -4,12 +4,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from daily_insights_api.modules.identity.auth import AuthContext, require_password_changed
-from daily_insights_api.modules.markets.service import (
+from daily_insights_api.modules.identity.api import AuthContext, require_password_changed
+from daily_insights_api.modules.markets.api import (
     is_market_visible,
     visible_market_codes,
 )
-from daily_insights_api.modules.operations.service import LastKnownGood, get_last_known_good
+from daily_insights_api.modules.operations.api import LastKnownGood, get_last_known_good
 from daily_insights_api.modules.reports.contracts import (
     Locale,
     PresentationContract,

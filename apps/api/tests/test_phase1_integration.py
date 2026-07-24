@@ -130,6 +130,51 @@ async def create_organization(
     return uuid.UUID(response.json()["id"])
 
 
+async def test_csrf_token_can_be_rotated_after_browser_reload(harness: Harness) -> None:
+    previous_token = await login(
+        harness.client,
+        "admin@example.com",
+        "AdminPassword123!",
+    )
+    current_user = await harness.client.get("/api/auth/me")
+    assert current_user.headers["Cache-Control"] == "no-store"
+
+    rejected_cross_origin = await harness.client.post(
+        "/api/auth/csrf",
+        headers={"Origin": "https://attacker.example"},
+    )
+    assert rejected_cross_origin.status_code == 403
+
+    rotated = await harness.client.post(
+        "/api/auth/csrf",
+        headers={"Origin": "http://test"},
+    )
+
+    assert rotated.status_code == 200
+    assert rotated.headers["Cache-Control"] == "no-store"
+    current_token = str(rotated.json()["csrf_token"])
+    assert current_token != previous_token
+
+    rejected = await harness.client.post(
+        "/api/admin/organizations",
+        headers={"X-CSRF-Token": previous_token},
+        json={
+            "name": "Rejected stale token",
+            "slug": "rejected-stale-token",
+            "seat_limit": 1,
+            "contract_reference": "contract-stale-token",
+            "reason": "Confirm CSRF rotation invalidates the old token",
+        },
+    )
+    assert rejected.status_code == 403
+
+    logged_out = await harness.client.post(
+        "/api/auth/logout",
+        headers={"X-CSRF-Token": current_token},
+    )
+    assert logged_out.status_code == 204
+
+
 async def provision_member(
     harness: Harness,
     csrf_token: str,
@@ -656,6 +701,11 @@ async def test_production_login_cookie_is_secure(harness: Harness) -> None:
         database_url=harness.settings.database_url,
         session_secret=SecretStr("production-session-secret-value-123456789"),
         password_pepper=SecretStr(production_pepper),
+        findb_api_key=SecretStr("production-findb-key"),
+        r2_endpoint_url="https://account.r2.cloudflarestorage.com",
+        r2_bucket_name="daily-insights-test",
+        r2_access_key_id=SecretStr("production-r2-access-key"),
+        r2_secret_access_key=SecretStr("production-r2-secret-key"),
     )
     async with harness.session_factory.begin() as database:
         admin = await database.scalar(select(User).where(User.email == "admin@example.com"))

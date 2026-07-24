@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "pnpm --filter @daily-insights/web dev",
     "generate-routes": "pnpm --filter @daily-insights/web generate-routes",
+    "generate:api-client": "pnpm --filter @daily-insights/api-client generate",
+    "api-client:check": "pnpm --filter @daily-insights/api-client generate:check",
     "build": "pnpm build:web && pnpm build:api",
-    "build:web": "pnpm --filter @daily-insights/web build",
+    "build:web": "pnpm --filter @daily-insights/web build && pnpm --filter @daily-insights/web build:secret-scan",
     "build:api": "uv build --project apps/api",
     "preview": "pnpm --filter @daily-insights/web preview",
     "format": "pnpm format:web && pnpm format:api && pnpm format:docs",
@@ -24,15 +26,17 @@
     "lint:check": "pnpm lint:check:web && pnpm lint:check:api",
     "lint:check:web": "pnpm --filter @daily-insights/web lint:check",
     "lint:check:api": "uv run --project apps/api ruff check apps/api",
-    "type:check": "pnpm type:check:web && pnpm type:check:api",
+    "type:check": "pnpm type:check:web && pnpm type:check:client && pnpm type:check:api",
     "type:check:web": "pnpm --filter @daily-insights/web type:check",
+    "type:check:client": "pnpm --filter @daily-insights/api-client type:check",
     "type:check:api": "uv run --project apps/api mypy --config-file apps/api/pyproject.toml apps/api/src apps/api/tests",
-    "test": "pnpm test:web && pnpm test:api",
+    "test": "pnpm test:web && pnpm test:client && pnpm test:api",
     "test:web": "pnpm --filter @daily-insights/web test",
+    "test:client": "pnpm --filter @daily-insights/api-client test",
     "test:api": "uv run --project apps/api pytest -c apps/api/pyproject.toml apps/api/tests",
     "test:watch": "pnpm --filter @daily-insights/web test:watch",
     "test:coverage": "pnpm --filter @daily-insights/web test:coverage",
-    "check": "pnpm format:check && pnpm lint:check && pnpm type:check && pnpm test && pnpm build",
+    "check": "pnpm format:check && pnpm lint:check && pnpm type:check && pnpm api-client:check && pnpm test && pnpm build",
     "prepare": "git config core.hooksPath .githooks"
   }
 }

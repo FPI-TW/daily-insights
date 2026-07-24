@@ -140,8 +140,16 @@ Cutover must not modify or delete the legacy services or data.
    each source key; reject duplicates or ambiguous mappings.
 2. Run migration tooling in dry-run mode and review every generated canonical
    target key.
-3. Copy objects without deleting or overwriting source keys. An existing target
-   with a different checksum is a hard failure.
+3. Copy objects through an atomic conditional target create without deleting
+   or overwriting source keys. An existing target with a different checksum is
+   a hard failure. The controlled tool streams source bytes through the
+   migration host because R2/S3 server-side CopyObject has no destination
+   precondition; capacity planning must include host download/upload bandwidth,
+   temporary memory/disk limits, timeouts, and worker-thread headroom. The
+   current adapter keeps at most 8 MiB per copy in memory, spills larger bodies
+   to the host temporary directory, and rejects an individual object above
+   1 GiB; review these safeguards against the approved inventory before
+   cutover.
 4. Verify source/target size, MIME type, and SHA-256; do not treat ETag alone as
    a content checksum.
 5. Reconcile manifest count, total bytes, checksums, and episode/locale

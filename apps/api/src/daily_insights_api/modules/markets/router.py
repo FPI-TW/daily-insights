@@ -3,9 +3,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from daily_insights_api.modules.identity.auth import AuthContext, require_password_changed
-from daily_insights_api.modules.markets.schemas import MarketResponse
-from daily_insights_api.modules.markets.service import market_responses
+from daily_insights_api.modules.identity.api import AuthContext, require_password_changed
+from daily_insights_api.modules.markets.api import MarketResponse, market_responses
 from daily_insights_api.web.dependencies import get_database_session
 
 router = APIRouter(prefix="/api/markets", tags=["markets"])

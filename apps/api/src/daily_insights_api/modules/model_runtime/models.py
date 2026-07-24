@@ -1,17 +1,16 @@
 import uuid
 
 from sqlalchemy import (
-    Boolean,
     CheckConstraint,
     Enum,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
-    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -24,12 +23,6 @@ class ModelConfiguration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "model_configurations"
     __table_args__ = (
         CheckConstraint("version > 0", name="version_positive"),
-        Index(
-            "uq_model_configurations_single_active",
-            "is_active",
-            unique=True,
-            postgresql_where=text("is_active"),
-        ),
         UniqueConstraint("id", "version", name="uq_model_configurations_id_version"),
     )
 
@@ -38,9 +31,6 @@ class ModelConfiguration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     requested_model: Mapped[str] = mapped_column(String(200), nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(100), nullable=False)
     parameters: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
-    is_active: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="false"
-    )
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
@@ -66,7 +56,7 @@ class GenerationRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     message_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("messages.id", ondelete="CASCADE"),
+        ForeignKey("messages.id", ondelete="RESTRICT"),
         nullable=False,
         unique=True,
     )
@@ -96,3 +86,23 @@ class GenerationRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     error_code: Mapped[str | None] = mapped_column(String(100))
     error_detail: Mapped[str | None] = mapped_column(Text)
+
+
+class ActiveModelConfiguration(Base):
+    """Mutable singleton pointer kept outside immutable model history."""
+
+    __tablename__ = "active_model_configuration"
+    __table_args__ = (CheckConstraint("singleton_id = 1", name="singleton_id_one"),)
+
+    singleton_id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, default=1)
+    model_configuration_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("model_configurations.id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+    )
+    activated_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )

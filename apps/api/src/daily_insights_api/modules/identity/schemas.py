@@ -28,3 +28,7 @@ class UserResponse(BaseModel):
 class AuthenticationResponse(BaseModel):
     user: UserResponse
     csrf_token: str
+
+
+class CsrfTokenResponse(BaseModel):
+    csrf_token: str

@@ -1,6 +1,7 @@
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from time import perf_counter
 
 from fastapi import FastAPI, Request, Response, status
 from fastapi.responses import JSONResponse
@@ -13,9 +14,13 @@ from daily_insights_api.core.database import (
     create_session_factory,
     database_is_ready,
 )
+from daily_insights_api.core.observability import emit_event
 from daily_insights_api.modules.admin.router import router as admin_router
+from daily_insights_api.modules.assets.object_store import ObjectStore
+from daily_insights_api.modules.assets.r2.store import R2ObjectStore
 from daily_insights_api.modules.identity.router import router as identity_router
 from daily_insights_api.modules.markets.router import router as markets_router
+from daily_insights_api.modules.operations.health import ReadinessReport, evaluate_readiness
 from daily_insights_api.modules.reports.router import router as reports_router
 
 ReadinessChecker = Callable[[], Awaitable[bool]]
@@ -29,9 +34,21 @@ def create_app(
     settings: Settings | None = None,
     readiness_checker: ReadinessChecker | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
+    object_store: ObjectStore | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     engine: AsyncEngine | None = None
+    if (
+        object_store is None
+        and resolved_settings.r2_endpoint_url is not None
+        and resolved_settings.r2_access_key_id is not None
+        and resolved_settings.r2_secret_access_key is not None
+    ):
+        object_store = R2ObjectStore.from_credentials(
+            endpoint_url=resolved_settings.r2_endpoint_url,
+            access_key_id=resolved_settings.r2_access_key_id.get_secret_value(),
+            secret_access_key=resolved_settings.r2_secret_access_key.get_secret_value(),
+        )
 
     if session_factory is None:
         engine = create_engine(resolved_settings)
@@ -46,6 +63,15 @@ def create_app(
 
         readiness_checker = check_readiness
 
+    async def r2_runtime_is_ready() -> bool:
+        return resolved_settings.environment in {"development", "test"} or object_store is not None
+
+    async def provider_runtime_is_ready() -> bool:
+        return (
+            resolved_settings.environment in {"development", "test"}
+            or resolved_settings.findb_api_key is not None
+        )
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         try:
@@ -57,6 +83,7 @@ def create_app(
     app = FastAPI(title=resolved_settings.app_name, lifespan=lifespan)
     app.state.settings = resolved_settings
     app.state.session_factory = session_factory
+    app.state.object_store = object_store
 
     @app.middleware("http")
     async def request_id_middleware(
@@ -73,8 +100,28 @@ def create_app(
             else str(uuid.uuid4())
         )
         request.state.request_id = request_id
-        response = await call_next(request)
+        started_at = perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            emit_event(
+                "http.request.completed",
+                request_id=request_id,
+                method=request.method,
+                path=request.url.path,
+                status_code=500,
+                duration_ms=round((perf_counter() - started_at) * 1000, 3),
+            )
+            raise
         response.headers["X-Request-ID"] = request_id
+        emit_event(
+            "http.request.completed",
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            duration_ms=round((perf_counter() - started_at) * 1000, 3),
+        )
         return response
 
     app.include_router(identity_router)
@@ -89,23 +136,30 @@ def create_app(
 
     @app.get(
         "/health/ready",
-        response_model=HealthResponse,
-        responses={status.HTTP_503_SERVICE_UNAVAILABLE: {"model": HealthResponse}},
+        response_model=ReadinessReport,
+        responses={status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ReadinessReport}},
         include_in_schema=False,
     )
     @app.get(
         "/api/health/ready",
-        response_model=HealthResponse,
-        responses={status.HTTP_503_SERVICE_UNAVAILABLE: {"model": HealthResponse}},
+        response_model=ReadinessReport,
+        responses={status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ReadinessReport}},
     )
-    async def ready(request: Request) -> HealthResponse | JSONResponse:
+    async def ready(request: Request) -> ReadinessReport | JSONResponse:
         del request
         assert readiness_checker is not None
-        if not await readiness_checker():
+        report = await evaluate_readiness(
+            {
+                "database": readiness_checker,
+                "findb_configuration": provider_runtime_is_ready,
+                "r2_runtime": r2_runtime_is_ready,
+            }
+        )
+        if report.status != "ok":
             return JSONResponse(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                content={"status": "unhealthy"},
+                content=report.model_dump(),
             )
-        return HealthResponse(status="ok")
+        return report
 
     return app

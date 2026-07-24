@@ -1,0 +1,69 @@
+import pytest
+from pydantic import SecretStr, ValidationError
+
+from daily_insights_api.core.config import Settings
+from daily_insights_api.modules.assets.r2.store import R2ObjectStore
+from daily_insights_api.web.app import create_app
+
+
+def production_settings(**overrides: object) -> dict[str, object]:
+    values: dict[str, object] = {
+        "environment": "production",
+        "database_url": "postgresql+psycopg://app:secret@example.invalid/app",
+        "session_secret": SecretStr("s" * 32),
+        "password_pepper": SecretStr("p" * 32),
+        "findb_base_url": "https://findb.example.invalid",
+        "findb_api_key": SecretStr("findb-production-key"),
+        "r2_endpoint_url": "https://account.r2.cloudflarestorage.com",
+        "r2_bucket_name": "daily-insights-production",
+        "r2_access_key_id": SecretStr("r2-access-key"),
+        "r2_secret_access_key": SecretStr("r2-secret-key"),
+        "r2_signed_url_ttl_seconds": 900,
+    }
+    values.update(overrides)
+    return values
+
+
+def test_production_accepts_complete_external_configuration() -> None:
+    settings = Settings.model_validate(production_settings())
+    assert settings.environment == "production"
+    assert settings.r2_signed_url_ttl_seconds == 900
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("findb_base_url", "http://findb.example.invalid"),
+        ("findb_api_key", SecretStr("CHANGE_ME_FINDB")),
+        ("r2_endpoint_url", "http://account.r2.cloudflarestorage.com"),
+        ("r2_bucket_name", "CHANGE_ME_BUCKET"),
+        ("r2_bucket_name", "Invalid_Bucket"),
+        ("r2_access_key_id", None),
+        ("r2_secret_access_key", SecretStr("development-only-secret")),
+    ],
+)
+def test_production_rejects_insecure_or_partial_external_configuration(
+    field: str,
+    value: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        Settings.model_validate(production_settings(**{field: value}))
+
+
+def test_settings_repr_redacts_r2_and_provider_credentials() -> None:
+    rendered = repr(Settings.model_validate(production_settings()))
+    assert "findb-production-key" not in rendered
+    assert "r2-access-key" not in rendered
+    assert "r2-secret-key" not in rendered
+
+
+def test_production_runtime_composes_r2_adapter_without_exposing_credentials() -> None:
+    settings = Settings.model_validate(production_settings())
+
+    async def ready() -> bool:
+        return True
+
+    app = create_app(settings=settings, readiness_checker=ready)
+    assert isinstance(app.state.object_store, R2ObjectStore)
+    assert "r2-access-key" not in repr(app.state.object_store)
+    assert "r2-secret-key" not in repr(app.state.object_store)

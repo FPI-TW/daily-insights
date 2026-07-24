@@ -15,7 +15,7 @@ from daily_insights_api.core.security import (
     password_needs_rehash,
     verify_password,
 )
-from daily_insights_api.modules.audit.service import record_audit_event
+from daily_insights_api.modules.audit.api import record_audit_event
 from daily_insights_api.modules.identity.auth import AuthContext, get_auth_context, require_csrf
 from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.identity.rate_limit import (
@@ -26,10 +26,11 @@ from daily_insights_api.modules.identity.rate_limit import (
 from daily_insights_api.modules.identity.schemas import (
     AuthenticationResponse,
     ChangePasswordRequest,
+    CsrfTokenResponse,
     LoginRequest,
     UserResponse,
 )
-from daily_insights_api.modules.identity.service import create_session
+from daily_insights_api.modules.identity.service import create_session, rotate_csrf_token
 from daily_insights_api.modules.identity.session_models import Session
 from daily_insights_api.modules.tenancy.models import Membership, Organization
 from daily_insights_api.web.dependencies import get_database_session
@@ -61,7 +62,11 @@ def _set_session_cookie(response: Response, token: str, settings: Settings) -> N
     )
 
 
-@router.post("/login", response_model=AuthenticationResponse)
+@router.post(
+    "/login",
+    response_model=AuthenticationResponse,
+    operation_id="auth_login",
+)
 async def login(
     payload: LoginRequest,
     request: Request,
@@ -169,12 +174,51 @@ async def login(
     return AuthenticationResponse(user=_user_response(context), csrf_token=csrf_token)
 
 
-@router.get("/me", response_model=UserResponse)
-async def me(context: Annotated[AuthContext, Depends(get_auth_context)]) -> UserResponse:
+@router.get("/me", response_model=UserResponse, operation_id="auth_get_current_user")
+async def me(
+    response: Response,
+    context: Annotated[AuthContext, Depends(get_auth_context)],
+) -> UserResponse:
+    response.headers["Cache-Control"] = "no-store"
     return _user_response(context)
 
 
-@router.post("/change-password", response_model=AuthenticationResponse)
+@router.post(
+    "/csrf",
+    response_model=CsrfTokenResponse,
+    operation_id="auth_rotate_csrf_token",
+)
+async def refresh_csrf_token(
+    request: Request,
+    response: Response,
+    context: Annotated[AuthContext, Depends(get_auth_context)],
+    database: Annotated[AsyncSession, Depends(get_database_session)],
+) -> CsrfTokenResponse:
+    """Rotate a CSRF token using only the authenticated same-site session cookie.
+
+    This endpoint deliberately does not require the previous CSRF token: it is
+    the recovery path after a reload. The strict SameSite session cookie and
+    same-origin browser transport remain the request boundary.
+    """
+    origin = request.headers.get("origin")
+    forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    forwarded_host = request.headers.get("x-forwarded-host", request.headers.get("host", ""))
+    expected_origin = f"{forwarded_proto}://{forwarded_host}"
+    if origin != expected_origin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "same-origin request required")
+
+    settings: Settings = request.app.state.settings
+    csrf_token = rotate_csrf_token(context.session, settings)
+    await database.commit()
+    response.headers["Cache-Control"] = "no-store"
+    return CsrfTokenResponse(csrf_token=csrf_token)
+
+
+@router.post(
+    "/change-password",
+    response_model=AuthenticationResponse,
+    operation_id="auth_change_password",
+)
 async def change_password(
     payload: ChangePasswordRequest,
     request: Request,
@@ -252,7 +296,11 @@ async def change_password(
     return AuthenticationResponse(user=_user_response(new_context), csrf_token=csrf_token)
 
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="auth_logout",
+)
 async def logout(
     request: Request,
     response: Response,

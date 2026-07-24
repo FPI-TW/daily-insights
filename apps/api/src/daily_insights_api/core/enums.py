@@ -9,7 +9,10 @@ class AssetKind(StrEnum):
 
 
 class AssetStatus(StrEnum):
+    PENDING_VERIFICATION = "pending_verification"
     ACTIVE = "active"
+    QUARANTINED = "quarantined"
+    MISSING = "missing"
     ARCHIVED = "archived"
     DELETED = "deleted"
 

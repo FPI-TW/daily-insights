@@ -28,18 +28,17 @@ from daily_insights_api.modules.admin.schemas import (
     ProvisionedInternalUserResponse,
     ProvisionedMemberResponse,
 )
+from daily_insights_api.modules.audit.api import record_audit_event
 from daily_insights_api.modules.audit.models import AuditEvent
-from daily_insights_api.modules.audit.service import record_audit_event
-from daily_insights_api.modules.identity.auth import (
+from daily_insights_api.modules.identity.api import (
     AuthContext,
     require_csrf_roles,
     require_roles,
 )
 from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.identity.session_models import Session
+from daily_insights_api.modules.markets.api import MarketResponse, market_responses
 from daily_insights_api.modules.markets.models import Market, OrganizationMarketPolicy
-from daily_insights_api.modules.markets.schemas import MarketResponse
-from daily_insights_api.modules.markets.service import market_responses
 from daily_insights_api.modules.tenancy.models import Membership, Organization
 from daily_insights_api.web.dependencies import get_database_session
 

@@ -1,0 +1,106 @@
+import { createInstance, type Resource } from "i18next"
+import { initReactI18next } from "react-i18next"
+import type { Locale } from "@daily-insights/api-client"
+
+const resources: Resource = {
+  "zh-TW": {
+    translation: {
+      brand: "Daily Insights",
+      signIn: "登入",
+      email: "電子郵件",
+      password: "密碼",
+      currentPassword: "目前密碼",
+      newPassword: "新密碼",
+      changePassword: "變更密碼",
+      initialPasswordTitle: "請先變更臨時密碼",
+      initialPasswordDescription: "完成密碼變更後，才能使用其他產品功能。",
+      welcome: "歡迎，{{name}}",
+      account: "帳戶",
+      customerArea: "客戶帳戶",
+      backOffice: "內部管理",
+      adminAccess: "管理員權限",
+      organization: "組織",
+      role: "角色",
+      signOut: "登出",
+      loading: "載入中…",
+      retry: "重試",
+      forbidden: "你沒有權限開啟此頁面。",
+      notFound: "找不到此頁面。",
+      sessionExpired: "登入已失效，請重新登入。",
+      unexpectedError: "服務暫時無法使用。",
+      requestId: "請求編號：{{id}}",
+      submitting: "處理中…",
+    },
+  },
+  "zh-CN": {
+    translation: {
+      brand: "Daily Insights",
+      signIn: "登录",
+      email: "电子邮件",
+      password: "密码",
+      currentPassword: "当前密码",
+      newPassword: "新密码",
+      changePassword: "更改密码",
+      initialPasswordTitle: "请先更改临时密码",
+      initialPasswordDescription: "完成密码更改后，才能使用其他产品功能。",
+      welcome: "欢迎，{{name}}",
+      account: "账户",
+      customerArea: "客户账户",
+      backOffice: "内部管理",
+      adminAccess: "管理员权限",
+      organization: "组织",
+      role: "角色",
+      signOut: "退出登录",
+      loading: "加载中…",
+      retry: "重试",
+      forbidden: "你没有权限打开此页面。",
+      notFound: "找不到此页面。",
+      sessionExpired: "登录已失效，请重新登录。",
+      unexpectedError: "服务暂时无法使用。",
+      requestId: "请求编号：{{id}}",
+      submitting: "处理中…",
+    },
+  },
+  en: {
+    translation: {
+      brand: "Daily Insights",
+      signIn: "Sign in",
+      email: "Email",
+      password: "Password",
+      currentPassword: "Current password",
+      newPassword: "New password",
+      changePassword: "Change password",
+      initialPasswordTitle: "Change your temporary password",
+      initialPasswordDescription:
+        "You can access other product features after changing your password.",
+      welcome: "Welcome, {{name}}",
+      account: "Account",
+      customerArea: "Customer account",
+      backOffice: "Back office",
+      adminAccess: "Administrator access",
+      organization: "Organization",
+      role: "Role",
+      signOut: "Sign out",
+      loading: "Loading…",
+      retry: "Retry",
+      forbidden: "You do not have permission to open this page.",
+      notFound: "This page could not be found.",
+      sessionExpired: "Your session expired. Sign in again.",
+      unexpectedError: "The service is temporarily unavailable.",
+      requestId: "Request ID: {{id}}",
+      submitting: "Working…",
+    },
+  },
+}
+
+export function createI18n(locale: Locale) {
+  const instance = createInstance()
+  void instance.use(initReactI18next).init({
+    lng: locale,
+    fallbackLng: "zh-TW",
+    resources,
+    initAsync: false,
+    interpolation: { escapeValue: false },
+  })
+  return instance
+}

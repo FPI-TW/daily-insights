@@ -53,8 +53,44 @@ if [ "$immutable_trigger_count" -ne 2 ]; then
   exit 1
 fi
 
+phase2b_trigger_count="$(
+  docker exec "$container_id" \
+    psql -U daily_insights -d daily_insights_test -Atc \
+    "SELECT count(*) FROM pg_trigger WHERE tgname IN ('conversations_retained_history', 'messages_retained_history', 'generation_records_retained_history', 'model_configurations_retained_history') AND NOT tgisinternal"
+)"
+if [ "$phase2b_trigger_count" -ne 4 ]; then
+  echo "Phase 2B retained history triggers 未正確建立。" >&2
+  exit 1
+fi
+
+phase2b_table_count="$(
+  docker exec "$container_id" \
+    psql -U daily_insights -d daily_insights_test -Atc \
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('active_model_configuration', 'asset_migration_manifests', 'asset_migration_entries', 'podcast_episodes', 'podcast_episode_translations', 'podcast_episode_audio_variants')"
+)"
+if [ "$phase2b_table_count" -ne 6 ]; then
+  echo "Phase 2B foundation tables 未正確建立。" >&2
+  exit 1
+fi
+
 DAILY_INSIGHTS_DATABASE_URL="$database_url" \
   uv run --project apps/api alembic -c apps/api/alembic.ini downgrade 20260724_0002
+
+phase2b_downgrade_table_count="$(
+  docker exec "$container_id" \
+    psql -U daily_insights -d daily_insights_test -Atc \
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('active_model_configuration', 'asset_migration_manifests', 'asset_migration_entries', 'podcast_episodes', 'podcast_episode_translations', 'podcast_episode_audio_variants')"
+)"
+phase2b_downgrade_trigger_count="$(
+  docker exec "$container_id" \
+    psql -U daily_insights -d daily_insights_test -Atc \
+    "SELECT count(*) FROM pg_trigger WHERE tgname IN ('conversations_retained_history', 'messages_retained_history', 'generation_records_retained_history', 'model_configurations_retained_history') AND NOT tgisinternal"
+)"
+if [ "$phase2b_downgrade_table_count" -ne 0 ] || [ "$phase2b_downgrade_trigger_count" -ne 0 ]; then
+  echo "Phase 2B downgrade 後仍殘留 foundation tables 或 retained history triggers。" >&2
+  exit 1
+fi
+
 DAILY_INSIGHTS_DATABASE_URL="$database_url" \
   uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head
 DAILY_INSIGHTS_DATABASE_URL="$database_url" \
