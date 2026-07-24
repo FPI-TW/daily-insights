@@ -24,6 +24,10 @@ Accept when:
 
 ## Phase 1 — identity, tenancy, and policy
 
+Implementation status: complete in the current Phase 1 change set. PostgreSQL
+acceptance coverage is documented in
+[`phase-1-identity.md`](phase-1-identity.md).
+
 Deliver:
 
 - admin-provisioned user, organization, membership, password-change, and

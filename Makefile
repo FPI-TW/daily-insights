@@ -3,7 +3,7 @@
 export pnpm_config_verify_deps_before_run := false
 
 .PHONY: help init dev dev-detached dev-web dev-api stop restart logs ps \
-	format format-check lint type-check test check build
+	migrate bootstrap-admin format format-check lint type-check test test-db check build
 
 help: ## 顯示可用指令
 	@awk 'BEGIN {FS = ":.*## "; printf "Daily Insights 開發指令：\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -44,6 +44,14 @@ logs: ## 持續顯示開發環境日誌
 ps: ## 顯示開發環境服務狀態
 	docker compose ps
 
+migrate: ## 將 API 資料庫 migration 升級至最新版
+	docker compose run --rm api alembic upgrade head
+
+bootstrap-admin: ## 建立初始 admin（需 EMAIL 與 NAME）
+	@test -n "$(EMAIL)" || { echo "請提供 EMAIL，例如 make bootstrap-admin EMAIL=admin@example.com NAME='Admin'。"; exit 1; }
+	@test -n "$(NAME)" || { echo "請提供 NAME，例如 make bootstrap-admin EMAIL=admin@example.com NAME='Admin'。"; exit 1; }
+	docker compose run --rm api python -m daily_insights_api.scripts.bootstrap_admin --email "$(EMAIL)" --display-name "$(NAME)"
+
 format: ## 格式化 Web、API 與文件
 	pnpm format
 
@@ -58,6 +66,9 @@ type-check: ## 執行 Web 與 API 型別檢查
 
 test: ## 執行 Web 與 API 測試
 	pnpm test
+
+test-db: ## 以隔離 PostgreSQL 執行 Web 與 API 完整測試
+	./scripts/test-with-postgres.sh
 
 check: ## 執行所有品質檢查、測試與建置
 	pnpm check

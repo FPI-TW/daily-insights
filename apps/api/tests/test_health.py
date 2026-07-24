@@ -31,3 +31,34 @@ async def test_liveness_does_not_require_database() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+@pytest.mark.parametrize("length", [100, 101])
+async def test_request_id_is_bounded_before_reaching_audit_storage(length: int) -> None:
+    app = create_app(Settings(environment="test"), readiness(True))
+    supplied = "r" * length
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/health/live", headers={"X-Request-ID": supplied})
+
+    assert len(response.headers["X-Request-ID"]) <= 100
+    assert (response.headers["X-Request-ID"] == supplied) is (length == 100)
+
+
+async def test_phase1_openapi_exposes_only_supported_identity_flows() -> None:
+    app = create_app(Settings(environment="test"), readiness(True))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        document = (await client.get("/openapi.json")).json()
+
+    paths = set(document["paths"])
+    assert {
+        "/api/auth/login",
+        "/api/auth/me",
+        "/api/auth/change-password",
+        "/api/auth/logout",
+        "/api/admin/organizations",
+        "/api/admin/internal-users",
+        "/api/markets",
+    } <= paths
+    assert not any(
+        "register" in path or "forgot" in path or "reset-password" in path for path in paths
+    )

@@ -6,4 +6,4 @@ export pnpm_config_verify_deps_before_run=false
 pnpm format:check
 pnpm lint:check
 pnpm type:check
-pnpm test
+make test-db

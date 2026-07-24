@@ -39,9 +39,19 @@ make dev
 make help          # 顯示全部指令
 make dev-web       # 僅啟動 TanStack Start
 make dev-api       # 僅啟動 FastAPI
+make migrate       # 升級 API 資料庫 schema
+make test-db       # 以隔離 PostgreSQL 執行完整測試
 make check         # 執行格式、lint、型別、測試與建置
 make stop          # 停止 Compose 開發環境
 ```
+
+首次建立內部管理員時，先完成 migration，再執行：
+
+```bash
+make bootstrap-admin EMAIL=admin@example.com NAME="Admin"
+```
+
+指令只會顯示一次隨機臨時密碼；管理員登入後必須立即更改。
 
 架構文件所描述的是目標設計；領域出現在文件中，不代表相關功能已經完成。
 
@@ -51,6 +61,9 @@ make stop          # 停止 Compose 開發環境
 
 - `pre-commit`：檢查格式、lint 與型別。
 - `pre-push`：執行 pre-commit 的全部檢查，並額外執行測試。
+
+`pre-push` 會透過 Docker 建立一次性的 PostgreSQL，確保 Phase 1
+整合測試不會因本機未設定測試資料庫而被略過；測試結束後容器會自動移除。
 
 若未透過 `pnpm install` 初始化環境，可手動啟用：
 

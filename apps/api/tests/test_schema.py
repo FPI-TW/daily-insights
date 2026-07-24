@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 from sqlalchemy.schema import DefaultClause
 
 from daily_insights_api import models as registered_models  # noqa: F401
@@ -12,14 +12,17 @@ from daily_insights_api.modules.markets.catalog import MARKETS
 
 EXPECTED_TABLES = {
     "assets",
+    "audit_events",
     "conversations",
     "generation_records",
+    "login_throttles",
     "markets",
     "memberships",
     "messages",
     "model_configurations",
     "organization_market_policies",
     "organizations",
+    "sessions",
     "users",
 }
 
@@ -78,6 +81,42 @@ def test_admin_provisioned_user_requires_initial_password_change() -> None:
     assert str(password_change_default.arg) == "true"
     assert isinstance(status_default, DefaultClause)
     assert str(status_default.arg) == "active"
+
+
+def test_phase1_sessions_store_only_hashed_tokens() -> None:
+    session_table = Base.metadata.tables["sessions"]
+    assert {"token_hash", "csrf_token_hash", "expires_at", "revoked_at"} <= set(
+        session_table.columns.keys()
+    )
+    assert "token" not in session_table.columns
+    assert session_table.columns["token_hash"].unique
+
+
+def test_membership_removal_preserves_row_and_active_user_is_unique() -> None:
+    membership_table = Base.metadata.tables["memberships"]
+    assert {"removed_at", "removed_by_user_id"} <= set(membership_table.columns.keys())
+    active_user_index = next(
+        index for index in membership_table.indexes if index.name == "uq_memberships_active_user"
+    )
+    assert active_user_index.unique
+    assert str(active_user_index.dialect_options["postgresql"]["where"]) == "removed_at IS NULL"
+
+
+def test_audit_event_has_actor_target_and_before_after_evidence() -> None:
+    columns = Base.metadata.tables["audit_events"].columns
+    assert {
+        "actor_user_id",
+        "organization_id",
+        "action",
+        "target_type",
+        "target_id",
+        "reason",
+        "before",
+        "after",
+        "request_id",
+        "created_at",
+    } <= set(columns.keys())
+    assert "updated_at" not in columns
 
 
 def test_conversation_references_membership_pair() -> None:
@@ -164,13 +203,33 @@ def test_production_requires_database_url() -> None:
         Settings(environment="production")
 
 
+@pytest.mark.parametrize(
+    ("session_secret", "password_pepper"),
+    [
+        ("short", "another-short"),
+        ("a" * 32, "a" * 32),
+        ("CHANGE_ME_" + "a" * 32, "b" * 32),
+    ],
+)
+def test_production_rejects_weak_or_reused_secrets(
+    session_secret: str,
+    password_pepper: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            environment="production",
+            database_url="postgresql+psycopg://example.invalid/database",
+            session_secret=SecretStr(session_secret),
+            password_pepper=SecretStr(password_pepper),
+        )
+
+
 def test_development_has_local_only_database_default() -> None:
     settings = Settings(environment="development")
     assert settings.database_url == LOCAL_DATABASE_URL
 
 
 def test_initial_migration_is_present() -> None:
-    migration = (
-        Path(__file__).parents[1] / "migrations" / "versions" / "20260724_0001_initial_schema.py"
-    )
-    assert migration.is_file()
+    migration_directory = Path(__file__).parents[1] / "migrations" / "versions"
+    assert (migration_directory / "20260724_0001_initial_schema.py").is_file()
+    assert (migration_directory / "20260724_0002_phase1_identity.py").is_file()

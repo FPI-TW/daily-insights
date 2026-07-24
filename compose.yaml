@@ -31,7 +31,7 @@ services:
       - path: .env
         required: false
     environment:
-      DAILY_INSIGHTS_ENVIRONMENT: ${APP_ENV:-development}
+      DAILY_INSIGHTS_ENVIRONMENT: ${APP_ENV:?set APP_ENV in .env}
       DAILY_INSIGHTS_DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
       FINDB_BASE_URL: ${FINDB_BASE_URL:-https://findb.tingfong.com}
     command:
@@ -70,7 +70,7 @@ services:
       - path: .env
         required: false
     environment:
-      APP_ENV: ${APP_ENV:-development}
+      APP_ENV: ${APP_ENV:?set APP_ENV in .env}
       API_INTERNAL_URL: http://api:8000
     depends_on:
       api:
