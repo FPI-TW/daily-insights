@@ -1,0 +1,12 @@
+.git
+.env
+**/.DS_Store
+**/.mypy_cache
+**/.pytest_cache
+**/.ruff_cache
+**/.tanstack
+**/.venv
+**/__pycache__
+**/coverage
+**/node_modules
+**/.output

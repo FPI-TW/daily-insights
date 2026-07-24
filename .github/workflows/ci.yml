@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: daily_insights_ci
+          POSTGRES_USER: daily_insights_ci
+          POSTGRES_PASSWORD: daily-insights-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U daily_insights_ci -d daily_insights_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DAILY_INSIGHTS_ENVIRONMENT: test
+      DAILY_INSIGHTS_DATABASE_URL: postgresql+psycopg://daily_insights_ci:daily-insights-ci-only@127.0.0.1:5432/daily_insights_ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.15.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - run: pnpm install --frozen-lockfile
+      - run: uv sync --project apps/api --frozen
+      - run: pnpm check
+
+      - name: Validate PostgreSQL migration round trip
+        working-directory: apps/api
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+
+      - name: Validate Compose contract
+        env:
+          POSTGRES_PASSWORD: compose-config-only
+          DATABASE_URL: postgresql+psycopg://daily_insights:compose-config-only@postgres:5432/daily_insights
+        run: docker compose config --quiet

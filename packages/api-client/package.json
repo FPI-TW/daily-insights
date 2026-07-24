@@ -1,0 +1,6 @@
+{
+  "name": "@daily-insights/api-client",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module"
+}
