@@ -4,6 +4,25 @@ Phases are ordered by dependency. A later phase starts only after the prior
 phase's acceptance evidence is recorded; parallel work is allowed within a
 phase when file ownership does not overlap.
 
+## Current delivery priority
+
+The immediate goal is to launch the Podcast pilot before expanding the product.
+Work proceeds in this order:
+
+1. separate the customer and administration entry points, authentication
+   routes, layouts, redirects, and authorization boundaries;
+2. finish the customer Podcast list and listening experience;
+3. retain a focused administration interface for the current Podcast audio
+   management workflow;
+4. begin Phase 4 production deployment and cutover immediately after the
+   revised Phase 3 acceptance criteria pass.
+
+Phase 5 chat and Phase 6 product surfaces must not begin in a way that delays
+the initial production launch. Customer and administration routes may remain in
+one deployable web application for the initial release, but their navigation,
+presentation, login entry points, and authorization behavior must be
+independent.
+
 ## Phase 0 — foundation and contracts
 
 Deliver:
@@ -87,7 +106,8 @@ FinDB semantics.
 Implementation status: complete in the current Phase 2B change set. Acceptance
 evidence and remaining production risks are recorded in
 [`phase-2b-application-architecture.md`](phase-2b-application-architecture.md).
-Phase 3 Podcast pilot implementation is now the next product phase.
+The shared application shell and authorization foundation are complete. The
+explicit customer/admin login and presentation split is revised Phase 3 work.
 
 Deliver:
 
@@ -129,24 +149,35 @@ administration, or Podcast presentation.
 
 ## Phase 3 — Podcast pilot
 
-Implementation status: implemented locally with PostgreSQL/fake-R2 integration
-coverage, deterministic mock-based Playwright browser E2E, and isolated live R2
-adapter QA. The R2 QA covered upload, same-key overwrite, checksum metadata,
-signed full GET, MP3-to-MP4 key switching with old-key deletion, and cleanup.
-Actual browser playback against R2 (including CORS/range), signed URL expiry,
-live endpoint authentication/upload, network failure, and production capacity
+Implementation status: the core Podcast API, audio management workflow, and
+customer playback path are implemented locally with PostgreSQL/fake-R2
+integration coverage, deterministic mock-based Playwright browser E2E, and
+isolated live R2 adapter QA. The current work is to separate customer and admin
+entry points and finish the deliberately limited UI/UX scope below. Actual
+browser playback against R2 (including CORS/range), signed URL expiry, live
+endpoint authentication/upload, network failure, and production capacity
 remain Phase 3 acceptance gaps or Phase 4 production-readiness work. Detailed
-scope and evidence are recorded in
+domain scope and existing evidence are recorded in
 [`podcast-pilot.md`](podcast-pilot.md).
 
 Deliver:
 
-- internal Podcast episode management for `admin`, plus the approved R2
-  maintenance workflow for `admin` and `asset_manager`;
+- a customer login route at `/$locale/login` and a separate administration
+  login route at `/$locale/admin/login`, with independent post-login redirects
+  and no cross-surface navigation;
+- separate customer and administration layouts and route guards, while keeping
+  a single deployable web application for the initial release;
+- a polished, responsive customer experience limited to the Podcast list and
+  listening controls, with clear loading, empty, failure, unavailable-audio,
+  keyboard, and mobile states;
+- a concise administration experience limited to the current Podcast audio
+  management workflow for `admin`, plus the approved R2 maintenance workflow
+  for `admin` and `asset_manager`;
 - canonical path/filename-derived episode presentation with missing-locale
   visibility;
-- customer episode list, episode detail, cover artwork, and accessible audio
-  player in TanStack Start;
+- customer Podcast list, cover artwork, and accessible audio playback in
+  TanStack Start; no report, chat, subscription, favorites, or general content
+  management UI is included;
 - API-authorized, short-lived R2 media URLs with object-scoped access;
 - browser upload of one to three locale files plus migration of existing R2
   objects to backend-generated canonical keys;
@@ -156,6 +187,17 @@ Deliver:
 
 Accept when:
 
+- customer credentials enter through `/$locale/login`, administration
+  credentials enter through `/$locale/admin/login`, and authentication expiry
+  or authorization failure returns each audience to its own login route;
+- customer and administration layouts have distinct navigation and
+  presentation, and neither surface exposes links or controls belonging to the
+  other;
+- the customer interface presents a clear, responsive Podcast list and permits
+  listening without requiring access to administration routes;
+- the administration interface presents the existing audio upload,
+  replacement, publication, and unpublication workflow without unrelated
+  customer or future administration features;
 - an unauthorized or suspended user cannot list an episode or obtain a media
   URL;
 - customers cannot upload, publish, unpublish, or mutate Podcast content;
@@ -174,10 +216,16 @@ Accept when:
   signed URL;
 - the player works through a short-lived URL without proxying audio bytes
   through nginx/API, and R2 credentials never reach the browser;
-- list/detail/player states pass responsive, keyboard, loading, empty, and
-  failure-state tests.
+- list/player states pass responsive, keyboard, loading, empty, and
+  failure-state tests;
+- deterministic browser E2E covers both login entry points, route-boundary
+  redirects, customer playback, and the administration audio workflow.
 
 ## Phase 4 — Podcast pilot production readiness and cutover
+
+Phase 4 starts immediately after the revised Phase 3 acceptance evidence is
+recorded. The goal is to put the limited Podcast pilot online before starting
+chat, report UI, or broader asset-management work.
 
 Deliver:
 
@@ -205,8 +253,9 @@ Accept when:
 - rollback and DNS/origin cutover are rehearsed without touching legacy data.
 
 This phase launches only the approved Podcast pilot. Chat, eight-market report
-content, and report UI do not block it. There is no legacy-data migration or
-destructive legacy cleanup.
+content, report UI, and general asset administration do not block it and must
+not delay cutover. There is no legacy-data migration or destructive legacy
+cleanup.
 
 ## Phase 5 — chat and model operations
 
