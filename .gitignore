@@ -11,6 +11,8 @@ dist-ssr
 .vinxi
 __unconfig*
 todos.json
+playwright-report
+test-results
 
 .env
 !.env.example

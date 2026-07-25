@@ -1,0 +1,450 @@
+import { createServer } from "node:http"
+
+const episodeId = "10000000-0000-4000-8000-000000000001"
+const assetId = "20000000-0000-4000-8000-000000000001"
+const organizationId = "30000000-0000-4000-8000-000000000001"
+const adminId = "40000000-0000-4000-8000-000000000001"
+const memberId = "50000000-0000-4000-8000-000000000001"
+const port = Number(process.argv[process.argv.indexOf("--port") + 1] || 3311)
+
+let state
+
+function reset(overrides = {}) {
+  state = {
+    podcastList: "normal",
+    audio: "normal",
+    status: "published",
+    episodeVersion: 2,
+    audioVersion: 1,
+    requests: [],
+    ...overrides,
+  }
+}
+
+reset()
+
+function sendJson(response, status, value, headers = {}) {
+  response.writeHead(status, {
+    "Content-Type": "application/json",
+    "X-Request-ID": "e2e-request-id",
+    ...headers,
+  })
+  response.end(JSON.stringify(value))
+}
+
+function readBody(request) {
+  return new Promise(resolve => {
+    const chunks = []
+    request.on("data", chunk => chunks.push(chunk))
+    request.on("end", () => resolve(Buffer.concat(chunks)))
+  })
+}
+
+function roleFrom(request) {
+  const match = /(?:^|;\s*)e2e-role=([^;]+)/.exec(request.headers.cookie || "")
+  return ["admin", "org_member"].includes(match?.[1]) ? match[1] : null
+}
+
+function userFor(role) {
+  return {
+    id: role === "admin" ? adminId : memberId,
+    email: `${role}@example.test`,
+    display_name: role === "admin" ? "E2E Admin" : "E2E Member",
+    system_role: role,
+    status: "active",
+    must_change_password: false,
+    organization_id: role === "org_member" ? organizationId : null,
+  }
+}
+
+function requireRole(request, response, allowedRoles) {
+  const role = roleFrom(request)
+  if (role === null) {
+    sendJson(response, 401, { detail: "Authentication required" })
+    return null
+  }
+  if (!allowedRoles.includes(role)) {
+    sendJson(response, 403, { detail: "Forbidden" })
+    return null
+  }
+  return role
+}
+
+function hasValidCsrf(request) {
+  return request.headers["x-csrf-token"] === "e2e-csrf-token"
+}
+
+function requireCsrf(request, response) {
+  if (hasValidCsrf(request)) return true
+  sendJson(response, 403, { detail: "Invalid CSRF token" })
+  return false
+}
+
+function parseJsonBody(body) {
+  try {
+    return JSON.parse(body.toString("utf8"))
+  } catch {
+    return null
+  }
+}
+
+function parseMultipart(request, body) {
+  const contentType = request.headers["content-type"] || ""
+  const boundaryMatch = /boundary=(?:"([^"]+)"|([^;]+))/.exec(contentType)
+  const boundary = boundaryMatch?.[1] || boundaryMatch?.[2]
+  if (!boundary) return null
+
+  const fields = {}
+  const files = {}
+  for (const part of body.toString("latin1").split(`--${boundary}`)) {
+    const normalized = part.replace(/^\r\n/, "").replace(/\r\n$/, "")
+    const separator = normalized.indexOf("\r\n\r\n")
+    if (separator === -1) continue
+    const headers = normalized.slice(0, separator)
+    const content = normalized.slice(separator + 4).replace(/\r\n$/, "")
+    const disposition = /content-disposition:\s*form-data;([^\r\n]+)/i.exec(
+      headers
+    )?.[1]
+    const name = /name="([^"]+)"/.exec(disposition || "")?.[1]
+    if (!name) continue
+    const filename = /filename="([^"]*)"/.exec(disposition || "")?.[1]
+    if (filename !== undefined) {
+      files[name] = {
+        filename,
+        contentType:
+          /content-type:\s*([^\r\n]+)/i.exec(headers)?.[1]?.trim() || null,
+        size: Buffer.byteLength(content, "latin1"),
+      }
+    } else {
+      fields[name] = content
+    }
+  }
+  return { fields, files }
+}
+
+function recordRequest(request, url, role, facts) {
+  state.requests.push({
+    method: request.method,
+    path: url.pathname,
+    role,
+    ...(facts ? { facts } : {}),
+  })
+}
+
+function adminEpisode() {
+  return {
+    id: episodeId,
+    trading_date: "2026-07-24",
+    status: state.status,
+    version: state.episodeVersion,
+    metadata: [
+      {
+        locale: "zh-hant",
+        title: "市場晨間簡報",
+        summary: "測試用繁體中文摘要。",
+      },
+      {
+        locale: "en",
+        title: "Market Morning Brief",
+        summary: "An English summary for browser testing.",
+      },
+    ],
+    audio_variants: [
+      {
+        asset_id: assetId,
+        locale: "zh-hant",
+        version: state.audioVersion,
+        is_active: true,
+      },
+    ],
+    cover_asset_id: null,
+    published_at:
+      state.status === "published" ? "2026-07-24T08:00:00+08:00" : null,
+  }
+}
+
+function localizedEpisode(locale) {
+  const english = locale === "en"
+  return {
+    id: episodeId,
+    trading_date: "2026-07-24",
+    title: english ? "Market Morning Brief" : "市場晨間簡報",
+    summary: english
+      ? "An English summary for browser testing."
+      : "測試用繁體中文摘要。",
+    locale,
+    cover_asset_id: null,
+  }
+}
+
+const server = createServer(async (request, response) => {
+  const url = new URL(request.url || "/", `http://127.0.0.1:${port}`)
+
+  if (url.pathname === "/__e2e/health") {
+    sendJson(response, 200, { ok: true })
+    return
+  }
+
+  if (url.pathname === "/__e2e/reset" && request.method === "POST") {
+    const raw = await readBody(request)
+    reset(raw.length ? JSON.parse(raw.toString("utf8")) : {})
+    sendJson(response, 200, { ok: true })
+    return
+  }
+
+  if (url.pathname === "/__e2e/state") {
+    sendJson(response, 200, state)
+    return
+  }
+
+  if (url.pathname === "/api/auth/me") {
+    const role = requireRole(request, response, ["admin", "org_member"])
+    if (!role) return
+    recordRequest(request, url, role)
+    sendJson(response, 200, userFor(role))
+    return
+  }
+
+  if (url.pathname === "/api/auth/csrf" && request.method === "POST") {
+    const role = requireRole(request, response, ["admin", "org_member"])
+    if (!role) return
+    recordRequest(request, url, role)
+    sendJson(response, 200, { csrf_token: "e2e-csrf-token" })
+    return
+  }
+
+  if (url.pathname === "/api/admin/podcasts" && request.method === "GET") {
+    const role = requireRole(request, response, ["admin"])
+    if (!role) return
+    recordRequest(request, url, role)
+    sendJson(response, 200, [adminEpisode()])
+    return
+  }
+
+  if (
+    url.pathname === `/api/admin/podcasts/${episodeId}/unpublish` &&
+    request.method === "POST"
+  ) {
+    const role = requireRole(request, response, ["admin"])
+    if (!role || !requireCsrf(request, response)) return
+    const input = parseJsonBody(await readBody(request))
+    if (
+      input === null ||
+      !Number.isInteger(input.expected_version) ||
+      input.expected_version !== state.episodeVersion
+    ) {
+      sendJson(response, 409, { detail: "Expected version mismatch" })
+      return
+    }
+    recordRequest(request, url, role, {
+      csrf: "valid",
+      expectedVersion: input.expected_version,
+    })
+    state.status = "draft"
+    state.episodeVersion += 1
+    sendJson(response, 200, adminEpisode())
+    return
+  }
+
+  if (
+    url.pathname === `/api/admin/podcasts/${episodeId}/publish` &&
+    request.method === "POST"
+  ) {
+    const role = requireRole(request, response, ["admin"])
+    if (!role || !requireCsrf(request, response)) return
+    const input = parseJsonBody(await readBody(request))
+    if (
+      input === null ||
+      !Number.isInteger(input.expected_version) ||
+      input.expected_version !== state.episodeVersion
+    ) {
+      sendJson(response, 409, { detail: "Expected version mismatch" })
+      return
+    }
+    recordRequest(request, url, role, {
+      csrf: "valid",
+      expectedVersion: input.expected_version,
+    })
+    state.status = "published"
+    state.episodeVersion += 1
+    sendJson(response, 200, adminEpisode())
+    return
+  }
+
+  if (
+    url.pathname === "/api/admin/podcasts/uploads" &&
+    request.method === "POST"
+  ) {
+    const role = requireRole(request, response, ["admin"])
+    if (!role || !requireCsrf(request, response)) return
+    const multipart = parseMultipart(request, await readBody(request))
+    if (!multipart) {
+      sendJson(response, 400, { detail: "Multipart body required" })
+      return
+    }
+    const { fields, files } = multipart
+    const confirmed =
+      fields.confirm_replacement === "true"
+        ? true
+        : fields.confirm_replacement === "false"
+          ? false
+          : null
+    let expectedVersions
+    try {
+      expectedVersions = JSON.parse(fields.expected_versions)
+    } catch {
+      expectedVersions = null
+    }
+    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(fields.trading_date || "")
+    const validReason = ["initial_upload", "update_file", "other"].includes(
+      fields.reason
+    )
+    const zhHantFile = files.zh_hant
+    const validFile =
+      zhHantFile &&
+      zhHantFile.filename === "briefing.mp3" &&
+      zhHantFile.contentType === "audio/mpeg" &&
+      zhHantFile.size > 0
+    const validExpectedVersions =
+      expectedVersions !== null &&
+      typeof expectedVersions === "object" &&
+      !Array.isArray(expectedVersions)
+    if (
+      !validDate ||
+      !validReason ||
+      confirmed === null ||
+      !validExpectedVersions ||
+      !validFile
+    ) {
+      sendJson(response, 422, { detail: "Invalid Podcast upload contract" })
+      return
+    }
+    const facts = {
+      csrf: "valid",
+      tradingDate: fields.trading_date,
+      reason: fields.reason,
+      confirmReplacement: confirmed,
+      expectedVersions,
+      files,
+    }
+    recordRequest(request, url, role, facts)
+    if (!confirmed) {
+      sendJson(response, 409, {
+        detail: {
+          code: "replacement_confirmation_required",
+          current_versions: { "zh-hant": state.audioVersion },
+        },
+      })
+      return
+    }
+    if (expectedVersions["zh-hant"] !== state.audioVersion) {
+      sendJson(response, 409, { detail: "Expected audio version mismatch" })
+      return
+    }
+    state.audioVersion += 1
+    state.episodeVersion += 1
+    sendJson(response, 200, adminEpisode())
+    return
+  }
+
+  if (url.pathname === "/api/podcasts" && request.method === "GET") {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    recordRequest(request, url, role, {
+      locale: url.searchParams.get("locale"),
+    })
+    if (state.podcastList === "error") {
+      sendJson(response, 503, { detail: "Podcast service unavailable" })
+      return
+    }
+    const locale = url.searchParams.get("locale") || "zh-hant"
+    sendJson(
+      response,
+      200,
+      state.podcastList === "empty" ? [] : [localizedEpisode(locale)]
+    )
+    return
+  }
+
+  if (
+    url.pathname === `/api/podcasts/${episodeId}` &&
+    request.method === "GET"
+  ) {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    recordRequest(request, url, role, {
+      locale: url.searchParams.get("locale"),
+    })
+    const locale = url.searchParams.get("locale") || "zh-hant"
+    sendJson(response, 200, {
+      ...localizedEpisode(locale),
+      published_at: "2026-07-24T08:00:00+08:00",
+    })
+    return
+  }
+
+  if (
+    url.pathname === `/api/podcasts/${episodeId}/audio-url` &&
+    request.method === "POST"
+  ) {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    recordRequest(request, url, role, {
+      locale: url.searchParams.get("locale"),
+    })
+    if (state.audio === "delayed") {
+      await new Promise(resolve => setTimeout(resolve, 700))
+    }
+    if (state.audio === "error") {
+      sendJson(response, 503, { detail: "Audio unavailable" })
+      return
+    }
+    sendJson(response, 200, {
+      episode_id: episodeId,
+      requested_locale: url.searchParams.get("locale") || "zh-hant",
+      resolved_locale: "zh-hant",
+      asset_id: assetId,
+      url: `http://127.0.0.1:${port}/media/podcast.wav`,
+      expires_in_seconds: 300,
+    })
+    return
+  }
+
+  if (
+    /^\/api\/podcasts\/[^/]+$/.test(url.pathname) &&
+    request.method === "GET"
+  ) {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    recordRequest(request, url, role)
+    sendJson(response, 404, { detail: "Podcast episode not found" })
+    return
+  }
+
+  if (url.pathname === "/media/podcast.wav") {
+    const wav = Buffer.from(
+      "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=",
+      "base64"
+    )
+    response.writeHead(200, {
+      "Content-Type": "audio/wav",
+      "Content-Length": wav.length,
+      "Accept-Ranges": "bytes",
+    })
+    response.end(wav)
+    return
+  }
+
+  sendJson(response, 404, { detail: "Not found" })
+})
+
+server.listen(port, "127.0.0.1", () => {
+  process.stdout.write(`Mock API listening on http://127.0.0.1:${port}\n`)
+})
+
+function shutdown() {
+  server.close(() => process.exit(0))
+}
+
+process.on("SIGINT", shutdown)
+process.on("SIGTERM", shutdown)

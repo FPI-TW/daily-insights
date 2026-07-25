@@ -2,4 +2,6 @@ node_modules
 .output
 .tanstack
 coverage
+playwright-report
+test-results
 src/routeTree.gen.ts

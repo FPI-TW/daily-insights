@@ -1,7 +1,8 @@
 # Podcast 先行版
 
-狀態：本機功能已完成第一輪實作與整合測試；正式 R2 音檔、browser E2E 與
-Phase 4 上線驗收尚未執行。八大市場正式內容與報告前端在此期間維持 pending。
+狀態：本機功能已完成第一輪實作、整合測試及 mock-based browser E2E；隔離的
+live R2 adapter QA 亦已完成。實際 browser 對 R2 播放、live endpoint 流程與
+Phase 4 上線驗收仍待執行。八大市場正式內容與報告前端在此期間維持 pending。
 
 ## 實作狀態
 
@@ -10,8 +11,8 @@ Phase 4 上線驗收尚未執行。八大市場正式內容與報告前端在此
 - `admin` 發布及下架 episode，`admin` 與 `asset_manager` 可從後台一次上傳
   1–3 個語系音檔；
 - 同交易日唯一性、任一語系 active audio 發布驗證，以及缺漏語系提示；
-- 同 locale 替換警告、明確確認、expected current version 與新 canonical
-  object key；
+- 同 locale 替換警告、明確確認、expected current version、stable canonical
+  key 的同格式原地覆寫／跨格式 key 切換，以及邏輯版本遞增；
 - 客戶共用 catalog、detail、requested locale 優先且其後依
   `zh-hant` → `zh-hans` → `en` fallback，以及短效 signed URL；
 - TanStack Start 三語客戶頁、responsive list/detail、原生 audio element、
@@ -19,15 +20,22 @@ Phase 4 上線驗收尚未執行。八大市場正式內容與報告前端在此
   `localStorage` 進度；
 - 內部 Podcast 後台、三個可點擊／拖放的語系 slot、R2 upload 及發布控制；
 - PostgreSQL + fake R2 端到端測試，覆蓋建立、發布拒絕、音檔登記、角色限制、
-  locale fallback、同路徑覆寫及下架。
+  locale fallback、同路徑覆寫及下架；
+- Playwright + deterministic mock API browser E2E，覆蓋後台 upload slot、
+  replacement／unpublish confirmation、客戶 list/detail/player、locale fallback、
+  loading/empty/error、keyboard 與 mobile viewport；第一輪 6 個 specs 及新增的
+  detail 404 regression 均通過；
+- 在 `2099-12-31` 隔離 prefix 完成 live R2 adapter QA：初次 upload、same-key
+  overwrite、SHA/checksum metadata、signed full GET、MP3 → MP4 key switch 與
+  old-key deletion，並已清理該次測試 objects。
 
 尚待正式環境或 browser 驗收：
 
-- 目前設定的 R2 bucket 可連線及列舉，但 bucket 為空，尚無真實音檔可執行
-  HEAD、copy、checksum、signed URL 與實際播放驗證；
-- 尚未加入 Playwright，因此鍵盤操作、不同 viewport、signed URL 到期及
-  R2/network failure 仍需在 Phase 4 前以實際 browser 驗收；
-- browser upload 尚需在正式 R2、容量及網路條件下執行最終驗收。
+- 以實際 browser 透過 R2 signed URL 播放，驗證 CORS、byte range／seek 與
+  browser audio 行為；
+- signed URL 到期後的拒絕行為，以及 R2／network failure 的 browser UX；
+- live API endpoint 的登入、CSRF、multipart upload、發布及播放授權完整流程；
+- 正式容量、併發、失敗注入及網路條件驗收。
 
 ## 目標
 
@@ -80,9 +88,10 @@ podcast_episode_audio_variants
 - API 先找頁面語系完全相符的 audio variant；找不到時依
   `zh-hant` → `zh-hans` → `en` 選擇第一個可用檔案，並在 response 明確回傳
   requested/resolved locale。
-- 目前只有繁體中文音檔；既有 R2 objects 會先複製到新的 canonical key 並
-  登記為 `zh-hant` variant。只有完成逐檔驗證及整批 migration reconciliation
-  後才切換 active mapping。
+- 既有 R2 objects 必須在 inventory 時逐一人工審核並指定 locale，不得從 legacy
+  key 推斷語系；object 會先複製到新的 migration target key，並以該 verified
+  locale 登記 variant。只有完成逐檔驗證及整批 migration reconciliation 後才
+  切換 active mapping。
 - 後台提供固定對應 `zh-hant`、`zh-hans`、`en` 的三個 slot，每個皆可點擊或
   拖放。一次請求至少一檔、最多三檔，不要求固定必備語系。
 - 上傳原因使用固定選單：`initial_upload`（初次上傳）、`update_file`
@@ -90,13 +99,16 @@ podcast_episode_audio_variants
 - browser upload 的 object 使用
   `podcasts/{trading-date}/audio/{locale}/podcast.{ext}`，其中 `{ext}` 僅支援
   `mp3` 與 `mp4`。三個語系使用相同 basename 並透過 locale 路徑區分；同交易日
-  同語系經明確確認後覆寫，若格式改變則刪除被取代的舊格式 object。
+  同語系經明確確認後，格式相同時覆寫同一 stable key；格式改變時先寫入新格式
+  的 stable-extension key，再刪除被取代的舊格式 object。
 - object key 與檔名只由後端產生，來源檔名不進入 R2 key。標題由固定檔名
   `podcast` 與路徑中的 trading date 推導，上傳者不輸入標題或摘要。
-- 初期手動上傳與既有 object 透過受控 migration/import workflow 處理：內部
-  人員提供來源 key、`trading_date` 與 locale，後端不信任也不解析舊檔名，
-  並將 object 複製到後端產生的 canonical key。正式 upload workflow 完成後
-  也沿用相同 key generator。
+- 既有 object 透過受控 migration/import workflow 處理：內部人員提供來源
+  key、`trading_date` 與 locale，後端不信任也不解析舊檔名，並將 object
+  複製到不可變 target key
+  `podcasts/{trading-date}/audio/{locale}/podcast-{trading-date}-{locale}-{asset-id}.{ext}`。
+  migration 使用含 asset ID 的 key 與 conditional create，不與 browser upload
+  共用 stable key generator，也不覆寫已存在的 target。
 - 使用者切換頁面 locale 後，播放器重新解析該 locale 的音檔；若發生 fallback，
   UI 仍維持使用者選擇的頁面語系。
 
@@ -130,10 +142,11 @@ publication、show/series/season、episode number、收聽分析、留言、訂�
   警告。
 - 同一 `trading_date + locale` 已有 active audio 時，登記或上傳新檔第一次
   必須回傳 replacement-required 警告，不得直接改變 active mapping。
-- 管理者明確確認後才建立新 asset/version 並切換 active mapping；請求需帶
-  expected current version，避免兩位管理者同時操作造成 lost update。
-- 「覆蓋」會以相同 R2 key 原地改寫 bytes；資料庫同步更新 checksum、size 與
-  邏輯版本，且 mutation 必須寫入 audit。
+- 管理者明確確認後，格式相同時才以同一 stable R2 key 原地改寫 bytes；若在
+  MP3 與 MP4 間切換，則先寫入新 stable-extension key，再刪除被取代的舊格式
+  key。兩條路徑都會更新 asset metadata、checksum 與 size，並遞增 variant 的
+  邏輯版本；請求需帶 expected current version，避免兩位管理者同時操作造成
+  lost update，且 mutation 必須寫入 audit。
 
 ## 既有 R2 搬移流程
 
@@ -141,8 +154,9 @@ publication、show/series/season、episode number、收聽分析、留言、訂�
 記錄 source key、target key、trading date、locale、size、MIME type、SHA-256、
 copy/verify 狀態與時間：
 
-1. inventory 舊 objects，人工補上 trading date 與 locale；目前全部為
-   `zh-hant`；
+1. inventory 舊 objects，逐一人工審核並補上 trading date 與 locale；locale
+   必須是明確確認的 `zh-hant`、`zh-hans` 或 `en`，不得由 legacy source key
+   推斷；
 2. 對 source 執行 HEAD，拒絕不存在、零 bytes 或不允許的 MIME type；
 3. 由後端產生 canonical target key，使用 `If-None-Match: *` conditional
    object create 原子建立 target；因 R2/S3 `CopyObject` 沒有 destination
@@ -190,11 +204,14 @@ key 使用 resolved audio locale：例如英文頁面 fallback 至 `zh-hant` 時
   Podcast 結果。
 - 同一交易日不得建立第二個 logical episode；同 locale replacement 未經明確
   確認不得改變 active audio。
-- replacement 必須明確確認，並覆寫相同的後端 canonical object key。
+- replacement 必須明確確認並帶 expected current version；格式相同時覆寫同一
+  stable canonical key，格式改變時先寫入新 stable-extension key，再刪除被
+  取代的舊格式 key。
 - requested locale variant 存在時必須播放相符檔案；不存在時依
   `zh-hant` → `zh-hans` → `en` 穩定回退。
-- 既有無 locale object key 的音檔完成 copy/verify 後，canonical copy 登記為
-  `zh-hant`；cutover 前不得只因 source object 存在就標記 migration complete。
+- 既有 legacy 音檔的 locale 必須逐一人工審核，不得由 source key 推斷；
+  copy/verify 後的 migration target 以該 verified locale 登記。cutover 前不得
+  只因 source object 存在就標記 migration complete。
 - signed URL 有短效期限、只對應單一 object，response 與 log 不含 R2
   credential。
 - asset 被 quarantine、遺失或失效後，不再簽發新 URL；播放器呈現可理解的

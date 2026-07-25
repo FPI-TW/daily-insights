@@ -22,6 +22,7 @@ import { Route as LocaleAuthenticatedCustomerPodcastsRouteImport } from './route
 import { Route as LocaleAuthenticatedBackOfficeIndexRouteImport } from './routes/$locale._authenticated.back-office.index'
 import { Route as LocaleAuthenticatedBackOfficeAdminRouteImport } from './routes/$locale._authenticated.back-office.admin'
 import { Route as LocaleAuthenticatedBackOfficePodcastsRouteImport } from './routes/$locale._authenticated.back-office.podcasts'
+import { Route as LocaleAuthenticatedCustomerPodcastsIndexRouteImport } from './routes/$locale._authenticated._customer.podcasts.index'
 import { Route as LocaleAuthenticatedCustomerPodcastsEpisodeIdRouteImport } from './routes/$locale._authenticated._customer.podcasts.$episodeId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -94,6 +95,12 @@ const LocaleAuthenticatedBackOfficePodcastsRoute =
     path: '/podcasts',
     getParentRoute: () => LocaleAuthenticatedBackOfficeRoute,
   } as any)
+const LocaleAuthenticatedCustomerPodcastsIndexRoute =
+  LocaleAuthenticatedCustomerPodcastsIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => LocaleAuthenticatedCustomerPodcastsRoute,
+  } as any)
 const LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute =
   LocaleAuthenticatedCustomerPodcastsEpisodeIdRouteImport.update({
     id: '/$episodeId',
@@ -114,6 +121,7 @@ export interface FileRoutesByFullPath {
   '/$locale/back-office/podcasts': typeof LocaleAuthenticatedBackOfficePodcastsRoute
   '/$locale/back-office/': typeof LocaleAuthenticatedBackOfficeIndexRoute
   '/$locale/podcasts/$episodeId': typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
+  '/$locale/podcasts/': typeof LocaleAuthenticatedCustomerPodcastsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -121,11 +129,11 @@ export interface FileRoutesByTo {
   '/$locale/change-password': typeof LocaleChangePasswordRoute
   '/$locale/login': typeof LocaleLoginRoute
   '/$locale/account': typeof LocaleAuthenticatedCustomerAccountRoute
-  '/$locale/podcasts': typeof LocaleAuthenticatedCustomerPodcastsRouteWithChildren
   '/$locale/back-office/admin': typeof LocaleAuthenticatedBackOfficeAdminRoute
   '/$locale/back-office/podcasts': typeof LocaleAuthenticatedBackOfficePodcastsRoute
   '/$locale/back-office': typeof LocaleAuthenticatedBackOfficeIndexRoute
   '/$locale/podcasts/$episodeId': typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
+  '/$locale/podcasts': typeof LocaleAuthenticatedCustomerPodcastsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -143,6 +151,7 @@ export interface FileRoutesById {
   '/$locale/_authenticated/back-office/podcasts': typeof LocaleAuthenticatedBackOfficePodcastsRoute
   '/$locale/_authenticated/back-office/': typeof LocaleAuthenticatedBackOfficeIndexRoute
   '/$locale/_authenticated/_customer/podcasts/$episodeId': typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
+  '/$locale/_authenticated/_customer/podcasts/': typeof LocaleAuthenticatedCustomerPodcastsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -159,6 +168,7 @@ export interface FileRouteTypes {
     | '/$locale/back-office/podcasts'
     | '/$locale/back-office/'
     | '/$locale/podcasts/$episodeId'
+    | '/$locale/podcasts/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -166,11 +176,11 @@ export interface FileRouteTypes {
     | '/$locale/change-password'
     | '/$locale/login'
     | '/$locale/account'
-    | '/$locale/podcasts'
     | '/$locale/back-office/admin'
     | '/$locale/back-office/podcasts'
     | '/$locale/back-office'
     | '/$locale/podcasts/$episodeId'
+    | '/$locale/podcasts'
   id:
     | '__root__'
     | '/'
@@ -187,6 +197,7 @@ export interface FileRouteTypes {
     | '/$locale/_authenticated/back-office/podcasts'
     | '/$locale/_authenticated/back-office/'
     | '/$locale/_authenticated/_customer/podcasts/$episodeId'
+    | '/$locale/_authenticated/_customer/podcasts/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -287,6 +298,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LocaleAuthenticatedBackOfficePodcastsRouteImport
       parentRoute: typeof LocaleAuthenticatedBackOfficeRoute
     }
+    '/$locale/_authenticated/_customer/podcasts/': {
+      id: '/$locale/_authenticated/_customer/podcasts/'
+      path: '/'
+      fullPath: '/$locale/podcasts/'
+      preLoaderRoute: typeof LocaleAuthenticatedCustomerPodcastsIndexRouteImport
+      parentRoute: typeof LocaleAuthenticatedCustomerPodcastsRoute
+    }
     '/$locale/_authenticated/_customer/podcasts/$episodeId': {
       id: '/$locale/_authenticated/_customer/podcasts/$episodeId'
       path: '/$episodeId'
@@ -299,12 +317,15 @@ declare module '@tanstack/react-router' {
 
 interface LocaleAuthenticatedCustomerPodcastsRouteChildren {
   LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute: typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
+  LocaleAuthenticatedCustomerPodcastsIndexRoute: typeof LocaleAuthenticatedCustomerPodcastsIndexRoute
 }
 
 const LocaleAuthenticatedCustomerPodcastsRouteChildren: LocaleAuthenticatedCustomerPodcastsRouteChildren =
   {
     LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute:
       LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute,
+    LocaleAuthenticatedCustomerPodcastsIndexRoute:
+      LocaleAuthenticatedCustomerPodcastsIndexRoute,
   }
 
 const LocaleAuthenticatedCustomerPodcastsRouteWithChildren =

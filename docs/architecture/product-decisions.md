@@ -107,22 +107,35 @@ and Traditional Chinese, Simplified Chinese, and English labels for all eight.
   during the Podcast pilot.
 - Every authenticated organization shares one Podcast catalog; market
   visibility policy does not filter Podcast episodes.
-- Initial Podcast audio already in R2 is copied to backend-generated,
-  locale-aware canonical keys. The active mapping changes only after complete
-  size/MIME/checksum reconciliation. The application never automatically
-  deletes source objects; internal staff manually remove old-path copies after
-  verified cutover. The initial release has no upload API.
-- Podcast metadata supports all three locales. Audio may vary by locale;
-  `zh-hant` is required and is the deterministic fallback when the selected page
-  locale has no matching audio.
+- Initial Podcast audio already in R2 is migrated to immutable,
+  backend-generated, locale-aware keys that include the asset ID. Migration is
+  a copy/verify/cutover workflow. Inventory assigns each source object an
+  explicitly reviewed locale rather than inferring it from a legacy key, and
+  registration uses that verified locale. The active mapping changes only
+  after complete size/MIME/checksum reconciliation, the application never
+  automatically deletes source objects, and internal staff manually remove
+  old-path copies only after verified cutover.
+- The privileged browser upload endpoint accepts one to three files per
+  request, with at most one file for each supported locale. It writes to the
+  stable canonical key
+  `podcasts/{trading-date}/audio/{locale}/podcast.{mp3|mp4}`. Confirmed
+  replacement with the same extension overwrites that locale's same stable key.
+  A replacement that changes between MP3 and MP4 writes the new
+  stable-extension key before deleting the replaced old-format key. Both paths
+  increment the logical version.
+- Podcast metadata supports all three locales and audio may vary by locale.
+  Publishing requires at least one active locale; no particular locale is
+  mandatory. Playback first selects an exact requested-locale match and then
+  falls back in the fixed order `zh-hant` → `zh-hans` → `en`.
 - The customer surface uses the native HTML audio element, retains playback
   progress in browser localStorage, and provides no product download or
   offline-listening workflow.
 - Podcast uses one admin-specified unique `trading_date` and has no
   show/series, season, episode number, or scheduled publication in the pilot.
 - A duplicate `trading_date + locale` media operation warns before logical
-  replacement. Confirmed replacement creates a new backend-named object/version
-  and switches the active mapping without rewriting the previous R2 object.
+  replacement and requires the expected current version. Confirmed replacement
+  follows the stable-key rules above, updates checksum and object metadata,
+  increments the logical version, and is audited.
 - nginx replaces the previous gateway and is the single public application/API
   ingress.
 - The production region is AWS Singapore (`ap-southeast-1`).

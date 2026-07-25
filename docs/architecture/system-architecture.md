@@ -113,16 +113,26 @@ the API. The root env file is limited to local Compose infrastructure wiring.
 - R2 object keys are generated server-side. Metadata, authorization, checksum,
   MIME type, size, and lifecycle state live in PostgreSQL.
 - Podcast episodes reference asset IDs rather than raw R2 keys. Publishing
-  requires complete localized metadata and active media; playback authorization
-  is checked before each short-lived URL is issued.
+  requires at least one active locale audio variant; playback authorization is
+  checked before each short-lived URL is issued.
 - Podcast audio locale is modeled on an episode-to-asset variant relation, not
-  inferred from object keys. Existing unlocalized objects are copied to
-  canonical locale-aware keys and registered as `zh-hant` only after checksum
-  verification; locale resolution is exact-match then `zh-hant` fallback.
-- Podcast episode identity is the admin-specified unique trading date. Replacing
-  an existing locale creates a new backend-named asset/version and atomically
-  changes the active relation after explicit confirmation; R2 bytes are not
-  overwritten in place.
+  inferred from object keys. Locale resolution first uses an exact requested
+  match, then checks `zh-hant` → `zh-hans` → `en` in order.
+- Podcast episode identity is the admin-specified unique trading date.
+- The privileged Podcast browser upload accepts one to three files per request.
+  It uses the stable canonical key
+  `podcasts/{trading-date}/audio/{locale}/podcast.{mp3|mp4}`. Replacing an
+  existing locale requires explicit confirmation and its expected current
+  version. A same-extension replacement overwrites the same stable key; an
+  MP3/MP4 format change writes the new stable-extension key before deleting the
+  replaced old-format key. Both paths update checksum and object metadata,
+  increment the logical version, and are audited.
+- Existing legacy Podcast objects use a separate migration path. Inventory must
+  assign every source object an explicitly reviewed locale; the application
+  does not infer locale from a legacy key. Each object is copied to an
+  immutable, locale-aware target key containing the asset ID and registered
+  with that verified locale only after checksum verification. This migration
+  key scheme is not the browser-upload key scheme.
 - Podcast playback progress is browser-owned state keyed by authenticated user,
   episode, and resolved audio locale. It is validated at the localStorage trust
   boundary and is not duplicated in PostgreSQL.

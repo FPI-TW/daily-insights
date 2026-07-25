@@ -129,8 +129,14 @@ administration, or Podcast presentation.
 
 ## Phase 3 — Podcast pilot
 
-Implementation status: implemented locally; live R2 and browser acceptance are
-still pending. Detailed scope, evidence, and remaining gates are recorded in
+Implementation status: implemented locally with PostgreSQL/fake-R2 integration
+coverage, deterministic mock-based Playwright browser E2E, and isolated live R2
+adapter QA. The R2 QA covered upload, same-key overwrite, checksum metadata,
+signed full GET, MP3-to-MP4 key switching with old-key deletion, and cleanup.
+Actual browser playback against R2 (including CORS/range), signed URL expiry,
+live endpoint authentication/upload, network failure, and production capacity
+remain Phase 3 acceptance gaps or Phase 4 production-readiness work. Detailed
+scope and evidence are recorded in
 [`podcast-pilot.md`](podcast-pilot.md).
 
 Deliver:
