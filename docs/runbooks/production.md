@@ -67,6 +67,10 @@ CloudWatch, security-group control, and future scaling are clearer with EC2.
 - Store production database credentials, session/password secrets, FinDB key,
   model-provider key, and R2 credentials in AWS Secrets Manager or SSM
   Parameter Store with KMS encryption.
+- Keep Web and API runtime configuration independent. Web receives only its
+  public runtime mode and internal API origin; API receives database, provider,
+  model, and R2 configuration. Do not mount one shared application env file
+  into both services.
 - Grant the EC2 instance role read access only to named application secrets.
 - Materialize secrets at runtime in memory or a root-readable ephemeral file;
   never bake them into images, Compose files, logs, metrics, or user-visible

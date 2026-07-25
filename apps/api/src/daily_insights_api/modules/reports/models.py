@@ -32,8 +32,8 @@ class ReportPublication(UUIDPrimaryKeyMixin, Base):
         CheckConstraint("jsonb_typeof(content) = 'object'", name="content_is_object"),
         CheckConstraint(
             "jsonb_typeof(presentations) = 'object' "
-            "AND presentations ?& ARRAY['zh-TW', 'zh-CN', 'en'] "
-            "AND presentations - ARRAY['zh-TW', 'zh-CN', 'en'] = '{}'::jsonb",
+            "AND presentations ?& ARRAY['zh-hant', 'zh-hans', 'en'] "
+            "AND presentations - ARRAY['zh-hant', 'zh-hans', 'en'] = '{}'::jsonb",
             name="presentations_have_supported_locales",
         ),
         UniqueConstraint("pipeline_run_id"),

@@ -15,7 +15,7 @@
 - 任一必要輸入缺漏、契約錯誤或逾時時，不建立新 publication；既有最後成功
   publication 仍可讀取並標示 stale。
 - Publication 是 immutable revision，包含 locale-neutral values/charts 與
-  `zh-TW`、`zh-CN`、`en` 三語 presentation。
+  `zh-hant`、`zh-hans`、`en` 三語 presentation。
 - 客戶報告 API 從已登入 membership 取得 organization，並在伺服器端套用
   市場可見政策。隱藏市場不會出現在列表，直接存取亦回傳不存在。
 

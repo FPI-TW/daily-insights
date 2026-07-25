@@ -5,7 +5,7 @@ import secrets
 import string
 from functools import lru_cache
 
-PASSWORD_MIN_LENGTH = 12
+PASSWORD_MIN_LENGTH = 8
 PASSWORD_MAX_LENGTH = 128
 SCRYPT_N = 2**14
 SCRYPT_R = 8
@@ -29,8 +29,6 @@ def validate_password(password: str) -> None:
         raise PasswordPolicyError("password must contain a lowercase character")
     if not any(character.isupper() for character in password):
         raise PasswordPolicyError("password must contain an uppercase character")
-    if not any(character.isdigit() for character in password):
-        raise PasswordPolicyError("password must contain a digit")
 
 
 def generate_temporary_password() -> str:

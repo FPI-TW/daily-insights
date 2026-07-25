@@ -2,8 +2,8 @@ import type { Locale } from "@daily-insights/api-client"
 import { Link } from "@tanstack/react-router"
 
 const locales: ReadonlyArray<{ code: Locale; label: string }> = [
-  { code: "zh-TW", label: "繁中" },
-  { code: "zh-CN", label: "简中" },
+  { code: "zh-hant", label: "繁中" },
+  { code: "zh-hans", label: "简中" },
   { code: "en", label: "EN" },
 ]
 

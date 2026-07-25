@@ -224,22 +224,22 @@ async def ensure_publishable(database: AsyncSession, episode: PodcastEpisode) ->
             )
         ).all()
     )
-    if locales != {"zh-TW", "zh-CN", "en"}:
+    if locales != {"zh-hant", "zh-hans", "en"}:
         raise PodcastPublicationError("complete three-locale metadata is required")
-    zh_tw = await database.scalar(
+    zh_hant = await database.scalar(
         select(PodcastEpisodeAudioVariant)
         .join(Asset, Asset.id == PodcastEpisodeAudioVariant.asset_id)
         .where(
             PodcastEpisodeAudioVariant.episode_id == episode.id,
-            PodcastEpisodeAudioVariant.locale == "zh-TW",
+            PodcastEpisodeAudioVariant.locale == "zh-hant",
             PodcastEpisodeAudioVariant.is_active.is_(True),
             Asset.status == AssetStatus.ACTIVE,
             Asset.kind == AssetKind.AUDIO,
             Asset.mime_type.in_(ALLOWED_PODCAST_AUDIO_MIME_TYPES),
         )
     )
-    if zh_tw is None:
-        raise PodcastPublicationError("active zh-TW audio is required")
+    if zh_hant is None:
+        raise PodcastPublicationError("active zh-hant audio is required")
 
 
 async def import_audio(

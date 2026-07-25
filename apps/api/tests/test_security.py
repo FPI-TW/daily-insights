@@ -32,13 +32,18 @@ def test_generated_temporary_password_satisfies_policy() -> None:
     hash_password(temporary_password, "pepper")
 
 
+def test_password_policy_accepts_eight_letters_without_digit_or_symbol() -> None:
+    encoded = hash_password("Abcdefgh", "pepper")
+
+    assert verify_password("Abcdefgh", encoded, "pepper")
+
+
 @pytest.mark.parametrize(
     "password",
     [
         "Short1!",
         "alllowercase123!",
         "ALLUPPERCASE123!",
-        "NoDigitsHere!!",
     ],
 )
 def test_password_policy_rejects_weak_passwords(password: str) -> None:

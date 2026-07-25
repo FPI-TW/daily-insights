@@ -192,8 +192,8 @@ async def podcast_harness() -> AsyncIterator[PodcastHarness]:
 
 def _metadata() -> list[dict[str, str]]:
     return [
-        {"locale": "zh-TW", "title": "市場晨報", "summary": "繁體摘要"},
-        {"locale": "zh-CN", "title": "市场晨报", "summary": "简体摘要"},
+        {"locale": "zh-hant", "title": "市場晨報", "summary": "繁體摘要"},
+        {"locale": "zh-hans", "title": "市场晨报", "summary": "简体摘要"},
         {"locale": "en", "title": "Market Brief", "summary": "English summary"},
     ]
 
@@ -249,7 +249,7 @@ async def test_podcast_publish_play_replace_and_unpublish(
         json={
             "source_bucket": source.bucket,
             "source_key": source.key,
-            "locale": "zh-TW",
+            "locale": "zh-hant",
             "expected_mime_type": "audio/mpeg",
             "reason": "登記手動上傳音檔",
         },
@@ -279,7 +279,7 @@ async def test_podcast_publish_play_replace_and_unpublish(
     catalog = await podcast_harness.customer.get("/api/podcasts?locale=en")
     assert catalog.status_code == 200, catalog.text
     assert catalog.json()[0]["title"] == "Market Brief"
-    detail = await podcast_harness.customer.get(f"/api/podcasts/{episode_id}?locale=zh-CN")
+    detail = await podcast_harness.customer.get(f"/api/podcasts/{episode_id}?locale=zh-hans")
     assert detail.status_code == 200
     assert detail.json()["summary"] == "简体摘要"
 
@@ -288,7 +288,7 @@ async def test_podcast_publish_play_replace_and_unpublish(
     )
     assert playback.status_code == 200, playback.text
     assert playback.json()["requested_locale"] == "en"
-    assert playback.json()["resolved_locale"] == "zh-TW"
+    assert playback.json()["resolved_locale"] == "zh-hant"
     first_asset_id = playback.json()["asset_id"]
 
     replacement_source = ObjectRef(
@@ -302,7 +302,7 @@ async def test_podcast_publish_play_replace_and_unpublish(
         json={
             "source_bucket": replacement_source.bucket,
             "source_key": replacement_source.key,
-            "locale": "zh-TW",
+            "locale": "zh-hant",
             "expected_mime_type": "audio/mpeg",
             "reason": "測試替換警告",
         },
@@ -319,7 +319,7 @@ async def test_podcast_publish_play_replace_and_unpublish(
         json={
             "source_bucket": replacement_source.bucket,
             "source_key": replacement_source.key,
-            "locale": "zh-TW",
+            "locale": "zh-hant",
             "expected_mime_type": "audio/mpeg",
             "confirm_replacement": True,
             "expected_current_version": 1,
@@ -344,7 +344,7 @@ async def test_podcast_publish_play_replace_and_unpublish(
         assert len((await database.scalars(select(Asset))).all()) == 2
 
     replacement_playback = await podcast_harness.customer.post(
-        f"/api/podcasts/{episode_id}/audio-url?locale=zh-TW"
+        f"/api/podcasts/{episode_id}/audio-url?locale=zh-hant"
     )
     assert replacement_playback.status_code == 200
     assert replacement_playback.json()["asset_id"] != first_asset_id

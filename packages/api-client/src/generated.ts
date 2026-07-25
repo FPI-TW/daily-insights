@@ -749,10 +749,10 @@ export interface components {
       expected_mime_type: string
       /**
        * Locale
-       * @default zh-TW
+       * @default zh-hant
        * @enum {string}
        */
-      locale: "zh-TW" | "zh-CN" | "en"
+      locale: "zh-hant" | "zh-hans" | "en"
       /** Reason */
       reason: string
       /** Source Bucket */
@@ -778,12 +778,12 @@ export interface components {
        * Requested Locale
        * @enum {string}
        */
-      requested_locale: "zh-TW" | "zh-CN" | "en"
+      requested_locale: "zh-hant" | "zh-hans" | "en"
       /**
        * Resolved Locale
        * @enum {string}
        */
-      resolved_locale: "zh-TW" | "zh-CN" | "en"
+      resolved_locale: "zh-hant" | "zh-hans" | "en"
       /** Url */
       url: string
     }
@@ -800,7 +800,7 @@ export interface components {
        * Locale
        * @enum {string}
        */
-      locale: "zh-TW" | "zh-CN" | "en"
+      locale: "zh-hant" | "zh-hans" | "en"
       /** Version */
       version: number
     }
@@ -856,7 +856,7 @@ export interface components {
        * Locale
        * @enum {string}
        */
-      locale: "zh-TW" | "zh-CN" | "en"
+      locale: "zh-hant" | "zh-hans" | "en"
       /**
        * Published At
        * Format: date-time
@@ -885,7 +885,7 @@ export interface components {
        * Locale
        * @enum {string}
        */
-      locale: "zh-TW" | "zh-CN" | "en"
+      locale: "zh-hant" | "zh-hans" | "en"
       /** Summary */
       summary: string
       /** Title */
@@ -910,7 +910,7 @@ export interface components {
        * Locale
        * @enum {string}
        */
-      locale: "zh-TW" | "zh-CN" | "en"
+      locale: "zh-hant" | "zh-hans" | "en"
       /** Summary */
       summary: string
       /** Title */
@@ -938,7 +938,7 @@ export interface components {
        * Locale
        * @enum {string}
        */
-      locale: "zh-TW" | "zh-CN" | "en"
+      locale: "zh-hant" | "zh-hans" | "en"
       /** Schema Version */
       schema_version: string
       /** Summary */
@@ -1043,7 +1043,7 @@ export interface components {
        * Locale
        * @enum {string}
        */
-      locale: "zh-TW" | "zh-CN" | "en"
+      locale: "zh-hant" | "zh-hans" | "en"
       /** Market Code */
       market_code: string
       presentation: components["schemas"]["PresentationContract"]
@@ -1986,7 +1986,7 @@ export interface operations {
   podcasts_list: {
     parameters: {
       query?: {
-        locale?: "zh-TW" | "zh-CN" | "en"
+        locale?: "zh-hant" | "zh-hans" | "en"
       }
       header?: never
       path?: never
@@ -2017,7 +2017,7 @@ export interface operations {
   podcasts_get: {
     parameters: {
       query?: {
-        locale?: "zh-TW" | "zh-CN" | "en"
+        locale?: "zh-hant" | "zh-hans" | "en"
       }
       header?: never
       path: {
@@ -2050,7 +2050,7 @@ export interface operations {
   podcasts_create_audio_url: {
     parameters: {
       query?: {
-        locale?: "zh-TW" | "zh-CN" | "en"
+        locale?: "zh-hant" | "zh-hans" | "en"
       }
       header?: never
       path: {
@@ -2083,7 +2083,7 @@ export interface operations {
   list_latest_reports_api_reports_get: {
     parameters: {
       query?: {
-        locale?: "zh-TW" | "zh-CN" | "en"
+        locale?: "zh-hant" | "zh-hans" | "en"
         report_key?: string
       }
       header?: never
@@ -2115,7 +2115,7 @@ export interface operations {
   get_latest_report_api_reports__market_code__latest_get: {
     parameters: {
       query?: {
-        locale?: "zh-TW" | "zh-CN" | "en"
+        locale?: "zh-hant" | "zh-hans" | "en"
         report_key?: string
       }
       header?: never

@@ -239,7 +239,7 @@ def test_production_rejects_weak_or_reused_secrets(
 
 
 def test_development_has_local_only_database_default() -> None:
-    settings = Settings(environment="development")
+    settings = Settings(environment="development", _env_file=None)
     assert settings.database_url == LOCAL_DATABASE_URL
 
 

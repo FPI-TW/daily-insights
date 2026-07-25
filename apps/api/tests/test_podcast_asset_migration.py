@@ -91,7 +91,7 @@ def _entry(source_key: str = "legacy/podcast.mp3") -> AssetMigrationInput:
         source=ObjectRef(bucket="legacy", key=source_key),
         target_bucket="canonical",
         trading_date=date(2026, 7, 24),
-        locale="zh-TW",
+        locale="zh-hant",
         expected_mime_type="audio/mpeg",
     )
 

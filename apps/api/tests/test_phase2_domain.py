@@ -72,19 +72,19 @@ def bundle() -> PublicationBundle:
     return PublicationBundle(
         content=content(),
         presentations={
-            "zh-TW": presentation("zh-TW"),
-            "zh-CN": presentation("zh-CN"),
+            "zh-hant": presentation("zh-hant"),
+            "zh-hans": presentation("zh-hans"),
             "en": presentation("en"),
         },
     )
 
 
 def test_publication_bundle_requires_exactly_three_locales() -> None:
-    with pytest.raises(ValidationError, match="exactly zh-TW"):
+    with pytest.raises(ValidationError, match="exactly zh-hant"):
         PublicationBundle(
             content=content(),
             presentations={
-                "zh-TW": presentation("zh-TW"),
+                "zh-hant": presentation("zh-hant"),
                 "en": presentation("en"),
             },
         )
@@ -102,8 +102,8 @@ def test_presentation_references_every_content_and_series_id() -> None:
         PublicationBundle(
             content=content(),
             presentations={
-                "zh-TW": presentation("zh-TW"),
-                "zh-CN": presentation("zh-CN"),
+                "zh-hant": presentation("zh-hant"),
+                "zh-hans": presentation("zh-hans"),
                 "en": invalid,
             },
         )
@@ -247,7 +247,7 @@ def publication(source_as_of: date, published_at: datetime) -> ReportPublication
         input_digest="c" * 64,
         source_as_of=source_as_of,
         content={},
-        presentations={"zh-TW": {}, "zh-CN": {}, "en": {}},
+        presentations={"zh-hant": {}, "zh-hans": {}, "en": {}},
         published_at=published_at,
         created_at=published_at,
     )

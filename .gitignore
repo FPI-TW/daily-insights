@@ -13,4 +13,4 @@ __unconfig*
 todos.json
 
 .env
-!.emv.example
+!.env.example

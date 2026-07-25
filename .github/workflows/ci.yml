@@ -65,9 +65,7 @@ jobs:
 
       - name: Validate Compose contract
         env:
-          APP_ENV: development
           POSTGRES_PASSWORD: compose-config-only
-          DATABASE_URL: postgresql+psycopg://daily_insights:compose-config-only@postgres:5432/daily_insights
         run: docker compose config --quiet
 
       - name: Validate nginx transport contract

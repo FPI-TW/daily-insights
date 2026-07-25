@@ -147,7 +147,11 @@ async def test_csrf_token_can_be_rotated_after_browser_reload(harness: Harness) 
 
     rotated = await harness.client.post(
         "/api/auth/csrf",
-        headers={"Origin": "http://test"},
+        headers={
+            "Origin": "http://localhost:3000",
+            "X-Forwarded-Proto": "http",
+            "X-Forwarded-Host": "localhost:3000",
+        },
     )
 
     assert rotated.status_code == 200

@@ -72,13 +72,13 @@ describe("API client trust boundary", () => {
           trading_date: "2026-07-24",
           title: "市場晨報",
           summary: "今日摘要",
-          locale: "zh-TW",
+          locale: "zh-hant",
           cover_asset_id: null,
         },
       ])
     )
 
-    await expect(client.list("zh-TW")).resolves.toHaveLength(1)
+    await expect(client.list("zh-hant")).resolves.toHaveLength(1)
   })
 
   it("rejects an invalid Podcast locale returned by the API", async () => {

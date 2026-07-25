@@ -63,17 +63,17 @@ def test_active_asset_requires_verified_metadata() -> None:
 def test_complete_podcast_metadata_requires_exactly_three_locales() -> None:
     complete = PodcastMetadataSet(
         values=(
-            PodcastMetadata(locale="zh-TW", title="市場晨報", summary="摘要"),
-            PodcastMetadata(locale="zh-CN", title="市场晨报", summary="摘要"),
+            PodcastMetadata(locale="zh-hant", title="市場晨報", summary="摘要"),
+            PodcastMetadata(locale="zh-hans", title="市场晨报", summary="摘要"),
             PodcastMetadata(locale="en", title="Market Brief", summary="Summary"),
         )
     )
-    assert {value.locale for value in complete.values} == {"zh-TW", "zh-CN", "en"}
+    assert {value.locale for value in complete.values} == {"zh-hant", "zh-hans", "en"}
 
     with pytest.raises(ValidationError, match="exactly"):
         PodcastMetadataSet(
             values=(
-                PodcastMetadata(locale="zh-TW", title="市場晨報", summary="摘要"),
+                PodcastMetadata(locale="zh-hant", title="市場晨報", summary="摘要"),
                 PodcastMetadata(locale="en", title="Market Brief", summary="Summary"),
             )
         )

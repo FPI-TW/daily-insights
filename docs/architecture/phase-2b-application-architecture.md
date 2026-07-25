@@ -25,7 +25,10 @@
 - staging/production 啟動時必須具備有效的 database、session、password
   pepper、FinDB 與 R2 設定；placeholder、非 HTTPS endpoint 與不合法 bucket
   會 fail closed。
-- Web 以 URL locale 作為 `zh-TW`、`zh-CN`、`en` 的 source of truth，完成
+- Web 與 API 使用各自的服務設定檔，不共享 application env。根目錄 `.env`
+  只負責本機 Compose/PostgreSQL wiring；provider、model 與 R2 credential
+  只會注入 API。
+- Web 以 URL locale 作為 `zh-hant`、`zh-hans`、`en` 的 source of truth，完成
   登入、首次改密碼、登出、客戶／後台／admin route boundary，以及共用
   loading、error、403、404 狀態。
 - browser 只以 same-origin `/api` 使用 HttpOnly session cookie；server

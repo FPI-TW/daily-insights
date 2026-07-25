@@ -9,10 +9,10 @@ Phase 4 上線驗收尚未執行。八大市場正式內容與報告前端在此
 
 - `admin` 建立、編輯、發布及下架 episode，`admin` 與 `asset_manager`
   可登記手動上傳的 R2 audio；
-- 同交易日唯一性、完整三語 metadata、發布前 `zh-TW` active audio 驗證；
+- 同交易日唯一性、完整三語 metadata、發布前 `zh-hant` active audio 驗證；
 - 同 locale 替換警告、明確確認、expected current version 與新 canonical
   object key；
-- 客戶共用 catalog、detail、`zh-CN`／`en` 到 `zh-TW` fallback，以及短效
+- 客戶共用 catalog、detail、`zh-hans`／`en` 到 `zh-hant` fallback，以及短效
   signed URL；
 - TanStack Start 三語客戶頁、responsive list/detail、原生 audio element、
   loading/empty/failure state 與依 user/episode/resolved locale 隔離的
@@ -70,16 +70,16 @@ Podcast 先行版用來驗證一條可上線的完整路徑：
 ```text
 podcast_episode_audio_variants
   episode_id
-  locale       zh-TW | zh-CN | en
+  locale       zh-hant | zh-hans | en
   asset_id
   UNIQUE (episode_id, locale)
 ```
 
-- `zh-TW` 是每個已發布 episode 必備的預設音檔。
-- 頁面為 `zh-CN` 或 `en` 時，API 先找完全相符的 audio variant；找不到就
-  回退至 `zh-TW`，並在 response 明確回傳 requested/resolved locale。
+- `zh-hant` 是每個已發布 episode 必備的預設音檔。
+- 頁面為 `zh-hans` 或 `en` 時，API 先找完全相符的 audio variant；找不到就
+  回退至 `zh-hant`，並在 response 明確回傳 requested/resolved locale。
 - 目前只有繁體中文音檔；既有 R2 objects 會先複製到新的 canonical key 並
-  登記為 `zh-TW` variant。只有完成逐檔驗證及整批 migration reconciliation
+  登記為 `zh-hant` variant。只有完成逐檔驗證及整批 migration reconciliation
   後才切換 active mapping。
 - 初版不做 browser/back-office upload。內部人員先手動上傳至 R2，再由
   back office 或受控管理指令登記 object key；API 必須以 R2 HEAD 驗證 object、
@@ -106,7 +106,7 @@ podcast_episode_audio_variants
   number 或 scheduled publication；
 - 原生 HTML `<audio>` 的播放、暫停、seek、載入與錯誤狀態；
 - 保存與恢復每位使用者的播放進度；
-- `zh-TW`、`zh-CN`、`en` 完整 metadata。
+- `zh-hant`、`zh-hans`、`en` 完整 metadata。
 
 內部端：
 
@@ -114,7 +114,7 @@ podcast_episode_audio_variants
   unpublish；
 - `admin` 與 `asset_manager` 可登記或替換已手動放入 R2 的 audio/cover
   object；初版沒有上傳 API，且 `asset_manager` 不取得 episode 發布權限；
-- 檢查三語 metadata、必備 `zh-TW` audio variant、asset 狀態與 MIME type
+- 檢查三語 metadata、必備 `zh-hant` audio variant、asset 狀態與 MIME type
   後才允許發布；
 - privileged mutation audit。
 
@@ -141,7 +141,7 @@ publication、show/series/season、episode number、收聽分析、留言、訂�
 copy/verify 狀態與時間：
 
 1. inventory 舊 objects，人工補上 trading date 與 locale；目前全部為
-   `zh-TW`；
+   `zh-hant`；
 2. 對 source 執行 HEAD，拒絕不存在、零 bytes 或不允許的 MIME type；
 3. 由後端產生 canonical target key，使用 `If-None-Match: *` conditional
    object create 原子建立 target；因 R2/S3 `CopyObject` 沒有 destination
@@ -174,8 +174,8 @@ value 至少包含 `positionSeconds`、`durationSeconds` 與 `updatedAt`，讀�
 `timeupdate` 保存，並在 pause、ended 與頁面離開前補寫；storage quota、private
 mode 或損壞資料不得阻止播放。
 
-key 使用 resolved audio locale：例如英文頁面 fallback 至 `zh-TW` 時，讀寫
-`zh-TW` 進度；日後補上英文音檔後，英文 variant 使用自己的獨立進度。
+key 使用 resolved audio locale：例如英文頁面 fallback 至 `zh-hant` 時，讀寫
+`zh-hant` 進度；日後補上英文音檔後，英文 variant 使用自己的獨立進度。
 
 ## 驗收重點
 
@@ -189,16 +189,16 @@ key 使用 resolved audio locale：例如英文頁面 fallback 至 `zh-TW` 時�
 - 同一交易日不得建立第二個 logical episode；同 locale replacement 未經明確
   確認不得改變 active audio。
 - replacement 使用新的後端 canonical object key，舊 object 不被原地覆寫。
-- `zh-CN`／`en` variant 存在時必須播放相符檔案；不存在時穩定回退
-  `zh-TW`，且不得回退至任意其他語系。
+- `zh-hans`／`en` variant 存在時必須播放相符檔案；不存在時穩定回退
+  `zh-hant`，且不得回退至任意其他語系。
 - 既有無 locale object key 的音檔完成 copy/verify 後，canonical copy 登記為
-  `zh-TW`；cutover 前不得只因 source object 存在就標記 migration complete。
+  `zh-hant`；cutover 前不得只因 source object 存在就標記 migration complete。
 - signed URL 有短效期限、只對應單一 object，response 與 log 不含 R2
   credential。
 - asset 被 quarantine、遺失或失效後，不再簽發新 URL；播放器呈現可理解的
   unavailable 狀態。
 - 三語欄位缺漏時不可發布。
-- 沒有 `zh-TW` 音檔時不可發布；缺少其他語系音檔不阻擋發布。
+- 沒有 `zh-hant` 音檔時不可發布；缺少其他語系音檔不阻擋發布。
 - 原生 audio element 的 current time 能保存並在重新進入 episode 後恢復。
 - localStorage 依 user、episode 與 resolved locale 隔離；無效或超出 duration
   的資料會被忽略或修正，且不影響播放。

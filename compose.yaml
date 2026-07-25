@@ -28,18 +28,10 @@ services:
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
     env_file:
-      - path: .env
+      - path: apps/api/.env
         required: false
     environment:
-      DAILY_INSIGHTS_ENVIRONMENT: ${APP_ENV:?set APP_ENV in .env}
-      DAILY_INSIGHTS_DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
-      DAILY_INSIGHTS_FINDB_BASE_URL: ${FINDB_BASE_URL:-https://findb.tingfong.com}
-      DAILY_INSIGHTS_FINDB_API_KEY: ${FINDB_API_KEY:-}
-      DAILY_INSIGHTS_R2_ENDPOINT_URL: ${R2_ENDPOINT_URL:-}
-      DAILY_INSIGHTS_R2_BUCKET_NAME: ${R2_BUCKET_NAME:-}
-      DAILY_INSIGHTS_R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
-      DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
-      DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS: ${R2_SIGNED_URL_TTL_SECONDS:-900}
+      DAILY_INSIGHTS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-daily_insights}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-daily_insights}
     command:
       [
         "sh",
@@ -73,10 +65,9 @@ services:
       dockerfile: apps/web/Dockerfile
     restart: unless-stopped
     env_file:
-      - path: .env
+      - path: apps/web/.env
         required: false
     environment:
-      APP_ENV: ${APP_ENV:?set APP_ENV in .env}
       API_INTERNAL_URL: http://api:8000
     depends_on:
       api:

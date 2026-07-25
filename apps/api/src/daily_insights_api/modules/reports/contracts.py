@@ -4,8 +4,8 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-Locale = Literal["zh-TW", "zh-CN", "en"]
-SUPPORTED_LOCALES: frozenset[str] = frozenset(("zh-TW", "zh-CN", "en"))
+Locale = Literal["zh-hant", "zh-hans", "en"]
+SUPPORTED_LOCALES: frozenset[str] = frozenset(("zh-hant", "zh-hans", "en"))
 Identifier = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_.-]{0,99}$")]
 
 
@@ -90,7 +90,7 @@ class PublicationBundle(ContractModel):
     @model_validator(mode="after")
     def validate_localized_references(self) -> Self:
         if set(self.presentations) != SUPPORTED_LOCALES:
-            raise ValueError("presentations must contain exactly zh-TW, zh-CN, and en")
+            raise ValueError("presentations must contain exactly zh-hant, zh-hans, and en")
 
         metric_ids = {metric.id for metric in self.content.metrics}
         chart_series = {

@@ -4,9 +4,9 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-Locale = Literal["zh-TW", "zh-CN", "en"]
-SUPPORTED_LOCALES = frozenset(("zh-TW", "zh-CN", "en"))
-DEFAULT_AUDIO_LOCALE: Locale = "zh-TW"
+Locale = Literal["zh-hant", "zh-hans", "en"]
+SUPPORTED_LOCALES = frozenset(("zh-hant", "zh-hans", "en"))
+DEFAULT_AUDIO_LOCALE: Locale = "zh-hant"
 
 
 class PodcastContract(BaseModel):
@@ -28,7 +28,7 @@ class PodcastMetadataSet(PodcastContract):
         if len(locales) != len(set(locales)):
             raise ValueError("Podcast metadata locales must be unique")
         if set(locales) != SUPPORTED_LOCALES:
-            raise ValueError("Podcast metadata must contain exactly zh-TW, zh-CN, and en")
+            raise ValueError("Podcast metadata must contain exactly zh-hant, zh-hans, and en")
         return self
 
 
@@ -79,7 +79,7 @@ class PodcastPublicationRequest(PodcastContract):
 class PodcastAudioImportRequest(PodcastContract):
     source_bucket: str = Field(min_length=1, max_length=100)
     source_key: str = Field(min_length=1, max_length=1_024)
-    locale: Locale = "zh-TW"
+    locale: Locale = "zh-hant"
     expected_mime_type: str = Field(min_length=1, max_length=255)
     confirm_replacement: bool = False
     expected_current_version: int | None = Field(default=None, gt=0)
@@ -138,7 +138,7 @@ def resolve_audio_variant(
     by_locale = {variant.locale: variant for variant in variants}
     variant = by_locale.get(requested_locale) or by_locale.get(DEFAULT_AUDIO_LOCALE)
     if variant is None:
-        raise AudioVariantUnavailableError("no requested or zh-TW Podcast audio is available")
+        raise AudioVariantUnavailableError("no requested or zh-hant Podcast audio is available")
     return ResolvedPodcastAudio(
         requested_locale=requested_locale,
         resolved_locale=variant.locale,

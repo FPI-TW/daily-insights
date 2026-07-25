@@ -27,7 +27,14 @@ TanStack Start 應用程式位於 `apps/web`，模組化 FastAPI 基礎位於 `a
 make init
 ```
 
-此指令會建立未追蹤的 `.env`、安裝 pnpm 與 uv 依賴，並啟用版本控制內的 Git hooks。請先替換 `.env` 中的 `CHANGE_ME` 預留值，再啟動完整開發環境：
+此指令會建立三份互不共用的未追蹤設定檔、安裝 pnpm 與 uv 依賴，並啟用
+版本控制內的 Git hooks：
+
+- 根目錄 `.env`：僅供 Compose 與 PostgreSQL 基礎設施使用。
+- `apps/web/.env`：僅供 TanStack Start Web 服務使用。
+- `apps/api/.env`：僅供 FastAPI 服務使用。
+
+請先替換各檔案中的 `CHANGE_ME` 預留值，再啟動完整開發環境：
 
 ```bash
 make dev
@@ -37,13 +44,18 @@ make dev
 
 ```bash
 make help          # 顯示全部指令
-make dev-web       # 僅啟動 TanStack Start
+make dev-web       # 僅啟動 TanStack Start，後端位址由 API_INTERNAL_URL 指定
 make dev-api       # 僅啟動 FastAPI
 make migrate       # 升級 API 資料庫 schema
 make test-db       # 以隔離 PostgreSQL 執行完整測試
 make check         # 執行格式、lint、型別、測試與建置
 make stop          # 停止 Compose 開發環境
 ```
+
+單獨啟動 Web 前，需先確保 `apps/web/.env` 的 `API_INTERNAL_URL` 指向可連線
+的 API 或 nginx origin；Vite 開發伺服器會將瀏覽器的 `/api` 請求代理至該
+位址。預設範例會連至 `http://localhost:8080`。單獨啟動 API 時則只會載入
+`apps/api/.env`，不會讀取 Web 或根目錄的應用程式設定。
 
 首次建立內部管理員時，先完成 migration，再執行：
 
@@ -76,7 +88,8 @@ git config core.hooksPath .githooks
 
 ## 開發環境基礎設施
 
-`make init` 會在 `.env` 不存在時由 `.env.example` 建立一份，且不會覆寫既有設定。替換所有預留值後，可透過 Make 指令管理完整服務：
+`make init` 會分別由三份 `.env.example` 建立根目錄基礎設施、Web 與 API
+設定，且不會覆寫既有檔案。替換所有預留值後，可透過 Make 指令管理完整服務：
 
 ```bash
 docker compose config

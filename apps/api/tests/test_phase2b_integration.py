@@ -97,7 +97,7 @@ def _entry(source_key: str) -> AssetMigrationInput:
         source=ObjectRef(bucket="legacy", key=source_key),
         target_bucket="canonical",
         trading_date=date(2026, 7, 24),
-        locale="zh-TW",
+        locale="zh-hant",
         expected_mime_type="audio/mpeg",
     )
 
@@ -343,7 +343,7 @@ async def test_cutover_conflict_rolls_back_all_new_mappings(
                 mime_type="audio/mpeg",
                 size_bytes=7,
                 sha256="0" * 64,
-                locale="zh-TW",
+                locale="zh-hant",
                 localized_titles={},
                 status=AssetStatus.ACTIVE,
                 uploaded_by_user_id=phase2b_database.admin_id,

@@ -14,23 +14,31 @@ init: ## 初始化環境、安裝依賴並啟用 Git hooks
 	@command -v pnpm >/dev/null 2>&1 || { echo "找不到 pnpm，請先安裝 pnpm 11。"; exit 1; }
 	@command -v uv >/dev/null 2>&1 || { echo "找不到 uv，請先安裝 uv。"; exit 1; }
 	@if [ ! -f .env ]; then cp .env.example .env; echo "已由 .env.example 建立 .env，啟動服務前請替換 CHANGE_ME。"; else echo "保留現有 .env。"; fi
+	@if [ ! -f apps/web/.env ]; then cp apps/web/.env.example apps/web/.env; echo "已建立 apps/web/.env。"; else echo "保留現有 apps/web/.env。"; fi
+	@if [ ! -f apps/api/.env ]; then cp apps/api/.env.example apps/api/.env; echo "已建立 apps/api/.env。"; else echo "保留現有 apps/api/.env。"; fi
 	pnpm install
 	uv sync --project apps/api
 	git config core.hooksPath .githooks
-	@echo "初始化完成。執行 make dev 前請確認 .env 內容。"
+	@echo "初始化完成。執行 make dev 前請確認根目錄及兩個服務的 .env。"
 
 dev: ## 建置並以前景模式啟動完整開發環境
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
+	@test -f apps/web/.env || { echo "找不到 apps/web/.env，請先執行 make init。"; exit 1; }
+	@test -f apps/api/.env || { echo "找不到 apps/api/.env，請先執行 make init。"; exit 1; }
 	docker compose up --build
 
 dev-detached: ## 建置並在背景啟動完整開發環境
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
+	@test -f apps/web/.env || { echo "找不到 apps/web/.env，請先執行 make init。"; exit 1; }
+	@test -f apps/api/.env || { echo "找不到 apps/api/.env，請先執行 make init。"; exit 1; }
 	docker compose up --build --detach
 
 dev-web: ## 啟動 TanStack Start 開發伺服器
+	@test -f apps/web/.env || { echo "找不到 apps/web/.env，請先執行 make init。"; exit 1; }
 	pnpm dev
 
 dev-api: ## 啟動 FastAPI 開發伺服器（自動重新載入）
+	@test -f apps/api/.env || { echo "找不到 apps/api/.env，請先執行 make init。"; exit 1; }
 	uv run --project apps/api uvicorn daily_insights_api.main:app --reload
 
 stop: ## 停止開發環境

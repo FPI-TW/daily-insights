@@ -13,6 +13,14 @@ grep -q 'proxy_buffering off;' "$config_file"
 grep -q 'X-Accel-Buffering "no"' "$config_file"
 grep -q 'location ~ \^/api/podcasts/' "$config_file"
 grep -q 'client_max_body_size 16k;' "$config_file"
+grep -q 'proxy_set_header Host $http_host;' "$config_file"
+grep -q 'proxy_set_header X-Forwarded-Host $http_host;' "$config_file"
+
+if grep -q 'proxy_set_header X-Forwarded-Host $host;' "$config_file"
+then
+  echo "nginx 必須保留原始 Host port，否則 CSRF same-origin 檢查會誤判。" >&2
+  exit 1
+fi
 
 if grep -Eq 'proxy_pass .*r2|R2_(ACCESS|SECRET|ACCOUNT)' infra/nginx/*.conf infra/nginx/conf.d/*.conf
 then

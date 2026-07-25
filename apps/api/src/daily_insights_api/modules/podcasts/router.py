@@ -82,7 +82,7 @@ def _require_expected_version(episode: PodcastEpisode, expected_version: int) ->
 async def customer_list(
     actor: CustomerRead,
     database: Database,
-    locale: Annotated[Locale, Query()] = "zh-TW",
+    locale: Annotated[Locale, Query()] = "zh-hant",
 ) -> list[PodcastEpisodeSummaryResponse]:
     if actor.organization_id is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "active organization membership required")
@@ -98,7 +98,7 @@ async def customer_detail(
     episode_id: uuid.UUID,
     actor: CustomerRead,
     database: Database,
-    locale: Annotated[Locale, Query()] = "zh-TW",
+    locale: Annotated[Locale, Query()] = "zh-hant",
 ) -> PodcastEpisodeDetailResponse:
     if actor.organization_id is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "active organization membership required")
@@ -119,7 +119,7 @@ async def customer_audio_url(
     database: Database,
     store: Store,
     request: Request,
-    locale: Annotated[Locale, Query()] = "zh-TW",
+    locale: Annotated[Locale, Query()] = "zh-hant",
 ) -> PodcastAudioPlaybackResponse:
     if actor.organization_id is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "active organization membership required")

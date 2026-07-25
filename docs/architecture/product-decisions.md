@@ -71,7 +71,7 @@ and Traditional Chinese, Simplified Chinese, and English labels for all eight.
   presented as PDF documents.
 - PDF remains an allowed downloadable asset format.
 - Reports, chart labels, and narrative content support Traditional Chinese
-  (`zh-TW`), Simplified Chinese (`zh-CN`), and English (`en`).
+  (`zh-hant`), Simplified Chinese (`zh-hans`), and English (`en`).
 - FinDB is the first raw-data source and its contract may grow or change.
   Additional raw-data providers are expected.
 - This application does not durably duplicate provider raw rows. It stores
@@ -113,7 +113,7 @@ and Traditional Chinese, Simplified Chinese, and English labels for all eight.
   deletes source objects; internal staff manually remove old-path copies after
   verified cutover. The initial release has no upload API.
 - Podcast metadata supports all three locales. Audio may vary by locale;
-  `zh-TW` is required and is the deterministic fallback when the selected page
+  `zh-hant` is required and is the deterministic fallback when the selected page
   locale has no matching audio.
 - The customer surface uses the native HTML audio element, retains playback
   progress in browser localStorage, and provides no product download or

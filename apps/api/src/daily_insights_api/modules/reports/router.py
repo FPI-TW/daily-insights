@@ -72,7 +72,7 @@ async def list_latest_reports(
     request: Request,
     context: Member,
     database: Annotated[AsyncSession, Depends(get_database_session)],
-    locale: Locale = "zh-TW",
+    locale: Locale = "zh-hant",
     report_key: ReportKey = "daily-market",
 ) -> list[ReportPublicationResponse]:
     if context.organization_id is None:
@@ -96,7 +96,7 @@ async def get_latest_report(
     request: Request,
     context: Member,
     database: Annotated[AsyncSession, Depends(get_database_session)],
-    locale: Locale = "zh-TW",
+    locale: Locale = "zh-hant",
     report_key: ReportKey = "daily-market",
 ) -> ReportPublicationResponse:
     if context.organization_id is None:

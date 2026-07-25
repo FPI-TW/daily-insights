@@ -44,6 +44,11 @@ uv run uvicorn daily_insights_api.main:app --reload
 完整 API 測試需要 PostgreSQL，建議由根目錄執行 `make test-db`，避免略過
 整合測試。
 
+API 僅讀取 `apps/api/.env` 與程序環境中的 `DAILY_INSIGHTS_*` 變數，不讀取
+根目錄或 Web 的設定檔。Compose 會以內部 PostgreSQL hostname 覆寫
+`DAILY_INSIGHTS_DATABASE_URL`；直接執行 API 時，該 URL 必須指向本機可連線
+的 PostgreSQL。
+
 `DAILY_INSIGHTS_DATABASE_URL` 只會在 `development` 或 `test` 使用本機
 預設值；staging 與 production 必須明確提供資料庫、獨立 session/password
 secret、FinDB API key，以及完整 R2 endpoint、bucket 與 access credentials。
@@ -64,17 +69,17 @@ OpenAPI、回應或結構化 log。
 
 客戶 Podcast API：
 
-- `GET /api/podcasts?locale=zh-TW`
-- `GET /api/podcasts/{episode_id}?locale=zh-TW`
-- `POST /api/podcasts/{episode_id}/audio-url?locale=zh-TW`
+- `GET /api/podcasts?locale=zh-hant`
+- `GET /api/podcasts/{episode_id}?locale=zh-hant`
+- `POST /api/podcasts/{episode_id}/audio-url?locale=zh-hant`
 
 內部 Podcast API 位於 `/api/admin/podcasts`。`admin` 可建立、編輯、發布與
 下架；`admin` 與 `asset_manager` 可將已手動上傳的來源 object 登記為版本化
 音檔。登記流程會複製到後端產生的 canonical key，核對 size、MIME type 與
 SHA-256 後才更新 active mapping，不會刪除來源或舊版本。
 
-客戶只能取得已發布內容與短效、object-scoped R2 URL。`zh-CN` 或 `en` 沒有
-對應音檔時只會回退至 `zh-TW`，回應會同時標明 requested 與 resolved locale。
+客戶只能取得已發布內容與短效、object-scoped R2 URL。`zh-hans` 或 `en` 沒有
+對應音檔時只會回退至 `zh-hant`，回應會同時標明 requested 與 resolved locale。
 
 ## Phase 1：身份與租戶
 

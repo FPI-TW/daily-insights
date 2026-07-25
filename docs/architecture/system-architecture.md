@@ -59,6 +59,11 @@ They do not import another module's persistence implementation or write its
 tables. Cross-module workflows are coordinated in application services and
 committed in one database transaction where atomicity matters.
 
+Web and API are independently deployable services and do not share an
+application env file. Web configuration contains only its runtime mode and API
+origin. Database, provider, model, and R2 configuration belongs exclusively to
+the API. The root env file is limited to local Compose infrastructure wiring.
+
 ## Core domain ownership
 
 | Module        | Owns                                                                       | Does not own                       |
@@ -104,7 +109,7 @@ committed in one database transaction where atomicity matters.
 - User message plus pending generation must commit before any provider call.
   Provider retries are idempotent and cannot duplicate the user message.
 - Report/chart APIs return stable locale-neutral values plus localized
-  presentation fields for `zh-TW`, `zh-CN`, and `en`.
+  presentation fields for `zh-hant`, `zh-hans`, and `en`.
 - R2 object keys are generated server-side. Metadata, authorization, checksum,
   MIME type, size, and lifecycle state live in PostgreSQL.
 - Podcast episodes reference asset IDs rather than raw R2 keys. Publishing
@@ -112,8 +117,8 @@ committed in one database transaction where atomicity matters.
   is checked before each short-lived URL is issued.
 - Podcast audio locale is modeled on an episode-to-asset variant relation, not
   inferred from object keys. Existing unlocalized objects are copied to
-  canonical locale-aware keys and registered as `zh-TW` only after checksum
-  verification; locale resolution is exact-match then `zh-TW` fallback.
+  canonical locale-aware keys and registered as `zh-hant` only after checksum
+  verification; locale resolution is exact-match then `zh-hant` fallback.
 - Podcast episode identity is the admin-specified unique trading date. Replacing
   an existing locale creates a new backend-named asset/version and atomically
   changes the active relation after explicit confirmation; R2 bytes are not

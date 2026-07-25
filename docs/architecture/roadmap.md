@@ -137,7 +137,7 @@ Deliver:
 
 - internal Podcast episode management for `admin`, plus the approved R2
   maintenance workflow for `admin` and `asset_manager`;
-- shared episode metadata and complete `zh-TW`, `zh-CN`, and `en`
+- shared episode metadata and complete `zh-hant`, `zh-hans`, and `en`
   presentation;
 - customer episode list, episode detail, cover artwork, and accessible audio
   player in TanStack Start;
@@ -156,9 +156,9 @@ Accept when:
 - `asset_manager` capabilities remain limited to the approved Podcast/asset
   workflow and cannot administer organizations or conversations;
 - every published episode has complete three-locale metadata and a valid,
-  active `zh-TW` audio asset;
-- selecting `zh-CN` or `en` plays the matching variant when present and
-  otherwise resolves to `zh-TW`;
+  active `zh-hant` audio asset;
+- selecting `zh-hans` or `en` plays the matching variant when present and
+  otherwise resolves to `zh-hant`;
 - duplicate trading-date/locale replacement requires explicit confirmation,
   uses a new backend-generated key, and preserves the previous object/version;
 - legacy R2 cutover cannot occur until every manifest entry passes

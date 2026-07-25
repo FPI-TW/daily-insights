@@ -34,12 +34,12 @@ function metadataFrom(values: {
 }): PodcastMetadata[] {
   return [
     {
-      locale: "zh-TW",
+      locale: "zh-hant",
       title: values.zhTwTitle,
       summary: values.zhTwSummary,
     },
     {
-      locale: "zh-CN",
+      locale: "zh-hans",
       title: values.zhCnTitle,
       summary: values.zhCnSummary,
     },
@@ -56,10 +56,10 @@ function metadataValue(
 }
 
 const metadataFieldSpecs = [
-  ["zhTwTitle", "zh-TW", "title"],
-  ["zhTwSummary", "zh-TW", "summary"],
-  ["zhCnTitle", "zh-CN", "title"],
-  ["zhCnSummary", "zh-CN", "summary"],
+  ["zhTwTitle", "zh-hant", "title"],
+  ["zhTwSummary", "zh-hant", "summary"],
+  ["zhCnTitle", "zh-hans", "title"],
+  ["zhCnSummary", "zh-hans", "summary"],
   ["enTitle", "en", "title"],
   ["enSummary", "en", "summary"],
 ] as const
@@ -245,7 +245,7 @@ function EpisodeManager({
       <header>
         <div>
           <time dateTime={episode.trading_date}>{episode.trading_date}</time>
-          <h3>{metadataValue(episode, "zh-TW", "title")}</h3>
+          <h3>{metadataValue(episode, "zh-hant", "title")}</h3>
         </div>
         <span data-status={episode.status}>
           {t(
@@ -295,10 +295,10 @@ function EditMetadataForm({ episode }: { episode: PodcastEpisodeAdmin }) {
   const [error, setError] = useState("")
   const form = useForm({
     defaultValues: {
-      zhTwTitle: metadataValue(episode, "zh-TW", "title"),
-      zhTwSummary: metadataValue(episode, "zh-TW", "summary"),
-      zhCnTitle: metadataValue(episode, "zh-CN", "title"),
-      zhCnSummary: metadataValue(episode, "zh-CN", "summary"),
+      zhTwTitle: metadataValue(episode, "zh-hant", "title"),
+      zhTwSummary: metadataValue(episode, "zh-hant", "summary"),
+      zhCnTitle: metadataValue(episode, "zh-hans", "title"),
+      zhCnSummary: metadataValue(episode, "zh-hans", "summary"),
       enTitle: metadataValue(episode, "en", "title"),
       enSummary: metadataValue(episode, "en", "summary"),
       reason: "",
@@ -394,7 +394,7 @@ function AudioImportForm({ episode }: { episode: PodcastEpisodeAdmin }) {
     defaultValues: {
       sourceBucket: "",
       sourceKey: "",
-      locale: "zh-TW" as Locale,
+      locale: "zh-hant" as Locale,
       mimeType: "audio/mpeg",
       reason: "",
     },
@@ -486,8 +486,8 @@ function AudioImportForm({ episode }: { episode: PodcastEpisodeAdmin }) {
                   field.handleChange(event.target.value as Locale)
                 }
               >
-                <option value="zh-TW">zh-TW</option>
-                <option value="zh-CN">zh-CN</option>
+                <option value="zh-hant">zh-hant</option>
+                <option value="zh-hans">zh-hans</option>
                 <option value="en">en</option>
               </select>
             </label>

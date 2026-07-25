@@ -3,7 +3,7 @@ import { initReactI18next } from "react-i18next"
 import type { Locale } from "@daily-insights/api-client"
 
 const resources: Resource = {
-  "zh-TW": {
+  "zh-hant": {
     translation: {
       brand: "Daily Insights",
       signIn: "登入",
@@ -70,7 +70,7 @@ const resources: Resource = {
       podcastConfirmReplacement: "確認建立替換版本",
     },
   },
-  "zh-CN": {
+  "zh-hans": {
     translation: {
       brand: "Daily Insights",
       signIn: "登录",
@@ -215,7 +215,8 @@ export function createI18n(locale: Locale) {
   const instance = createInstance()
   void instance.use(initReactI18next).init({
     lng: locale,
-    fallbackLng: "zh-TW",
+    fallbackLng: "zh-hant",
+    lowerCaseLng: true,
     resources,
     initAsync: false,
     interpolation: { escapeValue: false },

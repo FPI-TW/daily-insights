@@ -92,7 +92,7 @@ class AssetMigrationManifest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class AssetMigrationEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "asset_migration_entries"
     __table_args__ = (
-        CheckConstraint("locale IN ('zh-TW', 'zh-CN', 'en')", name="locale_supported"),
+        CheckConstraint("locale IN ('zh-hant', 'zh-hans', 'en')", name="locale_supported"),
         CheckConstraint(
             "source_size_bytes IS NULL OR source_size_bytes > 0", name="source_size_positive"
         ),

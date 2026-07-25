@@ -57,7 +57,7 @@ class PodcastEpisode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class PodcastEpisodeTranslation(TimestampMixin, Base):
     __tablename__ = "podcast_episode_translations"
     __table_args__ = (
-        CheckConstraint("locale IN ('zh-TW', 'zh-CN', 'en')", name="locale_supported"),
+        CheckConstraint("locale IN ('zh-hant', 'zh-hans', 'en')", name="locale_supported"),
         CheckConstraint("char_length(btrim(title)) > 0", name="title_nonempty"),
         CheckConstraint("char_length(btrim(summary)) > 0", name="summary_nonempty"),
     )
@@ -75,7 +75,7 @@ class PodcastEpisodeTranslation(TimestampMixin, Base):
 class PodcastEpisodeAudioVariant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "podcast_episode_audio_variants"
     __table_args__ = (
-        CheckConstraint("locale IN ('zh-TW', 'zh-CN', 'en')", name="locale_supported"),
+        CheckConstraint("locale IN ('zh-hant', 'zh-hans', 'en')", name="locale_supported"),
         CheckConstraint("version > 0", name="version_positive"),
         UniqueConstraint(
             "episode_id",

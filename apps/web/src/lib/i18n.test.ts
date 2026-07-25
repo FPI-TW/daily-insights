@@ -3,8 +3,8 @@ import { createI18n } from "./i18n"
 
 describe("request-local i18n", () => {
   it("keeps simultaneous locale instances isolated", () => {
-    const traditionalChinese = createI18n("zh-TW")
-    const simplifiedChinese = createI18n("zh-CN")
+    const traditionalChinese = createI18n("zh-hant")
+    const simplifiedChinese = createI18n("zh-hans")
     const english = createI18n("en")
 
     expect(traditionalChinese.t("signIn")).toBe("登入")
@@ -13,6 +13,6 @@ describe("request-local i18n", () => {
     expect(traditionalChinese.t("podcastTitle")).toBe("Podcast")
     expect(simplifiedChinese.t("podcastAudioFallback")).toContain("繁体")
     expect(english.t("podcastAdminTitle")).toBe("Podcast content")
-    expect(traditionalChinese.language).toBe("zh-TW")
+    expect(traditionalChinese.language).toBe("zh-hant")
   })
 })

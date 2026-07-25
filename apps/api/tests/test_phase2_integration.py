@@ -224,8 +224,8 @@ def _bundle(market_code: str, source_as_of: date) -> PublicationBundle:
             ),
         ),
         presentations={
-            "zh-TW": _presentation("zh-TW", market_code),
-            "zh-CN": _presentation("zh-CN", market_code),
+            "zh-hant": _presentation("zh-hant", market_code),
+            "zh-hans": _presentation("zh-hans", market_code),
             "en": _presentation("en", market_code),
         },
     )

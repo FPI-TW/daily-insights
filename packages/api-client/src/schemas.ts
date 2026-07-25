@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-export const localeSchema = z.enum(["zh-TW", "zh-CN", "en"])
+export const localeSchema = z.enum(["zh-hant", "zh-hans", "en"])
 export type Locale = z.infer<typeof localeSchema>
 
 export const systemRoleSchema = z.enum(["admin", "asset_manager", "org_member"])

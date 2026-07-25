@@ -6,9 +6,11 @@ RUN corepack enable && corepack prepare pnpm@11.15.1 --activate
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json apps/web/package.json
+COPY packages/api-client/package.json packages/api-client/package.json
 RUN pnpm install --frozen-lockfile --filter @daily-insights/web...
 
 COPY apps/web apps/web
+COPY packages/api-client packages/api-client
 RUN pnpm --filter @daily-insights/web build
 
 FROM node:22-alpine AS runtime

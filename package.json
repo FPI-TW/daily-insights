@@ -37,6 +37,6 @@
     "test:watch": "pnpm --filter @daily-insights/web test:watch",
     "test:coverage": "pnpm --filter @daily-insights/web test:coverage",
     "check": "pnpm format:check && pnpm lint:check && pnpm type:check && pnpm api-client:check && pnpm test && pnpm build",
-    "prepare": "git config core.hooksPath .githooks"
+    "prepare": "git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git config core.hooksPath .githooks || true"
   }
 }

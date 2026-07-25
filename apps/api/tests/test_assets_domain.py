@@ -177,26 +177,26 @@ def test_canonical_key_is_backend_controlled_and_locale_aware() -> None:
     asset_id = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
     assert canonical_podcast_audio_key(
         trading_date=date(2026, 7, 24),
-        locale="zh-TW",
+        locale="zh-hant",
         asset_id=asset_id,
         mime_type="audio/mpeg",
     ) == (
-        "podcasts/2026-07-24/audio/zh-TW/"
-        "podcast-2026-07-24-zh-TW-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.mp3"
+        "podcasts/2026-07-24/audio/zh-hant/"
+        "podcast-2026-07-24-zh-hant-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.mp3"
     )
 
 
-def test_locale_resolution_is_exact_then_only_zh_tw() -> None:
-    zh_tw = PodcastAudioVariant(asset_id=uuid.uuid4(), locale="zh-TW", version=1)
-    zh_cn = PodcastAudioVariant(asset_id=uuid.uuid4(), locale="zh-CN", version=1)
+def test_locale_resolution_is_exact_then_only_zh_hant() -> None:
+    zh_hant = PodcastAudioVariant(asset_id=uuid.uuid4(), locale="zh-hant", version=1)
+    zh_hans = PodcastAudioVariant(asset_id=uuid.uuid4(), locale="zh-hans", version=1)
 
-    exact = resolve_audio_variant((zh_tw, zh_cn), "zh-CN")
-    fallback = resolve_audio_variant((zh_tw,), "en")
+    exact = resolve_audio_variant((zh_hant, zh_hans), "zh-hans")
+    fallback = resolve_audio_variant((zh_hant,), "en")
 
-    assert exact.resolved_locale == "zh-CN"
-    assert exact.variant.asset_id == zh_cn.asset_id
+    assert exact.resolved_locale == "zh-hans"
+    assert exact.variant.asset_id == zh_hans.asset_id
     assert fallback.requested_locale == "en"
-    assert fallback.resolved_locale == "zh-TW"
+    assert fallback.resolved_locale == "zh-hant"
 
 
 def test_replacement_requires_expected_current_version() -> None:

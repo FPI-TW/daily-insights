@@ -36,7 +36,7 @@ export const Route = createRootRoute({
 function RootComponent() {
   const params = useParams({ strict: false })
   const parsedLocale = localeSchema.safeParse(params.locale)
-  const locale = parsedLocale.success ? parsedLocale.data : "zh-TW"
+  const locale = parsedLocale.success ? parsedLocale.data : "zh-hant"
   const i18n = useMemo(() => createI18n(locale), [locale])
 
   return (

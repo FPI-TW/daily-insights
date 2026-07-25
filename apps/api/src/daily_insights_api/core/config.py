@@ -1,5 +1,6 @@
 import re
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal, Self
 from urllib.parse import urlparse
 
@@ -13,12 +14,13 @@ LOCAL_DATABASE_URL = (
 LOCAL_SESSION_SECRET = "development-only-session-secret-change-me"
 LOCAL_PASSWORD_PEPPER = "development-only-password-pepper-change-me"
 PLACEHOLDER_MARKERS = ("change_me", "change-me", "development-only")
+API_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="DAILY_INSIGHTS_",
-        env_file=".env",
+        env_file=API_ENV_FILE,
         extra="ignore",
     )
 

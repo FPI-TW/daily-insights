@@ -11,7 +11,7 @@ from daily_insights_api.core.enums import AssetKind, AssetStatus
 from daily_insights_api.modules.assets.models import Asset
 from daily_insights_api.modules.assets.object_store import ObjectRef, ObjectStore
 
-Locale = Literal["zh-TW", "zh-CN", "en"]
+Locale = Literal["zh-hant", "zh-hans", "en"]
 MigrationStatus = Literal["planned", "verified", "cutover", "failed"]
 EntryStatus = Literal["planned", "verified", "cutover", "failed"]
 MigrationIdentity = tuple[uuid.UUID, ObjectRef, ObjectRef, date, Locale]
@@ -51,7 +51,7 @@ class AssetMigrationInput(AssetContract):
     source: ObjectRef
     target_bucket: str = Field(min_length=1, max_length=100)
     trading_date: date
-    locale: Locale = "zh-TW"
+    locale: Locale = "zh-hant"
     expected_mime_type: str
 
     @property
