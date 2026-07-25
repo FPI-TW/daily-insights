@@ -76,3 +76,6 @@ jobs:
 
       - name: Validate nginx transport contract
         run: ./scripts/check-nginx-contract.sh
+
+      - name: Validate production deployment contract
+        run: ./scripts/check-production-deployment-contract.sh

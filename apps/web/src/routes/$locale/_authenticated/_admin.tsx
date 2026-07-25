@@ -2,39 +2,39 @@ import { Outlet, createFileRoute, redirect } from "@tanstack/react-router"
 import { AppShell } from "#/components/AppShell"
 import { canEnterBackOffice, canEnterCustomer } from "#/lib/authorization"
 
-export const Route = createFileRoute("/$locale/_authenticated/_customer")({
+export const Route = createFileRoute("/$locale/_authenticated/_admin")({
   beforeLoad: ({ context }) => {
     if (!context.user) {
       throw redirect({
-        to: "/$locale/login",
+        to: "/$locale/admin/login",
         params: { locale: context.locale },
       })
     }
     if (context.user.must_change_password) {
       throw redirect({
-        to: canEnterCustomer(context.user)
-          ? "/$locale/change-password"
-          : "/$locale/admin/change-password",
+        to: canEnterBackOffice(context.user)
+          ? "/$locale/admin/change-password"
+          : "/$locale/change-password",
         params: { locale: context.locale },
       })
     }
-    if (!canEnterCustomer(context.user)) {
+    if (!canEnterBackOffice(context.user)) {
       throw redirect({
-        to: canEnterBackOffice(context.user)
-          ? "/$locale/admin/audio"
-          : "/$locale/login",
+        to: canEnterCustomer(context.user)
+          ? "/$locale/podcasts"
+          : "/$locale/admin/login",
         params: { locale: context.locale },
       })
     }
     return { user: context.user }
   },
-  component: CustomerLayout,
+  component: AdminLayout,
 })
 
-function CustomerLayout() {
+function AdminLayout() {
   const { locale, user } = Route.useRouteContext()
   return (
-    <AppShell locale={locale} user={user} surface="customer">
+    <AppShell locale={locale} user={user} surface="admin">
       <Outlet />
     </AppShell>
   )

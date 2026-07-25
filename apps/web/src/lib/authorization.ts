@@ -1,12 +1,11 @@
 import type { User } from "@daily-insights/api-client"
 
-export type Destination =
-  "login" | "change-password" | "customer" | "back-office"
+export type Destination = "login" | "change-password" | "customer" | "admin"
 
 export function destinationFor(user: User | null): Destination {
   if (!user) return "login"
   if (user.must_change_password) return "change-password"
-  return user.system_role === "org_member" ? "customer" : "back-office"
+  return user.system_role === "org_member" ? "customer" : "admin"
 }
 
 export function canEnterCustomer(user: User) {

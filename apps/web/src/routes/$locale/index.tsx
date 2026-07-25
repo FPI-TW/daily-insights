@@ -23,7 +23,7 @@ export const Route = createFileRoute("/$locale/")({
       })
     }
     throw redirect({
-      to: "/$locale/back-office",
+      to: "/$locale/admin/audio",
       params: { locale: context.locale },
     })
   },

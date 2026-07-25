@@ -1,0 +1,23 @@
+[Unit]
+Description=Daily Insights Podcast pilot
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/daily-insights
+Environment=COMPOSE_PROJECT_NAME=daily-insights-production
+ExecStartPre=/opt/daily-insights/scripts/production/validate-release.sh /var/lib/daily-insights/current.env
+ExecStartPre=/opt/daily-insights/scripts/production/preflight.sh /var/lib/daily-insights/current.env
+ExecStartPre=/usr/bin/docker compose --env-file /var/lib/daily-insights/current.env -f /opt/daily-insights/compose.production.yaml config --quiet
+ExecStart=/usr/bin/docker compose --env-file /var/lib/daily-insights/current.env -f /opt/daily-insights/compose.production.yaml up --no-build --remove-orphans
+ExecStartPost=/opt/daily-insights/scripts/production/health.sh /var/lib/daily-insights/current.env
+ExecStop=/usr/bin/docker compose --env-file /var/lib/daily-insights/current.env -f /opt/daily-insights/compose.production.yaml stop --timeout 45
+TimeoutStartSec=300
+TimeoutStopSec=90
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

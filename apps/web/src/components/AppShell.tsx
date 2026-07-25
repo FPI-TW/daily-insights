@@ -8,29 +8,41 @@ import {
   rememberCsrfToken,
   requireCsrfToken,
 } from "#/lib/auth"
+import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
 import ThemeToggle from "./ThemeToggle"
 import { LocaleSwitcher } from "./LocaleSwitcher"
 
 export function AppShell({
   locale,
   user,
+  surface,
   children,
 }: {
   locale: Locale
   user: User
+  surface: "customer" | "admin"
   children: ReactNode
 }) {
   const { t } = useTranslation()
   const router = useRouter()
+  const redirectExpiredSession = useSessionExpiryRedirect(locale, surface)
   const [pending, setPending] = useState(false)
+  const [signOutError, setSignOutError] = useState("")
 
   async function signOut() {
     setPending(true)
+    setSignOutError("")
     try {
       await browserAuthClient().logout(await requireCsrfToken())
       rememberCsrfToken(null)
       await router.invalidate()
-      await router.navigate({ to: "/$locale/login", params: { locale } })
+      await router.navigate({
+        to: surface === "customer" ? "/$locale/login" : "/$locale/admin/login",
+        params: { locale },
+      })
+    } catch (caught) {
+      if (await redirectExpiredSession(caught)) return
+      setSignOutError(t("unexpectedError"))
     } finally {
       setPending(false)
     }
@@ -38,23 +50,40 @@ export function AppShell({
 
   return (
     <>
-      <header className="app-header">
-        <Link to="/$locale" params={{ locale }} className="brand">
+      <header className="app-header" data-surface={surface}>
+        <Link
+          to={
+            surface === "customer"
+              ? "/$locale/podcasts"
+              : "/$locale/admin/audio"
+          }
+          params={{ locale }}
+          className="brand"
+        >
           {t("brand")}
+          {surface === "admin" ? (
+            <span className="brand-surface">{t("adminPortal")}</span>
+          ) : null}
         </Link>
-        <nav aria-label={t("account")}>
-          {user.system_role === "org_member" && (
+        <nav
+          aria-label={t(surface === "customer" ? "customerNav" : "adminNav")}
+        >
+          {surface === "customer" ? (
             <Link to="/$locale/podcasts" params={{ locale }}>
               {t("podcastNav")}
             </Link>
-          )}
-          {user.system_role !== "org_member" && (
-            <Link to="/$locale/back-office/podcasts" params={{ locale }}>
-              {t("podcastNav")}
+          ) : (
+            <Link to="/$locale/admin/audio" params={{ locale }}>
+              {t("audioManagementNav")}
             </Link>
           )}
-          <span>{user.display_name}</span>
-          <LocaleSwitcher locale={locale} />
+          <span className="user-name">{user.display_name}</span>
+          <LocaleSwitcher
+            locale={locale}
+            destination={
+              surface === "customer" ? "customer-podcasts" : "admin-audio"
+            }
+          />
           <ThemeToggle />
           <button
             type="button"
@@ -63,6 +92,11 @@ export function AppShell({
           >
             {pending ? t("submitting") : t("signOut")}
           </button>
+          {signOutError ? (
+            <span className="header-error" role="alert">
+              {signOutError}
+            </span>
+          ) : null}
         </nav>
       </header>
       {children}

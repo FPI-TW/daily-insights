@@ -6,6 +6,26 @@ automatic recovery and alerting.
 
 This is a recommendation and readiness checklist. It does not deploy anything.
 
+The repository now includes an offline-verifiable deployment foundation. It
+does not create AWS, Cloudflare, RDS, or R2 resources:
+
+- [`compose.production.yaml`](../../compose.production.yaml) runs only externally
+  built API, Web, and nginx images pinned by digest; PostgreSQL is deliberately
+  absent because production uses RDS;
+- [`daily-insights.service`](../../infra/systemd/daily-insights.service) owns the
+  Compose lifecycle after the host has been provisioned;
+- [`deploy.sh`](../../scripts/production/deploy.sh),
+  [`preflight.sh`](../../scripts/production/preflight.sh),
+  [`health.sh`](../../scripts/production/health.sh), and
+  [`rollback.sh`](../../scripts/production/rollback.sh) validate release
+  manifests and runtime material, serialize lifecycle operations, require
+  health convergence, and preserve a previous application release;
+- [`infra/production/env`](../../infra/production/env) defines the non-secret
+  release manifest and separate API/Web runtime environment contracts.
+
+Run `make check-production-deployment` before packaging or installing these
+files.
+
 ## Recommended topology
 
 - One EC2 application instance in a private or tightly restricted subnet runs
@@ -119,12 +139,59 @@ and escalation timing. A dashboard without notification is not an alarm.
 
 ## Deployment and rollback
 
+### Host contract
+
+Provision the following before the first deployment:
+
+1. Install the repository release bundle at `/opt/daily-insights`, owned by
+   root and not writable by the application account.
+2. Create `/var/lib/daily-insights` for the non-secret `current.env` and
+   `previous.env` release manifests.
+3. Create `/run/daily-insights/api.env` and `/run/daily-insights/web.env` from
+   the examples on every boot. The API file is root-owned mode `0600` and is
+   populated from only the named SSM/Secrets Manager entries. The Web file must
+   not contain database, provider, session, or R2 credentials. Preflight rejects
+   missing mandatory settings and committed example/placeholder values, but
+   cannot prove that a syntactically valid credential is live.
+4. Install the origin certificate and key as
+   `/etc/daily-insights/tls/origin.crt` and `origin.key`, with the private key
+   root-owned mode `0600`.
+5. Materialize `/etc/daily-insights/cloudflare-realip.conf` from Cloudflare's
+   current published IPv4 and IPv6 ranges. Reject empty results, default routes
+   (`0.0.0.0/0`, `::/0`), and stale cached data. The committed example contains
+   documentation-only addresses and is never a production allowlist. Runtime
+   preflight validates directive syntax and rejects unsafe/private/test ranges;
+   it cannot prove that a public CIDR belongs to Cloudflare or that the list is
+   current. Provisioning must verify ownership and freshness against
+   Cloudflare's published source.
+6. Install and enable `infra/systemd/daily-insights.service`. The EC2 security
+   group still enforces that origin port 443 is reachable only through the
+   approved Cloudflare/origin path; Compose publishes no API or Web port.
+
+Before Compose starts, runtime preflight verifies root ownership and restrictive
+file modes, the production API/Web environment contract, the Cloudflare
+allowlist syntax, and the origin certificate hostname, minimum remaining
+validity, private-key readability, and certificate/key match. The application
+network is pinned to `172.30.0.0/24`; the Uvicorn forwarded-header allowlist and
+`DAILY_INSIGHTS_TRUSTED_PROXY_CIDRS` must both match that exact CIDR so nginx is
+the only trusted application proxy.
+
+The release manifest is intentionally non-secret and contains exactly three
+immutable `image@sha256:<digest>` references, the public hostname, and absolute
+configuration/runtime paths. CI or the release operator obtains the digest
+from the registry after image publication; tags alone are rejected.
+
+### Release procedure
+
 1. Validate migrations and images in staging with sanitized/synthetic data.
 2. Record current image digests, database migration, configuration version, and
    global model configuration.
 3. Run pre-deploy database backup checks.
-4. Pull pinned images, run compatible migrations once, and start containers
-   through systemd/Compose.
+4. Copy the candidate non-secret release manifest to the host and run:
+   `sudo /opt/daily-insights/scripts/production/deploy.sh /path/to/release.env`.
+   The script validates and pulls pinned images, runs compatible migrations
+   once, installs the manifest atomically, restarts the systemd unit, and waits
+   for API/Web/nginx container health.
 5. Require readiness from database, API, web, and nginx before switching
    traffic.
 6. For the Podcast pilot, smoke-test authentication, tenant isolation, all
@@ -133,7 +200,18 @@ and escalation timing. A dashboard without notification is not an alarm.
    Add report and SSE chat smoke tests only when those surfaces enter the
    deployed release.
 7. Roll back to the prior compatible image on application failure. Database
-   restore is an incident action, not a routine code rollback.
+   restore is an incident action, not a routine code rollback. For an explicit
+   application rollback, run
+   `sudo /opt/daily-insights/scripts/production/rollback.sh`; if the previous
+   release is unhealthy, the script restores the original release and fails.
+
+The deploy script automatically restores the previous application manifest
+when a candidate fails health checks. A first deployment has no prior
+application release: on failure it stops systemd and Compose, removes
+`current.env`, and retains the rejected manifest as `failed.env` for diagnosis,
+so `Restart=on-failure` cannot keep launching a known-bad candidate. Migrations
+must remain backward-compatible with the previous image because rollback never
+reverses or restores the database.
 
 Use Cloudflare's proxied DNS with a conservative TTL during initial cutover.
 Cutover must not modify or delete the legacy services or data.

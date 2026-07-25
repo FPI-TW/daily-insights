@@ -1,10 +1,19 @@
 import type { APIRequestContext, BrowserContext, Page } from "@playwright/test"
 
 export const episodeId = "10000000-0000-4000-8000-000000000001"
+export const customerCredentials = {
+  email: "customer@example.test",
+  password: "customer-password",
+}
+export const adminCredentials = {
+  email: "admin@example.test",
+  password: "admin-password",
+}
 
 type MockState = {
   podcastList?: "normal" | "empty" | "error"
   audio?: "normal" | "error" | "delayed"
+  sessionExpired?: boolean
 }
 
 export type RecordedRequest = {

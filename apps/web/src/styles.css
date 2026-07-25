@@ -261,16 +261,74 @@ button:disabled {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
   color: var(--sea-ink);
   font-weight: 800;
   text-decoration: none;
 }
 
+.brand-surface {
+  border-left: 1px solid var(--line);
+  color: var(--sea-ink-soft);
+  padding-left: 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.app-header[data-surface="admin"] {
+  --header-bg: color-mix(in oklab, var(--surface-strong) 92%, var(--bg-base));
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+}
+
+.user-name {
+  color: var(--sea-ink-soft);
+  font-size: 0.85rem;
+}
+
+.header-error {
+  color: var(--sea-ink);
+  font-size: 0.8rem;
+}
+
 .auth-page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(19rem, 28rem);
+  align-items: center;
+  gap: clamp(2rem, 7vw, 7rem);
   min-height: 100svh;
-  place-items: center;
-  padding: 1.5rem;
+  width: min(calc(100% - 3rem), 70rem);
+  margin: 0 auto;
+  padding: 2rem 0;
+}
+
+.auth-page[data-portal="admin"] {
+  grid-template-columns: minmax(0, 0.8fr) minmax(19rem, 26rem);
+}
+
+.auth-intro {
+  max-width: 40rem;
+}
+
+.auth-intro h1 {
+  margin: 0.45rem 0 1rem;
+  font-family: var(--font-display);
+  font-size: clamp(2.8rem, 7vw, 5.4rem);
+  line-height: 0.98;
+}
+
+.auth-page[data-portal="admin"] .auth-intro h1 {
+  font-family: var(--font-sans);
+  font-size: clamp(2.1rem, 5vw, 3.6rem);
+  font-weight: 800;
+}
+
+.auth-intro > p:last-child {
+  max-width: 34rem;
+  color: var(--sea-ink-soft);
+  font-size: 1.1rem;
+  line-height: 1.7;
 }
 
 .auth-card,
@@ -363,16 +421,15 @@ button:disabled {
 
 .podcast-card {
   display: grid;
-  grid-template-columns: minmax(7rem, 0.22fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(8rem, 0.28fr) minmax(0, 1fr);
   align-items: center;
-  gap: 1.25rem;
+  gap: clamp(1.25rem, 4vw, 2.5rem);
   border: 1px solid var(--line);
   border-radius: 1.25rem;
   background: var(--surface);
   box-shadow: inset 0 1px var(--inset-glint);
   color: var(--sea-ink);
   padding: 1.5rem;
-  text-decoration: none;
   transition:
     transform 180ms ease,
     border-color 180ms ease,
@@ -380,7 +437,7 @@ button:disabled {
 }
 
 .podcast-card:hover,
-.podcast-card:focus-visible {
+.podcast-card:focus-within {
   border-color: var(--lagoon);
   background: var(--surface-strong);
   color: var(--sea-ink);
@@ -388,14 +445,13 @@ button:disabled {
 }
 
 .podcast-card h2 {
-  margin: 0;
+  margin: 0.35rem 0 0;
   font-family: var(--font-display);
   font-size: clamp(1.35rem, 3vw, 2rem);
 }
 
 .podcast-card p {
   display: -webkit-box;
-  grid-column: 2;
   margin: 0.5rem 0 0;
   overflow: hidden;
   color: var(--sea-ink-soft);
@@ -404,12 +460,33 @@ button:disabled {
 }
 
 .podcast-card time,
-.podcast-card span,
 .podcast-copy time {
   color: var(--kicker);
   font-size: 0.8rem;
   font-weight: 800;
   letter-spacing: 0.06em;
+}
+
+.podcast-card-cover {
+  display: grid;
+  aspect-ratio: 1;
+  place-items: end start;
+  border-radius: 1rem;
+  background:
+    radial-gradient(circle at 72% 20%, var(--lagoon), transparent 32%),
+    linear-gradient(145deg, var(--palm), var(--sea-ink));
+  color: var(--foam);
+  padding: 1.1rem;
+}
+
+.podcast-card-cover span {
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 6vw, 3.2rem);
+  line-height: 1;
+}
+
+.podcast-card-copy {
+  min-width: 0;
 }
 
 .podcast-empty {
@@ -463,12 +540,28 @@ button:disabled {
 
 .podcast-player {
   display: grid;
-  margin-top: 2rem;
+  margin-top: 1.25rem;
   gap: 0.75rem;
 }
 
 .podcast-player audio {
   width: 100%;
+}
+
+.podcast-player > button,
+.podcast-player-error button {
+  width: fit-content;
+}
+
+.podcast-player-error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.podcast-player-error p {
+  margin: 0;
 }
 
 .podcast-fallback-note {
@@ -481,6 +574,20 @@ button:disabled {
   width: min(calc(100% - 2rem), 68rem);
   margin: 0 auto;
   padding: clamp(2.5rem, 6vw, 5rem) 0;
+}
+
+.podcast-upload-fieldset {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.podcast-upload-fieldset legend {
+  margin-bottom: 0.65rem;
+  color: var(--sea-ink-soft);
+  font-size: 0.85rem;
+  font-weight: 700;
 }
 
 .podcast-admin-page > header {
@@ -669,6 +776,21 @@ button:disabled {
     flex-direction: column;
   }
 
+  .auth-page,
+  .auth-page[data-portal="admin"] {
+    grid-template-columns: 1fr;
+    width: min(calc(100% - 2rem), 32rem);
+    gap: 1.5rem;
+  }
+
+  .auth-intro h1 {
+    font-size: clamp(2.3rem, 13vw, 3.6rem);
+  }
+
+  .user-name {
+    display: none;
+  }
+
   .app-header nav {
     width: 100%;
     flex-wrap: wrap;
@@ -678,8 +800,8 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  .podcast-card p {
-    grid-column: 1;
+  .podcast-card-cover {
+    width: min(45vw, 9rem);
   }
 
   .podcast-detail article {

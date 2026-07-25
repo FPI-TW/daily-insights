@@ -1,0 +1,128 @@
+# Production Podcast pilot stack. Images are built by CI and must be supplied
+# as immutable digest references in the release manifest.
+name: daily-insights-production
+
+services:
+  api:
+    image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}
+    restart: unless-stopped
+    env_file:
+      - ${DAILY_INSIGHTS_RUNTIME_DIR:?set DAILY_INSIGHTS_RUNTIME_DIR}/api.env
+    command:
+      [
+        "uvicorn",
+        "daily_insights_api.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--proxy-headers",
+        "--forwarded-allow-ips",
+        "172.30.0.0/24",
+      ]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    stop_grace_period: 45s
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "8000"
+    networks:
+      - app
+
+  web:
+    image: ${WEB_IMAGE:?set WEB_IMAGE to an immutable digest reference}
+    restart: unless-stopped
+    env_file:
+      - ${DAILY_INSIGHTS_RUNTIME_DIR:?set DAILY_INSIGHTS_RUNTIME_DIR}/web.env
+    environment:
+      API_INTERNAL_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    stop_grace_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "3000"
+    networks:
+      - app
+
+  nginx:
+    image: ${NGINX_IMAGE:?set NGINX_IMAGE to an immutable digest reference}
+    restart: unless-stopped
+    environment:
+      NGINX_ENVSUBST_FILTER: ^PUBLIC_HOSTNAME$
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:?set PUBLIC_HOSTNAME}
+    ports:
+      - "443:443"
+    volumes:
+      - ./infra/production/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/production/nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${DAILY_INSIGHTS_CONFIG_DIR:?set DAILY_INSIGHTS_CONFIG_DIR}/cloudflare-realip.conf:/etc/nginx/cloudflare-realip.conf:ro
+      - ${DAILY_INSIGHTS_CONFIG_DIR}/tls/origin.crt:/etc/nginx/tls/origin.crt:ro
+      - ${DAILY_INSIGHTS_CONFIG_DIR}/tls/origin.key:/etc/nginx/tls/origin.key:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/nginx-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 30s
+    read_only: true
+    tmpfs:
+      - /etc/nginx/conf.d:size=1m
+      - /var/cache/nginx:size=32m
+      - /var/run:size=1m
+      - /tmp:size=16m
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - app
+
+networks:
+  app:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

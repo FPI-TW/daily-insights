@@ -5,6 +5,16 @@ const assetId = "20000000-0000-4000-8000-000000000001"
 const organizationId = "30000000-0000-4000-8000-000000000001"
 const adminId = "40000000-0000-4000-8000-000000000001"
 const memberId = "50000000-0000-4000-8000-000000000001"
+const credentials = {
+  "customer@example.test": {
+    password: "customer-password",
+    role: "org_member",
+  },
+  "admin@example.test": {
+    password: "admin-password",
+    role: "admin",
+  },
+}
 const port = Number(process.argv[process.argv.indexOf("--port") + 1] || 3311)
 
 let state
@@ -13,6 +23,7 @@ function reset(overrides = {}) {
   state = {
     podcastList: "normal",
     audio: "normal",
+    sessionExpired: false,
     status: "published",
     episodeVersion: 2,
     audioVersion: 1,
@@ -194,6 +205,66 @@ const server = createServer(async (request, response) => {
 
   if (url.pathname === "/__e2e/state") {
     sendJson(response, 200, state)
+    return
+  }
+
+  if (
+    state.sessionExpired &&
+    url.pathname.startsWith("/api/") &&
+    url.pathname !== "/api/auth/login"
+  ) {
+    recordRequest(request, url, roleFrom(request), { sessionExpired: true })
+    sendJson(response, 401, { detail: "Session expired" })
+    return
+  }
+
+  if (url.pathname === "/api/auth/login" && request.method === "POST") {
+    const input = parseJsonBody(await readBody(request))
+    if (
+      input === null ||
+      typeof input.email !== "string" ||
+      typeof input.password !== "string"
+    ) {
+      sendJson(response, 400, { detail: "Invalid login request" })
+      return
+    }
+    const credential = credentials[input.email]
+    if (!credential || credential.password !== input.password) {
+      recordRequest(request, url, null, {
+        email: input.email,
+        credentialAccepted: false,
+      })
+      sendJson(response, 401, { detail: "Invalid credentials" })
+      return
+    }
+    recordRequest(request, url, null, {
+      email: input.email,
+      credentialAccepted: true,
+      authenticatedRole: credential.role,
+    })
+    sendJson(
+      response,
+      200,
+      {
+        user: userFor(credential.role),
+        csrf_token: "e2e-csrf-token",
+      },
+      {
+        "Set-Cookie": `e2e-role=${credential.role}; Path=/; HttpOnly; SameSite=Lax`,
+      }
+    )
+    return
+  }
+
+  if (url.pathname === "/api/auth/logout" && request.method === "POST") {
+    const role = requireRole(request, response, ["admin", "org_member"])
+    if (!role || !requireCsrf(request, response)) return
+    recordRequest(request, url, role, { csrf: "valid" })
+    response.writeHead(204, {
+      "X-Request-ID": "e2e-request-id",
+      "Set-Cookie": "e2e-role=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    })
+    response.end()
     return
   }
 

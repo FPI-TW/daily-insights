@@ -36,6 +36,9 @@ describe("route authorization decisions", () => {
     })
     const admin = user({ system_role: "admin", organization_id: null })
 
+    expect(destinationFor(member)).toBe("customer")
+    expect(destinationFor(assetManager)).toBe("admin")
+    expect(destinationFor(admin)).toBe("admin")
     expect(canEnterCustomer(member)).toBe(true)
     expect(canEnterBackOffice(member)).toBe(false)
     expect(canEnterCustomer(assetManager)).toBe(false)

@@ -15,16 +15,19 @@ Phase 4 上線驗收仍待執行。八大市場正式內容與報告前端在此
   key 的同格式原地覆寫／跨格式 key 切換，以及邏輯版本遞增；
 - 客戶共用 catalog、detail、requested locale 優先且其後依
   `zh-hant` → `zh-hans` → `en` fallback，以及短效 signed URL；
-- TanStack Start 三語客戶頁、responsive list/detail、原生 audio element、
+- TanStack Start 三語客戶頁、responsive Podcast 清單內的原生 audio element、
   loading/empty/failure state 與依 user/episode/resolved locale 隔離的
   `localStorage` 進度；
-- 內部 Podcast 後台、三個可點擊／拖放的語系 slot、R2 upload 及發布控制；
+- 獨立的客戶與管理端登入入口、route guard、導覽與登出導向；
+- `/admin/audio` 音檔管理頁、三個可點擊／拖放的語系 slot、R2 upload 及發布
+  控制；
 - PostgreSQL + fake R2 端到端測試，覆蓋建立、發布拒絕、音檔登記、角色限制、
   locale fallback、同路徑覆寫及下架；
-- Playwright + deterministic mock API browser E2E，覆蓋後台 upload slot、
-  replacement／unpublish confirmation、客戶 list/detail/player、locale fallback、
-  loading/empty/error、keyboard 與 mobile viewport；第一輪 6 個 specs 及新增的
-  detail 404 regression 均通過；
+- Playwright + deterministic mock API browser E2E 共 15 個 specs，覆蓋兩個
+  login 入口、錯角色 session 清除、跨 surface guard、各自 logout、後台 upload
+  slot、replacement／unpublish confirmation、客戶清單內播放器、locale
+  fallback、lazy signed URL、單集音檔重試、mounted session 過期導向、
+  loading/empty/error、keyboard 與 390px viewport；
 - 在 `2099-12-31` 隔離 prefix 完成 live R2 adapter QA：初次 upload、same-key
   overwrite、SHA/checksum metadata、signed full GET、MP3 → MP4 key switch 與
   old-key deletion，並已清理該次測試 objects。
@@ -46,7 +49,7 @@ Podcast 先行版用來驗證一條可上線的完整路徑：
   -> PostgreSQL episode/asset metadata
   -> private Cloudflare R2 audio
   -> API authorization and signed URL
-  -> TanStack Start episode list/detail/player
+  -> TanStack Start Podcast list with inline player
 ```
 
 這個切片必須沿用正式的 identity、RBAC、audit、i18n、R2、API client、nginx
@@ -116,10 +119,10 @@ podcast_episode_audio_variants
 
 客戶端：
 
-- Podcast 列表；
-- episode 詳細頁；
+- Podcast 列表與清單內播放器；既有 detail URL 安全轉回清單；
 - cover、標題、摘要與 `trading_date`；不建立 show/series、season、episode
   number 或 scheduled publication；
+- 使用者明確選擇收聽後才請求短效 signed URL；單集載入或媒體失敗可獨立重試；
 - 原生 HTML `<audio>` 的播放、暫停、seek、載入與錯誤狀態；
 - 保存與恢復每位使用者的播放進度；
 - 顯示標題由 canonical 路徑與檔名推導，不接受人工 metadata。
@@ -218,11 +221,11 @@ key 使用 resolved audio locale：例如英文頁面 fallback 至 `zh-hant` 時
   unavailable 狀態。
 - 任一交易日已有音檔但語系不完整時，後台需在該交易日旁列出缺少語系。
 - 只有一個任意語系音檔也可發布；完全沒有音檔時不可發布。
-- 原生 audio element 的 current time 能保存並在重新進入 episode 後恢復。
+- 原生 audio element 的 current time 能保存並在重新進入清單後恢復。
 - localStorage 依 user、episode 與 resolved locale 隔離；無效或超出 duration
   的資料會被忽略或修正，且不影響播放。
-- 列表、詳細頁與播放器具備 responsive、keyboard、loading、empty、404 與
-  failure-state 測試。
+- 列表與播放器具備 responsive、keyboard、loading、empty 與 failure-state
+  測試；舊 detail URL 具備 redirect regression。
 - 從內部建立 episode 到客戶播放的整合測試使用隔離 PostgreSQL 與 fake R2
   signer，不依賴正式 bucket。
 

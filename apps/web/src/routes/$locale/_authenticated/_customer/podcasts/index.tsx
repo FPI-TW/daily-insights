@@ -1,5 +1,6 @@
-import { Link, createFileRoute } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
+import { PodcastPlayer } from "#/components/PodcastPlayer"
 import { ErrorScreen, LoadingScreen } from "#/components/StateScreen"
 import { getPodcastList } from "#/lib/podcasts"
 
@@ -14,7 +15,7 @@ export const Route = createFileRoute(
 
 function PodcastListPage() {
   const episodes = Route.useLoaderData()
-  const { locale } = Route.useRouteContext()
+  const { locale, user } = Route.useRouteContext()
   const { t } = useTranslation()
 
   return (
@@ -32,20 +33,24 @@ function PodcastListPage() {
       ) : (
         <ol className="podcast-list">
           {episodes.map(episode => (
-            <li key={episode.id}>
-              <Link
-                to="/$locale/podcasts/$episodeId"
-                params={{ locale, episodeId: episode.id }}
-                preload="intent"
-                className="podcast-card"
-              >
+            <li key={episode.id} className="podcast-card">
+              <div className="podcast-card-cover" aria-hidden="true">
+                <span>{episode.trading_date.slice(5)}</span>
+              </div>
+              <article className="podcast-card-copy">
                 <time dateTime={episode.trading_date}>
                   {episode.trading_date}
                 </time>
                 <h2>{episode.title}</h2>
                 <p>{episode.summary}</p>
-                <span>{t("podcastListen")}</span>
-              </Link>
+                <PodcastPlayer
+                  key={`${episode.id}:${locale}`}
+                  episodeId={episode.id}
+                  locale={locale}
+                  user={user}
+                  title={episode.title}
+                />
+              </article>
             </li>
           ))}
         </ol>

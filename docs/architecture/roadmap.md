@@ -152,8 +152,9 @@ administration, or Podcast presentation.
 Implementation status: the core Podcast API, audio management workflow, and
 customer playback path are implemented locally with PostgreSQL/fake-R2
 integration coverage, deterministic mock-based Playwright browser E2E, and
-isolated live R2 adapter QA. The current work is to separate customer and admin
-entry points and finish the deliberately limited UI/UX scope below. Actual
+isolated live R2 adapter QA. Customer and admin entry points, guards, layouts,
+and the deliberately limited UI/UX scope below are now implemented locally.
+Actual
 browser playback against R2 (including CORS/range), signed URL expiry, live
 endpoint authentication/upload, network failure, and production capacity
 remain Phase 3 acceptance gaps or Phase 4 production-readiness work. Detailed

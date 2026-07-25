@@ -1,15 +1,17 @@
-import { Outlet, createFileRoute } from "@tanstack/react-router"
-import { ForbiddenScreen } from "#/components/StateScreen"
+import { createFileRoute, redirect } from "@tanstack/react-router"
 import { canEnterBackOffice } from "#/lib/authorization"
 
 export const Route = createFileRoute("/$locale/_authenticated/back-office")({
-  beforeLoad: ({ context }) => ({
-    forbidden: !canEnterBackOffice(context.user),
-  }),
-  component: BackOfficeLayout,
+  beforeLoad: ({ context }) => {
+    throw redirect({
+      to:
+        context.user && canEnterBackOffice(context.user)
+          ? "/$locale/admin/audio"
+          : context.user
+            ? "/$locale/podcasts"
+            : "/$locale/admin/login",
+      params: { locale: context.locale },
+      replace: true,
+    })
+  },
 })
-
-function BackOfficeLayout() {
-  const { forbidden } = Route.useRouteContext()
-  return forbidden ? <ForbiddenScreen /> : <Outlet />
-}

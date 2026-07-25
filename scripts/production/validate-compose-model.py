@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import ipaddress
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+EXPECTED_PROXY_NETWORK = "172.30.0.0/24"
+SERVICES = ("api", "web", "nginx")
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise SystemExit(message)
+
+
+def main() -> None:
+    if len(sys.argv) != 2:
+        raise SystemExit(f"usage: {sys.argv[0]} COMPOSE_MODEL_JSON")
+
+    model: dict[str, Any] = json.loads(Path(sys.argv[1]).read_text())
+    services = model.get("services", {})
+    require(set(services) == set(SERVICES), "production Compose must contain only api/web/nginx")
+
+    for name in SERVICES:
+        service = services[name]
+        require("@sha256:" in service.get("image", ""), f"{name} image must use a digest")
+        require("build" not in service, f"{name} must not build on the host")
+        require(service.get("restart") == "unless-stopped", f"{name} restart policy is invalid")
+        require(service.get("read_only") is True, f"{name} root filesystem must be read-only")
+        require(bool(service.get("healthcheck")), f"{name} must define a healthcheck")
+        stop_grace = service.get("stop_grace_period")
+        require(
+            isinstance(stop_grace, str)
+            and stop_grace.endswith("s")
+            and float(stop_grace[:-1]) > 0,
+            f"{name} must define a positive stop grace period",
+        )
+
+    require(not services["api"].get("ports"), "API must not publish a host port")
+    require(not services["web"].get("ports"), "Web must not publish a host port")
+    nginx_ports = services["nginx"].get("ports", [])
+    require(len(nginx_ports) == 1, "nginx must publish exactly one port")
+    nginx_port = nginx_ports[0]
+    require(
+        nginx_port.get("published") == "443" and nginx_port.get("target") == 443,
+        "nginx must publish only host port 443",
+    )
+
+    tmpfs = services["nginx"].get("tmpfs", [])
+    require(
+        any(str(item).startswith("/etc/nginx/conf.d") for item in tmpfs),
+        "read-only nginx must provide writable tmpfs for envsubst output",
+    )
+
+    app_network = model.get("networks", {}).get("app", {})
+    subnets = [
+        entry.get("subnet")
+        for entry in app_network.get("ipam", {}).get("config", [])
+        if entry.get("subnet")
+    ]
+    require(subnets == [EXPECTED_PROXY_NETWORK], "production app network must use its pinned CIDR")
+    ipaddress.ip_network(subnets[0], strict=True)
+
+    command = [str(item) for item in services["api"].get("command", [])]
+    try:
+        allowed_proxy = command[command.index("--forwarded-allow-ips") + 1]
+    except (ValueError, IndexError):
+        raise SystemExit("API command must set --forwarded-allow-ips") from None
+    require(
+        allowed_proxy == EXPECTED_PROXY_NETWORK,
+        "uvicorn forwarded proxy CIDR must match the app network",
+    )
+
+
+if __name__ == "__main__":
+    main()
