@@ -164,6 +164,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/admin/podcasts/uploads": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Admin Upload */
+    post: operations["admin_podcasts_upload"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/admin/podcasts/{episode_id}": {
     parameters: {
       query?: never
@@ -504,6 +521,35 @@ export interface components {
       /** Csrf Token */
       csrf_token: string
       user: components["schemas"]["UserResponse"]
+    }
+    /** Body_admin_podcasts_upload */
+    Body_admin_podcasts_upload: {
+      /**
+       * Confirm Replacement
+       * @default false
+       */
+      confirm_replacement: boolean
+      /** En */
+      en?: string | null
+      /**
+       * Expected Versions
+       * @default {}
+       */
+      expected_versions: string
+      /**
+       * Reason
+       * @enum {string}
+       */
+      reason: "initial_upload" | "update_file" | "other"
+      /**
+       * Trading Date
+       * Format: date
+       */
+      trading_date: string
+      /** Zh Hans */
+      zh_hans?: string | null
+      /** Zh Hant */
+      zh_hant?: string | null
     }
     /** ChangePasswordRequest */
     ChangePasswordRequest: {
@@ -925,8 +971,6 @@ export interface components {
     PodcastPublicationRequest: {
       /** Expected Version */
       expected_version: number
-      /** Reason */
-      reason: string
     }
     /** PresentationContract */
     PresentationContract: {
@@ -1611,6 +1655,41 @@ export interface operations {
     responses: {
       /** @description Successful Response */
       201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["PodcastEpisodeAdminResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  admin_podcasts_upload: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_admin_podcasts_upload"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
         headers: {
           [name: string]: unknown
         }

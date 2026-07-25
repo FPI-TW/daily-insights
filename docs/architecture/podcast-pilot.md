@@ -7,19 +7,19 @@ Phase 4 上線驗收尚未執行。八大市場正式內容與報告前端在此
 
 目前已完成：
 
-- `admin` 建立、編輯、發布及下架 episode，`admin` 與 `asset_manager`
-  可登記手動上傳的 R2 audio；
-- 同交易日唯一性、完整三語 metadata、發布前 `zh-hant` active audio 驗證；
+- `admin` 發布及下架 episode，`admin` 與 `asset_manager` 可從後台一次上傳
+  1–3 個語系音檔；
+- 同交易日唯一性、任一語系 active audio 發布驗證，以及缺漏語系提示；
 - 同 locale 替換警告、明確確認、expected current version 與新 canonical
   object key；
-- 客戶共用 catalog、detail、`zh-hans`／`en` 到 `zh-hant` fallback，以及短效
-  signed URL；
+- 客戶共用 catalog、detail、requested locale 優先且其後依
+  `zh-hant` → `zh-hans` → `en` fallback，以及短效 signed URL；
 - TanStack Start 三語客戶頁、responsive list/detail、原生 audio element、
   loading/empty/failure state 與依 user/episode/resolved locale 隔離的
   `localStorage` 進度；
-- 內部 Podcast 後台、三語 metadata 表單、R2 object 登記及發布控制；
+- 內部 Podcast 後台、三個可點擊／拖放的語系 slot、R2 upload 及發布控制；
 - PostgreSQL + fake R2 端到端測試，覆蓋建立、發布拒絕、音檔登記、角色限制、
-  locale fallback、替換保留舊版本及下架。
+  locale fallback、同路徑覆寫及下架。
 
 尚待正式環境或 browser 驗收：
 
@@ -27,7 +27,7 @@ Phase 4 上線驗收尚未執行。八大市場正式內容與報告前端在此
   HEAD、copy、checksum、signed URL 與實際播放驗證；
 - 尚未加入 Playwright，因此鍵盤操作、不同 viewport、signed URL 到期及
   R2/network failure 仍需在 Phase 4 前以實際 browser 驗收；
-- back-office 初版只接受已存在 R2 source key，不提供 browser upload。
+- browser upload 尚需在正式 R2、容量及網路條件下執行最終驗收。
 
 ## 目標
 
@@ -46,14 +46,15 @@ Podcast 先行版用來驗證一條可上線的完整路徑：
 
 ## 架構邊界
 
-- `podcasts` 擁有 episode identity、發布狀態、排序、三語 metadata 與對
-  audio/cover asset 的 reference。
+- `podcasts` 擁有 episode identity、發布狀態、排序、由 canonical 路徑推導的
+  顯示資訊，以及對 audio/cover asset 的 reference。
 - `assets` 擁有 R2 object key、MIME type、size、checksum、lifecycle 與
   signed URL；不擁有 Podcast 標題、摘要或發布規則。
 - `admin` 組合 episode 與 asset 的 privileged workflow，並寫入 audit。
 - 客戶 web 只取得可發布的 episode metadata；播放前再向 API 要求短效、
   object-scoped URL。
-- audio bytes 由瀏覽器直接向 R2 取得，不流經 nginx 或 API。
+- 播放 audio bytes 由瀏覽器直接向 R2 取得；後台 upload 則經 nginx/API 的受控
+  multipart endpoint 寫入 private R2。
 - Podcast catalog 由所有具有效 membership 的 org 共用，不套用八市場
   visibility，也沒有 customer-specific episode policy。
 - `trading_date` 是 episode 的唯一業務鍵，由後台指定，不從上傳時間、檔名或
@@ -64,8 +65,8 @@ Podcast 先行版用來驗證一條可上線的完整路徑：
 
 ## R2 與語系音檔
 
-語系屬於 episode 與 asset 的關聯，不從 R2 object key 推導，也不應只依賴
-`assets.locale`。預定關聯為：
+語系同時存在 canonical R2 path 與 episode/asset 關聯；資料庫關聯仍是授權及
+版本切換的 source of truth，讀取端可由固定 path 格式驗證語系。關聯為：
 
 ```text
 podcast_episode_audio_variants
@@ -75,20 +76,23 @@ podcast_episode_audio_variants
   UNIQUE (episode_id, locale)
 ```
 
-- `zh-hant` 是每個已發布 episode 必備的預設音檔。
-- 頁面為 `zh-hans` 或 `en` 時，API 先找完全相符的 audio variant；找不到就
-  回退至 `zh-hant`，並在 response 明確回傳 requested/resolved locale。
+- 已發布 episode 只需至少一個有效語系音檔。
+- API 先找頁面語系完全相符的 audio variant；找不到時依
+  `zh-hant` → `zh-hans` → `en` 選擇第一個可用檔案，並在 response 明確回傳
+  requested/resolved locale。
 - 目前只有繁體中文音檔；既有 R2 objects 會先複製到新的 canonical key 並
   登記為 `zh-hant` variant。只有完成逐檔驗證及整批 migration reconciliation
   後才切換 active mapping。
-- 初版不做 browser/back-office upload。內部人員先手動上傳至 R2，再由
-  back office 或受控管理指令登記 object key；API 必須以 R2 HEAD 驗證 object、
-  MIME type 與 size 後才建立或啟用 asset metadata。
-- 新 object 建議使用
-  `podcasts/{trading-date}/audio/{locale}/podcast-{trading-date}-{locale}-{asset-id}.{ext}`。
-  object key 與檔名只能由後端產生；`asset-id` 防止 R2 原地覆寫、舊 signed URL
-  或 CDN cache 靜默指向不同 bytes。資料庫 mapping 才是語系的 source of
-  truth，既有無語系結構的 key 仍完全支援。
+- 後台提供固定對應 `zh-hant`、`zh-hans`、`en` 的三個 slot，每個皆可點擊或
+  拖放。一次請求至少一檔、最多三檔，不要求固定必備語系。
+- 上傳原因使用固定選單：`initial_upload`（初次上傳）、`update_file`
+  （更新檔案）、`other`（其他）。
+- browser upload 的 object 使用
+  `podcasts/{trading-date}/audio/{locale}/podcast.{ext}`，其中 `{ext}` 僅支援
+  `mp3` 與 `mp4`。三個語系使用相同 basename 並透過 locale 路徑區分；同交易日
+  同語系經明確確認後覆寫，若格式改變則刪除被取代的舊格式 object。
+- object key 與檔名只由後端產生，來源檔名不進入 R2 key。標題由固定檔名
+  `podcast` 與路徑中的 trading date 推導，上傳者不輸入標題或摘要。
 - 初期手動上傳與既有 object 透過受控 migration/import workflow 處理：內部
   人員提供來源 key、`trading_date` 與 locale，後端不信任也不解析舊檔名，
   並將 object 複製到後端產生的 canonical key。正式 upload workflow 完成後
@@ -106,16 +110,13 @@ podcast_episode_audio_variants
   number 或 scheduled publication；
 - 原生 HTML `<audio>` 的播放、暫停、seek、載入與錯誤狀態；
 - 保存與恢復每位使用者的播放進度；
-- `zh-hant`、`zh-hans`、`en` 完整 metadata。
+- 顯示標題由 canonical 路徑與檔名推導，不接受人工 metadata。
 
 內部端：
 
-- `admin` 建立與編輯 episode metadata、關聯 asset，以及執行 draft、publish、
-  unpublish；
-- `admin` 與 `asset_manager` 可登記或替換已手動放入 R2 的 audio/cover
-  object；初版沒有上傳 API，且 `asset_manager` 不取得 episode 發布權限；
-- 檢查三語 metadata、必備 `zh-hant` audio variant、asset 狀態與 MIME type
-  後才允許發布；
+- `admin` 與 `asset_manager` 可透過三語 slot 建立 episode、上傳或替換 audio；
+  `asset_manager` 不取得 episode 發布權限；
+- 檢查至少一個 audio variant、asset 狀態與 MIME type 後才允許發布；
 - privileged mutation audit。
 
 下列功能不納入先行版：RSS feed、公開匿名播放、離線下載、scheduled
@@ -131,8 +132,8 @@ publication、show/series/season、episode number、收聽分析、留言、訂�
   必須回傳 replacement-required 警告，不得直接改變 active mapping。
 - 管理者明確確認後才建立新 asset/version 並切換 active mapping；請求需帶
   expected current version，避免兩位管理者同時操作造成 lost update。
-- 「覆蓋」是產品上的 logical replacement，不是以相同 R2 key 原地改寫 bytes。
-  舊 object 與版本關聯保留、不可再簽發給客戶，且 mutation 必須寫入 audit。
+- 「覆蓋」會以相同 R2 key 原地改寫 bytes；資料庫同步更新 checksum、size 與
+  邏輯版本，且 mutation 必須寫入 audit。
 
 ## 既有 R2 搬移流程
 
@@ -182,23 +183,24 @@ key 使用 resolved audio locale：例如英文頁面 fallback 至 `zh-hant` 時
 - 未登入、停權或不具 membership 的請求無法取得客戶 Podcast catalog 或
   signed URL。
 - draft/unpublished episode 永遠不出現在客戶 API。
+- 特定日期的發布與下架不要求填寫理由；後台執行下架前必須顯示確認警告。
 - audio asset 必須為 active、允許的 MIME type，且 checksum/size 與 metadata
   完整。
 - 所有 org 看到同一份已發布 catalog；任何八市場 policy 調整都不改變
   Podcast 結果。
 - 同一交易日不得建立第二個 logical episode；同 locale replacement 未經明確
   確認不得改變 active audio。
-- replacement 使用新的後端 canonical object key，舊 object 不被原地覆寫。
-- `zh-hans`／`en` variant 存在時必須播放相符檔案；不存在時穩定回退
-  `zh-hant`，且不得回退至任意其他語系。
+- replacement 必須明確確認，並覆寫相同的後端 canonical object key。
+- requested locale variant 存在時必須播放相符檔案；不存在時依
+  `zh-hant` → `zh-hans` → `en` 穩定回退。
 - 既有無 locale object key 的音檔完成 copy/verify 後，canonical copy 登記為
   `zh-hant`；cutover 前不得只因 source object 存在就標記 migration complete。
 - signed URL 有短效期限、只對應單一 object，response 與 log 不含 R2
   credential。
 - asset 被 quarantine、遺失或失效後，不再簽發新 URL；播放器呈現可理解的
   unavailable 狀態。
-- 三語欄位缺漏時不可發布。
-- 沒有 `zh-hant` 音檔時不可發布；缺少其他語系音檔不阻擋發布。
+- 任一交易日已有音檔但語系不完整時，後台需在該交易日旁列出缺少語系。
+- 只有一個任意語系音檔也可發布；完全沒有音檔時不可發布。
 - 原生 audio element 的 current time 能保存並在重新進入 episode 後恢復。
 - localStorage 依 user、episode 與 resolved locale 隔離；無效或超出 duration
   的資料會被忽略或修正，且不影響播放。

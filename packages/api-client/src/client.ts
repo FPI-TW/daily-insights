@@ -5,6 +5,7 @@ import {
   csrfTokenSchema,
   podcastAudioPlaybackSchema,
   type PodcastAudioImportInput,
+  type PodcastUploadInput,
   podcastEpisodeAdminListSchema,
   podcastEpisodeAdminSchema,
   type PodcastEpisodeCreateInput,
@@ -231,6 +232,29 @@ export function createPodcastAdminClient(transport: ApiTransport) {
           method: "POST",
           headers: mutationHeaders(csrfToken),
           body: JSON.stringify(input),
+        }),
+        podcastEpisodeAdminSchema
+      )
+    },
+    async upload(input: PodcastUploadInput, csrfToken: string) {
+      const body = new FormData()
+      body.set("trading_date", input.tradingDate)
+      body.set("reason", input.reason)
+      body.set("confirm_replacement", String(input.confirmReplacement))
+      body.set("expected_versions", JSON.stringify(input.expectedVersions))
+      const fieldNames: Record<Locale, string> = {
+        "zh-hant": "zh_hant",
+        "zh-hans": "zh_hans",
+        en: "en",
+      }
+      for (const [locale, file] of Object.entries(input.files)) {
+        if (file) body.set(fieldNames[locale as Locale], file)
+      }
+      return parseResponse(
+        await transport("/api/admin/podcasts/uploads", {
+          method: "POST",
+          headers: { "X-CSRF-Token": csrfToken },
+          body,
         }),
         podcastEpisodeAdminSchema
       )

@@ -73,13 +73,16 @@ OpenAPI、回應或結構化 log。
 - `GET /api/podcasts/{episode_id}?locale=zh-hant`
 - `POST /api/podcasts/{episode_id}/audio-url?locale=zh-hant`
 
-內部 Podcast API 位於 `/api/admin/podcasts`。`admin` 可建立、編輯、發布與
-下架；`admin` 與 `asset_manager` 可將已手動上傳的來源 object 登記為版本化
-音檔。登記流程會複製到後端產生的 canonical key，核對 size、MIME type 與
-SHA-256 後才更新 active mapping，不會刪除來源或舊版本。
+內部 Podcast API 位於 `/api/admin/podcasts`。`admin` 可發布與下架；
+`admin` 與 `asset_manager` 可透過 multipart endpoint 一次上傳 1–3 個語系
+音檔。後端統一寫入
+`podcasts/{trading-date}/audio/{locale}/podcast.{ext}`，其中 `{ext}` 僅支援
+`mp3` 與 `mp4`。同交易日同語系確認後
+直接覆寫該 object，並同步更新 size、MIME type、SHA-256 與邏輯版本。
 
-客戶只能取得已發布內容與短效、object-scoped R2 URL。`zh-hans` 或 `en` 沒有
-對應音檔時只會回退至 `zh-hant`，回應會同時標明 requested 與 resolved locale。
+客戶只能取得已發布內容與短效、object-scoped R2 URL。requested locale 沒有
+對應音檔時依 `zh-hant` → `zh-hans` → `en` 回退，回應會同時標明 requested
+與 resolved locale。
 
 ## Phase 1：身份與租戶
 

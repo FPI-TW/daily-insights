@@ -1,5 +1,8 @@
 import uuid
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
+from pathlib import PurePosixPath
+from typing import BinaryIO
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +15,7 @@ from daily_insights_api.modules.assets.api import (
     AssetMigrationInput,
     ObjectRef,
     ObjectStore,
+    canonical_podcast_upload_key,
     load_asset_for_signing,
     migrate_podcast_assets,
     sign_asset_download,
@@ -40,10 +44,17 @@ class PodcastNotFoundError(LookupError):
 
 
 class PodcastConflictError(RuntimeError):
-    def __init__(self, code: str, *, current_version: int | None = None) -> None:
+    def __init__(
+        self,
+        code: str,
+        *,
+        current_version: int | None = None,
+        current_versions: dict[str, int] | None = None,
+    ) -> None:
         super().__init__(code)
         self.code = code
         self.current_version = current_version
+        self.current_versions = current_versions
 
 
 class PodcastPublicationError(RuntimeError):
@@ -52,6 +63,37 @@ class PodcastPublicationError(RuntimeError):
 
 class PodcastMediaUnavailableError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class PodcastAudioUpload:
+    locale: Locale
+    content: BinaryIO
+    size_bytes: int
+    mime_type: str
+    sha256: str
+
+
+def derived_episode_metadata(trading_date: date) -> tuple[PodcastMetadata, ...]:
+    values: list[PodcastMetadata] = []
+    locales: tuple[Locale, ...] = ("zh-hant", "zh-hans", "en")
+    for locale in locales:
+        path = PurePosixPath(
+            canonical_podcast_upload_key(
+                trading_date=trading_date,
+                locale=locale,
+                mime_type="audio/mpeg",
+            )
+        )
+        day = path.parts[1]
+        values.append(
+            PodcastMetadata(
+                locale=locale,
+                title=f"{path.stem.title()} | {day}",
+                summary=day,
+            )
+        )
+    return tuple(values)
 
 
 async def get_episode(
@@ -104,13 +146,6 @@ async def episode_admin_response(
     database: AsyncSession,
     episode: PodcastEpisode,
 ) -> PodcastEpisodeAdminResponse:
-    translations = (
-        await database.scalars(
-            select(PodcastEpisodeTranslation)
-            .where(PodcastEpisodeTranslation.episode_id == episode.id)
-            .order_by(PodcastEpisodeTranslation.locale)
-        )
-    ).all()
     variants = (
         await database.scalars(
             select(PodcastEpisodeAudioVariant)
@@ -128,10 +163,7 @@ async def episode_admin_response(
         trading_date=episode.trading_date,
         status=episode.status,
         version=episode.version,
-        metadata=tuple(
-            PodcastMetadata(locale=item.locale, title=item.title, summary=item.summary)
-            for item in translations
-        ),
+        metadata=derived_episode_metadata(episode.trading_date),
         audio_variants=tuple(
             PodcastAudioVariantResponse(
                 asset_id=item.asset_id,
@@ -144,22 +176,6 @@ async def episode_admin_response(
         cover_asset_id=episode.cover_asset_id,
         published_at=episode.published_at,
     )
-
-
-async def _localized_translation(
-    database: AsyncSession,
-    episode_id: uuid.UUID,
-    locale: Locale,
-) -> PodcastEpisodeTranslation:
-    translation = await database.scalar(
-        select(PodcastEpisodeTranslation).where(
-            PodcastEpisodeTranslation.episode_id == episode_id,
-            PodcastEpisodeTranslation.locale == locale,
-        )
-    )
-    if translation is None:
-        raise PodcastPublicationError("published episode metadata is incomplete")
-    return translation
 
 
 async def list_published_episodes(
@@ -175,13 +191,15 @@ async def list_published_episodes(
     ).all()
     responses: list[PodcastEpisodeSummaryResponse] = []
     for episode in episodes:
-        translation = await _localized_translation(database, episode.id, locale)
+        metadata = next(
+            item for item in derived_episode_metadata(episode.trading_date) if item.locale == locale
+        )
         responses.append(
             PodcastEpisodeSummaryResponse(
                 id=episode.id,
                 trading_date=episode.trading_date,
-                title=translation.title,
-                summary=translation.summary,
+                title=metadata.title,
+                summary=metadata.summary,
                 locale=locale,
                 cover_asset_id=episode.cover_asset_id,
             )
@@ -202,12 +220,14 @@ async def published_episode_detail(
     )
     if episode is None or episode.published_at is None:
         raise PodcastNotFoundError
-    translation = await _localized_translation(database, episode.id, locale)
+    metadata = next(
+        item for item in derived_episode_metadata(episode.trading_date) if item.locale == locale
+    )
     return PodcastEpisodeDetailResponse(
         id=episode.id,
         trading_date=episode.trading_date,
-        title=translation.title,
-        summary=translation.summary,
+        title=metadata.title,
+        summary=metadata.summary,
         locale=locale,
         cover_asset_id=episode.cover_asset_id,
         published_at=episode.published_at,
@@ -215,31 +235,154 @@ async def published_episode_detail(
 
 
 async def ensure_publishable(database: AsyncSession, episode: PodcastEpisode) -> None:
-    locales = set(
-        (
-            await database.scalars(
-                select(PodcastEpisodeTranslation.locale).where(
-                    PodcastEpisodeTranslation.episode_id == episode.id
-                )
-            )
-        ).all()
-    )
-    if locales != {"zh-hant", "zh-hans", "en"}:
-        raise PodcastPublicationError("complete three-locale metadata is required")
-    zh_hant = await database.scalar(
+    audio = await database.scalar(
         select(PodcastEpisodeAudioVariant)
         .join(Asset, Asset.id == PodcastEpisodeAudioVariant.asset_id)
         .where(
             PodcastEpisodeAudioVariant.episode_id == episode.id,
-            PodcastEpisodeAudioVariant.locale == "zh-hant",
             PodcastEpisodeAudioVariant.is_active.is_(True),
             Asset.status == AssetStatus.ACTIVE,
             Asset.kind == AssetKind.AUDIO,
             Asset.mime_type.in_(ALLOWED_PODCAST_AUDIO_MIME_TYPES),
         )
     )
-    if zh_hant is None:
-        raise PodcastPublicationError("active zh-hant audio is required")
+    if audio is None:
+        raise PodcastPublicationError("at least one active audio file is required")
+
+
+async def upload_audio_batch(
+    database: AsyncSession,
+    store: ObjectStore,
+    settings: Settings,
+    episode: PodcastEpisode,
+    uploads: tuple[PodcastAudioUpload, ...],
+    *,
+    actor_user_id: uuid.UUID,
+    confirm_replacement: bool,
+    expected_versions: dict[str, int],
+) -> tuple[PodcastEpisodeAudioVariant, ...]:
+    if not 1 <= len(uploads) <= 3:
+        raise ValueError("Podcast upload requires one to three files")
+    locales = [upload.locale for upload in uploads]
+    if len(locales) != len(set(locales)):
+        raise ValueError("Podcast upload locales must be unique")
+    if settings.r2_bucket_name is None:
+        raise PodcastMediaUnavailableError("R2 bucket is not configured")
+
+    current_rows = (
+        await database.scalars(
+            select(PodcastEpisodeAudioVariant)
+            .where(
+                PodcastEpisodeAudioVariant.episode_id == episode.id,
+                PodcastEpisodeAudioVariant.locale.in_(locales),
+                PodcastEpisodeAudioVariant.is_active.is_(True),
+            )
+            .with_for_update()
+        )
+    ).all()
+    current_by_locale = {row.locale: row for row in current_rows}
+    current_asset_ids = [row.asset_id for row in current_rows]
+    current_assets = (
+        {
+            asset.id: asset
+            for asset in (
+                await database.scalars(
+                    select(Asset).where(Asset.id.in_(current_asset_ids)).with_for_update()
+                )
+            ).all()
+        }
+        if current_asset_ids
+        else {}
+    )
+    conflicts = {locale: row.version for locale, row in current_by_locale.items()}
+    if conflicts and not confirm_replacement:
+        raise PodcastConflictError(
+            "replacement_confirmation_required",
+            current_versions=conflicts,
+        )
+    for locale, row in current_by_locale.items():
+        if expected_versions.get(locale) != row.version:
+            raise PodcastConflictError(
+                "audio_version_conflict",
+                current_versions=conflicts,
+            )
+
+    variants: list[PodcastEpisodeAudioVariant] = []
+    for upload in uploads:
+        current = current_by_locale.get(upload.locale)
+        current_asset = current_assets.get(current.asset_id) if current is not None else None
+        version = 1 if current is None else current.version + 1
+        target = ObjectRef(
+            bucket=settings.r2_bucket_name,
+            key=canonical_podcast_upload_key(
+                trading_date=episode.trading_date,
+                locale=upload.locale,
+                mime_type=upload.mime_type,
+            ),
+        )
+        await store.overwrite(
+            target,
+            upload.content,
+            size_bytes=upload.size_bytes,
+            mime_type=upload.mime_type,
+            sha256=upload.sha256,
+        )
+        asset = current_asset
+        if asset is None:
+            asset = await database.scalar(
+                select(Asset).where(Asset.object_key == target.key).with_for_update()
+            )
+        if asset is None:
+            asset = Asset(
+                id=uuid.uuid4(),
+                bucket=target.bucket,
+                object_key=target.key,
+                kind=AssetKind.AUDIO,
+                mime_type=upload.mime_type,
+                size_bytes=upload.size_bytes,
+                sha256=upload.sha256,
+                locale=upload.locale,
+                localized_titles={},
+                status=AssetStatus.ACTIVE,
+                uploaded_by_user_id=actor_user_id,
+            )
+            database.add(asset)
+        else:
+            previous_ref = ObjectRef(bucket=asset.bucket, key=asset.object_key)
+            asset.bucket = target.bucket
+            asset.object_key = target.key
+            asset.kind = AssetKind.AUDIO
+            asset.mime_type = upload.mime_type
+            asset.size_bytes = upload.size_bytes
+            asset.sha256 = upload.sha256
+            asset.locale = upload.locale
+            asset.status = AssetStatus.ACTIVE
+            asset.uploaded_by_user_id = actor_user_id
+            asset.deleted_by_user_id = None
+            asset.deleted_at = None
+            if previous_ref != target:
+                await store.delete(previous_ref)
+        if current is not None:
+            current.version = version
+            current.asset_id = asset.id
+            current.activated_by_user_id = actor_user_id
+            current.replaced_at = None
+            variant = current
+        else:
+            variant = PodcastEpisodeAudioVariant(
+                episode_id=episode.id,
+                locale=upload.locale,
+                version=version,
+                asset_id=asset.id,
+                is_active=True,
+                activated_by_user_id=actor_user_id,
+            )
+            database.add(variant)
+        variants.append(variant)
+
+    episode.version += 1
+    await database.flush()
+    return tuple(variants)
 
 
 async def import_audio(

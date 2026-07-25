@@ -24,6 +24,10 @@ _AUDIO_EXTENSIONS = {
     "audio/x-wav": "wav",
 }
 ALLOWED_PODCAST_AUDIO_MIME_TYPES = frozenset(_AUDIO_EXTENSIONS)
+BROWSER_PODCAST_AUDIO_EXTENSIONS = {
+    "audio/mpeg": "mp3",
+    "audio/mp4": "mp4",
+}
 
 
 class AssetContract(BaseModel):
@@ -143,6 +147,19 @@ def canonical_podcast_audio_key(
     return f"podcasts/{day}/audio/{locale}/podcast-{day}-{locale}-{asset_id}.{extension}"
 
 
+def canonical_podcast_upload_key(
+    *,
+    trading_date: date,
+    locale: Locale,
+    mime_type: str,
+) -> str:
+    try:
+        extension = BROWSER_PODCAST_AUDIO_EXTENSIONS[mime_type.lower()]
+    except KeyError as error:
+        raise ValueError("unsupported browser Podcast audio MIME type") from error
+    return f"podcasts/{trading_date.isoformat()}/audio/{locale}/podcast.{extension}"
+
+
 def migration_idempotency_key(entries: tuple[AssetMigrationInput, ...]) -> str:
     return _migration_idempotency_key(
         (
@@ -206,6 +223,7 @@ async def sign_asset_download(
 
 __all__ = [
     "ALLOWED_PODCAST_AUDIO_MIME_TYPES",
+    "BROWSER_PODCAST_AUDIO_EXTENSIONS",
     "Asset",
     "AssetForSigning",
     "AssetMigrationInput",
@@ -216,6 +234,7 @@ __all__ = [
     "ObjectStore",
     "SignedAsset",
     "canonical_podcast_audio_key",
+    "canonical_podcast_upload_key",
     "load_asset_for_signing",
     "migrate_podcast_assets",
     "sign_asset_download",

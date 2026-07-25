@@ -126,6 +126,69 @@
         "title": "AuthenticationResponse",
         "type": "object"
       },
+      "Body_admin_podcasts_upload": {
+        "properties": {
+          "confirm_replacement": {
+            "default": false,
+            "title": "Confirm Replacement",
+            "type": "boolean"
+          },
+          "en": {
+            "anyOf": [
+              {
+                "contentMediaType": "application/octet-stream",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "En"
+          },
+          "expected_versions": {
+            "default": "{}",
+            "title": "Expected Versions",
+            "type": "string"
+          },
+          "reason": {
+            "enum": ["initial_upload", "update_file", "other"],
+            "title": "Reason",
+            "type": "string"
+          },
+          "trading_date": {
+            "format": "date",
+            "title": "Trading Date",
+            "type": "string"
+          },
+          "zh_hans": {
+            "anyOf": [
+              {
+                "contentMediaType": "application/octet-stream",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zh Hans"
+          },
+          "zh_hant": {
+            "anyOf": [
+              {
+                "contentMediaType": "application/octet-stream",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zh Hant"
+          }
+        },
+        "required": ["trading_date", "reason"],
+        "title": "Body_admin_podcasts_upload",
+        "type": "object"
+      },
       "ChangePasswordRequest": {
         "properties": {
           "current_password": {
@@ -1143,15 +1206,9 @@
             "exclusiveMinimum": 0.0,
             "title": "Expected Version",
             "type": "integer"
-          },
-          "reason": {
-            "maxLength": 2000,
-            "minLength": 1,
-            "title": "Reason",
-            "type": "string"
           }
         },
-        "required": ["expected_version", "reason"],
+        "required": ["expected_version"],
         "title": "PodcastPublicationRequest",
         "type": "object"
       },
@@ -2379,6 +2436,63 @@
           }
         },
         "summary": "Admin Create",
+        "tags": ["podcasts"]
+      }
+    },
+    "/api/admin/podcasts/uploads": {
+      "post": {
+        "operationId": "admin_podcasts_upload",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_admin_podcasts_upload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PodcastEpisodeAdminResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Upload",
         "tags": ["podcasts"]
       }
     },

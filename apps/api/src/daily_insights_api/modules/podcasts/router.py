@@ -1,15 +1,32 @@
+import hashlib
+import json
+import mimetypes
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from pathlib import PurePath
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.config import Settings
 from daily_insights_api.core.enums import SystemRole
-from daily_insights_api.modules.assets.api import ObjectStore
+from daily_insights_api.modules.assets.api import (
+    BROWSER_PODCAST_AUDIO_EXTENSIONS,
+    ObjectStore,
+)
 from daily_insights_api.modules.audit.api import record_audit_event
 from daily_insights_api.modules.identity.api import (
     AuthContext,
@@ -26,9 +43,11 @@ from daily_insights_api.modules.podcasts.api import (
     PodcastEpisodeSummaryResponse,
     PodcastEpisodeUpdate,
     PodcastPublicationRequest,
+    PodcastUploadReason,
 )
 from daily_insights_api.modules.podcasts.models import PodcastEpisode
 from daily_insights_api.modules.podcasts.service import (
+    PodcastAudioUpload,
     PodcastConflictError,
     PodcastMediaUnavailableError,
     PodcastNotFoundError,
@@ -41,6 +60,7 @@ from daily_insights_api.modules.podcasts.service import (
     published_episode_detail,
     replace_metadata,
     sign_episode_audio,
+    upload_audio_batch,
 )
 from daily_insights_api.web.dependencies import get_database_session, get_object_store
 
@@ -57,6 +77,7 @@ AssetWrite = Annotated[
 CustomerRead = Annotated[AuthContext, Depends(require_roles(SystemRole.ORG_MEMBER))]
 Database = Annotated[AsyncSession, Depends(get_database_session)]
 Store = Annotated[ObjectStore, Depends(get_object_store)]
+MAX_PODCAST_AUDIO_BYTES = 256 * 1024 * 1024
 
 
 def _not_found() -> HTTPException:
@@ -72,6 +93,86 @@ def _require_expected_version(episode: PodcastEpisode, expected_version: int) ->
                 "current_version": episode.version,
             },
         )
+
+
+def _audio_mime_type(upload: UploadFile) -> str:
+    extension_types = {
+        ".mp3": "audio/mpeg",
+        ".mp4": "audio/mp4",
+    }
+    suffix = PurePath(upload.filename or "").suffix.lower()
+    expected = extension_types.get(suffix)
+    if expected is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "unsupported_audio_type"},
+        )
+    declared = (upload.content_type or "").lower()
+    aliases = {
+        "audio/mp3": "audio/mpeg",
+        "video/mp4": "audio/mp4",
+    }
+    declared = aliases.get(declared, declared)
+    if declared in BROWSER_PODCAST_AUDIO_EXTENSIONS and declared == expected:
+        return expected
+    guessed = mimetypes.guess_type(upload.filename or "")[0] or ""
+    guessed = aliases.get(guessed.lower(), guessed.lower())
+    if guessed in BROWSER_PODCAST_AUDIO_EXTENSIONS and guessed == expected:
+        return expected
+    raise HTTPException(
+        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={"code": "unsupported_audio_type"},
+    )
+
+
+async def _prepare_audio_upload(locale: Locale, upload: UploadFile) -> PodcastAudioUpload:
+    digest = hashlib.sha256()
+    size_bytes = 0
+    while chunk := await upload.read(1024 * 1024):
+        size_bytes += len(chunk)
+        if size_bytes > MAX_PODCAST_AUDIO_BYTES:
+            raise HTTPException(
+                status.HTTP_413_CONTENT_TOO_LARGE,
+                detail={"code": "podcast_audio_too_large"},
+            )
+        digest.update(chunk)
+    if size_bytes == 0:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "podcast_audio_empty"},
+        )
+    await upload.seek(0)
+    return PodcastAudioUpload(
+        locale=locale,
+        content=upload.file,
+        size_bytes=size_bytes,
+        mime_type=_audio_mime_type(upload),
+        sha256=digest.hexdigest(),
+    )
+
+
+def _parse_expected_versions(raw: str) -> dict[str, int]:
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "invalid_expected_versions"},
+        ) from error
+    if not isinstance(value, dict):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "invalid_expected_versions"},
+        )
+    result: dict[str, int] = {}
+    for locale, version in value.items():
+        if locale not in {"zh-hant", "zh-hans", "en"} or not isinstance(version, int):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "invalid_expected_versions"},
+            )
+        result[locale] = version
+    return result
 
 
 @router.get(
@@ -268,7 +369,6 @@ async def admin_publish(
         target_type="podcast_episode",
         target_id=str(episode.id),
         after={"version": episode.version},
-        reason=payload.reason,
         request_id=request.state.request_id,
     )
     await database.commit()
@@ -305,7 +405,98 @@ async def admin_unpublish(
         target_type="podcast_episode",
         target_id=str(episode.id),
         after={"version": episode.version},
-        reason=payload.reason,
+        request_id=request.state.request_id,
+    )
+    await database.commit()
+    return await episode_admin_response(database, episode)
+
+
+@router.post(
+    "/api/admin/podcasts/uploads",
+    response_model=PodcastEpisodeAdminResponse,
+    operation_id="admin_podcasts_upload",
+)
+async def admin_upload(
+    request: Request,
+    actor: AssetWrite,
+    database: Database,
+    store: Store,
+    trading_date: Annotated[date, Form()],
+    reason: Annotated[PodcastUploadReason, Form()],
+    confirm_replacement: Annotated[bool, Form()] = False,
+    expected_versions: Annotated[str, Form()] = "{}",
+    zh_hant: Annotated[UploadFile | None, File()] = None,
+    zh_hans: Annotated[UploadFile | None, File()] = None,
+    en: Annotated[UploadFile | None, File()] = None,
+) -> PodcastEpisodeAdminResponse:
+    candidates: tuple[tuple[Locale, UploadFile | None], ...] = (
+        ("zh-hant", zh_hant),
+        ("zh-hans", zh_hans),
+        ("en", en),
+    )
+    selected = tuple((locale, upload) for locale, upload in candidates if upload is not None)
+    if not selected:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "podcast_audio_required"},
+        )
+    uploads = tuple([await _prepare_audio_upload(locale, upload) for locale, upload in selected])
+    episode = await database.scalar(
+        select(PodcastEpisode).where(PodcastEpisode.trading_date == trading_date).with_for_update()
+    )
+    created = episode is None
+    if episode is None:
+        episode = PodcastEpisode(
+            trading_date=trading_date,
+            status="draft",
+            version=1,
+            created_by_user_id=actor.user.id,
+        )
+        database.add(episode)
+        try:
+            await database.flush()
+        except IntegrityError as error:
+            await database.rollback()
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "trading_date_already_exists"},
+            ) from error
+    try:
+        variants = await upload_audio_batch(
+            database,
+            store,
+            request.app.state.settings,
+            episode,
+            uploads,
+            actor_user_id=actor.user.id,
+            confirm_replacement=confirm_replacement,
+            expected_versions=_parse_expected_versions(expected_versions),
+        )
+    except PodcastConflictError as error:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": error.code,
+                "current_versions": error.current_versions or {},
+            },
+        ) from error
+    except PodcastMediaUnavailableError as error:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "audio_upload_failed", "message": str(error)},
+        ) from error
+    record_audit_event(
+        database,
+        actor_user_id=actor.user.id,
+        action="podcast.episode_uploaded" if created else "podcast.audio_uploaded",
+        target_type="podcast_episode",
+        target_id=str(episode.id),
+        after={
+            "trading_date": episode.trading_date.isoformat(),
+            "locales": [variant.locale for variant in variants],
+            "version": episode.version,
+        },
+        reason=reason,
         request_id=request.state.request_id,
     )
     await database.commit()

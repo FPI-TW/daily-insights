@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   createAuthClient,
   createBrowserTransport,
+  createPodcastAdminClient,
   createPodcastClient,
 } from "../src"
 import { createServerTransport } from "../src/server"
@@ -96,5 +97,49 @@ describe("API client trust boundary", () => {
     )
 
     await expect(client.list("en")).rejects.toMatchObject({ status: 502 })
+  })
+
+  it("uploads one to three Podcast files as multipart without forcing content type", async () => {
+    let captured: RequestInit | undefined
+    const client = createPodcastAdminClient(async (_path, init) => {
+      captured = init
+      return Response.json({
+        id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
+        trading_date: "2026-07-25",
+        status: "draft",
+        version: 2,
+        metadata: [
+          {
+            locale: "zh-hant",
+            title: "Podcast | 2026-07-25",
+            summary: "2026-07-25",
+          },
+        ],
+        audio_variants: [],
+        cover_asset_id: null,
+        published_at: null,
+      })
+    })
+
+    await client.upload(
+      {
+        tradingDate: "2026-07-25",
+        reason: "initial_upload",
+        files: {
+          en: new File(["podcast"], "source-name.mp3", {
+            type: "audio/mpeg",
+          }),
+        },
+        confirmReplacement: false,
+        expectedVersions: {},
+      },
+      "csrf-token"
+    )
+
+    expect(captured?.body).toBeInstanceOf(FormData)
+    const headers = new Headers(captured?.headers)
+    expect(headers.get("x-csrf-token")).toBe("csrf-token")
+    expect(headers.has("content-type")).toBe(false)
+    expect((captured?.body as FormData).get("en")).toBeInstanceOf(File)
   })
 })

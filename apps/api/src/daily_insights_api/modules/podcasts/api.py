@@ -5,8 +5,10 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Locale = Literal["zh-hant", "zh-hans", "en"]
+PodcastUploadReason = Literal["initial_upload", "update_file", "other"]
 SUPPORTED_LOCALES = frozenset(("zh-hant", "zh-hans", "en"))
 DEFAULT_AUDIO_LOCALE: Locale = "zh-hant"
+PODCAST_AUDIO_FALLBACK_ORDER: tuple[Locale, ...] = ("zh-hant", "zh-hans", "en")
 
 
 class PodcastContract(BaseModel):
@@ -73,7 +75,6 @@ class PodcastEpisodeUpdate(PodcastContract):
 
 class PodcastPublicationRequest(PodcastContract):
     expected_version: int = Field(gt=0)
-    reason: str = Field(min_length=1, max_length=2_000)
 
 
 class PodcastAudioImportRequest(PodcastContract):
@@ -136,9 +137,14 @@ def resolve_audio_variant(
     requested_locale: Locale,
 ) -> ResolvedPodcastAudio:
     by_locale = {variant.locale: variant for variant in variants}
-    variant = by_locale.get(requested_locale) or by_locale.get(DEFAULT_AUDIO_LOCALE)
+    variant = by_locale.get(requested_locale)
     if variant is None:
-        raise AudioVariantUnavailableError("no requested or zh-hant Podcast audio is available")
+        variant = next(
+            (by_locale[locale] for locale in PODCAST_AUDIO_FALLBACK_ORDER if locale in by_locale),
+            None,
+        )
+    if variant is None:
+        raise AudioVariantUnavailableError("no Podcast audio is available")
     return ResolvedPodcastAudio(
         requested_locale=requested_locale,
         resolved_locale=variant.locale,

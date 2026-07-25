@@ -13,6 +13,8 @@ grep -q 'proxy_buffering off;' "$config_file"
 grep -q 'X-Accel-Buffering "no"' "$config_file"
 grep -q 'location ~ \^/api/podcasts/' "$config_file"
 grep -q 'client_max_body_size 16k;' "$config_file"
+grep -q 'location = /api/admin/podcasts/uploads' "$config_file"
+grep -q 'client_max_body_size 800m;' "$config_file"
 grep -q 'proxy_set_header Host $http_host;' "$config_file"
 grep -q 'proxy_set_header X-Forwarded-Host $http_host;' "$config_file"
 

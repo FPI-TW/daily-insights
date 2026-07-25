@@ -531,6 +531,68 @@ button:disabled {
   gap: 1rem;
 }
 
+.podcast-upload-form > h2,
+.podcast-upload-form > p {
+  margin: 0;
+}
+
+.podcast-upload-slots {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.podcast-upload-slot {
+  display: grid;
+  min-height: 10rem;
+  place-items: center;
+  align-content: center;
+  border: 1px dashed color-mix(in oklab, var(--lagoon) 55%, var(--line));
+  border-radius: 1rem;
+  background: color-mix(in oklab, var(--lagoon) 5%, var(--surface));
+  gap: 0.75rem;
+  padding: 1rem;
+  text-align: center;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.podcast-upload-slot[data-dragging] {
+  border-color: var(--lagoon);
+  background: color-mix(in oklab, var(--lagoon) 14%, var(--surface));
+  transform: translateY(-2px);
+}
+
+.podcast-upload-slot input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.podcast-upload-slot label {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.podcast-upload-slot button {
+  padding: 0.45rem 0.75rem;
+}
+
+.podcast-locale-warning {
+  width: fit-content;
+  margin: 0;
+  border-radius: 0.6rem;
+  background: color-mix(in oklab, var(--lagoon) 18%, var(--surface));
+  color: var(--sea-ink);
+  padding: 0.55rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
 .podcast-admin-list {
   display: grid;
   margin-top: 3rem;
@@ -596,6 +658,11 @@ button:disabled {
   .app-header,
   .app-header nav {
     align-items: flex-start;
+  }
+
+  .podcast-upload-slots,
+  .podcast-publication-controls {
+    grid-template-columns: 1fr;
   }
 
   .app-header {

@@ -2,11 +2,11 @@ import {
   ApiError,
   type Locale,
   type PodcastEpisodeAdmin,
-  type PodcastMetadata,
+  type PodcastUploadReason,
 } from "@daily-insights/api-client"
 import { useForm } from "@tanstack/react-form"
 import { createFileRoute, useRouter } from "@tanstack/react-router"
-import { useState } from "react"
+import { useState, type DragEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { ErrorScreen, LoadingScreen } from "#/components/StateScreen"
 import {
@@ -24,45 +24,9 @@ export const Route = createFileRoute(
   component: PodcastAdminPage,
 })
 
-function metadataFrom(values: {
-  zhTwTitle: string
-  zhTwSummary: string
-  zhCnTitle: string
-  zhCnSummary: string
-  enTitle: string
-  enSummary: string
-}): PodcastMetadata[] {
-  return [
-    {
-      locale: "zh-hant",
-      title: values.zhTwTitle,
-      summary: values.zhTwSummary,
-    },
-    {
-      locale: "zh-hans",
-      title: values.zhCnTitle,
-      summary: values.zhCnSummary,
-    },
-    { locale: "en", title: values.enTitle, summary: values.enSummary },
-  ]
-}
-
-function metadataValue(
-  episode: PodcastEpisodeAdmin,
-  locale: Locale,
-  field: "title" | "summary"
-) {
-  return episode.metadata.find(item => item.locale === locale)?.[field] ?? ""
-}
-
-const metadataFieldSpecs = [
-  ["zhTwTitle", "zh-hant", "title"],
-  ["zhTwSummary", "zh-hant", "summary"],
-  ["zhCnTitle", "zh-hans", "title"],
-  ["zhCnSummary", "zh-hans", "summary"],
-  ["enTitle", "en", "title"],
-  ["enSummary", "en", "summary"],
-] as const
+const podcastLocales = ["zh-hant", "zh-hans", "en"] as const
+type PodcastFiles = Record<Locale, File | null>
+type ExpectedVersions = Partial<Record<Locale, number>>
 
 function PodcastAdminPage() {
   const episodes = Route.useLoaderData()
@@ -75,7 +39,7 @@ function PodcastAdminPage() {
         <h1>{t("podcastAdminTitle")}</h1>
         <p>{t("podcastAdminDescription")}</p>
       </header>
-      {user.system_role === "admin" && <CreateEpisodeForm />}
+      <PodcastUploadForm />
       <section className="podcast-admin-list">
         <h2>{t("podcastEpisodes")}</h2>
         {episodes.length === 0 ? (
@@ -94,51 +58,87 @@ function PodcastAdminPage() {
   )
 }
 
-function CreateEpisodeForm() {
+function PodcastUploadForm() {
   const router = useRouter()
   const { t } = useTranslation()
   const [error, setError] = useState("")
+  const [replacementVersions, setReplacementVersions] =
+    useState<ExpectedVersions | null>(null)
+  const [files, setFiles] = useState<PodcastFiles>({
+    "zh-hant": null,
+    "zh-hans": null,
+    en: null,
+  })
   const form = useForm({
     defaultValues: {
       tradingDate: "",
-      zhTwTitle: "",
-      zhTwSummary: "",
-      zhCnTitle: "",
-      zhCnSummary: "",
-      enTitle: "",
-      enSummary: "",
-      reason: "",
+      reason: "initial_upload" as PodcastUploadReason,
     },
-    onSubmit: async ({ value }) => {
-      setError("")
-      try {
-        await browserPodcastAdminClient().create(
-          {
-            trading_date: value.tradingDate,
-            metadata: { values: metadataFrom(value) },
-            reason: value.reason,
-          },
-          await requireCsrfToken()
-        )
-        form.reset()
-        await router.invalidate()
-      } catch (caught) {
-        setError(
-          caught instanceof Error ? caught.message : t("unexpectedError")
-        )
-      }
-    },
+    onSubmit: async ({ value }) => runUpload(value, files, false, {}),
   })
+
+  async function runUpload(
+    value: typeof form.state.values,
+    selectedFiles: PodcastFiles,
+    confirmReplacement: boolean,
+    expectedVersions: ExpectedVersions
+  ) {
+    setError("")
+    setReplacementVersions(null)
+    const files = Object.fromEntries(
+      podcastLocales
+        .filter(locale => selectedFiles[locale] !== null)
+        .map(locale => [locale, selectedFiles[locale]])
+    ) as Partial<Record<Locale, File>>
+    if (Object.keys(files).length === 0) {
+      setError(t("podcastUploadAtLeastOne"))
+      return
+    }
+    try {
+      await browserPodcastAdminClient().upload(
+        {
+          tradingDate: value.tradingDate,
+          reason: value.reason,
+          files,
+          confirmReplacement,
+          expectedVersions,
+        },
+        await requireCsrfToken()
+      )
+      form.reset()
+      setFiles({ "zh-hant": null, "zh-hans": null, en: null })
+      await router.invalidate({ sync: true })
+    } catch (caught) {
+      if (
+        caught instanceof ApiError &&
+        caught.status === 409 &&
+        typeof caught.detail === "object" &&
+        caught.detail !== null &&
+        "code" in caught.detail &&
+        caught.detail.code === "replacement_confirmation_required" &&
+        "current_versions" in caught.detail &&
+        typeof caught.detail.current_versions === "object" &&
+        caught.detail.current_versions !== null
+      ) {
+        setReplacementVersions(
+          caught.detail.current_versions as ExpectedVersions
+        )
+        return
+      }
+      setError(caught instanceof Error ? caught.message : t("unexpectedError"))
+    }
+  }
 
   return (
     <form
-      className="podcast-admin-form"
+      className="podcast-admin-form podcast-upload-form"
       onSubmit={event => {
         event.preventDefault()
         void form.handleSubmit()
       }}
     >
-      <h2>{t("podcastCreateEpisode")}</h2>
+      <h2>{t("podcastUploadTitle")}</h2>
+      <p>{t("podcastUploadDescription")}</p>
       <form.Field name="tradingDate">
         {field => (
           <label>
@@ -153,58 +153,122 @@ function CreateEpisodeForm() {
           </label>
         )}
       </form.Field>
-      <div className="podcast-metadata-grid">
-        {metadataFieldSpecs.map(([name, locale, kind]) => (
-          <form.Field key={name} name={name}>
-            {field => (
-              <label>
-                {locale} ·
-                {kind === "title"
-                  ? t("podcastMetadataTitle")
-                  : t("podcastMetadataSummary")}
-                {kind === "title" ? (
-                  <input
-                    required
-                    value={field.state.value}
-                    onBlur={field.handleBlur}
-                    onChange={event => field.handleChange(event.target.value)}
-                  />
-                ) : (
-                  <textarea
-                    required
-                    rows={3}
-                    value={field.state.value}
-                    onBlur={field.handleBlur}
-                    onChange={event => field.handleChange(event.target.value)}
-                  />
-                )}
-              </label>
-            )}
-          </form.Field>
+      <div className="podcast-upload-slots">
+        {podcastLocales.map(locale => (
+          <PodcastFileSlot
+            key={locale}
+            locale={locale}
+            file={files[locale]}
+            onChange={file =>
+              setFiles(current => ({ ...current, [locale]: file }))
+            }
+          />
         ))}
       </div>
       <form.Field name="reason">
         {field => (
           <label>
             {t("podcastAuditReason")}
-            <input
-              required
+            <select
               value={field.state.value}
               onBlur={field.handleBlur}
-              onChange={event => field.handleChange(event.target.value)}
-            />
+              onChange={event =>
+                field.handleChange(event.target.value as PodcastUploadReason)
+              }
+            >
+              <option value="initial_upload">
+                {t("podcastReasonInitialUpload")}
+              </option>
+              <option value="update_file">
+                {t("podcastReasonUpdateFile")}
+              </option>
+              <option value="other">{t("podcastReasonOther")}</option>
+            </select>
           </label>
         )}
       </form.Field>
+      {replacementVersions && (
+        <div className="podcast-replacement-warning" role="alert">
+          <p>
+            {t("podcastBatchReplacementWarning", {
+              locales: Object.keys(replacementVersions).join(", "),
+            })}
+          </p>
+          <button
+            type="button"
+            onClick={() =>
+              void runUpload(
+                form.state.values,
+                files,
+                true,
+                replacementVersions
+              )
+            }
+          >
+            {t("podcastConfirmReplacement")}
+          </button>
+        </div>
+      )}
       {error && <p role="alert">{error}</p>}
       <form.Subscribe selector={state => state.isSubmitting}>
         {pending => (
           <button type="submit" disabled={pending}>
-            {pending ? t("submitting") : t("podcastCreateEpisode")}
+            {pending ? t("submitting") : t("podcastUploadSubmit")}
           </button>
         )}
       </form.Subscribe>
     </form>
+  )
+}
+
+function PodcastFileSlot({
+  locale,
+  file,
+  onChange,
+}: {
+  locale: Locale
+  file: File | null
+  onChange: (file: File | null) => void
+}) {
+  const { t } = useTranslation()
+  const [dragging, setDragging] = useState(false)
+  const inputId = `podcast-file-${locale}`
+
+  function receiveDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault()
+    setDragging(false)
+    const nextFile = event.dataTransfer.files.item(0)
+    if (nextFile) onChange(nextFile)
+  }
+
+  return (
+    <div
+      className="podcast-upload-slot"
+      data-dragging={dragging || undefined}
+      onDragEnter={event => {
+        event.preventDefault()
+        setDragging(true)
+      }}
+      onDragOver={event => event.preventDefault()}
+      onDragLeave={() => setDragging(false)}
+      onDrop={receiveDrop}
+    >
+      <strong>{locale}</strong>
+      <input
+        id={inputId}
+        type="file"
+        accept=".mp3,.mp4,audio/mpeg,audio/mp4,video/mp4"
+        onChange={event => onChange(event.target.files?.item(0) ?? null)}
+      />
+      <label htmlFor={inputId}>
+        {file ? file.name : t("podcastUploadSlotPrompt")}
+      </label>
+      {file && (
+        <button type="button" onClick={() => onChange(null)}>
+          {t("podcastUploadRemove")}
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -217,22 +281,33 @@ function EpisodeManager({
 }) {
   const router = useRouter()
   const { t } = useTranslation()
-  const [reason, setReason] = useState("")
   const [error, setError] = useState("")
   const [pending, setPending] = useState(false)
+  const available = new Set(
+    episode.audio_variants
+      .filter(item => item.is_active)
+      .map(item => item.locale)
+  )
+  const missing = podcastLocales.filter(locale => !available.has(locale))
 
   async function changePublication() {
+    if (
+      episode.status === "published" &&
+      !window.confirm(t("podcastUnpublishConfirmation"))
+    ) {
+      return
+    }
     setPending(true)
     setError("")
     try {
       const client = browserPodcastAdminClient()
-      const input = { expected_version: episode.version, reason }
+      const input = { expected_version: episode.version }
       if (episode.status === "draft") {
         await client.publish(episode.id, input, await requireCsrfToken())
       } else {
         await client.unpublish(episode.id, input, await requireCsrfToken())
       }
-      await router.invalidate()
+      await router.invalidate({ sync: true })
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t("unexpectedError"))
     } finally {
@@ -245,7 +320,7 @@ function EpisodeManager({
       <header>
         <div>
           <time dateTime={episode.trading_date}>{episode.trading_date}</time>
-          <h3>{metadataValue(episode, "zh-hant", "title")}</h3>
+          <h3>Podcast | {episode.trading_date}</h3>
         </div>
         <span data-status={episode.status}>
           {t(
@@ -254,28 +329,19 @@ function EpisodeManager({
         </span>
       </header>
       <p>
-        {t("podcastVersion", { version: episode.version })} ·
-        {t("podcastAudioCount", {
-          count: episode.audio_variants.filter(item => item.is_active).length,
-        })}
+        {t("podcastVersion", { version: episode.version })} ·{" "}
+        {t("podcastAudioCount", { count: available.size })}
       </p>
-      {canPublish && episode.status === "draft" && (
-        <EditMetadataForm episode={episode} />
+      {missing.length > 0 && (
+        <p className="podcast-locale-warning" role="status">
+          {t("podcastMissingLocales", { locales: missing.join(", ") })}
+        </p>
       )}
-      <AudioImportForm episode={episode} />
       {canPublish && (
         <div className="podcast-publication-controls">
-          <label>
-            {t("podcastAuditReason")}
-            <input
-              required
-              value={reason}
-              onChange={event => setReason(event.target.value)}
-            />
-          </label>
           <button
             type="button"
-            disabled={pending || reason.trim().length === 0}
+            disabled={pending}
             onClick={() => void changePublication()}
           >
             {episode.status === "draft"
@@ -286,260 +352,5 @@ function EpisodeManager({
       )}
       {error && <p role="alert">{error}</p>}
     </article>
-  )
-}
-
-function EditMetadataForm({ episode }: { episode: PodcastEpisodeAdmin }) {
-  const router = useRouter()
-  const { t } = useTranslation()
-  const [error, setError] = useState("")
-  const form = useForm({
-    defaultValues: {
-      zhTwTitle: metadataValue(episode, "zh-hant", "title"),
-      zhTwSummary: metadataValue(episode, "zh-hant", "summary"),
-      zhCnTitle: metadataValue(episode, "zh-hans", "title"),
-      zhCnSummary: metadataValue(episode, "zh-hans", "summary"),
-      enTitle: metadataValue(episode, "en", "title"),
-      enSummary: metadataValue(episode, "en", "summary"),
-      reason: "",
-    },
-    onSubmit: async ({ value }) => {
-      setError("")
-      try {
-        await browserPodcastAdminClient().update(
-          episode.id,
-          {
-            expected_version: episode.version,
-            metadata: { values: metadataFrom(value) },
-            reason: value.reason,
-          },
-          await requireCsrfToken()
-        )
-        await router.invalidate()
-      } catch (caught) {
-        setError(
-          caught instanceof Error ? caught.message : t("unexpectedError")
-        )
-      }
-    },
-  })
-  return (
-    <details>
-      <summary>{t("podcastEditMetadata")}</summary>
-      <form
-        className="podcast-admin-form"
-        onSubmit={event => {
-          event.preventDefault()
-          void form.handleSubmit()
-        }}
-      >
-        <div className="podcast-metadata-grid">
-          {metadataFieldSpecs.map(([name, locale, kind]) => (
-            <form.Field key={name} name={name}>
-              {field => (
-                <label>
-                  {locale} ·
-                  {kind === "title"
-                    ? t("podcastMetadataTitle")
-                    : t("podcastMetadataSummary")}
-                  {kind === "title" ? (
-                    <input
-                      required
-                      value={field.state.value}
-                      onBlur={field.handleBlur}
-                      onChange={event => field.handleChange(event.target.value)}
-                    />
-                  ) : (
-                    <textarea
-                      required
-                      rows={3}
-                      value={field.state.value}
-                      onBlur={field.handleBlur}
-                      onChange={event => field.handleChange(event.target.value)}
-                    />
-                  )}
-                </label>
-              )}
-            </form.Field>
-          ))}
-        </div>
-        <form.Field name="reason">
-          {field => (
-            <label>
-              {t("podcastAuditReason")}
-              <input
-                required
-                value={field.state.value}
-                onBlur={field.handleBlur}
-                onChange={event => field.handleChange(event.target.value)}
-              />
-            </label>
-          )}
-        </form.Field>
-        {error && <p role="alert">{error}</p>}
-        <button type="submit">{t("podcastSaveMetadata")}</button>
-      </form>
-    </details>
-  )
-}
-
-function AudioImportForm({ episode }: { episode: PodcastEpisodeAdmin }) {
-  const router = useRouter()
-  const { t } = useTranslation()
-  const [error, setError] = useState("")
-  const [replacementVersion, setReplacementVersion] = useState<number | null>(
-    null
-  )
-  const form = useForm({
-    defaultValues: {
-      sourceBucket: "",
-      sourceKey: "",
-      locale: "zh-hant" as Locale,
-      mimeType: "audio/mpeg",
-      reason: "",
-    },
-    onSubmit: async ({ value }) => runImport(value, false, null),
-  })
-
-  async function runImport(
-    value: typeof form.state.values,
-    confirmReplacement: boolean,
-    expectedVersion: number | null
-  ) {
-    setError("")
-    try {
-      await browserPodcastAdminClient().importAudio(
-        episode.id,
-        {
-          source_bucket: value.sourceBucket,
-          source_key: value.sourceKey,
-          locale: value.locale,
-          expected_mime_type: value.mimeType,
-          confirm_replacement: confirmReplacement,
-          expected_current_version: expectedVersion,
-          reason: value.reason,
-        },
-        await requireCsrfToken()
-      )
-      setReplacementVersion(null)
-      form.reset()
-      await router.invalidate()
-    } catch (caught) {
-      if (
-        caught instanceof ApiError &&
-        caught.status === 409 &&
-        typeof caught.detail === "object" &&
-        caught.detail !== null &&
-        "code" in caught.detail &&
-        caught.detail.code === "replacement_confirmation_required" &&
-        "current_version" in caught.detail &&
-        typeof caught.detail.current_version === "number"
-      ) {
-        setReplacementVersion(caught.detail.current_version)
-        return
-      }
-      setError(caught instanceof Error ? caught.message : t("unexpectedError"))
-    }
-  }
-
-  return (
-    <details>
-      <summary>{t("podcastImportAudio")}</summary>
-      <form
-        className="podcast-admin-form podcast-audio-import"
-        onSubmit={event => {
-          event.preventDefault()
-          void form.handleSubmit()
-        }}
-      >
-        <form.Field name="sourceBucket">
-          {field => (
-            <label>
-              {t("podcastSourceBucket")}
-              <input
-                required
-                value={field.state.value}
-                onChange={event => field.handleChange(event.target.value)}
-              />
-            </label>
-          )}
-        </form.Field>
-        <form.Field name="sourceKey">
-          {field => (
-            <label>
-              {t("podcastSourceKey")}
-              <input
-                required
-                value={field.state.value}
-                onChange={event => field.handleChange(event.target.value)}
-              />
-            </label>
-          )}
-        </form.Field>
-        <form.Field name="locale">
-          {field => (
-            <label>
-              {t("podcastAudioLocale")}
-              <select
-                value={field.state.value}
-                onChange={event =>
-                  field.handleChange(event.target.value as Locale)
-                }
-              >
-                <option value="zh-hant">zh-hant</option>
-                <option value="zh-hans">zh-hans</option>
-                <option value="en">en</option>
-              </select>
-            </label>
-          )}
-        </form.Field>
-        <form.Field name="mimeType">
-          {field => (
-            <label>
-              {t("podcastMimeType")}
-              <select
-                value={field.state.value}
-                onChange={event => field.handleChange(event.target.value)}
-              >
-                <option value="audio/mpeg">audio/mpeg (.mp3)</option>
-                <option value="audio/mp4">audio/mp4 (.m4a)</option>
-                <option value="audio/wav">audio/wav (.wav)</option>
-              </select>
-            </label>
-          )}
-        </form.Field>
-        <form.Field name="reason">
-          {field => (
-            <label>
-              {t("podcastAuditReason")}
-              <input
-                required
-                value={field.state.value}
-                onChange={event => field.handleChange(event.target.value)}
-              />
-            </label>
-          )}
-        </form.Field>
-        {replacementVersion !== null && (
-          <div className="podcast-replacement-warning" role="alert">
-            <p>
-              {t("podcastReplacementWarning", {
-                version: replacementVersion,
-              })}
-            </p>
-            <button
-              type="button"
-              onClick={() =>
-                void runImport(form.state.values, true, replacementVersion)
-              }
-            >
-              {t("podcastConfirmReplacement")}
-            </button>
-          </div>
-        )}
-        {error && <p role="alert">{error}</p>}
-        <button type="submit">{t("podcastImportAudio")}</button>
-      </form>
-    </details>
   )
 }

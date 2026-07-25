@@ -3,7 +3,7 @@ import io
 import uuid
 from collections.abc import AsyncIterator
 from datetime import date, timedelta
-from typing import IO, Any, Protocol, cast
+from typing import IO, Any, BinaryIO, Protocol, cast
 
 import boto3
 import pytest
@@ -14,6 +14,7 @@ from daily_insights_api.core.enums import AssetKind, AssetStatus
 from daily_insights_api.modules.assets.api import (
     AssetForSigning,
     canonical_podcast_audio_key,
+    canonical_podcast_upload_key,
 )
 from daily_insights_api.modules.assets.object_store import ObjectMetadata, ObjectRef
 from daily_insights_api.modules.assets.r2.store import R2ObjectStore, S3Client
@@ -48,6 +49,34 @@ class SigningStore:
     ) -> bool:
         del source, target, sha256
         raise AssertionError("signing must not copy")
+
+    async def put_if_absent(
+        self,
+        target: ObjectRef,
+        content: BinaryIO,
+        *,
+        size_bytes: int,
+        mime_type: str,
+        sha256: str,
+    ) -> bool:
+        del target, content, size_bytes, mime_type, sha256
+        raise AssertionError("signing must not upload")
+
+    async def overwrite(
+        self,
+        target: ObjectRef,
+        content: BinaryIO,
+        *,
+        size_bytes: int,
+        mime_type: str,
+        sha256: str,
+    ) -> None:
+        del target, content, size_bytes, mime_type, sha256
+        raise AssertionError("signing must not upload")
+
+    async def delete(self, target: ObjectRef) -> None:
+        del target
+        raise AssertionError("signing must not delete")
 
     def read(self, ref: ObjectRef) -> AsyncIterator[bytes]:
         del ref
@@ -127,7 +156,7 @@ class StubS3Client:
     def put_object(self, **kwargs: object) -> dict[str, Any]:
         self.calls.append(("put", kwargs))
         self.put_body = cast(ObservedSpool, kwargs["Body"])
-        self.put_body_rolled = bool(self.put_body._rolled)
+        self.put_body_rolled = bool(getattr(self.put_body, "_rolled", False))
         if self.precondition_failed:
             raise ClientError(
                 {
@@ -142,6 +171,10 @@ class StubS3Client:
                 },
                 "PutObject",
             )
+        return {}
+
+    def delete_object(self, **kwargs: object) -> dict[str, Any]:
+        self.calls.append(("delete", kwargs))
         return {}
 
     def generate_presigned_url(
@@ -186,17 +219,31 @@ def test_canonical_key_is_backend_controlled_and_locale_aware() -> None:
     )
 
 
-def test_locale_resolution_is_exact_then_only_zh_hant() -> None:
+def test_canonical_upload_key_uses_locale_path_and_fixed_filename() -> None:
+    assert (
+        canonical_podcast_upload_key(
+            trading_date=date(2026, 7, 25),
+            locale="en",
+            mime_type="audio/mpeg",
+        )
+        == "podcasts/2026-07-25/audio/en/podcast.mp3"
+    )
+
+
+def test_locale_resolution_prefers_exact_then_configured_fallback_order() -> None:
     zh_hant = PodcastAudioVariant(asset_id=uuid.uuid4(), locale="zh-hant", version=1)
     zh_hans = PodcastAudioVariant(asset_id=uuid.uuid4(), locale="zh-hans", version=1)
+    english = PodcastAudioVariant(asset_id=uuid.uuid4(), locale="en", version=1)
 
     exact = resolve_audio_variant((zh_hant, zh_hans), "zh-hans")
     fallback = resolve_audio_variant((zh_hant,), "en")
+    secondary_fallback = resolve_audio_variant((english, zh_hans), "zh-hant")
 
     assert exact.resolved_locale == "zh-hans"
     assert exact.variant.asset_id == zh_hans.asset_id
     assert fallback.requested_locale == "en"
     assert fallback.resolved_locale == "zh-hant"
+    assert secondary_fallback.resolved_locale == "zh-hans"
 
 
 def test_replacement_requires_expected_current_version() -> None:
@@ -312,6 +359,52 @@ async def test_r2_atomic_copy_reports_concurrent_destination_without_overwrite()
     assert not created
     assert client.bodies[-1].closed
     assert client.put_body is not None and client.put_body.closed
+
+
+@pytest.mark.asyncio
+async def test_r2_upload_uses_fixed_target_without_overwrite() -> None:
+    client = StubS3Client()
+    store = R2ObjectStore(cast(S3Client, client))
+    body = io.BytesIO(b"podcast")
+    digest = hashlib.sha256(b"podcast").hexdigest()
+
+    assert await store.put_if_absent(
+        ObjectRef(bucket="private", key="podcasts/day/audio/en/podcast.mp3"),
+        body,
+        size_bytes=7,
+        mime_type="audio/mpeg",
+        sha256=digest,
+    )
+    put_call = next(arguments for name, arguments in client.calls if name == "put")
+    assert put_call["IfNoneMatch"] == "*"
+    assert put_call["ContentType"] == "audio/mpeg"
+    assert put_call["Metadata"] == {"sha256": digest}
+
+
+@pytest.mark.asyncio
+async def test_r2_upload_can_overwrite_fixed_podcast_target() -> None:
+    client = StubS3Client()
+    store = R2ObjectStore(cast(S3Client, client))
+    digest = hashlib.sha256(b"podcast").hexdigest()
+
+    await store.overwrite(
+        ObjectRef(bucket="private", key="podcasts/day/audio/en/podcast.mp3"),
+        io.BytesIO(b"podcast"),
+        size_bytes=7,
+        mime_type="audio/mpeg",
+        sha256=digest,
+    )
+
+    put_call = next(arguments for name, arguments in client.calls if name == "put")
+    assert "IfNoneMatch" not in put_call
+    assert put_call["Metadata"] == {"sha256": digest}
+
+    await store.delete(ObjectRef(bucket="private", key="podcasts/day/audio/en/podcast.mp3"))
+    delete_call = next(arguments for name, arguments in client.calls if name == "delete")
+    assert delete_call == {
+        "Bucket": "private",
+        "Key": "podcasts/day/audio/en/podcast.mp3",
+    }
 
 
 @pytest.mark.asyncio

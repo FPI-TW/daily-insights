@@ -11,7 +11,7 @@ describe("request-local i18n", () => {
     expect(simplifiedChinese.t("signIn")).toBe("登录")
     expect(english.t("signIn")).toBe("Sign in")
     expect(traditionalChinese.t("podcastTitle")).toBe("Podcast")
-    expect(simplifiedChinese.t("podcastAudioFallback")).toContain("繁体")
+    expect(simplifiedChinese.t("podcastAudioFallback")).toContain("其他可用")
     expect(english.t("podcastAdminTitle")).toBe("Podcast content")
     expect(traditionalChinese.language).toBe("zh-hant")
   })

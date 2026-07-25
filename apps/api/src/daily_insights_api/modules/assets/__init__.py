@@ -6,6 +6,7 @@ from daily_insights_api.modules.assets.api import (
     AssetMigrationResult,
     MigratedObject,
     canonical_podcast_audio_key,
+    canonical_podcast_upload_key,
 )
 from daily_insights_api.modules.assets.object_store import (
     ObjectMetadata,
@@ -31,6 +32,7 @@ __all__ = [
     "ObjectRef",
     "ObjectStore",
     "canonical_podcast_audio_key",
+    "canonical_podcast_upload_key",
     "cutover_migration",
     "migrate_podcast_assets",
     "sign_asset_download",

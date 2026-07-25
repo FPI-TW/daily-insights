@@ -4,6 +4,7 @@ import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import timedelta
+from typing import BinaryIO
 
 import pytest
 import pytest_asyncio
@@ -60,6 +61,40 @@ class FakeObjectStore:
         assert hashlib.sha256(body).hexdigest() == sha256
         self.objects[target] = (body, mime_type, sha256)
         return True
+
+    async def put_if_absent(
+        self,
+        target: ObjectRef,
+        content: BinaryIO,
+        *,
+        size_bytes: int,
+        mime_type: str,
+        sha256: str,
+    ) -> bool:
+        if target in self.objects:
+            return False
+        body = content.read()
+        assert len(body) == size_bytes
+        assert hashlib.sha256(body).hexdigest() == sha256
+        self.objects[target] = (body, mime_type, sha256)
+        return True
+
+    async def overwrite(
+        self,
+        target: ObjectRef,
+        content: BinaryIO,
+        *,
+        size_bytes: int,
+        mime_type: str,
+        sha256: str,
+    ) -> None:
+        body = content.read()
+        assert len(body) == size_bytes
+        assert hashlib.sha256(body).hexdigest() == sha256
+        self.objects[target] = (body, mime_type, sha256)
+
+    async def delete(self, target: ObjectRef) -> None:
+        self.objects.pop(target, None)
 
     def read(self, ref: ObjectRef) -> AsyncIterator[bytes]:
         body = self.objects[ref][0]
@@ -236,7 +271,7 @@ async def test_podcast_publish_play_replace_and_unpublish(
     blocked_publish = await podcast_harness.admin.post(
         f"/api/admin/podcasts/{episode_id}/publish",
         headers={"X-CSRF-Token": admin_csrf},
-        json={"expected_version": 1, "reason": "缺少音檔時不得發布"},
+        json={"expected_version": 1},
     )
     assert blocked_publish.status_code == 422
     assert blocked_publish.json()["detail"]["code"] == "episode_not_publishable"
@@ -262,14 +297,14 @@ async def test_podcast_publish_play_replace_and_unpublish(
     asset_manager_cannot_publish = await podcast_harness.asset_manager.post(
         f"/api/admin/podcasts/{episode_id}/publish",
         headers={"X-CSRF-Token": asset_csrf},
-        json={"expected_version": 2, "reason": "權限測試"},
+        json={"expected_version": 2},
     )
     assert asset_manager_cannot_publish.status_code == 403
 
     published = await podcast_harness.admin.post(
         f"/api/admin/podcasts/{episode_id}/publish",
         headers={"X-CSRF-Token": admin_csrf},
-        json={"expected_version": 2, "reason": "內容確認完成"},
+        json={"expected_version": 2},
     )
     assert published.status_code == 200, published.text
     episode = published.json()
@@ -278,10 +313,10 @@ async def test_podcast_publish_play_replace_and_unpublish(
 
     catalog = await podcast_harness.customer.get("/api/podcasts?locale=en")
     assert catalog.status_code == 200, catalog.text
-    assert catalog.json()[0]["title"] == "Market Brief"
+    assert catalog.json()[0]["title"] == "Podcast | 2026-07-24"
     detail = await podcast_harness.customer.get(f"/api/podcasts/{episode_id}?locale=zh-hans")
     assert detail.status_code == 200
-    assert detail.json()["summary"] == "简体摘要"
+    assert detail.json()["summary"] == "2026-07-24"
 
     playback = await podcast_harness.customer.post(
         f"/api/podcasts/{episode_id}/audio-url?locale=en"
@@ -352,10 +387,116 @@ async def test_podcast_publish_play_replace_and_unpublish(
     unpublished = await podcast_harness.admin.post(
         f"/api/admin/podcasts/{episode_id}/unpublish",
         headers={"X-CSRF-Token": admin_csrf},
-        json={"expected_version": 4, "reason": "內容下架"},
+        json={"expected_version": 4},
     )
     assert unpublished.status_code == 200
     assert unpublished.json()["status"] == "draft"
     assert (await podcast_harness.customer.get("/api/podcasts")).json() == []
     unavailable = await podcast_harness.customer.post(f"/api/podcasts/{episode_id}/audio-url")
     assert unavailable.status_code == 404
+
+
+async def test_browser_upload_uses_fixed_filename_and_any_locale_fallback(
+    podcast_harness: PodcastHarness,
+) -> None:
+    admin_csrf = await _login(
+        podcast_harness.admin,
+        "admin@podcast.test",
+        "AdminPassword123!",
+    )
+    await _login(
+        podcast_harness.customer,
+        "member@podcast.test",
+        "MemberPassword123!",
+    )
+
+    unsupported = await podcast_harness.admin.post(
+        "/api/admin/podcasts/uploads",
+        headers={"X-CSRF-Token": admin_csrf},
+        data={
+            "trading_date": "2026-07-25",
+            "reason": "initial_upload",
+        },
+        files={"zh_hans": ("podcast.wav", b"unsupported", "audio/wav")},
+    )
+    assert unsupported.status_code == 422
+    assert unsupported.json()["detail"] == {"code": "unsupported_audio_type"}
+
+    uploaded = await podcast_harness.admin.post(
+        "/api/admin/podcasts/uploads",
+        headers={"X-CSRF-Token": admin_csrf},
+        data={
+            "trading_date": "2026-07-25",
+            "reason": "initial_upload",
+        },
+        files={
+            "zh_hans": (
+                "任意來源檔名.mp3",
+                b"simplified-chinese-podcast",
+                "audio/mpeg",
+            )
+        },
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    episode = uploaded.json()
+    assert episode["metadata"][0]["title"] == "Podcast | 2026-07-25"
+    assert episode["audio_variants"][0]["locale"] == "zh-hans"
+    assert {ref.key for ref in podcast_harness.store.objects} == {
+        "podcasts/2026-07-25/audio/zh-hans/podcast.mp3"
+    }
+
+    published = await podcast_harness.admin.post(
+        f"/api/admin/podcasts/{episode['id']}/publish",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={"expected_version": episode["version"]},
+    )
+    assert published.status_code == 200, published.text
+
+    catalog = await podcast_harness.customer.get(
+        "/api/podcasts",
+        params={"locale": "en"},
+    )
+    assert catalog.status_code == 200, catalog.text
+    assert catalog.json()[0]["title"] == "Podcast | 2026-07-25"
+
+    playback = await podcast_harness.customer.post(
+        f"/api/podcasts/{episode['id']}/audio-url",
+        params={"locale": "en"},
+    )
+    assert playback.status_code == 200, playback.text
+    assert playback.json()["resolved_locale"] == "zh-hans"
+
+    replacement_warning = await podcast_harness.admin.post(
+        "/api/admin/podcasts/uploads",
+        headers={"X-CSRF-Token": admin_csrf},
+        data={
+            "trading_date": "2026-07-25",
+            "reason": "update_file",
+        },
+        files={"zh_hans": ("replacement.mp4", b"replacement", "video/mp4")},
+    )
+    assert replacement_warning.status_code == 409
+    assert replacement_warning.json()["detail"] == {
+        "code": "replacement_confirmation_required",
+        "current_versions": {"zh-hans": 1},
+    }
+
+    replaced = await podcast_harness.admin.post(
+        "/api/admin/podcasts/uploads",
+        headers={"X-CSRF-Token": admin_csrf},
+        data={
+            "trading_date": "2026-07-25",
+            "reason": "update_file",
+            "confirm_replacement": "true",
+            "expected_versions": '{"zh-hans": 1}',
+        },
+        files={"zh_hans": ("replacement.mp4", b"replacement", "video/mp4")},
+    )
+    assert replaced.status_code == 200, replaced.text
+    target = ObjectRef(
+        bucket="podcast-private",
+        key="podcasts/2026-07-25/audio/zh-hans/podcast.mp4",
+    )
+    assert set(podcast_harness.store.objects) == {target}
+    assert podcast_harness.store.objects[target][0] == b"replacement"
+    assert replaced.json()["audio_variants"][0]["version"] == 2

@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
+from typing import BinaryIO
 
 import pytest
 import pytest_asyncio
@@ -77,6 +78,38 @@ class FakeObjectStore:
         body, mime_type, _ = self.objects[source]
         self.objects[target] = (body, mime_type, sha256)
         return True
+
+    async def put_if_absent(
+        self,
+        target: ObjectRef,
+        content: BinaryIO,
+        *,
+        size_bytes: int,
+        mime_type: str,
+        sha256: str,
+    ) -> bool:
+        if target in self.objects:
+            return False
+        body = content.read()
+        assert len(body) == size_bytes
+        self.objects[target] = (body, mime_type, sha256)
+        return True
+
+    async def overwrite(
+        self,
+        target: ObjectRef,
+        content: BinaryIO,
+        *,
+        size_bytes: int,
+        mime_type: str,
+        sha256: str,
+    ) -> None:
+        body = content.read()
+        assert len(body) == size_bytes
+        self.objects[target] = (body, mime_type, sha256)
+
+    async def delete(self, target: ObjectRef) -> None:
+        self.objects.pop(target, None)
 
     def read(self, ref: ObjectRef) -> AsyncIterator[bytes]:
         body = self.objects[ref][0]

@@ -137,13 +137,13 @@ Deliver:
 
 - internal Podcast episode management for `admin`, plus the approved R2
   maintenance workflow for `admin` and `asset_manager`;
-- shared episode metadata and complete `zh-hant`, `zh-hans`, and `en`
-  presentation;
+- canonical path/filename-derived episode presentation with missing-locale
+  visibility;
 - customer episode list, episode detail, cover artwork, and accessible audio
   player in TanStack Start;
 - API-authorized, short-lived R2 media URLs with object-scoped access;
-- migration of existing/manually uploaded R2 objects to backend-generated
-  canonical keys without an upload API;
+- browser upload of one to three locale files plus migration of existing R2
+  objects to backend-generated canonical keys;
 - draft/published lifecycle, date ordering, locale audio fallback, playback
   progress, and unavailable-media handling;
 - audit evidence for privileged publication and asset changes.
@@ -155,12 +155,12 @@ Accept when:
 - customers cannot upload, publish, unpublish, or mutate Podcast content;
 - `asset_manager` capabilities remain limited to the approved Podcast/asset
   workflow and cannot administer organizations or conversations;
-- every published episode has complete three-locale metadata and a valid,
-  active `zh-hant` audio asset;
-- selecting `zh-hans` or `en` plays the matching variant when present and
-  otherwise resolves to `zh-hant`;
+- every published episode has at least one valid active locale audio asset;
+- selecting a locale plays its matching variant when present and otherwise
+  resolves by `zh-hant` → `zh-hans` → `en`;
 - duplicate trading-date/locale replacement requires explicit confirmation,
-  uses a new backend-generated key, and preserves the previous object/version;
+  overwrites the stable backend-generated key, and increments the logical
+  database version;
 - legacy R2 cutover cannot occur until every manifest entry passes
   size/MIME/SHA-256 verification; old-path cleanup remains a manual post-cutover
   action;

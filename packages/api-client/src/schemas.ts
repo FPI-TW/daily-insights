@@ -107,7 +107,6 @@ export type PodcastEpisodeUpdateInput = {
 
 export type PodcastPublicationInput = {
   expected_version: number
-  reason: string
 }
 
 export type PodcastAudioImportInput = {
@@ -119,3 +118,13 @@ export type PodcastAudioImportInput = {
   expected_current_version: number | null
   reason: string
 }
+
+export type PodcastUploadInput = {
+  tradingDate: string
+  reason: PodcastUploadReason
+  files: Partial<Record<Locale, File>>
+  confirmReplacement: boolean
+  expectedVersions: Partial<Record<Locale, number>>
+}
+
+export type PodcastUploadReason = "initial_upload" | "update_file" | "other"

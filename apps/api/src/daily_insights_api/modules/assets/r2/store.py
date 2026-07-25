@@ -5,7 +5,7 @@ import hashlib
 import tempfile
 from collections.abc import AsyncIterator, Callable, Mapping
 from datetime import timedelta
-from typing import Any, Protocol, cast
+from typing import Any, BinaryIO, Protocol, cast
 
 import boto3
 from botocore.client import BaseClient
@@ -29,6 +29,8 @@ class S3Client(Protocol):
     def get_object(self, **kwargs: object) -> dict[str, Any]: ...
 
     def put_object(self, **kwargs: object) -> dict[str, Any]: ...
+
+    def delete_object(self, **kwargs: object) -> dict[str, Any]: ...
 
     def generate_presigned_url(
         self,
@@ -203,6 +205,98 @@ class R2ObjectStore:
         sha256: str,
     ) -> bool:
         return await asyncio.to_thread(self._copy_if_absent, source, target, sha256)
+
+    def _put_if_absent(
+        self,
+        target: ObjectRef,
+        content: BinaryIO,
+        *,
+        size_bytes: int,
+        mime_type: str,
+        sha256: str,
+    ) -> bool:
+        if size_bytes <= 0 or size_bytes > self._max_copy_size_bytes:
+            raise ValueError("upload size is outside configured limits")
+        content.seek(0)
+        try:
+            self._client.put_object(
+                Bucket=target.bucket,
+                Key=target.key,
+                Body=content,
+                ContentType=mime_type,
+                Metadata={"sha256": sha256},
+                ContentLength=size_bytes,
+                IfNoneMatch="*",
+            )
+        except ClientError as error:
+            if _is_precondition_failed(error):
+                return False
+            raise
+        return True
+
+    async def put_if_absent(
+        self,
+        target: ObjectRef,
+        content: BinaryIO,
+        *,
+        size_bytes: int,
+        mime_type: str,
+        sha256: str,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._put_if_absent,
+            target,
+            content,
+            size_bytes=size_bytes,
+            mime_type=mime_type,
+            sha256=sha256,
+        )
+
+    def _overwrite(
+        self,
+        target: ObjectRef,
+        content: BinaryIO,
+        *,
+        size_bytes: int,
+        mime_type: str,
+        sha256: str,
+    ) -> None:
+        if size_bytes <= 0 or size_bytes > self._max_copy_size_bytes:
+            raise ValueError("upload size is outside configured limits")
+        content.seek(0)
+        self._client.put_object(
+            Bucket=target.bucket,
+            Key=target.key,
+            Body=content,
+            ContentType=mime_type,
+            Metadata={"sha256": sha256},
+            ContentLength=size_bytes,
+        )
+
+    async def overwrite(
+        self,
+        target: ObjectRef,
+        content: BinaryIO,
+        *,
+        size_bytes: int,
+        mime_type: str,
+        sha256: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._overwrite,
+            target,
+            content,
+            size_bytes=size_bytes,
+            mime_type=mime_type,
+            sha256=sha256,
+        )
+
+    async def delete(self, target: ObjectRef) -> None:
+        await asyncio.to_thread(
+            self._client.delete_object,
+            Bucket=target.bucket,
+            Key=target.key,
+        )
 
     def read(self, ref: ObjectRef) -> AsyncIterator[bytes]:
         async def chunks() -> AsyncIterator[bytes]:
