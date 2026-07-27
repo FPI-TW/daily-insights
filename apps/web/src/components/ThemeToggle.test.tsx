@@ -23,18 +23,22 @@ describe("ThemeToggle", () => {
     )
   })
 
-  it("cycles from the system theme to light and persists the preference", () => {
+  it("defaults to light and persists dark when toggled", () => {
     render(<ThemeToggle />)
+
+    expect(screen.getByRole("button")).toHaveTextContent("Light")
+    expect(document.documentElement).toHaveClass("light")
+    expect(document.documentElement).toHaveAttribute("data-theme", "light")
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: /theme mode: auto/i,
+        name: /theme mode: light/i,
       })
     )
 
-    expect(screen.getByRole("button")).toHaveTextContent("Light")
-    expect(window.localStorage.getItem("theme")).toBe("light")
-    expect(document.documentElement).toHaveClass("light")
-    expect(document.documentElement).toHaveAttribute("data-theme", "light")
+    expect(screen.getByRole("button")).toHaveTextContent("Dark")
+    expect(window.localStorage.getItem("theme")).toBe("dark")
+    expect(document.documentElement).toHaveClass("dark")
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark")
   })
 })

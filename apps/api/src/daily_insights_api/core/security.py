@@ -6,7 +6,6 @@ import string
 from functools import lru_cache
 
 PASSWORD_MIN_LENGTH = 8
-PASSWORD_MAX_LENGTH = 128
 SCRYPT_N = 2**14
 SCRYPT_R = 8
 SCRYPT_P = 5
@@ -21,14 +20,10 @@ def normalize_email(email: str) -> str:
 
 
 def validate_password(password: str) -> None:
-    if not PASSWORD_MIN_LENGTH <= len(password) <= PASSWORD_MAX_LENGTH:
+    if len(password) < PASSWORD_MIN_LENGTH:
         raise PasswordPolicyError(
-            f"password must contain {PASSWORD_MIN_LENGTH} to {PASSWORD_MAX_LENGTH} characters"
+            f"password must contain at least {PASSWORD_MIN_LENGTH} characters"
         )
-    if not any(character.islower() for character in password):
-        raise PasswordPolicyError("password must contain a lowercase character")
-    if not any(character.isupper() for character in password):
-        raise PasswordPolicyError("password must contain an uppercase character")
 
 
 def generate_temporary_password() -> str:
