@@ -92,6 +92,11 @@ def main() -> None:
         any(str(item).startswith("/etc/nginx/conf.d") for item in tmpfs),
         "read-only nginx must provide writable tmpfs for envsubst output",
     )
+    require(
+        set(services["nginx"].get("cap_add", []))
+        == {"CHOWN", "NET_BIND_SERVICE", "SETGID", "SETUID"},
+        "nginx must receive only the capabilities required to initialize and drop worker privileges",
+    )
 
     app_network = model.get("networks", {}).get("app", {})
     subnets = [

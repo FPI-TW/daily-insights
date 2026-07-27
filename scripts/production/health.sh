@@ -19,12 +19,22 @@ containers="daily-insights-api daily-insights-web daily-insights-nginx"
 while [ "$(date +%s)" -le "$deadline" ]; do
   all_healthy=true
   for container in $containers; do
-    status=$(
+    state=$(
       docker inspect \
-        --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+        --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
         "$container" 2>/dev/null || true
     )
-    if [ "$status" != "healthy" ]; then
+    runtime_status=${state%% *}
+    health_status=${state#* }
+
+    case "$runtime_status" in
+      dead | exited | paused | removing | restarting)
+        echo "$container entered terminal runtime state: $runtime_status" >&2
+        exit 1
+        ;;
+    esac
+
+    if [ "$health_status" != "healthy" ]; then
       all_healthy=false
     fi
   done
