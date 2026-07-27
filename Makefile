@@ -82,7 +82,7 @@ test-db: ## 以隔離 PostgreSQL 執行 Web 與 API 完整測試
 check-nginx: ## 驗證 nginx API、signed URL 與 SSE transport 契約
 	./scripts/check-nginx-contract.sh
 
-check-production-deployment: ## 離線驗證 production Compose、nginx、systemd 與 release 契約
+check-production-deployment: ## 離線驗證 production Compose、nginx、GitHub env 與 Docker restart 契約
 	./scripts/check-production-deployment-contract.sh
 
 check: check-nginx check-production-deployment ## 執行所有品質檢查、測試、建置與部署契約驗證

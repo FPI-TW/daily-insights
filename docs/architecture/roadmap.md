@@ -230,13 +230,22 @@ chat, report UI, or broader asset-management work.
 
 Deliver:
 
-- EC2/RDS deployment automation and systemd-managed Compose/application
+- EC2/RDS deployment automation with Docker-managed container restart
   lifecycle;
 - Cloudflare DNS/TLS, AWS security groups, secrets, observability, alarms;
 - database backup/restore and incident runbooks;
 - Podcast/R2 capacity and failure testing using a fresh production database,
   verified canonical copies of approved Podcast objects, and a dedicated prefix
   for all target objects.
+
+Repository status: CI-gated x86_64 GHCR publication, digest-pinned image
+deployment, SSH/SCP deployment, EC2 host-bundle installation, direct protected
+GitHub environment delivery to Compose, Cloudflare real-IP refresh, production
+preflight, Docker reboot recovery, health convergence, and failure diagnostics
+are implemented and offline-verifiable.
+AWS/Cloudflare resource creation, live RDS/R2 validation, alarm delivery,
+capacity evidence, and production cutover remain external acceptance work; see
+[`ec2-first-deploy.md`](../runbooks/ec2-first-deploy.md).
 
 Accept when:
 

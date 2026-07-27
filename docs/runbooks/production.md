@@ -6,32 +6,36 @@ automatic recovery and alerting.
 
 This is a recommendation and readiness checklist. It does not deploy anything.
 
-The repository now includes an offline-verifiable deployment foundation. It
-does not create AWS, Cloudflare, RDS, or R2 resources:
+The repository now includes an offline-verifiable deployment foundation and an
+[EC2 first-deploy procedure](ec2-first-deploy.md). It does not create AWS,
+Cloudflare, RDS, or R2 resources:
 
 - [`compose.production.yaml`](../../compose.production.yaml) runs only externally
   built API, Web, and nginx images pinned by digest; PostgreSQL is deliberately
   absent because production uses RDS;
-- [`daily-insights.service`](../../infra/systemd/daily-insights.service) owns the
-  Compose lifecycle after the host has been provisioned;
 - [`deploy.sh`](../../scripts/production/deploy.sh),
   [`preflight.sh`](../../scripts/production/preflight.sh),
   [`health.sh`](../../scripts/production/health.sh), and
-  [`rollback.sh`](../../scripts/production/rollback.sh) validate release
-  manifests and runtime material, serialize lifecycle operations, require
-  health convergence, and preserve a previous application release;
-- [`infra/production/env`](../../infra/production/env) defines the non-secret
-  release manifest and separate API/Web runtime environment contracts.
+  [`diagnose.sh`](../../scripts/production/diagnose.sh) validate host TLS
+  material, deploy directly supplied GitHub environment values, require health
+  convergence, and report container failures;
+- [`infra/production/env`](../../infra/production/env) documents the GitHub
+  production Environment contract; those files are never copied to EC2;
+- [`release.yml`](../../.github/workflows/release.yml) reuses CI, publishes
+  x86_64 API/Web images to GHCR, deploys immutable digests over SSH, and
+  validates health after migration;
+- [`install-host-bundle.sh`](../../scripts/production/install-host-bundle.sh)
+  installs root-owned Compose, nginx, and shell deployment assets and enables
+  Docker without requiring host Python or AWS CLI.
 
 Run `make check-production-deployment` before packaging or installing these
 files.
 
 ## Recommended topology
 
-- One EC2 application instance in a private or tightly restricted subnet runs
-  nginx, web, and API containers. Start with a current general-purpose Graviton
-  instance only after confirming all images are multi-architecture; otherwise
-  use x86_64. Size from measured SSE memory and CPU, not user count alone.
+- One x86_64 EC2 application instance in a private or tightly restricted subnet
+  runs nginx, web, and API containers. Size from measured SSE memory and CPU,
+  not user count alone.
 - RDS PostgreSQL in private subnets is the durable store. A Single-AZ instance
   is compatible with accepted downtime and lower cost; Multi-AZ is the
   recommended upgrade if recovery time becomes stricter.
@@ -51,9 +55,7 @@ CloudWatch, security-group control, and future scaling are clearer with EC2.
 
 1. Put RDS in private subnets with no public address. Its security group accepts
    PostgreSQL only from the application security group.
-2. Expose only nginx HTTP/HTTPS on EC2. Restrict SSH in favor of AWS Systems
-   Manager Session Manager; if SSH is unavoidable, restrict it to named
-   administrator CIDRs.
+2. Expose only nginx HTTPS on EC2. Restrict SSH to named administrator CIDRs.
 3. Use Cloudflare Full (strict) TLS and an origin certificate or publicly
    trusted certificate on nginx. Do not use Flexible TLS.
 4. Restrict the origin to Cloudflare proxy IP ranges or use Cloudflare
@@ -67,12 +69,10 @@ CloudWatch, security-group control, and future scaling are clearer with EC2.
 
 - Build immutable, version-tagged web/API images in CI and deploy pinned image
   digests. Do not build production images on the instance.
-- A systemd unit owns the production Compose project:
-  `After=network-online.target docker.service`,
-  `Requires=docker.service`, and `Restart=on-failure`.
 - Containers use `restart: unless-stopped`, bounded health checks, and graceful
-  shutdown periods. systemd runs `docker compose up -d --remove-orphans` on
-  boot and fails deployment when health does not converge.
+  shutdown periods. systemd enables and starts Docker; after an EC2 reboot,
+  Docker recreates each process from the existing container configuration,
+  including the environment captured by `docker compose up`.
 - API shutdown stops new requests, lets active SSE/provider operations finish
   within a bounded grace period, and records interrupted generations as
   `partial` or `error`.
@@ -85,16 +85,15 @@ CloudWatch, security-group control, and future scaling are clearer with EC2.
 ## Secrets
 
 - Store production database credentials, session/password secrets, FinDB key,
-  model-provider key, and R2 credentials in AWS Secrets Manager or SSM
-  Parameter Store with KMS encryption.
-- Keep Web and API runtime configuration independent. Web receives only its
-  public runtime mode and internal API origin; API receives database, provider,
-  model, and R2 configuration. Do not mount one shared application env file
-  into both services.
-- Grant the EC2 instance role read access only to named application secrets.
-- Materialize secrets at runtime in memory or a root-readable ephemeral file;
-  never bake them into images, Compose files, logs, metrics, or user-visible
-  error responses.
+  R2 credentials, and the deployment SSH key in the protected GitHub
+  `production` environment.
+- The GitHub SSH action passes Secrets only to the deployment process. Compose
+  writes API values into Docker's container configuration when creating the
+  API container; no application env file is written or mounted on EC2.
+- Docker daemon access can reveal container environment and is equivalent to
+  root access. Restrict Docker group membership and never print Compose's
+  rendered environment, `docker inspect` environment, or deployment shell
+  tracing in logs.
 - Rotate application secrets on a documented schedule and immediately after
   suspected exposure. R2 credentials should be scoped to the required bucket
   and operations.
@@ -145,15 +144,12 @@ Provision the following before the first deployment:
 
 1. Install the repository release bundle at `/opt/daily-insights`, owned by
    root and not writable by the application account.
-2. Create `/var/lib/daily-insights` for the non-secret `current.env` and
-   `previous.env` release manifests.
-3. Create `/run/daily-insights/api.env` and `/run/daily-insights/web.env` from
-   the examples on every boot. The API file is root-owned mode `0600` and is
-   populated from only the named SSM/Secrets Manager entries. The Web file must
-   not contain database, provider, session, or R2 credentials. Preflight rejects
-   missing mandatory settings and committed example/placeholder values, but
-   cannot prove that a syntactically valid credential is live.
-4. Install the origin certificate and key as
+2. Enable and start `docker.service`. Do not install a separate Daily Insights
+   systemd unit; Docker restart policies own reboot recovery.
+3. Configure the protected GitHub `production` Environment. The SSH action
+   passes its values directly to Compose; do not install application env files
+   on EC2.
+4. Install the Cloudflare Origin CA certificate and key as
    `/etc/daily-insights/tls/origin.crt` and `origin.key`, with the private key
    root-owned mode `0600`.
 5. Materialize `/etc/daily-insights/cloudflare-realip.conf` from Cloudflare's
@@ -164,34 +160,35 @@ Provision the following before the first deployment:
    it cannot prove that a public CIDR belongs to Cloudflare or that the list is
    current. Provisioning must verify ownership and freshness against
    Cloudflare's published source.
-6. Install and enable `infra/systemd/daily-insights.service`. The EC2 security
-   group still enforces that origin port 443 is reachable only through the
-   approved Cloudflare/origin path; Compose publishes no API or Web port.
+6. Confirm the EC2 security group enforces that origin port 443 is reachable
+   only through the approved Cloudflare path; Compose publishes no API or Web
+   port.
 
-Before Compose starts, runtime preflight verifies root ownership and restrictive
-file modes, the production API/Web environment contract, the Cloudflare
-allowlist syntax, and the origin certificate hostname, minimum remaining
-validity, private-key readability, and certificate/key match. The application
-network is pinned to `172.30.0.0/24`; the Uvicorn forwarded-header allowlist and
-`DAILY_INSIGHTS_TRUSTED_PROXY_CIDRS` must both match that exact CIDR so nginx is
-the only trusted application proxy.
+Before Compose starts, preflight verifies root ownership and restrictive file
+modes, Cloudflare allowlist syntax, and the Origin CA certificate hostname,
+minimum remaining validity, private-key readability, and certificate/key match.
+The workflow validates the GitHub environment contract, while the API validates
+its production settings again during startup. The application network is
+pinned to `172.30.0.0/24`; the Uvicorn forwarded-header allowlist and
+`DAILY_INSIGHTS_TRUSTED_PROXY_CIDRS` match that exact CIDR so nginx is the only
+trusted application proxy.
 
-The release manifest is intentionally non-secret and contains exactly three
-immutable `image@sha256:<digest>` references, the public hostname, and absolute
-configuration/runtime paths. CI or the release operator obtains the digest
-from the registry after image publication; tags alone are rejected.
+CI obtains immutable API/Web digests from GHCR and passes them to the SSH
+deployment process. The official nginx image is pinned by digest in
+`compose.production.yaml`, matching FindB's choice to manage the proxy image in
+Compose while retaining immutable deployment inputs.
 
 ### Release procedure
 
 1. Validate migrations and images in staging with sanitized/synthetic data.
 2. Record current image digests, database migration, configuration version, and
-   global model configuration.
+   application configuration.
 3. Run pre-deploy database backup checks.
-4. Copy the candidate non-secret release manifest to the host and run:
-   `sudo /opt/daily-insights/scripts/production/deploy.sh /path/to/release.env`.
-   The script validates and pulls pinned images, runs compatible migrations
-   once, installs the manifest atomically, restarts the systemd unit, and waits
-   for API/Web/nginx container health.
+4. Let the protected GitHub CD workflow send Secrets, Variables, and image
+   digests to the SSH process and run
+   `/opt/daily-insights/scripts/production/deploy.sh`. The script validates and
+   pulls pinned images, runs compatible migrations once, executes
+   `docker compose up`, and waits for API/Web/nginx container health.
 5. Require readiness from database, API, web, and nginx before switching
    traffic.
 6. For the Podcast pilot, smoke-test authentication, tenant isolation, all
@@ -199,19 +196,14 @@ from the registry after image publication; tags alone are rejected.
    playback, including locale fallback and browser-local progress restoration.
    Add report and SSE chat smoke tests only when those surfaces enter the
    deployed release.
-7. Roll back to the prior compatible image on application failure. Database
-   restore is an incident action, not a routine code rollback. For an explicit
-   application rollback, run
-   `sudo /opt/daily-insights/scripts/production/rollback.sh`; if the previous
-   release is unhealthy, the script restores the original release and fails.
+7. Roll back by rerunning the protected workflow for the prior compatible
+   commit/image digest with the same GitHub Environment values. Database restore
+   is an incident action, not a routine code rollback.
 
-The deploy script automatically restores the previous application manifest
-when a candidate fails health checks. A first deployment has no prior
-application release: on failure it stops systemd and Compose, removes
-`current.env`, and retains the rejected manifest as `failed.env` for diagnosis,
-so `Restart=on-failure` cannot keep launching a known-bad candidate. Migrations
-must remain backward-compatible with the previous image because rollback never
-reverses or restores the database.
+The host does not save rollback env files because they would duplicate GitHub
+Secrets. A failed deployment emits container state and recent logs. Migrations
+must remain backward-compatible with the previous image because application
+rollback never reverses or restores the database.
 
 Use Cloudflare's proxied DNS with a conservative TTL during initial cutover.
 Cutover must not modify or delete the legacy services or data.

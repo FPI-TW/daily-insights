@@ -16,3 +16,6 @@ test-results
 
 .env
 !.env.example
+remote.*.env
+
+key/*

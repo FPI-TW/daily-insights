@@ -9,6 +9,20 @@ from typing import Any
 
 EXPECTED_PROXY_NETWORK = "172.30.0.0/24"
 SERVICES = ("api", "web", "nginx")
+API_ENVIRONMENT_KEYS = {
+    "DAILY_INSIGHTS_DATABASE_URL",
+    "DAILY_INSIGHTS_ENVIRONMENT",
+    "DAILY_INSIGHTS_FINDB_API_KEY",
+    "DAILY_INSIGHTS_FINDB_BASE_URL",
+    "DAILY_INSIGHTS_PASSWORD_PEPPER",
+    "DAILY_INSIGHTS_R2_ACCESS_KEY_ID",
+    "DAILY_INSIGHTS_R2_BUCKET_NAME",
+    "DAILY_INSIGHTS_R2_ENDPOINT_URL",
+    "DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY",
+    "DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS",
+    "DAILY_INSIGHTS_SESSION_SECRET",
+    "DAILY_INSIGHTS_TRUSTED_PROXY_CIDRS",
+}
 
 
 def require(condition: bool, message: str) -> None:
@@ -26,6 +40,10 @@ def main() -> None:
 
     for name in SERVICES:
         service = services[name]
+        require(
+            service.get("container_name") == f"daily-insights-{name}",
+            f"{name} must use a stable container name for reboot diagnostics",
+        )
         require("@sha256:" in service.get("image", ""), f"{name} image must use a digest")
         require("build" not in service, f"{name} must not build on the host")
         require(service.get("restart") == "unless-stopped", f"{name} restart policy is invalid")
@@ -41,6 +59,26 @@ def main() -> None:
 
     require(not services["api"].get("ports"), "API must not publish a host port")
     require(not services["web"].get("ports"), "Web must not publish a host port")
+    api_environment = services["api"].get("environment", {})
+    require(
+        API_ENVIRONMENT_KEYS.issubset(api_environment),
+        "API must receive every production setting through Compose environment",
+    )
+    require(
+        api_environment.get("DAILY_INSIGHTS_ENVIRONMENT") == "production",
+        "API environment must be production",
+    )
+    require(
+        api_environment.get("DAILY_INSIGHTS_TRUSTED_PROXY_CIDRS")
+        == EXPECTED_PROXY_NETWORK,
+        "API trusted proxy setting must match the app network",
+    )
+    web_environment = services["web"].get("environment", {})
+    require(web_environment.get("APP_ENV") == "production", "Web environment must be production")
+    require(
+        web_environment.get("API_INTERNAL_URL") == "http://api:8000",
+        "Web must use the internal API service URL",
+    )
     nginx_ports = services["nginx"].get("ports", [])
     require(len(nginx_ports) == 1, "nginx must publish exactly one port")
     nginx_port = nginx_ports[0]

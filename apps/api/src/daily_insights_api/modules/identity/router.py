@@ -259,9 +259,9 @@ async def change_password(
     try:
         new_password_hash = hash_password(payload.new_password, pepper)
     except PasswordPolicyError as error:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
     if verify_password(payload.new_password, locked_user.password_hash, pepper):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "new password must be different")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "new password must be different")
 
     locked_user.password_hash = new_password_hash
     locked_user.must_change_password = False
