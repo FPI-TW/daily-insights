@@ -180,7 +180,7 @@ cat >"$temporary_dir/stubs/docker" <<'EOF'
 #!/bin/sh
 echo "docker $*" >>"$DEPLOYMENT_LOG"
 if [ "${1:-}" = "inspect" ]; then
-  echo healthy
+  echo "${DOCKER_INSPECT_STATE:-running healthy}"
 fi
 exit 0
 EOF
@@ -202,5 +202,15 @@ if grep -Eq -- '--env-file|systemctl|daily-insights[.]service' "$temporary_dir/d
   echo "deployment unexpectedly used a host env file or app systemd unit" >&2
   exit 1
 fi
+
+if PATH="$temporary_dir/stubs:$PATH" \
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  DOCKER_INSPECT_STATE='restarting unhealthy' \
+  DAILY_INSIGHTS_HEALTH_TIMEOUT_SECONDS=240 \
+  scripts/production/health.sh >"$temporary_dir/health.out" 2>"$temporary_dir/health.err"; then
+  echo "production health must fail immediately for a restarting container" >&2
+  exit 1
+fi
+grep -q 'entered terminal runtime state: restarting' "$temporary_dir/health.err"
 
 echo "production deployment contract is valid"
