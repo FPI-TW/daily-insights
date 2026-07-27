@@ -19,3 +19,4 @@ test-results
 remote.*.env
 
 key/*
+crt/*
