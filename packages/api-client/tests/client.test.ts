@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
+  createAdministrationClient,
   createAuthClient,
   createBrowserTransport,
   createPodcastAdminClient,
@@ -97,6 +98,69 @@ describe("API client trust boundary", () => {
     )
 
     await expect(client.list("en")).rejects.toMatchObject({ status: 502 })
+  })
+
+  it("creates an organization member with CSRF protection", async () => {
+    let capturedPath = ""
+    let captured: RequestInit | undefined
+    const client = createAdministrationClient(async (path, init) => {
+      capturedPath = path
+      captured = init
+      return Response.json(
+        {
+          membership_id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
+          user_id: "9322a09a-6a02-421b-a966-a5cd5f44056e",
+          email: "member@example.com",
+          display_name: "Member",
+          status: "active",
+          must_change_password: true,
+          joined_at: "2026-07-27T03:00:00Z",
+          temporary_password: "TemporaryPassword123!",
+        },
+        { status: 201 }
+      )
+    })
+
+    const result = await client.createMember(
+      "645f35b4-7e53-4ed3-a0c4-6bedc7db4e29",
+      {
+        email: "member@example.com",
+        display_name: "Member",
+        reason: "Provision seat",
+      },
+      "csrf-token"
+    )
+
+    expect(capturedPath).toBe(
+      "/api/admin/organizations/645f35b4-7e53-4ed3-a0c4-6bedc7db4e29/members"
+    )
+    expect(captured?.method).toBe("POST")
+    expect(new Headers(captured?.headers).get("x-csrf-token")).toBe(
+      "csrf-token"
+    )
+    expect(JSON.parse(String(captured?.body))).toEqual({
+      email: "member@example.com",
+      display_name: "Member",
+      reason: "Provision seat",
+    })
+    expect(result.temporary_password).toBe("TemporaryPassword123!")
+  })
+
+  it("rejects malformed organization responses", async () => {
+    const client = createAdministrationClient(async () =>
+      Response.json([
+        {
+          id: "not-a-uuid",
+          name: "Organization",
+          seat_limit: 3,
+          seat_count: 0,
+        },
+      ])
+    )
+
+    await expect(client.listOrganizations()).rejects.toMatchObject({
+      status: 502,
+    })
   })
 
   it("uploads one to three Podcast files as multipart without forcing content type", async () => {

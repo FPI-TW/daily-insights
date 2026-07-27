@@ -24,6 +24,7 @@ import { Route as LocaleAuthenticatedCustomerAccountRouteImport } from './routes
 import { Route as LocaleAuthenticatedCustomerPodcastsRouteImport } from './routes/$locale/_authenticated/_customer/podcasts'
 import { Route as LocaleAuthenticatedBackOfficePodcastsRouteImport } from './routes/$locale/_authenticated/back-office/podcasts'
 import { Route as LocaleAuthenticatedAdminAdminAudioRouteImport } from './routes/$locale/_authenticated/_admin/admin/audio'
+import { Route as LocaleAuthenticatedAdminAdminMembersRouteImport } from './routes/$locale/_authenticated/_admin/admin/members'
 import { Route as LocaleAuthenticatedCustomerPodcastsIndexRouteImport } from './routes/$locale/_authenticated/_customer/podcasts/index'
 import { Route as LocaleAuthenticatedCustomerPodcastsEpisodeIdRouteImport } from './routes/$locale/_authenticated/_customer/podcasts/$episodeId'
 
@@ -107,6 +108,12 @@ const LocaleAuthenticatedAdminAdminAudioRoute =
     path: '/admin/audio',
     getParentRoute: () => LocaleAuthenticatedAdminRoute,
   } as any)
+const LocaleAuthenticatedAdminAdminMembersRoute =
+  LocaleAuthenticatedAdminAdminMembersRouteImport.update({
+    id: '/admin/members',
+    path: '/admin/members',
+    getParentRoute: () => LocaleAuthenticatedAdminRoute,
+  } as any)
 const LocaleAuthenticatedCustomerPodcastsIndexRoute =
   LocaleAuthenticatedCustomerPodcastsIndexRouteImport.update({
     id: '/',
@@ -133,6 +140,7 @@ export interface FileRoutesByFullPath {
   '/$locale/podcasts': typeof LocaleAuthenticatedCustomerPodcastsRouteWithChildren
   '/$locale/back-office/podcasts': typeof LocaleAuthenticatedBackOfficePodcastsRoute
   '/$locale/admin/audio': typeof LocaleAuthenticatedAdminAdminAudioRoute
+  '/$locale/admin/members': typeof LocaleAuthenticatedAdminAdminMembersRoute
   '/$locale/podcasts/$episodeId': typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
   '/$locale/podcasts/': typeof LocaleAuthenticatedCustomerPodcastsIndexRoute
 }
@@ -147,6 +155,7 @@ export interface FileRoutesByTo {
   '/$locale/account': typeof LocaleAuthenticatedCustomerAccountRoute
   '/$locale/back-office/podcasts': typeof LocaleAuthenticatedBackOfficePodcastsRoute
   '/$locale/admin/audio': typeof LocaleAuthenticatedAdminAdminAudioRoute
+  '/$locale/admin/members': typeof LocaleAuthenticatedAdminAdminMembersRoute
   '/$locale/podcasts/$episodeId': typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
   '/$locale/podcasts': typeof LocaleAuthenticatedCustomerPodcastsIndexRoute
 }
@@ -167,6 +176,7 @@ export interface FileRoutesById {
   '/$locale/_authenticated/_customer/podcasts': typeof LocaleAuthenticatedCustomerPodcastsRouteWithChildren
   '/$locale/_authenticated/back-office/podcasts': typeof LocaleAuthenticatedBackOfficePodcastsRoute
   '/$locale/_authenticated/_admin/admin/audio': typeof LocaleAuthenticatedAdminAdminAudioRoute
+  '/$locale/_authenticated/_admin/admin/members': typeof LocaleAuthenticatedAdminAdminMembersRoute
   '/$locale/_authenticated/_customer/podcasts/$episodeId': typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
   '/$locale/_authenticated/_customer/podcasts/': typeof LocaleAuthenticatedCustomerPodcastsIndexRoute
 }
@@ -185,6 +195,7 @@ export interface FileRouteTypes {
     | '/$locale/podcasts'
     | '/$locale/back-office/podcasts'
     | '/$locale/admin/audio'
+    | '/$locale/admin/members'
     | '/$locale/podcasts/$episodeId'
     | '/$locale/podcasts/'
   fileRoutesByTo: FileRoutesByTo
@@ -199,6 +210,7 @@ export interface FileRouteTypes {
     | '/$locale/account'
     | '/$locale/back-office/podcasts'
     | '/$locale/admin/audio'
+    | '/$locale/admin/members'
     | '/$locale/podcasts/$episodeId'
     | '/$locale/podcasts'
   id:
@@ -218,6 +230,7 @@ export interface FileRouteTypes {
     | '/$locale/_authenticated/_customer/podcasts'
     | '/$locale/_authenticated/back-office/podcasts'
     | '/$locale/_authenticated/_admin/admin/audio'
+    | '/$locale/_authenticated/_admin/admin/members'
     | '/$locale/_authenticated/_customer/podcasts/$episodeId'
     | '/$locale/_authenticated/_customer/podcasts/'
   fileRoutesById: FileRoutesById
@@ -334,6 +347,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LocaleAuthenticatedAdminAdminAudioRouteImport
       parentRoute: typeof LocaleAuthenticatedAdminRoute
     }
+    '/$locale/_authenticated/_admin/admin/members': {
+      id: '/$locale/_authenticated/_admin/admin/members'
+      path: '/admin/members'
+      fullPath: '/$locale/admin/members'
+      preLoaderRoute: typeof LocaleAuthenticatedAdminAdminMembersRouteImport
+      parentRoute: typeof LocaleAuthenticatedAdminRoute
+    }
     '/$locale/_authenticated/_customer/podcasts/': {
       id: '/$locale/_authenticated/_customer/podcasts/'
       path: '/'
@@ -353,12 +373,15 @@ declare module '@tanstack/react-router' {
 
 interface LocaleAuthenticatedAdminRouteChildren {
   LocaleAuthenticatedAdminAdminAudioRoute: typeof LocaleAuthenticatedAdminAdminAudioRoute
+  LocaleAuthenticatedAdminAdminMembersRoute: typeof LocaleAuthenticatedAdminAdminMembersRoute
 }
 
 const LocaleAuthenticatedAdminRouteChildren: LocaleAuthenticatedAdminRouteChildren =
   {
     LocaleAuthenticatedAdminAdminAudioRoute:
       LocaleAuthenticatedAdminAdminAudioRoute,
+    LocaleAuthenticatedAdminAdminMembersRoute:
+      LocaleAuthenticatedAdminAdminMembersRoute,
   }
 
 const LocaleAuthenticatedAdminRouteWithChildren =

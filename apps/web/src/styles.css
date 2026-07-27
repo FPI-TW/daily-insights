@@ -967,6 +967,464 @@ button:disabled {
   padding: 1rem;
 }
 
+.member-admin-page {
+  width: min(calc(100% - 2rem), 74rem);
+  margin: 0 auto;
+  padding: clamp(2.5rem, 6vw, 5rem) 0;
+}
+
+.member-admin-hero {
+  max-width: 48rem;
+  margin-bottom: 2rem;
+}
+
+.member-admin-hero h1 {
+  margin: 0.4rem 0;
+  font-family: var(--font-display);
+  font-size: clamp(2.3rem, 6vw, 4rem);
+}
+
+.member-admin-hero > p:last-child {
+  color: var(--sea-ink-soft);
+  line-height: 1.7;
+}
+
+.member-admin-layout {
+  display: grid;
+  grid-template-columns: minmax(15rem, 18rem) minmax(0, 1fr);
+  align-items: start;
+  gap: 1.25rem;
+}
+
+.organization-panel,
+.member-workspace,
+.member-create-card,
+.temporary-password-notice,
+.member-card {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: 0 18px 45px rgb(30 90 72 / 7%);
+  backdrop-filter: blur(14px);
+}
+
+.organization-panel {
+  position: sticky;
+  top: 5rem;
+  overflow: hidden;
+  border-radius: 1.25rem;
+}
+
+.organization-panel-heading,
+.member-workspace-heading,
+.member-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.organization-panel-heading {
+  border-bottom: 1px solid var(--line);
+  padding: 1.25rem;
+}
+
+.organization-panel-heading h2,
+.member-workspace-heading h2,
+.member-list-heading h2 {
+  margin: 0.25rem 0 0;
+}
+
+.organization-count,
+.member-list-heading > span {
+  display: inline-grid;
+  min-width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--lagoon) 15%, var(--chip-bg));
+  color: var(--palm);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.organization-list {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.65rem;
+}
+
+.organization-option {
+  display: grid;
+  width: 100%;
+  border-color: transparent;
+  background: transparent;
+  gap: 0.25rem;
+  padding: 0.8rem 0.85rem;
+  text-align: left;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.organization-option:hover {
+  border-color: var(--line);
+  background: var(--link-bg-hover);
+  transform: translateX(2px);
+}
+
+.organization-option[aria-pressed="true"] {
+  border-color: color-mix(in oklab, var(--lagoon) 40%, var(--line));
+  background: color-mix(in oklab, var(--lagoon) 12%, var(--surface));
+}
+
+.organization-option span {
+  font-weight: 800;
+}
+
+.organization-option small {
+  color: var(--sea-ink-soft);
+}
+
+.organization-create {
+  border-top: 1px solid var(--line);
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.organization-create summary,
+.member-actions summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.organization-create[open] summary,
+.member-actions[open] summary {
+  margin-bottom: 1rem;
+}
+
+.member-workspace {
+  min-width: 0;
+  border-radius: 1.5rem;
+  padding: clamp(1rem, 3vw, 2rem);
+}
+
+.member-workspace-heading {
+  margin-bottom: 1.5rem;
+}
+
+.seat-meter {
+  display: grid;
+  min-width: 9rem;
+  color: var(--sea-ink-soft);
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+.seat-meter progress {
+  width: 100%;
+  height: 0.45rem;
+  border: 0;
+  border-radius: 999px;
+  appearance: none;
+}
+
+.seat-meter progress::-webkit-progress-bar {
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--line) 70%, transparent);
+}
+
+.seat-meter progress::-webkit-progress-value {
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--palm), var(--lagoon));
+}
+
+.seat-meter progress::-moz-progress-bar {
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--palm), var(--lagoon));
+}
+
+.member-create-card {
+  display: grid;
+  border-color: color-mix(in oklab, var(--lagoon) 30%, var(--line));
+  border-radius: 1.1rem;
+  background: linear-gradient(
+    145deg,
+    color-mix(in oklab, var(--lagoon) 8%, var(--surface-strong)),
+    var(--surface)
+  );
+  gap: 1rem;
+  padding: clamp(1rem, 3vw, 1.5rem);
+}
+
+.member-create-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.member-create-card h2 {
+  margin: 0.25rem 0 0;
+}
+
+.member-admin-form {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.member-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.member-admin-form label,
+.member-create-card label {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--sea-ink-soft);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.member-admin-form input,
+.member-admin-form select,
+.member-create-card input,
+.member-create-card select {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  outline: none;
+  background: var(--surface-strong);
+  color: var(--sea-ink);
+  padding: 0.72rem 0.8rem;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.member-admin-form input:focus-visible,
+.member-admin-form select:focus-visible,
+.member-create-card input:focus-visible,
+.member-create-card select:focus-visible {
+  border-color: var(--lagoon-deep);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--lagoon) 15%, transparent);
+}
+
+.member-create-card button[type="submit"],
+.member-admin-form button[type="submit"] {
+  border-color: transparent;
+  background: linear-gradient(110deg, var(--palm), var(--lagoon-deep));
+  color: white;
+  font-weight: 800;
+}
+
+.seat-limit-warning {
+  border-radius: 999px;
+  background: color-mix(in oklab, #c27a32 14%, var(--chip-bg));
+  color: color-mix(in oklab, #9a581d 82%, var(--sea-ink));
+  padding: 0.35rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.member-form-error {
+  margin: 0;
+  border-radius: 0.7rem;
+  background: color-mix(in oklab, #c75252 9%, var(--surface));
+  color: color-mix(in oklab, #9e3434 80%, var(--sea-ink));
+  padding: 0.7rem 0.8rem;
+  font-size: 0.82rem;
+}
+
+.member-list-section {
+  margin-top: 2rem;
+}
+
+.member-list-heading {
+  margin-bottom: 1rem;
+}
+
+.member-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.member-card {
+  overflow: hidden;
+  border-radius: 1rem;
+}
+
+.member-card > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 1rem;
+}
+
+.member-avatar {
+  display: grid;
+  width: 2.65rem;
+  height: 2.65rem;
+  place-items: center;
+  border-radius: 0.8rem;
+  background: linear-gradient(
+    145deg,
+    color-mix(in oklab, var(--lagoon) 25%, var(--surface)),
+    color-mix(in oklab, var(--palm) 18%, var(--surface))
+  );
+  color: var(--palm);
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.member-identity {
+  min-width: 0;
+}
+
+.member-identity h3 {
+  margin: 0;
+  overflow: hidden;
+  font-size: 0.95rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-identity p {
+  margin: 0.2rem 0 0;
+  overflow: hidden;
+  color: var(--sea-ink-soft);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-status {
+  border-radius: 999px;
+  background: var(--chip-bg);
+  padding: 0.3rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.member-status[data-status="active"] {
+  background: color-mix(in oklab, var(--palm) 12%, var(--chip-bg));
+  color: var(--palm);
+}
+
+.member-status[data-status="suspended"] {
+  background: color-mix(in oklab, #c75252 10%, var(--chip-bg));
+  color: color-mix(in oklab, #9e3434 78%, var(--sea-ink));
+}
+
+.member-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid var(--line);
+  padding: 0.85rem 1rem;
+  gap: 1rem;
+}
+
+.member-meta div {
+  min-width: 0;
+}
+
+.member-meta dt {
+  color: var(--sea-ink-soft);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.member-meta dd {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.member-actions {
+  border-top: 1px solid var(--line);
+  padding: 0.85rem 1rem 1rem;
+}
+
+.member-action-buttons,
+.temporary-password-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.destructive-button {
+  border-color: color-mix(in oklab, #c75252 38%, var(--line));
+  color: color-mix(in oklab, #a33939 80%, var(--sea-ink));
+}
+
+.member-empty {
+  border: 1px dashed color-mix(in oklab, var(--lagoon) 45%, var(--line));
+  border-radius: 1rem;
+  background: color-mix(in oklab, var(--lagoon) 5%, var(--surface));
+  padding: 2rem;
+  text-align: center;
+}
+
+.member-empty h2,
+.member-empty h3 {
+  margin: 0;
+}
+
+.member-empty p {
+  margin: 0.5rem 0 0;
+  color: var(--sea-ink-soft);
+}
+
+.member-empty--workspace {
+  min-height: 24rem;
+  align-content: center;
+}
+
+.temporary-password-notice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  margin-bottom: 1.25rem;
+  border-color: color-mix(in oklab, var(--lagoon) 50%, var(--line));
+  border-radius: 1.25rem;
+  background: linear-gradient(
+    120deg,
+    color-mix(in oklab, var(--lagoon) 13%, var(--surface-strong)),
+    var(--surface)
+  );
+  gap: 1rem 1.5rem;
+  padding: clamp(1rem, 3vw, 1.5rem);
+}
+
+.temporary-password-notice h2 {
+  margin: 0.25rem 0;
+}
+
+.temporary-password-notice p:last-child {
+  margin: 0;
+  color: var(--sea-ink-soft);
+}
+
+.temporary-password-notice code {
+  grid-row: span 2;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  background: color-mix(in oklab, var(--surface-strong) 92%, var(--bg-base));
+  color: var(--sea-ink);
+  padding: 0.85rem 1rem;
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
 @media (max-width: 42rem) {
   .app-header,
   .app-header nav {
@@ -995,6 +1453,31 @@ button:disabled {
 
   .auth-card-frame::before {
     inset: -0.75rem 0;
+  }
+
+  .member-admin-layout,
+  .member-form-grid,
+  .member-list,
+  .temporary-password-notice {
+    grid-template-columns: 1fr;
+  }
+
+  .organization-panel {
+    position: static;
+  }
+
+  .member-workspace-heading,
+  .member-create-card > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .seat-meter {
+    text-align: left;
+  }
+
+  .temporary-password-notice code {
+    grid-row: auto;
   }
 
   .user-name {

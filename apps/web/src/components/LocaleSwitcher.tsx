@@ -14,6 +14,7 @@ type LocaleDestination =
   | "customer-change-password"
   | "admin-login"
   | "admin-audio"
+  | "admin-members"
   | "admin-change-password"
 
 const destinations = {
@@ -22,6 +23,7 @@ const destinations = {
   "customer-change-password": "/$locale/change-password",
   "admin-login": "/$locale/admin/login",
   "admin-audio": "/$locale/admin/audio",
+  "admin-members": "/$locale/admin/members",
   "admin-change-password": "/$locale/admin/change-password",
 } as const
 

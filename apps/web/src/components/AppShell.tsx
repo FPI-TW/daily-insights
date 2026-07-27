@@ -1,5 +1,5 @@
 import type { Locale, User } from "@daily-insights/api-client"
-import { Link, useRouter } from "@tanstack/react-router"
+import { Link, useLocation, useRouter } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -25,6 +25,7 @@ export function AppShell({
 }) {
   const { t } = useTranslation()
   const router = useRouter()
+  const location = useLocation()
   const redirectExpiredSession = useSessionExpiryRedirect(locale, surface)
   const [pending, setPending] = useState(false)
   const [signOutError, setSignOutError] = useState("")
@@ -73,15 +74,26 @@ export function AppShell({
               {t("podcastNav")}
             </Link>
           ) : (
-            <Link to="/$locale/admin/audio" params={{ locale }}>
-              {t("audioManagementNav")}
-            </Link>
+            <>
+              <Link to="/$locale/admin/audio" params={{ locale }}>
+                {t("audioManagementNav")}
+              </Link>
+              {user.system_role === "admin" ? (
+                <Link to="/$locale/admin/members" params={{ locale }}>
+                  {t("memberManagementNav")}
+                </Link>
+              ) : null}
+            </>
           )}
           <span className="user-name">{user.display_name}</span>
           <LocaleSwitcher
             locale={locale}
             destination={
-              surface === "customer" ? "customer-podcasts" : "admin-audio"
+              surface === "customer"
+                ? "customer-podcasts"
+                : location.pathname.endsWith("/admin/members")
+                  ? "admin-members"
+                  : "admin-audio"
             }
           />
           <ThemeToggle />

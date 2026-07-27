@@ -13,7 +13,15 @@ import {
   podcastEpisodeListSchema,
   type PodcastEpisodeUpdateInput,
   type Locale,
+  type MemberCreateInput,
+  memberListSchema,
+  memberSchema,
+  type MemberUpdateInput,
+  type OrganizationCreateInput,
+  organizationListSchema,
+  organizationSchema,
   type PodcastPublicationInput,
+  provisionedMemberSchema,
   userSchema,
 } from "./schemas"
 
@@ -159,6 +167,97 @@ function mutationHeaders(csrfToken: string) {
   return {
     "Content-Type": "application/json",
     "X-CSRF-Token": csrfToken,
+  }
+}
+
+export function createAdministrationClient(transport: ApiTransport) {
+  return {
+    async listOrganizations() {
+      return parseResponse(
+        await transport("/api/admin/organizations"),
+        organizationListSchema
+      )
+    },
+    async createOrganization(
+      input: OrganizationCreateInput,
+      csrfToken: string
+    ) {
+      return parseResponse(
+        await transport("/api/admin/organizations", {
+          method: "POST",
+          headers: mutationHeaders(csrfToken),
+          body: JSON.stringify(input),
+        }),
+        organizationSchema
+      )
+    },
+    async listMembers(organizationId: string) {
+      return parseResponse(
+        await transport(`/api/admin/organizations/${organizationId}/members`),
+        memberListSchema
+      )
+    },
+    async createMember(
+      organizationId: string,
+      input: MemberCreateInput,
+      csrfToken: string
+    ) {
+      return parseResponse(
+        await transport(`/api/admin/organizations/${organizationId}/members`, {
+          method: "POST",
+          headers: mutationHeaders(csrfToken),
+          body: JSON.stringify(input),
+        }),
+        provisionedMemberSchema
+      )
+    },
+    async updateMember(
+      organizationId: string,
+      userId: string,
+      input: MemberUpdateInput,
+      csrfToken: string
+    ) {
+      return parseResponse(
+        await transport(
+          `/api/admin/organizations/${organizationId}/members/${userId}`,
+          {
+            method: "PATCH",
+            headers: mutationHeaders(csrfToken),
+            body: JSON.stringify(input),
+          }
+        ),
+        memberSchema
+      )
+    },
+    async removeMember(
+      organizationId: string,
+      userId: string,
+      reason: string,
+      csrfToken: string
+    ) {
+      const query = new URLSearchParams({ reason })
+      const response = await transport(
+        `/api/admin/organizations/${organizationId}/members/${userId}?${query}`,
+        {
+          method: "DELETE",
+          headers: { "X-CSRF-Token": csrfToken },
+        }
+      )
+      if (!response.ok) {
+        const parsed = apiErrorSchema.safeParse(
+          await response.json().catch(() => ({}))
+        )
+        const detail = parsed.success ? parsed.data.detail : undefined
+        throw new ApiError(
+          response.status,
+          response.headers.get("X-Request-ID"),
+          typeof detail === "string"
+            ? detail
+            : `API request failed (${response.status})`,
+          detail
+        )
+      }
+    },
   }
 }
 
