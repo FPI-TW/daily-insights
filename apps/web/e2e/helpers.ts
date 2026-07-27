@@ -13,6 +13,7 @@ export const adminCredentials = {
 type MockState = {
   podcastList?: "normal" | "empty" | "error"
   audio?: "normal" | "error" | "delayed"
+  passwordChange?: "normal" | "error"
   sessionExpired?: boolean
 }
 
