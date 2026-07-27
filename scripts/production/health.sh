@@ -1,12 +1,6 @@
 #!/bin/sh
 set -eu
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-. "$script_dir/common.sh"
-
-release_file=${1:-$production_current_release}
-"$script_dir/validate-release.sh" "$release_file"
-
 timeout_seconds=${DAILY_INSIGHTS_HEALTH_TIMEOUT_SECONDS:-240}
 case "$timeout_seconds" in
   '' | *[!0-9]*)
@@ -20,20 +14,15 @@ if [ "$timeout_seconds" -lt 1 ] || [ "$timeout_seconds" -gt 900 ]; then
 fi
 
 deadline=$(( $(date +%s) + timeout_seconds ))
-services="api web nginx"
+containers="daily-insights-api daily-insights-web daily-insights-nginx"
 
 while [ "$(date +%s)" -le "$deadline" ]; do
   all_healthy=true
-  for service in $services; do
-    container_id=$(compose_with_release "$release_file" ps -q "$service" 2>/dev/null || true)
-    if [ -z "$container_id" ]; then
-      all_healthy=false
-      continue
-    fi
+  for container in $containers; do
     status=$(
       docker inspect \
         --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
-        "$container_id" 2>/dev/null || true
+        "$container" 2>/dev/null || true
     )
     if [ "$status" != "healthy" ]; then
       all_healthy=false
@@ -41,12 +30,13 @@ while [ "$(date +%s)" -le "$deadline" ]; do
   done
 
   if [ "$all_healthy" = true ]; then
-    echo "production services are healthy: $services"
+    echo "production containers are healthy: $containers"
     exit 0
   fi
   sleep 5
 done
 
-compose_with_release "$release_file" ps >&2
+docker ps -a \
+  --filter label=com.docker.compose.project=daily-insights-production >&2
 echo "production health did not converge within ${timeout_seconds}s" >&2
 exit 1

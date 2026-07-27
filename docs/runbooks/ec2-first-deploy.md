@@ -1,169 +1,186 @@
 # EC2 首次部署操作手冊
 
-本手冊把 repository 內可自動化的首次上線流程串起來。預設區域為新加坡
-`ap-southeast-1`，EC2 僅執行 nginx、Web 與 API；PostgreSQL 使用私有 RDS，
-Podcast 檔案使用私有 Cloudflare R2。
-
-執行本手冊前，先完成 [`production.md`](production.md) 的網路、備份、告警與
-容量決策。這些步驟會產生 AWS/Cloudflare 費用，因此 repository 不會自動建立
-外部資源。
-
-## 1. 建立 AWS 與 GitHub 邊界
-
-1. 建立兩個 private ECR repositories（API、Web），啟用 tag immutability、
-   enhanced scanning，並設定已核准的 lifecycle policy。
-2. 在 AWS IAM 建立 GitHub OIDC provider 與 release role。以
-   [`github-release-trust-policy.json`](../../infra/aws/iam/github-release-trust-policy.json)
-   和
-   [`github-release-policy.json`](../../infra/aws/iam/github-release-policy.json)
-   為最小權限起點，替換所有大寫 placeholder。Trust policy 必須限制到本
-   repository 的 GitHub `production` environment。
-3. GitHub `production` environment 啟用必要 reviewer，並設定：
-   `AWS_ACCOUNT_ID`、`AWS_REGION`、`AWS_RELEASE_ROLE_ARN`、
-   `ECR_API_REPOSITORY`、`ECR_WEB_REPOSITORY`、`PUBLIC_HOSTNAME`、
-   `NGINX_IMAGE`。`NGINX_IMAGE` 必須是已審核的 multi-architecture
-   `image@sha256:digest`，不可使用 tag。
-4. EC2 instance role 附加 AWS managed
-   `AmazonSSMManagedInstanceCore`，並以
-   [`ec2-application-policy.json`](../../infra/aws/iam/ec2-application-policy.json)
-   限制 ECR pull、指定 SSM path 與 KMS key。不要建立 IAM user access key。
-
-GitHub Actions 透過 OIDC 取得短期 AWS 憑證；設定方式以
-[GitHub 官方 AWS OIDC 文件](https://docs.github.com/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws)
-及
-[AWS credentials action](https://github.com/aws-actions/configure-aws-credentials)
-為準。SSM 敏感值使用 KMS `SecureString`，詳見
-[AWS Parameter Store 文件](https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-parameter-store.html)。
-
-## 2. 建立網路與資料服務
-
-- EC2 可使用 Amazon Linux 2023，先選 x86_64 或 Graviton；release workflow
-  會發布 `linux/amd64` 與 `linux/arm64` 映像。
-- 不開放 SSH/22，管理連線使用
-  [AWS Systems Manager Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html)。
-- EC2 security group 的 443 僅允許目前 Cloudflare proxy CIDR。API 8000、
-  Web 3000 與 Docker network 不對外發布。
-- RDS 使用私有 subnet、無 public address；5432 僅允許 EC2 application
-  security group。啟用 encryption、deletion protection、至少 14 天 automated
-  backup 與 point-in-time recovery。
-- 建立 CloudWatch 告警與已驗證的通知目的地。至少包含 EC2 status check、
-  CPU、記憶體、磁碟、程序健康，以及 RDS CPU、storage、connections 與備份。
-
-## 3. 建立 SSM runtime 參數
-
-在 `/daily-insights/production/api/` 下建立以下直接子項。敏感值一律使用
-customer-managed KMS key 的 `SecureString`；非敏感設定也可放在同一路徑，
-讓 runtime env 只由單一受控來源產生。
+正式主機：
 
 ```text
-DAILY_INSIGHTS_ENVIRONMENT
+Host: ec2-56-10-51-231.ap-southeast-1.compute.amazonaws.com
+User: ubuntu
+OS: Ubuntu 26.04 LTS
+Architecture: x86_64
+Capacity: 2 vCPU / 約 2 GB RAM / 19 GB root volume
+```
+
+2026-07-27 已透過 Docker 官方 Ubuntu repository 安裝並驗證：
+
+- Docker Engine 29.6.2；
+- containerd 2.2.6；
+- Docker Buildx 0.35.0；
+- Docker Compose plugin 5.3.1。
+
+Docker 與 containerd 已設為開機啟動，`ubuntu` 已加入 `docker` 群組並通過
+`hello-world` smoke test。EC2 不需要 Node.js、pnpm、uv、應用 Python
+dependencies、nginx、PostgreSQL、AWS CLI 或 SSM Agent。
+
+## 1. 部署與重開機模型
+
+Daily Insights 比照 FindB：
+
+1. GitHub Actions 從 protected `production` Environment 讀取 Secrets 與
+   Variables；
+2. `appleboy/ssh-action` 將值放入該次 SSH deployment process 的環境；
+3. `docker compose up` 建立 container 時，將環境寫入 Docker container
+   configuration；
+4. API、Web、nginx 都使用 `restart: unless-stopped`；
+5. EC2 reboot 後，systemd 啟動 Docker，Docker 以既有 container
+   configuration 自動恢復服務。
+
+不建立 `/etc/daily-insights/runtime/*.env`，不使用 Compose `env_file`，也不
+安裝 Daily Insights application systemd unit。GitHub Secrets 不會寫入 EC2
+檔案，但具有 Docker daemon 權限的管理者仍可透過 container inspect 讀取
+container environment；Docker 權限應視同 root 權限管理。
+
+## 2. GitHub production Environment
+
+建立 GitHub Actions Environment `production` 並啟用必要 reviewer。
+
+Secrets：
+
+```text
+DAILY_INSIGHTS_EC2_HOST
+DAILY_INSIGHTS_EC2_USER
+DAILY_INSIGHTS_EC2_SSH_KEY
 DAILY_INSIGHTS_DATABASE_URL
 DAILY_INSIGHTS_SESSION_SECRET
 DAILY_INSIGHTS_PASSWORD_PEPPER
-DAILY_INSIGHTS_TRUSTED_PROXY_CIDRS
-DAILY_INSIGHTS_FINDB_BASE_URL
 DAILY_INSIGHTS_FINDB_API_KEY
-DAILY_INSIGHTS_R2_ENDPOINT_URL
-DAILY_INSIGHTS_R2_BUCKET_NAME
 DAILY_INSIGHTS_R2_ACCESS_KEY_ID
 DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY
-DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS  # optional
 ```
 
-固定值：
+主機設定：
 
 ```text
-DAILY_INSIGHTS_ENVIRONMENT=production
-DAILY_INSIGHTS_TRUSTED_PROXY_CIDRS=172.30.0.0/24
+DAILY_INSIGHTS_EC2_HOST=ec2-56-10-51-231.ap-southeast-1.compute.amazonaws.com
+DAILY_INSIGHTS_EC2_USER=ubuntu
 ```
 
-Secret 與 env value 必須是單行、無空白或 shell quoting 字元。Session secret
-與 password pepper 各至少 32 字元且不得相同。Database URL 使用
-`postgresql+psycopg://...?...sslmode=require`。
+`DAILY_INSIGHTS_EC2_SSH_KEY` 儲存 `key/daily-insights-key.pem` 的完整內容，
+private key 不得 commit。
 
-## 4. 安裝 EC2 host bundle
+Variables：
 
-Host 需預先安裝並啟用 Docker Engine、Docker Compose v2、AWS CLI v2、
-Python 3、OpenSSL 與 curl。Docker 安裝與更新以
-[Docker Engine RHEL 文件](https://docs.docker.com/engine/install/rhel/)及
-[Compose plugin 文件](https://docs.docker.com/compose/install/linux/)為準；
-不要在 production 使用未固定版本的 convenience script。
-
-先在 CI 對欲部署的 commit 執行：
-
-```sh
-make check-production-deployment
+```text
+PUBLIC_HOSTNAME
+DAILY_INSIGHTS_FINDB_BASE_URL
+DAILY_INSIGHTS_R2_ENDPOINT_URL
+DAILY_INSIGHTS_R2_BUCKET_NAME
+DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS
 ```
 
-將同一 commit 的 repository bundle 經核准的 artifact 管道傳到 EC2，核對
-SHA-256 後執行：
+`infra/production/env/remote.*.env` 只作為本機設定清單，已被 Git 忽略；workflow
+不會讀取或上傳這些檔案。
 
-```sh
-sudo ./scripts/production/install-host-bundle.sh "$PWD"
-sudo cp /etc/daily-insights/ssm.env.example /etc/daily-insights/ssm.env
-sudo chown root:root /etc/daily-insights/ssm.env
-sudo chmod 0644 /etc/daily-insights/ssm.env
-```
+## 3. GHCR 與 nginx image
 
-安裝 Cloudflare origin certificate：
+[`release.yml`](../../.github/workflows/release.yml)：
+
+1. 呼叫 [`ci.yml`](../../.github/workflows/ci.yml)；
+2. 建置 `linux/amd64` API 與 Web images；
+3. 發布至 `ghcr.io/fpi-tw/daily-insights-api` 與
+   `ghcr.io/fpi-tw/daily-insights-web`；
+4. 部署 build action 回傳的 immutable digest；
+5. 使用短期 `GITHUB_TOKEN` 登入 GHCR，部署完成後 logout。
+
+比照 FindB，nginx image 由
+[`compose.production.yaml`](../../compose.production.yaml) 管理，不是 GitHub
+Variable；Daily Insights 額外以 immutable digest 鎖定官方 nginx image。
+nginx 設定由 CD 同步，Cloudflare private key 不會進入 image。
+
+## 4. Cloudflare DNS 與 TLS
+
+正式域名由 Cloudflare 管理：
+
+1. 建立 proxied DNS record，將 `PUBLIC_HOSTNAME` 指向 EC2 public address；
+2. SSL/TLS mode 使用 **Full (strict)**，不可使用 Flexible；
+3. 在 Cloudflare Origin Server 建立涵蓋 `PUBLIC_HOSTNAME` 的 Origin CA
+   certificate；
+4. 將 certificate 與 private key 安裝為：
 
 ```text
 /etc/daily-insights/tls/origin.crt  root:root 0644
 /etc/daily-insights/tls/origin.key  root:root 0600
 ```
 
-取得並驗證 Cloudflare 官方 CIDR：
+CD 每次從 Cloudflare 官方 IPv4/IPv6 endpoint 重新產生並驗證：
 
-```sh
-sudo /opt/daily-insights/scripts/production/update-cloudflare-realip.sh
+```text
+/etc/daily-insights/cloudflare-realip.conf  root:root 0644
 ```
 
-更新 allowlist 後必須 restart `daily-insights.service` 才會套用新的 bind mount。
+EC2 security group 的 443 僅允許 Cloudflare proxy CIDRs；SSH/22 僅允許核准
+管理來源。Compose 只公開 443，不公開 API、Web 或 port 80。
 
-## 5. 發布映像與首次部署
+## 5. EC2 檔案
 
-從 GitHub Actions 手動執行 `Publish production images`。Production
-environment approval 通過後，workflow 會：
+CD 只安裝非敏感的部署資產與 TLS material：
 
-1. 透過 OIDC 登入 AWS；
-2. 建置及推送 API/Web 的 amd64、arm64 映像；
-3. 以 registry 回傳的 digest 產生 `release.env`；
-4. 上傳 `production-release-<commit>` artifact。
+```text
+/opt/daily-insights/
+├── compose.production.yaml
+├── infra/production/nginx/
+└── scripts/production/
 
-EC2 的 deploy 與 systemd 啟動流程會透過 instance role 取得短期 ECR login
-token；不要把 registry password 寫進 SSM、release manifest 或 Dockerfile。
-
-下載 artifact、核對 workflow commit 與 artifact digest，再透過核准的
-artifact 管道放到 EC2，例如 `/var/tmp/daily-insights/release.env`。首次執行：
-
-```sh
-sudo /opt/daily-insights/scripts/production/validate-release.sh \
-  /var/tmp/daily-insights/release.env
-sudo /opt/daily-insights/scripts/production/materialize-runtime-env.sh \
-  /etc/daily-insights/ssm.env \
-  /var/tmp/daily-insights/release.env
-sudo /opt/daily-insights/scripts/production/preflight.sh \
-  /var/tmp/daily-insights/release.env
-sudo /opt/daily-insights/scripts/production/deploy.sh \
-  /var/tmp/daily-insights/release.env
+/etc/daily-insights/
+├── cloudflare-realip.conf
+└── tls/
+    ├── origin.crt
+    └── origin.key
 ```
 
-後續 release 不要先覆蓋 `current.env`；直接把新的 candidate path 傳給
-`deploy.sh`，才能保留上一版並自動 rollback。
+API/Web Secrets 不會寫入上述目錄。
 
-## 6. Go-live 驗收
+## 6. Deployment lifecycle
 
-正式切換 Cloudflare DNS 前，至少保留以下證據：
+Workflow 在 SSH process 中執行：
 
-- `systemctl status daily-insights.service` 與三個 container health；
-- migration、deploy、health 與 rollback rehearsal transcript；
-- customer/admin 登入、tenant isolation、三語系、會員/組織管理與 Podcast
-  publish/unpublish；
-- R2 CORS/range playback、signed URL expiry、missing object 與無效憑證；
-- RDS automated backup 狀態與隔離還原演練；
-- EC2 reboot/replacement recovery、CloudWatch alarm 實際送達；
-- 低於 1,000 concurrent users 的量測報告與資源 headroom；
-- security group、IAM、KMS、SSM 參數清冊及 rotation owner。
+1. 驗證 GitHub Secrets、Variables、image digests 與 EC2 Docker 狀態；
+2. 產生 Cloudflare real-IP allowlist；
+3. SCP Compose、nginx 與 deployment scripts；
+4. 安裝 root-owned host bundle；
+5. 驗證 Origin CA certificate、private key 與 Cloudflare allowlist；
+6. `docker compose config` 與 `docker compose pull`；
+7. 使用 API image 執行 `alembic upgrade head`；
+8. `docker compose up -d --no-build --remove-orphans`；
+9. 等待 API、Web、nginx health convergence；
+10. 輸出失敗 container state/logs，並從 GHCR logout。
 
-在上述外部驗收完成前，部署狀態是「可上機、不可切流量」。不要刪除 legacy
-資料，也不要把 RDS、API、Web 或 R2 bucket 改成 public。
+第一次部署前執行：
+
+```sh
+make check-production-deployment
+```
+
+部署後可在不需要 Secrets 的情況下檢查既有 container：
+
+```sh
+docker ps --filter label=com.docker.compose.project=daily-insights-production
+docker logs --tail=200 daily-insights-api
+docker logs --tail=200 daily-insights-web
+docker logs --tail=200 daily-insights-nginx
+```
+
+設定或 image rollback 透過重新執行指定版本的 GitHub workflow 完成；不在 EC2
+保存包含 Secrets 的 rollback env。
+
+## 7. Go-live acceptance
+
+正式切換 DNS 前仍需保存：
+
+- deployment、migration、health 與 rollback transcript；
+- customer/admin 登入、tenant isolation、會員/組織管理與三語系；
+- Podcast publish/unpublish、R2 CORS/range playback 與 signed URL expiry；
+- RDS backup/PITR 隔離還原結果；
+- EC2 reboot 後三個 container 由 Docker 自動恢復的證據；
+- 告警實際送達與目標流量的 CPU、memory、disk、database、latency headroom。
+
+外部驗收完成前，狀態是「可部署，不可正式切流量」。

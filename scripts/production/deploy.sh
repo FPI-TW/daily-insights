@@ -2,78 +2,65 @@
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-. "$script_dir/common.sh"
+install_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+compose_file="$install_root/compose.production.yaml"
+project_name=daily-insights-production
 
-candidate_release=${1:-}
-if [ -z "$candidate_release" ]; then
-  echo "usage: $0 CANDIDATE_RELEASE_ENV" >&2
-  exit 2
-fi
-"$script_dir/validate-release.sh" "$candidate_release"
-"$script_dir/preflight.sh" "$candidate_release"
-
-if [ ! -d "$production_state_dir" ]; then
-  echo "$production_state_dir must be provisioned before deployment" >&2
-  exit 1
-fi
-
-lock_dir="$production_state_dir/deploy.lock"
-if ! mkdir "$lock_dir" 2>/dev/null; then
-  echo "another production lifecycle operation is active" >&2
-  exit 1
-fi
-cleanup_lock() {
-  rmdir "$lock_dir" 2>/dev/null || true
+compose() {
+  docker compose \
+    --project-name "$project_name" \
+    --file "$compose_file" \
+    "$@"
 }
-trap cleanup_lock EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
 
-candidate_copy="$production_state_dir/candidate.env"
-atomic_install_release "$candidate_release" "$candidate_copy"
-
-compose_with_release "$candidate_copy" config --quiet
-"$script_dir/login-registries.sh" "$candidate_copy"
-compose_with_release "$candidate_copy" pull
-
-# Migrations must remain forward-compatible with the previous application.
-# Database restore is never used as a routine application rollback.
-compose_with_release "$candidate_copy" run --rm --no-deps api alembic upgrade head
-
-had_previous=false
-if [ -f "$production_current_release" ]; then
-  "$script_dir/validate-release.sh" "$production_current_release"
-  atomic_install_release "$production_current_release" "$production_previous_release"
-  had_previous=true
-fi
-atomic_install_release "$candidate_copy" "$production_current_release"
-
-if systemctl restart daily-insights.service &&
-  "$script_dir/health.sh" "$production_current_release"; then
-  rm -f "$candidate_copy"
-  echo "deployment completed"
-  exit 0
-fi
-
-echo "deployment failed health validation" >&2
-systemctl stop daily-insights.service || true
-compose_with_release "$production_current_release" down --remove-orphans || true
-if [ "$had_previous" = true ]; then
-  echo "restoring previous application release" >&2
-  atomic_install_release "$production_previous_release" "$production_current_release"
-  if systemctl restart daily-insights.service &&
-    "$script_dir/health.sh" "$production_current_release"; then
+required_environment="
+API_IMAGE
+WEB_IMAGE
+PUBLIC_HOSTNAME
+DAILY_INSIGHTS_DATABASE_URL
+DAILY_INSIGHTS_SESSION_SECRET
+DAILY_INSIGHTS_PASSWORD_PEPPER
+DAILY_INSIGHTS_FINDB_BASE_URL
+DAILY_INSIGHTS_FINDB_API_KEY
+DAILY_INSIGHTS_R2_ENDPOINT_URL
+DAILY_INSIGHTS_R2_BUCKET_NAME
+DAILY_INSIGHTS_R2_ACCESS_KEY_ID
+DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY
+DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS
+"
+for name in $required_environment; do
+  if [ -z "$(printenv "$name" 2>/dev/null || true)" ]; then
+    echo "required deployment environment is missing: $name" >&2
     exit 1
   fi
-  systemctl stop daily-insights.service || true
-  compose_with_release "$production_current_release" down --remove-orphans || true
-  echo "previous release also failed recovery health; service is stopped" >&2
+done
+
+for name in API_IMAGE WEB_IMAGE; do
+  value=$(printenv "$name")
+  if ! printf '%s\n' "$value" |
+    grep -Eq '^[A-Za-z0-9._:/-]+@sha256:[a-f0-9]{64}$' ||
+    printf '%s\n' "$value" | grep -Eq '@sha256:0{64}$'; then
+    echo "$name must be an immutable non-placeholder image digest" >&2
+    exit 1
+  fi
+done
+
+sudo -n "$script_dir/preflight.sh" "$PUBLIC_HOSTNAME"
+compose config --quiet
+compose pull
+
+# Migrations must remain forward-compatible with the containers serving the
+# previous application version during rollout.
+compose run --rm --no-deps api alembic upgrade head
+
+if ! compose up -d --no-build --remove-orphans; then
+  "$script_dir/diagnose.sh" >&2
   exit 1
 fi
 
-failed_release="$production_state_dir/failed.env"
-atomic_install_release "$production_current_release" "$failed_release"
-rm -f "$production_current_release" "$candidate_copy"
-echo "first deployment failed; known-bad release retained at $failed_release and service is stopped" >&2
-exit 1
+if ! "$script_dir/health.sh"; then
+  "$script_dir/diagnose.sh" >&2
+  exit 1
+fi
+
+echo "deployment completed"

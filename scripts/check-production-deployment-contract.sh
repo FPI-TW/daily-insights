@@ -4,18 +4,30 @@ set -eu
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root_dir"
 
-for script in scripts/production/*.sh scripts/check-production-deployment-contract.sh scripts/test-production-lifecycle.sh; do
+for script in scripts/production/*.sh scripts/check-production-deployment-contract.sh; do
   sh -n "$script"
 done
-python3 scripts/test-runtime-env-materialization.py
 
 compose_file=compose.production.yaml
 nginx_file=infra/production/nginx/default.conf.template
 nginx_main=infra/production/nginx/nginx.conf
-unit_file=infra/systemd/daily-insights.service
+workflow_file=.github/workflows/release.yml
 
-if grep -Eq '^[[:space:]]*(build:|image: [^$])' "$compose_file"; then
-  echo "production Compose must use only externally supplied image variables" >&2
+if grep -Eq '^[[:space:]]*build:' "$compose_file"; then
+  echo "production Compose must not build images on the host" >&2
+  exit 1
+fi
+if grep -Eq 'env_file:|DAILY_INSIGHTS_(CONFIG|RUNTIME)_DIR' "$compose_file"; then
+  echo "production Compose must receive GitHub deployment values directly, not host env files" >&2
+  exit 1
+fi
+grep -Fq 'image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}' "$compose_file"
+grep -Fq 'image: ${WEB_IMAGE:?set WEB_IMAGE to an immutable digest reference}' "$compose_file"
+nginx_image=$(awk 'index($0, "image: docker.io/library/nginx@sha256:") { print $2 }' "$compose_file")
+if ! printf '%s\n' "$nginx_image" |
+  grep -Eq '^docker[.]io/library/nginx@sha256:[a-f0-9]{64}$' ||
+  printf '%s\n' "$nginx_image" | grep -Eq '@sha256:0{64}$'; then
+  echo "production nginx image must be pinned in Compose by immutable digest" >&2
   exit 1
 fi
 if grep -q 'postgres:' "$compose_file"; then
@@ -25,12 +37,30 @@ fi
 
 for service in api web nginx; do
   grep -q "^  ${service}:" "$compose_file"
+  grep -q "container_name: daily-insights-${service}" "$compose_file"
 done
-grep -q 'restart: unless-stopped' "$compose_file"
+[ "$(grep -c 'restart: unless-stopped' "$compose_file")" -eq 3 ]
 grep -q 'stop_grace_period:' "$compose_file"
 grep -q 'healthcheck:' "$compose_file"
 grep -q 'read_only: true' "$compose_file"
 
+for name in \
+  DAILY_INSIGHTS_DATABASE_URL \
+  DAILY_INSIGHTS_SESSION_SECRET \
+  DAILY_INSIGHTS_PASSWORD_PEPPER \
+  DAILY_INSIGHTS_FINDB_BASE_URL \
+  DAILY_INSIGHTS_FINDB_API_KEY \
+  DAILY_INSIGHTS_R2_ENDPOINT_URL \
+  DAILY_INSIGHTS_R2_BUCKET_NAME \
+  DAILY_INSIGHTS_R2_ACCESS_KEY_ID \
+  DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY \
+  DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS; do
+  grep -Fq "${name}: \${${name}:?" "$compose_file"
+done
+
+grep -Fq '/etc/daily-insights/cloudflare-realip.conf:/etc/nginx/cloudflare-realip.conf:ro' "$compose_file"
+grep -Fq '/etc/daily-insights/tls/origin.crt:/etc/nginx/tls/origin.crt:ro' "$compose_file"
+grep -Fq '/etc/daily-insights/tls/origin.key:/etc/nginx/tls/origin.key:ro' "$compose_file"
 grep -q 'listen 443 ssl;' "$nginx_file"
 grep -q 'ssl_certificate ' "$nginx_file"
 grep -q 'server_name ${PUBLIC_HOSTNAME};' "$nginx_file"
@@ -49,75 +79,34 @@ if grep -Eq 'proxy_pass .*r2|R2_(ACCESS|SECRET|ACCOUNT)' \
   exit 1
 fi
 
-grep -q 'After=network-online.target docker.service' "$unit_file"
-grep -q 'Requires=docker.service' "$unit_file"
-grep -q 'Restart=on-failure' "$unit_file"
-grep -q 'up --no-build --remove-orphans' "$unit_file"
-grep -q 'health.sh' "$unit_file"
-grep -q 'preflight.sh' "$unit_file"
-grep -q 'login-registries.sh' "$unit_file"
-grep -q 'materialize-runtime-env.sh' "$unit_file"
+grep -q 'systemctl enable --now docker.service' scripts/production/install-host-bundle.sh
+if grep -R -Eq 'daily-insights[.]service|/etc/daily-insights/runtime|/var/lib/daily-insights|--env-file' \
+  "$workflow_file" compose.production.yaml scripts/production; then
+  echo "deployment must rely on Docker restart policies without host runtime env or app systemd" >&2
+  exit 1
+fi
+grep -Fq 'envs: GITHUB_TOKEN,GITHUB_ACTOR,API_IMAGE,WEB_IMAGE,PUBLIC_HOSTNAME,' "$workflow_file"
+grep -Fq '/opt/daily-insights/scripts/production/deploy.sh' "$workflow_file"
+
+for obsolete in \
+  infra/systemd/daily-insights.service \
+  scripts/production/common.sh \
+  scripts/production/render-release-manifest.sh \
+  scripts/production/rollback.sh \
+  scripts/production/validate-release.sh; do
+  if [ -e "$obsolete" ]; then
+    echo "obsolete persistent-env lifecycle file remains: $obsolete" >&2
+    exit 1
+  fi
+done
 
 temporary_dir=$(mktemp -d)
 trap 'rm -rf "$temporary_dir"' EXIT HUP INT TERM
-sed -E 's/sha256:0{64}/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/g; s/podcasts\.example\.com/podcast.example.test/' \
-  infra/production/env/release.env.example >"$temporary_dir/release.env"
-scripts/production/validate-release.sh "$temporary_dir/release.env"
-scripts/production/render-release-manifest.sh \
-  'registry.example.test/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
-  'registry.example.test/web@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
-  'docker.io/library/nginx@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' \
-  'podcast.example.test' >"$temporary_dir/rendered-release.env"
-scripts/production/validate-release.sh "$temporary_dir/rendered-release.env"
-
-mkdir "$temporary_dir/registry-stubs"
-cat >"$temporary_dir/registry-stubs/aws" <<'EOF'
-#!/bin/sh
-[ "$*" = "ecr get-login-password --region ap-southeast-1" ]
-printf 'contract-ecr-token\n'
-EOF
-cat >"$temporary_dir/registry-stubs/docker" <<'EOF'
-#!/bin/sh
-token=$(cat)
-[ "$token" = "contract-ecr-token" ]
-printf '%s\n' "$*" >>"$REGISTRY_LOGIN_LOG"
-EOF
-chmod +x "$temporary_dir/registry-stubs/aws" "$temporary_dir/registry-stubs/docker"
-scripts/production/render-release-manifest.sh \
-  '123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
-  '123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/web@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
-  'docker.io/library/nginx@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' \
-  'podcast.example.test' >"$temporary_dir/ecr-release.env"
-: >"$temporary_dir/registry-login.log"
-PATH="$temporary_dir/registry-stubs:$PATH" \
-  REGISTRY_LOGIN_LOG="$temporary_dir/registry-login.log" \
-  scripts/production/login-registries.sh "$temporary_dir/ecr-release.env" >/dev/null
-[ "$(wc -l <"$temporary_dir/registry-login.log" | tr -d ' ')" -eq 1 ]
-grep -q '^login --username AWS --password-stdin 123456789012.dkr.ecr.ap-southeast-1.amazonaws.com$' \
-  "$temporary_dir/registry-login.log"
-
-sed 's/@sha256:[a-f0-9]*/:latest/' \
-  "$temporary_dir/release.env" >"$temporary_dir/tagged-release.env"
-if scripts/production/validate-release.sh "$temporary_dir/tagged-release.env" 2>/dev/null; then
-  echo "release validation must reject mutable image tags" >&2
-  exit 1
-fi
-
-mkdir "$temporary_dir/runtime" "$temporary_dir/config"
-mkdir "$temporary_dir/config/tls" "$temporary_dir/stubs"
-sed \
-  -e 's#USER:PASSWORD@RDS_PRIVATE_HOST#daily_insights:strong-db-password@db.internal#' \
-  -e 's#REPLACE_WITH_AT_LEAST_32_RANDOM_CHARACTERS#contract-session-secret-12345678901234567890#' \
-  -e 's#REPLACE_WITH_A_DIFFERENT_32_CHARACTER_SECRET#contract-password-pepper-098765432109876543#' \
-  -e 's#findb.example.com#findb.vendor.invalid#' \
-  -e 's#REPLACE_FROM_SECRET_STORE#contract-secret-value#g' \
-  -e 's#ACCOUNT_ID#tenant12345#' \
-  infra/production/env/api.env.example >"$temporary_dir/runtime/api.env"
-cp infra/production/env/web.env.example "$temporary_dir/runtime/web.env"
-chmod 0600 "$temporary_dir/runtime/api.env"
-chmod 0644 "$temporary_dir/runtime/web.env"
-printf '%s\n' 'set_real_ip_from 104.16.0.0/13;' >"$temporary_dir/config/cloudflare-realip.conf"
-
+mkdir -p "$temporary_dir/config/tls" "$temporary_dir/stubs"
+printf '%s\n' \
+  'set_real_ip_from 104.16.0.0/13;' \
+  'set_real_ip_from 2400:cb00::/32;' \
+  >"$temporary_dir/config/cloudflare-realip.conf"
 openssl req -x509 -newkey rsa:2048 -nodes -days 30 \
   -keyout "$temporary_dir/config/tls/origin.key" \
   -out "$temporary_dir/config/tls/origin.crt" \
@@ -129,86 +118,89 @@ chmod 0644 "$temporary_dir/config/tls/origin.crt"
 cat >"$temporary_dir/stubs/stat" <<'EOF'
 #!/bin/sh
 case "${2:-}" in
-  %u)
-    echo 0
-    ;;
+  %u) echo 0 ;;
   %a)
     case "${3:-}" in
-      */api.env | */origin.key) echo 600 ;;
+      */origin.key) echo 600 ;;
       *) echo 644 ;;
     esac
     ;;
-  *)
-    exit 1
-    ;;
+  *) exit 1 ;;
 esac
 EOF
 chmod +x "$temporary_dir/stubs/stat"
 
-sed "s#DAILY_INSIGHTS_CONFIG_DIR=/etc/daily-insights#DAILY_INSIGHTS_CONFIG_DIR=$temporary_dir/config#; s#DAILY_INSIGHTS_RUNTIME_DIR=/run/daily-insights#DAILY_INSIGHTS_RUNTIME_DIR=$temporary_dir/runtime#" \
-  "$temporary_dir/release.env" >"$temporary_dir/compose.env"
+PATH="$temporary_dir/stubs:$PATH" \
+  DAILY_INSIGHTS_CONFIG_ROOT="$temporary_dir/config" \
+  scripts/production/preflight.sh podcast.example.test >/dev/null
+
+printf '%s\n' 'set_real_ip_from 0.0.0.0/0;' >"$temporary_dir/config/cloudflare-realip.conf"
+if PATH="$temporary_dir/stubs:$PATH" \
+  DAILY_INSIGHTS_CONFIG_ROOT="$temporary_dir/config" \
+  scripts/production/preflight.sh podcast.example.test >/dev/null 2>&1; then
+  echo "preflight must reject a default-route Cloudflare allowlist" >&2
+  exit 1
+fi
+printf '%s\n' \
+  'set_real_ip_from 104.16.0.0/13;' \
+  'set_real_ip_from 2400:cb00::/32;' \
+  >"$temporary_dir/config/cloudflare-realip.conf"
+if PATH="$temporary_dir/stubs:$PATH" \
+  DAILY_INSIGHTS_CONFIG_ROOT="$temporary_dir/config" \
+  scripts/production/preflight.sh other.example.test >/dev/null 2>&1; then
+  echo "preflight must reject a TLS hostname mismatch" >&2
+  exit 1
+fi
+
+export API_IMAGE=registry.example.test/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+export WEB_IMAGE=registry.example.test/web@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+export PUBLIC_HOSTNAME=podcast.example.test
+export DAILY_INSIGHTS_DATABASE_URL=postgresql+psycopg://daily_insights:test@db.internal/daily_insights
+export DAILY_INSIGHTS_SESSION_SECRET=contract-session-secret-12345678901234567890
+export DAILY_INSIGHTS_PASSWORD_PEPPER=contract-password-pepper-098765432109876543
+export DAILY_INSIGHTS_FINDB_BASE_URL=https://findb.example.test
+export DAILY_INSIGHTS_FINDB_API_KEY=contract-findb-key
+export DAILY_INSIGHTS_R2_ENDPOINT_URL=https://tenant.r2.cloudflarestorage.com
+export DAILY_INSIGHTS_R2_BUCKET_NAME=production-podcast-assets
+export DAILY_INSIGHTS_R2_ACCESS_KEY_ID=contract-r2-access
+export DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY=contract-r2-secret
+export DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS=900
 
 docker compose \
   --project-name daily-insights-production-contract \
-  --env-file "$temporary_dir/compose.env" \
   --file compose.production.yaml \
   config --quiet
 docker compose \
   --project-name daily-insights-production-contract \
-  --env-file "$temporary_dir/compose.env" \
   --file compose.production.yaml \
   config --format json >"$temporary_dir/compose.json"
 python3 scripts/production/validate-compose-model.py "$temporary_dir/compose.json"
 
+cat >"$temporary_dir/stubs/docker" <<'EOF'
+#!/bin/sh
+echo "docker $*" >>"$DEPLOYMENT_LOG"
+if [ "${1:-}" = "inspect" ]; then
+  echo healthy
+fi
+exit 0
+EOF
+cat >"$temporary_dir/stubs/sudo" <<'EOF'
+#!/bin/sh
+echo "sudo $*" >>"$DEPLOYMENT_LOG"
+exit 0
+EOF
+chmod +x "$temporary_dir/stubs/docker" "$temporary_dir/stubs/sudo"
+: >"$temporary_dir/deployment.log"
 PATH="$temporary_dir/stubs:$PATH" \
-  scripts/production/preflight.sh "$temporary_dir/compose.env" >/dev/null
-
-cp "$temporary_dir/runtime/api.env" "$temporary_dir/runtime/api.valid"
-sed 's/contract-secret-value/REPLACE_FROM_SECRET_STORE/' \
-  "$temporary_dir/runtime/api.valid" >"$temporary_dir/runtime/api.env"
-if PATH="$temporary_dir/stubs:$PATH" \
-  scripts/production/preflight.sh "$temporary_dir/compose.env" >/dev/null 2>&1; then
-  echo "preflight must reject placeholder API values" >&2
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  scripts/production/deploy.sh >/dev/null
+grep -q 'compose .* config --quiet' "$temporary_dir/deployment.log"
+grep -q 'compose .* pull' "$temporary_dir/deployment.log"
+grep -q 'compose .* run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log"
+grep -q 'compose .* up -d --no-build --remove-orphans' "$temporary_dir/deployment.log"
+if grep -Eq -- '--env-file|systemctl|daily-insights[.]service' "$temporary_dir/deployment.log"; then
+  echo "deployment unexpectedly used a host env file or app systemd unit" >&2
   exit 1
 fi
-cp "$temporary_dir/runtime/api.valid" "$temporary_dir/runtime/api.env"
-
-printf '%s\n' 'set_real_ip_from 0.0.0.0/0;' >"$temporary_dir/config/cloudflare-realip.conf"
-if PATH="$temporary_dir/stubs:$PATH" \
-  scripts/production/preflight.sh "$temporary_dir/compose.env" >/dev/null 2>&1; then
-  echo "preflight must reject a default-route Cloudflare allowlist" >&2
-  exit 1
-fi
-printf '%s\n' 'set_real_ip_from 192.0.2.0/24;' >"$temporary_dir/config/cloudflare-realip.conf"
-if PATH="$temporary_dir/stubs:$PATH" \
-  scripts/production/preflight.sh "$temporary_dir/compose.env" >/dev/null 2>&1; then
-  echo "preflight must reject documentation/test networks" >&2
-  exit 1
-fi
-printf '%s\n' 'set_real_ip_from 104.16.0.0/13;' >"$temporary_dir/config/cloudflare-realip.conf"
-
-openssl req -x509 -newkey rsa:2048 -nodes -days 30 \
-  -keyout "$temporary_dir/config/tls/mismatch.key" \
-  -out "$temporary_dir/config/tls/mismatch.crt" \
-  -subj '/CN=other.example.test' \
-  -addext 'subjectAltName=DNS:other.example.test' >/dev/null 2>&1
-cp "$temporary_dir/config/tls/mismatch.crt" "$temporary_dir/config/tls/origin.crt"
-if PATH="$temporary_dir/stubs:$PATH" \
-  scripts/production/preflight.sh "$temporary_dir/compose.env" >/dev/null 2>&1; then
-  echo "preflight must reject a TLS hostname mismatch" >&2
-  exit 1
-fi
-openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
-  -keyout "$temporary_dir/config/tls/origin.key" \
-  -out "$temporary_dir/config/tls/origin.crt" \
-  -subj '/CN=podcast.example.test' \
-  -addext 'subjectAltName=DNS:podcast.example.test' >/dev/null 2>&1
-if PATH="$temporary_dir/stubs:$PATH" \
-  scripts/production/preflight.sh "$temporary_dir/compose.env" >/dev/null 2>&1; then
-  echo "preflight must reject a certificate inside the minimum validity window" >&2
-  exit 1
-fi
-
-./scripts/test-production-lifecycle.sh "$temporary_dir"
 
 echo "production deployment contract is valid"
