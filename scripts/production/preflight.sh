@@ -59,7 +59,8 @@ case "$minimum_validity_seconds" in
     exit 2
     ;;
 esac
-if ! openssl x509 -in "$certificate_file" -noout -checkhost "$public_hostname" >/dev/null; then
+if ! openssl x509 -in "$certificate_file" -noout -checkhost "$public_hostname" |
+  grep -Fqx "Hostname $public_hostname does match certificate"; then
   echo "origin certificate does not match $public_hostname" >&2
   exit 1
 fi
