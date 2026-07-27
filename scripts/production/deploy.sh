@@ -34,6 +34,7 @@ candidate_copy="$production_state_dir/candidate.env"
 atomic_install_release "$candidate_release" "$candidate_copy"
 
 compose_with_release "$candidate_copy" config --quiet
+"$script_dir/login-registries.sh" "$candidate_copy"
 compose_with_release "$candidate_copy" pull
 
 # Migrations must remain forward-compatible with the previous application.

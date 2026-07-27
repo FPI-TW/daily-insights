@@ -193,7 +193,7 @@ async def create_internal_user(
 ) -> ProvisionedInternalUserResponse:
     if payload.system_role not in {SystemRole.ADMIN, SystemRole.ASSET_MANAGER}:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             "internal user role must be admin or asset_manager",
         )
     settings: Settings = request.app.state.settings
@@ -353,7 +353,7 @@ async def archive_organization(
     contract_reference = contract_reference.strip()
     if not reason or not contract_reference:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             "reason and contract_reference must not be blank",
         )
     organization = await _get_organization(database, organization_id, for_update=True)
@@ -542,7 +542,7 @@ async def update_member(
     if payload.status is not None:
         if payload.status == UserStatus.INVITED:
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY, "invited status is unsupported"
+                status.HTTP_422_UNPROCESSABLE_CONTENT, "invited status is unsupported"
             )
         user.status = payload.status
         if payload.status == UserStatus.SUSPENDED:
@@ -581,7 +581,7 @@ async def remove_member(
 ) -> None:
     reason = reason.strip()
     if not reason:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "reason must not be blank")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "reason must not be blank")
     membership, user = await _get_active_member(database, organization_id, user_id)
     now = datetime.now(UTC)
     before_status = user.status.value
@@ -710,7 +710,9 @@ async def list_audit_events(
     limit: int = 100,
 ) -> list[AuditEventResponse]:
     if not 1 <= limit <= 500:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "limit must be between 1 and 500")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "limit must be between 1 and 500"
+        )
     statement = select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(limit)
     if organization_id is not None:
         statement = statement.where(AuditEvent.organization_id == organization_id)

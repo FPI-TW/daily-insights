@@ -104,7 +104,7 @@ def _audio_mime_type(upload: UploadFile) -> str:
     expected = extension_types.get(suffix)
     if expected is None:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "unsupported_audio_type"},
         )
     declared = (upload.content_type or "").lower()
@@ -120,7 +120,7 @@ def _audio_mime_type(upload: UploadFile) -> str:
     if guessed in BROWSER_PODCAST_AUDIO_EXTENSIONS and guessed == expected:
         return expected
     raise HTTPException(
-        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
         detail={"code": "unsupported_audio_type"},
     )
 
@@ -138,7 +138,7 @@ async def _prepare_audio_upload(locale: Locale, upload: UploadFile) -> PodcastAu
         digest.update(chunk)
     if size_bytes == 0:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "podcast_audio_empty"},
         )
     await upload.seek(0)
@@ -156,19 +156,19 @@ def _parse_expected_versions(raw: str) -> dict[str, int]:
         value = json.loads(raw)
     except json.JSONDecodeError as error:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "invalid_expected_versions"},
         ) from error
     if not isinstance(value, dict):
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "invalid_expected_versions"},
         )
     result: dict[str, int] = {}
     for locale, version in value.items():
         if locale not in {"zh-hant", "zh-hans", "en"} or not isinstance(version, int):
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail={"code": "invalid_expected_versions"},
             )
         result[locale] = version
@@ -355,7 +355,7 @@ async def admin_publish(
         await ensure_publishable(database, episode)
     except PodcastPublicationError as error:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "episode_not_publishable", "message": str(error)},
         ) from error
     episode.status = "published"
@@ -437,7 +437,7 @@ async def admin_upload(
     selected = tuple((locale, upload) for locale, upload in candidates if upload is not None)
     if not selected:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "podcast_audio_required"},
         )
     uploads = tuple([await _prepare_audio_upload(locale, upload) for locale, upload in selected])
@@ -482,7 +482,7 @@ async def admin_upload(
         ) from error
     except PodcastMediaUnavailableError as error:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "audio_upload_failed", "message": str(error)},
         ) from error
     record_audit_event(
@@ -535,7 +535,7 @@ async def admin_import_audio(
         ) from error
     except PodcastMediaUnavailableError as error:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "audio_import_failed", "message": str(error)},
         ) from error
     record_audit_event(

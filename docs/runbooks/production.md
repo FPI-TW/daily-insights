@@ -6,8 +6,9 @@ automatic recovery and alerting.
 
 This is a recommendation and readiness checklist. It does not deploy anything.
 
-The repository now includes an offline-verifiable deployment foundation. It
-does not create AWS, Cloudflare, RDS, or R2 resources:
+The repository now includes an offline-verifiable deployment foundation and an
+[EC2 first-deploy procedure](ec2-first-deploy.md). It does not create AWS,
+Cloudflare, RDS, or R2 resources:
 
 - [`compose.production.yaml`](../../compose.production.yaml) runs only externally
   built API, Web, and nginx images pinned by digest; PostgreSQL is deliberately
@@ -22,6 +23,17 @@ does not create AWS, Cloudflare, RDS, or R2 resources:
   health convergence, and preserve a previous application release;
 - [`infra/production/env`](../../infra/production/env) defines the non-secret
   release manifest and separate API/Web runtime environment contracts.
+- [`release.yml`](../../.github/workflows/release.yml) uses GitHub OIDC to
+  publish multi-architecture API/Web images to ECR and emits a digest-pinned
+  release manifest;
+- [`install-host-bundle.sh`](../../scripts/production/install-host-bundle.sh),
+  [`login-registries.sh`](../../scripts/production/login-registries.sh),
+  [`materialize-runtime-env.sh`](../../scripts/production/materialize-runtime-env.sh),
+  and
+  [`update-cloudflare-realip.sh`](../../scripts/production/update-cloudflare-realip.sh)
+  install the host contract, authenticate ECR with the EC2 role, materialize SSM
+  configuration into ephemeral env files, and validate Cloudflare's current
+  real-IP ranges.
 
 Run `make check-production-deployment` before packaging or installing these
 files.
@@ -147,9 +159,10 @@ Provision the following before the first deployment:
    root and not writable by the application account.
 2. Create `/var/lib/daily-insights` for the non-secret `current.env` and
    `previous.env` release manifests.
-3. Create `/run/daily-insights/api.env` and `/run/daily-insights/web.env` from
-   the examples on every boot. The API file is root-owned mode `0600` and is
-   populated from only the named SSM/Secrets Manager entries. The Web file must
+3. Configure `/etc/daily-insights/ssm.env` and let the systemd preflight create
+   `/run/daily-insights/api.env` and `/run/daily-insights/web.env` from the
+   named SSM path on every service start. The API file is root-owned mode `0600`
+   and is populated from only the named SSM entries. The Web file must
    not contain database, provider, session, or R2 credentials. Preflight rejects
    missing mandatory settings and committed example/placeholder values, but
    cannot prove that a syntactically valid credential is live.

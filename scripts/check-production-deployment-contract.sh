@@ -7,6 +7,7 @@ cd "$root_dir"
 for script in scripts/production/*.sh scripts/check-production-deployment-contract.sh scripts/test-production-lifecycle.sh; do
   sh -n "$script"
 done
+python3 scripts/test-runtime-env-materialization.py
 
 compose_file=compose.production.yaml
 nginx_file=infra/production/nginx/default.conf.template
@@ -54,12 +55,46 @@ grep -q 'Restart=on-failure' "$unit_file"
 grep -q 'up --no-build --remove-orphans' "$unit_file"
 grep -q 'health.sh' "$unit_file"
 grep -q 'preflight.sh' "$unit_file"
+grep -q 'login-registries.sh' "$unit_file"
+grep -q 'materialize-runtime-env.sh' "$unit_file"
 
 temporary_dir=$(mktemp -d)
 trap 'rm -rf "$temporary_dir"' EXIT HUP INT TERM
 sed -E 's/sha256:0{64}/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/g; s/podcasts\.example\.com/podcast.example.test/' \
   infra/production/env/release.env.example >"$temporary_dir/release.env"
 scripts/production/validate-release.sh "$temporary_dir/release.env"
+scripts/production/render-release-manifest.sh \
+  'registry.example.test/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+  'registry.example.test/web@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
+  'docker.io/library/nginx@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' \
+  'podcast.example.test' >"$temporary_dir/rendered-release.env"
+scripts/production/validate-release.sh "$temporary_dir/rendered-release.env"
+
+mkdir "$temporary_dir/registry-stubs"
+cat >"$temporary_dir/registry-stubs/aws" <<'EOF'
+#!/bin/sh
+[ "$*" = "ecr get-login-password --region ap-southeast-1" ]
+printf 'contract-ecr-token\n'
+EOF
+cat >"$temporary_dir/registry-stubs/docker" <<'EOF'
+#!/bin/sh
+token=$(cat)
+[ "$token" = "contract-ecr-token" ]
+printf '%s\n' "$*" >>"$REGISTRY_LOGIN_LOG"
+EOF
+chmod +x "$temporary_dir/registry-stubs/aws" "$temporary_dir/registry-stubs/docker"
+scripts/production/render-release-manifest.sh \
+  '123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+  '123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/web@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
+  'docker.io/library/nginx@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' \
+  'podcast.example.test' >"$temporary_dir/ecr-release.env"
+: >"$temporary_dir/registry-login.log"
+PATH="$temporary_dir/registry-stubs:$PATH" \
+  REGISTRY_LOGIN_LOG="$temporary_dir/registry-login.log" \
+  scripts/production/login-registries.sh "$temporary_dir/ecr-release.env" >/dev/null
+[ "$(wc -l <"$temporary_dir/registry-login.log" | tr -d ' ')" -eq 1 ]
+grep -q '^login --username AWS --password-stdin 123456789012.dkr.ecr.ap-southeast-1.amazonaws.com$' \
+  "$temporary_dir/registry-login.log"
 
 sed 's/@sha256:[a-f0-9]*/:latest/' \
   "$temporary_dir/release.env" >"$temporary_dir/tagged-release.env"

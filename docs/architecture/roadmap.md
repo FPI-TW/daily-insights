@@ -238,6 +238,14 @@ Deliver:
   verified canonical copies of approved Podcast objects, and a dedicated prefix
   for all target objects.
 
+Repository status: immutable multi-architecture ECR publication, digest release
+manifests, EC2 host-bundle installation, SSM runtime materialization,
+Cloudflare real-IP refresh, production preflight, systemd lifecycle, health
+convergence, and application rollback are implemented and offline-verifiable.
+AWS/Cloudflare resource creation, live RDS/R2 validation, alarm delivery,
+capacity evidence, and production cutover remain external acceptance work; see
+[`ec2-first-deploy.md`](../runbooks/ec2-first-deploy.md).
+
 Accept when:
 
 - EC2 replacement/reboot automatically restores healthy service;
