@@ -26,6 +26,8 @@ from daily_insights_api.web.app import create_app
 
 pytestmark = pytest.mark.integration
 
+MEMBER_PASSWORD = "12345678"
+
 
 @dataclass
 class Harness:
@@ -219,7 +221,7 @@ async def activate_member(
         headers={"X-CSRF-Token": csrf_token},
         json={
             "current_password": provisioned["temporary_password"],
-            "new_password": "12345678",
+            "new_password": MEMBER_PASSWORD,
         },
     )
     assert changed.status_code == 200, changed.text
@@ -550,7 +552,7 @@ async def test_archiving_organization_revokes_sessions_and_blocks_login(
         assert (await member_client.get("/api/auth/me")).status_code == 401
         blocked_login = await member_client.post(
             "/api/auth/login",
-            json={"email": "archived@example.com", "password": "MemberPassword123!"},
+            json={"email": "archived@example.com", "password": MEMBER_PASSWORD},
         )
         assert blocked_login.status_code == 401
 
@@ -574,7 +576,7 @@ async def test_archiving_organization_revokes_sessions_and_blocks_login(
         assert (
             await member_client.post(
                 "/api/auth/login",
-                json={"email": "archived@example.com", "password": "MemberPassword123!"},
+                json={"email": "archived@example.com", "password": MEMBER_PASSWORD},
             )
         ).status_code == 200
     finally:
