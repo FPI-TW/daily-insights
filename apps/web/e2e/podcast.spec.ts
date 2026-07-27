@@ -84,7 +84,7 @@ test.describe("Portal authentication and boundaries", () => {
 
     await expect(page).toHaveURL("/zh-hant/login")
     await expect(page.getByRole("alert")).toHaveText(
-      "此帳號無法使用這個登入入口，登入狀態已安全清除。"
+      "此帳號目前無法登入，登入狀態已安全清除。"
     )
     expect(
       (await context.cookies()).find(cookie => cookie.name === "e2e-role")
