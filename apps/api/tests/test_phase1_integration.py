@@ -219,7 +219,7 @@ async def activate_member(
         headers={"X-CSRF-Token": csrf_token},
         json={
             "current_password": provisioned["temporary_password"],
-            "new_password": "MemberPassword123!",
+            "new_password": "12345678",
         },
     )
     assert changed.status_code == 200, changed.text

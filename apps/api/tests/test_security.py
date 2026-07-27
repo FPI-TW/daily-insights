@@ -6,6 +6,7 @@ from daily_insights_api.core.security import (
     generate_temporary_password,
     hash_password,
     password_needs_rehash,
+    validate_password,
     verify_password,
 )
 from daily_insights_api.modules.identity.rate_limit import client_ip
@@ -32,23 +33,32 @@ def test_generated_temporary_password_satisfies_policy() -> None:
     hash_password(temporary_password, "pepper")
 
 
-def test_password_policy_accepts_eight_letters_without_digit_or_symbol() -> None:
-    encoded = hash_password("Abcdefgh", "pepper")
-
-    assert verify_password("Abcdefgh", encoded, "pepper")
+@pytest.mark.parametrize(
+    "password",
+    [
+        "abcdefgh",
+        "ABCDEFGH",
+        "12345678",
+        "!!!!!!!!",
+        "a" * 129,
+    ],
+)
+def test_password_policy_accepts_any_eight_or_more_characters(password: str) -> None:
+    validate_password(password)
 
 
 @pytest.mark.parametrize(
     "password",
     [
+        "",
         "Short1!",
-        "alllowercase123!",
-        "ALLUPPERCASE123!",
     ],
 )
-def test_password_policy_rejects_weak_passwords(password: str) -> None:
+def test_password_policy_rejects_passwords_shorter_than_eight_characters(
+    password: str,
+) -> None:
     with pytest.raises(PasswordPolicyError):
-        hash_password(password, "pepper")
+        validate_password(password)
 
 
 def test_client_ip_only_trusts_forwarded_address_from_configured_proxy() -> None:
