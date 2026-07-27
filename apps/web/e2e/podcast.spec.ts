@@ -375,6 +375,100 @@ test.describe("Customer inline Podcast experience", () => {
   })
 })
 
+test.describe("Customer account security", () => {
+  test.beforeEach(async ({ context }) => {
+    await authenticateAs(context, "org_member")
+  })
+
+  test("navigates to Account and changes the member password", async ({
+    page,
+    request,
+  }) => {
+    await openHydrated(page, "/en/podcasts", ".app-header")
+    await page.getByRole("link", { name: "Account" }).click()
+
+    await expect(page).toHaveURL("/en/account")
+    await expect(
+      page.getByRole("heading", { name: "Account & security" })
+    ).toBeVisible()
+    await page.getByLabel("Current password").fill("customer-password")
+    await page.getByLabel("New password").fill("new-password-123")
+    await page.getByRole("button", { name: "Change password" }).click()
+
+    await expect(page.getByRole("status")).toHaveText(
+      "Your password has been updated."
+    )
+    await expect(page).toHaveURL("/en/account")
+    expect(
+      (await getMockApiState(request)).requests.find(
+        item => item.path === "/api/auth/change-password"
+      )
+    ).toMatchObject({
+      role: "org_member",
+      facts: {
+        csrf: "valid",
+        currentPassword: "customer-password",
+        newPassword: "new-password-123",
+      },
+    })
+
+    await page.getByRole("button", { name: "Sign out" }).click()
+    await expect(page).toHaveURL("/en/login")
+    expect(
+      (await getMockApiState(request)).requests.find(
+        item => item.path === "/api/auth/logout"
+      )
+    ).toMatchObject({
+      role: "org_member",
+      facts: {
+        csrf: "valid",
+        csrfToken: "e2e-csrf-token-rotated",
+      },
+    })
+  })
+
+  test("shows a safe localized error when the current password is rejected", async ({
+    page,
+    request,
+  }) => {
+    await resetMockApi(request, { passwordChange: "error" })
+    await openHydrated(page, "/en/account", 'input[name="currentPassword"]')
+    await page.getByLabel("Current password").fill("incorrect-password")
+    await page.getByLabel("New password").fill("new-password-123")
+    await page.getByRole("button", { name: "Change password" }).click()
+
+    await expect(page.getByRole("alert")).toHaveText(
+      "We could not update your password. Check your current password and try again."
+    )
+    await expect(page).toHaveURL("/en/account")
+  })
+
+  test("returns to the customer login when the password session expires", async ({
+    page,
+    request,
+  }) => {
+    await openHydrated(page, "/en/account", 'input[name="currentPassword"]')
+    await resetMockApi(request, { sessionExpired: true })
+
+    await page.getByLabel("Current password").fill("customer-password")
+    await page.getByLabel("New password").fill("new-password-123")
+    await page.getByRole("button", { name: "Change password" }).click()
+
+    await expect(page).toHaveURL("/en/login")
+    await expect(
+      page.getByRole("heading", {
+        name: "Your market briefing, ready to listen",
+      })
+    ).toBeVisible()
+    expect(
+      (await getMockApiState(request)).requests.some(
+        item =>
+          item.path === "/api/auth/csrf" && item.facts?.sessionExpired === true
+      )
+    ).toBe(true)
+  })
+})
+
 test.describe("Mounted session expiry", () => {
   test("customer signing failure returns to customer login", async ({
     context,

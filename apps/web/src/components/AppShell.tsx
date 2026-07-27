@@ -52,45 +52,58 @@ export function AppShell({
   return (
     <>
       <header className="app-header" data-surface={surface}>
-        <Link
-          to={
-            surface === "customer"
-              ? "/$locale/podcasts"
-              : "/$locale/admin/audio"
-          }
-          params={{ locale }}
-          className="brand"
-        >
-          {t("brand")}
-          {surface === "admin" ? (
-            <span className="brand-surface">{t("adminPortal")}</span>
-          ) : null}
-        </Link>
-        <nav
-          aria-label={t(surface === "customer" ? "customerNav" : "adminNav")}
-        >
-          {surface === "customer" ? (
-            <Link to="/$locale/podcasts" params={{ locale }}>
-              {t("podcastNav")}
-            </Link>
-          ) : (
-            <>
-              <Link to="/$locale/admin/audio" params={{ locale }}>
-                {t("audioManagementNav")}
-              </Link>
-              {user.system_role === "admin" ? (
-                <Link to="/$locale/admin/members" params={{ locale }}>
-                  {t("memberManagementNav")}
+        <div className="app-header-main">
+          <Link
+            to={
+              surface === "customer"
+                ? "/$locale/podcasts"
+                : "/$locale/admin/audio"
+            }
+            params={{ locale }}
+            className="brand"
+          >
+            <span className="brand-mark" aria-hidden="true" />
+            <span>{t("brand")}</span>
+            {surface === "admin" ? (
+              <span className="brand-surface">{t("adminPortal")}</span>
+            ) : null}
+          </Link>
+          <nav
+            className="primary-nav"
+            aria-label={t(surface === "customer" ? "customerNav" : "adminNav")}
+          >
+            {surface === "customer" ? (
+              <>
+                <Link to="/$locale/podcasts" params={{ locale }}>
+                  {t("podcastNav")}
                 </Link>
-              ) : null}
-            </>
-          )}
+                <Link to="/$locale/account" params={{ locale }}>
+                  {t("accountNav")}
+                </Link>
+              </>
+            ) : (
+              <>
+                <Link to="/$locale/admin/audio" params={{ locale }}>
+                  {t("audioManagementNav")}
+                </Link>
+                {user.system_role === "admin" ? (
+                  <Link to="/$locale/admin/members" params={{ locale }}>
+                    {t("memberManagementNav")}
+                  </Link>
+                ) : null}
+              </>
+            )}
+          </nav>
+        </div>
+        <div className="app-utilities">
           <span className="user-name">{user.display_name}</span>
           <LocaleSwitcher
             locale={locale}
             destination={
               surface === "customer"
-                ? "customer-podcasts"
+                ? location.pathname.endsWith("/account")
+                  ? "customer-account"
+                  : "customer-podcasts"
                 : location.pathname.endsWith("/admin/members")
                   ? "admin-members"
                   : "admin-audio"
@@ -98,6 +111,7 @@ export function AppShell({
           />
           <ThemeToggle />
           <button
+            className="utility-button"
             type="button"
             disabled={pending}
             onClick={() => void signOut()}
@@ -109,7 +123,7 @@ export function AppShell({
               {signOutError}
             </span>
           ) : null}
-        </nav>
+        </div>
       </header>
       {children}
     </>

@@ -1,4 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700;800&display=swap");
 @import "tailwindcss";
 @plugin '@tailwindcss/typography';
 
@@ -7,25 +6,25 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --sea-ink: #173a40;
-  --sea-ink-soft: #416166;
-  --lagoon: #4fb8b2;
-  --lagoon-deep: #328f97;
-  --palm: #2f6a4a;
-  --sand: #e7f0e8;
-  --foam: #f3faf5;
-  --surface: rgba(255, 255, 255, 0.74);
-  --surface-strong: rgba(255, 255, 255, 0.9);
-  --line: rgba(23, 58, 64, 0.14);
-  --inset-glint: rgba(255, 255, 255, 0.82);
-  --kicker: rgba(47, 106, 74, 0.9);
-  --bg-base: #e7f3ec;
-  --header-bg: rgba(251, 255, 248, 0.84);
-  --chip-bg: rgba(255, 255, 255, 0.8);
-  --chip-line: rgba(47, 106, 74, 0.18);
-  --link-bg-hover: rgba(255, 255, 255, 0.9);
-  --hero-a: rgba(79, 184, 178, 0.36);
-  --hero-b: rgba(47, 106, 74, 0.2);
+  --sea-ink: #172033;
+  --sea-ink-soft: #5b667a;
+  --lagoon: #22b8cf;
+  --lagoon-deep: #1769e0;
+  --palm: #1858b8;
+  --sand: #f4f7fb;
+  --foam: #f8fafc;
+  --surface: rgba(255, 255, 255, 0.76);
+  --surface-strong: rgba(255, 255, 255, 0.96);
+  --line: rgba(51, 65, 85, 0.14);
+  --inset-glint: rgba(255, 255, 255, 0.9);
+  --kicker: #1769e0;
+  --bg-base: #eef3f9;
+  --header-bg: rgba(248, 250, 252, 0.88);
+  --chip-bg: rgba(255, 255, 255, 0.78);
+  --chip-line: rgba(51, 65, 85, 0.16);
+  --link-bg-hover: rgba(226, 232, 240, 0.68);
+  --hero-a: rgba(37, 99, 235, 0.14);
+  --hero-b: rgba(34, 211, 238, 0.1);
 
   --background: oklch(1 0 0);
   --foreground: oklch(0.141 0.005 285.823);
@@ -63,25 +62,25 @@
 }
 
 .dark {
-  --sea-ink: #d7ece8;
-  --sea-ink-soft: #afcdc8;
-  --lagoon: #60d7cf;
-  --lagoon-deep: #8de5db;
-  --palm: #6ec89a;
-  --sand: #0f1a1e;
-  --foam: #101d22;
-  --surface: rgba(16, 30, 34, 0.8);
-  --surface-strong: rgba(15, 27, 31, 0.92);
-  --line: rgba(141, 229, 219, 0.18);
-  --inset-glint: rgba(194, 247, 238, 0.14);
-  --kicker: #b8efe5;
-  --bg-base: #0a1418;
-  --header-bg: rgba(10, 20, 24, 0.8);
-  --chip-bg: rgba(13, 28, 32, 0.9);
-  --chip-line: rgba(141, 229, 219, 0.24);
-  --link-bg-hover: rgba(24, 44, 49, 0.8);
-  --hero-a: rgba(96, 215, 207, 0.18);
-  --hero-b: rgba(110, 200, 154, 0.12);
+  --sea-ink: #e6edf7;
+  --sea-ink-soft: #97a6bb;
+  --lagoon: #22d3ee;
+  --lagoon-deep: #69a7ff;
+  --palm: #60a5fa;
+  --sand: #0d1422;
+  --foam: #0b1220;
+  --surface: rgba(18, 29, 48, 0.76);
+  --surface-strong: rgba(15, 24, 40, 0.95);
+  --line: rgba(148, 163, 184, 0.17);
+  --inset-glint: rgba(255, 255, 255, 0.06);
+  --kicker: #67e8f9;
+  --bg-base: #080f1d;
+  --header-bg: rgba(8, 15, 29, 0.88);
+  --chip-bg: rgba(30, 41, 59, 0.8);
+  --chip-line: rgba(148, 163, 184, 0.2);
+  --link-bg-hover: rgba(51, 65, 85, 0.6);
+  --hero-a: rgba(37, 99, 235, 0.16);
+  --hero-b: rgba(34, 211, 238, 0.1);
 
   --background: oklch(0.141 0.005 285.823);
   --foreground: oklch(0.985 0 0);
@@ -118,8 +117,12 @@
 }
 
 @theme inline {
-  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Fraunces", Georgia, serif;
+  --font-sans:
+    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  --font-display:
+    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
   --color-sea-ink: var(--sea-ink);
   --color-sea-ink-soft: var(--sea-ink-soft);
   --color-lagoon: var(--lagoon);
@@ -1576,5 +1579,506 @@ body::after {
 
   .prose pre {
     @apply rounded-xl border border-line bg-[#1d2e45] text-[#e8efff];
+  }
+}
+
+/* V1 interface system: compact, technical, and intentionally extensible. */
+body {
+  background:
+    radial-gradient(900px 500px at 8% -10%, var(--hero-a), transparent 62%),
+    radial-gradient(800px 460px at 100% 0%, var(--hero-b), transparent 58%),
+    linear-gradient(180deg, var(--foam), var(--bg-base));
+}
+
+body::before {
+  opacity: 0;
+}
+
+body::after {
+  opacity: 0.24;
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: linear-gradient(to bottom, black, transparent 44rem);
+}
+
+button,
+.primary-button {
+  border-radius: 0.6rem;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 3px solid color-mix(in oklab, var(--lagoon-deep) 28%, transparent);
+  outline-offset: 2px;
+}
+
+.app-header {
+  min-height: 4rem;
+  padding-block: 0.65rem;
+}
+
+.app-header-main,
+.app-utilities,
+.primary-nav {
+  display: flex;
+  align-items: center;
+}
+
+.app-header-main {
+  min-width: 0;
+  gap: clamp(1rem, 4vw, 2.5rem);
+}
+
+.app-utilities {
+  gap: 0.45rem;
+}
+
+.brand {
+  flex: none;
+  letter-spacing: -0.025em;
+}
+
+.brand-mark {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 0.15rem;
+  background: linear-gradient(135deg, var(--lagoon-deep), var(--lagoon));
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--lagoon-deep) 10%, transparent);
+  transform: rotate(45deg);
+}
+
+.primary-nav {
+  gap: 0.25rem;
+}
+
+.primary-nav a {
+  border-radius: 0.55rem;
+  color: var(--sea-ink-soft);
+  padding: 0.5rem 0.7rem;
+  font-size: 0.86rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.primary-nav a:hover,
+.primary-nav a[aria-current="page"] {
+  background: var(--link-bg-hover);
+  color: var(--sea-ink);
+}
+
+.locale-switcher {
+  border: 1px solid var(--chip-line);
+  border-radius: 0.55rem;
+  background: var(--chip-bg);
+  padding: 0.15rem;
+}
+
+.locale-switcher a {
+  color: var(--sea-ink-soft);
+  padding: 0.3rem 0.4rem;
+  font-size: 0.7rem;
+}
+
+.utility-button {
+  min-height: 2.2rem;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.auth-page {
+  width: min(calc(100% - 2rem), 64rem);
+  gap: clamp(2rem, 7vw, 6rem);
+}
+
+.auth-intro h1,
+.auth-page[data-portal="admin"] .auth-intro h1 {
+  max-width: 12ch;
+  margin: 0.7rem 0 1rem;
+  font-family: var(--font-sans);
+  font-size: clamp(2.35rem, 6vw, 4.5rem);
+  font-weight: 750;
+  letter-spacing: -0.055em;
+  line-height: 1.02;
+}
+
+.auth-card,
+.shell-card,
+.podcast-admin-form,
+.podcast-admin-card,
+.organization-panel,
+.member-workspace,
+.member-create-card,
+.temporary-password-notice,
+.member-card {
+  border-radius: 0.85rem;
+  box-shadow:
+    0 16px 40px rgba(15, 23, 42, 0.07),
+    inset 0 1px var(--inset-glint);
+}
+
+.auth-card-frame::before,
+.auth-card-frame::after,
+.auth-card--login::before {
+  display: none;
+}
+
+.auth-card--login {
+  border-radius: 0.9rem;
+  background: var(--surface-strong);
+}
+
+.auth-brand-mark {
+  border-radius: 0.6rem;
+  background: linear-gradient(135deg, var(--lagoon-deep), var(--lagoon));
+  box-shadow: none;
+}
+
+.auth-card-heading h2 {
+  font-family: var(--font-sans);
+  font-size: 1.6rem;
+  letter-spacing: -0.03em;
+}
+
+.auth-card input,
+.podcast-admin-form input,
+.podcast-admin-form textarea,
+.podcast-admin-form select,
+.podcast-publication-controls input,
+.member-admin-form input,
+.member-admin-form select,
+.member-create-card input,
+.member-create-card select,
+.account-security-card input {
+  border-radius: 0.55rem;
+}
+
+.auth-submit,
+.primary-button,
+.member-create-card button[type="submit"],
+.member-admin-form button[type="submit"] {
+  border-color: transparent;
+  background: linear-gradient(110deg, var(--palm), var(--lagoon-deep));
+  color: white;
+  box-shadow: 0 10px 25px
+    color-mix(in oklab, var(--lagoon-deep) 20%, transparent);
+  font-weight: 800;
+}
+
+.auth-submit:hover:not(:disabled),
+.primary-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.podcast-page,
+.account-page {
+  width: min(calc(100% - 2rem), 68rem);
+  margin: 0 auto;
+  padding: clamp(2.5rem, 6vw, 4.5rem) 0;
+}
+
+.podcast-hero,
+.account-hero {
+  max-width: 42rem;
+  margin-bottom: clamp(1.75rem, 4vw, 3rem);
+}
+
+.podcast-hero h1,
+.podcast-detail h1,
+.account-hero h1 {
+  margin: 0.4rem 0 0.65rem;
+  font-family: var(--font-sans);
+  font-size: clamp(2.2rem, 6vw, 3.8rem);
+  font-weight: 760;
+  letter-spacing: -0.055em;
+  line-height: 1;
+}
+
+.podcast-hero > p:last-child,
+.account-hero > p:last-child {
+  color: var(--sea-ink-soft);
+  line-height: 1.7;
+}
+
+.podcast-list {
+  gap: 0.75rem;
+}
+
+.podcast-card {
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  align-items: start;
+  gap: 1.25rem;
+  border-radius: 0.85rem;
+  padding: 1.1rem;
+}
+
+.podcast-card:hover,
+.podcast-card:focus-within {
+  border-color: color-mix(in oklab, var(--lagoon-deep) 50%, var(--line));
+  transform: translateY(-1px);
+}
+
+.podcast-card-cover {
+  width: 5.5rem;
+  border-radius: 0.6rem;
+  background:
+    linear-gradient(135deg, transparent 35%, rgba(255, 255, 255, 0.16)),
+    linear-gradient(145deg, #1551a9, #172033);
+  color: white;
+  padding: 0.65rem;
+}
+
+.podcast-card-cover span {
+  font-family: var(--font-sans);
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.podcast-card h2 {
+  margin-top: 0.25rem;
+  font-family: var(--font-sans);
+  font-size: clamp(1.05rem, 3vw, 1.35rem);
+  letter-spacing: -0.02em;
+}
+
+.podcast-card p {
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.podcast-player {
+  margin-top: 0.85rem;
+}
+
+.podcast-player > button {
+  border-color: color-mix(in oklab, var(--lagoon-deep) 30%, var(--line));
+  color: var(--lagoon-deep);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.podcast-admin-page h1,
+.member-admin-hero h1,
+.podcast-admin-card h3 {
+  font-family: var(--font-sans);
+  letter-spacing: -0.04em;
+}
+
+.account-layout {
+  display: grid;
+  grid-template-columns: minmax(14rem, 0.7fr) minmax(20rem, 1.3fr);
+  align-items: start;
+  gap: 1rem;
+}
+
+.account-profile,
+.account-security-card {
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  background: var(--surface);
+  box-shadow:
+    0 16px 40px rgba(15, 23, 42, 0.07),
+    inset 0 1px var(--inset-glint);
+  backdrop-filter: blur(14px);
+}
+
+.account-profile {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 1.25rem;
+}
+
+.account-avatar {
+  display: grid;
+  flex: none;
+  width: 2.8rem;
+  height: 2.8rem;
+  place-items: center;
+  border-radius: 0.65rem;
+  background: color-mix(
+    in oklab,
+    var(--lagoon-deep) 13%,
+    var(--surface-strong)
+  );
+  color: var(--lagoon-deep);
+  font-weight: 800;
+}
+
+.account-profile h2,
+.account-profile p,
+.account-security-card h2,
+.account-security-card header > p:last-child,
+.field-hint {
+  margin: 0;
+}
+
+.account-profile h2 {
+  font-size: 1rem;
+}
+
+.account-profile p,
+.account-security-card header > p:last-child,
+.field-hint {
+  color: var(--sea-ink-soft);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.account-profile p {
+  margin-top: 0.2rem;
+  overflow-wrap: anywhere;
+}
+
+.account-security-card {
+  display: grid;
+  gap: 1rem;
+  padding: clamp(1.25rem, 4vw, 2rem);
+}
+
+.account-security-card h2 {
+  margin-top: 0.3rem;
+  font-size: 1.45rem;
+  letter-spacing: -0.03em;
+}
+
+.account-security-card header > p:last-child {
+  margin-top: 0.5rem;
+}
+
+.account-security-card label {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--sea-ink-soft);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.account-security-card input {
+  min-width: 0;
+  min-height: 2.8rem;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  color: var(--sea-ink);
+  padding: 0 0.8rem;
+}
+
+.field-hint {
+  margin-top: -0.65rem;
+}
+
+.form-message {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  padding: 0.75rem;
+  font-size: 0.84rem;
+}
+
+.form-message--error {
+  border-color: color-mix(in oklab, #ef4444 35%, var(--line));
+  background: color-mix(in oklab, #ef4444 8%, var(--surface));
+  color: color-mix(in oklab, #dc2626 85%, var(--sea-ink));
+}
+
+.form-message--success {
+  border-color: color-mix(in oklab, #10b981 36%, var(--line));
+  background: color-mix(in oklab, #10b981 8%, var(--surface));
+  color: color-mix(in oklab, #059669 78%, var(--sea-ink));
+}
+
+.account-security-card .primary-button {
+  width: fit-content;
+}
+
+@media (max-width: 52rem) {
+  .app-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  .app-header-main,
+  .app-utilities {
+    justify-content: space-between;
+  }
+
+  .account-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 42rem) {
+  .app-header {
+    padding-inline: 0.75rem;
+  }
+
+  .app-header-main {
+    width: 100%;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .app-header .primary-nav {
+    width: auto;
+    flex: 1;
+    justify-content: flex-end;
+  }
+
+  .primary-nav a {
+    text-align: center;
+  }
+
+  .app-utilities {
+    align-items: center;
+    flex-wrap: nowrap;
+  }
+
+  .app-header .app-utilities .locale-switcher {
+    width: auto;
+    flex: 1;
+  }
+
+  .user-name {
+    display: none;
+  }
+
+  .podcast-card {
+    grid-template-columns: 4.2rem minmax(0, 1fr);
+    gap: 0.85rem;
+    padding: 0.85rem;
+  }
+
+  .podcast-card-cover {
+    width: 4.2rem;
+  }
+
+  .podcast-card-cover span {
+    font-size: 1rem;
+  }
+
+  .podcast-player {
+    grid-column: 1 / -1;
+  }
+
+  .auth-page {
+    padding-block: 1.25rem;
+  }
+
+  .auth-intro h1,
+  .auth-page[data-portal="admin"] .auth-intro h1 {
+    font-size: clamp(2rem, 11vw, 3rem);
   }
 }

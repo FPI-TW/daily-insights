@@ -11,6 +11,7 @@ const locales: ReadonlyArray<{ code: Locale; label: string }> = [
 type LocaleDestination =
   | "customer-login"
   | "customer-podcasts"
+  | "customer-account"
   | "customer-change-password"
   | "admin-login"
   | "admin-audio"
@@ -20,6 +21,7 @@ type LocaleDestination =
 const destinations = {
   "customer-login": "/$locale/login",
   "customer-podcasts": "/$locale/podcasts",
+  "customer-account": "/$locale/account",
   "customer-change-password": "/$locale/change-password",
   "admin-login": "/$locale/admin/login",
   "admin-audio": "/$locale/admin/audio",

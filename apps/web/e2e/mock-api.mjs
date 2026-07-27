@@ -23,6 +23,7 @@ function reset(overrides = {}) {
   state = {
     podcastList: "normal",
     audio: "normal",
+    passwordChange: "normal",
     sessionExpired: false,
     status: "published",
     episodeVersion: 2,
@@ -82,7 +83,9 @@ function requireRole(request, response, allowedRoles) {
 }
 
 function hasValidCsrf(request) {
-  return request.headers["x-csrf-token"] === "e2e-csrf-token"
+  return ["e2e-csrf-token", "e2e-csrf-token-rotated"].includes(
+    request.headers["x-csrf-token"]
+  )
 }
 
 function requireCsrf(request, response) {
@@ -259,7 +262,11 @@ const server = createServer(async (request, response) => {
   if (url.pathname === "/api/auth/logout" && request.method === "POST") {
     const role = requireRole(request, response, ["admin", "org_member"])
     if (!role || !requireCsrf(request, response)) return
-    recordRequest(request, url, role, { csrf: "valid" })
+    const csrfToken = request.headers["x-csrf-token"]
+    recordRequest(request, url, role, {
+      csrf: "valid",
+      ...(csrfToken === "e2e-csrf-token-rotated" ? { csrfToken } : {}),
+    })
     response.writeHead(204, {
       "X-Request-ID": "e2e-request-id",
       "Set-Cookie": "e2e-role=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
@@ -281,6 +288,33 @@ const server = createServer(async (request, response) => {
     if (!role) return
     recordRequest(request, url, role)
     sendJson(response, 200, { csrf_token: "e2e-csrf-token" })
+    return
+  }
+
+  if (
+    url.pathname === "/api/auth/change-password" &&
+    request.method === "POST"
+  ) {
+    const role = requireRole(request, response, ["admin", "org_member"])
+    if (!role || !requireCsrf(request, response)) return
+    const input = parseJsonBody(await readBody(request))
+    recordRequest(request, url, role, {
+      csrf: "valid",
+      currentPassword: input?.current_password,
+      newPassword: input?.new_password,
+    })
+    if (
+      state.passwordChange === "error" ||
+      input?.current_password !==
+        (role === "admin" ? "admin-password" : "customer-password")
+    ) {
+      sendJson(response, 400, { detail: "Current password is incorrect" })
+      return
+    }
+    sendJson(response, 200, {
+      user: userFor(role),
+      csrf_token: "e2e-csrf-token-rotated",
+    })
     return
   }
 
