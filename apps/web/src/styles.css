@@ -346,6 +346,145 @@ button:disabled {
   gap: 1rem;
 }
 
+.auth-card-frame {
+  position: relative;
+  width: min(100%, 28rem);
+  isolation: isolate;
+}
+
+.auth-card-shell {
+  width: min(100%, 36rem);
+}
+
+.auth-card-frame::before,
+.auth-card-frame::after {
+  position: absolute;
+  content: "";
+  pointer-events: none;
+}
+
+.auth-card-frame::before {
+  z-index: -2;
+  inset: -1.15rem;
+  border-radius: 2rem;
+  background:
+    radial-gradient(
+      circle at 85% 10%,
+      color-mix(in oklab, var(--lagoon) 28%, transparent),
+      transparent 38%
+    ),
+    linear-gradient(
+      145deg,
+      color-mix(in oklab, var(--surface-strong) 65%, transparent),
+      transparent 58%
+    );
+  filter: blur(2px);
+}
+
+.auth-card-frame::after {
+  z-index: -1;
+  right: -0.9rem;
+  bottom: -0.9rem;
+  width: 7.5rem;
+  height: 7.5rem;
+  border-right: 1px solid color-mix(in oklab, var(--lagoon) 55%, transparent);
+  border-bottom: 1px solid color-mix(in oklab, var(--lagoon) 55%, transparent);
+  border-radius: 0 0 2rem;
+}
+
+.auth-card--login {
+  position: relative;
+  width: 100%;
+  gap: 1.25rem;
+  overflow: hidden;
+  border-color: color-mix(in oklab, var(--lagoon) 26%, var(--line));
+  border-radius: 1.75rem;
+  background: linear-gradient(
+    145deg,
+    color-mix(in oklab, var(--surface-strong) 97%, white) 0%,
+    var(--surface-strong) 58%
+  );
+  box-shadow:
+    0 32px 80px rgb(24 76 67 / 16%),
+    0 8px 24px rgb(24 76 67 / 8%),
+    inset 0 1px 0 var(--inset-glint);
+}
+
+.auth-card--login::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 9rem;
+  height: 9rem;
+  border-radius: 0 0 0 100%;
+  background: radial-gradient(
+    circle at top right,
+    color-mix(in oklab, var(--lagoon) 18%, transparent),
+    transparent 68%
+  );
+  content: "";
+  pointer-events: none;
+}
+
+.auth-card-toolbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.auth-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.16rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid color-mix(in oklab, var(--lagoon) 45%, var(--line));
+  border-radius: 0.9rem;
+  background: linear-gradient(
+    145deg,
+    color-mix(in oklab, var(--lagoon) 88%, white),
+    var(--palm)
+  );
+  box-shadow: 0 10px 26px rgb(47 106 74 / 18%);
+}
+
+.auth-brand-mark i {
+  width: 0.16rem;
+  border-radius: 999px;
+  background: white;
+  opacity: 0.94;
+}
+
+.auth-brand-mark i:nth-child(1),
+.auth-brand-mark i:nth-child(4) {
+  height: 0.6rem;
+}
+
+.auth-brand-mark i:nth-child(2) {
+  height: 1.15rem;
+}
+
+.auth-brand-mark i:nth-child(3) {
+  height: 0.85rem;
+}
+
+.auth-card-heading h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 5vw, 2.35rem);
+  line-height: 1.1;
+}
+
+.auth-card-heading p {
+  margin: 0.55rem 0 0;
+  color: var(--sea-ink-soft);
+  font-size: 0.92rem;
+  line-height: 1.65;
+}
+
 .auth-card label {
   display: grid;
   gap: 0.4rem;
@@ -359,6 +498,73 @@ button:disabled {
   background: var(--surface);
   color: var(--sea-ink);
   padding: 0 0.8rem;
+}
+
+.auth-card--login input {
+  min-height: 3.15rem;
+  border-radius: 0.9rem;
+  outline: none;
+  background: color-mix(in oklab, var(--surface) 88%, transparent);
+  padding: 0 0.95rem;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease;
+}
+
+.auth-card--login input:hover {
+  border-color: color-mix(in oklab, var(--lagoon) 42%, var(--line));
+}
+
+.auth-card--login input:focus-visible {
+  border-color: var(--lagoon-deep);
+  background: var(--surface-strong);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--lagoon) 16%, transparent);
+}
+
+.auth-submit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 3.2rem;
+  margin-top: 0.15rem;
+  border: 0;
+  border-radius: 0.9rem;
+  background: linear-gradient(110deg, var(--palm), var(--lagoon-deep));
+  color: white;
+  padding-inline: 1.15rem;
+  font-weight: 800;
+  box-shadow: 0 12px 28px rgb(47 106 74 / 22%);
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    filter 180ms ease;
+}
+
+.auth-submit:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: saturate(1.08);
+  box-shadow: 0 16px 32px rgb(47 106 74 / 28%);
+}
+
+.auth-submit:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.auth-submit:focus-visible {
+  outline: 3px solid color-mix(in oklab, var(--lagoon) 38%, transparent);
+  outline-offset: 3px;
+}
+
+.auth-error {
+  margin: 0;
+  border: 1px solid color-mix(in oklab, #c75252 45%, var(--line));
+  border-radius: 0.8rem;
+  background: color-mix(in oklab, #c75252 8%, var(--surface));
+  color: color-mix(in oklab, #9e3434 82%, var(--sea-ink));
+  padding: 0.75rem 0.9rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
 }
 
 .shell-card {
@@ -785,6 +991,10 @@ button:disabled {
 
   .auth-intro h1 {
     font-size: clamp(2.3rem, 13vw, 3.6rem);
+  }
+
+  .auth-card-frame::before {
+    inset: -0.75rem 0;
   }
 
   .user-name {

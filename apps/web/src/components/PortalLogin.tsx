@@ -71,7 +71,7 @@ export function PortalLogin({
     <main className="auth-page" data-portal={portal}>
       <section className="auth-intro">
         <p className="eyebrow">
-          {t(portal === "customer" ? "customerPortal" : "adminPortal")}
+          {t(portal === "customer" ? "brand" : "adminPortal")}
         </p>
         <h1>
           {t(portal === "customer" ? "customerLoginTitle" : "adminLoginTitle")}
@@ -84,30 +84,65 @@ export function PortalLogin({
           )}
         </p>
       </section>
-      <form className="auth-card" onSubmit={event => void submit(event)}>
-        <LocaleSwitcher
-          locale={locale}
-          destination={portal === "customer" ? "customer-login" : "admin-login"}
-        />
-        <h2>{t("signIn")}</h2>
-        <label>
-          {t("email")}
-          <input name="email" type="email" autoComplete="username" required />
-        </label>
-        <label>
-          {t("password")}
-          <input
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            required
-          />
-        </label>
-        {error ? <p role="alert">{error}</p> : null}
-        <button type="submit" disabled={pending}>
-          {pending ? t("submitting") : t("signIn")}
-        </button>
-      </form>
+      <div
+        className={
+          portal === "customer" ? "auth-card-frame" : "auth-card-shell"
+        }
+      >
+        <form
+          className={
+            portal === "customer" ? "auth-card auth-card--login" : "auth-card"
+          }
+          onSubmit={event => void submit(event)}
+        >
+          <div className="auth-card-toolbar">
+            {portal === "customer" ? (
+              <span className="auth-brand-mark" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+                <i />
+              </span>
+            ) : null}
+            <LocaleSwitcher
+              locale={locale}
+              destination={
+                portal === "customer" ? "customer-login" : "admin-login"
+              }
+            />
+          </div>
+          <header className={portal === "customer" ? "auth-card-heading" : ""}>
+            <h2>{t(portal === "customer" ? "loginWelcome" : "signIn")}</h2>
+            {portal === "customer" ? <p>{t("loginPrompt")}</p> : null}
+          </header>
+          <label>
+            {t("email")}
+            <input name="email" type="email" autoComplete="username" required />
+          </label>
+          <label>
+            {t("password")}
+            <input
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+            />
+          </label>
+          {error ? (
+            <p className="auth-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <button
+            className={portal === "customer" ? "auth-submit" : ""}
+            type="submit"
+            disabled={pending}
+          >
+            <span>{pending ? t("submitting") : t("signIn")}</span>
+            {portal === "customer" ? <span aria-hidden="true">→</span> : null}
+          </button>
+        </form>
+      </div>
     </main>
   )
 }
