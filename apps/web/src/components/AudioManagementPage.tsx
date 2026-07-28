@@ -27,22 +27,27 @@ export function AudioManagementPage({
 }) {
   const { t } = useTranslation()
   return (
-    <main className="podcast-admin-page">
-      <header>
+    <main className="page-shell">
+      <header className="mb-8 max-w-3xl">
         <p className="eyebrow">{t("adminPortal")}</p>
-        <h1>{t("audioManagementTitle")}</h1>
-        <p>{t("audioManagementDescription")}</p>
+        <h1 className="my-3 text-[clamp(2.2rem,6vw,3.8rem)] leading-none font-extrabold tracking-[-0.055em]">
+          {t("audioManagementTitle")}
+        </h1>
+        <p className="leading-7 text-sea-ink-soft">
+          {t("audioManagementDescription")}
+        </p>
       </header>
       <PodcastUploadForm locale={locale} />
-      <section
-        className="podcast-admin-list"
-        aria-labelledby="audio-list-title"
-      >
-        <h2 id="audio-list-title">{t("audioFiles")}</h2>
+      <section className="mt-8 grid gap-4" aria-labelledby="audio-list-title">
+        <h2 className="mb-0 text-2xl" id="audio-list-title">
+          {t("audioFiles")}
+        </h2>
         {episodes.length === 0 ? (
-          <div className="podcast-empty">
-            <h3>{t("audioEmptyTitle")}</h3>
-            <p>{t("audioEmptyDescription")}</p>
+          <div className="rounded-xl border border-dashed border-line bg-surface p-10 text-center">
+            <h3 className="mt-0">{t("audioEmptyTitle")}</h3>
+            <p className="mb-0 text-sea-ink-soft">
+              {t("audioEmptyDescription")}
+            </p>
           </div>
         ) : (
           episodes.map(episode => (
@@ -134,15 +139,17 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
 
   return (
     <form
-      className="podcast-admin-form podcast-upload-form"
+      className="surface-panel grid gap-4 p-[clamp(1.25rem,3vw,2rem)]"
       aria-labelledby="audio-upload-title"
       onSubmit={event => {
         event.preventDefault()
         void form.handleSubmit()
       }}
     >
-      <h2 id="audio-upload-title">{t("podcastUploadTitle")}</h2>
-      <p>{t("podcastUploadDescription")}</p>
+      <h2 className="mb-0 text-2xl" id="audio-upload-title">
+        {t("podcastUploadTitle")}
+      </h2>
+      <p className="mt-0 text-sea-ink-soft">{t("podcastUploadDescription")}</p>
       <form.Field name="tradingDate">
         {field => (
           <label>
@@ -157,9 +164,11 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
           </label>
         )}
       </form.Field>
-      <fieldset className="podcast-upload-fieldset">
-        <legend>{t("audioLanguageFiles")}</legend>
-        <div className="podcast-upload-slots">
+      <fieldset className="m-0 grid gap-3 border-0 p-0">
+        <legend className="mb-3 text-sm font-bold">
+          {t("audioLanguageFiles")}
+        </legend>
+        <div className="grid grid-cols-3 gap-3 max-[42rem]:grid-cols-1">
           {podcastLocales.map(locale => (
             <PodcastFileSlot
               key={locale}
@@ -195,13 +204,17 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
         )}
       </form.Field>
       {replacementVersions && (
-        <div className="podcast-replacement-warning" role="alert">
-          <p>
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3"
+          role="alert"
+        >
+          <p className="m-0 text-sm font-bold">
             {t("podcastBatchReplacementWarning", {
               locales: Object.keys(replacementVersions).join(", "),
             })}
           </p>
           <button
+            className="font-bold"
             type="button"
             onClick={() =>
               void runUpload(
@@ -216,10 +229,18 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
           </button>
         </div>
       )}
-      {error && <p role="alert">{error}</p>}
+      {error && (
+        <p className="m-0 text-sm font-bold text-red-700" role="alert">
+          {error}
+        </p>
+      )}
       <form.Subscribe selector={state => state.isSubmitting}>
         {pending => (
-          <button type="submit" disabled={pending}>
+          <button
+            className="primary-action w-fit"
+            type="submit"
+            disabled={pending}
+          >
             {pending ? t("submitting") : t("podcastUploadSubmit")}
           </button>
         )}
@@ -250,8 +271,11 @@ function PodcastFileSlot({
 
   return (
     <div
-      className="podcast-upload-slot"
-      data-dragging={dragging || undefined}
+      className={
+        dragging
+          ? "grid min-h-36 place-items-center gap-2 rounded-lg border-2 border-dashed border-lagoon bg-lagoon/10 p-4 text-center"
+          : "grid min-h-36 place-items-center gap-2 rounded-lg border-2 border-dashed border-line bg-surface p-4 text-center transition-colors hover:border-lagoon"
+      }
       onDragEnter={event => {
         event.preventDefault()
         setDragging(true)
@@ -260,18 +284,28 @@ function PodcastFileSlot({
       onDragLeave={() => setDragging(false)}
       onDrop={receiveDrop}
     >
-      <strong>{locale}</strong>
+      <strong className="text-xs tracking-[0.08em] text-kicker uppercase">
+        {locale}
+      </strong>
       <input
+        className="sr-only"
         id={inputId}
         type="file"
         accept=".mp3,.mp4,audio/mpeg,audio/mp4,video/mp4"
         onChange={event => onChange(event.target.files?.item(0) ?? null)}
       />
-      <label htmlFor={inputId}>
+      <label
+        className="max-w-full cursor-pointer overflow-hidden text-ellipsis text-sm font-bold text-sea-ink"
+        htmlFor={inputId}
+      >
         {file ? file.name : t("podcastUploadSlotPrompt")}
       </label>
       {file && (
-        <button type="button" onClick={() => onChange(null)}>
+        <button
+          className="px-2 py-1 text-xs"
+          type="button"
+          onClick={() => onChange(null)}
+        >
           {t("podcastUploadRemove")}
         </button>
       )}
@@ -327,30 +361,48 @@ function EpisodeManager({
   }
 
   return (
-    <article className="podcast-admin-card">
-      <header>
+    <article className="surface-panel grid gap-3 p-[clamp(1.25rem,3vw,1.75rem)]">
+      <header className="flex items-start justify-between gap-4">
         <div>
-          <time dateTime={episode.trading_date}>{episode.trading_date}</time>
-          <h3>{t("audioEpisodeTitle", { date: episode.trading_date })}</h3>
+          <time
+            className="text-xs font-extrabold tracking-[0.06em] text-kicker"
+            dateTime={episode.trading_date}
+          >
+            {episode.trading_date}
+          </time>
+          <h3 className="mt-1 mb-0 text-lg tracking-[-0.025em]">
+            {t("audioEpisodeTitle", { date: episode.trading_date })}
+          </h3>
         </div>
-        <span data-status={episode.status}>
+        <span
+          className={
+            episode.status === "published"
+              ? "rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-extrabold text-emerald-700"
+              : "rounded-full bg-slate-500/15 px-2.5 py-1 text-xs font-extrabold text-sea-ink-soft"
+          }
+        >
           {t(
             episode.status === "published" ? "podcastPublished" : "podcastDraft"
           )}
         </span>
       </header>
-      <p>
+      <p className="m-0 text-sm text-sea-ink-soft">
         {t("podcastVersion", { version: episode.version })} ·{" "}
         {t("podcastAudioCount", { count: available.size })}
       </p>
       {missing.length > 0 && (
-        <p className="podcast-locale-warning" role="status">
+        <p
+          className="m-0 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm font-bold"
+          role="status"
+        >
           {t("podcastMissingLocales", { locales: missing.join(", ") })}
         </p>
       )}
       {canPublish && (
-        <div className="podcast-publication-controls">
+        <div className="flex flex-wrap gap-3">
           <button
+            className="primary-action"
+            data-action="publication"
             type="button"
             disabled={pending}
             onClick={() => void changePublication()}
@@ -361,7 +413,11 @@ function EpisodeManager({
           </button>
         </div>
       )}
-      {error && <p role="alert">{error}</p>}
+      {error && (
+        <p className="m-0 text-sm font-bold text-red-700" role="alert">
+          {error}
+        </p>
+      )}
     </article>
   )
 }

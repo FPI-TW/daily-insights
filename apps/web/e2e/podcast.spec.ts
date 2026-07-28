@@ -153,7 +153,7 @@ test.describe("Portal authentication and boundaries", () => {
     await openHydrated(
       page,
       "/en/podcasts",
-      '.app-header button[type="button"]:last-of-type'
+      '[data-surface="customer"] button[type="button"]:last-of-type'
     )
     await page.getByRole("button", { name: "Sign out" }).click()
     await expect(page).toHaveURL("/en/login")
@@ -162,7 +162,7 @@ test.describe("Portal authentication and boundaries", () => {
     await openHydrated(
       page,
       "/en/admin/audio",
-      '.app-header button[type="button"]:last-of-type'
+      '[data-surface="admin"] button[type="button"]:last-of-type'
     )
     await page.getByRole("button", { name: "Sign out" }).click()
     await expect(page).toHaveURL("/en/admin/login")
@@ -241,7 +241,7 @@ test.describe("Podcast administration", () => {
     await openHydrated(
       page,
       "/en/admin/audio",
-      ".podcast-publication-controls button"
+      'button[data-action="publication"]'
     )
     const unpublish = page.getByRole("button", { name: "Unpublish" })
 
@@ -317,7 +317,11 @@ test.describe("Customer inline Podcast experience", () => {
     request,
   }) => {
     await resetMockApi(request, { audio: "delayed" })
-    await openHydrated(page, "/en/podcasts", ".podcast-player button")
+    await openHydrated(
+      page,
+      "/en/podcasts",
+      '[data-testid="podcast-player"] button'
+    )
     await page.getByRole("button", { name: "Listen now" }).click()
     await expect(page.getByRole("status")).toHaveText("Preparing audio…")
     await expect(page.locator("audio")).toBeVisible()
@@ -384,7 +388,7 @@ test.describe("Customer account", () => {
     page,
     request,
   }) => {
-    await openHydrated(page, "/en/podcasts", ".app-header")
+    await openHydrated(page, "/en/podcasts", '[data-surface="customer"]')
     await page.getByRole("link", { name: "Account" }).click()
 
     await expect(page).toHaveURL("/en/account")
@@ -423,7 +427,11 @@ test.describe("Mounted session expiry", () => {
     request,
   }) => {
     await authenticateAs(context, "org_member")
-    await openHydrated(page, "/en/podcasts", ".podcast-player button")
+    await openHydrated(
+      page,
+      "/en/podcasts",
+      '[data-testid="podcast-player"] button'
+    )
     await resetMockApi(request, { sessionExpired: true })
 
     await page.getByRole("button", { name: "Listen now" }).click()
@@ -455,7 +463,7 @@ test.describe("Mounted session expiry", () => {
     await openHydrated(
       page,
       "/en/admin/audio",
-      ".podcast-publication-controls button"
+      'button[data-action="publication"]'
     )
     await resetMockApi(request, { sessionExpired: true })
 

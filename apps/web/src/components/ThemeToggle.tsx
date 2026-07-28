@@ -73,7 +73,7 @@ export default function ThemeToggle() {
       onClick={toggleMode}
       aria-label={label}
       title={label}
-      className="utility-button"
+      className="min-h-9 px-3 py-1.5 text-xs font-extrabold"
     >
       {mode === "auto" ? "Auto" : mode === "dark" ? "Dark" : "Light"}
     </button>

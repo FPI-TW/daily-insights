@@ -57,8 +57,14 @@ export function PortalChangePassword({
   }
 
   return (
-    <main className="auth-page" data-portal={portal}>
-      <form className="auth-card" onSubmit={event => void submit(event)}>
+    <main
+      className="mx-auto grid min-h-svh w-[min(calc(100%-2rem),36rem)] place-items-center py-8"
+      data-portal={portal}
+    >
+      <form
+        className="surface-panel grid w-full gap-4 p-[clamp(1.5rem,4vw,2.5rem)]"
+        onSubmit={event => void submit(event)}
+      >
         <LocaleSwitcher
           locale={locale}
           destination={
@@ -67,8 +73,12 @@ export function PortalChangePassword({
               : "admin-change-password"
           }
         />
-        <h1>{t("initialPasswordTitle")}</h1>
-        <p>{t("initialPasswordDescription")}</p>
+        <h1 className="mb-0 text-3xl tracking-[-0.04em]">
+          {t("initialPasswordTitle")}
+        </h1>
+        <p className="mt-0 leading-7 text-sea-ink-soft">
+          {t("initialPasswordDescription")}
+        </p>
         <label>
           {t("currentPassword")}
           <input
@@ -88,8 +98,12 @@ export function PortalChangePassword({
             required
           />
         </label>
-        {error ? <p role="alert">{error}</p> : null}
-        <button type="submit" disabled={pending}>
+        {error ? (
+          <p className="text-sm font-bold text-red-700" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <button className="primary-action" type="submit" disabled={pending}>
           {pending ? t("submitting") : t("changePassword")}
         </button>
       </form>

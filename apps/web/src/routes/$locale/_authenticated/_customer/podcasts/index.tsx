@@ -19,30 +19,49 @@ function PodcastListPage() {
   const { t } = useTranslation()
 
   return (
-    <main className="podcast-page">
-      <header className="podcast-hero">
+    <main className="page-shell">
+      <header className="mb-[clamp(2rem,5vw,3.5rem)] max-w-3xl">
         <p className="eyebrow">{t("podcastEyebrow")}</p>
-        <h1>{t("podcastTitle")}</h1>
-        <p>{t("podcastDescription")}</p>
+        <h1 className="my-3 text-[clamp(2.2rem,6vw,3.8rem)] leading-none font-extrabold tracking-[-0.055em]">
+          {t("podcastTitle")}
+        </h1>
+        <p className="leading-7 text-sea-ink-soft">{t("podcastDescription")}</p>
       </header>
       {episodes.length === 0 ? (
-        <section className="podcast-empty">
-          <h2>{t("podcastEmptyTitle")}</h2>
-          <p>{t("podcastEmptyDescription")}</p>
+        <section className="rounded-xl border border-dashed border-line bg-surface p-[clamp(2rem,6vw,4rem)] text-center">
+          <h2 className="mt-0">{t("podcastEmptyTitle")}</h2>
+          <p className="mb-0 text-sea-ink-soft">
+            {t("podcastEmptyDescription")}
+          </p>
         </section>
       ) : (
-        <ol className="podcast-list">
+        <ol className="m-0 grid list-none gap-3 p-0">
           {episodes.map(episode => (
-            <li key={episode.id} className="podcast-card">
-              <div className="podcast-card-cover" aria-hidden="true">
-                <span>{episode.trading_date.slice(5)}</span>
+            <li
+              key={episode.id}
+              className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-5 rounded-xl border border-line bg-surface p-4 text-sea-ink shadow-[inset_0_1px_var(--inset-glint)] transition hover:-translate-y-px hover:border-lagoon-deep hover:bg-surface-strong max-[42rem]:grid-cols-[4.2rem_minmax(0,1fr)] max-[42rem]:gap-3 max-[42rem]:p-3.5"
+            >
+              <div
+                className="grid aspect-square w-[5.5rem] items-end justify-items-start rounded-lg bg-[linear-gradient(135deg,transparent_35%,rgb(255_255_255/16%)),linear-gradient(145deg,var(--palm),var(--sea-ink))] p-2.5 text-white max-[42rem]:w-[4.2rem]"
+                aria-hidden="true"
+              >
+                <span className="text-xl font-extrabold max-[42rem]:text-base">
+                  {episode.trading_date.slice(5)}
+                </span>
               </div>
-              <article className="podcast-card-copy">
-                <time dateTime={episode.trading_date}>
+              <article className="min-w-0">
+                <time
+                  className="text-xs font-extrabold tracking-[0.06em] text-kicker"
+                  dateTime={episode.trading_date}
+                >
                   {episode.trading_date}
                 </time>
-                <h2>{episode.title}</h2>
-                <p>{episode.summary}</p>
+                <h2 className="mt-1 mb-0 text-[clamp(1.05rem,3vw,1.35rem)] tracking-[-0.02em]">
+                  {episode.title}
+                </h2>
+                <p className="mt-2 line-clamp-2 text-sm leading-6 text-sea-ink-soft">
+                  {episode.summary}
+                </p>
                 <PodcastPlayer
                   key={`${episode.id}:${locale}`}
                   episodeId={episode.id}
