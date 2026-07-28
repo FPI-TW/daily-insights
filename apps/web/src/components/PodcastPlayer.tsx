@@ -132,6 +132,9 @@ export function PodcastPlayer({
             } catch {
               // Corrupt storage is ignored.
             }
+            void event.currentTarget.play().catch(() => {
+              // Browser autoplay policy may require the native play control.
+            })
           }}
           onTimeUpdate={event => {
             if (event.currentTarget.currentTime - lastSavedAt.current >= 5) {
