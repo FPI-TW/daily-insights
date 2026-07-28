@@ -11,6 +11,7 @@ done
 compose_file=compose.production.yaml
 nginx_file=infra/production/nginx/default.conf.template
 nginx_main=infra/production/nginx/nginx.conf
+ci_workflow_file=.github/workflows/ci.yml
 workflow_file=.github/workflows/release.yml
 
 if grep -Eq '^[[:space:]]*build:' "$compose_file"; then
@@ -80,6 +81,16 @@ if grep -Eq 'proxy_pass .*r2|R2_(ACCESS|SECRET|ACCOUNT)' \
 fi
 
 grep -q 'systemctl enable --now docker.service' scripts/production/install-host-bundle.sh
+if awk '
+  /^on:$/ { in_triggers = 1; next }
+  in_triggers && /^[^[:space:]#]/ { exit }
+  in_triggers && /^[[:space:]]+push:/ { found = 1 }
+  END { exit found ? 0 : 1 }
+' "$ci_workflow_file"; then
+  echo "CI must not run directly on main pushes because release runs it before deployment" >&2
+  exit 1
+fi
+[ "$(grep -Fc 'uses: ./.github/workflows/ci.yml' "$workflow_file")" -eq 1 ]
 if grep -R -Eq 'daily-insights[.]service|/etc/daily-insights/runtime|/var/lib/daily-insights|--env-file' \
   "$workflow_file" compose.production.yaml scripts/production; then
   echo "deployment must rely on Docker restart policies without host runtime env or app systemd" >&2
