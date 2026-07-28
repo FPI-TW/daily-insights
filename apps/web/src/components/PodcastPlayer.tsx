@@ -92,28 +92,42 @@ export function PodcastPlayer({
 
   return (
     <section
-      className="podcast-player"
+      className="mt-[0.85rem] grid gap-3 max-[42rem]:col-span-full"
       aria-label={t("podcastPlayerFor", { title })}
+      data-testid="podcast-player"
     >
       {!requested ? (
-        <button type="button" onClick={() => void loadAudio()}>
+        <button
+          className="w-fit border-[color-mix(in_oklab,var(--lagoon-deep)_30%,var(--line))] px-3 py-2 text-[0.8rem] font-extrabold text-lagoon-deep"
+          type="button"
+          onClick={() => void loadAudio()}
+        >
           {t("podcastListen")}
         </button>
       ) : null}
       {loading ? <p role="status">{t("podcastAudioLoading")}</p> : null}
       {unavailable ? (
-        <div className="podcast-player-error">
-          <p role="alert">{t("podcastAudioUnavailable")}</p>
-          <button type="button" onClick={() => void loadAudio()}>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="m-0" role="alert">
+            {t("podcastAudioUnavailable")}
+          </p>
+          <button
+            className="w-fit"
+            type="button"
+            onClick={() => void loadAudio()}
+          >
             {t("podcastRetryAudio")}
           </button>
         </div>
       ) : null}
       {playback && playback.requested_locale !== playback.resolved_locale ? (
-        <p className="podcast-fallback-note">{t("podcastAudioFallback")}</p>
+        <p className="m-0 text-[0.85rem] text-sea-ink-soft">
+          {t("podcastAudioFallback")}
+        </p>
       ) : null}
       {playback ? (
         <audio
+          className="w-full"
           ref={audioRef}
           controls
           controlsList="nodownload"
@@ -132,6 +146,9 @@ export function PodcastPlayer({
             } catch {
               // Corrupt storage is ignored.
             }
+            void event.currentTarget.play().catch(() => {
+              // Browser autoplay policy may require the native play control.
+            })
           }}
           onTimeUpdate={event => {
             if (event.currentTarget.currentTime - lastSavedAt.current >= 5) {

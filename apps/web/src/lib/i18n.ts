@@ -87,8 +87,8 @@ const resources: Resource = {
       account: "帳戶",
       accountNav: "帳戶",
       accountEyebrow: "個人設定",
-      accountTitle: "帳戶與安全性",
-      accountDescription: "管理你的個人資料與登入安全設定。",
+      accountTitle: "帳戶資料",
+      accountDescription: "查看你的個人資料與帳戶資訊。",
       accountSecurityEyebrow: "安全性",
       accountSecurityTitle: "變更密碼",
       accountSecurityDescription:
@@ -259,8 +259,8 @@ const resources: Resource = {
       account: "账户",
       accountNav: "账户",
       accountEyebrow: "个人设置",
-      accountTitle: "账户与安全",
-      accountDescription: "管理你的个人资料与登录安全设置。",
+      accountTitle: "账户资料",
+      accountDescription: "查看你的个人资料与账户信息。",
       accountSecurityEyebrow: "安全",
       accountSecurityTitle: "更改密码",
       accountSecurityDescription:
@@ -438,8 +438,8 @@ const resources: Resource = {
       account: "Account",
       accountNav: "Account",
       accountEyebrow: "Personal settings",
-      accountTitle: "Account & security",
-      accountDescription: "Manage your profile and sign-in security.",
+      accountTitle: "Account profile",
+      accountDescription: "View your profile and account information.",
       accountSecurityEyebrow: "Security",
       accountSecurityTitle: "Change password",
       accountSecurityDescription:

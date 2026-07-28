@@ -61,11 +61,15 @@ export function MemberManagementPage({
     directory[0]
 
   return (
-    <main className="member-admin-page">
-      <header className="member-admin-hero">
+    <main className="page-shell">
+      <header className="mb-8 max-w-3xl">
         <p className="eyebrow">{t("adminPortal")}</p>
-        <h1>{t("memberManagementTitle")}</h1>
-        <p>{t("memberManagementDescription")}</p>
+        <h1 className="my-3 text-[clamp(2.2rem,6vw,3.8rem)] leading-none font-extrabold tracking-[-0.055em]">
+          {t("memberManagementTitle")}
+        </h1>
+        <p className="leading-7 text-sea-ink-soft">
+          {t("memberManagementDescription")}
+        </p>
       </header>
 
       {provisionedMember ? (
@@ -75,22 +79,24 @@ export function MemberManagementPage({
         />
       ) : null}
 
-      <div className="member-admin-layout">
-        <aside className="organization-panel">
-          <div className="organization-panel-heading">
+      <div className="grid grid-cols-[minmax(16rem,0.34fr)_minmax(0,1fr)] items-start gap-5 max-[52rem]:grid-cols-1">
+        <aside className="surface-panel sticky top-24 grid gap-4 p-4 max-[52rem]:static">
+          <div className="flex items-start justify-between gap-4">
             <div>
               <p className="eyebrow">{t("organizations")}</p>
               <h2>{t("organizationListTitle")}</h2>
             </div>
-            <span className="organization-count">{directory.length}</span>
+            <span className="grid h-7 min-w-7 place-items-center rounded-full bg-link-hover px-2 text-xs font-extrabold text-sea-ink-soft">
+              {directory.length}
+            </span>
           </div>
 
-          <div className="organization-list">
+          <div className="grid gap-2">
             {directory.map(({ organization }) => (
               <button
                 key={organization.id}
                 type="button"
-                className="organization-option"
+                className="grid w-full gap-1 rounded-lg border border-transparent bg-transparent px-3 py-2.5 text-left hover:border-line hover:bg-link-hover aria-pressed:border-lagoon-deep aria-pressed:bg-lagoon-deep aria-pressed:text-white [&>small]:text-xs [&>small]:opacity-75 [&>span]:font-extrabold"
                 aria-pressed={
                   organization.id === selectedEntry?.organization.id
                 }
@@ -119,22 +125,23 @@ export function MemberManagementPage({
           />
         </aside>
 
-        <section className="member-workspace">
+        <section className="surface-panel min-w-0 p-[clamp(1rem,3vw,2rem)]">
           {selectedEntry ? (
             <>
-              <header className="member-workspace-heading">
+              <header className="flex items-end justify-between gap-4 border-b border-line pb-5 max-[42rem]:items-stretch max-[42rem]:flex-col">
                 <div>
                   <p className="eyebrow">{selectedEntry.organization.slug}</p>
                   <h2>{selectedEntry.organization.name}</h2>
                 </div>
-                <div className="seat-meter">
-                  <span>
+                <div className="grid min-w-44 gap-2 text-right max-[42rem]:text-left">
+                  <span className="text-xs font-extrabold text-sea-ink-soft">
                     {t("seatUsage", {
                       used: selectedEntry.organization.seat_count,
                       total: selectedEntry.organization.seat_limit,
                     })}
                   </span>
                   <progress
+                    className="h-2 w-full overflow-hidden rounded-full accent-lagoon-deep"
                     value={selectedEntry.organization.seat_count}
                     max={selectedEntry.organization.seat_limit}
                   />
@@ -151,21 +158,20 @@ export function MemberManagementPage({
                 onCreated={setProvisionedMember}
               />
 
-              <section
-                className="member-list-section"
-                aria-labelledby="member-list-title"
-              >
-                <div className="member-list-heading">
+              <section className="mt-7" aria-labelledby="member-list-title">
+                <div className="mb-3 flex items-center justify-between gap-4">
                   <h2 id="member-list-title">{t("memberListTitle")}</h2>
                   <span>{selectedEntry.members.length}</span>
                 </div>
                 {selectedEntry.members.length === 0 ? (
-                  <div className="member-empty">
-                    <h3>{t("memberEmptyTitle")}</h3>
-                    <p>{t("memberEmptyDescription")}</p>
+                  <div className="rounded-xl border border-dashed border-line bg-surface p-8 text-center">
+                    <h3 className="mt-0">{t("memberEmptyTitle")}</h3>
+                    <p className="mb-0 text-sea-ink-soft">
+                      {t("memberEmptyDescription")}
+                    </p>
                   </div>
                 ) : (
-                  <div className="member-list">
+                  <div className="grid gap-3">
                     {selectedEntry.members.map(member => (
                       <MemberCard
                         key={member.user_id}
@@ -179,9 +185,11 @@ export function MemberManagementPage({
               </section>
             </>
           ) : (
-            <div className="member-empty member-empty--workspace">
-              <h2>{t("organizationEmptyTitle")}</h2>
-              <p>{t("organizationEmptyDescription")}</p>
+            <div className="grid min-h-80 place-content-center rounded-xl border border-dashed border-line bg-surface p-8 text-center">
+              <h2 className="mt-0">{t("organizationEmptyTitle")}</h2>
+              <p className="mb-0 text-sea-ink-soft">
+                {t("organizationEmptyDescription")}
+              </p>
             </div>
           )}
         </section>
@@ -238,16 +246,18 @@ function CreateOrganizationForm({
   })
 
   return (
-    <details className="organization-create">
-      <summary>{t("createOrganization")}</summary>
+    <details className="border-t border-line pt-4">
+      <summary className="cursor-pointer text-sm font-extrabold text-lagoon-deep">
+        {t("createOrganization")}
+      </summary>
       <form
-        className="member-admin-form"
+        className="mt-4 grid gap-3"
         onSubmit={event => {
           event.preventDefault()
           void form.handleSubmit()
         }}
       >
-        <div className="member-form-grid">
+        <div className="grid grid-cols-2 gap-3 max-[42rem]:grid-cols-1">
           <form.Field name="name">
             {field => (
               <label>
@@ -326,13 +336,17 @@ function CreateOrganizationForm({
           )}
         </form.Field>
         {error ? (
-          <p className="member-form-error" role="alert">
+          <p className="m-0 text-sm font-bold text-red-700" role="alert">
             {error}
           </p>
         ) : null}
         <form.Subscribe selector={state => state.isSubmitting}>
           {isSubmitting => (
-            <button type="submit" disabled={isSubmitting}>
+            <button
+              className="primary-action w-fit"
+              type="submit"
+              disabled={isSubmitting}
+            >
               {isSubmitting ? t("submitting") : t("createOrganization")}
             </button>
           )}
@@ -391,22 +405,24 @@ function CreateMemberForm({
 
   return (
     <form
-      className="member-create-card"
+      className="mt-6 grid gap-4 rounded-xl border border-line bg-surface p-[clamp(1rem,3vw,1.5rem)]"
       onSubmit={event => {
         event.preventDefault()
         void form.handleSubmit()
       }}
     >
-      <header>
+      <header className="flex items-start justify-between gap-4">
         <div>
           <p className="eyebrow">{t("newMember")}</p>
           <h2>{t("createMemberTitle")}</h2>
         </div>
         {!seatsAvailable ? (
-          <span className="seat-limit-warning">{t("seatLimitReached")}</span>
+          <span className="rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-extrabold text-amber-800">
+            {t("seatLimitReached")}
+          </span>
         ) : null}
       </header>
-      <div className="member-form-grid">
+      <div className="grid grid-cols-2 gap-3 max-[42rem]:grid-cols-1">
         <form.Field name="displayName">
           {field => (
             <label>
@@ -454,13 +470,17 @@ function CreateMemberForm({
         )}
       </form.Field>
       {error ? (
-        <p className="member-form-error" role="alert">
+        <p className="m-0 text-sm font-bold text-red-700" role="alert">
           {error}
         </p>
       ) : null}
       <form.Subscribe selector={state => state.isSubmitting}>
         {isSubmitting => (
-          <button type="submit" disabled={isSubmitting || !seatsAvailable}>
+          <button
+            className="primary-action w-fit"
+            type="submit"
+            disabled={isSubmitting || !seatsAvailable}
+          >
             {isSubmitting ? t("submitting") : t("createMember")}
           </button>
         )}
@@ -480,14 +500,19 @@ function TemporaryPasswordNotice({
   const [copied, setCopied] = useState(false)
 
   return (
-    <section className="temporary-password-notice" aria-live="polite">
+    <section
+      className="surface-panel mb-5 grid grid-cols-[minmax(0,1fr)_minmax(14rem,0.55fr)] items-center gap-4 border-l-4 border-l-lagoon-deep p-5 max-[42rem]:grid-cols-1"
+      aria-live="polite"
+    >
       <div>
         <p className="eyebrow">{t("memberCreated")}</p>
         <h2>{t("temporaryPasswordTitle")}</h2>
         <p>{t("temporaryPasswordDescription", { email: member.email })}</p>
       </div>
-      <code>{member.temporary_password}</code>
-      <div className="temporary-password-actions">
+      <code className="row-span-2 select-all rounded-lg border border-line bg-surface px-4 py-3 text-sm text-sea-ink [overflow-wrap:anywhere] max-[42rem]:row-auto">
+        {member.temporary_password}
+      </code>
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => {
@@ -599,41 +624,58 @@ function MemberCard({
   }
 
   return (
-    <article className="member-card">
-      <header>
-        <div className="member-avatar" aria-hidden="true">
+    <article className="rounded-xl border border-line bg-surface p-4">
+      <header className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+        <div
+          className="grid h-10 w-10 place-items-center rounded-full bg-[linear-gradient(145deg,var(--palm),var(--lagoon-deep))] font-extrabold text-white"
+          aria-hidden="true"
+        >
           {member.display_name.slice(0, 1).toUpperCase()}
         </div>
-        <div className="member-identity">
-          <h3>{member.display_name}</h3>
-          <p>{member.email}</p>
+        <div className="min-w-0">
+          <h3 className="m-0 truncate text-base">{member.display_name}</h3>
+          <p className="mt-1 mb-0 truncate text-sm text-sea-ink-soft">
+            {member.email}
+          </p>
         </div>
-        <span className="member-status" data-status={member.status}>
+        <span
+          className={
+            member.status === "active"
+              ? "rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-extrabold text-emerald-700"
+              : "rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-extrabold text-amber-800"
+          }
+        >
           {t(`memberStatus_${member.status}`)}
         </span>
       </header>
-      <dl className="member-meta">
-        <div>
-          <dt>{t("joinedAt")}</dt>
-          <dd>
+      <dl className="my-4 grid grid-cols-2 gap-3 max-[42rem]:grid-cols-1">
+        <div className="rounded-lg bg-link-hover p-3">
+          <dt className="text-xs font-extrabold text-sea-ink-soft">
+            {t("joinedAt")}
+          </dt>
+          <dd className="mt-1 ml-0 text-sm font-bold">
             {new Intl.DateTimeFormat(locale, {
               dateStyle: "medium",
             }).format(new Date(member.joined_at))}
           </dd>
         </div>
-        <div>
-          <dt>{t("passwordState")}</dt>
-          <dd>
+        <div className="rounded-lg bg-link-hover p-3">
+          <dt className="text-xs font-extrabold text-sea-ink-soft">
+            {t("passwordState")}
+          </dt>
+          <dd className="mt-1 ml-0 text-sm font-bold">
             {member.must_change_password
               ? t("passwordChangePending")
               : t("passwordReady")}
           </dd>
         </div>
       </dl>
-      <details className="member-actions">
-        <summary>{t("manageMember")}</summary>
+      <details className="border-t border-line pt-3">
+        <summary className="cursor-pointer text-sm font-extrabold text-lagoon-deep">
+          {t("manageMember")}
+        </summary>
         <form
-          className="member-admin-form"
+          className="mt-4 grid gap-3"
           onSubmit={event => {
             event.preventDefault()
             void form.handleSubmit()
@@ -671,12 +713,16 @@ function MemberCard({
             )}
           </form.Field>
           {error ? (
-            <p className="member-form-error" role="alert">
+            <p className="m-0 text-sm font-bold text-red-700" role="alert">
               {error}
             </p>
           ) : null}
-          <div className="member-action-buttons">
-            <button type="submit" disabled={pendingAction !== ""}>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="primary-action"
+              type="submit"
+              disabled={pendingAction !== ""}
+            >
               {pendingAction === "save" ? t("submitting") : t("saveMember")}
             </button>
             <button
@@ -691,7 +737,7 @@ function MemberCard({
                   : t("activateMember")}
             </button>
             <button
-              className="destructive-button"
+              className="border-red-500/30 bg-red-500/10 font-bold text-red-700 hover:bg-red-500/15"
               type="button"
               disabled={pendingAction !== ""}
               onClick={() => void removeMember()}

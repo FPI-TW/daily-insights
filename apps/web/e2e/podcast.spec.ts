@@ -153,7 +153,7 @@ test.describe("Portal authentication and boundaries", () => {
     await openHydrated(
       page,
       "/en/podcasts",
-      '.app-header button[type="button"]:last-of-type'
+      '[data-surface="customer"] button[type="button"]:last-of-type'
     )
     await page.getByRole("button", { name: "Sign out" }).click()
     await expect(page).toHaveURL("/en/login")
@@ -162,7 +162,7 @@ test.describe("Portal authentication and boundaries", () => {
     await openHydrated(
       page,
       "/en/admin/audio",
-      '.app-header button[type="button"]:last-of-type'
+      '[data-surface="admin"] button[type="button"]:last-of-type'
     )
     await page.getByRole("button", { name: "Sign out" }).click()
     await expect(page).toHaveURL("/en/admin/login")
@@ -241,7 +241,7 @@ test.describe("Podcast administration", () => {
     await openHydrated(
       page,
       "/en/admin/audio",
-      ".podcast-publication-controls button"
+      'button[data-action="publication"]'
     )
     const unpublish = page.getByRole("button", { name: "Unpublish" })
 
@@ -317,7 +317,11 @@ test.describe("Customer inline Podcast experience", () => {
     request,
   }) => {
     await resetMockApi(request, { audio: "delayed" })
-    await openHydrated(page, "/en/podcasts", ".podcast-player button")
+    await openHydrated(
+      page,
+      "/en/podcasts",
+      '[data-testid="podcast-player"] button'
+    )
     await page.getByRole("button", { name: "Listen now" }).click()
     await expect(page.getByRole("status")).toHaveText("Preparing audio…")
     await expect(page.locator("audio")).toBeVisible()
@@ -375,42 +379,31 @@ test.describe("Customer inline Podcast experience", () => {
   })
 })
 
-test.describe("Customer account security", () => {
+test.describe("Customer account", () => {
   test.beforeEach(async ({ context }) => {
     await authenticateAs(context, "org_member")
   })
 
-  test("navigates to Account and changes the member password", async ({
+  test("shows the member profile without password controls", async ({
     page,
     request,
   }) => {
-    await openHydrated(page, "/en/podcasts", ".app-header")
+    await openHydrated(page, "/en/podcasts", '[data-surface="customer"]')
     await page.getByRole("link", { name: "Account" }).click()
 
     await expect(page).toHaveURL("/en/account")
     await expect(
-      page.getByRole("heading", { name: "Account & security" })
+      page.getByRole("heading", { name: "Account profile" })
     ).toBeVisible()
-    await page.getByLabel("Current password").fill("customer-password")
-    await page.getByLabel("New password").fill("new-password-123")
-    await page.getByRole("button", { name: "Change password" }).click()
-
-    await expect(page.getByRole("status")).toHaveText(
-      "Your password has been updated."
-    )
-    await expect(page).toHaveURL("/en/account")
-    expect(
-      (await getMockApiState(request)).requests.find(
-        item => item.path === "/api/auth/change-password"
-      )
-    ).toMatchObject({
-      role: "org_member",
-      facts: {
-        csrf: "valid",
-        currentPassword: "customer-password",
-        newPassword: "new-password-123",
-      },
-    })
+    await expect(
+      page.getByRole("heading", { name: "E2E Member" })
+    ).toBeVisible()
+    await expect(page.getByText("org_member@example.test")).toBeVisible()
+    await expect(page.getByLabel("Current password")).toHaveCount(0)
+    await expect(page.getByLabel("New password")).toHaveCount(0)
+    await expect(
+      page.getByRole("button", { name: "Change password" })
+    ).toHaveCount(0)
 
     await page.getByRole("button", { name: "Sign out" }).click()
     await expect(page).toHaveURL("/en/login")
@@ -422,50 +415,8 @@ test.describe("Customer account security", () => {
       role: "org_member",
       facts: {
         csrf: "valid",
-        csrfToken: "e2e-csrf-token-rotated",
       },
     })
-  })
-
-  test("shows a safe localized error when the current password is rejected", async ({
-    page,
-    request,
-  }) => {
-    await resetMockApi(request, { passwordChange: "error" })
-    await openHydrated(page, "/en/account", 'input[name="currentPassword"]')
-    await page.getByLabel("Current password").fill("incorrect-password")
-    await page.getByLabel("New password").fill("new-password-123")
-    await page.getByRole("button", { name: "Change password" }).click()
-
-    await expect(page.getByRole("alert")).toHaveText(
-      "We could not update your password. Check your current password and try again."
-    )
-    await expect(page).toHaveURL("/en/account")
-  })
-
-  test("returns to the customer login when the password session expires", async ({
-    page,
-    request,
-  }) => {
-    await openHydrated(page, "/en/account", 'input[name="currentPassword"]')
-    await resetMockApi(request, { sessionExpired: true })
-
-    await page.getByLabel("Current password").fill("customer-password")
-    await page.getByLabel("New password").fill("new-password-123")
-    await page.getByRole("button", { name: "Change password" }).click()
-
-    await expect(page).toHaveURL("/en/login")
-    await expect(
-      page.getByRole("heading", {
-        name: "Your market briefing, ready to listen",
-      })
-    ).toBeVisible()
-    expect(
-      (await getMockApiState(request)).requests.some(
-        item =>
-          item.path === "/api/auth/csrf" && item.facts?.sessionExpired === true
-      )
-    ).toBe(true)
   })
 })
 
@@ -476,7 +427,11 @@ test.describe("Mounted session expiry", () => {
     request,
   }) => {
     await authenticateAs(context, "org_member")
-    await openHydrated(page, "/en/podcasts", ".podcast-player button")
+    await openHydrated(
+      page,
+      "/en/podcasts",
+      '[data-testid="podcast-player"] button'
+    )
     await resetMockApi(request, { sessionExpired: true })
 
     await page.getByRole("button", { name: "Listen now" }).click()
@@ -508,7 +463,7 @@ test.describe("Mounted session expiry", () => {
     await openHydrated(
       page,
       "/en/admin/audio",
-      ".podcast-publication-controls button"
+      'button[data-action="publication"]'
     )
     await resetMockApi(request, { sessionExpired: true })
 

@@ -42,7 +42,7 @@ tanstackIntent:
   for: "Framework-agnostic core concepts for TanStack Router: route trees, createRouter, createRoute, createRootRoute, createRootRouteWithContext, addChildren, Register type declaration, route matching, route sorting, file naming conventions. Entry point for all router skills."
 - id: "@tanstack/router-core#router-core/auth-and-guards"
   run: "pnpm dlx @tanstack/intent@latest load @tanstack/router-core#router-core/auth-and-guards"
-  for: "Route protection with beforeLoad, redirect()/throw redirect(), isRedirect helper, authenticated layout routes (_authenticated), non-redirect auth (inline login), RBAC with roles and permissions, auth provider integration (Auth0, Clerk, Supabase), router context for auth state."
+  for: "Route protection with beforeLoad, redirect()/throw redirect(), isRedirect helper, authenticated layout routes (\_authenticated), non-redirect auth (inline login), RBAC with roles and permissions, auth provider integration (Auth0, Clerk, Supabase), router context for auth state."
 - id: "@tanstack/router-core#router-core/code-splitting"
   run: "pnpm dlx @tanstack/intent@latest load @tanstack/router-core#router-core/code-splitting"
   for: "Automatic code splitting (autoCodeSplitting), .lazy.tsx convention, createLazyFileRoute, createLazyRoute, lazyRouteComponent, getRouteApi for typed hooks in split files, codeSplitGroupings per-route override, splitBehavior programmatic config, critical vs non-critical properties."
@@ -57,7 +57,7 @@ tanstackIntent:
   for: "notFound() function, notFoundComponent, defaultNotFoundComponent, notFoundMode (fuzzy/root), errorComponent, CatchBoundary, CatchNotFound, isNotFound, NotFoundRoute (deprecated), route masking (mask option, createRouteMask, unmaskOnReload)."
 - id: "@tanstack/router-core#router-core/path-params"
   run: "pnpm dlx @tanstack/intent@latest load @tanstack/router-core#router-core/path-params"
-  for: "Dynamic path segments ($paramName), splat routes ($ / _splat), optional params ({-$paramName}), prefix/suffix patterns ({$param}.ext), useParams, params.parse/stringify, pathParamsAllowedCharacters, i18n locale patterns."
+  for: "Dynamic path segments ($paramName), splat routes ($ / \_splat), optional params ({-$paramName}), prefix/suffix patterns ({$param}.ext), useParams, params.parse/stringify, pathParamsAllowedCharacters, i18n locale patterns."
 - id: "@tanstack/router-core#router-core/search-params"
   run: "pnpm dlx @tanstack/intent@latest load @tanstack/router-core#router-core/search-params"
   for: "validateSearch, search param validation with Zod/Valibot/ArkType adapters, fallback(), search middlewares (retainSearchParams, stripSearchParams), custom serialization (parseSearch, stringifySearch), search param inheritance, loaderDeps for cache keys, reading and writing search params."
@@ -75,13 +75,13 @@ tanstackIntent:
   for: "Core overview for TanStack Start: tanstackStart() Vite plugin, getRouter() factory, root route document shell (HeadContent, Scripts, Outlet), client/server entry points, routeTree.gen.ts, tsconfig configuration. Entry point for all Start skills."
 - id: "@tanstack/start-client-core#start-core/auth-server-primitives"
   run: "pnpm dlx @tanstack/intent@latest load @tanstack/start-client-core#start-core/auth-server-primitives"
-  for: "Server-side authentication primitives for TanStack Start: session cookies (HttpOnly, Secure, SameSite, __Host- prefix), session read/issue/destroy via createServerFn and middleware, OAuth authorization-code flow with state and PKCE, password-reset enumeration defense, CSRF for non-GET RPCs, rate limiting auth endpoints, session rotation on privilege change. Pairs with router-core/auth-and-guards for the routing side."
+  for: "Server-side authentication primitives for TanStack Start: session cookies (HttpOnly, Secure, SameSite, \_\_Host- prefix), session read/issue/destroy via createServerFn and middleware, OAuth authorization-code flow with state and PKCE, password-reset enumeration defense, CSRF for non-GET RPCs, rate limiting auth endpoints, session rotation on privilege change. Pairs with router-core/auth-and-guards for the routing side."
 - id: "@tanstack/start-client-core#start-core/deployment"
   run: "pnpm dlx @tanstack/intent@latest load @tanstack/start-client-core#start-core/deployment"
   for: "Deploy to Cloudflare Workers, Netlify, Vercel, Node.js/Docker, Bun, Railway. Selective SSR (ssr option per route), SPA mode, static prerendering, ISR with Cache-Control headers, SEO and head management."
 - id: "@tanstack/start-client-core#start-core/execution-model"
   run: "pnpm dlx @tanstack/intent@latest load @tanstack/start-client-core#start-core/execution-model"
-  for: "Isomorphic-by-default principle, environment boundary functions (createServerFn, createServerOnlyFn, createClientOnlyFn, createIsomorphicFn), ClientOnly component, useHydrated hook, import protection, dead code elimination, environment variable safety (VITE_ prefix, process.env)."
+  for: "Isomorphic-by-default principle, environment boundary functions (createServerFn, createServerOnlyFn, createClientOnlyFn, createIsomorphicFn), ClientOnly component, useHydrated hook, import protection, dead code elimination, environment variable safety (VITE\_ prefix, process.env)."
 - id: "@tanstack/start-client-core#start-core/middleware"
   run: "pnpm dlx @tanstack/intent@latest load @tanstack/start-client-core#start-core/middleware"
   for: "createMiddleware, request middleware (.server only), server function middleware (.client + .server), context passing via next({ context }), sendContext for client-server transfer, global middleware via createStart in src/start.ts, middleware factories, method order enforcement, fetch override precedence."
@@ -107,6 +107,18 @@ tanstackIntent:
 3. Commit messages must use `<type>: <summary>`, for example `feat: split package scripts by platform` or `fix: guard renderer process access`.
 4. Recommended commit types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `build`, `ci`.
 5. Unless the user asks, never relax TypeScript, lint, or format constraints, and never skip tests.
+
+## Dashboard UI 規則
+
+- 元件視覺樣式優先使用 Tailwind CSS utilities；新增或修改 UI 時，不新增只為單一元件服務的 semantic CSS class。
+- 盡可能使用 Tailwind 原生 class name；僅在 Tailwind 沒有對應 utility 或必須引用專案 design token 時使用 arbitrary values（例如 `[...]`）。
+- 不得使用常數保存 Tailwind class name，避免編輯器的 Tailwind 插件無法辨識；重複樣式應抽成共用元件、shadcn variant，或在 Tailwind 中定義可復用的 class name。
+- 因執行期條件、狀態或其他功能需求時可以使用變數組合 class；不得只為集中保存一組靜態樣式而建立變數。
+- 頁面元件的條件式 class 必須直接列出完整 class 名稱；只有共用 UI 元件內的 shadcn/CVA variants 可以集中管理 class 組合。
+- `src/styles.css` 僅保留 Tailwind import、全域 design tokens、字型、頁面基礎樣式，以及 utilities 難以清楚表達的跨元件規則。
+- 沿用 CSS variables 作為明暗主題的 design tokens，再由 Tailwind utilities 引用；不得在元件內複製 light/dark 色碼。
+- 所有非同步資料頁面必須有明確的初次 loading UI（建議 skeleton 並搭配 `role="status"` / `aria-live`）；第一次請求完成前，不得顯示錯誤占位或「無資料」狀態。
+- 後續重新整理可保留既有資料並顯示局部 pending 狀態，避免畫面閃爍。
 
 ### Validation Rules and Checklist
 
