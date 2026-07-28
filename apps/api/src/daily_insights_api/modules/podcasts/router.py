@@ -74,6 +74,10 @@ AssetWrite = Annotated[
     AuthContext,
     Depends(require_csrf_roles(SystemRole.ADMIN, SystemRole.ASSET_MANAGER)),
 ]
+PublicationWrite = Annotated[
+    AuthContext,
+    Depends(require_csrf_roles(SystemRole.ADMIN, SystemRole.ASSET_MANAGER)),
+]
 CustomerRead = Annotated[
     AuthContext,
     Depends(
@@ -361,7 +365,7 @@ async def admin_publish(
     episode_id: uuid.UUID,
     payload: PodcastPublicationRequest,
     request: Request,
-    actor: AdminWrite,
+    actor: PublicationWrite,
     database: Database,
 ) -> PodcastEpisodeAdminResponse:
     try:
@@ -404,7 +408,7 @@ async def admin_unpublish(
     episode_id: uuid.UUID,
     payload: PodcastPublicationRequest,
     request: Request,
-    actor: AdminWrite,
+    actor: PublicationWrite,
     database: Database,
 ) -> PodcastEpisodeAdminResponse:
     try:
@@ -505,15 +509,30 @@ async def admin_upload(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "audio_upload_failed", "message": str(error)},
         ) from error
+    before_status = episode.status
+    if episode.status == "draft":
+        episode.status = "published"
+        episode.published_at = datetime.now(UTC)
+        episode.published_by_user_id = actor.user.id
     record_audit_event(
         database,
         actor_user_id=actor.user.id,
         action="podcast.episode_uploaded" if created else "podcast.audio_uploaded",
         target_type="podcast_episode",
         target_id=str(episode.id),
+        before={"status": before_status},
         after={
             "trading_date": episode.trading_date.isoformat(),
             "locales": [variant.locale for variant in variants],
+            "status": episode.status,
+            "published_at": (
+                episode.published_at.isoformat() if episode.published_at is not None else None
+            ),
+            "published_by_user_id": (
+                str(episode.published_by_user_id)
+                if episode.published_by_user_id is not None
+                else None
+            ),
             "version": episode.version,
         },
         reason=reason,
