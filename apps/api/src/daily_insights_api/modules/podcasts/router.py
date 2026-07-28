@@ -4,7 +4,7 @@ import mimetypes
 import uuid
 from datetime import UTC, date, datetime
 from pathlib import PurePath
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import (
     APIRouter,
@@ -74,14 +74,37 @@ AssetWrite = Annotated[
     AuthContext,
     Depends(require_csrf_roles(SystemRole.ADMIN, SystemRole.ASSET_MANAGER)),
 ]
-CustomerRead = Annotated[AuthContext, Depends(require_roles(SystemRole.ORG_MEMBER))]
+CustomerRead = Annotated[
+    AuthContext,
+    Depends(
+        require_roles(
+            SystemRole.ADMIN,
+            SystemRole.ASSET_MANAGER,
+            SystemRole.ORG_MEMBER,
+        )
+    ),
+]
 Database = Annotated[AsyncSession, Depends(get_database_session)]
 Store = Annotated[ObjectStore, Depends(get_object_store)]
 MAX_PODCAST_AUDIO_BYTES = 256 * 1024 * 1024
+INTERNAL_CUSTOMER_ORGANIZATION: Literal["admin"] = "admin"
 
 
 def _not_found() -> HTTPException:
     return HTTPException(status.HTTP_404_NOT_FOUND, "Podcast episode not found")
+
+
+def _require_customer_organization(
+    actor: AuthContext,
+) -> uuid.UUID | Literal["admin"]:
+    if actor.user.system_role in {SystemRole.ADMIN, SystemRole.ASSET_MANAGER}:
+        return INTERNAL_CUSTOMER_ORGANIZATION
+    if actor.organization_id is None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "active organization membership required",
+        )
+    return actor.organization_id
 
 
 def _require_expected_version(episode: PodcastEpisode, expected_version: int) -> None:
@@ -185,8 +208,7 @@ async def customer_list(
     database: Database,
     locale: Annotated[Locale, Query()] = "zh-hant",
 ) -> list[PodcastEpisodeSummaryResponse]:
-    if actor.organization_id is None:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "active organization membership required")
+    _require_customer_organization(actor)
     return await list_published_episodes(database, locale)
 
 
@@ -201,8 +223,7 @@ async def customer_detail(
     database: Database,
     locale: Annotated[Locale, Query()] = "zh-hant",
 ) -> PodcastEpisodeDetailResponse:
-    if actor.organization_id is None:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "active organization membership required")
+    _require_customer_organization(actor)
     try:
         return await published_episode_detail(database, episode_id, locale)
     except PodcastNotFoundError as error:
@@ -222,8 +243,7 @@ async def customer_audio_url(
     request: Request,
     locale: Annotated[Locale, Query()] = "zh-hant",
 ) -> PodcastAudioPlaybackResponse:
-    if actor.organization_id is None:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "active organization membership required")
+    _require_customer_organization(actor)
     settings: Settings = request.app.state.settings
     try:
         response = await sign_episode_audio(database, store, settings, episode_id, locale)

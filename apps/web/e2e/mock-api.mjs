@@ -5,6 +5,7 @@ const assetId = "20000000-0000-4000-8000-000000000001"
 const organizationId = "30000000-0000-4000-8000-000000000001"
 const adminId = "40000000-0000-4000-8000-000000000001"
 const memberId = "50000000-0000-4000-8000-000000000001"
+const assetManagerId = "60000000-0000-4000-8000-000000000001"
 const credentials = {
   "customer@example.test": {
     password: "customer-password",
@@ -13,6 +14,10 @@ const credentials = {
   "admin@example.test": {
     password: "admin-password",
     role: "admin",
+  },
+  "asset-manager@example.test": {
+    password: "asset-manager-password",
+    role: "asset_manager",
   },
 }
 const port = Number(process.argv[process.argv.indexOf("--port") + 1] || 3311)
@@ -54,18 +59,31 @@ function readBody(request) {
 
 function roleFrom(request) {
   const match = /(?:^|;\s*)e2e-role=([^;]+)/.exec(request.headers.cookie || "")
-  return ["admin", "org_member"].includes(match?.[1]) ? match[1] : null
+  return ["admin", "asset_manager", "org_member"].includes(match?.[1])
+    ? match[1]
+    : null
 }
 
 function userFor(role) {
+  const internalRole = role === "admin" || role === "asset_manager"
   return {
-    id: role === "admin" ? adminId : memberId,
+    id:
+      role === "admin"
+        ? adminId
+        : role === "asset_manager"
+          ? assetManagerId
+          : memberId,
     email: `${role}@example.test`,
-    display_name: role === "admin" ? "E2E Admin" : "E2E Member",
+    display_name:
+      role === "admin"
+        ? "E2E Admin"
+        : role === "asset_manager"
+          ? "E2E Asset Manager"
+          : "E2E Member",
     system_role: role,
     status: "active",
     must_change_password: false,
-    organization_id: role === "org_member" ? organizationId : null,
+    organization_id: internalRole ? null : organizationId,
   }
 }
 
@@ -260,7 +278,11 @@ const server = createServer(async (request, response) => {
   }
 
   if (url.pathname === "/api/auth/logout" && request.method === "POST") {
-    const role = requireRole(request, response, ["admin", "org_member"])
+    const role = requireRole(request, response, [
+      "admin",
+      "asset_manager",
+      "org_member",
+    ])
     if (!role || !requireCsrf(request, response)) return
     const csrfToken = request.headers["x-csrf-token"]
     recordRequest(request, url, role, {
@@ -276,7 +298,11 @@ const server = createServer(async (request, response) => {
   }
 
   if (url.pathname === "/api/auth/me") {
-    const role = requireRole(request, response, ["admin", "org_member"])
+    const role = requireRole(request, response, [
+      "admin",
+      "asset_manager",
+      "org_member",
+    ])
     if (!role) return
     recordRequest(request, url, role)
     sendJson(response, 200, userFor(role))
@@ -284,7 +310,11 @@ const server = createServer(async (request, response) => {
   }
 
   if (url.pathname === "/api/auth/csrf" && request.method === "POST") {
-    const role = requireRole(request, response, ["admin", "org_member"])
+    const role = requireRole(request, response, [
+      "admin",
+      "asset_manager",
+      "org_member",
+    ])
     if (!role) return
     recordRequest(request, url, role)
     sendJson(response, 200, { csrf_token: "e2e-csrf-token" })
@@ -295,7 +325,11 @@ const server = createServer(async (request, response) => {
     url.pathname === "/api/auth/change-password" &&
     request.method === "POST"
   ) {
-    const role = requireRole(request, response, ["admin", "org_member"])
+    const role = requireRole(request, response, [
+      "admin",
+      "asset_manager",
+      "org_member",
+    ])
     if (!role || !requireCsrf(request, response)) return
     const input = parseJsonBody(await readBody(request))
     recordRequest(request, url, role, {
@@ -306,7 +340,11 @@ const server = createServer(async (request, response) => {
     if (
       state.passwordChange === "error" ||
       input?.current_password !==
-        (role === "admin" ? "admin-password" : "customer-password")
+        (role === "admin"
+          ? "admin-password"
+          : role === "asset_manager"
+            ? "asset-manager-password"
+            : "customer-password")
     ) {
       sendJson(response, 400, { detail: "Current password is incorrect" })
       return
@@ -319,7 +357,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (url.pathname === "/api/admin/podcasts" && request.method === "GET") {
-    const role = requireRole(request, response, ["admin"])
+    const role = requireRole(request, response, ["admin", "asset_manager"])
     if (!role) return
     recordRequest(request, url, role)
     sendJson(response, 200, [adminEpisode()])
@@ -380,7 +418,7 @@ const server = createServer(async (request, response) => {
     url.pathname === "/api/admin/podcasts/uploads" &&
     request.method === "POST"
   ) {
-    const role = requireRole(request, response, ["admin"])
+    const role = requireRole(request, response, ["admin", "asset_manager"])
     if (!role || !requireCsrf(request, response)) return
     const multipart = parseMultipart(request, await readBody(request))
     if (!multipart) {
@@ -453,7 +491,11 @@ const server = createServer(async (request, response) => {
   }
 
   if (url.pathname === "/api/podcasts" && request.method === "GET") {
-    const role = requireRole(request, response, ["org_member"])
+    const role = requireRole(request, response, [
+      "admin",
+      "asset_manager",
+      "org_member",
+    ])
     if (!role) return
     recordRequest(request, url, role, {
       locale: url.searchParams.get("locale"),
@@ -475,7 +517,11 @@ const server = createServer(async (request, response) => {
     url.pathname === `/api/podcasts/${episodeId}` &&
     request.method === "GET"
   ) {
-    const role = requireRole(request, response, ["org_member"])
+    const role = requireRole(request, response, [
+      "admin",
+      "asset_manager",
+      "org_member",
+    ])
     if (!role) return
     recordRequest(request, url, role, {
       locale: url.searchParams.get("locale"),
@@ -492,7 +538,11 @@ const server = createServer(async (request, response) => {
     url.pathname === `/api/podcasts/${episodeId}/audio-url` &&
     request.method === "POST"
   ) {
-    const role = requireRole(request, response, ["org_member"])
+    const role = requireRole(request, response, [
+      "admin",
+      "asset_manager",
+      "org_member",
+    ])
     if (!role) return
     recordRequest(request, url, role, {
       locale: url.searchParams.get("locale"),
@@ -519,7 +569,11 @@ const server = createServer(async (request, response) => {
     /^\/api\/podcasts\/[^/]+$/.test(url.pathname) &&
     request.method === "GET"
   ) {
-    const role = requireRole(request, response, ["org_member"])
+    const role = requireRole(request, response, [
+      "admin",
+      "asset_manager",
+      "org_member",
+    ])
     if (!role) return
     recordRequest(request, url, role)
     sendJson(response, 404, { detail: "Podcast episode not found" })

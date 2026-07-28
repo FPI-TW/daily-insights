@@ -4,7 +4,9 @@ import {
   canEnterAdmin,
   canEnterBackOffice,
   canEnterCustomer,
+  customerOrganizationScope,
   destinationFor,
+  INTERNAL_CUSTOMER_ORGANIZATION,
 } from "./authorization"
 
 function user(overrides: Partial<User> = {}): User {
@@ -28,7 +30,7 @@ describe("route authorization decisions", () => {
     )
   })
 
-  it("keeps customer and back-office roles separated", () => {
+  it("allows back-office roles to use the virtual admin customer organization", () => {
     const member = user()
     const assetManager = user({
       system_role: "asset_manager",
@@ -41,7 +43,14 @@ describe("route authorization decisions", () => {
     expect(destinationFor(admin)).toBe("admin")
     expect(canEnterCustomer(member)).toBe(true)
     expect(canEnterBackOffice(member)).toBe(false)
-    expect(canEnterCustomer(assetManager)).toBe(false)
+    expect(canEnterCustomer(assetManager)).toBe(true)
+    expect(canEnterCustomer(admin)).toBe(true)
+    expect(customerOrganizationScope(assetManager)).toBe(
+      INTERNAL_CUSTOMER_ORGANIZATION
+    )
+    expect(customerOrganizationScope(admin)).toBe(
+      INTERNAL_CUSTOMER_ORGANIZATION
+    )
     expect(canEnterBackOffice(assetManager)).toBe(true)
     expect(canEnterAdmin(assetManager)).toBe(false)
     expect(canEnterAdmin(admin)).toBe(true)
@@ -49,5 +58,8 @@ describe("route authorization decisions", () => {
 
   it("rejects an org member without an active organization context", () => {
     expect(canEnterCustomer(user({ organization_id: null }))).toBe(false)
+    expect(customerOrganizationScope(user({ organization_id: null }))).toBe(
+      null
+    )
   })
 })

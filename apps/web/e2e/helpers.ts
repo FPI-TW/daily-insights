@@ -9,6 +9,10 @@ export const adminCredentials = {
   email: "admin@example.test",
   password: "admin-password",
 }
+export const assetManagerCredentials = {
+  email: "asset-manager@example.test",
+  password: "asset-manager-password",
+}
 
 type MockState = {
   podcastList?: "normal" | "empty" | "error"
@@ -20,7 +24,7 @@ type MockState = {
 export type RecordedRequest = {
   method: string
   path: string
-  role: "admin" | "org_member" | null
+  role: "admin" | "asset_manager" | "org_member" | null
   facts?: Record<string, unknown>
 }
 
@@ -53,7 +57,7 @@ export async function getMockApiState(request: APIRequestContext) {
 
 export async function authenticateAs(
   context: BrowserContext,
-  role: "admin" | "org_member"
+  role: "admin" | "asset_manager" | "org_member"
 ) {
   await context.addCookies([
     {
