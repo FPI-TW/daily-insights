@@ -3,7 +3,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import BinaryIO
 
 import pytest
@@ -116,6 +116,7 @@ class PodcastHarness:
     admin: AsyncClient
     asset_manager: AsyncClient
     customer: AsyncClient
+    customer_without_membership: AsyncClient
     anonymous: AsyncClient
     session_factory: async_sessionmaker[AsyncSession]
     store: FakeObjectStore
@@ -160,6 +161,7 @@ async def podcast_harness() -> AsyncIterator[PodcastHarness]:
     pepper = settings.password_pepper.get_secret_value()
     organization_id = uuid.uuid4()
     member_id = uuid.uuid4()
+    member_without_membership_id = uuid.uuid4()
     async with session_factory.begin() as database:
         database.add(
             Organization(
@@ -197,22 +199,40 @@ async def podcast_harness() -> AsyncIterator[PodcastHarness]:
                     system_role=SystemRole.ORG_MEMBER,
                     status=UserStatus.ACTIVE,
                 ),
+                User(
+                    id=member_without_membership_id,
+                    email="unscoped-member@podcast.test",
+                    display_name="Unscoped Podcast Listener",
+                    password_hash=hash_password("UnscopedPassword123!", pepper),
+                    must_change_password=False,
+                    system_role=SystemRole.ORG_MEMBER,
+                    status=UserStatus.ACTIVE,
+                ),
             ]
         )
         await database.flush()
-        database.add(Membership(organization_id=organization_id, user_id=member_id))
+        database.add_all(
+            [
+                Membership(organization_id=organization_id, user_id=member_id),
+                Membership(
+                    organization_id=organization_id,
+                    user_id=member_without_membership_id,
+                ),
+            ]
+        )
 
     store = FakeObjectStore()
     app = create_app(settings, ready, session_factory, store)
     clients = [
-        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") for _ in range(4)
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") for _ in range(5)
     ]
     try:
         yield PodcastHarness(
             admin=clients[0],
             asset_manager=clients[1],
             customer=clients[2],
-            anonymous=clients[3],
+            customer_without_membership=clients[3],
+            anonymous=clients[4],
             session_factory=session_factory,
             store=store,
         )
@@ -251,6 +271,22 @@ async def test_podcast_publish_play_replace_and_unpublish(
         "member@podcast.test",
         "MemberPassword123!",
     )
+    await _login(
+        podcast_harness.customer_without_membership,
+        "unscoped-member@podcast.test",
+        "UnscopedPassword123!",
+    )
+    async with podcast_harness.session_factory.begin() as database:
+        membership = await database.scalar(
+            select(Membership)
+            .join(User, User.id == Membership.user_id)
+            .where(
+                User.email == "unscoped-member@podcast.test",
+                Membership.removed_at.is_(None),
+            )
+        )
+        assert membership is not None
+        membership.removed_at = datetime.now(UTC)
 
     anonymous = await podcast_harness.anonymous.get("/api/podcasts")
     assert anonymous.status_code == 401
@@ -325,6 +361,30 @@ async def test_podcast_publish_play_replace_and_unpublish(
     assert playback.json()["requested_locale"] == "en"
     assert playback.json()["resolved_locale"] == "zh-hant"
     first_asset_id = playback.json()["asset_id"]
+
+    for internal_customer in (
+        podcast_harness.admin,
+        podcast_harness.asset_manager,
+    ):
+        assert (await internal_customer.get("/api/podcasts?locale=en")).status_code == 200
+        assert (
+            await internal_customer.get(f"/api/podcasts/{episode_id}?locale=en")
+        ).status_code == 200
+        assert (
+            await internal_customer.post(f"/api/podcasts/{episode_id}/audio-url?locale=en")
+        ).status_code == 200
+
+    for endpoint, method in (
+        ("/api/podcasts", "get"),
+        (f"/api/podcasts/{episode_id}", "get"),
+        (f"/api/podcasts/{episode_id}/audio-url", "post"),
+    ):
+        response = await getattr(
+            podcast_harness.customer_without_membership,
+            method,
+        )(endpoint)
+        assert response.status_code == 403
+        assert response.json()["detail"] == "active organization membership required"
 
     replacement_source = ObjectRef(
         bucket="podcast-private",

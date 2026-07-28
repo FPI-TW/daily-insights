@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import {
   adminCredentials,
+  assetManagerCredentials,
   authenticateAs,
   customerCredentials,
   episodeId,
@@ -72,37 +73,38 @@ test.describe("Portal authentication and boundaries", () => {
     })
   })
 
-  test("wrong-role portal login clears the session and localizes the mismatch", async ({
+  test("both back-office roles can sign in to the customer portal", async ({
     context,
     page,
     request,
   }) => {
-    await openHydrated(page, "/zh-hant/login", 'input[name="email"]')
-    await page.getByLabel("電子郵件").fill(adminCredentials.email)
-    await page.getByLabel("密碼").fill(adminCredentials.password)
-    await page.getByRole("button", { name: "登入" }).click()
+    for (const [credentials, role] of [
+      [adminCredentials, "admin"],
+      [assetManagerCredentials, "asset_manager"],
+    ] as const) {
+      await signIn(page, "/en/login", credentials)
+      await expect(page).toHaveURL("/en/podcasts")
+      await expect(page.locator('[data-surface="customer"]')).toBeVisible()
+      await expect(page.getByRole("heading", { name: "Podcast" })).toBeVisible()
 
-    await expect(page).toHaveURL("/zh-hant/login")
-    await expect(page.getByRole("alert")).toHaveText(
-      "此帳號目前無法登入，登入狀態已安全清除。"
-    )
-    expect(
-      (await context.cookies()).find(cookie => cookie.name === "e2e-role")
-    ).toBeUndefined()
-    const authRequests = (await getMockApiState(request)).requests.filter(
-      item => ["/api/auth/login", "/api/auth/logout"].includes(item.path)
-    )
-    expect(authRequests).toEqual([
-      expect.objectContaining({
-        path: "/api/auth/login",
-        facts: expect.objectContaining({ authenticatedRole: "admin" }),
-      }),
-      expect.objectContaining({
-        path: "/api/auth/logout",
-        role: "admin",
-        facts: { csrf: "valid" },
-      }),
-    ])
+      const login = [...(await getMockApiState(request)).requests]
+        .reverse()
+        .find(
+          item =>
+            item.path === "/api/auth/login" &&
+            item.facts?.authenticatedRole === role
+        )
+      expect(login).toMatchObject({
+        role: null,
+        facts: {
+          email: credentials.email,
+          credentialAccepted: true,
+          authenticatedRole: role,
+        },
+      })
+
+      await context.clearCookies()
+    }
   })
 
   test("unauthenticated protected URLs reach their respective login portals", async ({
@@ -129,11 +131,12 @@ test.describe("Portal authentication and boundaries", () => {
   }) => {
     await authenticateAs(context, "admin")
     await page.goto("/en/podcasts")
+    await expect(page).toHaveURL("/en/podcasts")
+    await expect(page.locator('[data-surface="customer"]')).toBeVisible()
+
+    await page.goto("/en/admin/audio")
     await expect(page).toHaveURL("/en/admin/audio")
     await expect(page.locator('[data-surface="admin"]')).toBeVisible()
-    await expect(
-      page.getByRole("heading", { name: "Market Morning Brief" })
-    ).toHaveCount(0)
 
     await context.clearCookies()
     await authenticateAs(context, "org_member")

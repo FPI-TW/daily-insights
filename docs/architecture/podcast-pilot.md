@@ -67,7 +67,10 @@ Podcast 先行版用來驗證一條可上線的完整路徑：
 - 播放 audio bytes 由瀏覽器直接向 R2 取得；後台 upload 則經 nginx/API 的受控
   multipart endpoint 寫入 private R2。
 - Podcast catalog 由所有具有效 membership 的 org 共用，不套用八市場
-  visibility，也沒有 customer-specific episode policy。
+  visibility，也沒有 customer-specific episode policy。`admin` 與
+  `asset_manager` 以前台虛擬 `admin` 組織存取同一份 catalog；此 scope
+  不建立 Organization 或 Membership、不占用席位，也不改變兩種內部角色既有的
+  後台 RBAC。
 - `trading_date` 是 episode 的唯一業務鍵，由後台指定，不從上傳時間、檔名或
   R2 metadata 推導；列表依交易日由新到舊排序。
 - 使用原生 HTML `<audio>` element；產品不提供下載按鈕或離線下載功能。
@@ -197,8 +200,9 @@ key 使用 resolved audio locale：例如英文頁面 fallback 至 `zh-hant` 時
 
 ## 驗收重點
 
-- 未登入、停權或不具 membership 的請求無法取得客戶 Podcast catalog 或
-  signed URL。
+- 未登入、停權或不具 membership 的 `org_member` 無法取得客戶 Podcast
+  catalog 或 signed URL；`admin` 與 `asset_manager` 則使用前台虛擬 `admin`
+  組織 scope，不需要持久化 membership。
 - draft/unpublished episode 永遠不出現在客戶 API。
 - 特定日期的發布與下架不要求填寫理由；後台執行下架前必須顯示確認警告。
 - audio asset 必須為 active、允許的 MIME type，且 checksum/size 與 metadata
