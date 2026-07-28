@@ -19,6 +19,8 @@ type MockState = {
   audio?: "normal" | "error" | "delayed"
   passwordChange?: "normal" | "error"
   sessionExpired?: boolean
+  podcastEpisodes?: "single" | "grouped"
+  status?: "draft" | "published"
 }
 
 export type RecordedRequest = {

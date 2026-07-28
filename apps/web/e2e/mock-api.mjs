@@ -33,6 +33,7 @@ function reset(overrides = {}) {
     status: "published",
     episodeVersion: 2,
     audioVersion: 1,
+    podcastEpisodes: "single",
     requests: [],
     ...overrides,
   }
@@ -163,11 +164,15 @@ function recordRequest(request, url, role, facts) {
   })
 }
 
-function adminEpisode() {
+function adminEpisode({
+  id = episodeId,
+  tradingDate = "2026-07-24",
+  status = state.status,
+} = {}) {
   return {
-    id: episodeId,
-    trading_date: "2026-07-24",
-    status: state.status,
+    id,
+    trading_date: tradingDate,
+    status,
     version: state.episodeVersion,
     metadata: [
       {
@@ -191,8 +196,27 @@ function adminEpisode() {
     ],
     cover_asset_id: null,
     published_at:
-      state.status === "published" ? "2026-07-24T08:00:00+08:00" : null,
+      status === "published" ? `${tradingDate}T08:00:00+08:00` : null,
   }
+}
+
+function adminEpisodes() {
+  if (state.podcastEpisodes !== "grouped") return [adminEpisode()]
+  return [
+    adminEpisode({
+      id: "10000000-0000-4000-8000-000000000002",
+      tradingDate: "2026-06-30",
+    }),
+    adminEpisode(),
+    adminEpisode({
+      id: "10000000-0000-4000-8000-000000000003",
+      tradingDate: "2026-07-26",
+    }),
+    adminEpisode({
+      id: "10000000-0000-4000-8000-000000000004",
+      tradingDate: "2026-05-02",
+    }),
+  ]
 }
 
 function localizedEpisode(locale) {
@@ -360,7 +384,7 @@ const server = createServer(async (request, response) => {
     const role = requireRole(request, response, ["admin", "asset_manager"])
     if (!role) return
     recordRequest(request, url, role)
-    sendJson(response, 200, [adminEpisode()])
+    sendJson(response, 200, adminEpisodes())
     return
   }
 
@@ -368,7 +392,7 @@ const server = createServer(async (request, response) => {
     url.pathname === `/api/admin/podcasts/${episodeId}/unpublish` &&
     request.method === "POST"
   ) {
-    const role = requireRole(request, response, ["admin"])
+    const role = requireRole(request, response, ["admin", "asset_manager"])
     if (!role || !requireCsrf(request, response)) return
     const input = parseJsonBody(await readBody(request))
     if (
@@ -393,7 +417,7 @@ const server = createServer(async (request, response) => {
     url.pathname === `/api/admin/podcasts/${episodeId}/publish` &&
     request.method === "POST"
   ) {
-    const role = requireRole(request, response, ["admin"])
+    const role = requireRole(request, response, ["admin", "asset_manager"])
     if (!role || !requireCsrf(request, response)) return
     const input = parseJsonBody(await readBody(request))
     if (
@@ -484,6 +508,7 @@ const server = createServer(async (request, response) => {
       sendJson(response, 409, { detail: "Expected audio version mismatch" })
       return
     }
+    state.status = "published"
     state.audioVersion += 1
     state.episodeVersion += 1
     sendJson(response, 200, adminEpisode())
@@ -508,7 +533,9 @@ const server = createServer(async (request, response) => {
     sendJson(
       response,
       200,
-      state.podcastList === "empty" ? [] : [localizedEpisode(locale)]
+      state.podcastList === "empty" || state.status !== "published"
+        ? []
+        : [localizedEpisode(locale)]
     )
     return
   }

@@ -181,6 +181,7 @@ test.describe("Podcast administration", () => {
     page,
     request,
   }) => {
+    await resetMockApi(request, { status: "draft" })
     await openHydrated(page, "/en/admin/audio", "#podcast-file-zh-hant")
 
     const uploadForm = page
@@ -198,12 +199,14 @@ test.describe("Podcast administration", () => {
 
     const warning = page.getByRole("alert")
     await expect(warning).toContainText("zh-hant")
+    await expect(page.getByText("Draft", { exact: true })).toBeVisible()
     const confirm = warning.getByRole("button", { name: "Confirm overwrite" })
     await confirm.focus()
     await expect(confirm).toBeFocused()
     await confirm.press("Enter")
 
     await expect(page.getByText("Version 3")).toBeVisible()
+    await expect(page.getByText("Published", { exact: true })).toBeVisible()
     await expect(warning).toBeHidden()
 
     const uploadRequests = (await getMockApiState(request)).requests.filter(
@@ -265,6 +268,91 @@ test.describe("Podcast administration", () => {
         facts: { csrf: "valid", expectedVersion: 2 },
       }),
     ])
+  })
+
+  test("lets an asset manager publish and unpublish", async ({
+    context,
+    page,
+    request,
+  }) => {
+    await context.clearCookies()
+    await authenticateAs(context, "asset_manager")
+    await openHydrated(
+      page,
+      "/en/admin/audio",
+      'button[data-action="publication"]'
+    )
+
+    const publication = page.locator('button[data-action="publication"]')
+    await expect(publication).toHaveText("Unpublish")
+    page.once("dialog", dialog => dialog.accept())
+    await publication.click()
+    await expect(publication).toHaveText("Publish")
+    await publication.click()
+    await expect(publication).toHaveText("Unpublish")
+
+    const publicationRequests = (
+      await getMockApiState(request)
+    ).requests.filter(
+      item => item.path.endsWith("/unpublish") || item.path.endsWith("/publish")
+    )
+    expect(publicationRequests).toEqual([
+      expect.objectContaining({
+        role: "asset_manager",
+        facts: { csrf: "valid", expectedVersion: 2 },
+      }),
+      expect.objectContaining({
+        role: "asset_manager",
+        facts: { csrf: "valid", expectedVersion: 3 },
+      }),
+    ])
+  })
+
+  test("groups compact episode cards by localized descending month", async ({
+    page,
+    request,
+  }) => {
+    await resetMockApi(request, { podcastEpisodes: "grouped" })
+    await openHydrated(page, "/en/admin/audio", "article")
+
+    const monthHeadings = page.locator(
+      'section[aria-labelledby^="audio-month-"] > h3'
+    )
+    await expect(monthHeadings).toHaveText([
+      "July 2026",
+      "June 2026",
+      "May 2026",
+    ])
+    await expect(page.locator("article time")).toHaveText([
+      "2026-07-26",
+      "2026-07-24",
+      "2026-06-30",
+      "2026-05-02",
+    ])
+
+    const desktopLayout = await page.locator("article").evaluateAll(cards =>
+      cards.map(card => {
+        const bounds = card.getBoundingClientRect()
+        return { left: bounds.left, width: bounds.width }
+      })
+    )
+    expect(new Set(desktopLayout.map(card => card.left)).size).toBe(1)
+    const listWidth = await page
+      .locator("#audio-list-title")
+      .locator("..")
+      .evaluate(element => element.getBoundingClientRect().width)
+    expect(desktopLayout[0]?.width).toBeLessThan(listWidth)
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    const mobileWidths = await page.locator("article").evaluateAll(cards =>
+      cards.map(card => ({
+        card: card.getBoundingClientRect().width,
+        parent: card.parentElement?.getBoundingClientRect().width ?? 0,
+      }))
+    )
+    for (const widths of mobileWidths) {
+      expect(Math.abs(widths.card - widths.parent)).toBeLessThan(1)
+    }
   })
 })
 

@@ -18,7 +18,9 @@ function AdminAudioPage() {
   return (
     <AudioManagementPage
       episodes={episodes}
-      canPublish={user.system_role === "admin"}
+      canPublish={
+        user.system_role === "admin" || user.system_role === "asset_manager"
+      }
       locale={locale}
     />
   )

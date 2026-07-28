@@ -20,6 +20,7 @@ from daily_insights_api.core.models import Base
 from daily_insights_api.core.security import hash_password
 from daily_insights_api.modules.assets.models import Asset
 from daily_insights_api.modules.assets.object_store import ObjectMetadata, ObjectRef
+from daily_insights_api.modules.audit.models import AuditEvent
 from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.podcasts.models import PodcastEpisodeAudioVariant
 from daily_insights_api.modules.tenancy.models import Membership, Organization
@@ -330,22 +331,33 @@ async def test_podcast_publish_play_replace_and_unpublish(
     assert episode["version"] == 2
     assert episode["audio_variants"][0]["version"] == 1
 
-    asset_manager_cannot_publish = await podcast_harness.asset_manager.post(
+    published_by_asset_manager = await podcast_harness.asset_manager.post(
         f"/api/admin/podcasts/{episode_id}/publish",
         headers={"X-CSRF-Token": asset_csrf},
         json={"expected_version": 2},
     )
-    assert asset_manager_cannot_publish.status_code == 403
+    assert published_by_asset_manager.status_code == 200, published_by_asset_manager.text
+    assert published_by_asset_manager.json()["status"] == "published"
+    assert published_by_asset_manager.json()["version"] == 3
 
-    published = await podcast_harness.admin.post(
+    unpublished_by_admin = await podcast_harness.admin.post(
+        f"/api/admin/podcasts/{episode_id}/unpublish",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={"expected_version": 3},
+    )
+    assert unpublished_by_admin.status_code == 200, unpublished_by_admin.text
+    assert unpublished_by_admin.json()["status"] == "draft"
+    assert unpublished_by_admin.json()["version"] == 4
+
+    published_by_admin = await podcast_harness.admin.post(
         f"/api/admin/podcasts/{episode_id}/publish",
         headers={"X-CSRF-Token": admin_csrf},
-        json={"expected_version": 2},
+        json={"expected_version": 4},
     )
-    assert published.status_code == 200, published.text
-    episode = published.json()
+    assert published_by_admin.status_code == 200, published_by_admin.text
+    episode = published_by_admin.json()
     assert episode["status"] == "published"
-    assert episode["version"] == 3
+    assert episode["version"] == 5
 
     catalog = await podcast_harness.customer.get("/api/podcasts?locale=en")
     assert catalog.status_code == 200, catalog.text
@@ -422,7 +434,7 @@ async def test_podcast_publish_play_replace_and_unpublish(
         },
     )
     assert replaced.status_code == 200, replaced.text
-    assert replaced.json()["version"] == 4
+    assert replaced.json()["version"] == 6
 
     async with podcast_harness.session_factory() as database:
         variants = (
@@ -444,10 +456,10 @@ async def test_podcast_publish_play_replace_and_unpublish(
     assert replacement_playback.status_code == 200
     assert replacement_playback.json()["asset_id"] != first_asset_id
 
-    unpublished = await podcast_harness.admin.post(
+    unpublished = await podcast_harness.asset_manager.post(
         f"/api/admin/podcasts/{episode_id}/unpublish",
-        headers={"X-CSRF-Token": admin_csrf},
-        json={"expected_version": 4},
+        headers={"X-CSRF-Token": asset_csrf},
+        json={"expected_version": 6},
     )
     assert unpublished.status_code == 200
     assert unpublished.json()["status"] == "draft"
@@ -463,6 +475,11 @@ async def test_browser_upload_uses_fixed_filename_and_any_locale_fallback(
         podcast_harness.admin,
         "admin@podcast.test",
         "AdminPassword123!",
+    )
+    asset_csrf = await _login(
+        podcast_harness.asset_manager,
+        "assets@podcast.test",
+        "AssetPassword123!",
     )
     await _login(
         podcast_harness.customer,
@@ -499,18 +516,27 @@ async def test_browser_upload_uses_fixed_filename_and_any_locale_fallback(
     )
     assert uploaded.status_code == 200, uploaded.text
     episode = uploaded.json()
+    assert episode["status"] == "published"
+    assert episode["published_at"] is not None
     assert episode["metadata"][0]["title"] == "Podcast | 2026-07-25"
     assert episode["audio_variants"][0]["locale"] == "zh-hans"
     assert {ref.key for ref in podcast_harness.store.objects} == {
         "podcasts/2026-07-25/audio/zh-hans/podcast.mp3"
     }
 
-    published = await podcast_harness.admin.post(
-        f"/api/admin/podcasts/{episode['id']}/publish",
-        headers={"X-CSRF-Token": admin_csrf},
-        json={"expected_version": episode["version"]},
-    )
-    assert published.status_code == 200, published.text
+    async with podcast_harness.session_factory() as database:
+        upload_audit = await database.scalar(
+            select(AuditEvent).where(
+                AuditEvent.action == "podcast.episode_uploaded",
+                AuditEvent.target_id == episode["id"],
+            )
+        )
+        assert upload_audit is not None
+        assert upload_audit.before == {"status": "draft"}
+        assert upload_audit.after is not None
+        assert upload_audit.after["status"] == "published"
+        assert upload_audit.after["published_at"] is not None
+        assert upload_audit.after["published_by_user_id"] is not None
 
     catalog = await podcast_harness.customer.get(
         "/api/podcasts",
@@ -560,3 +586,58 @@ async def test_browser_upload_uses_fixed_filename_and_any_locale_fallback(
     assert set(podcast_harness.store.objects) == {target}
     assert podcast_harness.store.objects[target][0] == b"replacement"
     assert replaced.json()["audio_variants"][0]["version"] == 2
+    assert replaced.json()["status"] == "published"
+    assert replaced.json()["published_at"] == episode["published_at"]
+
+    existing_draft = await podcast_harness.admin.post(
+        "/api/admin/podcasts",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={
+            "trading_date": "2026-07-26",
+            "metadata": {"values": _metadata()},
+            "reason": "建立等待上傳的草稿",
+        },
+    )
+    assert existing_draft.status_code == 201, existing_draft.text
+    assert existing_draft.json()["status"] == "draft"
+
+    uploaded_existing_draft = await podcast_harness.asset_manager.post(
+        "/api/admin/podcasts/uploads",
+        headers={"X-CSRF-Token": asset_csrf},
+        data={
+            "trading_date": "2026-07-26",
+            "reason": "initial_upload",
+        },
+        files={"en": ("existing-draft.mp3", b"existing-draft", "audio/mpeg")},
+    )
+    assert uploaded_existing_draft.status_code == 200, uploaded_existing_draft.text
+    assert uploaded_existing_draft.json()["status"] == "published"
+    assert uploaded_existing_draft.json()["published_at"] is not None
+
+    failed_draft = await podcast_harness.admin.post(
+        "/api/admin/podcasts",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={
+            "trading_date": "2026-07-27",
+            "metadata": {"values": _metadata()},
+            "reason": "建立失敗上傳測試草稿",
+        },
+    )
+    assert failed_draft.status_code == 201, failed_draft.text
+
+    failed_upload = await podcast_harness.asset_manager.post(
+        "/api/admin/podcasts/uploads",
+        headers={"X-CSRF-Token": asset_csrf},
+        data={
+            "trading_date": "2026-07-27",
+            "reason": "initial_upload",
+        },
+        files={"en": ("unsupported.wav", b"unsupported", "audio/wav")},
+    )
+    assert failed_upload.status_code == 422
+    episodes_after_failure = (await podcast_harness.admin.get("/api/admin/podcasts")).json()
+    unchanged_draft = next(
+        item for item in episodes_after_failure if item["id"] == failed_draft.json()["id"]
+    )
+    assert unchanged_draft["status"] == "draft"
+    assert unchanged_draft["published_at"] is None

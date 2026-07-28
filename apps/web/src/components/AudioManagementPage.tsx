@@ -16,6 +16,35 @@ const podcastLocales = ["zh-hant", "zh-hans", "en"] as const
 type PodcastFiles = Record<Locale, File | null>
 type ExpectedVersions = Partial<Record<Locale, number>>
 
+export function groupEpisodesByMonth(episodes: PodcastEpisodeAdmin[]) {
+  const sorted = [...episodes].sort((left, right) => {
+    const dateOrder = right.trading_date.localeCompare(left.trading_date)
+    return dateOrder !== 0 ? dateOrder : left.id.localeCompare(right.id)
+  })
+  const groups = new Map<string, PodcastEpisodeAdmin[]>()
+  for (const episode of sorted) {
+    const month = episode.trading_date.slice(0, 7)
+    const group = groups.get(month)
+    if (group) {
+      group.push(episode)
+    } else {
+      groups.set(month, [episode])
+    }
+  }
+  return [...groups].map(([month, monthEpisodes]) => ({
+    month,
+    episodes: monthEpisodes,
+  }))
+}
+
+function formatEpisodeMonth(month: string, locale: Locale) {
+  return new Intl.DateTimeFormat(locale, {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${month}-01T00:00:00Z`))
+}
+
 export function AudioManagementPage({
   episodes,
   canPublish,
@@ -26,6 +55,7 @@ export function AudioManagementPage({
   locale: Locale
 }) {
   const { t } = useTranslation()
+  const episodeGroups = groupEpisodesByMonth(episodes)
   return (
     <main className="page-shell">
       <header className="mb-8 max-w-3xl">
@@ -38,7 +68,7 @@ export function AudioManagementPage({
         </p>
       </header>
       <PodcastUploadForm locale={locale} />
-      <section className="mt-8 grid gap-4" aria-labelledby="audio-list-title">
+      <section className="mt-8 grid gap-5" aria-labelledby="audio-list-title">
         <h2 className="mb-0 text-2xl" id="audio-list-title">
           {t("audioFiles")}
         </h2>
@@ -50,13 +80,29 @@ export function AudioManagementPage({
             </p>
           </div>
         ) : (
-          episodes.map(episode => (
-            <EpisodeManager
-              key={episode.id}
-              episode={episode}
-              canPublish={canPublish}
-              locale={locale}
-            />
+          episodeGroups.map(group => (
+            <section
+              className="grid gap-3"
+              key={group.month}
+              aria-labelledby={`audio-month-${group.month}`}
+            >
+              <h3
+                className="m-0 border-b border-line pb-2 text-base font-extrabold text-sea-ink-soft"
+                id={`audio-month-${group.month}`}
+              >
+                {formatEpisodeMonth(group.month, locale)}
+              </h3>
+              <div className="flex flex-col items-start gap-3">
+                {group.episodes.map(episode => (
+                  <EpisodeManager
+                    key={episode.id}
+                    episode={episode}
+                    canPublish={canPublish}
+                    locale={locale}
+                  />
+                ))}
+              </div>
+            </section>
           ))
         )}
       </section>
@@ -361,7 +407,7 @@ function EpisodeManager({
   }
 
   return (
-    <article className="surface-panel grid gap-3 p-[clamp(1.25rem,3vw,1.75rem)]">
+    <article className="surface-panel grid w-fit max-w-full gap-2.5 p-4 max-[42rem]:w-full">
       <header className="flex items-start justify-between gap-4">
         <div>
           <time

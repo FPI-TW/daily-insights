@@ -8,8 +8,8 @@ Phase 4 上線驗收仍待執行。八大市場正式內容與報告前端在此
 
 目前已完成：
 
-- `admin` 發布及下架 episode，`admin` 與 `asset_manager` 可從後台一次上傳
-  1–3 個語系音檔；
+- `admin` 與 `asset_manager` 可從後台一次上傳 1–3 個語系音檔，成功上傳後
+  episode 預設發布，兩種身份皆可發布及下架；
 - 同交易日唯一性、任一語系 active audio 發布驗證，以及缺漏語系提示；
 - 同 locale 替換警告、明確確認、expected current version、stable canonical
   key 的同格式原地覆寫／跨格式 key 切換，以及邏輯版本遞增；
@@ -132,8 +132,8 @@ podcast_episode_audio_variants
 
 內部端：
 
-- `admin` 與 `asset_manager` 可透過三語 slot 建立 episode、上傳或替換 audio；
-  `asset_manager` 不取得 episode 發布權限；
+- `admin` 與 `asset_manager` 可透過三語 slot 建立 episode、上傳或替換 audio，
+  成功上傳後 episode 預設發布，且兩種身份皆可發布及下架；
 - 檢查至少一個 audio variant、asset 狀態與 MIME type 後才允許發布；
 - privileged mutation audit。
 
