@@ -10,6 +10,15 @@ export const Route = createFileRoute("/$locale/admin/change-password")({
         params: { locale: context.locale },
       })
     }
+    if (canEnterBackOffice(context.user)) {
+      if (!context.user.must_change_password) {
+        throw redirect({
+          to: "/$locale/admin/audio",
+          params: { locale: context.locale },
+        })
+      }
+      return { user: context.user }
+    }
     if (canEnterCustomer(context.user)) {
       throw redirect({
         to: context.user.must_change_password
@@ -18,19 +27,10 @@ export const Route = createFileRoute("/$locale/admin/change-password")({
         params: { locale: context.locale },
       })
     }
-    if (!canEnterBackOffice(context.user)) {
-      throw redirect({
-        to: "/$locale/admin/login",
-        params: { locale: context.locale },
-      })
-    }
-    if (!context.user.must_change_password) {
-      throw redirect({
-        to: "/$locale/admin/audio",
-        params: { locale: context.locale },
-      })
-    }
-    return { user: context.user }
+    throw redirect({
+      to: "/$locale/admin/login",
+      params: { locale: context.locale },
+    })
   },
   component: AdminChangePasswordPage,
 })
