@@ -20,3 +20,4 @@ remote.*.env
 
 key/*
 crt/*
+reference/*
