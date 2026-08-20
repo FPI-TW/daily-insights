@@ -2,6 +2,9 @@ import pytest
 from starlette.requests import Request
 
 from daily_insights_api.core.security import (
+    SCRYPT_N,
+    SCRYPT_P,
+    SCRYPT_R,
     PasswordPolicyError,
     generate_temporary_password,
     hash_password,
@@ -21,7 +24,8 @@ def test_password_hash_is_salted_and_verifiable() -> None:
     assert verify_password(password, first, "pepper")
     assert not verify_password("WrongPassword123!", first, "pepper")
     assert not verify_password(password, first, "different-pepper")
-    assert first.split("$")[3] == "5"
+    assert (SCRYPT_N, SCRYPT_R, SCRYPT_P) == (2**14, 8, 5)
+    assert first.split("$")[1:4] == [str(SCRYPT_N), str(SCRYPT_R), str(SCRYPT_P)]
     assert not password_needs_rehash(first)
     assert password_needs_rehash(first.replace("$5$", "$1$", 1))
 

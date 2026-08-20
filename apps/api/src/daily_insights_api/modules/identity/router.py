@@ -1,3 +1,4 @@
+import hmac
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -138,7 +139,16 @@ async def login(
             .with_for_update()
         )
     if user is not None:
-        password_is_valid = verify_password(payload.password, user.password_hash, pepper)
+        # The initial verification covers the hash selected before locking. If
+        # the locked row has the same hash, it remains valid without paying for
+        # scrypt twice. A changed hash may be a concurrent rehash, so verify the
+        # password against the latest value to preserve the original semantics.
+        hash_is_unchanged = hmac.compare_digest(
+            candidate_hash.encode("utf-8"),
+            user.password_hash.encode("utf-8"),
+        )
+        if not hash_is_unchanged:
+            password_is_valid = verify_password(payload.password, user.password_hash, pepper)
     valid = (
         user is not None
         and user.status == UserStatus.ACTIVE
@@ -256,12 +266,15 @@ async def change_password(
     pepper = settings.password_pepper.get_secret_value()
     if not verify_password(payload.current_password, locked_user.password_hash, pepper):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "current password is incorrect")
+    if hmac.compare_digest(
+        payload.new_password.encode("utf-8"),
+        payload.current_password.encode("utf-8"),
+    ):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "new password must be different")
     try:
         new_password_hash = hash_password(payload.new_password, pepper)
     except PasswordPolicyError as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
-    if verify_password(payload.new_password, locked_user.password_hash, pepper):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "new password must be different")
 
     locked_user.password_hash = new_password_hash
     locked_user.must_change_password = False

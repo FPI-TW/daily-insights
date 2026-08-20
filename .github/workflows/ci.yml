@@ -10,27 +10,29 @@ permissions:
   contents: read
 
 jobs:
-  validate:
+  web-quality:
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_DB: daily_insights_ci
-          POSTGRES_USER: daily_insights_ci
-          POSTGRES_PASSWORD: daily-insights-ci-only
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U daily_insights_ci -d daily_insights_ci"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
 
-    env:
-      DAILY_INSIGHTS_ENVIRONMENT: test
-      DAILY_INSIGHTS_DATABASE_URL: postgresql+psycopg://daily_insights_ci:daily-insights-ci-only@127.0.0.1:5432/daily_insights_ci
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.15.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check:web
+      - run: pnpm format:check:docs
+      - run: pnpm lint:check:web
+      - run: pnpm type:check:web
+
+  api-client-quality:
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -54,7 +56,103 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: uv sync --project apps/api --frozen
-      - run: pnpm check
+      - run: pnpm type:check:client
+      - run: pnpm api-client:check
+
+  api-quality:
+    runs-on: ubuntu-latest
+
+    env:
+      DAILY_INSIGHTS_ENVIRONMENT: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - run: uv sync --project apps/api --frozen
+      - run: uv run --project apps/api ruff format --check apps/api
+      - run: uv run --project apps/api ruff check apps/api
+      - run: uv run --project apps/api mypy --config-file apps/api/pyproject.toml apps/api/src apps/api/tests
+
+  web-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.15.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:web
+
+  client-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.15.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:client
+
+  api-integration:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: daily_insights_ci
+          POSTGRES_USER: daily_insights_ci
+          POSTGRES_PASSWORD: daily-insights-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U daily_insights_ci -d daily_insights_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DAILY_INSIGHTS_ENVIRONMENT: test
+      DAILY_INSIGHTS_DATABASE_URL: postgresql+psycopg://daily_insights_ci:daily-insights-ci-only@127.0.0.1:5432/daily_insights_ci
+      DAILY_INSIGHTS_TEST_DATABASE_URL: postgresql+psycopg://daily_insights_ci:daily-insights-ci-only@127.0.0.1:5432/daily_insights_ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - run: uv sync --project apps/api --frozen
+      - run: uv run --project apps/api pytest -c apps/api/pyproject.toml apps/api/tests
 
       - name: Validate PostgreSQL migration round trip
         working-directory: apps/api
@@ -62,6 +160,47 @@ jobs:
           uv run alembic upgrade head
           uv run alembic downgrade base
           uv run alembic upgrade head
+
+  web-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.15.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:web
+
+  api-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - run: uv sync --project apps/api --frozen
+      - run: uv build --project apps/api
+
+  contracts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Validate Compose contract
         env:
@@ -73,3 +212,34 @@ jobs:
 
       - name: Validate production deployment contract
         run: ./scripts/check-production-deployment-contract.sh
+
+  validate:
+    if: always()
+    needs:
+      - web-quality
+      - api-client-quality
+      - api-quality
+      - web-tests
+      - client-tests
+      - api-integration
+      - web-build
+      - api-build
+      - contracts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require every validation job to pass
+        run: |
+          if [[ "${{ needs.web-quality.result }}" != "success" ||
+            "${{ needs.api-client-quality.result }}" != "success" ||
+            "${{ needs.api-quality.result }}" != "success" ||
+            "${{ needs.web-tests.result }}" != "success" ||
+            "${{ needs.client-tests.result }}" != "success" ||
+            "${{ needs.api-integration.result }}" != "success" ||
+            "${{ needs.web-build.result }}" != "success" ||
+            "${{ needs.api-build.result }}" != "success" ||
+            "${{ needs.contracts.result }}" != "success" ]]; then
+            echo "At least one CI validation job failed or was skipped."
+            exit 1
+          fi
+          echo "All CI validation jobs passed."
