@@ -3,21 +3,22 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import cast
+from typing import Any, cast
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from daily_insights_api import models as registered_models  # noqa: F401
 from daily_insights_api.core.config import Settings
 from daily_insights_api.core.enums import SystemRole, UserStatus
 from daily_insights_api.core.models import Base
-from daily_insights_api.core.security import hash_password
+from daily_insights_api.core.security import hash_password, verify_password
 from daily_insights_api.modules.audit.models import AuditEvent
+from daily_insights_api.modules.identity import router as identity_router
 from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.markets.catalog import MARKETS
 from daily_insights_api.modules.markets.models import Market
@@ -108,6 +109,110 @@ async def login(
     )
     assert response.status_code == 200, response.text
     return str(response.json()["csrf_token"])
+
+
+async def test_known_user_login_verifies_password_once(
+    harness: Harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    verification_count = 0
+    original_verify_password = verify_password
+
+    def count_verification(password: str, encoded: str, pepper: str) -> bool:
+        nonlocal verification_count
+        verification_count += 1
+        return original_verify_password(password, encoded, pepper)
+
+    monkeypatch.setattr(identity_router, "verify_password", count_verification)
+    response = await harness.client.post(
+        "/api/auth/login",
+        json={"email": "admin@example.com", "password": "AdminPassword123!"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert verification_count == 1
+
+
+async def test_login_rechecks_password_after_a_concurrent_hash_change(
+    harness: Harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with harness.session_factory() as database:
+        admin = await database.scalar(select(User).where(User.email == "admin@example.com"))
+    assert admin is not None
+    assert harness.settings.password_pepper is not None
+    rotated_hash = hash_password(
+        "AdminPassword123!",
+        harness.settings.password_pepper.get_secret_value(),
+    )
+
+    scalar_calls = 0
+    verification_count = 0
+    original_scalar = AsyncSession.scalar
+    original_verify_password = verify_password
+
+    async def rotate_hash_before_locked_reload(
+        database: AsyncSession,
+        statement: Any,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        nonlocal scalar_calls
+        scalar_calls += 1
+        if scalar_calls == 2:
+            await database.execute(
+                update(User).where(User.id == admin.id).values(password_hash=rotated_hash)
+            )
+        return await original_scalar(database, statement, *args, **kwargs)
+
+    def count_verification(password: str, encoded: str, pepper: str) -> bool:
+        nonlocal verification_count
+        verification_count += 1
+        return original_verify_password(password, encoded, pepper)
+
+    async def allow_login_attempt(*args: Any, **kwargs: Any) -> bool:
+        return True
+
+    async def clear_login_attempts(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(AsyncSession, "scalar", rotate_hash_before_locked_reload)
+    monkeypatch.setattr(identity_router, "verify_password", count_verification)
+    monkeypatch.setattr(identity_router, "consume_login_attempt", allow_login_attempt)
+    monkeypatch.setattr(identity_router, "clear_login_attempts", clear_login_attempts)
+
+    response = await harness.client.post(
+        "/api/auth/login",
+        json={"email": "admin@example.com", "password": "AdminPassword123!"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert scalar_calls == 2
+    assert verification_count == 2
+
+
+async def test_change_password_rejects_same_unicode_password(harness: Harness) -> None:
+    csrf_token = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    unicode_password = "密碼安全🙂123"
+    changed = await harness.client.post(
+        "/api/auth/change-password",
+        headers={"X-CSRF-Token": csrf_token},
+        json={
+            "current_password": "AdminPassword123!",
+            "new_password": unicode_password,
+        },
+    )
+    assert changed.status_code == 200, changed.text
+
+    rejected = await harness.client.post(
+        "/api/auth/change-password",
+        headers={"X-CSRF-Token": changed.json()["csrf_token"]},
+        json={
+            "current_password": unicode_password,
+            "new_password": unicode_password,
+        },
+    )
+    assert rejected.status_code == 422, rejected.text
 
 
 async def create_organization(

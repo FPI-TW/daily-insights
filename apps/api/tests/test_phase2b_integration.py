@@ -167,6 +167,16 @@ def _remigrate_phase2b(database_url: str) -> None:
         get_settings.cache_clear()
 
 
+def _reset_phase2b_schema(database_url: str) -> None:
+    engine = create_sync_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DROP SCHEMA public CASCADE"))
+            connection.execute(text("CREATE SCHEMA public"))
+    finally:
+        engine.dispose()
+
+
 @pytest_asyncio.fixture
 async def phase2b_database() -> AsyncIterator[Phase2BDatabase]:
     database_url = os.getenv("DAILY_INSIGHTS_TEST_DATABASE_URL")
@@ -181,35 +191,38 @@ async def phase2b_database() -> AsyncIterator[Phase2BDatabase]:
     )
     engine = create_async_engine(database_url)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    admin_id = uuid.uuid4()
-    blocked_admin_id = uuid.uuid4()
-    async with session_factory.begin() as database:
-        database.add_all(
-            [
-                User(
-                    id=admin_id,
-                    email=f"phase2b-admin-{admin_id}@example.com",
-                    display_name="Phase 2B Admin",
-                    password_hash="not-used",
-                    must_change_password=False,
-                    system_role=SystemRole.ADMIN,
-                    status=UserStatus.ACTIVE,
-                ),
-                User(
-                    id=blocked_admin_id,
-                    email=f"phase2b-blocked-{blocked_admin_id}@example.com",
-                    display_name="Blocked Admin",
-                    password_hash="not-used",
-                    must_change_password=True,
-                    system_role=SystemRole.ADMIN,
-                    status=UserStatus.ACTIVE,
-                ),
-            ]
-        )
     try:
+        admin_id = uuid.uuid4()
+        blocked_admin_id = uuid.uuid4()
+        async with session_factory.begin() as database:
+            database.add_all(
+                [
+                    User(
+                        id=admin_id,
+                        email=f"phase2b-admin-{admin_id}@example.com",
+                        display_name="Phase 2B Admin",
+                        password_hash="not-used",
+                        must_change_password=False,
+                        system_role=SystemRole.ADMIN,
+                        status=UserStatus.ACTIVE,
+                    ),
+                    User(
+                        id=blocked_admin_id,
+                        email=f"phase2b-blocked-{blocked_admin_id}@example.com",
+                        display_name="Blocked Admin",
+                        password_hash="not-used",
+                        must_change_password=True,
+                        system_role=SystemRole.ADMIN,
+                        status=UserStatus.ACTIVE,
+                    ),
+                ]
+            )
         yield Phase2BDatabase(settings, session_factory, admin_id, blocked_admin_id)
     finally:
-        await engine.dispose()
+        try:
+            await engine.dispose()
+        finally:
+            await asyncio.to_thread(_reset_phase2b_schema, database_url)
 
 
 async def _verified_migration(
