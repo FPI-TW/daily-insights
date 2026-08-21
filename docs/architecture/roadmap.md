@@ -75,10 +75,13 @@ Accept when:
 
 Implementation status: foundation complete. The provider adapter, immutable
 publication contract, database-backed orchestration primitives, and customer
-read API are implemented. Formal eight-market content and the customer report
-UI are explicitly pending and move to Phase 6B. Production scheduling and
-alerts remain production-readiness work. See
-[`phase-2-data-reports.md`](phase-2-data-reports.md).
+read API are implemented. Formal report content and the customer report UI are
+explicitly pending and move to Phase 6B. The first wave is five markets only;
+FX, Hong Kong, and Mainland China remain later scope within the long-term
+eight-market catalog. Production scheduling and alerts remain
+production-readiness work. See
+[`phase-2-data-reports.md`](phase-2-data-reports.md) and the accepted
+[`five-market-morning-report-baseline.md`](five-market-morning-report-baseline.md).
 
 Deliver:
 
@@ -94,9 +97,17 @@ Accept when:
 - contract tests detect breaking FinDB fixture changes;
 - no provider raw row is retained durably;
 - repeated daily jobs cannot duplicate a publication;
-- incomplete input cannot create a new publication;
-- last published data remains readable and visibly stale during an outage;
+- current foundation evidence records fail-closed/LKG behavior during an
+  outage; this is not the acceptance rule for the migrated morning report;
 - the report read API honors org market policy and three locales.
+
+The Phase 2 foundation therefore remains accepted as current state, while the
+morning-report feature must meet the baseline target: a versioned five-market
+manifest, a passing production FinDB probe, at least one `候選` block per
+market, and `complete`/`partial`/`unavailable` publication for every edition.
+Missing included blocks retain their fixed position with nullable cells/points;
+the feature must not silently revert to the old LKG/no-incomplete-publication
+rule.
 
 Blocking decisions: formulas/derived indicators, editorial workflow, and final
 FinDB semantics.
@@ -318,24 +329,44 @@ Accept when:
 Blocking decisions: exact operations, upload limits, scanning, versioning, and
 deletion/recovery.
 
-### Phase 6B — eight-market report content and customer UI
+### Phase 6B — first-wave five-market report content and customer UI
 
 Deliver:
 
-- approved eight-market dataset mappings and provider coverage;
-- versioned formulas/derived indicators and editorial workflow;
+- the accepted
+  [`five-market-morning-report-baseline.md`](five-market-morning-report-baseline.md)
+  as the first gated deliverable;
+- a versioned launch manifest for macro/bonds, crypto, US equities, Taiwan
+  equities, and Taiwan index futures/options, using FinDB only;
+- production probe evidence for exact codes/symbols, required fields/rows/
+  series/history, freshness, formulas, windows, units, and three-language
+  labels;
+- versioned formulas/derived indicators and the target block/publication state
+  contract;
 - customer report/chart interface using structured data rather than PDF as the
   primary presentation;
-- complete three-locale report narrative, labels, units, and failure states.
+- complete three-locale labels, units, policy behavior, loading/null/chart-gap
+  states, and report failure states. AI summary is not part of this phase.
+
+FX, Hong Kong, and Mainland China are a later workstream and require a separate
+scope/source decision; they are not added to the first-wave manifest.
 
 Accept when:
 
-- every market has approved source, cutoff, freshness, missing-data, and
-  correction semantics;
+- the production FinDB release and new Environment key pass the required
+  read-only go/no-go probe; the old configured key or pre-production
+  observation cannot satisfy this gate;
+- all five markets have at least one `候選` block and the fixed block order is
+  frozen in the manifest;
+- every included block has approved source, cutoff, freshness, missing-data,
+  correction, formula, window, unit, and three-language label semantics;
 - calculations are reproducible from versioned inputs and derivation rules;
 - report/chart surfaces enforce tenant market policy and three locales;
-- provider outage behavior keeps the last successful publication visibly
-  stale without publishing incomplete data.
+- every edition publishes `complete`, `partial`, or `unavailable`, with failed
+  source-run evidence and nullable included cells/points when needed;
+- immutable revisions, same-input no-op, list-summary/latest-full separation,
+  scheduler idempotency/manual rerun/heartbeat, and the deployment restart plus
+  five-market terminal-state checks pass in the later feature/deploy PR.
 
 Blocking decisions: the open items in
 [`phase-2-data-reports.md`](phase-2-data-reports.md).
