@@ -60,9 +60,13 @@ export function AudioManagementPage({
     <main className="page-shell">
       <header className="mb-8 max-w-3xl">
         <p className="eyebrow">{t("adminPortal")}</p>
-        <h1 className="my-3 text-[clamp(2.2rem,6vw,3.8rem)] leading-none font-extrabold tracking-[-0.055em]">
+        <h1 className="mt-2 mb-3 text-[clamp(1.9rem,4vw,2.5rem)] leading-none font-extrabold tracking-[-0.045em]">
           {t("audioManagementTitle")}
         </h1>
+        <span
+          className="mb-4 block h-[3px] w-14 bg-lagoon"
+          aria-hidden="true"
+        />
         <p className="leading-7 text-sea-ink-soft">
           {t("audioManagementDescription")}
         </p>
@@ -73,7 +77,7 @@ export function AudioManagementPage({
           {t("audioFiles")}
         </h2>
         {episodes.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-line bg-surface p-10 text-center">
+          <div className="surface-panel border-dashed p-10 text-center">
             <h3 className="mt-0">{t("audioEmptyTitle")}</h3>
             <p className="mb-0 text-sea-ink-soft">
               {t("audioEmptyDescription")}
@@ -92,7 +96,7 @@ export function AudioManagementPage({
               >
                 {formatEpisodeMonth(group.month, locale)}
               </h3>
-              <div className="flex flex-col items-start gap-3">
+              <div className="grid gap-3">
                 {group.episodes.map(episode => (
                   <EpisodeManager
                     key={episode.id}
@@ -185,7 +189,7 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
 
   return (
     <form
-      className="surface-panel grid gap-4 p-[clamp(1.25rem,3vw,2rem)]"
+      className="surface-panel grid gap-4 border-t-[3px] border-t-lagoon p-[clamp(1.25rem,3vw,1.5rem)]"
       aria-labelledby="audio-upload-title"
       onSubmit={event => {
         event.preventDefault()
@@ -319,8 +323,8 @@ function PodcastFileSlot({
     <div
       className={
         dragging
-          ? "grid min-h-36 place-items-center gap-2 rounded-lg border-2 border-dashed border-lagoon bg-lagoon/10 p-4 text-center"
-          : "grid min-h-36 place-items-center gap-2 rounded-lg border-2 border-dashed border-line bg-surface p-4 text-center transition-colors hover:border-lagoon"
+          ? "grid min-h-32 place-items-center gap-2 rounded-lg border-2 border-dashed border-lagoon bg-lagoon/10 p-4 text-center"
+          : "grid min-h-32 place-items-center gap-2 rounded-lg border-2 border-dashed border-line bg-link-hover p-4 text-center transition-colors hover:border-lagoon"
       }
       onDragEnter={event => {
         event.preventDefault()
@@ -407,7 +411,7 @@ function EpisodeManager({
   }
 
   return (
-    <article className="surface-panel grid w-fit max-w-full gap-2.5 p-4 max-[42rem]:w-full">
+    <article className="surface-panel grid w-fit max-w-full grid-cols-[minmax(0,1fr)_auto] gap-3 border-l-[3px] border-l-transparent p-4 max-[42rem]:w-full max-[42rem]:grid-cols-1">
       <header className="flex items-start justify-between gap-4">
         <div>
           <time
@@ -423,8 +427,8 @@ function EpisodeManager({
         <span
           className={
             episode.status === "published"
-              ? "rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-extrabold text-emerald-700"
-              : "rounded-full bg-slate-500/15 px-2.5 py-1 text-xs font-extrabold text-sea-ink-soft"
+              ? "rounded-full bg-market-down/15 px-2.5 py-1 text-xs font-extrabold text-market-down"
+              : "rounded-full bg-link-hover px-2.5 py-1 text-xs font-extrabold text-sea-ink-soft"
           }
         >
           {t(
@@ -432,20 +436,20 @@ function EpisodeManager({
           )}
         </span>
       </header>
-      <p className="m-0 text-sm text-sea-ink-soft">
+      <p className="m-0 font-mono text-xs text-sea-ink-soft">
         {t("podcastVersion", { version: episode.version })} ·{" "}
         {t("podcastAudioCount", { count: available.size })}
       </p>
       {missing.length > 0 && (
         <p
-          className="m-0 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm font-bold"
+          className="m-0 rounded-lg border border-market-caution/30 bg-market-caution/10 px-3 py-2 text-sm font-bold text-market-caution"
           role="status"
         >
           {t("podcastMissingLocales", { locales: missing.join(", ") })}
         </p>
       )}
       {canPublish && (
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap justify-end gap-3 max-[42rem]:justify-start">
           <button
             className="primary-action"
             data-action="publication"

@@ -87,20 +87,38 @@ describe("five-market report presentation", () => {
   })
 
   it.each([
-    ["zh-hant", "8 月 22 日", "上漲", "3,412 億元"],
-    ["zh-hans", "8 月 22 日", "上涨", "3,412 亿元"],
-    ["en", "Aug 22", "Advancers", "NT$341.2 billion"],
+    ["zh-hant", "8 月 22 日", "上漲", "3,412 億元", "週一", "穩定幣供給"],
+    ["zh-hans", "8 月 22 日", "上涨", "3,412 亿元", "周一", "稳定币供给"],
+    [
+      "en",
+      "Aug 22",
+      "Advancers",
+      "NT$341.2 billion",
+      "Mon",
+      "Stablecoin supply",
+    ],
   ] as const)(
     "localizes provisional table values, units, and chart labels in %s",
-    async (locale, axisLabel, breadthLabel, unit) => {
+    async (
+      locale,
+      axisLabel,
+      breadthLabel,
+      unit,
+      weekdayLabel,
+      stablecoinLabel
+    ) => {
       const crypto = await getProvisionalReport("crypto")
       const taiwan = await getProvisionalReport("tw_equity")
-      if (!crypto || !taiwan) throw new Error("Expected report fixtures")
+      const usEquity = await getProvisionalReport("us_equity")
+      if (!crypto || !taiwan || !usEquity) {
+        throw new Error("Expected report fixtures")
+      }
 
       await renderLocalized(
         <>
           <ReportDetail locale={locale} report={crypto} />
           <ReportDetail locale={locale} report={taiwan} />
+          <ReportDetail locale={locale} report={usEquity} />
         </>,
         locale
       )
@@ -108,6 +126,8 @@ describe("five-market report presentation", () => {
       expect(screen.getByText(axisLabel)).toBeVisible()
       expect(screen.getByText(breadthLabel)).toBeVisible()
       expect(screen.getByText(unit)).toBeVisible()
+      expect(screen.getByText(weekdayLabel)).toBeVisible()
+      expect(screen.getByText(stablecoinLabel)).toBeVisible()
     }
   )
 
@@ -118,6 +138,7 @@ describe("five-market report presentation", () => {
       editionDate: "2026-08-28",
       sourceDate: "2026-08-28",
       caveatKey: "reportCaveatMock",
+      summaryKey: "reportSummary_tw_equity",
       blocks: [
         {
           kind: "metric",
@@ -192,7 +213,7 @@ describe("five-market report presentation", () => {
     )
 
     expect(screen.getAllByText("資料完整").length).toBeGreaterThan(0)
-    expect(screen.getByText("資料缺漏")).toBeVisible()
+    expect(screen.getAllByText("資料缺漏").length).toBeGreaterThan(0)
     expect(screen.getByText("資料錯誤")).toBeVisible()
     expect(screen.getAllByText("—").length).toBeGreaterThan(0)
     expect(screen.getAllByTestId("chart")[0]).toHaveTextContent(

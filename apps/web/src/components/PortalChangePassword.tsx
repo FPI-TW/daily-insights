@@ -57,11 +57,11 @@ export function PortalChangePassword({
 
   return (
     <main
-      className="mx-auto grid min-h-svh w-[min(calc(100%-2rem),36rem)] place-items-center py-8"
+      className="mx-auto grid min-h-svh w-[min(calc(100%-2rem),1240px)] place-items-center py-8"
       data-portal={portal}
     >
       <form
-        className="surface-panel grid w-full gap-4 p-[clamp(1.5rem,4vw,2.5rem)]"
+        className="surface-panel grid w-[min(100%,32rem)] gap-4 border-t-[3px] border-t-lagoon p-[clamp(1.5rem,4vw,2rem)]"
         onSubmit={event => void submit(event)}
       >
         <LocaleSwitcher
@@ -72,9 +72,14 @@ export function PortalChangePassword({
               : "admin-change-password"
           }
         />
-        <h1 className="mb-0 text-3xl tracking-[-0.04em]">
-          {t("initialPasswordTitle")}
-        </h1>
+        <div>
+          <p className="eyebrow">
+            {t(portal === "customer" ? "brand" : "adminPortal")}
+          </p>
+          <h1 className="mt-2 mb-0 text-3xl tracking-[-0.04em]">
+            {t("initialPasswordTitle")}
+          </h1>
+        </div>
         <p className="mt-0 leading-7 text-sea-ink-soft">
           {t("initialPasswordDescription")}
         </p>
@@ -98,7 +103,10 @@ export function PortalChangePassword({
           />
         </label>
         {error ? (
-          <p className="text-sm font-bold text-red-700" role="alert">
+          <p
+            className="m-0 rounded-lg border border-market-up/35 bg-market-up/10 px-3 py-2 text-sm font-bold text-market-up"
+            role="alert"
+          >
             {error}
           </p>
         ) : null}

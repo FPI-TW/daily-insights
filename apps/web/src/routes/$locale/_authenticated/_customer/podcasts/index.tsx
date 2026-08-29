@@ -20,11 +20,15 @@ function PodcastListPage() {
 
   return (
     <main className="page-shell">
-      <header className="mb-[clamp(2rem,5vw,3.5rem)] max-w-3xl">
+      <header className="mb-8 max-w-3xl">
         <p className="eyebrow">{t("podcastEyebrow")}</p>
-        <h1 className="my-3 text-[clamp(2.2rem,6vw,3.8rem)] leading-none font-extrabold tracking-[-0.055em]">
+        <h1 className="mt-2 mb-3 text-[clamp(1.9rem,4vw,2.5rem)] leading-none font-extrabold tracking-[-0.045em]">
           {t("podcastTitle")}
         </h1>
+        <span
+          className="mb-4 block h-[3px] w-14 bg-lagoon"
+          aria-hidden="true"
+        />
         <p className="leading-7 text-sea-ink-soft">{t("podcastDescription")}</p>
       </header>
       {episodes.length === 0 ? (
@@ -35,14 +39,14 @@ function PodcastListPage() {
           </p>
         </section>
       ) : (
-        <ol className="m-0 grid list-none gap-3 p-0">
+        <ol className="m-0 grid list-none gap-4 p-0">
           {episodes.map(episode => (
             <li
               key={episode.id}
-              className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-5 rounded-xl border border-line bg-surface p-4 text-sea-ink shadow-[inset_0_1px_var(--inset-glint)] transition hover:-translate-y-px hover:border-lagoon-deep hover:bg-surface-strong max-[42rem]:grid-cols-[4.2rem_minmax(0,1fr)] max-[42rem]:gap-3 max-[42rem]:p-3.5"
+              className="surface-panel grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-5 border-l-[3px] border-l-transparent p-4 text-sea-ink transition hover:border-l-lagoon hover:border-lagoon-deep max-[42rem]:grid-cols-[4.2rem_minmax(0,1fr)] max-[42rem]:gap-3 max-[42rem]:p-3.5"
             >
               <div
-                className="grid aspect-square w-[5.5rem] items-end justify-items-start rounded-lg bg-[linear-gradient(135deg,transparent_35%,rgb(255_255_255/16%)),linear-gradient(145deg,var(--palm),var(--sea-ink))] p-2.5 text-white max-[42rem]:w-[4.2rem]"
+                className="grid aspect-square w-[5.5rem] items-end justify-items-start rounded-[10px] bg-lagoon p-2.5 font-mono text-white max-[42rem]:w-[4.2rem]"
                 aria-hidden="true"
               >
                 <span className="text-xl font-extrabold max-[42rem]:text-base">
@@ -59,7 +63,7 @@ function PodcastListPage() {
                 <h2 className="mt-1 mb-0 text-[clamp(1.05rem,3vw,1.35rem)] tracking-[-0.02em]">
                   {episode.title}
                 </h2>
-                <p className="mt-2 line-clamp-2 text-sm leading-6 text-sea-ink-soft">
+                <p className="mt-2 mb-0 line-clamp-2 text-sm leading-6 text-sea-ink-soft">
                   {episode.summary}
                 </p>
                 <PodcastPlayer

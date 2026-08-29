@@ -45,7 +45,7 @@ test("unavailable report preserves gap and block states", async ({
 }) => {
   await authenticateAs(context, "org_member")
   await page.goto("/en/reports/tw_index_derivatives")
-  await expect(page.getByText("Unavailable")).toBeVisible()
-  await expect(page.getByText("Data missing")).toBeVisible()
-  await expect(page.getByText("Data error")).toBeVisible()
+  await expect(page.getByText("Unavailable", { exact: true })).toBeVisible()
+  await expect(page.getByText("Data missing", { exact: true })).toHaveCount(3)
+  await expect(page.getByText("Data error", { exact: true })).toHaveCount(1)
 })

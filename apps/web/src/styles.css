@@ -5,95 +5,98 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --sea-ink: #172033;
-  --sea-ink-soft: #5b667a;
-  --lagoon: #22b8cf;
-  --lagoon-deep: #1769e0;
-  --palm: #1858b8;
-  --sand: #f4f7fb;
-  --foam: #f8fafc;
-  --surface: rgba(255, 255, 255, 0.76);
-  --surface-strong: rgba(255, 255, 255, 0.96);
-  --line: rgba(51, 65, 85, 0.14);
-  --inset-glint: rgba(255, 255, 255, 0.9);
-  --kicker: #1769e0;
-  --bg-base: #eef3f9;
-  --header-bg: rgba(248, 250, 252, 0.88);
-  --chip-bg: rgba(255, 255, 255, 0.78);
-  --chip-line: rgba(51, 65, 85, 0.16);
-  --link-bg-hover: rgba(226, 232, 240, 0.68);
-  --hero-a: rgba(37, 99, 235, 0.14);
-  --hero-b: rgba(34, 211, 238, 0.1);
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.141 0.005 285.823);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.141 0.005 285.823);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.21 0.006 285.885);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
-  --accent-foreground: oklch(0.21 0.006 285.885);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.577 0.245 27.325);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.871 0.006 286.286);
-  --radius: 0.625rem;
+  --sea-ink: #1d2b2a;
+  --sea-ink-soft: #6f7c79;
+  --lagoon: #1eb89b;
+  --lagoon-deep: #159e84;
+  --palm: #117764;
+  --sand: #f4f7f8;
+  --foam: #ffffff;
+  --surface: #ffffff;
+  --surface-strong: #ffffff;
+  --line: #e4eae9;
+  --inset-glint: #ffffff;
+  --kicker: #159e84;
+  --bg-base: #f4f7f8;
+  --header-bg: rgb(255 255 255 / 94%);
+  --chip-bg: #f7faf9;
+  --chip-line: #dbe4e1;
+  --link-bg-hover: #edf5f2;
+  --market-up: #d6453f;
+  --market-down: #2f9e69;
+  --market-caution: #c98a2b;
+  --background: #ffffff;
+  --foreground: #1d2b2a;
+  --card: #ffffff;
+  --card-foreground: #1d2b2a;
+  --popover: #ffffff;
+  --popover-foreground: #1d2b2a;
+  --primary: #159e84;
+  --primary-foreground: #ffffff;
+  --secondary: #eef5f3;
+  --secondary-foreground: #1d2b2a;
+  --muted: #f4f7f8;
+  --muted-foreground: #6f7c79;
+  --accent: #eef5f3;
+  --accent-foreground: #1d2b2a;
+  --destructive: #d6453f;
+  --destructive-foreground: #ffffff;
+  --border: #e4eae9;
+  --input: #dbe4e1;
+  --ring: #1eb89b;
+  --radius: 0.8125rem;
 }
 
 .dark {
-  --sea-ink: #e6edf7;
-  --sea-ink-soft: #97a6bb;
-  --lagoon: #22d3ee;
-  --lagoon-deep: #69a7ff;
-  --palm: #60a5fa;
-  --sand: #0d1422;
-  --foam: #0b1220;
-  --surface: rgba(18, 29, 48, 0.76);
-  --surface-strong: rgba(15, 24, 40, 0.95);
-  --line: rgba(148, 163, 184, 0.17);
-  --inset-glint: rgba(255, 255, 255, 0.06);
-  --kicker: #67e8f9;
-  --bg-base: #080f1d;
-  --header-bg: rgba(8, 15, 29, 0.88);
-  --chip-bg: rgba(30, 41, 59, 0.8);
-  --chip-line: rgba(148, 163, 184, 0.2);
-  --link-bg-hover: rgba(51, 65, 85, 0.6);
-  --hero-a: rgba(37, 99, 235, 0.16);
-  --hero-b: rgba(34, 211, 238, 0.1);
-  --background: oklch(0.141 0.005 285.823);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.141 0.005 285.823);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.141 0.005 285.823);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.21 0.006 285.885);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.274 0.006 286.033);
-  --input: oklch(0.274 0.006 286.033);
-  --ring: oklch(0.442 0.017 285.786);
+  --sea-ink: #e6edeb;
+  --sea-ink-soft: #aebab7;
+  --lagoon: #2bc5a7;
+  --lagoon-deep: #1eb89b;
+  --palm: #159e84;
+  --sand: #0e1413;
+  --foam: #0e1413;
+  --surface: #161d1c;
+  --surface-strong: #161d1c;
+  --line: #26302e;
+  --inset-glint: rgb(255 255 255 / 4%);
+  --kicker: #2bc5a7;
+  --bg-base: #0e1413;
+  --header-bg: rgb(14 20 19 / 94%);
+  --chip-bg: #1a2321;
+  --chip-line: #34403d;
+  --link-bg-hover: #1d2926;
+  --market-up: #f16c63;
+  --market-down: #53bd84;
+  --market-caution: #dfad58;
+  --background: #0e1413;
+  --foreground: #e6edeb;
+  --card: #161d1c;
+  --card-foreground: #e6edeb;
+  --popover: #161d1c;
+  --popover-foreground: #e6edeb;
+  --primary: #2bc5a7;
+  --primary-foreground: #0e1413;
+  --secondary: #1d2926;
+  --secondary-foreground: #e6edeb;
+  --muted: #1d2926;
+  --muted-foreground: #aebab7;
+  --accent: #1d2926;
+  --accent-foreground: #e6edeb;
+  --destructive: #f16c63;
+  --destructive-foreground: #0e1413;
+  --border: #26302e;
+  --input: #34403d;
+  --ring: #2bc5a7;
 }
 
 @theme inline {
   --font-sans:
-    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+    "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", ui-sans-serif,
+    system-ui, sans-serif;
   --font-display:
-    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+    "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", ui-sans-serif,
+    system-ui, sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --color-sea-ink: var(--sea-ink);
   --color-sea-ink-soft: var(--sea-ink-soft);
   --color-lagoon: var(--lagoon);
@@ -109,6 +112,9 @@
   --color-chip-line: var(--chip-line);
   --color-link-hover: var(--link-bg-hover);
   --color-kicker: var(--kicker);
+  --color-market-up: var(--market-up);
+  --color-market-down: var(--market-down);
+  --color-market-caution: var(--market-caution);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -132,7 +138,6 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --animate-rise-in: rise-in 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @layer base {
@@ -141,83 +146,63 @@
   ::after {
     border-color: var(--line);
   }
-
   html,
   body,
   #app {
     min-height: 100%;
   }
-
   body {
     @apply m-0 overflow-x-hidden font-sans text-sea-ink antialiased;
-    background:
-      radial-gradient(1100px 620px at -8% -10%, var(--hero-a), transparent 58%),
-      radial-gradient(
-        1050px 620px at 112% -12%,
-        var(--hero-b),
-        transparent 62%
-      ),
-      linear-gradient(180deg, var(--foam), var(--bg-base));
+    background: var(--bg-base);
   }
-
   button,
   input,
   select,
   textarea {
     font: inherit;
   }
-
   button {
     @apply cursor-pointer rounded-lg border border-chip-line bg-chip px-4 py-2.5 text-sea-ink transition-colors disabled:cursor-wait disabled:opacity-65;
   }
-
   label {
     @apply grid gap-2 text-sm font-bold text-sea-ink;
   }
-
   input,
   select,
   textarea {
     @apply w-full rounded-lg border border-line bg-surface-strong px-3 py-2.5 text-sea-ink outline-none;
   }
-
   textarea {
     @apply min-h-28 resize-y;
   }
-
   button:focus-visible,
   input:focus-visible,
   select:focus-visible,
   textarea:focus-visible,
   a:focus-visible {
-    outline: 3px solid color-mix(in oklab, var(--lagoon-deep) 28%, transparent);
+    outline: 3px solid color-mix(in oklab, var(--lagoon) 38%, transparent);
     outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+    }
   }
 }
 
 @utility page-shell {
-  @apply mx-auto w-[min(calc(100%-2rem),68rem)] py-[clamp(2.5rem,6vw,5rem)];
+  @apply mx-auto w-full max-w-[1240px] px-6 py-8 max-sm:px-4;
 }
-
 @utility surface-panel {
-  @apply rounded-xl border border-line bg-surface-strong shadow-[0_18px_45px_rgb(15_23_42/8%)];
+  @apply rounded-[13px] border border-line bg-surface-strong shadow-[0_10px_28px_rgb(14_20_19/5%)];
 }
-
 @utility eyebrow {
-  @apply m-0 text-xs font-extrabold tracking-[0.14em] text-kicker uppercase;
+  @apply m-0 text-[11px] font-extrabold tracking-[0.14em] text-kicker uppercase;
 }
-
 @utility primary-action {
-  @apply border-transparent bg-[linear-gradient(110deg,var(--palm),var(--lagoon-deep))] font-extrabold text-white shadow-[0_10px_25px_color-mix(in_oklab,var(--lagoon-deep)_20%,transparent)] hover:-translate-y-px hover:brightness-108;
-}
-
-@keyframes rise-in {
-  from {
-    opacity: 0;
-    transform: translateY(18px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  @apply border-transparent bg-lagoon-deep font-extrabold text-white shadow-[0_8px_18px_rgb(21_158_132/22%)] hover:bg-palm;
 }

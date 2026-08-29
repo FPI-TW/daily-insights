@@ -21,7 +21,7 @@ describe("provisional reports adapter", () => {
       expect(performance.points[2]?.value).toBeNull()
     expect(
       (await getProvisionalReport("tw_equity"))?.blocks.map(block => block.kind)
-    ).toEqual(["metric", "table", "table", "metric"])
+    ).toEqual(["metric", "table", "table", "series", "metric"])
   })
 
   it("returns undefined for non-approved market codes", async () => {

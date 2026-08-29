@@ -45,7 +45,7 @@ export function LocaleSwitcher({
   return (
     <nav
       aria-label={t("language")}
-      className="flex items-center rounded-lg min-h-9 border border-chip-line bg-chip p-1 [&>a]:rounded-md [&>a]:px-2 [&>a]:py-1 [&>a]:text-[0.68rem] [&>a]:font-extrabold [&>a]:text-sea-ink-soft [&>a]:no-underline [&>a[aria-current=page]]:bg-lagoon-deep [&>a[aria-current=page]]:text-white"
+      className="flex min-h-9 shrink-0 items-center rounded-lg border border-chip-line bg-chip p-1 [&>a]:rounded-md [&>a]:px-2 [&>a]:py-1 [&>a]:text-[0.68rem] [&>a]:font-extrabold [&>a]:text-sea-ink-soft [&>a]:no-underline [&>a[aria-current=page]]:bg-lagoon-deep [&>a[aria-current=page]]:text-white max-sm:[&>a]:px-1.5"
     >
       {locales.map(({ code, label }) =>
         reportMarketCode ? (

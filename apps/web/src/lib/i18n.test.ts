@@ -13,6 +13,13 @@ describe("request-local i18n", () => {
     expect(traditionalChinese.t("podcastTitle")).toBe("Podcast")
     expect(simplifiedChinese.t("podcastAudioFallback")).toContain("其他可用")
     expect(english.t("podcastAdminTitle")).toBe("Podcast content")
+    expect(traditionalChinese.t("reportValueAiServers")).toBe("AI 伺服器")
+    expect(simplifiedChinese.t("reportValueForeignTxNetPosition")).toBe(
+      "外资 TX 净部位"
+    )
+    expect(english.t("reportAxisMonday")).toBe("Mon")
+    expect(english.t("themeToggleLabel_dark")).toContain("dark")
+    expect(english.t("role_org_member")).toBe("Organization member")
     expect(traditionalChinese.language).toBe("zh-hant")
   })
 })
