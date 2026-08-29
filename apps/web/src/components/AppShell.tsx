@@ -9,6 +9,7 @@ import {
   requireCsrfToken,
 } from "#/lib/auth"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
+import { marketCodes } from "#/lib/provisional-reports"
 import ThemeToggle from "./ThemeToggle"
 import { LocaleSwitcher } from "./LocaleSwitcher"
 
@@ -29,6 +30,9 @@ export function AppShell({
   const redirectExpiredSession = useSessionExpiryRedirect(locale, surface)
   const [pending, setPending] = useState(false)
   const [signOutError, setSignOutError] = useState("")
+  const reportMarketCode = marketCodes.find(code =>
+    location.pathname.endsWith(`/reports/${code}`)
+  )
 
   async function signOut() {
     setPending(true)
@@ -59,7 +63,7 @@ export function AppShell({
           <Link
             to={
               surface === "customer"
-                ? "/$locale/podcasts"
+                ? "/$locale/reports"
                 : "/$locale/admin/audio"
             }
             params={{ locale }}
@@ -77,11 +81,14 @@ export function AppShell({
             ) : null}
           </Link>
           <nav
-            className="flex items-center gap-1 rounded-lg bg-link-hover p-1 [&>a]:rounded-md [&>a]:px-3 [&>a]:py-1.5 [&>a]:text-sm [&>a]:font-bold [&>a]:text-sea-ink-soft [&>a]:no-underline [&>a]:transition-colors [&>a:hover]:bg-surface-strong [&>a:hover]:text-sea-ink [&>a[aria-current=page]]:bg-surface-strong [&>a[aria-current=page]]:text-lagoon-deep [&>a[aria-current=page]]:shadow-sm max-[42rem]:flex-1 max-[42rem]:justify-end"
+            className={`flex items-center gap-1 rounded-lg bg-link-hover p-1 [&>a]:rounded-md [&>a]:px-3 [&>a]:py-1.5 [&>a]:text-sm [&>a]:font-bold [&>a]:text-sea-ink-soft [&>a]:no-underline [&>a]:transition-colors [&>a:hover]:bg-surface-strong [&>a:hover]:text-sea-ink [&>a[aria-current=page]]:bg-surface-strong [&>a[aria-current=page]]:text-lagoon-deep [&>a[aria-current=page]]:shadow-sm max-[42rem]:flex-1 max-[42rem]:justify-end ${surface === "customer" ? "max-[42rem]:grid max-[42rem]:grid-cols-3 max-[42rem]:gap-0 max-[42rem]:[&>a]:px-2 max-[42rem]:[&>a]:text-center max-[42rem]:[&>a]:text-xs max-[42rem]:[&>a]:whitespace-nowrap" : ""}`}
             aria-label={t(surface === "customer" ? "customerNav" : "adminNav")}
           >
             {surface === "customer" ? (
               <>
+                <Link to="/$locale/reports" params={{ locale }}>
+                  {t("reportsNav")}
+                </Link>
                 <Link to="/$locale/podcasts" params={{ locale }}>
                   {t("podcastNav")}
                 </Link>
@@ -111,13 +118,16 @@ export function AppShell({
             locale={locale}
             destination={
               surface === "customer"
-                ? location.pathname.endsWith("/account")
-                  ? "customer-account"
-                  : "customer-podcasts"
+                ? location.pathname.includes("/reports")
+                  ? "customer-reports"
+                  : location.pathname.endsWith("/account")
+                    ? "customer-account"
+                    : "customer-podcasts"
                 : location.pathname.endsWith("/admin/members")
                   ? "admin-members"
                   : "admin-audio"
             }
+            reportMarketCode={reportMarketCode}
           />
           <ThemeToggle />
           <button

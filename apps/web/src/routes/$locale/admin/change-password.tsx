@@ -23,7 +23,7 @@ export const Route = createFileRoute("/$locale/admin/change-password")({
       throw redirect({
         to: context.user.must_change_password
           ? "/$locale/change-password"
-          : "/$locale/podcasts",
+          : "/$locale/reports",
         params: { locale: context.locale },
       })
     }

@@ -12,7 +12,7 @@ export const Route = createFileRoute("/$locale/login")({
     }
     if (context.user && canEnterCustomer(context.user)) {
       throw redirect({
-        to: "/$locale/podcasts",
+        to: "/$locale/reports",
         params: { locale: context.locale },
       })
     }

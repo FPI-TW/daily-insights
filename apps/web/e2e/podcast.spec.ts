@@ -33,8 +33,10 @@ test.describe("Portal authentication and boundaries", () => {
   }) => {
     await signIn(page, "/en/login", customerCredentials)
 
-    await expect(page).toHaveURL("/en/podcasts")
-    await expect(page.getByRole("heading", { name: "Podcast" })).toBeVisible()
+    await expect(page).toHaveURL("/en/reports")
+    await expect(
+      page.getByRole("heading", { name: "Market morning reports" })
+    ).toBeVisible()
     await expect(page.locator('[data-surface="customer"]')).toBeVisible()
     const login = (await getMockApiState(request)).requests.find(
       item => item.path === "/api/auth/login"
@@ -83,9 +85,11 @@ test.describe("Portal authentication and boundaries", () => {
       [assetManagerCredentials, "asset_manager"],
     ] as const) {
       await signIn(page, "/en/login", credentials)
-      await expect(page).toHaveURL("/en/podcasts")
+      await expect(page).toHaveURL("/en/reports")
       await expect(page.locator('[data-surface="customer"]')).toBeVisible()
-      await expect(page.getByRole("heading", { name: "Podcast" })).toBeVisible()
+      await expect(
+        page.getByRole("heading", { name: "Market morning reports" })
+      ).toBeVisible()
 
       const login = [...(await getMockApiState(request)).requests]
         .reverse()

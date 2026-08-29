@@ -37,8 +37,7 @@ export function PortalChangePassword({
       rememberCsrfToken(result.csrf_token)
       await router.invalidate()
       await router.navigate({
-        to:
-          portal === "customer" ? "/$locale/podcasts" : "/$locale/admin/audio",
+        to: portal === "customer" ? "/$locale/reports" : "/$locale/admin/audio",
         params: { locale },
       })
     } catch (cause) {

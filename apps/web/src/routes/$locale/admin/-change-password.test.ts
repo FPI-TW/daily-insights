@@ -88,7 +88,7 @@ describe("admin change-password route guard", () => {
     expect(
       redirectOptions(user({ must_change_password: false }))
     ).toMatchObject({
-      to: "/$locale/podcasts",
+      to: "/$locale/reports",
       params: { locale: "en" },
     })
   })

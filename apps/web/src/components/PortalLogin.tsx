@@ -52,7 +52,7 @@ export function PortalLogin({
             ? "/$locale/change-password"
             : "/$locale/admin/change-password"
           : portal === "customer"
-            ? "/$locale/podcasts"
+            ? "/$locale/reports"
             : "/$locale/admin/audio",
         params: { locale },
       })
