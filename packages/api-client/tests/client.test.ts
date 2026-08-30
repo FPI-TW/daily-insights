@@ -5,6 +5,7 @@ import {
   createBrowserTransport,
   createPodcastAdminClient,
   createPodcastClient,
+  createReportClient,
 } from "../src"
 import { createServerTransport } from "../src/server"
 
@@ -97,6 +98,26 @@ describe("API client trust boundary", () => {
       ])
     )
 
+    await expect(client.list("en")).rejects.toMatchObject({ status: 502 })
+  })
+
+  it("accepts only the three launch markets in report summaries", async () => {
+    const summary = {
+      publication_id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
+      report_key: "daily-market",
+      market_code: "tw_equity",
+      edition_date: "2026-08-30",
+      revision: 1,
+      source_as_of: null,
+      published_at: "2026-08-30T00:00:00Z",
+      stale: true,
+      stale_reason: "source_too_old",
+      status: "unavailable",
+      title: "Taiwan",
+      summary: null,
+      locale: "en",
+    }
+    const client = createReportClient(async () => Response.json([summary]))
     await expect(client.list("en")).rejects.toMatchObject({ status: 502 })
   })
 

@@ -1,9 +1,12 @@
-export const marketCodes = [
+export const launchMarketCodes = [
   "global_macro_bonds",
   "crypto",
   "us_equity",
-  "tw_equity",
-  "tw_index_derivatives",
+] as const
+export const previewMarketCodes = ["tw_equity", "tw_index_derivatives"] as const
+export const marketCodes = [
+  ...launchMarketCodes,
+  ...previewMarketCodes,
 ] as const
 
 export type MarketCode = (typeof marketCodes)[number]
@@ -38,7 +41,11 @@ export type SeriesBlock = {
   status: BlockStatus
   titleKey: string
   captionKey?: string
-  points: ReadonlyArray<{ label: ReportValue; value: number | null }>
+  series: ReadonlyArray<{
+    id: string
+    label: ReportValue
+    points: ReadonlyArray<{ label: ReportValue; value: number | null }>
+  }>
 }
 export type ReportBlock = MetricBlock | TableBlock | SeriesBlock
 export type ProvisionalReport = {
@@ -49,6 +56,7 @@ export type ProvisionalReport = {
   caveatKey: string
   summaryKey: string
   blocks: ReadonlyArray<ReportBlock>
+  preview?: boolean
 }
 
 const text = (key: string): ReportValue => ({ kind: "translation", key })
@@ -69,9 +77,14 @@ const table = (
 ): TableBlock => ({ kind: "table", status, titleKey, columns, rows })
 const series = (
   titleKey: string,
-  points: SeriesBlock["points"],
+  points: SeriesBlock["series"][number]["points"],
   status: BlockStatus = "ok"
-): SeriesBlock => ({ kind: "series", status, titleKey, points })
+): SeriesBlock => ({
+  kind: "series",
+  status,
+  titleKey,
+  series: [{ id: "primary", label: value(""), points }],
+})
 
 const reports: Record<MarketCode, ProvisionalReport> = {
   global_macro_bonds: {
@@ -246,6 +259,7 @@ const reports: Record<MarketCode, ProvisionalReport> = {
     ],
   },
   tw_equity: {
+    preview: true,
     marketCode: "tw_equity",
     status: "partial",
     editionDate: "2026-08-28",
@@ -316,6 +330,7 @@ const reports: Record<MarketCode, ProvisionalReport> = {
     ],
   },
   tw_index_derivatives: {
+    preview: true,
     marketCode: "tw_index_derivatives",
     status: "unavailable",
     editionDate: "2026-08-28",
@@ -387,10 +402,18 @@ const reports: Record<MarketCode, ProvisionalReport> = {
 export async function getProvisionalReportList(): Promise<
   ReadonlyArray<ProvisionalReport>
 > {
-  return marketCodes.map(code => reports[code])
+  return launchMarketCodes.map(code => reports[code])
 }
 export async function getProvisionalReport(
   code: string
 ): Promise<ProvisionalReport | undefined> {
   return reports[code as MarketCode]
+}
+
+export function getTaiwanPreviewReport(code: string) {
+  return previewMarketCodes.includes(
+    code as (typeof previewMarketCodes)[number]
+  )
+    ? reports[code as "tw_equity" | "tw_index_derivatives"]
+    : undefined
 }

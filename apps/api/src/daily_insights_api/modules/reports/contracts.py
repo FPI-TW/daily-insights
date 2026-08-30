@@ -5,6 +5,8 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Locale = Literal["zh-hant", "zh-hans", "en"]
+BlockStatus = Literal["ok", "missing", "error"]
+ReportStatus = Literal["complete", "partial", "unavailable"]
 SUPPORTED_LOCALES: frozenset[str] = frozenset(("zh-hant", "zh-hans", "en"))
 Identifier = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_.-]{0,99}$")]
 
@@ -44,6 +46,67 @@ class ChartData(ContractModel):
         return self
 
 
+class MetricItem(ContractModel):
+    id: Identifier
+    value: Decimal | None
+    change: Decimal | None = None
+    unit_code: Identifier
+
+
+class MetricBlock(ContractModel):
+    id: Identifier
+    kind: Literal["metric"] = "metric"
+    status: BlockStatus
+    source_as_of: date | None
+    caveat: str | None = Field(default=None, max_length=2_000)
+    metrics: tuple[MetricItem, ...]
+
+
+class TableColumn(ContractModel):
+    id: Identifier
+    unit_code: Identifier | None = None
+
+
+class TableCell(ContractModel):
+    text: str | None = Field(default=None, max_length=300)
+    value: Decimal | None = None
+
+    @model_validator(mode="after")
+    def require_exactly_one_value(self) -> Self:
+        if (self.text is None) == (self.value is None):
+            raise ValueError("table cell must contain exactly one of text or value")
+        return self
+
+
+class TableBlock(ContractModel):
+    id: Identifier
+    kind: Literal["table"] = "table"
+    status: BlockStatus
+    source_as_of: date | None
+    caveat: str | None = Field(default=None, max_length=2_000)
+    columns: tuple[TableColumn, ...]
+    rows: tuple[tuple[TableCell | None, ...], ...]
+
+    @model_validator(mode="after")
+    def require_rectangular_rows(self) -> Self:
+        if any(len(row) != len(self.columns) for row in self.rows):
+            raise ValueError("table rows must match the declared column count")
+        return self
+
+
+class SeriesBlock(ContractModel):
+    id: Identifier
+    kind: Literal["series"] = "series"
+    status: BlockStatus
+    source_as_of: date | None
+    caveat: str | None = Field(default=None, max_length=2_000)
+    unit_code: Identifier
+    series: tuple[ChartSeries, ...]
+
+
+ReportBlock = Annotated[MetricBlock | TableBlock | SeriesBlock, Field(discriminator="kind")]
+
+
 class PublicationContent(ContractModel):
     """Locale-neutral application-owned values.
 
@@ -53,7 +116,10 @@ class PublicationContent(ContractModel):
 
     schema_version: Identifier
     market_code: Identifier
-    as_of: date
+    as_of: date | None
+    status: ReportStatus = "complete"
+    caveat: str | None = Field(default=None, max_length=2_000)
+    blocks: tuple[ReportBlock, ...] = ()
     metrics: tuple[MetricValue, ...] = ()
     charts: tuple[ChartData, ...] = ()
 
@@ -61,8 +127,22 @@ class PublicationContent(ContractModel):
     def require_unique_element_ids(self) -> Self:
         element_ids = [metric.id for metric in self.metrics]
         element_ids.extend(chart.id for chart in self.charts)
+        element_ids.extend(block.id for block in self.blocks)
         if len(element_ids) != len(set(element_ids)):
-            raise ValueError("metric and chart ids must be unique within a publication")
+            raise ValueError("publication element ids must be unique")
+        block_statuses = {block.status for block in self.blocks}
+        if self.blocks:
+            expected_status: ReportStatus
+            if block_statuses == {"ok"}:
+                expected_status = "complete"
+            elif "ok" in block_statuses:
+                expected_status = "partial"
+            else:
+                expected_status = "unavailable"
+            if self.status != expected_status:
+                raise ValueError("report status must be derived from its fixed blocks")
+        if self.status == "unavailable" and self.as_of is not None:
+            raise ValueError("unavailable reports cannot have a source date")
         return self
 
 
@@ -97,6 +177,7 @@ class PublicationBundle(ContractModel):
             chart.id: {series.id for series in chart.series} for chart in self.content.charts
         }
         expected_element_ids = metric_ids | set(chart_series)
+        expected_element_ids |= {block.id for block in self.content.blocks}
 
         for locale, presentation in self.presentations.items():
             if presentation.locale != locale:

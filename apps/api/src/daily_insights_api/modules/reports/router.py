@@ -15,7 +15,8 @@ from daily_insights_api.modules.reports.contracts import (
     PresentationContract,
     PublicationContent,
 )
-from daily_insights_api.modules.reports.schemas import ReportPublicationResponse
+from daily_insights_api.modules.reports.launch_manifest import LAUNCH_MARKET_ORDER
+from daily_insights_api.modules.reports.schemas import ReportDetailResponse, ReportSummaryResponse
 from daily_insights_api.web.dependencies import get_database_session
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -30,11 +31,11 @@ ReportKey = Annotated[
 ]
 
 
-def _response(result: LastKnownGood, locale: Locale) -> ReportPublicationResponse:
+def _detail_response(result: LastKnownGood, locale: Locale) -> ReportDetailResponse:
     publication = result.publication
     content = PublicationContent.model_validate(publication.content)
     presentation = PresentationContract.model_validate(publication.presentations[locale])
-    return ReportPublicationResponse(
+    return ReportDetailResponse(
         publication_id=publication.id,
         report_key=publication.report_key,
         market_code=publication.market_code,
@@ -44,9 +45,23 @@ def _response(result: LastKnownGood, locale: Locale) -> ReportPublicationRespons
         published_at=publication.published_at,
         stale=result.freshness.status == "stale",
         stale_reason=result.freshness.stale_reason,
+        status=content.status,
+        title=presentation.title,
+        summary=presentation.summary,
+        manifest_version=publication.manifest_version,
+        manifest_hash=publication.manifest_hash,
         content=content,
         presentation=presentation,
         locale=locale,
+    )
+
+
+def _summary_response(result: LastKnownGood, locale: Locale) -> ReportSummaryResponse:
+    detail = _detail_response(result, locale)
+    return ReportSummaryResponse(
+        **detail.model_dump(
+            exclude={"content", "presentation", "manifest_version", "manifest_hash"}
+        )
     )
 
 
@@ -67,18 +82,21 @@ async def _latest(
     )
 
 
-@router.get("", response_model=list[ReportPublicationResponse])
+@router.get("", response_model=list[ReportSummaryResponse])
 async def list_latest_reports(
     request: Request,
     context: Member,
     database: Annotated[AsyncSession, Depends(get_database_session)],
     locale: Locale = "zh-hant",
     report_key: ReportKey = "daily-market",
-) -> list[ReportPublicationResponse]:
+) -> list[ReportSummaryResponse]:
     if context.organization_id is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "organization membership required")
     responses = []
-    for market_code in sorted(await visible_market_codes(database, context.organization_id)):
+    visible = await visible_market_codes(database, context.organization_id)
+    for market_code in LAUNCH_MARKET_ORDER:
+        if market_code not in visible:
+            continue
         result = await _latest(
             database,
             request,
@@ -86,11 +104,11 @@ async def list_latest_reports(
             market_code=market_code,
         )
         if result is not None:
-            responses.append(_response(result, locale))
+            responses.append(_summary_response(result, locale))
     return responses
 
 
-@router.get("/{market_code}/latest", response_model=ReportPublicationResponse)
+@router.get("/{market_code}/latest", response_model=ReportDetailResponse)
 async def get_latest_report(
     market_code: str,
     request: Request,
@@ -98,10 +116,12 @@ async def get_latest_report(
     database: Annotated[AsyncSession, Depends(get_database_session)],
     locale: Locale = "zh-hant",
     report_key: ReportKey = "daily-market",
-) -> ReportPublicationResponse:
+) -> ReportDetailResponse:
     if context.organization_id is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "organization membership required")
-    if not await is_market_visible(database, context.organization_id, market_code):
+    if market_code not in LAUNCH_MARKET_ORDER or not await is_market_visible(
+        database, context.organization_id, market_code
+    ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "report not found")
     result = await _latest(
         database,
@@ -111,4 +131,4 @@ async def get_latest_report(
     )
     if result is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "report not found")
-    return _response(result, locale)
+    return _detail_response(result, locale)

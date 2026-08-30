@@ -4,12 +4,12 @@ import {
   ReportList,
   ReportLoadingScreen,
 } from "#/components/Reports"
-import { getProvisionalReportList } from "#/lib/provisional-reports"
+import { getReportList } from "#/lib/reports"
 
 export const Route = createFileRoute(
   "/$locale/_authenticated/_customer/reports/"
 )({
-  loader: () => getProvisionalReportList(),
+  loader: ({ context }) => getReportList({ data: context.locale }),
   pendingComponent: ReportLoadingScreen,
   pendingMs: 0,
   errorComponent: ReportErrorScreen,

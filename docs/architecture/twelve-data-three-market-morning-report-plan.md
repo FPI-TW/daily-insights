@@ -1,7 +1,7 @@
 # Twelve Data 三市場晨報計劃
 
-狀態：已接受的第一波實作計劃，尚未完成 provider probe、feature implementation
-或 production deployment。本文件取代
+狀態：第一波核心功能已完成本機實作與非資料庫驗證；provider probe、manifest
+核准、資料庫整合測試與 production deployment 尚未完成。本文件取代
 [`five-market-morning-report-baseline.md`](five-market-morning-report-baseline.md)
 作為現行第一波晨報的市場、來源與驗收政策；舊文件只保留為歷史決策紀錄。
 
@@ -131,69 +131,69 @@ breadth，以及無 exact Twelve Data 對應的 sector index 預設不進第一�
 - [ ] 每個納入 block 都有 exact endpoint、symbol、欄位、單位、時區、日界與
       freshness 證據。
 - [ ] 每個正式市場至少有一個完整通過 probe 的 block，否則該市場為 launch no-go。
-- [ ] 不存在 Yahoo、FRED、CMC、FinDB 或其他資料源的執行期 fallback。
-- [ ] 不以 ETF、近似指數或不同語意序列替代缺失資料。
+- [x] 不存在 Yahoo、FRED、CMC、FinDB 或其他資料源的執行期 fallback。
+- [x] 不以 ETF、近似指數或不同語意序列替代缺失資料。
 
 ### Launch manifest
 
-- [ ] Manifest 僅包含 `global_macro_bonds`、`crypto`、`us_equity`。
+- [x] Manifest 僅包含 `global_macro_bonds`、`crypto`、`us_equity`。
 - [ ] 每個 block 的順序、required fields、歷史窗、公式、單位、精度與三語標籤均已
       凍結並版本化。
 - [ ] Twelve Data 無法完整供應的 block 未出現在 manifest 或正式 UI。
-- [ ] Manifest 變更會產生新版本，不會在 runtime 動態增加或刪除 block。
-- [ ] 已明確區分「未納入功能」與「已納入但當日來源失敗」。
+- [x] Manifest 變更會產生新版本，不會在 runtime 動態增加或刪除 block。
+- [x] 已明確區分「未納入功能」與「已納入但當日來源失敗」。
 
 ### Provider 與安全
 
-- [ ] Twelve Data adapter 使用 application-owned DTO，reports 模組不依賴 provider
+- [x] Twelve Data adapter 使用 application-owned DTO，reports 模組不依賴 provider
       schema。
-- [ ] 金額、價格、殖利率與比率使用 `Decimal`，不轉為 binary float。
-- [ ] 401/403、429、5xx、timeout、非法欄位與不合法數值均有明確錯誤分類。
-- [ ] 429 遵守 `Retry-After`，重試次數、timeout 與併發數均有上限。
-- [ ] API key 只存在 server runtime secret，不出現在 URL log、錯誤、資料庫或前端
+- [x] 金額、價格、殖利率與比率使用 `Decimal`，不轉為 binary float。
+- [x] 401/403、429、5xx、timeout、非法欄位與不合法數值均有明確錯誤分類。
+- [x] 429 遵守 `Retry-After`，重試次數、timeout 與併發數均有上限。
+- [x] API key 只存在 server runtime secret，不出現在 URL log、錯誤、資料庫或前端
       bundle。
-- [ ] Provenance 僅保存 provider/application dataset key、contract version、不含
+- [x] Provenance 僅保存 provider/application dataset key、contract version、不含
       secret 的 endpoint/query fingerprint、fetch time、source date、record count、
       digest、request ID 與 sanitized error。
-- [ ] PostgreSQL 不保存 Twelve Data raw response 或 raw rows。
+- [x] PostgreSQL 不保存 Twelve Data raw response 或 raw rows。
 
 ### Publication 與 API
 
-- [ ] 支援 `BlockStatus = ok | missing | error`。
-- [ ] 支援 `ReportStatus = complete | partial | unavailable`。
-- [ ] Block 與 publication 的 `source_as_of` 可為 `null`。
+- [x] 支援 `BlockStatus = ok | missing | error`。
+- [x] 支援 `ReportStatus = complete | partial | unavailable`。
+- [x] Block 與 publication 的 `source_as_of` 可為 `null`。
 - [ ] 每個台北日期都建立 edition，包括來源完全失敗的 `unavailable` edition。
 - [ ] 相同輸入與失敗狀態重跑為 no-op；內容或失敗狀態改變時新增 immutable revision。
-- [ ] `GET /api/reports` 只回三市場輕量摘要。
-- [ ] `GET /api/reports/{market_code}/latest` 回完整固定 blocks、status、source date、
+- [x] `GET /api/reports` 只回三市場輕量摘要。
+- [x] `GET /api/reports/{market_code}/latest` 回完整固定 blocks、status、source date、
       caveat 與 revision。
-- [ ] API 繼續套用 organization market policy；隱藏的正式市場直接存取回 404。
-- [ ] 八市場 catalog 與 admin market policy 不因第一波縮減而刪除。
+- [x] API 繼續套用 organization market policy；隱藏的正式市場直接存取回 404。
+- [x] 八市場 catalog 與 admin market policy 不因第一波縮減而刪除。
 
 ### Web UI
 
-- [ ] 晨報 tab 只顯示宏觀／債券、加密貨幣、美股。
-- [ ] 晨報列表只顯示三個正式市場。
-- [ ] 「五市場晨報」已在三語文案中改為「三市場晨報」。
-- [ ] 台股與台指期元件、翻譯、mock fixture 與 route code 保留。
-- [ ] 台股與台指期直接 URL 仍可開啟，且清楚標示「尚未上線／示意資料」。
-- [ ] 台灣預覽頁不呼叫正式 publication API，也不顯示成正式報告。
-- [ ] 三個正式市場不再顯示硬編 mock 數值。
-- [ ] 初次載入具有 skeleton、`role="status"` 與 `aria-live`。
-- [ ] `partial`、`unavailable`、`error`、`null` 與 chart gap 均有明確且三語一致的
+- [x] 晨報 tab 只顯示宏觀／債券、加密貨幣、美股。
+- [x] 晨報列表只顯示三個正式市場。
+- [x] 「五市場晨報」已在三語文案中改為「三市場晨報」。
+- [x] 台股與台指期元件、翻譯、mock fixture 與 route code 保留。
+- [x] 台股與台指期直接 URL 仍可開啟，且清楚標示「尚未上線／示意資料」。
+- [x] 台灣預覽頁不呼叫正式 publication API，也不顯示成正式報告。
+- [x] 三個正式市場不再顯示硬編 mock 數值。
+- [x] 初次載入具有 skeleton、`role="status"` 與 `aria-live`。
+- [x] `partial`、`unavailable`、`error`、`null` 與 chart gap 均有明確且三語一致的
       呈現。
 
 ### 測試與上線
 
-- [ ] Provider contract tests 覆蓋正常回應、缺欄位、非法 decimal、認證失敗、
+- [x] Provider contract tests 覆蓋正常回應、缺欄位、非法 decimal、認證失敗、
       限流、timeout 與重試。
-- [ ] Manifest tests 驗證三市場、固定 block order、原子欄位規則與排除 block。
+- [x] Manifest tests 驗證三市場、固定 block order、原子欄位規則與排除 block。
 - [ ] Pipeline tests 覆蓋 status、nullable source date、no-op、revision 與來源失敗。
-- [ ] Web tests 驗證三個 tab、台灣 tab 隱藏、台灣 URL 預覽及示意警告。
+- [x] Web tests 驗證三個 tab、台灣 tab 隱藏、台灣 URL 預覽及示意警告。
 - [ ] E2E 覆蓋登入、三市場列表／詳情、租戶 market policy 與 unavailable edition。
-- [ ] 已執行 API tests、Vitest、Playwright、`type:check`、`lint`、`lint:check`、
+- [x] 已執行 API tests、Vitest、Playwright、`type:check`、`lint`、`lint:check`、
       `format`、`format:check`。
-- [ ] Production preflight 驗證 Twelve Data 設定，不再將 FinDB key 視為三市場啟動
+- [x] Production preflight 驗證 Twelve Data 設定，不再將 FinDB key 視為三市場啟動
       必要條件。
 - [ ] 上線後監控 API credit 餘額、429、provider latency、來源 freshness、每日
       pipeline terminal state 與 publication 缺漏。

@@ -575,10 +575,18 @@ async def test_report_api_filters_hidden_market_localizes_and_marks_stale(
     report = listed.json()[0]
     assert report["publication_id"] == str(visible_publication_id)
     assert report["locale"] == "en"
-    assert report["presentation"]["locale"] == "en"
-    assert report["content"]["metrics"][0]["value"] == "123.4500"
+    assert "presentation" not in report
+    assert "content" not in report
     assert report["stale"] is True
     assert report["stale_reason"] == "source_too_old"
+
+    detail = await phase2_harness.client.get(
+        "/api/reports/us_equity/latest",
+        params={"locale": "en"},
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["presentation"]["locale"] == "en"
+    assert detail.json()["content"]["metrics"][0]["value"] == "123.4500"
 
     hidden = await phase2_harness.client.get("/api/reports/crypto/latest")
     assert hidden.status_code == 404

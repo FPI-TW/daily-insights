@@ -27,7 +27,7 @@ async def test_readiness_reflects_database_state(ready: bool, expected_status: i
         "status": expected,
         "components": {
             "database": {"status": expected},
-            "findb_configuration": {"status": "ok"},
+            "twelve_data_configuration": {"status": "ok"},
             "r2_runtime": {"status": "ok"},
         },
     }
@@ -61,7 +61,7 @@ async def test_production_readiness_reports_initialized_external_boundaries() ->
     assert response.status_code == 200
     assert response.json()["components"] == {
         "database": {"status": "ok"},
-        "findb_configuration": {"status": "ok"},
+        "twelve_data_configuration": {"status": "ok"},
         "r2_runtime": {"status": "ok"},
     }
 

@@ -4,13 +4,15 @@ import {
   ReportErrorScreen,
   ReportLoadingScreen,
 } from "#/components/Reports"
-import { getProvisionalReport } from "#/lib/provisional-reports"
+import { getReportDetail } from "#/lib/reports"
 
 export const Route = createFileRoute(
   "/$locale/_authenticated/_customer/reports/$marketCode"
 )({
-  loader: async ({ params }) => {
-    const report = await getProvisionalReport(params.marketCode)
+  loader: async ({ params, context }) => {
+    const report = await getReportDetail({
+      data: { marketCode: params.marketCode, locale: context.locale },
+    })
     if (!report) throw notFound()
     return report
   },

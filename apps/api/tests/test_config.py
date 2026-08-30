@@ -33,8 +33,6 @@ def test_production_accepts_complete_external_configuration() -> None:
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("findb_base_url", "http://findb.example.invalid"),
-        ("findb_api_key", SecretStr("CHANGE_ME_FINDB")),
         ("r2_endpoint_url", "http://account.r2.cloudflarestorage.com"),
         ("r2_bucket_name", "CHANGE_ME_BUCKET"),
         ("r2_bucket_name", "Invalid_Bucket"),
@@ -55,6 +53,33 @@ def test_settings_repr_redacts_r2_and_provider_credentials() -> None:
     assert "findb-production-key" not in rendered
     assert "r2-access-key" not in rendered
     assert "r2-secret-key" not in rendered
+
+
+def test_findb_is_not_a_three_market_production_requirement() -> None:
+    settings = Settings.model_validate(
+        production_settings(findb_base_url="http://unused.invalid", findb_api_key=None)
+    )
+    assert settings.findb_api_key is None
+
+
+def test_morning_reports_fail_closed_until_manifest_is_approved() -> None:
+    with pytest.raises(ValidationError, match="manifest has not been approved"):
+        Settings.model_validate(
+            production_settings(
+                morning_reports_enabled=True,
+                twelve_data_api_key=SecretStr("twelve-data-production-key"),
+            )
+        )
+
+
+def test_enabled_morning_reports_reject_an_empty_provider_key() -> None:
+    with pytest.raises(ValidationError, match="twelve_data_api_key is required"):
+        Settings.model_validate(
+            production_settings(
+                morning_reports_enabled=True,
+                twelve_data_api_key=SecretStr(""),
+            )
+        )
 
 
 def test_production_runtime_composes_r2_adapter_without_exposing_credentials() -> None:

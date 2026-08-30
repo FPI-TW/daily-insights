@@ -121,11 +121,17 @@ const resources: Resource = {
       requestId: "請求編號：{{id}}",
       submitting: "處理中…",
       reportsNav: "晨間報告",
-      reportsEyebrow: "五市場晨報",
+      reportsEyebrow: "三市場晨報",
       reportsTitle: "市場晨間報告",
       reportsDescription: "依固定市場順序檢視本日資料覆蓋與細節。",
       reportMockNotice:
         "展示資料：以下數值為 provisional mock data，僅供介面驗證。",
+      reportLiveNotice:
+        "正式資料由 Twelve Data 供應；缺漏會依區塊狀態如實標示。",
+      reportPreviewNotice:
+        "尚未上線／示意資料：此台灣市場頁面僅供介面預覽，不是正式晨報。",
+      reportCaveatLive:
+        "資料來源為 Twelve Data；來源日期與缺漏狀態以各區塊為準。",
       reportViewDetails: "查看詳情",
       reportBack: "返回所有報告",
       reportEditionDate: "報告日期",
@@ -136,9 +142,9 @@ const resources: Resource = {
       reportStatus_unavailable: "暫不可用",
       reportStatusDescription_complete: "本報告的展示區塊已準備完成。",
       reportStatusDescription_partial:
-        "部分展示資料缺漏；請參閱區塊狀態與注意事項。",
+        "部分正式資料缺漏；請參閱區塊狀態與注意事項。",
       reportStatusDescription_unavailable:
-        "此報告目前無法完整提供；保留可用展示資料與缺漏標記。",
+        "此報告目前無可用正式資料；固定區塊會保留來源失敗標記。",
       reportBlockStatus_missing: "資料缺漏",
       reportBlockStatus_error: "資料錯誤",
       reportBlockStatus_ok: "資料完整",
@@ -246,7 +252,7 @@ const resources: Resource = {
       reportMarketShort_tw_equity: "台股",
       reportMarketShort_tw_index_derivatives: "台指期權",
       reportOverviewStrip:
-        "五個市場依固定晨報順序更新；請留意各卡片的資料覆蓋狀態。",
+        "三個市場依固定晨報順序更新；請留意各卡片的資料覆蓋狀態。",
       reportSummary_global_macro_bonds:
         "殖利率曲線維持倒掛，信用利差變動有限。",
       reportSummary_crypto: "主流幣走高，ETF 資金流與穩定幣供給仍有缺漏。",
@@ -457,11 +463,17 @@ const resources: Resource = {
       requestId: "请求编号：{{id}}",
       submitting: "处理中…",
       reportsNav: "晨间报告",
-      reportsEyebrow: "五市场晨报",
+      reportsEyebrow: "三市场晨报",
       reportsTitle: "市场晨间报告",
       reportsDescription: "依固定市场顺序查看当日数据覆盖与详情。",
       reportMockNotice:
         "展示数据：以下数值为 provisional mock data，仅用于界面验证。",
+      reportLiveNotice:
+        "正式数据由 Twelve Data 提供；缺漏会按区块状态如实标示。",
+      reportPreviewNotice:
+        "尚未上线／示意数据：此台湾市场页面仅供界面预览，不是正式晨报。",
+      reportCaveatLive:
+        "数据来源为 Twelve Data；来源日期与缺漏状态以各区块为准。",
       reportViewDetails: "查看详情",
       reportBack: "返回全部报告",
       reportEditionDate: "报告日期",
@@ -472,9 +484,9 @@ const resources: Resource = {
       reportStatus_unavailable: "暂不可用",
       reportStatusDescription_complete: "本报告的展示区块已准备完成。",
       reportStatusDescription_partial:
-        "部分展示数据缺失；请参阅区块状态与注意事项。",
+        "部分正式数据缺失；请参阅区块状态与注意事项。",
       reportStatusDescription_unavailable:
-        "此报告目前无法完整提供；保留可用展示数据与缺失标记。",
+        "此报告目前没有可用正式数据；固定区块会保留来源失败标记。",
       reportBlockStatus_missing: "数据缺失",
       reportBlockStatus_error: "数据错误",
       reportBlockStatus_ok: "数据完整",
@@ -582,7 +594,7 @@ const resources: Resource = {
       reportMarketShort_tw_equity: "台股",
       reportMarketShort_tw_index_derivatives: "台指期权",
       reportOverviewStrip:
-        "五个市场依固定晨报顺序更新；请留意各卡片的数据覆盖状态。",
+        "三个市场依固定晨报顺序更新；请留意各卡片的数据覆盖状态。",
       reportSummary_global_macro_bonds:
         "收益率曲线维持倒挂，信用利差变化有限。",
       reportSummary_crypto: "主流币走高，ETF 资金流与稳定币供给仍有缺失。",
@@ -800,12 +812,18 @@ const resources: Resource = {
       requestId: "Request ID: {{id}}",
       submitting: "Working…",
       reportsNav: "Reports",
-      reportsEyebrow: "Five-market morning report",
+      reportsEyebrow: "Three-market morning report",
       reportsTitle: "Market morning reports",
       reportsDescription:
         "Review daily coverage and details in a fixed market order.",
       reportMockNotice:
         "Demo data: all numbers below are provisional mock data for interface validation only.",
+      reportLiveNotice:
+        "Official data is supplied by Twelve Data; gaps are shown explicitly at block level.",
+      reportPreviewNotice:
+        "Not launched / illustrative data: this Taiwan market page is a UI preview, not an official report.",
+      reportCaveatLive:
+        "Source: Twelve Data. See each block for source date and availability.",
       reportViewDetails: "View details",
       reportBack: "Back to all reports",
       reportEditionDate: "Edition date",
@@ -819,7 +837,7 @@ const resources: Resource = {
       reportStatusDescription_partial:
         "Some presentation data is absent; see block states and caveats.",
       reportStatusDescription_unavailable:
-        "This report cannot currently be fully provided; available demo data and missing states are retained.",
+        "No official data is currently available; fixed blocks retain their source failure states.",
       reportBlockStatus_missing: "Data missing",
       reportBlockStatus_error: "Data error",
       reportBlockStatus_ok: "Data ready",
@@ -933,7 +951,7 @@ const resources: Resource = {
       reportMarketShort_tw_equity: "Taiwan equities",
       reportMarketShort_tw_index_derivatives: "Taiwan derivatives",
       reportOverviewStrip:
-        "The five markets update in a fixed morning-report order. Review each card's coverage state.",
+        "The three markets update in a fixed morning-report order. Review each card's coverage state.",
       reportSummary_global_macro_bonds:
         "The curve remains inverted while credit spreads move only modestly.",
       reportSummary_crypto:

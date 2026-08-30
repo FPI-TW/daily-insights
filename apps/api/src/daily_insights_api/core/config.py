@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     findb_api_key: SecretStr | None = None
     findb_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     findb_retry_attempts: int = Field(default=3, ge=1, le=10)
+    twelve_data_base_url: str = "https://api.twelvedata.com"
+    twelve_data_api_key: SecretStr | None = None
+    twelve_data_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    twelve_data_retry_attempts: int = Field(default=3, ge=1, le=10)
+    twelve_data_max_concurrency: int = Field(default=4, ge=1, le=20)
+    morning_reports_enabled: bool = False
+    twelve_data_manifest_approved_hash: str | None = None
     report_freshness_max_age_days: int = Field(default=3, ge=1, le=30)
     r2_endpoint_url: str | None = None
     r2_bucket_name: str | None = None
@@ -80,11 +87,24 @@ class Settings(BaseSettings):
         return self
 
     def _validate_production_external_services(self) -> None:
-        findb_url = urlparse(self.findb_base_url)
-        if findb_url.scheme != "https" or not findb_url.netloc:
-            raise ValueError("findb_base_url must be an absolute HTTPS URL")
-        if self.findb_api_key is None or _is_placeholder(self.findb_api_key.get_secret_value()):
-            raise ValueError("findb_api_key is required and cannot be a placeholder")
+        if self.morning_reports_enabled:
+            twelve_data_url = urlparse(self.twelve_data_base_url)
+            if twelve_data_url.scheme != "https" or not twelve_data_url.netloc:
+                raise ValueError("twelve_data_base_url must be an absolute HTTPS URL")
+            if (
+                self.twelve_data_api_key is None
+                or not self.twelve_data_api_key.get_secret_value()
+                or _is_placeholder(self.twelve_data_api_key.get_secret_value())
+            ):
+                raise ValueError("twelve_data_api_key is required and cannot be a placeholder")
+            from daily_insights_api.modules.reports.launch_manifest import (
+                ACTIVE_LAUNCH_MANIFEST,
+            )
+
+            if ACTIVE_LAUNCH_MANIFEST.status != "approved":
+                raise ValueError("the active morning-report manifest has not been approved")
+            if self.twelve_data_manifest_approved_hash != ACTIVE_LAUNCH_MANIFEST.sha256:
+                raise ValueError("the approved manifest hash does not match the active manifest")
 
         required_r2_values = {
             "r2_endpoint_url": self.r2_endpoint_url,

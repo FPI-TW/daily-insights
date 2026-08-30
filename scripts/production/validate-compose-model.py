@@ -8,12 +8,14 @@ from pathlib import Path
 from typing import Any
 
 EXPECTED_PROXY_NETWORK = "172.30.0.0/24"
-SERVICES = ("api", "web", "nginx")
+SERVICES = ("api", "web", "nginx", "morning-report-scheduler")
 API_ENVIRONMENT_KEYS = {
     "DAILY_INSIGHTS_DATABASE_URL",
     "DAILY_INSIGHTS_ENVIRONMENT",
-    "DAILY_INSIGHTS_FINDB_API_KEY",
-    "DAILY_INSIGHTS_FINDB_BASE_URL",
+    "DAILY_INSIGHTS_MORNING_REPORTS_ENABLED",
+    "DAILY_INSIGHTS_TWELVE_DATA_API_KEY",
+    "DAILY_INSIGHTS_TWELVE_DATA_BASE_URL",
+    "DAILY_INSIGHTS_TWELVE_DATA_MANIFEST_APPROVED_HASH",
     "DAILY_INSIGHTS_PASSWORD_PEPPER",
     "DAILY_INSIGHTS_R2_ACCESS_KEY_ID",
     "DAILY_INSIGHTS_R2_BUCKET_NAME",
@@ -36,7 +38,10 @@ def main() -> None:
 
     model: dict[str, Any] = json.loads(Path(sys.argv[1]).read_text())
     services = model.get("services", {})
-    require(set(services) == set(SERVICES), "production Compose must contain only api/web/nginx")
+    require(
+        set(services) == set(SERVICES),
+        "production Compose must contain api/web/nginx and the gated morning-report scheduler",
+    )
 
     for name in SERVICES:
         service = services[name]

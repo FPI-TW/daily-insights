@@ -2,14 +2,15 @@ import { describe, expect, it } from "vitest"
 import {
   getProvisionalReport,
   getProvisionalReportList,
-  marketCodes,
+  getTaiwanPreviewReport,
+  launchMarketCodes,
 } from "./provisional-reports"
 
 describe("provisional reports adapter", () => {
   it("returns exactly the approved markets in fixed order", async () => {
     expect(
       (await getProvisionalReportList()).map(report => report.marketCode)
-    ).toEqual(marketCodes)
+    ).toEqual(launchMarketCodes)
   })
 
   it("keeps null series points as gaps and exposes each block kind", async () => {
@@ -18,7 +19,7 @@ describe("provisional reports adapter", () => {
     const performance = crypto?.blocks.find(block => block.kind === "series")
     expect(performance?.kind).toBe("series")
     if (performance?.kind === "series")
-      expect(performance.points[2]?.value).toBeNull()
+      expect(performance.series[0]?.points[2]?.value).toBeNull()
     expect(
       (await getProvisionalReport("tw_equity"))?.blocks.map(block => block.kind)
     ).toEqual(["metric", "table", "table", "series", "metric"])
@@ -28,5 +29,11 @@ describe("provisional reports adapter", () => {
     await expect(
       getProvisionalReport("excluded_market")
     ).resolves.toBeUndefined()
+  })
+
+  it("retains Taiwan routes only as clearly marked previews", () => {
+    expect(getTaiwanPreviewReport("tw_equity")?.preview).toBe(true)
+    expect(getTaiwanPreviewReport("tw_index_derivatives")?.preview).toBe(true)
+    expect(getTaiwanPreviewReport("crypto")).toBeUndefined()
   })
 })

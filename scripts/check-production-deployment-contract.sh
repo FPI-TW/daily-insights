@@ -40,17 +40,16 @@ for service in api web nginx; do
   grep -q "^  ${service}:" "$compose_file"
   grep -q "container_name: daily-insights-${service}" "$compose_file"
 done
-[ "$(grep -c 'restart: unless-stopped' "$compose_file")" -eq 3 ]
+[ "$(grep -c 'restart: unless-stopped' "$compose_file")" -eq 4 ]
 grep -q 'stop_grace_period:' "$compose_file"
 grep -q 'healthcheck:' "$compose_file"
+grep -Fq "st_mtime < 93600" "$compose_file"
 grep -q 'read_only: true' "$compose_file"
 
 for name in \
   DAILY_INSIGHTS_DATABASE_URL \
   DAILY_INSIGHTS_SESSION_SECRET \
   DAILY_INSIGHTS_PASSWORD_PEPPER \
-  DAILY_INSIGHTS_FINDB_BASE_URL \
-  DAILY_INSIGHTS_FINDB_API_KEY \
   DAILY_INSIGHTS_R2_ENDPOINT_URL \
   DAILY_INSIGHTS_R2_BUCKET_NAME \
   DAILY_INSIGHTS_R2_ACCESS_KEY_ID \
@@ -58,6 +57,9 @@ for name in \
   DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS; do
   grep -Fq "${name}: \${${name}:?" "$compose_file"
 done
+grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_BASE_URL: ${DAILY_INSIGHTS_TWELVE_DATA_BASE_URL:-https://api.twelvedata.com}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_API_KEY: ${DAILY_INSIGHTS_TWELVE_DATA_API_KEY:-}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_MANIFEST_APPROVED_HASH: ${DAILY_INSIGHTS_TWELVE_DATA_MANIFEST_APPROVED_HASH:-}' "$compose_file"
 
 grep -Fq '/etc/daily-insights/cloudflare-realip.conf:/etc/nginx/cloudflare-realip.conf:ro' "$compose_file"
 grep -Fq '/etc/daily-insights/tls/origin.crt:/etc/nginx/tls/origin.crt:ro' "$compose_file"
@@ -169,8 +171,10 @@ export PUBLIC_HOSTNAME=podcast.example.test
 export DAILY_INSIGHTS_DATABASE_URL=postgresql+psycopg://daily_insights:test@db.internal/daily_insights
 export DAILY_INSIGHTS_SESSION_SECRET=contract-session-secret-12345678901234567890
 export DAILY_INSIGHTS_PASSWORD_PEPPER=contract-password-pepper-098765432109876543
-export DAILY_INSIGHTS_FINDB_BASE_URL=https://findb.example.test
-export DAILY_INSIGHTS_FINDB_API_KEY=contract-findb-key
+export DAILY_INSIGHTS_MORNING_REPORTS_ENABLED=false
+export DAILY_INSIGHTS_TWELVE_DATA_BASE_URL=
+export DAILY_INSIGHTS_TWELVE_DATA_API_KEY=
+export DAILY_INSIGHTS_TWELVE_DATA_MANIFEST_APPROVED_HASH=
 export DAILY_INSIGHTS_R2_ENDPOINT_URL=https://tenant.r2.cloudflarestorage.com
 export DAILY_INSIGHTS_R2_BUCKET_NAME=production-podcast-assets
 export DAILY_INSIGHTS_R2_ACCESS_KEY_ID=contract-r2-access
@@ -211,6 +215,14 @@ grep -q 'compose .* run --rm --no-deps api alembic upgrade head' "$temporary_dir
 grep -q 'compose .* up -d --no-build --remove-orphans' "$temporary_dir/deployment.log"
 if grep -Eq -- '--env-file|systemctl|daily-insights[.]service' "$temporary_dir/deployment.log"; then
   echo "deployment unexpectedly used a host env file or app systemd unit" >&2
+  exit 1
+fi
+
+if PATH="$temporary_dir/stubs:$PATH" \
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  DAILY_INSIGHTS_MORNING_REPORTS_ENABLED=true \
+  scripts/production/deploy.sh >/dev/null 2>&1; then
+  echo "enabled morning reports must require Twelve Data launch configuration" >&2
   exit 1
 fi
 

@@ -21,7 +21,7 @@ test("customer login opens reports, then a market detail without mobile overflow
   await expect(page).toHaveURL("/en/reports")
   await expect(
     page.getByText(
-      "Demo data: all numbers below are provisional mock data for interface validation only."
+      "Official data is supplied by Twelve Data; gaps are shown explicitly at block level."
     )
   ).toBeVisible()
   await page.getByRole("link", { name: "View details" }).first().click()
@@ -45,6 +45,9 @@ test("unavailable report preserves gap and block states", async ({
 }) => {
   await authenticateAs(context, "org_member")
   await page.goto("/en/reports/tw_index_derivatives")
+  await expect(
+    page.getByText(/Not launched \/ illustrative data/)
+  ).toBeVisible()
   await expect(page.getByText("Unavailable", { exact: true })).toBeVisible()
   await expect(page.getByText("Data missing", { exact: true })).toHaveCount(3)
   await expect(page.getByText("Data error", { exact: true })).toHaveCount(1)

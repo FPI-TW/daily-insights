@@ -15,8 +15,15 @@ from daily_insights_api.modules.data_sources import (
     UnsupportedMarketError,
 )
 from daily_insights_api.modules.data_sources.provider import MarketDataProvider
+from daily_insights_api.modules.data_sources.twelve_data import (
+    TWELVE_DATA_CONTRACT_HASH,
+    RetryPolicy,
+    TwelveDataAdapter,
+    TwelveDataTransport,
+)
 
 __all__ = [
+    "TWELVE_DATA_CONTRACT_HASH",
     "DailyBar",
     "DailyBarQuery",
     "DataSourceAuthenticationError",
@@ -29,5 +36,8 @@ __all__ = [
     "PageInfo",
     "Provenance",
     "ProviderPage",
+    "RetryPolicy",
+    "TwelveDataAdapter",
+    "TwelveDataTransport",
     "UnsupportedMarketError",
 ]

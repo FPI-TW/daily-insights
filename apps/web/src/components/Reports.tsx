@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { Locale } from "@daily-insights/api-client"
 import {
-  marketCodes,
+  launchMarketCodes,
   type MarketCode,
   type ProvisionalReport,
   type ReportBlock,
@@ -97,7 +97,7 @@ function ReportMarketNav({
       >
         {t("reportAllMarkets")}
       </Link>
-      {marketCodes.map(code => (
+      {launchMarketCodes.map(code => (
         <Link
           key={code}
           to="/$locale/reports/$marketCode"
@@ -158,7 +158,7 @@ export function ReportList({
           {t("reportOverviewStrip")}
         </p>
         <span className="text-xs text-sea-ink-soft">
-          {t("reportMockNotice")}
+          {t("reportLiveNotice")}
         </span>
       </section>
       {reports.length === 0 ? (
@@ -242,6 +242,14 @@ export function ReportDetail({
         eyebrow={t("reportsEyebrow")}
       />
       <ReportMarketNav locale={locale} activeMarket={report.marketCode} />
+      {report.preview ? (
+        <aside
+          className="mb-5 border-l-4 border-market-caution bg-market-caution/10 px-4 py-3 text-sm font-semibold text-sea-ink"
+          role="status"
+        >
+          {t("reportPreviewNotice")}
+        </aside>
+      ) : null}
       <section
         className="mb-5 grid overflow-hidden rounded-[13px] border border-line bg-surface sm:grid-cols-[1fr_auto]"
         aria-label={t("reportStatus")}
@@ -281,8 +289,7 @@ export function ReportDetail({
 
 function useChartColors() {
   const [colors, setColors] = useState({
-    line: "",
-    point: "",
+    series: [] as string[],
     text: "",
     grid: "",
   })
@@ -290,8 +297,13 @@ function useChartColors() {
     const updateColors = () => {
       const styles = getComputedStyle(document.documentElement)
       setColors({
-        line: styles.getPropertyValue("--lagoon-deep").trim(),
-        point: styles.getPropertyValue("--lagoon").trim(),
+        series: [
+          styles.getPropertyValue("--lagoon-deep").trim(),
+          styles.getPropertyValue("--lagoon").trim(),
+          styles.getPropertyValue("--market-up").trim(),
+          styles.getPropertyValue("--market-down").trim(),
+          styles.getPropertyValue("--market-caution").trim(),
+        ],
         text: styles.getPropertyValue("--sea-ink-soft").trim(),
         grid: styles.getPropertyValue("--line").trim(),
       })
@@ -399,11 +411,14 @@ function ReportBlockView({ block }: { block: ReportBlock }) {
                 style={{ height: "100%", width: "100%" }}
                 option={{
                   animation: false,
+                  color: chartColors.series,
                   grid: { left: 48, right: 18, top: 18, bottom: 30 },
                   tooltip: { trigger: "axis" },
                   xAxis: {
                     type: "category",
-                    data: block.points.map(point => valueText(point.label, t)),
+                    data: (block.series[0]?.points ?? []).map(point =>
+                      valueText(point.label, t)
+                    ),
                     axisLabel: { color: chartColors.text },
                     axisLine: { lineStyle: { color: chartColors.grid } },
                   },
@@ -415,18 +430,16 @@ function ReportBlockView({ block }: { block: ReportBlock }) {
                       lineStyle: { color: chartColors.grid, type: "dashed" },
                     },
                   },
-                  series: [
-                    {
-                      type: "line",
-                      data: block.points.map(point => point.value),
-                      connectNulls: false,
-                      symbolSize: 6,
-                      smooth: 0.18,
-                      lineStyle: { color: chartColors.line, width: 2 },
-                      itemStyle: { color: chartColors.point },
-                      areaStyle: { color: "transparent" },
-                    },
-                  ],
+                  series: block.series.map(line => ({
+                    name: valueText(line.label, t),
+                    type: "line",
+                    data: line.points.map(point => point.value),
+                    connectNulls: false,
+                    symbolSize: 6,
+                    smooth: 0.18,
+                    lineStyle: { width: 2 },
+                    areaStyle: { color: "transparent" },
+                  })),
                 }}
               />
             </ClientOnly>
@@ -435,12 +448,16 @@ function ReportBlockView({ block }: { block: ReportBlock }) {
             <table>
               <caption>{t("reportChartSummary")}</caption>
               <tbody>
-                {block.points.map(point => (
-                  <tr key={valueText(point.label, t)}>
-                    <th>{valueText(point.label, t)}</th>
-                    <td>{point.value ?? "—"}</td>
-                  </tr>
-                ))}
+                {block.series.flatMap(line =>
+                  line.points.map(point => (
+                    <tr key={`${line.id}-${valueText(point.label, t)}`}>
+                      <th>
+                        {valueText(line.label, t)} {valueText(point.label, t)}
+                      </th>
+                      <td>{point.value ?? "—"}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

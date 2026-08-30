@@ -17,6 +17,7 @@ import { LocaleSwitcher } from "./LocaleSwitcher"
 import { createI18n } from "#/lib/i18n"
 import {
   getProvisionalReport,
+  getProvisionalReportList,
   type ProvisionalReport,
 } from "#/lib/provisional-reports"
 
@@ -67,7 +68,18 @@ async function renderLocalized(
   return render(<I18nextProvider i18n={i18n}>{ui}</I18nextProvider>)
 }
 
-describe("five-market report presentation", () => {
+describe("three-market report presentation", () => {
+  it("shows only three formal market tabs and labels Taiwan direct routes as previews", async () => {
+    const reports = await getProvisionalReportList()
+    await renderLocalized(<ReportList locale="en" reports={reports} />, "en")
+    expect(screen.getByRole("navigation").querySelectorAll("a")).toHaveLength(4)
+    expect(screen.queryByText("Taiwan equities")).not.toBeInTheDocument()
+
+    const taiwan = await getProvisionalReport("tw_equity")
+    if (!taiwan) throw new Error("Expected Taiwan preview fixture")
+    await renderLocalized(<ReportDetail locale="en" report={taiwan} />, "en")
+    expect(screen.getByText(/Not launched \/ illustrative data/)).toBeVisible()
+  })
   it("uses an accessible in-frame fallback before chart hydration", async () => {
     const crypto = await getProvisionalReport("crypto")
     if (!crypto) throw new Error("Expected report fixture")
@@ -84,6 +96,47 @@ describe("five-market report presentation", () => {
     } finally {
       renderClientOnlyFallback = false
     }
+  })
+
+  it("renders every normalized crypto series without dropping gaps", async () => {
+    const report = {
+      marketCode: "crypto",
+      status: "complete",
+      editionDate: "2026-08-30",
+      sourceDate: "2026-08-29",
+      caveatKey: "reportCaveatLive",
+      summaryKey: "reportSummary_crypto",
+      blocks: [
+        {
+          kind: "series",
+          status: "ok",
+          titleKey: "reportBlockNormalizedPerformance",
+          series: [
+            {
+              id: "btc",
+              label: { kind: "literal", value: "BTC" },
+              points: [
+                { label: { kind: "literal", value: "D1" }, value: 100 },
+                { label: { kind: "literal", value: "D2" }, value: null },
+              ],
+            },
+            {
+              id: "eth",
+              label: { kind: "literal", value: "ETH" },
+              points: [
+                { label: { kind: "literal", value: "D1" }, value: 100 },
+                { label: { kind: "literal", value: "D2" }, value: 104 },
+              ],
+            },
+          ],
+        },
+      ],
+    } satisfies ProvisionalReport
+    await renderLocalized(<ReportDetail locale="en" report={report} />, "en")
+    const chart = screen.getByTestId("chart")
+    expect(chart).toHaveTextContent('"name":"BTC"')
+    expect(chart).toHaveTextContent('"name":"ETH"')
+    expect(chart).toHaveTextContent("null")
   })
 
   it.each([
@@ -184,14 +237,14 @@ describe("five-market report presentation", () => {
       await renderLocalized(<ReportDetail locale="en" report={crypto} />, "en")
       const chart = screen.getByTestId("chart")
       await waitFor(() =>
-        expect(chart).toHaveTextContent('"color":"rgb(23, 105, 224)"')
+        expect(chart).toHaveTextContent('"color":["rgb(23, 105, 224)"')
       )
 
       root.style.setProperty("--lagoon-deep", "rgb(105, 167, 255)")
       root.style.setProperty("--lagoon", "rgb(34, 211, 238)")
       root.classList.add("dark")
       await waitFor(() =>
-        expect(chart).toHaveTextContent('"color":"rgb(105, 167, 255)"')
+        expect(chart).toHaveTextContent('"color":["rgb(105, 167, 255)"')
       )
     } finally {
       root.className = initialClassName
