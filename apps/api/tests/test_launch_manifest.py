@@ -11,6 +11,7 @@ from daily_insights_api.modules.reports.launch_manifest import (
     LaunchManifest,
 )
 from daily_insights_api.modules.reports.morning_report import (
+    MORNING_REPORT_DERIVATION_VERSION,
     _error_blocks,
     _next_revision,
     _normalized_points,
@@ -24,6 +25,7 @@ from daily_insights_api.modules.reports.morning_report import (
 
 
 def test_manifest_freezes_three_markets_and_block_order() -> None:
+    assert MORNING_REPORT_DERIVATION_VERSION == "twelve-data.three-market.v2"
     assert tuple(market.market_code for market in ACTIVE_LAUNCH_MANIFEST.markets) == (
         "global_macro_bonds",
         "crypto",
@@ -48,13 +50,18 @@ def test_manifest_freezes_three_markets_and_block_order() -> None:
 def test_manifest_hash_is_stable_and_changes_with_content() -> None:
     round_trip = LaunchManifest.model_validate(ACTIVE_LAUNCH_MANIFEST.model_dump(mode="json"))
     assert round_trip.sha256 == ACTIVE_LAUNCH_MANIFEST.sha256
-    changed = round_trip.model_copy(update={"version": "three-market.v2"})
+    changed = round_trip.model_copy(update={"version": "three-market.v3"})
     assert changed.sha256 != round_trip.sha256
 
 
 def test_unprobed_manifest_remains_a_fail_closed_launch_gate() -> None:
     assert ACTIVE_LAUNCH_MANIFEST.status == "draft"
     assert {dataset.atomicity for dataset in ACTIVE_LAUNCH_MANIFEST.datasets} == {"all_or_error"}
+    assert next(
+        dataset.symbol_units
+        for dataset in ACTIVE_LAUNCH_MANIFEST.datasets
+        if dataset.key == "macro.commodity_quotes"
+    ) == {"XBR/USD": "USD", "XAU/USD": "USD", "HG1": "EUR"}
 
 
 def test_runtime_rejects_required_fields_outside_the_adapter_contract() -> None:

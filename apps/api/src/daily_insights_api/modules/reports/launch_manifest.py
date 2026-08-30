@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -20,6 +21,7 @@ class DatasetManifest(ManifestModel):
     key: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,99}$")
     endpoint: Literal["/quote", "/time_series", "/market_movers/stocks"]
     symbols: tuple[str, ...]
+    symbol_units: dict[str, str]
     required_fields: tuple[str, ...]
     minimum_history: int = Field(default=1, ge=1, le=5_000)
     timezone: str
@@ -71,6 +73,14 @@ class LaunchManifest(ManifestModel):
             raise ValueError("every block must reference one or more unique datasets")
         if any(not dataset.required_fields for dataset in self.datasets):
             raise ValueError("every dataset must freeze required fields")
+        if any(set(dataset.symbol_units) != set(dataset.symbols) for dataset in self.datasets):
+            raise ValueError("every dataset must freeze one unit for each exact symbol")
+        if any(
+            re.fullmatch(r"[A-Z]{3}", unit) is None
+            for dataset in self.datasets
+            for unit in dataset.symbol_units.values()
+        ):
+            raise ValueError("every symbol unit must use a three-letter uppercase code")
         block_ids = [block.id for market in self.markets for block in market.blocks]
         if len(block_ids) != len(set(block_ids)):
             raise ValueError("manifest block ids must be globally unique")
@@ -98,7 +108,7 @@ class LaunchManifest(ManifestModel):
 
 
 ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
-    version="three-market.v1",
+    version="three-market.v2",
     provider="twelve_data",
     status="draft",
     markets=(
@@ -175,25 +185,34 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
             key="macro.commodity_quotes",
             endpoint="/quote",
             symbols=("XBR/USD", "XAU/USD", "HG1"),
-            required_fields=("close", "percent_change", "currency"),
-            timezone="provider exchange timezone; aware timestamp required",
-            day_boundary="provider quote calendar date",
+            symbol_units={"XBR/USD": "USD", "XAU/USD": "USD", "HG1": "EUR"},
+            required_fields=("close", "percent_change", "timestamp"),
+            timezone="UTC derived from provider Unix timestamp",
+            day_boundary="UTC calendar date of provider timestamp",
             freshness="latest completed provider quote",
         ),
         DatasetManifest(
             key="crypto.daily_bars",
             endpoint="/time_series",
             symbols=("BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD", "ADA/USD"),
-            required_fields=("datetime", "open", "high", "low", "close", "volume"),
+            symbol_units={
+                "BTC/USD": "USD",
+                "ETH/USD": "USD",
+                "SOL/USD": "USD",
+                "XRP/USD": "USD",
+                "ADA/USD": "USD",
+            },
+            required_fields=("datetime", "open", "high", "low", "close"),
             minimum_history=485,
-            timezone="provider exchange timezone from meta.exchange_timezone",
-            day_boundary="provider daily-bar calendar date",
+            timezone="UTC per provider crypto time-series contract",
+            day_boundary="provider 1day bar calendar date",
             freshness="latest completed 1day bar",
         ),
         DatasetManifest(
             key="us.market_movers",
             endpoint="/market_movers/stocks",
             symbols=(),
+            symbol_units={},
             required_fields=(
                 "symbol",
                 "name",
@@ -201,8 +220,8 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
                 "percent_change",
                 "volume",
             ),
-            timezone="aware provider mover timestamp",
-            day_boundary="provider mover calendar date",
+            timezone="provider market-local datetime; endpoint supplies no UTC offset",
+            day_boundary="provider market-local calendar date",
             freshness="current provider market-movers snapshot",
         ),
     ),

@@ -1,7 +1,7 @@
 # Twelve Data 三市場晨報計劃
 
-狀態：第一波核心功能已完成本機實作與非資料庫驗證；provider probe、manifest
-核准、資料庫整合測試與 production deployment 尚未完成。本文件取代
+狀態：第一波核心功能已完成本機實作與 credentialed provider probe；manifest
+核准、授權證據、資料庫整合測試與 production deployment 尚未完成。本文件取代
 [`five-market-morning-report-baseline.md`](five-market-morning-report-baseline.md)
 作為現行第一波晨報的市場、來源與驗收政策；舊文件只保留為歷史決策紀錄。
 
@@ -69,6 +69,35 @@ Manifest 一旦發布，runtime 不得因每日資料情況增加或刪除 block
 信用債、FedWatch、CMC/CNN 情緒與 global metrics、永續合約 OI、SPX point-in-time
 breadth，以及無 exact Twelve Data 對應的 sector index 預設不進第一版 manifest。
 
+### 2026-08-30 credentialed probe 證據
+
+本次以 `apps/api/.env` 的正式 credential 經 server-side transport 執行唯讀 probe；
+API key 未放入 URL，未輸出或保存 raw payload、raw rows 或行情數值。只保留 endpoint、
+query fingerprint、response digest、fetch/source date、record count、credit header 與
+request ID 是否存在等 sanitized metadata。Twelve Data 本次未回傳 request ID。
+
+- `/quote`：`XBR/USD`、`XAU/USD`、`HG1` 各 1 credit 且 adapter 全數通過。
+  `XBR/USD` 與 `XAU/USD` 不回傳 `currency`，由請求 symbol 明示的 quote currency
+  `USD` 決定單位；`HG1` 回傳 `EUR`。`source_as_of` 由 provider Unix `timestamp`
+  轉為 UTC calendar date。另以 `/commodities` catalog 確認 `HG1` 是
+  `Copper Spot`，未使用 ETF 或近似序列。
+- `/time_series`：`BTC/USD`、`ETH/USD`、`SOL/USD`、`XRP/USD`、`ADA/USD` 以
+  `interval=1day`、`order=ASC`、`outputsize=485` 各 1 credit，全數回傳 485 筆並通過
+  adapter。日線具有 `datetime/open/high/low/close`，不供 `volume`；crypto 日線日期
+  依 provider time-series contract 採 UTC。五個 symbol 的 `currency_quote` 均為
+  provider label `US Dollar`，adapter 會對照 manifest 的 `USD` unit 並拒絕缺值或漂移。
+- `/market_movers/stocks`：`country=USA`、`outputsize=2` 的 `gainers` 與 `losers`
+  各 100 credits，兩方向均回傳 2 筆並通過 adapter。`datetime` 是無 offset 的美股
+  market-local datetime，本版只取其 market-local calendar date 作 `source_as_of`。
+- Probe 已證明三個 endpoint 的 credential 權限、實際欄位、上述 credit weight 與本版
+  所需歷史深度。帳戶分鐘額度、daily limit、外部展示授權及 attribution 仍須由正式
+  dashboard／合約另行留存證據，因此 active manifest 維持 `draft`。
+
+欄位與時區語義以 Twelve Data 官方
+[API documentation](https://twelvedata.com/docs/advanced) 與
+[symbol reference guidance](https://support.twelvedata.com/en/articles/5620513-how-to-find-all-available-symbols-at-twelve-data)
+交叉確認。
+
 ## 3. 實作順序
 
 ### A. Provider 與設定
@@ -124,22 +153,22 @@ breadth，以及無 exact Twelve Data 對應的 sector index 預設不進第一�
 
 ### 資料來源
 
-- [ ] 已使用正式 Twelve Data credential 完成唯讀 probe，且未保存 raw payload 或
+- [x] 已使用正式 Twelve Data credential 完成唯讀 probe，且未保存 raw payload 或
       secret。
 - [ ] 已確認合約允許客戶端外部展示、必要 attribution 與使用市場範圍。
 - [ ] 已確認每個 endpoint 的可用權限、credit weight、分鐘額度與歷史深度。
-- [ ] 每個納入 block 都有 exact endpoint、symbol、欄位、單位、時區、日界與
+- [x] 每個納入 block 都有 exact endpoint、symbol、欄位、單位、時區、日界與
       freshness 證據。
-- [ ] 每個正式市場至少有一個完整通過 probe 的 block，否則該市場為 launch no-go。
+- [x] 每個正式市場至少有一個完整通過 probe 的 block，否則該市場為 launch no-go。
 - [x] 不存在 Yahoo、FRED、CMC、FinDB 或其他資料源的執行期 fallback。
 - [x] 不以 ETF、近似指數或不同語意序列替代缺失資料。
 
 ### Launch manifest
 
 - [x] Manifest 僅包含 `global_macro_bonds`、`crypto`、`us_equity`。
-- [ ] 每個 block 的順序、required fields、歷史窗、公式、單位、精度與三語標籤均已
+- [x] 每個 block 的順序、required fields、歷史窗、公式、單位、精度與三語標籤均已
       凍結並版本化。
-- [ ] Twelve Data 無法完整供應的 block 未出現在 manifest 或正式 UI。
+- [x] Twelve Data 無法完整供應的 block 未出現在 manifest 或正式 UI。
 - [x] Manifest 變更會產生新版本，不會在 runtime 動態增加或刪除 block。
 - [x] 已明確區分「未納入功能」與「已納入但當日來源失敗」。
 

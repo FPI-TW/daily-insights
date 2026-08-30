@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.data_sources.api import (
     TWELVE_DATA_CONTRACT_HASH,
+    TWELVE_DATA_CONTRACT_VERSION,
     DailyBar,
     DataSourceContractError,
     Provenance,
@@ -67,6 +68,8 @@ _TITLES = {
     },
 }
 
+MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v2"
+
 
 async def run_morning_report_edition(
     settings: Settings,
@@ -120,7 +123,7 @@ async def _run_market(
         _validate_manifest_output(market_code, blocks)
         source_status = "failed"
         source_marker = sanitize_error_code(type(caught).__name__)
-    derivation_version = "twelve-data.three-market.v1"
+    derivation_version = MORNING_REPORT_DERIVATION_VERSION
     input_digest = hashlib.sha256(
         f"{derivation_version}|twelve_data:{dataset.key}:{source_status}:{source_marker}".encode()
     ).hexdigest()
@@ -219,7 +222,7 @@ async def _run_market(
             provider="twelve_data",
             dataset_key=dataset.key,
             attempt=1,
-            contract_version="2026-08-30.v1",
+            contract_version=TWELVE_DATA_CONTRACT_VERSION,
             contract_hash=adapter_contract_hash(),
             endpoint=dataset.endpoint,
             request_fingerprint=fingerprint,
@@ -269,7 +272,14 @@ async def _build_blocks(
             item for item in ACTIVE_LAUNCH_MANIFEST.datasets if item.key == "macro.commodity_quotes"
         )
         quotes = await asyncio.gather(
-            *(adapter.get_quote(market=market_code, symbol=symbol) for symbol in dataset.symbols)
+            *(
+                adapter.get_quote(
+                    market=market_code,
+                    symbol=symbol,
+                    expected_currency=dataset.symbol_units[symbol],
+                )
+                for symbol in dataset.symbols
+            )
         )
         as_of = min(item.as_of for item in quotes)
         macro_block = MetricBlock(
@@ -305,6 +315,7 @@ async def _build_blocks(
                 adapter.get_daily_bars(
                     market=market_code,
                     symbol=symbol,
+                    expected_currency=dataset.symbol_units[symbol],
                     outputsize=dataset.minimum_history,
                 )
                 for symbol in symbols
@@ -551,6 +562,7 @@ _ENDPOINT_FIELDS: dict[str, frozenset[str]] = {
             "name",
             "currency",
             "datetime",
+            "timestamp",
             "open",
             "high",
             "low",

@@ -2,7 +2,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from itertools import pairwise
 from typing import Literal
@@ -22,10 +22,11 @@ from daily_insights_api.modules.data_sources.twelve_data.transport import (
     TwelveDataTransportResponse,
 )
 
-TWELVE_DATA_CONTRACT_VERSION = "2026-08-30.v1"
+TWELVE_DATA_CONTRACT_VERSION = "2026-08-30.v2"
 TWELVE_DATA_CONTRACT_HASH = hashlib.sha256(
-    b"twelve-data:quote,time_series,market_movers/stocks:2026-08-30.v1"
+    b"twelve-data:quote,time_series,market_movers/stocks:2026-08-30.v2"
 ).hexdigest()
+TWELVE_DATA_CURRENCY_NAMES = {"USD": "US Dollar"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,21 +74,32 @@ class TwelveDataAdapter:
     def __init__(self, transport: TwelveDataTransport) -> None:
         self._transport = transport
 
-    async def get_quote(self, *, market: MarketCode, symbol: str) -> QuoteResult:
+    async def get_quote(
+        self,
+        *,
+        market: MarketCode,
+        symbol: str,
+        expected_currency: str,
+    ) -> QuoteResult:
         params: dict[str, QueryValue] = {"symbol": symbol}
         response = await self._transport.get("/quote", params=params)
         payload = _parse(response, TwelveDataQuote, "/quote")
         if payload.symbol != symbol:
             raise DataSourceContractError("Twelve Data quote symbol did not match the request")
-        if payload.currency is None or payload.percent_change is None:
+        if payload.percent_change is None:
             raise DataSourceContractError("Twelve Data quote omitted a required field")
-        if re.fullmatch(r"[A-Z]{3}", payload.currency) is None:
+        currency = payload.currency or _quote_currency(symbol)
+        if currency is None or re.fullmatch(r"[A-Z]{3}", currency) is None:
             raise DataSourceContractError("Twelve Data quote returned an invalid currency unit")
-        as_of = payload.datetime.date()
+        if currency != expected_currency:
+            raise DataSourceContractError(
+                "Twelve Data quote currency did not match the launch manifest"
+            )
+        as_of = datetime.fromtimestamp(payload.timestamp, UTC).date()
         return QuoteResult(
             symbol=payload.symbol,
             name=payload.name,
-            currency=payload.currency,
+            currency=currency,
             as_of=as_of,
             close=payload.close,
             open=payload.open,
@@ -104,6 +116,7 @@ class TwelveDataAdapter:
         *,
         market: MarketCode,
         symbol: str,
+        expected_currency: str,
         outputsize: int,
     ) -> DailyBarsResult:
         if not 1 <= outputsize <= 5_000:
@@ -122,6 +135,13 @@ class TwelveDataAdapter:
             )
         if payload.meta.interval != "1day":
             raise DataSourceContractError("Twelve Data returned an unexpected interval")
+        expected_currency_name = TWELVE_DATA_CURRENCY_NAMES.get(expected_currency)
+        if expected_currency_name is None:
+            raise ValueError("expected_currency is not supported by the Twelve Data contract")
+        if payload.meta.currency_quote != expected_currency_name:
+            raise DataSourceContractError(
+                "Twelve Data time-series quote currency did not match the launch manifest"
+            )
         items = tuple(
             DailyBar(
                 instrument_source_id=symbol,
@@ -144,7 +164,7 @@ class TwelveDataAdapter:
         if any(
             value is None
             for item in items
-            for value in (item.open, item.high, item.low, item.close, item.volume)
+            for value in (item.open, item.high, item.low, item.close)
         ):
             raise DataSourceContractError("Twelve Data daily bars omitted a required field")
         if any(left.trade_date >= right.trade_date for left, right in pairwise(items)):
@@ -176,7 +196,7 @@ class TwelveDataAdapter:
             Mover(
                 symbol=item.symbol,
                 name=item.name,
-                as_of=item.datetime.date(),
+                as_of=item.market_date,
                 close=item.last,
                 high=item.high,
                 low=item.low,
@@ -197,6 +217,11 @@ class TwelveDataAdapter:
                 len(items),
             ),
         )
+
+
+def _quote_currency(symbol: str) -> str | None:
+    parts = symbol.split("/", maxsplit=1)
+    return parts[1] if len(parts) == 2 else None
 
 
 def _parse[PayloadT: BaseModel](
