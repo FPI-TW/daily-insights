@@ -65,21 +65,25 @@ exchange, US equities, Hong Kong equities, Mainland China equities, Taiwan
 equities, and Taiwan index futures/options. Phase 1 seeds stable internal codes
 and Traditional Chinese, Simplified Chinese, and English labels for all eight.
 
-### First-wave morning-report baseline
+### First-wave morning-report plan
 
-The long-term catalog remains eight markets, but the first morning-report launch
-is deliberately gated to five, in this fixed order: macro/bonds, crypto, US
-equities, Taiwan equities, and Taiwan index futures/options. FX, Hong Kong, and
-Mainland China remain future scope and cannot be added by runtime data discovery.
-The detailed baseline and 54-row source gate live in
-[`five-market-morning-report-baseline.md`](five-market-morning-report-baseline.md).
+The long-term catalog remains eight markets, but the current first-wave launch
+is fixed to macro/bonds, crypto, and US equities. Taiwan equities and Taiwan
+index derivatives retain their existing UI code and direct-URL mock previews,
+but are absent from report navigation, the report list, the launch manifest,
+and production publications. FX, Hong Kong, and Mainland China also remain
+outside this wave.
 
-For this first wave, FinDB is the only accepted source. AI summary and direct
-Twelve Data, FinLab, Yahoo, FRED, CMC, TWSE, TAIFEX, CME, BBG, or other provider
-calls are excluded. A missing required field, row, series, history, unit, or
-freshness condition excludes the entire atomic card; the application must not
-prune rows or substitute a proxy. Each market must have at least one `候選`
-block after the read-only production FinDB probe, or launch is a no-go.
+Twelve Data is the temporary sole raw-data provider for the three launch
+markets. There is no runtime fallback to FinDB or another provider, no proxy
+substitution, and no cross-provider history stitching. Only complete blocks
+that pass the licensed read-only probe enter the versioned manifest; unsupported
+blocks have no production UI slot. The detailed source gate and acceptance
+checklist live in
+[`twelve-data-three-market-morning-report-plan.md`](twelve-data-three-market-morning-report-plan.md).
+The previous
+[`five-market-morning-report-baseline.md`](five-market-morning-report-baseline.md)
+is retained only as historical investigation evidence.
 
 ### Reports, data, and localization
 
@@ -88,10 +92,11 @@ block after the read-only production FinDB probe, or launch is a no-go.
 - PDF remains an allowed downloadable asset format.
 - Reports, chart labels, and narrative content support Traditional Chinese
   (`zh-hant`), Simplified Chinese (`zh-hans`), and English (`en`).
-- FinDB is the only raw-data source for the first-wave morning-report contract;
-  its production release, new Environment key, exact codes, history, and
-  freshness still require a read-only probe. Additional raw-data providers are
-  future product scope and are not fallback sources for this launch.
+- Twelve Data is the temporary only raw-data source for the three-market
+  first-wave contract. Its license, exact endpoints/symbols, history, credits,
+  freshness, and external-display rights require a credentialed read-only
+  probe. FinDB remains isolated behind its adapter for future work and is not a
+  runtime fallback for this launch.
 - This application does not durably duplicate provider raw rows. It stores
   application-owned derived results, publication versions, provenance, and
   source `as_of` information.
@@ -168,12 +173,13 @@ These are the implementation baseline unless a later ADR supersedes them:
 
 - Use a modular monolith with a single API deployment and PostgreSQL migration
   graph.
-- Keep FinDB behind a provider adapter and normalized internal DTOs. Contract
-  tests detect breaking upstream changes.
+- Keep every raw-data provider, including Twelve Data and FinDB, behind a
+  provider adapter and normalized internal DTOs. Contract tests detect breaking
+  upstream changes.
 - The current foundation implementation is fail-closed: it serves the most
   recent published daily report during a provider outage and does not publish
   from incomplete data. This is an implementation note, not the accepted
-  future morning-report contract; the five-market baseline supersedes it with
+  future morning-report contract; the three-market plan supersedes it with
   `complete`/`partial`/`unavailable` publication states and a publication for
   every edition, including failed source-run evidence.
 - Keep numeric chart series locale-neutral; localize labels, units, summaries,

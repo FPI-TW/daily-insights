@@ -1,12 +1,12 @@
 # Phase 2 資料來源與結構化報告
 
-狀態：基礎能力已實作；五市場晨報的 accepted baseline、source gate 與遷移後
-publication 行為見 [`five-market-morning-report-baseline.md`](five-market-morning-report-baseline.md)。
+狀態：基礎能力已實作；現行三市場晨報的 source gate 與遷移後 publication 行為見
+[`twelve-data-three-market-morning-report-plan.md`](twelve-data-three-market-morning-report-plan.md)。
 本文件區分現行 foundation 與尚未實作的 feature target，不把 target 宣稱為現況。
 
 ## 本階段交付邊界
 
-- 以 application-owned contract 隔離 FinDB，不讓 provider schema 進入
+- 以 application-owned contract 隔離 Twelve Data 與 FinDB，不讓 provider schema 進入
   reports 模組。
 - 原始 provider response 只存在記憶體；PostgreSQL 僅保存同步執行狀態、
   provenance、checksum、來源時間及應用程式加工後的 publication。
@@ -15,8 +15,8 @@ publication 行為見 [`five-market-morning-report-baseline.md`](five-market-mor
   重複或覆蓋發布。
 - 現行 foundation 在任一必要輸入缺漏、契約錯誤或逾時時不建立新 publication；
   既有最後成功 publication 仍可讀取並標示 stale。這是目前 fail-closed/LKG
-  實作，不是五市場晨報遷移後的接受規則。
-- 五市場晨報 feature target 改由 baseline 定義：每一 edition 都有 publication，
+  實作，不是三市場晨報遷移後的接受規則。
+- 三市場晨報 feature target 改由現行計劃定義：每一 edition 都有 publication，
   可為 `complete`、`partial` 或 `unavailable`，並保留 failed source-run evidence；
   included blocks 不因當日失敗而被移除，缺值以 nullable cells/points 表達。
 - Publication 是 immutable revision，包含 locale-neutral values/charts 與
@@ -28,9 +28,9 @@ publication 行為見 [`five-market-morning-report-baseline.md`](five-market-mor
 
 - 自行發明或逆向推導指標、公式、分數及投資建議。
 - 未確認的 editorial approval、機器翻譯或人工審稿流程。
-- 把 FinDB raw row、response body 或完整 payload 保存至本服務。
-- 宣稱 FinDB 已完整支援五市場、八市場、台指選擇權或未文件化的市場代碼；
-  exact production capability 必須先通過 baseline 的唯讀 probe。
+- 把 Twelve Data 或 FinDB raw row、response body 或完整 payload 保存至本服務。
+- 宣稱 Twelve Data 已完整支援三市場或任一 block；exact production capability、
+  授權、history、credits 與 freshness 必須先通過現行計劃的唯讀 probe。
 - production scheduler、CloudWatch alarm 或正式環境 secret 配置。
 
 ## FinDB 目前契約
@@ -85,8 +85,8 @@ Publication 至少保存：
 - 產生此 publication 的所有成功 source run 關聯。
 
 目前 publication schema 要求 publication-level `source_as_of` 非 null，且
-現行 payload 已有 metrics/charts；這是 foundation 現況。五市場 feature PR
-必須依 baseline 遷移為 block/publication `source_as_of` 可為 null，並加入
+現行 payload 已有 metrics/charts；這是 foundation 現況。三市場 feature PR
+必須依現行計劃遷移為 block/publication `source_as_of` 可為 null，並加入
 block/report status 與 caveat，不能把現行 non-null/LKG contract 當成新晨報規則。
 
 相同 idempotency key 的重試必須回到同一 logical pipeline run。相同 report、
@@ -99,21 +99,20 @@ revision。
 
 ## 待產品與資料團隊確認
 
-以下項目阻擋五市場晨報 feature/deploy acceptance，但不阻擋既有 adapter 與
+以下項目阻擋三市場晨報 feature/deploy acceptance，但不阻擋既有 adapter 與
 pipeline foundation：
 
-1. 五市場 baseline matrix 的 FinDB exact market code、required instruments/
-   series/datasets；FX、港股、陸股仍是八市場長期 catalog 的後續範圍。
-2. 台指選擇權在 production FinDB 的 exact source、code、history 與 freshness；
-   文件能力不能替代 probe。
+1. Twelve Data 合約的外部展示、attribution、涵蓋市場與 endpoint 使用權。
+2. 三市場 manifest 的 exact endpoint、symbol、required fields、history、credits、
+   time zone、日界與 freshness；文件或 catalog 能力不能替代 credentialed probe。
 3. 每個指標與圖表的公式、lookback、缺值與修訂規則、derivation version。
-4. 其他報告產品的分類及發布頻率是否沿用 daily/weekly/research/AI news；五市場
+4. 其他報告產品的分類及發布頻率是否沿用 daily/weekly/research/AI news；三市場
    晨報已依 accepted baseline 固定每日 `07:00 Asia/Taipei`，不在此待確認項目。
 5. 三語 labels/presentation 的完整 manifest；AI summary 不在第一波 contract。
 6. 各市場交易日曆、時區、daily cutoff 與 freshness SLO。
-7. FinDB rate limit、429/Retry-After、資料修正及歷史回補契約。
+7. Twelve Data rate limit、429/Retry-After、資料修正及歷史回補契約。
 
 在上述決策與 production probe 完成前，generic contract 可用合成／sanitized
-fixture 驗證，但不得視為正式客戶報告內容或 `候選` block 已驗收。Production
-scheduler、API/Web UI 遷移、deploy restart 與五市場 terminal-state check
+fixture 驗證，但不得視為正式客戶報告內容或 block 已通過 source gate。Production
+scheduler、API/Web UI 遷移、deploy restart 與三市場 terminal-state check
 屬後續 feature/deploy PR；本文件 PR 未執行。
