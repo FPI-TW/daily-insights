@@ -59,7 +59,6 @@ for name in \
 done
 grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_BASE_URL: ${DAILY_INSIGHTS_TWELVE_DATA_BASE_URL:-https://api.twelvedata.com}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_API_KEY: ${DAILY_INSIGHTS_TWELVE_DATA_API_KEY:-}' "$compose_file"
-grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_MANIFEST_APPROVED_HASH: ${DAILY_INSIGHTS_TWELVE_DATA_MANIFEST_APPROVED_HASH:-}' "$compose_file"
 
 grep -Fq '/etc/daily-insights/cloudflare-realip.conf:/etc/nginx/cloudflare-realip.conf:ro' "$compose_file"
 grep -Fq '/etc/daily-insights/tls/origin.crt:/etc/nginx/tls/origin.crt:ro' "$compose_file"
@@ -174,7 +173,6 @@ export DAILY_INSIGHTS_PASSWORD_PEPPER=contract-password-pepper-09876543210987654
 export DAILY_INSIGHTS_MORNING_REPORTS_ENABLED=false
 export DAILY_INSIGHTS_TWELVE_DATA_BASE_URL=
 export DAILY_INSIGHTS_TWELVE_DATA_API_KEY=
-export DAILY_INSIGHTS_TWELVE_DATA_MANIFEST_APPROVED_HASH=
 export DAILY_INSIGHTS_R2_ENDPOINT_URL=https://tenant.r2.cloudflarestorage.com
 export DAILY_INSIGHTS_R2_BUCKET_NAME=production-podcast-assets
 export DAILY_INSIGHTS_R2_ACCESS_KEY_ID=contract-r2-access

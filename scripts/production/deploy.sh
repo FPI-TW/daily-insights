@@ -45,8 +45,7 @@ esac
 if [ "$DAILY_INSIGHTS_MORNING_REPORTS_ENABLED" = true ]; then
   for name in \
     DAILY_INSIGHTS_TWELVE_DATA_BASE_URL \
-    DAILY_INSIGHTS_TWELVE_DATA_API_KEY \
-    DAILY_INSIGHTS_TWELVE_DATA_MANIFEST_APPROVED_HASH; do
+    DAILY_INSIGHTS_TWELVE_DATA_API_KEY; do
     if [ -z "$(printenv "$name" 2>/dev/null || true)" ]; then
       echo "enabled morning reports require deployment environment: $name" >&2
       exit 1

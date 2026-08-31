@@ -91,7 +91,8 @@ request ID 是否存在等 sanitized metadata。Twelve Data 本次未回傳 requ
   market-local datetime，本版只取其 market-local calendar date 作 `source_as_of`。
 - Probe 已證明三個 endpoint 的 credential 權限、實際欄位、上述 credit weight 與本版
   所需歷史深度。帳戶分鐘額度、daily limit、外部展示授權及 attribution 仍須由正式
-  dashboard／合約另行留存證據，因此 active manifest 維持 `draft`。
+  dashboard／合約仍需另行留存證據；runtime 不以 manifest 核准狀態或外部 hash 作為
+  啟動條件。
 
 欄位與時區語義以 Twelve Data 官方
 [API documentation](https://twelvedata.com/docs/advanced) 與

@@ -63,7 +63,7 @@ bootstrap-admin: ## 建立初始 admin（需 EMAIL 與 NAME）
 
 generate-morning-reports: ## 本地使用 Twelve Data 單次產生三市場晨報（可傳 EDITION_DATE）
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
-	docker compose run --rm --build api python -m daily_insights_api.scripts.run_morning_reports --once --allow-draft-local $(if $(EDITION_DATE),--edition-date $(EDITION_DATE),)
+	docker compose run --rm --build api python -m daily_insights_api.scripts.run_morning_reports --once $(if $(EDITION_DATE),--edition-date $(EDITION_DATE),)
 
 format: ## 格式化 Web、API 與文件
 	pnpm format

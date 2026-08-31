@@ -47,9 +47,4 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the three-market morning-report scheduler")
     parser.add_argument("--once", action="store_true", help="run one edition and exit")
     parser.add_argument("--edition-date", type=date.fromisoformat)
-    parser.add_argument(
-        "--allow-draft-local",
-        action="store_true",
-        help="allow a draft manifest for an explicit local one-shot run",
-    )
     return parser.parse_args(args)

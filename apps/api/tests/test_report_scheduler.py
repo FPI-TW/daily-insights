@@ -7,13 +7,8 @@ import pytest
 from anyio import Path
 from pydantic import SecretStr
 
-from daily_insights_api.core.config import Environment, Settings
+from daily_insights_api.core.config import Settings
 from daily_insights_api.core.models import Base
-from daily_insights_api.modules.reports import morning_report
-from daily_insights_api.modules.reports.launch_manifest import ACTIVE_LAUNCH_MANIFEST
-from daily_insights_api.modules.reports.morning_report import (
-    authorize_morning_report_execution,
-)
 from daily_insights_api.modules.reports.scheduler import due_edition, next_run, parse_args
 from daily_insights_api.scripts import run_morning_reports
 from daily_insights_api.scripts.run_morning_reports import (
@@ -36,55 +31,18 @@ def test_next_run_handles_before_and_after_deadline() -> None:
     )
 
 
-def _settings(environment: Environment = "development") -> Settings:
-    settings = Settings(
+def _settings() -> Settings:
+    return Settings(
         environment="development",
         database_url="postgresql+psycopg://user:pass@localhost/database",
         session_secret=SecretStr("test-session-secret" * 3),
         password_pepper=SecretStr("test-password-pepper" * 3),
     )
-    return settings.model_copy(update={"environment": environment})
 
 
-def test_draft_override_requires_local_one_shot_execution() -> None:
-    authorize_morning_report_execution(
-        _settings(), execution_mode="one_shot", allow_draft_local=True
-    )
-    with pytest.raises(RuntimeError, match="one-shot"):
-        authorize_morning_report_execution(
-            _settings(), execution_mode="scheduled", allow_draft_local=True
-        )
-    with pytest.raises(RuntimeError, match="local environments"):
-        authorize_morning_report_execution(
-            _settings("staging"), execution_mode="one_shot", allow_draft_local=True
-        )
-
-
-def test_normal_execution_still_requires_approved_manifest_and_hash(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    settings = _settings()
-    with pytest.raises(RuntimeError, match="probe approval"):
-        authorize_morning_report_execution(
-            settings, execution_mode="one_shot", allow_draft_local=False
-        )
-
-    approved = ACTIVE_LAUNCH_MANIFEST.model_copy(update={"status": "approved"})
-    monkeypatch.setattr(morning_report, "ACTIVE_LAUNCH_MANIFEST", approved)
-    with pytest.raises(RuntimeError, match="approval hash"):
-        authorize_morning_report_execution(
-            settings, execution_mode="scheduled", allow_draft_local=False
-        )
-    authorized = settings.model_copy(update={"twelve_data_manifest_approved_hash": approved.sha256})
-    authorize_morning_report_execution(
-        authorized, execution_mode="scheduled", allow_draft_local=False
-    )
-
-
-def test_local_draft_flag_is_explicit_and_separate_from_once() -> None:
-    args = parse_args(["--once", "--allow-draft-local", "--edition-date", "2026-08-30"])
+def test_one_shot_cli_accepts_an_explicit_edition_date() -> None:
+    args = parse_args(["--once", "--edition-date", "2026-08-30"])
     assert args.once is True
-    assert args.allow_draft_local is True
     assert args.edition_date == date(2026, 8, 30)
 
 
@@ -107,7 +65,6 @@ async def test_scheduler_cli_rejects_unusable_key_before_transport(
         "parse_args",
         lambda: Namespace(
             once=True,
-            allow_draft_local=True,
             edition_date=date(2026, 8, 30),
         ),
     )
