@@ -107,7 +107,7 @@ pipeline foundation：
    time zone、日界與 freshness；文件或 catalog 能力不能替代 credentialed probe。
 3. 每個指標與圖表的公式、lookback、缺值與修訂規則、derivation version。
 4. 其他報告產品的分類及發布頻率是否沿用 daily/weekly/research/AI news；三市場
-   晨報已依 accepted baseline 固定每日 `07:00 Asia/Taipei`，不在此待確認項目。
+   晨報已依 accepted baseline 固定每日 `08:00 Asia/Taipei`，不在此待確認項目。
 5. 三語 labels/presentation 的完整 manifest；AI summary 不在第一波 contract。
 6. 各市場交易日曆、時區、daily cutoff 與 freshness SLO。
 7. Twelve Data rate limit、429/Retry-After、資料修正及歷史回補契約。

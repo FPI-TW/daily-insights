@@ -151,7 +151,7 @@ request ID 是否存在等 sanitized metadata。Twelve Data 本次未回傳 requ
 
 ### D. Deployment 與未來 FinDB cutover
 
-1. Scheduler 每日依既有 `07:00 Asia/Taipei` 目標執行，支援 manual rerun、
+1. Scheduler 每日依 `08:00 Asia/Taipei` 目標執行，支援 manual rerun、
    heartbeat 與 terminal-state check。
 2. Production preflight 驗證 Twelve Data credential、manifest version、provider
    readiness 與三市場終態；provider 暫時失敗不應使 API readiness 整體失敗。

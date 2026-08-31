@@ -18,16 +18,16 @@ from daily_insights_api.scripts.run_morning_reports import (
 
 
 def test_due_edition_uses_taipei_day_boundary() -> None:
-    assert due_edition(datetime(2026, 8, 29, 22, 59, tzinfo=UTC)) is None
-    assert due_edition(datetime(2026, 8, 29, 23, 0, tzinfo=UTC)) == date(2026, 8, 30)
+    assert due_edition(datetime(2026, 8, 29, 23, 59, tzinfo=UTC)) is None
+    assert due_edition(datetime(2026, 8, 30, 0, 0, tzinfo=UTC)) == date(2026, 8, 30)
 
 
 def test_next_run_handles_before_and_after_deadline() -> None:
-    assert next_run(datetime(2026, 8, 29, 22, 0, tzinfo=UTC)).isoformat() == (
-        "2026-08-30T07:00:00+08:00"
+    assert next_run(datetime(2026, 8, 29, 23, 0, tzinfo=UTC)).isoformat() == (
+        "2026-08-30T08:00:00+08:00"
     )
-    assert next_run(datetime(2026, 8, 29, 23, 1, tzinfo=UTC)).isoformat() == (
-        "2026-08-31T07:00:00+08:00"
+    assert next_run(datetime(2026, 8, 30, 0, 1, tzinfo=UTC)).isoformat() == (
+        "2026-08-31T08:00:00+08:00"
     )
 
 
