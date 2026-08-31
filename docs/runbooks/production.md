@@ -187,10 +187,14 @@ Compose while retaining immutable deployment inputs.
 4. Let the protected GitHub CD workflow send Secrets, Variables, and image
    digests to the SSH process and run
    `/opt/daily-insights/scripts/production/deploy.sh`. The script validates and
-   pulls pinned images, runs compatible migrations once, executes
-   `docker compose up`, and waits for API/Web/nginx container health.
-5. Require readiness from database, API, web, and nginx before switching
-   traffic.
+   pulls pinned images, renders and tests the nginx template in a disposable
+   container, then recreates only nginx with Docker DNS re-resolution enabled
+   while the previous API/Web containers are still available. It next runs the
+   compatible migration and converges only API, Web, and the scheduler.
+5. Require container health plus active API-readiness and Web-login probes
+   through nginx before reporting deployment success. Replaced upstream
+   addresses may take up to two seconds to re-resolve; a deployment remains
+   pending during that bounded transition and fails at the health deadline.
 6. For the Podcast pilot, smoke-test authentication, tenant isolation, all
    three locales, Podcast publication, admin authorization, and private audio
    playback, including locale fallback and browser-local progress restoration.
@@ -204,6 +208,11 @@ The host does not save rollback env files because they would duplicate GitHub
 Secrets. A failed deployment emits container state and recent logs. Migrations
 must remain backward-compatible with the previous image because application
 rollback never reverses or restores the database.
+
+nginx uses Docker's embedded DNS resolver for the `api` and `web` Compose
+aliases. Do not replace the targeted backend convergence with an unscoped
+`docker compose up`: the deployment deliberately validates and recreates nginx
+first, then leaves that proxy running while backend container addresses change.
 
 Use Cloudflare's proxied DNS with a conservative TTL during initial cutover.
 Cutover must not modify or delete the legacy services or data.

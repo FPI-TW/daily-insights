@@ -39,7 +39,11 @@ while [ "$(date +%s)" -le "$deadline" ]; do
     fi
   done
 
-  if [ "$all_healthy" = true ]; then
+  if [ "$all_healthy" = true ] &&
+    timeout 3 docker exec daily-insights-nginx \
+      wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/api &&
+    timeout 3 docker exec daily-insights-nginx \
+      wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/web; then
     echo "production containers are healthy: $containers"
     exit 0
   fi

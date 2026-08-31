@@ -67,11 +67,17 @@ sudo -n "$script_dir/preflight.sh" "$PUBLIC_HOSTNAME"
 compose config --quiet
 compose pull
 
+# Validate the official-entrypoint-rendered template before replacing the
+# production proxy. Recreate nginx while the old upstreams are still present so
+# it is using Docker's runtime resolver before API/Web receive new addresses.
+compose run --rm --no-deps nginx nginx -t
+compose up -d --no-build --force-recreate --no-deps nginx
+
 # Migrations must remain forward-compatible with the containers serving the
 # previous application version during rollout.
 compose run --rm --no-deps api alembic upgrade head
 
-if ! compose up -d --no-build --remove-orphans; then
+if ! compose up -d --no-build --remove-orphans api web morning-report-scheduler; then
   "$script_dir/diagnose.sh" >&2
   exit 1
 fi

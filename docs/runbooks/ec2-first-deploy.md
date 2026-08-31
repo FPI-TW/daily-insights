@@ -158,10 +158,19 @@ Workflow 在 SSH process 中執行：
 4. 安裝 root-owned host bundle；
 5. 驗證 Origin CA certificate、private key 與 Cloudflare allowlist；
 6. `docker compose config` 與 `docker compose pull`；
-7. 使用 API image 執行 `alembic upgrade head`；
-8. `docker compose up -d --no-build --remove-orphans`；
-9. 等待 API、Web、nginx health convergence；
-10. 輸出失敗 container state/logs，並從 GHCR logout。
+7. 用 disposable nginx container 渲染 template 並執行 `nginx -t`；
+8. 在舊 API／Web 仍存活時，以 `--force-recreate --no-deps nginx` 單獨重建
+   nginx，使 Docker DNS 動態解析先開始運作；
+9. 使用 API image 執行 `alembic upgrade head`；
+10. 只 convergence `api web morning-report-scheduler`，不再次重建 nginx；
+11. 等待所有 container health，並從 nginx container 內分別主動驗證 API
+    readiness 與 Web login route；
+12. 輸出失敗 container state/logs，並從 GHCR logout。
+
+nginx 以 Docker embedded DNS 重新解析 `api`／`web` service alias，TTL 為兩秒。
+後端換址期間 deployment 會保持 pending；兩條 upstream probe 都成功前不得回報部署
+完成。`scripts/test-production-nginx-dns.sh` 會在 CI 中以不重啟 nginx 的方式替換 mock
+upstream，驗證換址後能在五秒內恢復。
 
 第一次部署前執行：
 
