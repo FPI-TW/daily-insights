@@ -89,7 +89,23 @@ http {
 }
 EOF
 
-docker network create "$network_name" >/dev/null
+network_created=false
+subnet_octet=$(( ($$ % 200) + 20 ))
+network_attempt=0
+while [ "$network_attempt" -lt 20 ]; do
+  if docker network create \
+    --subnet "10.253.${subnet_octet}.0/24" \
+    "$network_name" >/dev/null 2>&1; then
+    network_created=true
+    break
+  fi
+  subnet_octet=$(( (subnet_octet % 220) + 20 ))
+  network_attempt=$((network_attempt + 1))
+done
+if [ "$network_created" != true ]; then
+  echo "unable to allocate an isolated Docker test subnet" >&2
+  exit 1
+fi
 
 start_mock() {
   name=$1

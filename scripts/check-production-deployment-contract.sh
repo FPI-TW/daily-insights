@@ -85,6 +85,7 @@ grep -q 'proxy_set_header X-Forwarded-For $remote_addr;' "$nginx_file"
 grep -q 'proxy_set_header X-Forwarded-Proto https;' "$nginx_file"
 grep -Fq 'http://127.0.0.1:8080/nginx-health/api' "$compose_file"
 grep -Fq 'http://127.0.0.1:8080/nginx-health/web' "$compose_file"
+grep -Fq -- '--subnet "10.253.${subnet_octet}.0/24"' scripts/test-production-nginx-dns.sh
 
 if grep -Eq 'proxy_set_header X-(Real-IP|Forwarded-For) \\$(http_|proxy_add_)' "$nginx_file"; then
   echo "production nginx must discard untrusted client forwarded headers" >&2
