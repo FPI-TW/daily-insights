@@ -141,6 +141,55 @@ describe("three-market report presentation", () => {
   })
 
   it.each([
+    ["zh-hant", "布蘭特原油與黃金標準化表現"],
+    ["zh-hans", "布兰特原油与黄金标准化表现"],
+    ["en", "Brent and gold normalized performance"],
+  ] as const)(
+    "renders the macro commodity chart title in %s",
+    async (locale, title) => {
+      const report = {
+        marketCode: "global_macro_bonds",
+        status: "complete",
+        editionDate: "2026-08-30",
+        sourceDate: "2026-08-29",
+        caveatKey: "reportCaveatLive",
+        summaryKey: "reportSummary_global_macro_bonds",
+        blocks: [
+          {
+            kind: "series",
+            status: "ok",
+            titleKey: "reportBlockMacroCommodityNormalizedPerformance",
+            series: [
+              {
+                id: "brent",
+                label: { kind: "literal", value: "BRENT" },
+                points: [
+                  { label: { kind: "literal", value: "D1" }, value: 100 },
+                ],
+              },
+              {
+                id: "gold",
+                label: { kind: "literal", value: "GOLD" },
+                points: [
+                  { label: { kind: "literal", value: "D1" }, value: 100 },
+                ],
+              },
+            ],
+          },
+        ],
+      } satisfies ProvisionalReport
+
+      await renderLocalized(
+        <ReportDetail locale={locale} report={report} />,
+        locale
+      )
+      expect(screen.getByRole("heading", { name: title })).toBeVisible()
+      expect(screen.getByTestId("chart")).toHaveTextContent('"name":"BRENT"')
+      expect(screen.getByTestId("chart")).toHaveTextContent('"name":"GOLD"')
+    }
+  )
+
+  it.each([
     ["zh-hant", "8 月 22 日", "上漲", "3,412 億元", "週一", "穩定幣供給"],
     ["zh-hans", "8 月 22 日", "上涨", "3,412 亿元", "周一", "稳定币供给"],
     [

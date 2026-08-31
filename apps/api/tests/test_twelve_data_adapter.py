@@ -314,6 +314,50 @@ async def test_daily_bars_accept_provider_crypto_shape_without_volume_or_timezon
     assert result.items[0].close == Decimal("2")
 
 
+async def test_daily_bars_enforce_expected_provider_asset_type() -> None:
+    payload = {
+        "meta": {
+            "symbol": "XBR/USD",
+            "interval": "1day",
+            "currency_quote": "US Dollar",
+            "type": "Energy Resource",
+        },
+        "values": [
+            {
+                "datetime": "2026-08-29",
+                "open": "1",
+                "high": "2",
+                "low": "1",
+                "close": "2",
+            }
+        ],
+        "status": "ok",
+    }
+    adapter = TwelveDataAdapter(
+        transport(
+            httpx.MockTransport(lambda request: httpx.Response(200, json=payload, request=request))
+        )
+    )
+
+    accepted = await adapter.get_daily_bars(
+        market="global_macro_bonds",
+        symbol="XBR/USD",
+        expected_currency="USD",
+        expected_asset_type="Energy Resource",
+        outputsize=1,
+    )
+    assert accepted.items[0].symbol == "XBR/USD"
+
+    with pytest.raises(DataSourceContractError, match="asset type"):
+        await adapter.get_daily_bars(
+            market="global_macro_bonds",
+            symbol="XBR/USD",
+            expected_currency="USD",
+            expected_asset_type="Precious Metal",
+            outputsize=1,
+        )
+
+
 @pytest.mark.parametrize("currency_quote", [None, "Euro"])
 async def test_daily_bars_reject_quote_currency_drift(currency_quote: object) -> None:
     payload = {

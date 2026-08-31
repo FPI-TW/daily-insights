@@ -61,8 +61,8 @@ Manifest 一旦發布，runtime 不得因每日資料情況增加或刪除 block
 
 首輪 probe 依現有簡版 UI 評估下列候選能力：
 
-- 宏觀／債券：商品快照；美債期限與殖利率曲線只有在 exact bond symbols 與全部必要
-  期限通過時才可整張納入。
+- 宏觀：商品快照與商品日線標準化表現；美債期限與殖利率曲線只有在 exact bond
+  symbols 與全部必要期限通過時才可整張納入。
 - 加密貨幣：BTC、ETH、SOL、XRP、ADA 報價、期間變動與 Base-100 表現。
 - 美股：exact 主要指數；US market movers 可定義為固定數量的當日漲幅與跌幅排行。
 
@@ -86,6 +86,16 @@ request ID 是否存在等 sanitized metadata。Twelve Data 本次未回傳 requ
   adapter。日線具有 `datetime/open/high/low/close`，不供 `volume`；crypto 日線日期
   依 provider time-series contract 採 UTC。五個 symbol 的 `currency_quote` 均為
   provider label `US Dollar`，adapter 會對照 manifest 的 `USD` unit 並拒絕缺值或漂移。
+- `/time_series`：`XBR/USD` 與 `XAU/USD` 以 `interval=1day`、`order=ASC`、
+  `outputsize=500` 各自通過歷史探測；provider metadata asset type 分別為
+  `Energy Resource` 與 `Precious Metal`，quote currency 均為 `US Dollar`。兩個
+  date-only 日線以 provider calendar date 對齊，可取得至少 30 個共同完成日期，故
+  納入獨立的 Brent／Gold Base-100 series dataset。此 date-only 合約沒有證明 UTC 或
+  exchange timezone，runtime 不作此類聲稱。
+- Treasury 候選 `US3M`、`US5Y`、`US10Y`、`US30Y` 不通過 exact history probe；只有
+  `US2Y` 可用，不能形成完整曲線，因此不納入 Treasury／bond curve。`HG1` 的
+  `/time_series` metadata 識別為 FSX 的 EUR Common Stock，不符合商品歷史合約，故不
+  納入歷史 series；既有 `/quote` 商品快照 contract 不變。
 - `/market_movers/stocks`：`country=USA`、`outputsize=2` 的 `gainers` 與 `losers`
   各 100 credits，兩方向均回傳 2 筆並通過 adapter。`datetime` 是無 offset 的美股
   market-local datetime，本版只取其 market-local calendar date 作 `source_as_of`。

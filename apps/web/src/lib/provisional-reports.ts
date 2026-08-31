@@ -112,39 +112,29 @@ const reports: Record<MarketCode, ProvisionalReport> = {
           change: value("-0.2%"),
         },
       ]),
-      table(
-        "reportBlockMacroRates",
-        ["reportColumnInstrument", "reportColumnLevel", "reportColumnChange"],
-        [
-          [value("US 2Y"), value("4.12%"), value("+2.1bp")],
-          [value("US 10Y"), value("3.87%"), value("+1.4bp")],
-          [value("DE 10Y"), value("2.31%"), value("-0.8bp")],
-          [value("JP 10Y"), value("1.06%"), value("+0.4bp")],
-        ]
-      ),
-      series("reportBlockTreasuryCurve", [
-        { label: value("2Y"), value: 4.12 },
-        { label: value("5Y"), value: 3.94 },
-        { label: value("10Y"), value: 3.87 },
-        { label: value("30Y"), value: 4.11 },
-      ]),
-      table(
-        "reportBlockCredit",
-        ["reportColumnInstrument", "reportColumnLevel", "reportColumnChange"],
-        [
-          [
-            text("reportValueInvestmentGradeSpread"),
-            text("reportValue92BasisPoints"),
-            text("reportValueDown1BasisPoint"),
-          ],
-          [
-            text("reportValueHighYieldSpread"),
-            text("reportValue334BasisPoints"),
-            text("reportValueUp4BasisPoints"),
-          ],
-          [value("EMBI"), value("286bp"), value("+3bp")],
-        ]
-      ),
+      {
+        kind: "series",
+        status: "ok",
+        titleKey: "reportBlockMacroCommodityNormalizedPerformance",
+        series: [
+          {
+            id: "brent",
+            label: value("Brent"),
+            points: [
+              { label: value("D1"), value: 100 },
+              { label: value("D2"), value: 101.2 },
+            ],
+          },
+          {
+            id: "gold",
+            label: value("Gold"),
+            points: [
+              { label: value("D1"), value: 100 },
+              { label: value("D2"), value: 100.5 },
+            ],
+          },
+        ],
+      },
     ],
   },
   crypto: {

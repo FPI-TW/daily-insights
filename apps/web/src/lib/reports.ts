@@ -34,6 +34,8 @@ const literal = (value: string | number): ReportValue => ({
 })
 const blockTitleKeys: Record<string, string> = {
   "macro.commodities": "reportBlockMacroSnapshot",
+  "macro.commodity_normalized_performance":
+    "reportBlockMacroCommodityNormalizedPerformance",
   "crypto.overview": "reportBlockCryptoOverview",
   "crypto.normalized_performance": "reportBlockNormalizedPerformance",
   "us.market_movers": "reportBlockUsLeaders",

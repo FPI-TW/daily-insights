@@ -169,17 +169,17 @@ const resources: Resource = {
       reportMarket_tw_equity: "台灣股票",
       reportMarket_tw_index_derivatives: "台指衍生品",
       reportMarketDescription_global_macro_bonds:
-        "商品、殖利率曲線與信用市場。",
+        "商品快照與布蘭特原油、黃金標準化表現。",
       reportMarketDescription_crypto: "主要加密資產概況與標準化表現。",
       reportMarketDescription_us_equity: "美股十一大類股相對表現。",
       reportMarketDescription_tw_equity: "台股指數、廣度、類股與技術訊號。",
       reportMarketDescription_tw_index_derivatives:
         "TX、MTX、TMF 報價與歷史部位百分位。",
       reportBlockCommodities: "商品",
-      reportBlockTreasuryCurve: "美國公債殖利率曲線",
-      reportBlockCredit: "信用市場",
       reportBlockCryptoOverview: "加密資產概況",
       reportBlockNormalizedPerformance: "標準化表現",
+      reportBlockMacroCommodityNormalizedPerformance:
+        "布蘭特原油與黃金標準化表現",
       reportBlockUsSectors: "美股十一大類股",
       reportBlockTaiwanIndex: "台灣加權指數快照",
       reportBlockBreadth: "市場廣度分布",
@@ -257,13 +257,12 @@ const resources: Resource = {
       reportOverviewStrip:
         "三個市場依固定晨報順序更新；請留意各卡片的資料覆蓋狀態。",
       reportSummary_global_macro_bonds:
-        "殖利率曲線維持倒掛，信用利差變動有限。",
+        "布蘭特原油與黃金的商品快照及標準化表現。",
       reportSummary_crypto: "主流幣走高，ETF 資金流與穩定幣供給仍有缺漏。",
       reportSummary_us_equity: "科技與能源領漲，市場廣度轉佳。",
       reportSummary_tw_equity: "電子權值帶動指數，技術訊號部分等待更新。",
       reportSummary_tw_index_derivatives: "期權與部位資料正等待來源補齊。",
       reportBlockMacroSnapshot: "宏觀快照",
-      reportBlockMacroRates: "主要利率",
       reportBlockCryptoSnapshot: "加密市場快照",
       reportBlockCryptoFlows: "資金流與穩定幣",
       reportBlockUsIndices: "美股指數快照",
@@ -514,17 +513,17 @@ const resources: Resource = {
       reportMarket_tw_equity: "台湾股票",
       reportMarket_tw_index_derivatives: "台指衍生品",
       reportMarketDescription_global_macro_bonds:
-        "商品、收益率曲线与信用市场。",
+        "商品快照与布兰特原油、黄金标准化表现。",
       reportMarketDescription_crypto: "主要加密资产概况与标准化表现。",
       reportMarketDescription_us_equity: "美股十一大类股相对表现。",
       reportMarketDescription_tw_equity: "台股指数、广度、类股与技术信号。",
       reportMarketDescription_tw_index_derivatives:
         "TX、MTX、TMF 报价与历史仓位百分位。",
       reportBlockCommodities: "商品",
-      reportBlockTreasuryCurve: "美国国债收益率曲线",
-      reportBlockCredit: "信用市场",
       reportBlockCryptoOverview: "加密资产概况",
       reportBlockNormalizedPerformance: "标准化表现",
+      reportBlockMacroCommodityNormalizedPerformance:
+        "布兰特原油与黄金标准化表现",
       reportBlockUsSectors: "美股十一大类股",
       reportBlockTaiwanIndex: "台湾加权指数快照",
       reportBlockBreadth: "市场广度分布",
@@ -602,13 +601,12 @@ const resources: Resource = {
       reportOverviewStrip:
         "三个市场依固定晨报顺序更新；请留意各卡片的数据覆盖状态。",
       reportSummary_global_macro_bonds:
-        "收益率曲线维持倒挂，信用利差变化有限。",
+        "布兰特原油与黄金的商品快照及标准化表现。",
       reportSummary_crypto: "主流币走高，ETF 资金流与稳定币供给仍有缺失。",
       reportSummary_us_equity: "科技与能源领涨，市场广度改善。",
       reportSummary_tw_equity: "电子权重带动指数，技术信号部分等待更新。",
       reportSummary_tw_index_derivatives: "期权与仓位数据正等待来源补齐。",
       reportBlockMacroSnapshot: "宏观快照",
-      reportBlockMacroRates: "主要利率",
       reportBlockCryptoSnapshot: "加密市场快照",
       reportBlockCryptoFlows: "资金流与稳定币",
       reportBlockUsIndices: "美股指数快照",
@@ -870,7 +868,7 @@ const resources: Resource = {
       reportMarket_tw_equity: "Taiwan equities",
       reportMarket_tw_index_derivatives: "Taiwan index derivatives",
       reportMarketDescription_global_macro_bonds:
-        "Commodities, Treasury curve, and credit markets.",
+        "Commodity snapshots and normalized Brent and gold performance.",
       reportMarketDescription_crypto:
         "Major crypto overview and normalized performance.",
       reportMarketDescription_us_equity:
@@ -880,10 +878,10 @@ const resources: Resource = {
       reportMarketDescription_tw_index_derivatives:
         "TX, MTX, TMF quotes and historical positioning percentiles.",
       reportBlockCommodities: "Commodities",
-      reportBlockTreasuryCurve: "Treasury yield curve",
-      reportBlockCredit: "Credit market",
       reportBlockCryptoOverview: "Crypto overview",
       reportBlockNormalizedPerformance: "Normalized performance",
+      reportBlockMacroCommodityNormalizedPerformance:
+        "Brent and gold normalized performance",
       reportBlockUsSectors: "US 11-sector performance",
       reportBlockTaiwanIndex: "Taiwan index snapshot",
       reportBlockBreadth: "Breadth distribution",
@@ -962,7 +960,7 @@ const resources: Resource = {
       reportOverviewStrip:
         "The three markets update in a fixed morning-report order. Review each card's coverage state.",
       reportSummary_global_macro_bonds:
-        "The curve remains inverted while credit spreads move only modestly.",
+        "Commodity snapshots and normalized Brent and gold performance.",
       reportSummary_crypto:
         "Major tokens advance; ETF flows and stablecoin supply remain partially covered.",
       reportSummary_us_equity:
@@ -972,7 +970,6 @@ const resources: Resource = {
       reportSummary_tw_index_derivatives:
         "Options and positioning data are still awaiting a source refresh.",
       reportBlockMacroSnapshot: "Macro snapshot",
-      reportBlockMacroRates: "Key rates",
       reportBlockCryptoSnapshot: "Crypto market snapshot",
       reportBlockCryptoFlows: "Flows & stablecoins",
       reportBlockUsIndices: "US index snapshot",
