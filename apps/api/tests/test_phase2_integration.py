@@ -55,6 +55,7 @@ class Phase2Harness:
     settings: Settings
     organization_id: uuid.UUID
     member_id: uuid.UUID
+    unassigned_member_id: uuid.UUID
 
 
 async def ready() -> bool:
@@ -85,6 +86,8 @@ async def phase2_harness() -> AsyncIterator[Phase2Harness]:
     organization_id = uuid.uuid4()
     member_id = uuid.uuid4()
     admin_id = uuid.uuid4()
+    asset_manager_id = uuid.uuid4()
+    unassigned_member_id = uuid.uuid4()
     assert settings.password_pepper is not None
     pepper = settings.password_pepper.get_secret_value()
     async with session_factory.begin() as database:
@@ -127,6 +130,24 @@ async def phase2_harness() -> AsyncIterator[Phase2Harness]:
                     system_role=SystemRole.ORG_MEMBER,
                     status=UserStatus.ACTIVE,
                 ),
+                User(
+                    id=asset_manager_id,
+                    email="phase2-asset-manager@example.com",
+                    display_name="Phase 2 Asset Manager",
+                    password_hash=hash_password("AssetManagerPassword123!", pepper),
+                    must_change_password=False,
+                    system_role=SystemRole.ASSET_MANAGER,
+                    status=UserStatus.ACTIVE,
+                ),
+                User(
+                    id=unassigned_member_id,
+                    email="phase2-unassigned-member@example.com",
+                    display_name="Phase 2 Unassigned Member",
+                    password_hash=hash_password("UnassignedPassword123!", pepper),
+                    must_change_password=False,
+                    system_role=SystemRole.ORG_MEMBER,
+                    status=UserStatus.ACTIVE,
+                ),
             ]
         )
         await database.flush()
@@ -134,6 +155,13 @@ async def phase2_harness() -> AsyncIterator[Phase2Harness]:
             Membership(
                 organization_id=organization_id,
                 user_id=member_id,
+                joined_at=datetime.now(UTC),
+            )
+        )
+        database.add(
+            Membership(
+                organization_id=organization_id,
+                user_id=unassigned_member_id,
                 joined_at=datetime.now(UTC),
             )
         )
@@ -168,6 +196,7 @@ async def phase2_harness() -> AsyncIterator[Phase2Harness]:
             settings=settings,
             organization_id=organization_id,
             member_id=member_id,
+            unassigned_member_id=unassigned_member_id,
         )
 
     async with engine.begin() as connection:
@@ -614,3 +643,87 @@ async def test_report_api_distinguishes_missing_publication_from_hidden_market(
     invalid = await phase2_harness.client.get("/api/reports/not-a-market/latest")
     assert invalid.status_code == 404
     assert invalid.json()["detail"] == "report not found"
+
+
+async def test_report_api_allows_internal_preview_without_tenant_membership(
+    phase2_harness: Phase2Harness,
+) -> None:
+    today = date.today()
+    await _publish(
+        phase2_harness.session_factory,
+        market_code="us_equity",
+        edition_date=today,
+        source_as_of=today,
+    )
+    await _publish(
+        phase2_harness.session_factory,
+        market_code="crypto",
+        edition_date=today,
+        source_as_of=today,
+    )
+
+    member_list = await phase2_harness.client.get("/api/reports")
+    assert member_list.status_code == 200, member_list.text
+    assert [report["market_code"] for report in member_list.json()] == ["us_equity"]
+    member_hidden = await phase2_harness.client.get("/api/reports/crypto/latest")
+    assert member_hidden.status_code == 404
+    member_invalid = await phase2_harness.client.get("/api/reports/not-a-market/latest")
+    assert member_invalid.status_code == 404
+
+    for email, password in (
+        ("phase2-admin@example.com", "AdminPassword123!"),
+        ("phase2-asset-manager@example.com", "AssetManagerPassword123!"),
+    ):
+        login = await phase2_harness.client.post(
+            "/api/auth/login",
+            json={"email": email, "password": password},
+        )
+        assert login.status_code == 200, login.text
+        internal_list = await phase2_harness.client.get("/api/reports")
+        assert internal_list.status_code == 200, internal_list.text
+        assert [report["market_code"] for report in internal_list.json()] == [
+            "crypto",
+            "us_equity",
+        ]
+        internal_detail = await phase2_harness.client.get("/api/reports/crypto/latest")
+        assert internal_detail.status_code == 200, internal_detail.text
+        internal_invalid = await phase2_harness.client.get("/api/reports/not-a-market/latest")
+        assert internal_invalid.status_code == 404
+        internal_taiwan = await phase2_harness.client.get("/api/reports/tw_equity/latest")
+        assert internal_taiwan.status_code == 404
+
+    async with phase2_harness.session_factory.begin() as database:
+        admin = await database.scalar(select(User).where(User.email == "phase2-admin@example.com"))
+        assert admin is not None
+        admin.must_change_password = True
+    login = await phase2_harness.client.post(
+        "/api/auth/login",
+        json={"email": "phase2-admin@example.com", "password": "AdminPassword123!"},
+    )
+    assert login.status_code == 200, login.text
+    password_change_required = await phase2_harness.client.get("/api/reports")
+    assert password_change_required.status_code == 403
+    assert password_change_required.headers["X-Password-Change-Required"] == "true"
+
+    login = await phase2_harness.client.post(
+        "/api/auth/login",
+        json={
+            "email": "phase2-unassigned-member@example.com",
+            "password": "UnassignedPassword123!",
+        },
+    )
+    assert login.status_code == 200, login.text
+    async with phase2_harness.session_factory.begin() as database:
+        membership = await database.scalar(
+            select(Membership).where(
+                Membership.user_id == phase2_harness.unassigned_member_id,
+                Membership.removed_at.is_(None),
+            )
+        )
+        assert membership is not None
+        membership.removed_at = datetime.now(UTC)
+    assert (await phase2_harness.client.get("/api/reports")).status_code == 403
+    assert (await phase2_harness.client.get("/api/reports/us_equity/latest")).status_code == 403
+
+    phase2_harness.client.cookies.clear()
+    assert (await phase2_harness.client.get("/api/reports")).status_code == 401
