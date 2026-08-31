@@ -47,6 +47,7 @@ make help          # 顯示全部指令
 make dev-web       # 僅啟動 TanStack Start，後端位址由 API_INTERNAL_URL 指定
 make dev-api       # 僅啟動 FastAPI
 make migrate       # 升級 API 資料庫 schema
+make generate-morning-reports # 本地以 Twelve Data 單次產生三市場晨報
 make test-db       # 以隔離 PostgreSQL 執行完整測試
 make check         # 執行格式、lint、型別、測試與建置
 make stop          # 停止 Compose 開發環境
@@ -62,6 +63,11 @@ make stop          # 停止 Compose 開發環境
 ```bash
 make bootstrap-admin EMAIL=admin@example.com NAME="Admin"
 ```
+
+本地需要驗證正式晨報資料時，可執行 `make generate-morning-reports`；也可傳入
+`EDITION_DATE=YYYY-MM-DD` 指定台北報告日期。此指令只允許 development／test
+環境的一次性執行，會使用 Twelve Data 正式 credential 並消耗 API credits；不會
+啟用背景排程，也不會放寬 staging／production 的 manifest 核准與 hash 檢查。
 
 指令只會顯示一次隨機臨時密碼；管理員登入後必須立即更改。
 

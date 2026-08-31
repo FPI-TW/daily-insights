@@ -93,8 +93,8 @@ class Settings(BaseSettings):
                 raise ValueError("twelve_data_base_url must be an absolute HTTPS URL")
             if (
                 self.twelve_data_api_key is None
-                or not self.twelve_data_api_key.get_secret_value()
-                or _is_placeholder(self.twelve_data_api_key.get_secret_value())
+                or not self.twelve_data_api_key.get_secret_value().strip()
+                or is_placeholder_value(self.twelve_data_api_key.get_secret_value())
             ):
                 raise ValueError("twelve_data_api_key is required and cannot be a placeholder")
             from daily_insights_api.modules.reports.launch_manifest import (
@@ -127,13 +127,13 @@ class Settings(BaseSettings):
         if endpoint.scheme != "https" or not endpoint.netloc:
             raise ValueError("r2_endpoint_url must be an absolute HTTPS URL")
         for name, value in required_r2_values.items():
-            if value is not None and _is_placeholder(value):
+            if value is not None and is_placeholder_value(value):
                 raise ValueError(f"{name} cannot contain a placeholder")
         if not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", self.r2_bucket_name or ""):
             raise ValueError("r2_bucket_name must be a valid 3-63 character bucket name")
 
 
-def _is_placeholder(value: str) -> bool:
+def is_placeholder_value(value: str) -> bool:
     lowered = value.lower()
     return any(marker in lowered for marker in PLACEHOLDER_MARKERS)
 

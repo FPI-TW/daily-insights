@@ -14,6 +14,7 @@ def production_settings(**overrides: object) -> dict[str, object]:
         "password_pepper": SecretStr("p" * 32),
         "findb_base_url": "https://findb.example.invalid",
         "findb_api_key": SecretStr("findb-production-key"),
+        "morning_reports_enabled": False,
         "r2_endpoint_url": "https://account.r2.cloudflarestorage.com",
         "r2_bucket_name": "daily-insights-production",
         "r2_access_key_id": SecretStr("r2-access-key"),
@@ -72,12 +73,13 @@ def test_morning_reports_fail_closed_until_manifest_is_approved() -> None:
         )
 
 
-def test_enabled_morning_reports_reject_an_empty_provider_key() -> None:
+@pytest.mark.parametrize("key", ["", "   \t"])
+def test_enabled_morning_reports_rejects_an_unusable_provider_key(key: str) -> None:
     with pytest.raises(ValidationError, match="twelve_data_api_key is required"):
         Settings.model_validate(
             production_settings(
                 morning_reports_enabled=True,
-                twelve_data_api_key=SecretStr(""),
+                twelve_data_api_key=SecretStr(key),
             )
         )
 

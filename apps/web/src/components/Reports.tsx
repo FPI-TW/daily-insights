@@ -488,3 +488,33 @@ export function ReportErrorScreen({ error }: { error: Error }) {
     </main>
   )
 }
+
+export function ReportNotGeneratedScreen({
+  locale,
+  marketCode,
+}: {
+  locale: Locale
+  marketCode: (typeof launchMarketCodes)[number]
+}) {
+  const { t } = useTranslation()
+  return (
+    <main className="page-shell">
+      <PageHeading
+        title={t(`reportMarket_${marketCode}`)}
+        description={t("reportsDescription")}
+        eyebrow={t("reportsEyebrow")}
+      />
+      <ReportMarketNav locale={locale} activeMarket={marketCode} />
+      <section
+        className="surface-panel border-market-caution/35 p-10 text-center"
+        role="status"
+        aria-live="polite"
+      >
+        <h2 className="mt-0 text-xl">{t("reportNotGeneratedTitle")}</h2>
+        <p className="mx-auto mb-0 max-w-xl text-sea-ink-soft">
+          {t("reportNotGeneratedDescription")}
+        </p>
+      </section>
+    </main>
+  )
+}

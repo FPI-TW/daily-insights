@@ -12,6 +12,7 @@ import {
   ReportErrorScreen,
   ReportList,
   ReportLoadingScreen,
+  ReportNotGeneratedScreen,
 } from "./Reports"
 import { LocaleSwitcher } from "./LocaleSwitcher"
 import { createI18n } from "#/lib/i18n"
@@ -293,6 +294,24 @@ describe("three-market report presentation", () => {
     fireEvent.click(screen.getByRole("button", { name: "重試" }))
     expect(invalidate).toHaveBeenCalledOnce()
   })
+
+  it.each([
+    ["zh-hant", "晨報尚未產生"],
+    ["zh-hans", "晨报尚未生成"],
+    ["en", "Morning report not generated yet"],
+  ] as const)(
+    "presents a dedicated non-error state in %s when publication is absent",
+    async (locale, title) => {
+      await renderLocalized(
+        <ReportNotGeneratedScreen locale={locale} marketCode="us_equity" />,
+        locale
+      )
+
+      expect(screen.getByRole("status")).toHaveTextContent(title)
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+      expect(screen.getByRole("navigation")).toBeVisible()
+    }
+  )
 
   it("keeps the current market code in typed locale-switcher links", async () => {
     await renderLocalized(

@@ -3,6 +3,7 @@ import {
   ReportDetail,
   ReportErrorScreen,
   ReportLoadingScreen,
+  ReportNotGeneratedScreen,
 } from "#/components/Reports"
 import { getReportDetail } from "#/lib/reports"
 
@@ -10,11 +11,11 @@ export const Route = createFileRoute(
   "/$locale/_authenticated/_customer/reports/$marketCode"
 )({
   loader: async ({ params, context }) => {
-    const report = await getReportDetail({
+    const result = await getReportDetail({
       data: { marketCode: params.marketCode, locale: context.locale },
     })
-    if (!report) throw notFound()
-    return report
+    if (result.kind === "not-found") throw notFound()
+    return result
   },
   pendingComponent: ReportLoadingScreen,
   pendingMs: 0,
@@ -22,7 +23,15 @@ export const Route = createFileRoute(
   component: ReportPage,
 })
 function ReportPage() {
-  const report = Route.useLoaderData()
+  const result = Route.useLoaderData()
   const { locale } = Route.useRouteContext()
-  return <ReportDetail locale={locale} report={report} />
+  if (result.kind === "not-generated") {
+    return (
+      <ReportNotGeneratedScreen
+        locale={locale}
+        marketCode={result.marketCode}
+      />
+    )
+  }
+  return <ReportDetail locale={locale} report={result.report} />
 }

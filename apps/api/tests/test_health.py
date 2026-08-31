@@ -49,6 +49,7 @@ async def test_production_readiness_reports_initialized_external_boundaries() ->
         session_secret=SecretStr("s" * 32),
         password_pepper=SecretStr("p" * 32),
         findb_api_key=SecretStr("findb-production-key"),
+        morning_reports_enabled=False,
         r2_endpoint_url="https://account.r2.cloudflarestorage.com",
         r2_bucket_name="daily-insights-production",
         r2_access_key_id=SecretStr("r2-access-key"),

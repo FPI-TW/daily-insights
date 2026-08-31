@@ -4,6 +4,7 @@ import json
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
+from typing import Literal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -29,8 +30,10 @@ from daily_insights_api.modules.operations.api import (
     start_source_run,
 )
 from daily_insights_api.modules.reports.contracts import (
+    BlockStatus,
     ChartPoint,
     ChartSeries,
+    Locale,
     LocalizedElementText,
     MetricBlock,
     MetricItem,
@@ -38,6 +41,7 @@ from daily_insights_api.modules.reports.contracts import (
     PublicationBundle,
     PublicationContent,
     ReportBlock,
+    ReportStatus,
     SeriesBlock,
     TableBlock,
     TableCell,
@@ -69,6 +73,25 @@ _TITLES = {
 }
 
 MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v2"
+ExecutionMode = Literal["scheduled", "one_shot"]
+
+
+def authorize_morning_report_execution(
+    settings: Settings,
+    *,
+    execution_mode: ExecutionMode,
+    allow_draft_local: bool,
+) -> None:
+    if allow_draft_local:
+        if settings.environment not in {"development", "test"}:
+            raise RuntimeError("draft manifest execution is restricted to local environments")
+        if execution_mode != "one_shot":
+            raise RuntimeError("draft manifest execution requires one-shot mode")
+        return
+    if ACTIVE_LAUNCH_MANIFEST.status != "approved":
+        raise RuntimeError("credentialed probe approval is required before publication")
+    if settings.twelve_data_manifest_approved_hash != ACTIVE_LAUNCH_MANIFEST.sha256:
+        raise RuntimeError("runtime approval hash does not match the active manifest")
 
 
 async def run_morning_report_edition(
@@ -76,11 +99,15 @@ async def run_morning_report_edition(
     session_factory: async_sessionmaker[AsyncSession],
     adapter: TwelveDataAdapter,
     edition_date: date,
+    *,
+    execution_mode: ExecutionMode = "scheduled",
+    allow_draft_local: bool = False,
 ) -> None:
-    if ACTIVE_LAUNCH_MANIFEST.status != "approved":
-        raise RuntimeError("credentialed probe approval is required before publication")
-    if settings.twelve_data_manifest_approved_hash != ACTIVE_LAUNCH_MANIFEST.sha256:
-        raise RuntimeError("runtime approval hash does not match the active manifest")
+    authorize_morning_report_execution(
+        settings,
+        execution_mode=execution_mode,
+        allow_draft_local=allow_draft_local,
+    )
     await asyncio.gather(
         *(
             _run_market(session_factory, adapter, market.market_code, edition_date)
@@ -478,18 +505,39 @@ def _error_blocks(market_code: LaunchMarketCode) -> tuple[ReportBlock, ...]:
     )
     blocks: list[ReportBlock] = []
     for block in market.blocks:
-        common = {
-            "id": block.id,
-            "status": "error",
-            "source_as_of": None,
-            "caveat": "provider request failed",
-        }
+        status: BlockStatus = "error"
         if block.kind == "metric":
-            blocks.append(MetricBlock(**common, metrics=()))
+            blocks.append(
+                MetricBlock(
+                    id=block.id,
+                    status=status,
+                    source_as_of=None,
+                    caveat="provider request failed",
+                    metrics=(),
+                )
+            )
         elif block.kind == "table":
-            blocks.append(TableBlock(**common, columns=(), rows=()))
+            blocks.append(
+                TableBlock(
+                    id=block.id,
+                    status=status,
+                    source_as_of=None,
+                    caveat="provider request failed",
+                    columns=(),
+                    rows=(),
+                )
+            )
         else:
-            blocks.append(SeriesBlock(**common, unit_code="index", series=()))
+            blocks.append(
+                SeriesBlock(
+                    id=block.id,
+                    status=status,
+                    source_as_of=None,
+                    caveat="provider request failed",
+                    unit_code="index",
+                    series=(),
+                )
+            )
     return tuple(blocks)
 
 
@@ -498,7 +546,7 @@ def _bundle(market_code: LaunchMarketCode, blocks: tuple[ReportBlock, ...]) -> P
     ok_dates = [
         block.source_as_of for block in blocks if block.status == "ok" and block.source_as_of
     ]
-    status = (
+    status: ReportStatus = (
         "complete"
         if all(block.status == "ok" for block in blocks)
         else "partial"
@@ -513,8 +561,9 @@ def _bundle(market_code: LaunchMarketCode, blocks: tuple[ReportBlock, ...]) -> P
         caveat=None if status == "complete" else "One or more provider datasets were unavailable.",
         blocks=blocks,
     )
-    presentations = {}
-    for locale in ("zh-hant", "zh-hans", "en"):
+    presentations: dict[Locale, PresentationContract] = {}
+    locales: tuple[Locale, ...] = ("zh-hant", "zh-hans", "en")
+    for locale in locales:
         title = _TITLES[locale][market_code]
         presentations[locale] = PresentationContract(
             schema_version="three-market.v1",

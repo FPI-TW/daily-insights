@@ -130,5 +130,11 @@ async def get_latest_report(
         market_code=market_code,
     )
     if result is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "report not found")
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            {
+                "code": "report_not_generated",
+                "message": "report has not been generated",
+            },
+        )
     return _detail_response(result, locale)

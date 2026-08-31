@@ -151,6 +151,9 @@ const resources: Resource = {
       reportLoadingAnnouncement: "正在載入市場晨間報告。",
       reportsEmptyTitle: "目前沒有晨間報告",
       reportsEmptyDescription: "請稍後重新整理，以取得最新的市場晨間報告。",
+      reportNotGeneratedTitle: "晨報尚未產生",
+      reportNotGeneratedDescription:
+        "此市場目前尚無正式晨報；產報完成後即可在此查看。",
       reportsErrorTitle: "無法載入晨間報告",
       reportsErrorDescription: "請重試載入；若問題持續，請稍後再試。",
       reportCaveatMock:
@@ -493,6 +496,9 @@ const resources: Resource = {
       reportLoadingAnnouncement: "正在加载市场晨间报告。",
       reportsEmptyTitle: "目前没有晨间报告",
       reportsEmptyDescription: "请稍后刷新，以取得最新的市场晨间报告。",
+      reportNotGeneratedTitle: "晨报尚未生成",
+      reportNotGeneratedDescription:
+        "此市场目前尚无正式晨报；生成完成后即可在此查看。",
       reportsErrorTitle: "无法加载晨间报告",
       reportsErrorDescription: "请重试加载；若问题持续，请稍后再试。",
       reportCaveatMock:
@@ -845,6 +851,9 @@ const resources: Resource = {
       reportsEmptyTitle: "No morning reports yet",
       reportsEmptyDescription:
         "Refresh shortly to check for the latest market morning reports.",
+      reportNotGeneratedTitle: "Morning report not generated yet",
+      reportNotGeneratedDescription:
+        "No formal morning report is available for this market yet. It will appear here after generation completes.",
       reportsErrorTitle: "Unable to load morning reports",
       reportsErrorDescription:
         "Retry loading the reports. If the issue continues, try again shortly.",

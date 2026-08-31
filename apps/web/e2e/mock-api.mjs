@@ -34,6 +34,7 @@ function reset(overrides = {}) {
     episodeVersion: 2,
     audioVersion: 1,
     podcastEpisodes: "single",
+    reports: "normal",
     requests: [],
     ...overrides,
   }
@@ -348,6 +349,15 @@ const server = createServer(async (request, response) => {
     const marketCode = reportMatch[1]
     if (!reportMarkets.includes(marketCode)) {
       sendJson(response, 404, { detail: "report not found" })
+      return
+    }
+    if (state.reports === "not_generated") {
+      sendJson(response, 404, {
+        detail: {
+          code: "report_not_generated",
+          message: "report has not been generated",
+        },
+      })
       return
     }
     const locale = url.searchParams.get("locale") || "zh-hant"

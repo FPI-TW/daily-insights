@@ -52,3 +52,21 @@ test("unavailable report preserves gap and block states", async ({
   await expect(page.getByText("Data missing", { exact: true })).toHaveCount(3)
   await expect(page.getByText("Data error", { exact: true })).toHaveCount(1)
 })
+
+test("visible market without a publication shows a non-error state", async ({
+  context,
+  page,
+  request,
+}) => {
+  await resetMockApi(request, { reports: "not_generated" })
+  await authenticateAs(context, "org_member")
+  await page.goto("/en/reports/us_equity")
+
+  await expect(
+    page.getByRole("heading", { name: "Morning report not generated yet" })
+  ).toBeVisible()
+  await expect(page.getByRole("alert")).toHaveCount(0)
+  await expect(
+    page.getByRole("navigation", { name: "Market category navigation" })
+  ).toBeVisible()
+})

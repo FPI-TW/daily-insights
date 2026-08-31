@@ -595,3 +595,22 @@ async def test_report_api_filters_hidden_market_localizes_and_marks_stale(
         params={"locale": "fr"},
     )
     assert unsupported_locale.status_code == 422
+
+
+async def test_report_api_distinguishes_missing_publication_from_hidden_market(
+    phase2_harness: Phase2Harness,
+) -> None:
+    missing = await phase2_harness.client.get("/api/reports/us_equity/latest")
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == {
+        "code": "report_not_generated",
+        "message": "report has not been generated",
+    }
+
+    hidden = await phase2_harness.client.get("/api/reports/crypto/latest")
+    assert hidden.status_code == 404
+    assert hidden.json()["detail"] == "report not found"
+
+    invalid = await phase2_harness.client.get("/api/reports/not-a-market/latest")
+    assert invalid.status_code == 404
+    assert invalid.json()["detail"] == "report not found"

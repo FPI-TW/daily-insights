@@ -4,15 +4,19 @@ from datetime import date, datetime
 
 from anyio import Path
 
-from daily_insights_api.core.config import get_settings
+from daily_insights_api import models as registered_models  # noqa: F401
+from daily_insights_api.core.config import get_settings, is_placeholder_value
 from daily_insights_api.core.database import create_engine, create_session_factory
 from daily_insights_api.modules.data_sources.api import (
     RetryPolicy,
     TwelveDataAdapter,
     TwelveDataTransport,
 )
-from daily_insights_api.modules.reports.launch_manifest import ACTIVE_LAUNCH_MANIFEST
-from daily_insights_api.modules.reports.morning_report import run_morning_report_edition
+from daily_insights_api.modules.reports.morning_report import (
+    ExecutionMode,
+    authorize_morning_report_execution,
+    run_morning_report_edition,
+)
 from daily_insights_api.modules.reports.scheduler import (
     TAIPEI,
     due_edition,
@@ -48,21 +52,35 @@ async def run_with_heartbeat(
 async def main() -> None:
     args = parse_args()
     settings = get_settings()
+    execution_mode: ExecutionMode = "one_shot" if args.once else "scheduled"
+    if args.allow_draft_local or settings.morning_reports_enabled:
+        try:
+            authorize_morning_report_execution(
+                settings,
+                execution_mode=execution_mode,
+                allow_draft_local=args.allow_draft_local,
+            )
+        except RuntimeError as error:
+            raise SystemExit(str(error)) from error
     heartbeat = Path("/tmp/morning-report-heartbeat")
     await heartbeat.touch()
-    if not settings.morning_reports_enabled:
+    if not settings.morning_reports_enabled and not args.allow_draft_local:
         await maintain_disabled_heartbeat(heartbeat)
-    if ACTIVE_LAUNCH_MANIFEST.status != "approved":
-        raise SystemExit("active manifest is draft; credentialed probe approval is required")
-    edition = args.edition_date or due_edition(datetime.now(TAIPEI))
+    now = datetime.now(TAIPEI)
+    edition = args.edition_date or (now.date() if args.allow_draft_local else due_edition(now))
     if args.once and edition is None:
         raise SystemExit("no edition is due yet; pass --edition-date for a manual run")
-    assert settings.twelve_data_api_key is not None
+    api_key = settings.twelve_data_api_key
+    if api_key is None:
+        raise SystemExit("Twelve Data API key is required for morning-report generation")
+    api_key_value = api_key.get_secret_value()
+    if not api_key_value.strip() or is_placeholder_value(api_key_value):
+        raise SystemExit("Twelve Data API key is required for morning-report generation")
     engine = create_engine(settings)
     session_factory = create_session_factory(engine)
     async with TwelveDataTransport(
         base_url=settings.twelve_data_base_url,
-        api_key=settings.twelve_data_api_key,
+        api_key=api_key,
         timeout_seconds=settings.twelve_data_timeout_seconds,
         retry_policy=RetryPolicy(max_attempts=settings.twelve_data_retry_attempts),
         max_concurrency=settings.twelve_data_max_concurrency,
@@ -76,6 +94,8 @@ async def main() -> None:
                     session_factory,
                     adapter,
                     target_date,
+                    execution_mode=execution_mode,
+                    allow_draft_local=args.allow_draft_local,
                 ),
                 run_date,
                 heartbeat,

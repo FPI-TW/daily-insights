@@ -25,6 +25,9 @@ const detailInputSchema = z.object({
   marketCode: z.string(),
   locale: localeSchema,
 })
+const reportNotGeneratedDetailSchema = z.object({
+  code: z.literal("report_not_generated"),
+})
 const literal = (value: string | number): ReportValue => ({
   kind: "literal",
   value,
@@ -138,9 +141,24 @@ export const getReportDetail = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     setResponseHeader("Cache-Control", "no-store")
     const preview = getTaiwanPreviewReport(data.marketCode)
-    if (preview) return preview
+    if (preview) return { kind: "report" as const, report: preview }
     const parsed = launchMarketCodeSchema.safeParse(data.marketCode)
-    if (!parsed.success) return null
+    if (!parsed.success) return { kind: "not-found" as const }
     const marketCode = parsed.data
-    return detail(await serverReportClient().latest(marketCode, data.locale))
+    try {
+      return {
+        kind: "report" as const,
+        report: detail(
+          await serverReportClient().latest(marketCode, data.locale)
+        ),
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        if (reportNotGeneratedDetailSchema.safeParse(error.detail).success) {
+          return { kind: "not-generated" as const, marketCode }
+        }
+        return { kind: "not-found" as const }
+      }
+      throw error
+    }
   })

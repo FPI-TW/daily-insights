@@ -813,6 +813,7 @@ async def test_production_login_cookie_is_secure(harness: Harness) -> None:
         session_secret=SecretStr("production-session-secret-value-123456789"),
         password_pepper=SecretStr(production_pepper),
         findb_api_key=SecretStr("production-findb-key"),
+        morning_reports_enabled=False,
         r2_endpoint_url="https://account.r2.cloudflarestorage.com",
         r2_bucket_name="daily-insights-test",
         r2_access_key_id=SecretStr("production-r2-access-key"),
