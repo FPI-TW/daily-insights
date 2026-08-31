@@ -5,11 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.modules.identity.api import AuthContext, require_password_changed
-from daily_insights_api.modules.markets.api import (
-    is_market_visible,
-    visible_market_codes,
-)
 from daily_insights_api.modules.operations.api import LastKnownGood, get_last_known_good
+from daily_insights_api.modules.reports.access import visible_report_market_codes
 from daily_insights_api.modules.reports.contracts import (
     Locale,
     PresentationContract,
@@ -90,10 +87,8 @@ async def list_latest_reports(
     locale: Locale = "zh-hant",
     report_key: ReportKey = "daily-market",
 ) -> list[ReportSummaryResponse]:
-    if context.organization_id is None:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "organization membership required")
     responses = []
-    visible = await visible_market_codes(database, context.organization_id)
+    visible = await visible_report_market_codes(database, context)
     for market_code in LAUNCH_MARKET_ORDER:
         if market_code not in visible:
             continue
@@ -117,11 +112,8 @@ async def get_latest_report(
     locale: Locale = "zh-hant",
     report_key: ReportKey = "daily-market",
 ) -> ReportDetailResponse:
-    if context.organization_id is None:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "organization membership required")
-    if market_code not in LAUNCH_MARKET_ORDER or not await is_market_visible(
-        database, context.organization_id, market_code
-    ):
+    visible = await visible_report_market_codes(database, context)
+    if market_code not in LAUNCH_MARKET_ORDER or market_code not in visible:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "report not found")
     result = await _latest(
         database,
