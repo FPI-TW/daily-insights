@@ -33,8 +33,10 @@ test.describe("Portal authentication and boundaries", () => {
   }) => {
     await signIn(page, "/en/login", customerCredentials)
 
-    await expect(page).toHaveURL("/en/podcasts")
-    await expect(page.getByRole("heading", { name: "Podcast" })).toBeVisible()
+    await expect(page).toHaveURL("/en/reports")
+    await expect(
+      page.getByRole("heading", { name: "Market morning reports" })
+    ).toBeVisible()
     await expect(page.locator('[data-surface="customer"]')).toBeVisible()
     const login = (await getMockApiState(request)).requests.find(
       item => item.path === "/api/auth/login"
@@ -83,9 +85,11 @@ test.describe("Portal authentication and boundaries", () => {
       [assetManagerCredentials, "asset_manager"],
     ] as const) {
       await signIn(page, "/en/login", credentials)
-      await expect(page).toHaveURL("/en/podcasts")
+      await expect(page).toHaveURL("/en/reports")
       await expect(page.locator('[data-surface="customer"]')).toBeVisible()
-      await expect(page.getByRole("heading", { name: "Podcast" })).toBeVisible()
+      await expect(
+        page.getByRole("heading", { name: "Market morning reports" })
+      ).toBeVisible()
 
       const login = [...(await getMockApiState(request)).requests]
         .reverse()
@@ -114,7 +118,7 @@ test.describe("Portal authentication and boundaries", () => {
     await expect(page).toHaveURL("/en/login")
     await expect(
       page.getByRole("heading", {
-        name: "Your market briefing, ready to listen",
+        name: "Your daily market reports and briefing",
       })
     ).toBeVisible()
 
@@ -141,7 +145,7 @@ test.describe("Portal authentication and boundaries", () => {
     await context.clearCookies()
     await authenticateAs(context, "org_member")
     await page.goto("/en/admin/audio")
-    await expect(page).toHaveURL("/en/podcasts")
+    await expect(page).toHaveURL("/en/reports")
     await expect(page.locator('[data-surface="customer"]')).toBeVisible()
     await expect(
       page.getByRole("heading", { name: "Audio management" })
@@ -366,7 +370,11 @@ test.describe("Customer inline Podcast experience", () => {
     request,
   }) => {
     await page.setViewportSize({ width: 390, height: 844 })
-    await page.goto("/en/podcasts")
+    await openHydrated(
+      page,
+      "/en/podcasts",
+      '[data-testid="podcast-player"] button'
+    )
 
     await expect(
       page.getByRole("heading", { name: "Market Morning Brief" })
@@ -490,6 +498,7 @@ test.describe("Customer account", () => {
       page.getByRole("heading", { name: "E2E Member" })
     ).toBeVisible()
     await expect(page.getByText("org_member@example.test")).toBeVisible()
+    await expect(page.getByText("Organization member")).toBeVisible()
     await expect(page.getByLabel("Current password")).toHaveCount(0)
     await expect(page.getByLabel("New password")).toHaveCount(0)
     await expect(
@@ -530,7 +539,7 @@ test.describe("Mounted session expiry", () => {
     await expect(page).toHaveURL("/en/login")
     await expect(
       page.getByRole("heading", {
-        name: "Your market briefing, ready to listen",
+        name: "Your daily market reports and briefing",
       })
     ).toBeVisible()
     await expect(

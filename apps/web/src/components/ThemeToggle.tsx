@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
 
 type ThemeMode = "light" | "dark" | "auto"
 
@@ -32,6 +33,7 @@ function applyThemeMode(mode: ThemeMode) {
 }
 
 export default function ThemeToggle() {
+  const { t } = useTranslation()
   const [mode, setMode] = useState<ThemeMode>("light")
 
   useEffect(() => {
@@ -62,10 +64,8 @@ export default function ThemeToggle() {
     window.localStorage.setItem("theme", nextMode)
   }
 
-  const label =
-    mode === "auto"
-      ? "Theme mode: auto (system). Click to switch to light mode."
-      : `Theme mode: ${mode}. Click to switch mode.`
+  const label = t(`themeToggleLabel_${mode}`)
+  const modeLabel = t(`themeMode_${mode}`)
 
   return (
     <button
@@ -73,9 +73,12 @@ export default function ThemeToggle() {
       onClick={toggleMode}
       aria-label={label}
       title={label}
-      className="min-h-9 px-3 py-1.5 text-xs font-extrabold"
+      className="min-h-9 shrink-0 px-3 py-1.5 text-xs font-extrabold max-sm:px-2"
     >
-      {mode === "auto" ? "Auto" : mode === "dark" ? "Dark" : "Light"}
+      <span className="max-sm:sr-only">{modeLabel}</span>
+      <span className="hidden text-sm max-sm:inline" aria-hidden="true">
+        {mode === "auto" ? "◐" : mode === "dark" ? "◒" : "◑"}
+      </span>
     </button>
   )
 }

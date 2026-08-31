@@ -18,7 +18,7 @@ export const Route = createFileRoute("/$locale/")({
     }
     if (destination === "customer") {
       throw redirect({
-        to: "/$locale/podcasts",
+        to: "/$locale/reports",
         params: { locale: context.locale },
       })
     }

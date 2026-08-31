@@ -1,7 +1,9 @@
 # 五市場晨報基準同步
 
-狀態：第一個 gated deliverable。本次只同步文件與 PR 基線，不實作 API、Web、
-scheduler、schema、migration、probe 或 deployment。
+狀態：歷史基線，已由
+[`twelve-data-three-market-morning-report-plan.md`](twelve-data-three-market-morning-report-plan.md)
+取代，不再是現行第一波 source policy。本文件保留當時的五市場、FinDB-only 與
+54 張卡片調查證據，不代表目前 launch scope。
 
 本基線 PR 確認後，才可開始 feature PR；feature PR 開始前還必須通過一次
 production FinDB 唯讀 probe。沒有這兩項證據，不得以示意資料或代理來源提前上線。
@@ -288,7 +290,7 @@ go/no-go evidence，不能以本地 fixture 或本次 docs PR 取代。
 
 ## 6. 文件取代關係
 
-本文件是五市場晨報第一波的 accepted baseline，取代既有文件中把「缺輸入時
-不出版、沿用 LKG」描述成晨報未來規則的文字。`product-decisions.md` 保留
-八市場長期 catalog；`phase-2-data-reports.md` 區分目前 foundation 與待遷移
-target；`roadmap.md` 將 Phase 6B 改為五市場第一波，FX／港股／陸股另列後續。
+本文件曾是五市場晨報第一波的 accepted baseline；2026-08-30 起由
+[`twelve-data-three-market-morning-report-plan.md`](twelve-data-three-market-morning-report-plan.md)
+取代。其 FinDB probe 結果、矩陣與排除理由仍可作歷史證據，但新的第一波市場、
+provider、UI 與驗收規則一律以新文件為準。

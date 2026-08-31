@@ -22,6 +22,9 @@ import {
   organizationSchema,
   type PodcastPublicationInput,
   provisionedMemberSchema,
+  reportDetailSchema,
+  reportListSchema,
+  type LaunchMarketCode,
   userSchema,
 } from "./schemas"
 
@@ -34,6 +37,25 @@ export class ApiError extends Error {
   ) {
     super(message)
     this.name = "ApiError"
+  }
+}
+
+export function createReportClient(transport: ApiTransport) {
+  return {
+    async list(locale: Locale) {
+      const query = new URLSearchParams({ locale })
+      return parseResponse(
+        await transport(`/api/reports?${query}`),
+        reportListSchema
+      )
+    },
+    async latest(marketCode: LaunchMarketCode, locale: Locale) {
+      const query = new URLSearchParams({ locale })
+      return parseResponse(
+        await transport(`/api/reports/${marketCode}/latest?${query}`),
+        reportDetailSchema
+      )
+    },
   }
 }
 

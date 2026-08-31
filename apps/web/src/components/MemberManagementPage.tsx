@@ -64,9 +64,13 @@ export function MemberManagementPage({
     <main className="page-shell">
       <header className="mb-8 max-w-3xl">
         <p className="eyebrow">{t("adminPortal")}</p>
-        <h1 className="my-3 text-[clamp(2.2rem,6vw,3.8rem)] leading-none font-extrabold tracking-[-0.055em]">
+        <h1 className="mt-2 mb-3 text-[clamp(1.9rem,4vw,2.5rem)] leading-none font-extrabold tracking-[-0.045em]">
           {t("memberManagementTitle")}
         </h1>
+        <span
+          className="mb-4 block h-[3px] w-14 bg-lagoon"
+          aria-hidden="true"
+        />
         <p className="leading-7 text-sea-ink-soft">
           {t("memberManagementDescription")}
         </p>
@@ -80,7 +84,7 @@ export function MemberManagementPage({
       ) : null}
 
       <div className="grid grid-cols-[minmax(16rem,0.34fr)_minmax(0,1fr)] items-start gap-5 max-[52rem]:grid-cols-1">
-        <aside className="surface-panel sticky top-24 grid gap-4 p-4 max-[52rem]:static">
+        <aside className="surface-panel sticky top-24 grid gap-4 border-t-[3px] border-t-lagoon p-4 max-[52rem]:static">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="eyebrow">{t("organizations")}</p>
@@ -125,7 +129,7 @@ export function MemberManagementPage({
           />
         </aside>
 
-        <section className="surface-panel min-w-0 p-[clamp(1rem,3vw,2rem)]">
+        <section className="surface-panel min-w-0 p-[clamp(1rem,3vw,1.5rem)]">
           {selectedEntry ? (
             <>
               <header className="flex items-end justify-between gap-4 border-b border-line pb-5 max-[42rem]:items-stretch max-[42rem]:flex-col">
@@ -405,7 +409,7 @@ function CreateMemberForm({
 
   return (
     <form
-      className="mt-6 grid gap-4 rounded-xl border border-line bg-surface p-[clamp(1rem,3vw,1.5rem)]"
+      className="mt-6 grid gap-4 rounded-[13px] border border-line bg-link-hover p-[clamp(1rem,3vw,1.5rem)]"
       onSubmit={event => {
         event.preventDefault()
         void form.handleSubmit()
@@ -417,7 +421,7 @@ function CreateMemberForm({
           <h2>{t("createMemberTitle")}</h2>
         </div>
         {!seatsAvailable ? (
-          <span className="rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-extrabold text-amber-800">
+          <span className="rounded-full bg-market-caution/15 px-2.5 py-1 text-xs font-extrabold text-market-caution">
             {t("seatLimitReached")}
           </span>
         ) : null}
@@ -501,7 +505,7 @@ function TemporaryPasswordNotice({
 
   return (
     <section
-      className="surface-panel mb-5 grid grid-cols-[minmax(0,1fr)_minmax(14rem,0.55fr)] items-center gap-4 border-l-4 border-l-lagoon-deep p-5 max-[42rem]:grid-cols-1"
+      className="surface-panel mb-5 grid grid-cols-[minmax(0,1fr)_minmax(14rem,0.55fr)] items-center gap-4 border-l-4 border-l-lagoon p-5 max-[42rem]:grid-cols-1"
       aria-live="polite"
     >
       <div>
@@ -509,7 +513,7 @@ function TemporaryPasswordNotice({
         <h2>{t("temporaryPasswordTitle")}</h2>
         <p>{t("temporaryPasswordDescription", { email: member.email })}</p>
       </div>
-      <code className="row-span-2 select-all rounded-lg border border-line bg-surface px-4 py-3 text-sm text-sea-ink [overflow-wrap:anywhere] max-[42rem]:row-auto">
+      <code className="row-span-2 select-all rounded-lg border border-line bg-surface px-4 py-3 font-mono text-sm text-sea-ink [overflow-wrap:anywhere] max-[42rem]:row-auto">
         {member.temporary_password}
       </code>
       <div className="flex flex-wrap gap-2">
@@ -624,7 +628,7 @@ function MemberCard({
   }
 
   return (
-    <article className="rounded-xl border border-line bg-surface p-4">
+    <article className="rounded-[13px] border border-line border-l-[3px] border-l-transparent bg-surface p-4 transition-colors hover:border-l-lagoon">
       <header className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
         <div
           className="grid h-10 w-10 place-items-center rounded-full bg-[linear-gradient(145deg,var(--palm),var(--lagoon-deep))] font-extrabold text-white"
@@ -641,8 +645,8 @@ function MemberCard({
         <span
           className={
             member.status === "active"
-              ? "rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-extrabold text-emerald-700"
-              : "rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-extrabold text-amber-800"
+              ? "rounded-full bg-market-down/15 px-2.5 py-1 text-xs font-extrabold text-market-down"
+              : "rounded-full bg-market-caution/15 px-2.5 py-1 text-xs font-extrabold text-market-caution"
           }
         >
           {t(`memberStatus_${member.status}`)}
@@ -653,7 +657,7 @@ function MemberCard({
           <dt className="text-xs font-extrabold text-sea-ink-soft">
             {t("joinedAt")}
           </dt>
-          <dd className="mt-1 ml-0 text-sm font-bold">
+          <dd className="mt-1 ml-0 font-mono text-sm font-bold">
             {new Intl.DateTimeFormat(locale, {
               dateStyle: "medium",
             }).format(new Date(member.joined_at))}
@@ -737,7 +741,7 @@ function MemberCard({
                   : t("activateMember")}
             </button>
             <button
-              className="border-red-500/30 bg-red-500/10 font-bold text-red-700 hover:bg-red-500/15"
+              className="border-market-up/30 bg-market-up/10 font-bold text-market-up hover:bg-market-up/15"
               type="button"
               disabled={pendingAction !== ""}
               onClick={() => void removeMember()}

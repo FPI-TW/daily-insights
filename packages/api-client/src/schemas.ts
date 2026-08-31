@@ -3,6 +3,121 @@ import { z } from "zod"
 export const localeSchema = z.enum(["zh-hant", "zh-hans", "en"])
 export type Locale = z.infer<typeof localeSchema>
 
+export const launchMarketCodeSchema = z.enum([
+  "global_macro_bonds",
+  "crypto",
+  "us_equity",
+])
+export type LaunchMarketCode = z.infer<typeof launchMarketCodeSchema>
+export const reportStatusSchema = z.enum(["complete", "partial", "unavailable"])
+export const blockStatusSchema = z.enum(["ok", "missing", "error"])
+const decimalSchema = z.string().regex(/^-?\d+(?:\.\d+)?$/)
+const chartPointSchema = z.object({
+  x: z.string().min(1),
+  value: decimalSchema.nullable(),
+})
+const chartSeriesSchema = z.object({
+  id: z.string(),
+  points: z.array(chartPointSchema),
+})
+const metricBlockSchema = z.object({
+  id: z.string(),
+  kind: z.literal("metric"),
+  status: blockStatusSchema,
+  source_as_of: z.iso.date().nullable(),
+  caveat: z.string().nullable(),
+  metrics: z.array(
+    z.object({
+      id: z.string(),
+      value: decimalSchema.nullable(),
+      change: decimalSchema.nullable(),
+      unit_code: z.string(),
+    })
+  ),
+})
+const tableBlockSchema = z.object({
+  id: z.string(),
+  kind: z.literal("table"),
+  status: blockStatusSchema,
+  source_as_of: z.iso.date().nullable(),
+  caveat: z.string().nullable(),
+  columns: z.array(
+    z.object({ id: z.string(), unit_code: z.string().nullable() })
+  ),
+  rows: z.array(
+    z.array(
+      z
+        .object({
+          text: z.string().nullable(),
+          value: decimalSchema.nullable(),
+        })
+        .nullable()
+    )
+  ),
+})
+const seriesBlockSchema = z.object({
+  id: z.string(),
+  kind: z.literal("series"),
+  status: blockStatusSchema,
+  source_as_of: z.iso.date().nullable(),
+  caveat: z.string().nullable(),
+  unit_code: z.string(),
+  series: z.array(chartSeriesSchema),
+})
+export const reportBlockSchema = z.discriminatedUnion("kind", [
+  metricBlockSchema,
+  tableBlockSchema,
+  seriesBlockSchema,
+])
+export type ReportBlock = z.infer<typeof reportBlockSchema>
+export const reportSummarySchema = z.object({
+  publication_id: z.uuid(),
+  report_key: z.string(),
+  market_code: launchMarketCodeSchema,
+  edition_date: z.iso.date(),
+  revision: z.number().int().positive(),
+  source_as_of: z.iso.date().nullable(),
+  published_at: z.iso.datetime({ offset: true }),
+  stale: z.boolean(),
+  stale_reason: z.string().nullable(),
+  status: reportStatusSchema,
+  title: z.string(),
+  summary: z.string().nullable(),
+  locale: localeSchema,
+})
+export type ReportSummary = z.infer<typeof reportSummarySchema>
+export const reportListSchema = z.array(reportSummarySchema)
+export const reportDetailSchema = reportSummarySchema.extend({
+  manifest_version: z.string(),
+  manifest_hash: z.string().length(64),
+  content: z.object({
+    schema_version: z.string(),
+    market_code: launchMarketCodeSchema,
+    as_of: z.iso.date().nullable(),
+    status: reportStatusSchema,
+    caveat: z.string().nullable(),
+    blocks: z.array(reportBlockSchema),
+    metrics: z.array(z.unknown()),
+    charts: z.array(z.unknown()),
+  }),
+  presentation: z.object({
+    schema_version: z.string(),
+    locale: localeSchema,
+    title: z.string(),
+    summary: z.string().nullable(),
+    labels: z.record(
+      z.string(),
+      z.object({
+        title: z.string(),
+        description: z.string().nullable(),
+        unit_label: z.string().nullable(),
+        series_labels: z.record(z.string(), z.string()),
+      })
+    ),
+  }),
+})
+export type ReportDetail = z.infer<typeof reportDetailSchema>
+
 export const systemRoleSchema = z.enum(["admin", "asset_manager", "org_member"])
 export type SystemRole = z.infer<typeof systemRoleSchema>
 

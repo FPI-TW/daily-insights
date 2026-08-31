@@ -24,6 +24,7 @@ class ReportPipelineRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint("revision > 0", name="revision_positive"),
         CheckConstraint("attempt_count >= 0", name="attempt_count_nonnegative"),
         CheckConstraint("char_length(idempotency_key) = 64", name="idempotency_key_sha256"),
+        CheckConstraint("char_length(manifest_hash) = 64", name="manifest_hash_sha256"),
         CheckConstraint(
             "status IN ('pending', 'running', 'published', 'failed')",
             name="status_valid",
@@ -63,6 +64,12 @@ class ReportPipelineRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     derivation_version: Mapped[str] = mapped_column(String(100), nullable=False)
     content_schema_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    manifest_version: Mapped[str] = mapped_column(
+        String(100), nullable=False, default="legacy.v1", server_default="legacy.v1"
+    )
+    manifest_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="0" * 64, server_default="0" * 64
+    )
     idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending", server_default="pending"
@@ -100,6 +107,7 @@ class SourceRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="record_count_nonnegative",
         ),
         CheckConstraint("char_length(contract_hash) = 64", name="contract_hash_sha256"),
+        CheckConstraint("char_length(manifest_hash) = 64", name="manifest_hash_sha256"),
         CheckConstraint("char_length(request_fingerprint) = 64", name="request_fingerprint_sha256"),
         CheckConstraint(
             "payload_sha256 IS NULL OR char_length(payload_sha256) = 64",
@@ -140,6 +148,12 @@ class SourceRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     contract_version: Mapped[str] = mapped_column(String(100), nullable=False)
     contract_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    manifest_version: Mapped[str] = mapped_column(
+        String(100), nullable=False, default="legacy.v1", server_default="legacy.v1"
+    )
+    manifest_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="0" * 64, server_default="0" * 64
+    )
     endpoint: Mapped[str] = mapped_column(String(255), nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     provider_request_id: Mapped[str | None] = mapped_column(String(255))

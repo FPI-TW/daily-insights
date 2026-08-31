@@ -27,6 +27,8 @@ import { Route as LocaleAuthenticatedAdminAdminAudioRouteImport } from './routes
 import { Route as LocaleAuthenticatedAdminAdminMembersRouteImport } from './routes/$locale/_authenticated/_admin/admin/members'
 import { Route as LocaleAuthenticatedCustomerPodcastsIndexRouteImport } from './routes/$locale/_authenticated/_customer/podcasts/index'
 import { Route as LocaleAuthenticatedCustomerPodcastsEpisodeIdRouteImport } from './routes/$locale/_authenticated/_customer/podcasts/$episodeId'
+import { Route as LocaleAuthenticatedCustomerReportsIndexRouteImport } from './routes/$locale/_authenticated/_customer/reports/index'
+import { Route as LocaleAuthenticatedCustomerReportsMarketCodeRouteImport } from './routes/$locale/_authenticated/_customer/reports/$marketCode'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -126,6 +128,18 @@ const LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute =
     path: '/$episodeId',
     getParentRoute: () => LocaleAuthenticatedCustomerPodcastsRoute,
   } as any)
+const LocaleAuthenticatedCustomerReportsIndexRoute =
+  LocaleAuthenticatedCustomerReportsIndexRouteImport.update({
+    id: '/reports/',
+    path: '/reports/',
+    getParentRoute: () => LocaleAuthenticatedCustomerRoute,
+  } as any)
+const LocaleAuthenticatedCustomerReportsMarketCodeRoute =
+  LocaleAuthenticatedCustomerReportsMarketCodeRouteImport.update({
+    id: '/reports/$marketCode',
+    path: '/reports/$marketCode',
+    getParentRoute: () => LocaleAuthenticatedCustomerRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -142,7 +156,9 @@ export interface FileRoutesByFullPath {
   '/$locale/admin/audio': typeof LocaleAuthenticatedAdminAdminAudioRoute
   '/$locale/admin/members': typeof LocaleAuthenticatedAdminAdminMembersRoute
   '/$locale/podcasts/$episodeId': typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
+  '/$locale/reports/$marketCode': typeof LocaleAuthenticatedCustomerReportsMarketCodeRoute
   '/$locale/podcasts/': typeof LocaleAuthenticatedCustomerPodcastsIndexRoute
+  '/$locale/reports/': typeof LocaleAuthenticatedCustomerReportsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -157,7 +173,9 @@ export interface FileRoutesByTo {
   '/$locale/admin/audio': typeof LocaleAuthenticatedAdminAdminAudioRoute
   '/$locale/admin/members': typeof LocaleAuthenticatedAdminAdminMembersRoute
   '/$locale/podcasts/$episodeId': typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
+  '/$locale/reports/$marketCode': typeof LocaleAuthenticatedCustomerReportsMarketCodeRoute
   '/$locale/podcasts': typeof LocaleAuthenticatedCustomerPodcastsIndexRoute
+  '/$locale/reports': typeof LocaleAuthenticatedCustomerReportsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -178,7 +196,9 @@ export interface FileRoutesById {
   '/$locale/_authenticated/_admin/admin/audio': typeof LocaleAuthenticatedAdminAdminAudioRoute
   '/$locale/_authenticated/_admin/admin/members': typeof LocaleAuthenticatedAdminAdminMembersRoute
   '/$locale/_authenticated/_customer/podcasts/$episodeId': typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
+  '/$locale/_authenticated/_customer/reports/$marketCode': typeof LocaleAuthenticatedCustomerReportsMarketCodeRoute
   '/$locale/_authenticated/_customer/podcasts/': typeof LocaleAuthenticatedCustomerPodcastsIndexRoute
+  '/$locale/_authenticated/_customer/reports/': typeof LocaleAuthenticatedCustomerReportsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -197,7 +217,9 @@ export interface FileRouteTypes {
     | '/$locale/admin/audio'
     | '/$locale/admin/members'
     | '/$locale/podcasts/$episodeId'
+    | '/$locale/reports/$marketCode'
     | '/$locale/podcasts/'
+    | '/$locale/reports/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -212,7 +234,9 @@ export interface FileRouteTypes {
     | '/$locale/admin/audio'
     | '/$locale/admin/members'
     | '/$locale/podcasts/$episodeId'
+    | '/$locale/reports/$marketCode'
     | '/$locale/podcasts'
+    | '/$locale/reports'
   id:
     | '__root__'
     | '/'
@@ -232,7 +256,9 @@ export interface FileRouteTypes {
     | '/$locale/_authenticated/_admin/admin/audio'
     | '/$locale/_authenticated/_admin/admin/members'
     | '/$locale/_authenticated/_customer/podcasts/$episodeId'
+    | '/$locale/_authenticated/_customer/reports/$marketCode'
     | '/$locale/_authenticated/_customer/podcasts/'
+    | '/$locale/_authenticated/_customer/reports/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -368,6 +394,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRouteImport
       parentRoute: typeof LocaleAuthenticatedCustomerPodcastsRoute
     }
+    '/$locale/_authenticated/_customer/reports/': {
+      id: '/$locale/_authenticated/_customer/reports/'
+      path: '/reports'
+      fullPath: '/$locale/reports/'
+      preLoaderRoute: typeof LocaleAuthenticatedCustomerReportsIndexRouteImport
+      parentRoute: typeof LocaleAuthenticatedCustomerRoute
+    }
+    '/$locale/_authenticated/_customer/reports/$marketCode': {
+      id: '/$locale/_authenticated/_customer/reports/$marketCode'
+      path: '/reports/$marketCode'
+      fullPath: '/$locale/reports/$marketCode'
+      preLoaderRoute: typeof LocaleAuthenticatedCustomerReportsMarketCodeRouteImport
+      parentRoute: typeof LocaleAuthenticatedCustomerRoute
+    }
   }
 }
 
@@ -410,6 +450,8 @@ const LocaleAuthenticatedCustomerPodcastsRouteWithChildren =
 interface LocaleAuthenticatedCustomerRouteChildren {
   LocaleAuthenticatedCustomerAccountRoute: typeof LocaleAuthenticatedCustomerAccountRoute
   LocaleAuthenticatedCustomerPodcastsRoute: typeof LocaleAuthenticatedCustomerPodcastsRouteWithChildren
+  LocaleAuthenticatedCustomerReportsMarketCodeRoute: typeof LocaleAuthenticatedCustomerReportsMarketCodeRoute
+  LocaleAuthenticatedCustomerReportsIndexRoute: typeof LocaleAuthenticatedCustomerReportsIndexRoute
 }
 
 const LocaleAuthenticatedCustomerRouteChildren: LocaleAuthenticatedCustomerRouteChildren =
@@ -418,6 +460,10 @@ const LocaleAuthenticatedCustomerRouteChildren: LocaleAuthenticatedCustomerRoute
       LocaleAuthenticatedCustomerAccountRoute,
     LocaleAuthenticatedCustomerPodcastsRoute:
       LocaleAuthenticatedCustomerPodcastsRouteWithChildren,
+    LocaleAuthenticatedCustomerReportsMarketCodeRoute:
+      LocaleAuthenticatedCustomerReportsMarketCodeRoute,
+    LocaleAuthenticatedCustomerReportsIndexRoute:
+      LocaleAuthenticatedCustomerReportsIndexRoute,
   }
 
 const LocaleAuthenticatedCustomerRouteWithChildren =

@@ -69,8 +69,8 @@ def create_app(
 
     async def provider_runtime_is_ready() -> bool:
         return (
-            resolved_settings.environment in {"development", "test"}
-            or resolved_settings.findb_api_key is not None
+            not resolved_settings.morning_reports_enabled
+            or resolved_settings.twelve_data_api_key is not None
         )
 
     @asynccontextmanager
@@ -153,7 +153,7 @@ def create_app(
         report = await evaluate_readiness(
             {
                 "database": readiness_checker,
-                "findb_configuration": provider_runtime_is_ready,
+                "twelve_data_configuration": provider_runtime_is_ready,
                 "r2_runtime": r2_runtime_is_ready,
             }
         )

@@ -1,0 +1,520 @@
+import { ClientOnly, Link, useRouter } from "@tanstack/react-router"
+import ReactECharts from "echarts-for-react"
+import { useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
+import type { Locale } from "@daily-insights/api-client"
+import {
+  launchMarketCodes,
+  type MarketCode,
+  type ProvisionalReport,
+  type ReportBlock,
+  type ReportStatus,
+  type ReportValue,
+} from "#/lib/provisional-reports"
+
+const statusStyles: Record<ReportStatus, string> = {
+  complete: "border-lagoon/35 bg-lagoon/10 text-lagoon-deep",
+  partial: "border-market-caution/40 bg-market-caution/10 text-market-caution",
+  unavailable: "border-market-up/40 bg-market-up/10 text-market-up",
+}
+
+function valueText(value: ReportValue | null, t: (key: string) => string) {
+  if (value === null) return "—"
+  return value.kind === "translation" ? t(value.key) : String(value.value)
+}
+
+function directionClass(value: ReportValue | null, t: (key: string) => string) {
+  const text = valueText(value, t)
+  if (text.startsWith("+")) return "text-market-up"
+  if (text.startsWith("-")) return "text-market-down"
+  return "text-sea-ink"
+}
+
+export function ReportLoadingScreen() {
+  const { t } = useTranslation()
+  return (
+    <main className="page-shell" role="status" aria-live="polite">
+      <p className="sr-only">{t("reportLoadingAnnouncement")}</p>
+      <div className="animate-pulse space-y-5">
+        <div className="h-3 w-24 rounded bg-line" />
+        <div className="h-9 w-72 max-w-full rounded bg-line" />
+        <div className="h-1 w-14 rounded bg-lagoon/40" />
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="h-44 rounded-[13px] bg-line" />
+          <div className="h-44 rounded-[13px] bg-line" />
+          <div className="h-44 rounded-[13px] bg-line" />
+        </div>
+      </div>
+    </main>
+  )
+}
+
+function StatusBadge({ status }: { status: ReportStatus }) {
+  const { t } = useTranslation()
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-extrabold ${statusStyles[status]}`}
+    >
+      {t(`reportStatus_${status}`)}
+    </span>
+  )
+}
+
+function BlockStatusBadge({ status }: { status: ReportBlock["status"] }) {
+  const { t } = useTranslation()
+  const style =
+    status === "error"
+      ? "border-market-up/40 bg-market-up/10 text-market-up"
+      : status === "missing"
+        ? "border-market-caution/40 bg-market-caution/10 text-market-caution"
+        : "border-lagoon/35 bg-lagoon/10 text-lagoon-deep"
+  return (
+    <span
+      className={`rounded-full border px-2 py-1 text-[10px] font-bold ${style}`}
+    >
+      {t(`reportBlockStatus_${status}`)}
+    </span>
+  )
+}
+
+function ReportMarketNav({
+  locale,
+  activeMarket,
+}: {
+  locale: Locale
+  activeMarket?: MarketCode
+}) {
+  const { t } = useTranslation()
+  return (
+    <nav
+      className="mb-6 flex overflow-x-auto border-y border-line bg-surface [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      aria-label={t("reportMarketNav")}
+    >
+      <Link
+        to="/$locale/reports"
+        params={{ locale }}
+        className={`shrink-0 border-b-2 px-4 py-3 text-xs font-extrabold no-underline transition-colors ${activeMarket === undefined ? "border-lagoon text-lagoon" : "border-transparent text-sea-ink-soft hover:text-sea-ink"}`}
+      >
+        {t("reportAllMarkets")}
+      </Link>
+      {launchMarketCodes.map(code => (
+        <Link
+          key={code}
+          to="/$locale/reports/$marketCode"
+          params={{ locale, marketCode: code }}
+          className={`shrink-0 border-b-2 px-4 py-3 text-xs font-extrabold no-underline transition-colors ${activeMarket === code ? "border-lagoon text-lagoon" : "border-transparent text-sea-ink-soft hover:text-sea-ink"}`}
+        >
+          {t(`reportMarketShort_${code}`)}
+        </Link>
+      ))}
+    </nav>
+  )
+}
+
+function PageHeading({
+  title,
+  description,
+  eyebrow,
+}: {
+  title: string
+  description: string
+  eyebrow: string
+}) {
+  return (
+    <header className="mb-6">
+      <p className="eyebrow">{eyebrow}</p>
+      <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h1 className="m-0 text-[30px] leading-tight font-extrabold tracking-[-0.035em] text-sea-ink max-sm:text-[26px]">
+          {title}
+        </h1>
+        <p className="m-0 text-sm text-sea-ink-soft">{description}</p>
+      </div>
+      <div className="mt-3 h-[3px] w-[54px] bg-lagoon" />
+    </header>
+  )
+}
+
+export function ReportList({
+  locale,
+  reports,
+}: {
+  locale: Locale
+  reports: ReadonlyArray<ProvisionalReport>
+}) {
+  const { t } = useTranslation()
+  return (
+    <main className="page-shell">
+      <PageHeading
+        title={t("reportsTitle")}
+        description={t("reportsDescription")}
+        eyebrow={t("reportsEyebrow")}
+      />
+      <ReportMarketNav locale={locale} />
+      <section
+        className="mb-5 flex flex-wrap items-center justify-between gap-3 border-l-4 border-market-caution bg-market-caution/10 px-4 py-3"
+        aria-label={t("reportStatus")}
+      >
+        <p className="m-0 text-sm font-semibold text-sea-ink">
+          {t("reportOverviewStrip")}
+        </p>
+        <span className="text-xs text-sea-ink-soft">
+          {t("reportLiveNotice")}
+        </span>
+      </section>
+      {reports.length === 0 ? (
+        <section className="surface-panel p-10 text-center">
+          <h2 className="mt-0 text-xl">{t("reportsEmptyTitle")}</h2>
+          <p className="mb-0 text-sm text-sea-ink-soft">
+            {t("reportsEmptyDescription")}
+          </p>
+        </section>
+      ) : (
+        <section
+          className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
+          aria-label={t("reportsTitle")}
+        >
+          {reports.map(report => (
+            <article
+              key={report.marketCode}
+              className="surface-panel flex min-w-0 flex-col p-5"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="m-0 text-[11px] font-bold tracking-[0.08em] text-sea-ink-soft uppercase">
+                    {t(`reportMarketShort_${report.marketCode}`)}
+                  </p>
+                  <h2 className="mt-2 mb-0 text-xl font-extrabold tracking-[-0.025em] text-sea-ink">
+                    {t(`reportMarket_${report.marketCode}`)}
+                  </h2>
+                </div>
+                <StatusBadge status={report.status} />
+              </div>
+              <p className="mt-3 mb-4 min-h-10 text-sm leading-6 text-sea-ink-soft">
+                {t(`reportMarketDescription_${report.marketCode}`)}
+              </p>
+              <dl className="grid grid-cols-2 border-y border-line py-3 text-xs">
+                <div>
+                  <dt className="text-sea-ink-soft">
+                    {t("reportEditionDate")}
+                  </dt>
+                  <dd className="mt-1 font-mono font-semibold text-sea-ink tabular-nums">
+                    {report.editionDate}
+                  </dd>
+                </div>
+                <div className="border-l border-line pl-3">
+                  <dt className="text-sea-ink-soft">{t("reportSourceDate")}</dt>
+                  <dd className="mt-1 font-mono font-semibold text-sea-ink tabular-nums">
+                    {report.sourceDate ?? "—"}
+                  </dd>
+                </div>
+              </dl>
+              <p className="mt-3 mb-0 text-xs leading-5 text-sea-ink-soft">
+                {t(report.summaryKey)}
+              </p>
+              <Link
+                to="/$locale/reports/$marketCode"
+                params={{ locale, marketCode: report.marketCode }}
+                className="mt-5 inline-flex w-fit items-center border-b border-lagoon pb-1 text-sm font-extrabold text-lagoon no-underline transition-colors hover:text-palm"
+              >
+                {t("reportViewDetails")}
+              </Link>
+            </article>
+          ))}
+        </section>
+      )}
+    </main>
+  )
+}
+
+export function ReportDetail({
+  locale,
+  report,
+}: {
+  locale: Locale
+  report: ProvisionalReport
+}) {
+  const { t } = useTranslation()
+  return (
+    <main className="page-shell">
+      <PageHeading
+        title={t(`reportMarket_${report.marketCode}`)}
+        description={t(`reportMarketDescription_${report.marketCode}`)}
+        eyebrow={t("reportsEyebrow")}
+      />
+      <ReportMarketNav locale={locale} activeMarket={report.marketCode} />
+      {report.preview ? (
+        <aside
+          className="mb-5 border-l-4 border-market-caution bg-market-caution/10 px-4 py-3 text-sm font-semibold text-sea-ink"
+          role="status"
+        >
+          {t("reportPreviewNotice")}
+        </aside>
+      ) : null}
+      <section
+        className="mb-5 grid overflow-hidden rounded-[13px] border border-line bg-surface sm:grid-cols-[1fr_auto]"
+        aria-label={t("reportStatus")}
+      >
+        <div className="flex items-center gap-3 px-5 py-4">
+          <StatusBadge status={report.status} />
+          <p className="m-0 text-sm text-sea-ink-soft">
+            {t(`reportStatusDescription_${report.status}`)}
+          </p>
+        </div>
+        <dl className="flex border-t border-line text-xs sm:border-t-0 sm:border-l">
+          <div className="min-w-[130px] px-4 py-3">
+            <dt className="text-sea-ink-soft">{t("reportEditionDate")}</dt>
+            <dd className="mt-1 font-mono font-bold text-sea-ink tabular-nums">
+              {report.editionDate}
+            </dd>
+          </div>
+          <div className="min-w-[130px] border-l border-line px-4 py-3">
+            <dt className="text-sea-ink-soft">{t("reportSourceDate")}</dt>
+            <dd className="mt-1 font-mono font-bold text-sea-ink tabular-nums">
+              {report.sourceDate ?? "—"}
+            </dd>
+          </div>
+        </dl>
+      </section>
+      <aside className="mb-5 border-l-4 border-lagoon bg-lagoon/8 px-4 py-3 text-sm leading-6 text-sea-ink-soft">
+        {t(report.caveatKey)}
+      </aside>
+      <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+        {report.blocks.map((block, index) => (
+          <ReportBlockView block={block} key={`${block.titleKey}-${index}`} />
+        ))}
+      </div>
+    </main>
+  )
+}
+
+function useChartColors() {
+  const [colors, setColors] = useState({
+    series: [] as string[],
+    text: "",
+    grid: "",
+  })
+  useEffect(() => {
+    const updateColors = () => {
+      const styles = getComputedStyle(document.documentElement)
+      setColors({
+        series: [
+          styles.getPropertyValue("--lagoon-deep").trim(),
+          styles.getPropertyValue("--lagoon").trim(),
+          styles.getPropertyValue("--market-up").trim(),
+          styles.getPropertyValue("--market-down").trim(),
+          styles.getPropertyValue("--market-caution").trim(),
+        ],
+        text: styles.getPropertyValue("--sea-ink-soft").trim(),
+        grid: styles.getPropertyValue("--line").trim(),
+      })
+    }
+    updateColors()
+    const observer = new MutationObserver(updateColors)
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-theme"],
+    })
+    return () => observer.disconnect()
+  }, [])
+  return colors
+}
+
+function ReportBlockView({ block }: { block: ReportBlock }) {
+  const { t } = useTranslation()
+  const chartColors = useChartColors()
+  return (
+    <section
+      className={`surface-panel min-w-0 p-5 ${block.kind === "series" ? "xl:col-span-2" : ""}`}
+    >
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="m-0 text-base font-extrabold tracking-[-0.015em] text-sea-ink">
+            {t(block.titleKey)}
+          </h2>
+          {block.captionKey ? (
+            <p className="mt-1 mb-0 text-xs text-sea-ink-soft">
+              {t(block.captionKey)}
+            </p>
+          ) : null}
+        </div>
+        <BlockStatusBadge status={block.status} />
+      </div>
+      {block.kind === "metric" ? (
+        <div className="grid min-w-0 divide-y divide-line border-y border-line sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          {block.metrics.map(item => (
+            <div
+              className="min-w-0 px-3 py-3 first:pl-0 last:pr-0 max-sm:first:pt-0 max-sm:last:pb-0 sm:first:pl-0 sm:last:pr-0"
+              key={item.labelKey}
+            >
+              <p className="m-0 text-xs text-sea-ink-soft">
+                {t(item.labelKey)}
+              </p>
+              <p className="mt-2 mb-0 font-mono text-[22px] font-extrabold tracking-[-0.03em] text-sea-ink tabular-nums">
+                {valueText(item.value, t)}
+              </p>
+              {"change" in item ? (
+                <p
+                  className={`mt-1 mb-0 font-mono text-xs font-bold tabular-nums ${directionClass(item.change ?? null, t)}`}
+                >
+                  {valueText(item.change ?? null, t)}
+                </p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {block.kind === "table" ? (
+        <div className="min-w-0 max-w-full overflow-x-auto border-y border-line">
+          <table className="w-full min-w-[480px] text-sm">
+            <thead className="bg-link-hover text-xs text-sea-ink-soft">
+              <tr>
+                {block.columns.map((column, index) => (
+                  <th
+                    className={`whitespace-nowrap px-3 py-2.5 font-bold ${index === 0 ? "text-left" : "text-right"}`}
+                    key={column}
+                  >
+                    {t(column)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((row, rowIndex) => (
+                <tr className="border-t border-line" key={rowIndex}>
+                  {row.map((cell, cellIndex) => (
+                    <td
+                      className={`whitespace-nowrap px-3 py-2.5 ${cellIndex === 0 ? "font-semibold text-sea-ink" : `text-right font-mono tabular-nums ${directionClass(cell, t)}`}`}
+                      key={cellIndex}
+                    >
+                      {valueText(cell, t)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      {block.kind === "series" ? (
+        <>
+          <div className="h-64 min-w-0 w-full overflow-hidden border-y border-line py-2">
+            <ClientOnly
+              fallback={
+                <div
+                  className="h-full w-full animate-pulse rounded-lg bg-link-hover"
+                  role="status"
+                  aria-label={t("reportChartSummary")}
+                />
+              }
+            >
+              <ReactECharts
+                style={{ height: "100%", width: "100%" }}
+                option={{
+                  animation: false,
+                  color: chartColors.series,
+                  grid: { left: 48, right: 18, top: 18, bottom: 30 },
+                  tooltip: { trigger: "axis" },
+                  xAxis: {
+                    type: "category",
+                    data: (block.series[0]?.points ?? []).map(point =>
+                      valueText(point.label, t)
+                    ),
+                    axisLabel: { color: chartColors.text },
+                    axisLine: { lineStyle: { color: chartColors.grid } },
+                  },
+                  yAxis: {
+                    type: "value",
+                    scale: true,
+                    axisLabel: { color: chartColors.text },
+                    splitLine: {
+                      lineStyle: { color: chartColors.grid, type: "dashed" },
+                    },
+                  },
+                  series: block.series.map(line => ({
+                    name: valueText(line.label, t),
+                    type: "line",
+                    data: line.points.map(point => point.value),
+                    connectNulls: false,
+                    symbolSize: 6,
+                    smooth: 0.18,
+                    lineStyle: { width: 2 },
+                    areaStyle: { color: "transparent" },
+                  })),
+                }}
+              />
+            </ClientOnly>
+          </div>
+          <div className="sr-only">
+            <table>
+              <caption>{t("reportChartSummary")}</caption>
+              <tbody>
+                {block.series.flatMap(line =>
+                  line.points.map(point => (
+                    <tr key={`${line.id}-${valueText(point.label, t)}`}>
+                      <th>
+                        {valueText(line.label, t)} {valueText(point.label, t)}
+                      </th>
+                      <td>{point.value ?? "—"}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : null}
+    </section>
+  )
+}
+
+export function ReportErrorScreen({ error }: { error: Error }) {
+  void error
+  const { t } = useTranslation()
+  const router = useRouter()
+  return (
+    <main className="page-shell">
+      <section
+        className="surface-panel border-market-up/35 p-10 text-center"
+        role="alert"
+      >
+        <h1 className="mt-0 text-2xl">{t("reportsErrorTitle")}</h1>
+        <p className="mx-auto max-w-xl text-sea-ink-soft">
+          {t("reportsErrorDescription")}
+        </p>
+        <button type="button" onClick={() => void router.invalidate()}>
+          {t("retry")}
+        </button>
+      </section>
+    </main>
+  )
+}
+
+export function ReportNotGeneratedScreen({
+  locale,
+  marketCode,
+}: {
+  locale: Locale
+  marketCode: (typeof launchMarketCodes)[number]
+}) {
+  const { t } = useTranslation()
+  return (
+    <main className="page-shell">
+      <PageHeading
+        title={t(`reportMarket_${marketCode}`)}
+        description={t("reportsDescription")}
+        eyebrow={t("reportsEyebrow")}
+      />
+      <ReportMarketNav locale={locale} activeMarket={marketCode} />
+      <section
+        className="surface-panel border-market-caution/35 p-10 text-center"
+        role="status"
+        aria-live="polite"
+      >
+        <h2 className="mt-0 text-xl">{t("reportNotGeneratedTitle")}</h2>
+        <p className="mx-auto mb-0 max-w-xl text-sea-ink-soft">
+          {t("reportNotGeneratedDescription")}
+        </p>
+      </section>
+    </main>
+  )
+}

@@ -34,6 +34,7 @@ function reset(overrides = {}) {
     episodeVersion: 2,
     audioVersion: 1,
     podcastEpisodes: "single",
+    reports: "normal",
     requests: [],
     ...overrides,
   }
@@ -233,6 +234,71 @@ function localizedEpisode(locale) {
   }
 }
 
+const reportMarkets = ["global_macro_bonds", "crypto", "us_equity"]
+
+function reportSummary(marketCode, locale) {
+  return {
+    publication_id: `${reportMarkets.indexOf(marketCode) + 7}0000000-0000-4000-8000-000000000001`,
+    report_key: "daily-market",
+    market_code: marketCode,
+    edition_date: "2026-08-30",
+    revision: 1,
+    source_as_of: "2026-08-29",
+    published_at: "2026-08-30T07:00:00+08:00",
+    stale: false,
+    stale_reason: null,
+    status: "complete",
+    title: marketCode,
+    summary: `Official ${marketCode} report`,
+    locale,
+  }
+}
+
+function reportDetail(marketCode, locale) {
+  const summary = reportSummary(marketCode, locale)
+  const block = {
+    id: "macro.commodities",
+    kind: "metric",
+    status: "ok",
+    source_as_of: "2026-08-29",
+    caveat: null,
+    metrics: [
+      { id: "brent", value: "72.4", change: "0.8", unit_code: "price" },
+      { id: "gold", value: "2418", change: "0.3", unit_code: "price" },
+      { id: "copper", value: "4.18", change: "-0.2", unit_code: "price" },
+    ],
+  }
+  return {
+    ...summary,
+    manifest_version: "three-market.v1",
+    manifest_hash: "a".repeat(64),
+    content: {
+      schema_version: "three-market.v1",
+      market_code: marketCode,
+      as_of: "2026-08-29",
+      status: "complete",
+      caveat: null,
+      blocks: [block],
+      metrics: [],
+      charts: [],
+    },
+    presentation: {
+      schema_version: "three-market.v1",
+      locale,
+      title: marketCode,
+      summary: `Official ${marketCode} report`,
+      labels: {
+        "macro.commodities": {
+          title: "Commodity snapshot",
+          description: null,
+          unit_label: null,
+          series_labels: {},
+        },
+      },
+    },
+  }
+}
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url || "/", `http://127.0.0.1:${port}`)
 
@@ -260,6 +326,43 @@ const server = createServer(async (request, response) => {
   ) {
     recordRequest(request, url, roleFrom(request), { sessionExpired: true })
     sendJson(response, 401, { detail: "Session expired" })
+    return
+  }
+
+  if (url.pathname === "/api/reports" && request.method === "GET") {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    const locale = url.searchParams.get("locale") || "zh-hant"
+    recordRequest(request, url, role)
+    sendJson(
+      response,
+      200,
+      reportMarkets.map(market => reportSummary(market, locale))
+    )
+    return
+  }
+
+  const reportMatch = /^\/api\/reports\/([^/]+)\/latest$/.exec(url.pathname)
+  if (reportMatch && request.method === "GET") {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    const marketCode = reportMatch[1]
+    if (!reportMarkets.includes(marketCode)) {
+      sendJson(response, 404, { detail: "report not found" })
+      return
+    }
+    if (state.reports === "not_generated") {
+      sendJson(response, 404, {
+        detail: {
+          code: "report_not_generated",
+          message: "report has not been generated",
+        },
+      })
+      return
+    }
+    const locale = url.searchParams.get("locale") || "zh-hant"
+    recordRequest(request, url, role)
+    sendJson(response, 200, reportDetail(marketCode, locale))
     return
   }
 

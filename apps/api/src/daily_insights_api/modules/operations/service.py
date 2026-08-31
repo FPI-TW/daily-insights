@@ -35,6 +35,8 @@ class PipelineSpec:
     revision: int
     derivation_version: str
     content_schema_version: str
+    manifest_version: str = "legacy.v1"
+    manifest_hash: str = "0" * 64
 
 
 @dataclass(frozen=True)
@@ -48,7 +50,7 @@ class PublishResult:
 class Freshness:
     status: Literal["fresh", "stale"]
     stale_reason: Literal["source_too_old", "latest_refresh_failed"] | None
-    source_as_of: date
+    source_as_of: date | None
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,8 @@ def pipeline_idempotency_key(spec: PipelineSpec) -> str:
             "derivation_version": spec.derivation_version,
             "edition_date": spec.edition_date.isoformat(),
             "market_code": spec.market_code,
+            "manifest_hash": spec.manifest_hash,
+            "manifest_version": spec.manifest_version,
             "report_key": spec.report_key,
             "revision": spec.revision,
         },
@@ -134,6 +138,8 @@ async def claim_pipeline_run(
 
     if spec.revision <= 0:
         raise ValueError("revision must be positive")
+    if len(spec.manifest_hash) != 64:
+        raise ValueError("manifest_hash must be a SHA-256 hex digest")
     if not lease_owner or len(lease_owner) > 100:
         raise ValueError("lease_owner must contain between 1 and 100 characters")
     if lease_for <= timedelta(0):
@@ -155,6 +161,8 @@ async def claim_pipeline_run(
             revision=spec.revision,
             derivation_version=spec.derivation_version,
             content_schema_version=spec.content_schema_version,
+            manifest_version=spec.manifest_version,
+            manifest_hash=spec.manifest_hash,
             idempotency_key=idempotency_key,
         )
         .on_conflict_do_nothing(index_elements=[ReportPipelineRun.idempotency_key])
@@ -231,6 +239,8 @@ async def start_source_run(
         attempt=attempt,
         contract_version=contract_version,
         contract_hash=contract_hash,
+        manifest_version=pipeline_run.manifest_version,
+        manifest_hash=pipeline_run.manifest_hash,
         endpoint=endpoint,
         request_fingerprint=request_fingerprint,
         status="running",
@@ -332,28 +342,33 @@ async def publish_completed_run(
         raise ValueError("publication schema version does not match pipeline")
 
     unique_source_run_ids = set(source_run_ids)
+    three_market_contract = bool(bundle.content.blocks)
     source_runs = (
         await database.scalars(
             select(SourceRun).where(
                 SourceRun.id.in_(unique_source_run_ids),
                 SourceRun.pipeline_run_id == pipeline_run_id,
                 SourceRun.pipeline_attempt == lease_attempt,
-                SourceRun.status == "succeeded",
+                SourceRun.status.in_(("succeeded", "failed"))
+                if three_market_contract
+                else SourceRun.status == "succeeded",
             )
         )
     ).all()
-    datasets = {source.dataset_key for source in source_runs}
+    succeeded_source_runs = [source for source in source_runs if source.status == "succeeded"]
+    datasets = {source.dataset_key for source in succeeded_source_runs}
     complete = (
         bool(required_dataset_keys)
         and bool(source_runs)
         and len(unique_source_run_ids) == len(source_run_ids)
         and len(source_runs) == len(source_run_ids)
         and required_dataset_keys <= datasets
+        and all(source.status == "succeeded" for source in source_runs)
         and all(
             source.record_count is not None and source.record_count > 0 for source in source_runs
         )
     )
-    if not complete:
+    if not complete and not three_market_contract:
         pipeline_run.status = "failed"
         pipeline_run.finished_at = now
         pipeline_run.lease_owner = None
@@ -367,15 +382,18 @@ async def publish_completed_run(
             error_code="incomplete_source_data",
         )
 
-    source_as_of_values = [source.source_as_of for source in source_runs]
-    assert all(value is not None for value in source_as_of_values)
-    source_as_of = min(value for value in source_as_of_values if value is not None)
+    source_as_of_values = [source.source_as_of for source in succeeded_source_runs]
+    source_as_of = min(
+        (value for value in source_as_of_values if value is not None),
+        default=None,
+    )
     if bundle.content.as_of != source_as_of:
         raise ValueError("publication as_of must equal the least-fresh required input")
 
     digest_material = "|".join(
         sorted(
-            f"{source.provider}:{source.dataset_key}:{source.payload_sha256}"
+            f"{source.provider}:{source.dataset_key}:{source.status}:"
+            f"{source.payload_sha256 or source.error_code or 'unknown'}"
             for source in source_runs
         )
     )
@@ -392,6 +410,8 @@ async def publish_completed_run(
         content_schema_version=pipeline_run.content_schema_version,
         input_digest=input_digest,
         source_as_of=source_as_of,
+        manifest_version=pipeline_run.manifest_version,
+        manifest_hash=pipeline_run.manifest_hash,
         content=bundle.content_for_storage(),
         presentations=bundle.presentations_for_storage(),
         published_at=now,
@@ -435,6 +455,12 @@ def evaluate_freshness(
                 stale_reason="latest_refresh_failed",
                 source_as_of=publication.source_as_of,
             )
+    if publication.source_as_of is None:
+        return Freshness(
+            status="stale",
+            stale_reason="source_too_old",
+            source_as_of=None,
+        )
     if now.date() - publication.source_as_of > maximum_age:
         return Freshness(
             status="stale",

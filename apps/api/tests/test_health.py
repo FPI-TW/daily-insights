@@ -27,7 +27,7 @@ async def test_readiness_reflects_database_state(ready: bool, expected_status: i
         "status": expected,
         "components": {
             "database": {"status": expected},
-            "findb_configuration": {"status": "ok"},
+            "twelve_data_configuration": {"status": "ok"},
             "r2_runtime": {"status": "ok"},
         },
     }
@@ -49,6 +49,7 @@ async def test_production_readiness_reports_initialized_external_boundaries() ->
         session_secret=SecretStr("s" * 32),
         password_pepper=SecretStr("p" * 32),
         findb_api_key=SecretStr("findb-production-key"),
+        morning_reports_enabled=False,
         r2_endpoint_url="https://account.r2.cloudflarestorage.com",
         r2_bucket_name="daily-insights-production",
         r2_access_key_id=SecretStr("r2-access-key"),
@@ -61,7 +62,7 @@ async def test_production_readiness_reports_initialized_external_boundaries() ->
     assert response.status_code == 200
     assert response.json()["components"] == {
         "database": {"status": "ok"},
-        "findb_configuration": {"status": "ok"},
+        "twelve_data_configuration": {"status": "ok"},
         "r2_runtime": {"status": "ok"},
     }
 

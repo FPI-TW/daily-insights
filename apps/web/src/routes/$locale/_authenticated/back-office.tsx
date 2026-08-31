@@ -8,7 +8,7 @@ export const Route = createFileRoute("/$locale/_authenticated/back-office")({
         context.user && canEnterBackOffice(context.user)
           ? "/$locale/admin/audio"
           : context.user
-            ? "/$locale/podcasts"
+            ? "/$locale/reports"
             : "/$locale/admin/login",
       params: { locale: context.locale },
       replace: true,

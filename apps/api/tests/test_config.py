@@ -14,6 +14,7 @@ def production_settings(**overrides: object) -> dict[str, object]:
         "password_pepper": SecretStr("p" * 32),
         "findb_base_url": "https://findb.example.invalid",
         "findb_api_key": SecretStr("findb-production-key"),
+        "morning_reports_enabled": False,
         "r2_endpoint_url": "https://account.r2.cloudflarestorage.com",
         "r2_bucket_name": "daily-insights-production",
         "r2_access_key_id": SecretStr("r2-access-key"),
@@ -33,8 +34,6 @@ def test_production_accepts_complete_external_configuration() -> None:
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("findb_base_url", "http://findb.example.invalid"),
-        ("findb_api_key", SecretStr("CHANGE_ME_FINDB")),
         ("r2_endpoint_url", "http://account.r2.cloudflarestorage.com"),
         ("r2_bucket_name", "CHANGE_ME_BUCKET"),
         ("r2_bucket_name", "Invalid_Bucket"),
@@ -55,6 +54,34 @@ def test_settings_repr_redacts_r2_and_provider_credentials() -> None:
     assert "findb-production-key" not in rendered
     assert "r2-access-key" not in rendered
     assert "r2-secret-key" not in rendered
+
+
+def test_findb_is_not_a_three_market_production_requirement() -> None:
+    settings = Settings.model_validate(
+        production_settings(findb_base_url="http://unused.invalid", findb_api_key=None)
+    )
+    assert settings.findb_api_key is None
+
+
+def test_morning_reports_fail_closed_until_manifest_is_approved() -> None:
+    with pytest.raises(ValidationError, match="manifest has not been approved"):
+        Settings.model_validate(
+            production_settings(
+                morning_reports_enabled=True,
+                twelve_data_api_key=SecretStr("twelve-data-production-key"),
+            )
+        )
+
+
+@pytest.mark.parametrize("key", ["", "   \t"])
+def test_enabled_morning_reports_rejects_an_unusable_provider_key(key: str) -> None:
+    with pytest.raises(ValidationError, match="twelve_data_api_key is required"):
+        Settings.model_validate(
+            production_settings(
+                morning_reports_enabled=True,
+                twelve_data_api_key=SecretStr(key),
+            )
+        )
 
 
 def test_production_runtime_composes_r2_adapter_without_exposing_credentials() -> None:

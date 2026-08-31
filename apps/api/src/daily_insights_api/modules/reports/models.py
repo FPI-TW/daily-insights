@@ -29,6 +29,7 @@ class ReportPublication(UUIDPrimaryKeyMixin, Base):
     __table_args__ = (
         CheckConstraint("revision > 0", name="revision_positive"),
         CheckConstraint("char_length(input_digest) = 64", name="input_digest_sha256"),
+        CheckConstraint("char_length(manifest_hash) = 64", name="manifest_hash_sha256"),
         CheckConstraint("jsonb_typeof(content) = 'object'", name="content_is_object"),
         CheckConstraint(
             "jsonb_typeof(presentations) = 'object' "
@@ -67,7 +68,13 @@ class ReportPublication(UUIDPrimaryKeyMixin, Base):
     derivation_version: Mapped[str] = mapped_column(String(100), nullable=False)
     content_schema_version: Mapped[str] = mapped_column(String(100), nullable=False)
     input_digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    source_as_of: Mapped[date] = mapped_column(Date, nullable=False)
+    source_as_of: Mapped[date | None] = mapped_column(Date)
+    manifest_version: Mapped[str] = mapped_column(
+        String(100), nullable=False, default="legacy.v1", server_default="legacy.v1"
+    )
+    manifest_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="0" * 64, server_default="0" * 64
+    )
     content: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     presentations: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     published_at: Mapped[datetime] = mapped_column(
@@ -79,7 +86,7 @@ class ReportPublication(UUIDPrimaryKeyMixin, Base):
 
 
 class PublicationSourceRun(Base):
-    """Immutable provenance edge from a publication to successful source metadata."""
+    """Immutable provenance edge from a publication to terminal source metadata."""
 
     __tablename__ = "publication_source_runs"
 

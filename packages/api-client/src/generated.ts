@@ -714,6 +714,38 @@ export interface components {
       reason: string
       status?: components["schemas"]["UserStatus"] | null
     }
+    /** MetricBlock */
+    MetricBlock: {
+      /** Caveat */
+      caveat?: string | null
+      /** Id */
+      id: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "metric"
+      /** Metrics */
+      metrics: components["schemas"]["MetricItem"][]
+      /** Source As Of */
+      source_as_of: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "ok" | "missing" | "error"
+    }
+    /** MetricItem */
+    MetricItem: {
+      /** Change */
+      change?: string | null
+      /** Id */
+      id: string
+      /** Unit Code */
+      unit_code: string
+      /** Value */
+      value: string | null
+    }
     /** MetricValue */
     MetricValue: {
       /** Id */
@@ -1043,11 +1075,19 @@ export interface components {
      *     by Pydantic. This avoids locale-specific formatting and binary float loss.
      */
     PublicationContent: {
+      /** As Of */
+      as_of: string | null
       /**
-       * As Of
-       * Format: date
+       * Blocks
+       * @default []
        */
-      as_of: string
+      blocks: (
+        | components["schemas"]["MetricBlock"]
+        | components["schemas"]["TableBlock"]
+        | components["schemas"]["SeriesBlock"]
+      )[]
+      /** Caveat */
+      caveat?: string | null
       /**
        * Charts
        * @default []
@@ -1062,6 +1102,12 @@ export interface components {
       metrics: components["schemas"]["MetricValue"][]
       /** Schema Version */
       schema_version: string
+      /**
+       * Status
+       * @default complete
+       * @enum {string}
+       */
+      status: "complete" | "partial" | "unavailable"
     }
     /** ReadinessReport */
     ReadinessReport: {
@@ -1075,8 +1121,8 @@ export interface components {
        */
       status: "ok" | "unhealthy"
     }
-    /** ReportPublicationResponse */
-    ReportPublicationResponse: {
+    /** ReportDetailResponse */
+    ReportDetailResponse: {
       content: components["schemas"]["PublicationContent"]
       /**
        * Edition Date
@@ -1088,6 +1134,10 @@ export interface components {
        * @enum {string}
        */
       locale: "zh-hant" | "zh-hans" | "en"
+      /** Manifest Hash */
+      manifest_hash: string
+      /** Manifest Version */
+      manifest_version: string
       /** Market Code */
       market_code: string
       presentation: components["schemas"]["PresentationContract"]
@@ -1105,21 +1155,131 @@ export interface components {
       report_key: string
       /** Revision */
       revision: number
-      /**
-       * Source As Of
-       * Format: date
-       */
-      source_as_of: string
+      /** Source As Of */
+      source_as_of: string | null
       /** Stale */
       stale: boolean
       /** Stale Reason */
       stale_reason: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "complete" | "partial" | "unavailable"
+      /** Summary */
+      summary: string | null
+      /** Title */
+      title: string
+    }
+    /** ReportSummaryResponse */
+    ReportSummaryResponse: {
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /**
+       * Locale
+       * @enum {string}
+       */
+      locale: "zh-hant" | "zh-hans" | "en"
+      /** Market Code */
+      market_code: string
+      /**
+       * Publication Id
+       * Format: uuid
+       */
+      publication_id: string
+      /**
+       * Published At
+       * Format: date-time
+       */
+      published_at: string
+      /** Report Key */
+      report_key: string
+      /** Revision */
+      revision: number
+      /** Source As Of */
+      source_as_of: string | null
+      /** Stale */
+      stale: boolean
+      /** Stale Reason */
+      stale_reason: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "complete" | "partial" | "unavailable"
+      /** Summary */
+      summary: string | null
+      /** Title */
+      title: string
+    }
+    /** SeriesBlock */
+    SeriesBlock: {
+      /** Caveat */
+      caveat?: string | null
+      /** Id */
+      id: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "series"
+      /** Series */
+      series: components["schemas"]["ChartSeries"][]
+      /** Source As Of */
+      source_as_of: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "ok" | "missing" | "error"
+      /** Unit Code */
+      unit_code: string
     }
     /**
      * SystemRole
      * @enum {string}
      */
     SystemRole: "admin" | "asset_manager" | "org_member"
+    /** TableBlock */
+    TableBlock: {
+      /** Caveat */
+      caveat?: string | null
+      /** Columns */
+      columns: components["schemas"]["TableColumn"][]
+      /** Id */
+      id: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "table"
+      /** Rows */
+      rows: (components["schemas"]["TableCell"] | null)[][]
+      /** Source As Of */
+      source_as_of: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "ok" | "missing" | "error"
+    }
+    /** TableCell */
+    TableCell: {
+      /** Text */
+      text?: string | null
+      /** Value */
+      value?: string | null
+    }
+    /** TableColumn */
+    TableColumn: {
+      /** Id */
+      id: string
+      /** Unit Code */
+      unit_code?: string | null
+    }
     /** UserResponse */
     UserResponse: {
       /** Display Name */
@@ -2177,7 +2337,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          "application/json": components["schemas"]["ReportPublicationResponse"][]
+          "application/json": components["schemas"]["ReportSummaryResponse"][]
         }
       }
       /** @description Validation Error */
@@ -2211,7 +2371,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          "application/json": components["schemas"]["ReportPublicationResponse"]
+          "application/json": components["schemas"]["ReportDetailResponse"]
         }
       }
       /** @description Validation Error */

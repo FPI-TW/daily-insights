@@ -616,6 +616,103 @@
         "title": "MemberUpdate",
         "type": "object"
       },
+      "MetricBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "caveat": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caveat"
+          },
+          "id": {
+            "pattern": "^[a-z][a-z0-9_.-]{0,99}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "metric",
+            "default": "metric",
+            "title": "Kind",
+            "type": "string"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/MetricItem"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
+          "source_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source As Of"
+          },
+          "status": {
+            "enum": ["ok", "missing", "error"],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": ["id", "status", "source_as_of", "metrics"],
+        "title": "MetricBlock",
+        "type": "object"
+      },
+      "MetricItem": {
+        "additionalProperties": false,
+        "properties": {
+          "change": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change"
+          },
+          "id": {
+            "pattern": "^[a-z][a-z0-9_.-]{0,99}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "unit_code": {
+            "pattern": "^[a-z][a-z0-9_.-]{0,99}$",
+            "title": "Unit Code",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": ["id", "value", "unit_code"],
+        "title": "MetricItem",
+        "type": "object"
+      },
       "MetricValue": {
         "additionalProperties": false,
         "properties": {
@@ -1351,9 +1448,54 @@
         "description": "Locale-neutral application-owned values.\n\nDecimal is intentionally retained in memory and serialized as a JSON string\nby Pydantic. This avoids locale-specific formatting and binary float loss.",
         "properties": {
           "as_of": {
-            "format": "date",
-            "title": "As Of",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "blocks": {
+            "default": [],
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "metric": "#/components/schemas/MetricBlock",
+                  "series": "#/components/schemas/SeriesBlock",
+                  "table": "#/components/schemas/TableBlock"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/MetricBlock"
+                },
+                {
+                  "$ref": "#/components/schemas/TableBlock"
+                },
+                {
+                  "$ref": "#/components/schemas/SeriesBlock"
+                }
+              ]
+            },
+            "title": "Blocks",
+            "type": "array"
+          },
+          "caveat": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caveat"
           },
           "charts": {
             "default": [],
@@ -1380,6 +1522,12 @@
             "pattern": "^[a-z][a-z0-9_.-]{0,99}$",
             "title": "Schema Version",
             "type": "string"
+          },
+          "status": {
+            "default": "complete",
+            "enum": ["complete", "partial", "unavailable"],
+            "title": "Status",
+            "type": "string"
           }
         },
         "required": ["schema_version", "market_code", "as_of"],
@@ -1405,7 +1553,7 @@
         "title": "ReadinessReport",
         "type": "object"
       },
-      "ReportPublicationResponse": {
+      "ReportDetailResponse": {
         "properties": {
           "content": {
             "$ref": "#/components/schemas/PublicationContent"
@@ -1418,6 +1566,14 @@
           "locale": {
             "enum": ["zh-hant", "zh-hans", "en"],
             "title": "Locale",
+            "type": "string"
+          },
+          "manifest_hash": {
+            "title": "Manifest Hash",
+            "type": "string"
+          },
+          "manifest_version": {
+            "title": "Manifest Version",
             "type": "string"
           },
           "market_code": {
@@ -1446,9 +1602,16 @@
             "type": "integer"
           },
           "source_as_of": {
-            "format": "date",
-            "title": "Source As Of",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source As Of"
           },
           "stale": {
             "title": "Stale",
@@ -1464,6 +1627,26 @@
               }
             ],
             "title": "Stale Reason"
+          },
+          "status": {
+            "enum": ["complete", "partial", "unavailable"],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
           }
         },
         "required": [
@@ -1476,17 +1659,310 @@
           "published_at",
           "stale",
           "stale_reason",
+          "status",
+          "title",
+          "summary",
+          "locale",
+          "manifest_version",
+          "manifest_hash",
           "content",
-          "presentation",
+          "presentation"
+        ],
+        "title": "ReportDetailResponse",
+        "type": "object"
+      },
+      "ReportSummaryResponse": {
+        "properties": {
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          },
+          "locale": {
+            "enum": ["zh-hant", "zh-hans", "en"],
+            "title": "Locale",
+            "type": "string"
+          },
+          "market_code": {
+            "title": "Market Code",
+            "type": "string"
+          },
+          "publication_id": {
+            "format": "uuid",
+            "title": "Publication Id",
+            "type": "string"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          },
+          "report_key": {
+            "title": "Report Key",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "source_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source As Of"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "stale_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stale Reason"
+          },
+          "status": {
+            "enum": ["complete", "partial", "unavailable"],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "publication_id",
+          "report_key",
+          "market_code",
+          "edition_date",
+          "revision",
+          "source_as_of",
+          "published_at",
+          "stale",
+          "stale_reason",
+          "status",
+          "title",
+          "summary",
           "locale"
         ],
-        "title": "ReportPublicationResponse",
+        "title": "ReportSummaryResponse",
+        "type": "object"
+      },
+      "SeriesBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "caveat": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caveat"
+          },
+          "id": {
+            "pattern": "^[a-z][a-z0-9_.-]{0,99}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "series",
+            "default": "series",
+            "title": "Kind",
+            "type": "string"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/ChartSeries"
+            },
+            "title": "Series",
+            "type": "array"
+          },
+          "source_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source As Of"
+          },
+          "status": {
+            "enum": ["ok", "missing", "error"],
+            "title": "Status",
+            "type": "string"
+          },
+          "unit_code": {
+            "pattern": "^[a-z][a-z0-9_.-]{0,99}$",
+            "title": "Unit Code",
+            "type": "string"
+          }
+        },
+        "required": ["id", "status", "source_as_of", "unit_code", "series"],
+        "title": "SeriesBlock",
         "type": "object"
       },
       "SystemRole": {
         "enum": ["admin", "asset_manager", "org_member"],
         "title": "SystemRole",
         "type": "string"
+      },
+      "TableBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "caveat": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caveat"
+          },
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/TableColumn"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^[a-z][a-z0-9_.-]{0,99}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "table",
+            "default": "table",
+            "title": "Kind",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/TableCell"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "source_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source As Of"
+          },
+          "status": {
+            "enum": ["ok", "missing", "error"],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": ["id", "status", "source_as_of", "columns", "rows"],
+        "title": "TableBlock",
+        "type": "object"
+      },
+      "TableCell": {
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "title": "TableCell",
+        "type": "object"
+      },
+      "TableColumn": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[a-z][a-z0-9_.-]{0,99}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "unit_code": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_.-]{0,99}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Code"
+          }
+        },
+        "required": ["id"],
+        "title": "TableColumn",
+        "type": "object"
       },
       "UserResponse": {
         "properties": {
@@ -3190,7 +3666,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/ReportPublicationResponse"
+                    "$ref": "#/components/schemas/ReportSummaryResponse"
                   },
                   "title": "Response List Latest Reports Api Reports Get",
                   "type": "array"
@@ -3257,7 +3733,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReportPublicationResponse"
+                  "$ref": "#/components/schemas/ReportDetailResponse"
                 }
               }
             },

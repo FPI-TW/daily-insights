@@ -1,5 +1,6 @@
 """Public report-operation orchestration interface."""
 
+from daily_insights_api.modules.operations.models import ReportPipelineRun
 from daily_insights_api.modules.operations.service import (
     Freshness,
     LastKnownGood,
@@ -14,6 +15,7 @@ from daily_insights_api.modules.operations.service import (
     get_last_known_good,
     pipeline_idempotency_key,
     publish_completed_run,
+    sanitize_error_code,
     start_source_run,
 )
 
@@ -24,6 +26,7 @@ __all__ = [
     "PipelineLeaseLostError",
     "PipelineSpec",
     "PublishResult",
+    "ReportPipelineRun",
     "claim_pipeline_run",
     "complete_source_run",
     "evaluate_freshness",
@@ -31,5 +34,6 @@ __all__ = [
     "get_last_known_good",
     "pipeline_idempotency_key",
     "publish_completed_run",
+    "sanitize_error_code",
     "start_source_run",
 ]

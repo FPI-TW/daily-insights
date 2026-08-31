@@ -92,27 +92,38 @@ export function PodcastPlayer({
 
   return (
     <section
-      className="mt-[0.85rem] grid gap-3 max-[42rem]:col-span-full"
+      className="mt-4 grid gap-3 border-t border-line pt-4 max-[42rem]:col-span-full"
       aria-label={t("podcastPlayerFor", { title })}
       data-testid="podcast-player"
     >
       {!requested ? (
         <button
-          className="w-fit border-[color-mix(in_oklab,var(--lagoon-deep)_30%,var(--line))] px-3 py-2 text-[0.8rem] font-extrabold text-lagoon-deep"
+          className="primary-action w-fit px-3 py-2 text-[0.8rem]"
           type="button"
           onClick={() => void loadAudio()}
         >
           {t("podcastListen")}
         </button>
       ) : null}
-      {loading ? <p role="status">{t("podcastAudioLoading")}</p> : null}
+      {loading ? (
+        <p
+          className="m-0 flex items-center gap-2 text-sm text-sea-ink-soft"
+          role="status"
+        >
+          <span
+            className="h-3 w-3 animate-spin rounded-full border-2 border-line border-t-lagoon"
+            aria-hidden="true"
+          />
+          {t("podcastAudioLoading")}
+        </p>
+      ) : null}
       {unavailable ? (
-        <div className="flex flex-wrap items-center gap-3">
-          <p className="m-0" role="alert">
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-market-caution/35 bg-market-caution/10 px-3 py-2">
+          <p className="m-0 text-sm font-bold" role="alert">
             {t("podcastAudioUnavailable")}
           </p>
           <button
-            className="w-fit"
+            className="w-fit border-market-caution/40 bg-transparent px-3 py-1.5 text-xs font-extrabold"
             type="button"
             onClick={() => void loadAudio()}
           >
@@ -121,7 +132,7 @@ export function PodcastPlayer({
         </div>
       ) : null}
       {playback && playback.requested_locale !== playback.resolved_locale ? (
-        <p className="m-0 text-[0.85rem] text-sea-ink-soft">
+        <p className="m-0 rounded-md bg-link-hover px-2.5 py-2 text-[0.85rem] text-sea-ink-soft">
           {t("podcastAudioFallback")}
         </p>
       ) : null}

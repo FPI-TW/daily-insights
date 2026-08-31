@@ -21,7 +21,7 @@ export const Route = createFileRoute("/$locale/_authenticated/_admin")({
     if (!canEnterBackOffice(context.user)) {
       throw redirect({
         to: canEnterCustomer(context.user)
-          ? "/$locale/podcasts"
+          ? "/$locale/reports"
           : "/$locale/admin/login",
         params: { locale: context.locale },
       })

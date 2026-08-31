@@ -20,8 +20,7 @@ PUBLIC_HOSTNAME
 DAILY_INSIGHTS_DATABASE_URL
 DAILY_INSIGHTS_SESSION_SECRET
 DAILY_INSIGHTS_PASSWORD_PEPPER
-DAILY_INSIGHTS_FINDB_BASE_URL
-DAILY_INSIGHTS_FINDB_API_KEY
+DAILY_INSIGHTS_MORNING_REPORTS_ENABLED
 DAILY_INSIGHTS_R2_ENDPOINT_URL
 DAILY_INSIGHTS_R2_BUCKET_NAME
 DAILY_INSIGHTS_R2_ACCESS_KEY_ID
@@ -34,6 +33,26 @@ for name in $required_environment; do
     exit 1
   fi
 done
+
+case "$DAILY_INSIGHTS_MORNING_REPORTS_ENABLED" in
+  true | false) ;;
+  *)
+    echo "DAILY_INSIGHTS_MORNING_REPORTS_ENABLED must be true or false" >&2
+    exit 1
+    ;;
+esac
+
+if [ "$DAILY_INSIGHTS_MORNING_REPORTS_ENABLED" = true ]; then
+  for name in \
+    DAILY_INSIGHTS_TWELVE_DATA_BASE_URL \
+    DAILY_INSIGHTS_TWELVE_DATA_API_KEY \
+    DAILY_INSIGHTS_TWELVE_DATA_MANIFEST_APPROVED_HASH; do
+    if [ -z "$(printenv "$name" 2>/dev/null || true)" ]; then
+      echo "enabled morning reports require deployment environment: $name" >&2
+      exit 1
+    fi
+  done
+fi
 
 for name in API_IMAGE WEB_IMAGE; do
   value=$(printenv "$name")
