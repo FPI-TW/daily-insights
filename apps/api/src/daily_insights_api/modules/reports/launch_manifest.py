@@ -22,6 +22,7 @@ class DatasetManifest(ManifestModel):
     endpoint: Literal["/quote", "/time_series", "/market_movers/stocks"]
     symbols: tuple[str, ...]
     symbol_units: dict[str, str]
+    expected_asset_types: dict[str, str] = Field(default_factory=dict)
     required_fields: tuple[str, ...]
     minimum_history: int = Field(default=1, ge=1, le=5_000)
     timezone: str
@@ -64,16 +65,29 @@ class LaunchManifest(ManifestModel):
         ]
         if set(referenced) != set(dataset_keys):
             raise ValueError("manifest blocks must exactly cover declared datasets")
-        if any(
-            not block.datasets or len(set(block.datasets)) != len(block.datasets)
-            for market in self.markets
-            for block in market.blocks
-        ):
-            raise ValueError("every block must reference one or more unique datasets")
+        if any(len(block.datasets) != 1 for market in self.markets for block in market.blocks):
+            raise ValueError("every block must reference exactly one dataset")
+        dataset_markets = {
+            key: {
+                market.market_code
+                for market in self.markets
+                for block in market.blocks
+                if key in block.datasets
+            }
+            for key in dataset_keys
+        }
+        if any(len(markets) != 1 for markets in dataset_markets.values()):
+            raise ValueError("every dataset must be referenced by exactly one market")
         if any(not dataset.required_fields for dataset in self.datasets):
             raise ValueError("every dataset must freeze required fields")
         if any(set(dataset.symbol_units) != set(dataset.symbols) for dataset in self.datasets):
             raise ValueError("every dataset must freeze one unit for each exact symbol")
+        if any(
+            dataset.expected_asset_types
+            and set(dataset.expected_asset_types) != set(dataset.symbols)
+            for dataset in self.datasets
+        ):
+            raise ValueError("asset-type contracts must cover every exact dataset symbol")
         if any(
             re.fullmatch(r"[A-Z]{3}", unit) is None
             for dataset in self.datasets
@@ -89,11 +103,6 @@ class LaunchManifest(ManifestModel):
             for block in market.blocks
         ):
             raise ValueError("every block must freeze exactly three locale labels")
-        if any(
-            len({key for block in market.blocks for key in block.datasets}) != 1
-            for market in self.markets
-        ):
-            raise ValueError("each first-wave market must use one atomic dataset")
         return self
 
     @property
@@ -107,7 +116,7 @@ class LaunchManifest(ManifestModel):
 
 
 ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
-    version="three-market.v3",
+    version="three-market.v4",
     provider="twelve_data",
     markets=(
         MarketManifest(
@@ -124,6 +133,22 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
                         "zh-hant": "商品快照",
                         "zh-hans": "商品快照",
                         "en": "Commodity snapshot",
+                    },
+                ),
+                BlockManifest(
+                    id="macro.commodity_normalized_performance",
+                    kind="series",
+                    datasets=("macro.commodity_daily_bars",),
+                    formula=(
+                        "normalized close=close/first_close*100 independently over the latest "
+                        "30 exact common provider calendar dates; null/zero protected"
+                    ),
+                    unit_code="index",
+                    precision=4,
+                    labels={
+                        "zh-hant": "布蘭特原油與黃金標準化表現",
+                        "zh-hans": "布兰特原油与黄金标准化表现",
+                        "en": "Brent and gold normalized performance",
                     },
                 ),
             ),
@@ -205,6 +230,24 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
             timezone="UTC per provider crypto time-series contract",
             day_boundary="provider 1day bar calendar date",
             freshness="latest completed 1day bar",
+        ),
+        DatasetManifest(
+            key="macro.commodity_daily_bars",
+            endpoint="/time_series",
+            symbols=("XBR/USD", "XAU/USD"),
+            symbol_units={"XBR/USD": "USD", "XAU/USD": "USD"},
+            expected_asset_types={
+                "XBR/USD": "Energy Resource",
+                "XAU/USD": "Precious Metal",
+            },
+            required_fields=("datetime", "open", "high", "low", "close"),
+            # The credentialed probe returned 500 rows per symbol. Retaining the full
+            # reviewed window leaves ample calendar-overlap headroom above the 30 dates
+            # required by the derived series.
+            minimum_history=500,
+            timezone="provider date-only 1day calendar date",
+            day_boundary="provider calendar date; no UTC or exchange timezone inferred",
+            freshness="latest completed provider 1day bar; fail if fewer than 30 common dates",
         ),
         DatasetManifest(
             key="us.market_movers",

@@ -268,9 +268,33 @@ function reportDetail(marketCode, locale) {
       { id: "copper", value: "4.18", change: "-0.2", unit_code: "price" },
     ],
   }
+  const commodityPerformance = {
+    id: "macro.commodity_normalized_performance",
+    kind: "series",
+    status: "ok",
+    source_as_of: "2026-08-29",
+    caveat: null,
+    unit_code: "index",
+    series: [
+      {
+        id: "brent",
+        points: [
+          { x: "2026-08-28", value: "100" },
+          { x: "2026-08-29", value: "101.2" },
+        ],
+      },
+      {
+        id: "gold",
+        points: [
+          { x: "2026-08-28", value: "100" },
+          { x: "2026-08-29", value: "100.5" },
+        ],
+      },
+    ],
+  }
   return {
     ...summary,
-    manifest_version: "three-market.v1",
+    manifest_version: "three-market.v4",
     manifest_hash: "a".repeat(64),
     content: {
       schema_version: "three-market.v1",
@@ -278,7 +302,10 @@ function reportDetail(marketCode, locale) {
       as_of: "2026-08-29",
       status: "complete",
       caveat: null,
-      blocks: [block],
+      blocks:
+        marketCode === "global_macro_bonds"
+          ? [block, commodityPerformance]
+          : [block],
       metrics: [],
       charts: [],
     },
@@ -290,6 +317,12 @@ function reportDetail(marketCode, locale) {
       labels: {
         "macro.commodities": {
           title: "Commodity snapshot",
+          description: null,
+          unit_label: null,
+          series_labels: {},
+        },
+        "macro.commodity_normalized_performance": {
+          title: "Brent and gold normalized performance",
           description: null,
           unit_label: null,
           series_labels: {},

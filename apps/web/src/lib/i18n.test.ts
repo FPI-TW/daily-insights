@@ -18,6 +18,15 @@ describe("request-local i18n", () => {
       "外资 TX 净部位"
     )
     expect(english.t("reportAxisMonday")).toBe("Mon")
+    expect(
+      traditionalChinese.t("reportBlockMacroCommodityNormalizedPerformance")
+    ).toBe("布蘭特原油與黃金標準化表現")
+    expect(
+      simplifiedChinese.t("reportBlockMacroCommodityNormalizedPerformance")
+    ).toBe("布兰特原油与黄金标准化表现")
+    expect(english.t("reportBlockMacroCommodityNormalizedPerformance")).toBe(
+      "Brent and gold normalized performance"
+    )
     expect(english.t("themeToggleLabel_dark")).toContain("dark")
     expect(english.t("role_org_member")).toBe("Organization member")
     expect(traditionalChinese.language).toBe("zh-hant")

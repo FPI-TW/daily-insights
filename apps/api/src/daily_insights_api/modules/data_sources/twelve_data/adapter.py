@@ -22,9 +22,9 @@ from daily_insights_api.modules.data_sources.twelve_data.transport import (
     TwelveDataTransportResponse,
 )
 
-TWELVE_DATA_CONTRACT_VERSION = "2026-08-30.v2"
+TWELVE_DATA_CONTRACT_VERSION = "2026-08-31.v3"
 TWELVE_DATA_CONTRACT_HASH = hashlib.sha256(
-    b"twelve-data:quote,time_series,market_movers/stocks:2026-08-30.v2"
+    b"twelve-data:quote,time_series,market_movers/stocks,asset-type:2026-08-31.v3"
 ).hexdigest()
 TWELVE_DATA_CURRENCY_NAMES = {"USD": "US Dollar"}
 
@@ -118,6 +118,7 @@ class TwelveDataAdapter:
         symbol: str,
         expected_currency: str,
         outputsize: int,
+        expected_asset_type: str | None = None,
     ) -> DailyBarsResult:
         if not 1 <= outputsize <= 5_000:
             raise ValueError("outputsize must be between 1 and 5000")
@@ -141,6 +142,10 @@ class TwelveDataAdapter:
         if payload.meta.currency_quote != expected_currency_name:
             raise DataSourceContractError(
                 "Twelve Data time-series quote currency did not match the launch manifest"
+            )
+        if expected_asset_type is not None and payload.meta.type != expected_asset_type:
+            raise DataSourceContractError(
+                "Twelve Data time-series asset type did not match the launch manifest"
             )
         items = tuple(
             DailyBar(

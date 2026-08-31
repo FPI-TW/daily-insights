@@ -29,6 +29,9 @@ test("customer login opens reports, then a market detail without mobile overflow
   await expect(
     page.getByRole("heading", { name: "Global macro & bonds" })
   ).toBeVisible()
+  await expect(
+    page.getByRole("heading", { name: "Brent and gold normalized performance" })
+  ).toBeVisible()
   await page.setViewportSize({ width: 375, height: 720 })
   await expect
     .poll(() =>

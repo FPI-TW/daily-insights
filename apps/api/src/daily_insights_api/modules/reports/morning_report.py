@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 
@@ -70,7 +71,29 @@ _TITLES = {
     },
 }
 
-MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v3"
+MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v4"
+
+
+@dataclass(frozen=True)
+class DatasetBuild:
+    dataset: DatasetManifest
+    blocks: tuple[ReportBlock, ...]
+    provenance: Provenance | None
+    error: Exception | None
+
+    @property
+    def status(self) -> str:
+        return "succeeded" if self.provenance is not None else "failed"
+
+    @property
+    def marker(self) -> str:
+        return (
+            self.provenance.response_digest
+            if self.provenance is not None
+            else sanitize_error_code(
+                type(self.error).__name__ if self.error is not None else "unknown"
+            )
+        )
 
 
 async def run_morning_report_edition(
@@ -93,37 +116,12 @@ async def _run_market(
     edition_date: date,
 ) -> None:
     owner = f"morning-report-{uuid.uuid4()}"
-    dataset = next(
-        dataset
-        for dataset in ACTIVE_LAUNCH_MANIFEST.datasets
-        if dataset.key
-        in {
-            key
-            for market in ACTIVE_LAUNCH_MANIFEST.markets
-            if market.market_code == market_code
-            for block in market.blocks
-            for key in block.datasets
-        }
-    )
-    _validate_dataset_contract(dataset)
-    provenance: Provenance | None = None
-    error: Exception | None = None
-    try:
-        blocks, provenances = await _build_blocks(adapter, market_code)
-        _validate_manifest_output(market_code, blocks)
-        provenance = _aggregate_provenance(provenances)
-        source_status = "succeeded"
-        source_marker = provenance.response_digest
-    except Exception as caught:
-        error = caught
-        blocks = _error_blocks(market_code)
-        _validate_manifest_output(market_code, blocks)
-        source_status = "failed"
-        source_marker = sanitize_error_code(type(caught).__name__)
+    datasets = _market_datasets(market_code)
+    builds = await _build_blocks(adapter, market_code, datasets)
+    blocks = tuple(block for build in builds for block in build.blocks)
+    _validate_manifest_output(market_code, blocks)
     derivation_version = MORNING_REPORT_DERIVATION_VERSION
-    input_digest = hashlib.sha256(
-        f"{derivation_version}|twelve_data:{dataset.key}:{source_status}:{source_marker}".encode()
-    ).hexdigest()
+    input_digest = _input_digest(derivation_version, builds)
 
     async with session_factory() as database:
         while True:
@@ -208,43 +206,48 @@ async def _run_market(
                 continue
             break
         attempt = run.attempt_count
-        fingerprint = hashlib.sha256(
-            json.dumps(dataset.model_dump(mode="json"), sort_keys=True).encode()
-        ).hexdigest()
-        source = await start_source_run(
-            database,
-            pipeline_run_id=run.id,
-            lease_owner=owner,
-            lease_attempt=attempt,
-            provider="twelve_data",
-            dataset_key=dataset.key,
-            attempt=1,
-            contract_version=TWELVE_DATA_CONTRACT_VERSION,
-            contract_hash=adapter_contract_hash(),
-            endpoint=dataset.endpoint,
-            request_fingerprint=fingerprint,
-            now=datetime.now(UTC),
-        )
+        sources = []
+        for build in builds:
+            fingerprint = hashlib.sha256(
+                json.dumps(build.dataset.model_dump(mode="json"), sort_keys=True).encode()
+            ).hexdigest()
+            sources.append(
+                await start_source_run(
+                    database,
+                    pipeline_run_id=run.id,
+                    lease_owner=owner,
+                    lease_attempt=attempt,
+                    provider="twelve_data",
+                    dataset_key=build.dataset.key,
+                    attempt=1,
+                    contract_version=TWELVE_DATA_CONTRACT_VERSION,
+                    contract_hash=adapter_contract_hash(),
+                    endpoint=build.dataset.endpoint,
+                    request_fingerprint=fingerprint,
+                    now=datetime.now(UTC),
+                )
+            )
         await database.commit()
 
-        if provenance is not None:
-            complete_source_run(
-                source,
-                source_as_of=provenance.as_of or edition_date,
-                fetched_at=provenance.fetched_at,
-                record_count=provenance.record_count,
-                payload_sha256=provenance.response_digest,
-                provider_request_id=provenance.request_id,
-                finished_at=datetime.now(UTC),
-            )
-        else:
-            assert error is not None
-            fail_source_run(
-                source,
-                error_code=type(error).__name__,
-                error_detail=str(error),
-                finished_at=datetime.now(UTC),
-            )
+        for source, build in zip(sources, builds, strict=True):
+            if build.provenance is not None:
+                complete_source_run(
+                    source,
+                    source_as_of=build.provenance.as_of or edition_date,
+                    fetched_at=build.provenance.fetched_at,
+                    record_count=build.provenance.record_count,
+                    payload_sha256=build.provenance.response_digest,
+                    provider_request_id=build.provenance.request_id,
+                    finished_at=datetime.now(UTC),
+                )
+            else:
+                assert build.error is not None
+                fail_source_run(
+                    source,
+                    error_code=type(build.error).__name__,
+                    error_detail=str(build.error),
+                    finished_at=datetime.now(UTC),
+                )
         await database.commit()
 
         bundle = _bundle(market_code, blocks)
@@ -254,20 +257,67 @@ async def _run_market(
             lease_owner=owner,
             lease_attempt=attempt,
             bundle=bundle,
-            source_run_ids=(source.id,),
-            required_dataset_keys=frozenset((dataset.key,)),
+            source_run_ids=tuple(source.id for source in sources),
+            required_dataset_keys=frozenset(dataset.key for dataset in datasets),
             now=datetime.now(UTC),
         )
         await database.commit()
 
 
+def _market_datasets(market_code: LaunchMarketCode) -> tuple[DatasetManifest, ...]:
+    market = next(
+        item for item in ACTIVE_LAUNCH_MANIFEST.markets if item.market_code == market_code
+    )
+    keys = tuple(dict.fromkeys(key for block in market.blocks for key in block.datasets))
+    datasets_by_key = {dataset.key: dataset for dataset in ACTIVE_LAUNCH_MANIFEST.datasets}
+    return tuple(datasets_by_key[key] for key in keys)
+
+
+def _input_digest(derivation_version: str, builds: tuple[DatasetBuild, ...]) -> str:
+    material = "|".join(
+        sorted(f"twelve_data:{build.dataset.key}:{build.status}:{build.marker}" for build in builds)
+    )
+    return hashlib.sha256(f"{derivation_version}|{material}".encode()).hexdigest()
+
+
 async def _build_blocks(
-    adapter: TwelveDataAdapter, market_code: LaunchMarketCode
-) -> tuple[tuple[ReportBlock, ...], tuple[Provenance, ...]]:
-    if market_code == "global_macro_bonds":
-        dataset = next(
-            item for item in ACTIVE_LAUNCH_MANIFEST.datasets if item.key == "macro.commodity_quotes"
+    adapter: TwelveDataAdapter,
+    market_code: LaunchMarketCode,
+    datasets: tuple[DatasetManifest, ...] | None = None,
+) -> tuple[DatasetBuild, ...]:
+    builds = await asyncio.gather(
+        *(
+            _build_dataset(adapter, market_code, dataset)
+            for dataset in (datasets if datasets is not None else _market_datasets(market_code))
         )
+    )
+    return tuple(builds)
+
+
+async def _build_dataset(
+    adapter: TwelveDataAdapter,
+    market_code: LaunchMarketCode,
+    dataset: DatasetManifest,
+) -> DatasetBuild:
+    try:
+        _validate_dataset_contract(dataset)
+        blocks, provenance = await _build_dataset_blocks(adapter, market_code, dataset)
+        return DatasetBuild(dataset=dataset, blocks=blocks, provenance=provenance, error=None)
+    except Exception as caught:
+        return DatasetBuild(
+            dataset=dataset,
+            blocks=_error_blocks_for_dataset(market_code, dataset.key),
+            provenance=None,
+            error=caught,
+        )
+
+
+async def _build_dataset_blocks(
+    adapter: TwelveDataAdapter,
+    market_code: LaunchMarketCode,
+    dataset: DatasetManifest,
+) -> tuple[tuple[ReportBlock, ...], Provenance]:
+    if dataset.key == "macro.commodity_quotes":
         quotes = await asyncio.gather(
             *(
                 adapter.get_quote(
@@ -301,11 +351,46 @@ async def _build_blocks(
                 for identifier, item in zip(("brent", "gold", "copper"), quotes, strict=True)
             ),
         )
-        return (macro_block,), tuple(item.provenance for item in quotes)
-    if market_code == "crypto":
-        dataset = next(
-            item for item in ACTIVE_LAUNCH_MANIFEST.datasets if item.key == "crypto.daily_bars"
+        return (macro_block,), _aggregate_provenance(tuple(item.provenance for item in quotes))
+    if dataset.key == "macro.commodity_daily_bars":
+        results = await asyncio.gather(
+            *(
+                adapter.get_daily_bars(
+                    market=market_code,
+                    symbol=symbol,
+                    expected_currency=dataset.symbol_units[symbol],
+                    expected_asset_type=dataset.expected_asset_types[symbol],
+                    outputsize=dataset.minimum_history,
+                )
+                for symbol in dataset.symbols
+            )
         )
+        window_dates = _latest_common_provider_dates(tuple(result.items for result in results))
+        normalized = SeriesBlock(
+            id="macro.commodity_normalized_performance",
+            status="ok",
+            source_as_of=window_dates[-1],
+            unit_code="index",
+            series=tuple(
+                ChartSeries(
+                    id=identifier,
+                    points=_normalized_common_date_points(
+                        result.items,
+                        window_dates,
+                        precision=block_precision("macro.commodity_normalized_performance"),
+                        rounding=block_rounding("macro.commodity_normalized_performance"),
+                    ),
+                )
+                for identifier, result in zip(("brent", "gold"), results, strict=True)
+            ),
+        )
+        return (
+            (normalized,),
+            _aggregate_provenance(
+                tuple(result.provenance for result in results), as_of=window_dates[-1]
+            ),
+        )
+    if dataset.key == "crypto.daily_bars":
         symbols = dataset.symbols
         results = await asyncio.gather(
             *(
@@ -366,7 +451,11 @@ async def _build_blocks(
                 for symbol, result in zip(symbols, results, strict=True)
             ),
         )
-        return (overview, normalized), tuple(result.provenance for result in results)
+        return (overview, normalized), _aggregate_provenance(
+            tuple(result.provenance for result in results)
+        )
+    if dataset.key != "us.market_movers":
+        raise DataSourceContractError(f"unsupported report dataset {dataset.key}")
     gainers, losers = await asyncio.gather(
         adapter.get_stock_movers(direction="gainers", outputsize=2),
         adapter.get_stock_movers(direction="losers", outputsize=2),
@@ -402,7 +491,7 @@ async def _build_blocks(
             for item in items
         ),
     )
-    return (movers_block,), (gainers.provenance, losers.provenance)
+    return (movers_block,), _aggregate_provenance((gainers.provenance, losers.provenance))
 
 
 def _normalized_points(
@@ -423,6 +512,39 @@ def _normalized_points(
         )
         for bar in window
     )
+
+
+def _normalized_common_date_points(
+    bars: tuple[DailyBar, ...],
+    dates: tuple[date, ...],
+    *,
+    precision: int = 4,
+    rounding: str = "ROUND_HALF_EVEN",
+) -> tuple[ChartPoint, ...]:
+    closes = {bar.trade_date: bar.close for bar in bars}
+    base = closes[dates[0]]
+    if base is None or base == 0:
+        return tuple(ChartPoint(x=str(item), value=None) for item in dates)
+    return tuple(
+        ChartPoint(
+            x=str(item),
+            value=_quantize(_normalize_close(closes[item], base), precision, rounding),
+        )
+        for item in dates
+    )
+
+
+def _latest_common_provider_dates(
+    histories: tuple[tuple[DailyBar, ...], ...],
+) -> tuple[date, ...]:
+    common_dates = sorted(
+        set.intersection(*(set(bar.trade_date for bar in history) for history in histories))
+    )
+    if len(common_dates) < 30:
+        raise DataSourceContractError(
+            "Twelve Data commodity histories have fewer than 30 common provider calendar dates"
+        )
+    return tuple(common_dates[-30:])
 
 
 def _normalize_close(close: Decimal | None, base: Decimal) -> Decimal | None:
@@ -470,11 +592,28 @@ def block_rounding(block_id: str) -> str:
 
 
 def _error_blocks(market_code: LaunchMarketCode) -> tuple[ReportBlock, ...]:
+    return _error_blocks_for_keys(
+        market_code,
+        frozenset(key for dataset in _market_datasets(market_code) for key in (dataset.key,)),
+    )
+
+
+def _error_blocks_for_dataset(
+    market_code: LaunchMarketCode, dataset_key: str
+) -> tuple[ReportBlock, ...]:
+    return _error_blocks_for_keys(market_code, frozenset((dataset_key,)))
+
+
+def _error_blocks_for_keys(
+    market_code: LaunchMarketCode, dataset_keys: frozenset[str]
+) -> tuple[ReportBlock, ...]:
     market = next(
         market for market in ACTIVE_LAUNCH_MANIFEST.markets if market.market_code == market_code
     )
     blocks: list[ReportBlock] = []
     for block in market.blocks:
+        if not set(block.datasets) & dataset_keys:
+            continue
         status: BlockStatus = "error"
         if block.kind == "metric":
             blocks.append(
@@ -555,7 +694,9 @@ def _bundle(market_code: LaunchMarketCode, blocks: tuple[ReportBlock, ...]) -> P
     return PublicationBundle(content=content, presentations=presentations)
 
 
-def _aggregate_provenance(values: tuple[Provenance, ...]) -> Provenance:
+def _aggregate_provenance(
+    values: tuple[Provenance, ...], *, as_of: date | None = None
+) -> Provenance:
     material = "|".join(sorted(value.response_digest for value in values))
     return Provenance(
         provider="twelve_data",
@@ -564,7 +705,11 @@ def _aggregate_provenance(values: tuple[Provenance, ...]) -> Provenance:
         endpoint=values[0].endpoint,
         query_fingerprint=hashlib.sha256(material.encode()).hexdigest(),
         fetched_at=max(value.fetched_at for value in values),
-        as_of=min(value.as_of for value in values if value.as_of is not None),
+        as_of=(
+            as_of
+            if as_of is not None
+            else min(value.as_of for value in values if value.as_of is not None)
+        ),
         response_digest=hashlib.sha256(material.encode()).hexdigest(),
         record_count=sum(value.record_count for value in values),
     )
