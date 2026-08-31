@@ -4,12 +4,10 @@ import json
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
-from typing import Literal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.data_sources.api import (
     TWELVE_DATA_CONTRACT_HASH,
     TWELVE_DATA_CONTRACT_VERSION,
@@ -72,42 +70,14 @@ _TITLES = {
     },
 }
 
-MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v2"
-ExecutionMode = Literal["scheduled", "one_shot"]
-
-
-def authorize_morning_report_execution(
-    settings: Settings,
-    *,
-    execution_mode: ExecutionMode,
-    allow_draft_local: bool,
-) -> None:
-    if allow_draft_local:
-        if settings.environment not in {"development", "test"}:
-            raise RuntimeError("draft manifest execution is restricted to local environments")
-        if execution_mode != "one_shot":
-            raise RuntimeError("draft manifest execution requires one-shot mode")
-        return
-    if ACTIVE_LAUNCH_MANIFEST.status != "approved":
-        raise RuntimeError("credentialed probe approval is required before publication")
-    if settings.twelve_data_manifest_approved_hash != ACTIVE_LAUNCH_MANIFEST.sha256:
-        raise RuntimeError("runtime approval hash does not match the active manifest")
+MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v3"
 
 
 async def run_morning_report_edition(
-    settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
     adapter: TwelveDataAdapter,
     edition_date: date,
-    *,
-    execution_mode: ExecutionMode = "scheduled",
-    allow_draft_local: bool = False,
 ) -> None:
-    authorize_morning_report_execution(
-        settings,
-        execution_mode=execution_mode,
-        allow_draft_local=allow_draft_local,
-    )
     await asyncio.gather(
         *(
             _run_market(session_factory, adapter, market.market_code, edition_date)

@@ -49,7 +49,6 @@ class MarketManifest(ManifestModel):
 class LaunchManifest(ManifestModel):
     version: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,99}$")
     provider: Literal["twelve_data"]
-    status: Literal["draft", "approved"]
     markets: tuple[MarketManifest, ...]
     datasets: tuple[DatasetManifest, ...]
 
@@ -108,9 +107,8 @@ class LaunchManifest(ManifestModel):
 
 
 ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
-    version="three-market.v2",
+    version="three-market.v3",
     provider="twelve_data",
-    status="draft",
     markets=(
         MarketManifest(
             market_code="global_macro_bonds",

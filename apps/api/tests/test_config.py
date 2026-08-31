@@ -63,14 +63,14 @@ def test_findb_is_not_a_three_market_production_requirement() -> None:
     assert settings.findb_api_key is None
 
 
-def test_morning_reports_fail_closed_until_manifest_is_approved() -> None:
-    with pytest.raises(ValidationError, match="manifest has not been approved"):
-        Settings.model_validate(
-            production_settings(
-                morning_reports_enabled=True,
-                twelve_data_api_key=SecretStr("twelve-data-production-key"),
-            )
+def test_morning_reports_accept_valid_twelve_data_configuration() -> None:
+    settings = Settings.model_validate(
+        production_settings(
+            morning_reports_enabled=True,
+            twelve_data_api_key=SecretStr("twelve-data-production-key"),
         )
+    )
+    assert settings.morning_reports_enabled is True
 
 
 @pytest.mark.parametrize("key", ["", "   \t"])

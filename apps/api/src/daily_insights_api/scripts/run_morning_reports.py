@@ -12,11 +12,7 @@ from daily_insights_api.modules.data_sources.api import (
     TwelveDataAdapter,
     TwelveDataTransport,
 )
-from daily_insights_api.modules.reports.morning_report import (
-    ExecutionMode,
-    authorize_morning_report_execution,
-    run_morning_report_edition,
-)
+from daily_insights_api.modules.reports.morning_report import run_morning_report_edition
 from daily_insights_api.modules.reports.scheduler import (
     TAIPEI,
     due_edition,
@@ -52,22 +48,12 @@ async def run_with_heartbeat(
 async def main() -> None:
     args = parse_args()
     settings = get_settings()
-    execution_mode: ExecutionMode = "one_shot" if args.once else "scheduled"
-    if args.allow_draft_local or settings.morning_reports_enabled:
-        try:
-            authorize_morning_report_execution(
-                settings,
-                execution_mode=execution_mode,
-                allow_draft_local=args.allow_draft_local,
-            )
-        except RuntimeError as error:
-            raise SystemExit(str(error)) from error
     heartbeat = Path("/tmp/morning-report-heartbeat")
     await heartbeat.touch()
-    if not settings.morning_reports_enabled and not args.allow_draft_local:
+    if not settings.morning_reports_enabled and not args.once:
         await maintain_disabled_heartbeat(heartbeat)
     now = datetime.now(TAIPEI)
-    edition = args.edition_date or (now.date() if args.allow_draft_local else due_edition(now))
+    edition = args.edition_date or (now.date() if args.once else due_edition(now))
     if args.once and edition is None:
         raise SystemExit("no edition is due yet; pass --edition-date for a manual run")
     api_key = settings.twelve_data_api_key
@@ -90,12 +76,9 @@ async def main() -> None:
         async def runner(run_date: date) -> None:
             await run_with_heartbeat(
                 lambda target_date: run_morning_report_edition(
-                    settings,
                     session_factory,
                     adapter,
                     target_date,
-                    execution_mode=execution_mode,
-                    allow_draft_local=args.allow_draft_local,
                 ),
                 run_date,
                 heartbeat,

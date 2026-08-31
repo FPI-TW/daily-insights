@@ -67,7 +67,7 @@ make bootstrap-admin EMAIL=admin@example.com NAME="Admin"
 本地需要驗證正式晨報資料時，可執行 `make generate-morning-reports`；也可傳入
 `EDITION_DATE=YYYY-MM-DD` 指定台北報告日期。此指令只允許 development／test
 環境的一次性執行，會使用 Twelve Data 正式 credential 並消耗 API credits；不會
-啟用背景排程，也不會放寬 staging／production 的 manifest 核准與 hash 檢查。
+啟用背景排程。正式環境啟用晨報時只驗證功能開關、provider URL 與 API key。
 
 指令只會顯示一次隨機臨時密碼；管理員登入後必須立即更改。
 
