@@ -154,9 +154,13 @@ services:
       web:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/nginx-health"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/api && wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/web",
+        ]
       interval: 10s
-      timeout: 5s
+      timeout: 6s
       retries: 12
       start_period: 10s
     stop_grace_period: 30s

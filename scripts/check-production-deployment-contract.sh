@@ -4,7 +4,10 @@ set -eu
 root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root_dir"
 
-for script in scripts/production/*.sh scripts/check-production-deployment-contract.sh; do
+for script in \
+  scripts/production/*.sh \
+  scripts/check-production-deployment-contract.sh \
+  scripts/test-production-nginx-dns.sh; do
   sh -n "$script"
 done
 
@@ -68,8 +71,20 @@ grep -q 'ssl_certificate ' "$nginx_file"
 grep -q 'server_name ${PUBLIC_HOSTNAME};' "$nginx_file"
 grep -q 'real_ip_header CF-Connecting-IP;' "$nginx_main"
 grep -q 'include /etc/nginx/cloudflare-realip.conf;' "$nginx_main"
+grep -Fq 'resolver 127.0.0.11 valid=2s ipv6=off;' "$nginx_main"
+grep -Fq 'resolver_timeout 1s;' "$nginx_main"
+grep -Fq 'zone api_upstream 64k;' "$nginx_file"
+grep -Fq 'server api:8000 resolve;' "$nginx_file"
+grep -Fq 'zone web_upstream 64k;' "$nginx_file"
+grep -Fq 'server web:3000 resolve;' "$nginx_file"
+grep -Fq 'listen 127.0.0.1:8080;' "$nginx_file"
+grep -Fq 'location = /nginx-health/api {' "$nginx_file"
+grep -Fq 'location = /nginx-health/web {' "$nginx_file"
+grep -Fq 'proxy_pass http://web_upstream/zh-hant/login;' "$nginx_file"
 grep -q 'proxy_set_header X-Forwarded-For $remote_addr;' "$nginx_file"
 grep -q 'proxy_set_header X-Forwarded-Proto https;' "$nginx_file"
+grep -Fq 'http://127.0.0.1:8080/nginx-health/api' "$compose_file"
+grep -Fq 'http://127.0.0.1:8080/nginx-health/web' "$compose_file"
 
 if grep -Eq 'proxy_set_header X-(Real-IP|Forwarded-For) \\$(http_|proxy_add_)' "$nginx_file"; then
   echo "production nginx must discard untrusted client forwarded headers" >&2
@@ -188,6 +203,7 @@ docker compose \
   --file compose.production.yaml \
   config --format json >"$temporary_dir/compose.json"
 python3 scripts/production/validate-compose-model.py "$temporary_dir/compose.json"
+scripts/test-production-nginx-dns.sh "$nginx_image"
 
 cat >"$temporary_dir/stubs/docker" <<'EOF'
 #!/bin/sh
@@ -202,15 +218,35 @@ cat >"$temporary_dir/stubs/sudo" <<'EOF'
 echo "sudo $*" >>"$DEPLOYMENT_LOG"
 exit 0
 EOF
-chmod +x "$temporary_dir/stubs/docker" "$temporary_dir/stubs/sudo"
+cat >"$temporary_dir/stubs/timeout" <<'EOF'
+#!/bin/sh
+shift
+exec "$@"
+EOF
+chmod +x "$temporary_dir/stubs/docker" "$temporary_dir/stubs/sudo" "$temporary_dir/stubs/timeout"
 : >"$temporary_dir/deployment.log"
 PATH="$temporary_dir/stubs:$PATH" \
   DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
   scripts/production/deploy.sh >/dev/null
 grep -q 'compose .* config --quiet' "$temporary_dir/deployment.log"
 grep -q 'compose .* pull' "$temporary_dir/deployment.log"
+grep -q 'compose .* run --rm --no-deps nginx nginx -t' "$temporary_dir/deployment.log"
+grep -q 'compose .* up -d --no-build --force-recreate --no-deps nginx' "$temporary_dir/deployment.log"
 grep -q 'compose .* run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log"
-grep -q 'compose .* up -d --no-build --remove-orphans' "$temporary_dir/deployment.log"
+grep -q 'compose .* up -d --no-build --remove-orphans api web morning-report-scheduler' "$temporary_dir/deployment.log"
+grep -q 'exec daily-insights-nginx wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/api' "$temporary_dir/deployment.log"
+grep -q 'exec daily-insights-nginx wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/web' "$temporary_dir/deployment.log"
+
+nginx_validate_line=$(grep -n 'run --rm --no-deps nginx nginx -t' "$temporary_dir/deployment.log" | cut -d: -f1)
+nginx_recreate_line=$(grep -n 'up -d --no-build --force-recreate --no-deps nginx' "$temporary_dir/deployment.log" | cut -d: -f1)
+migration_line=$(grep -n 'run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log" | cut -d: -f1)
+backend_converge_line=$(grep -n 'up -d --no-build --remove-orphans api web morning-report-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
+if [ "$nginx_validate_line" -ge "$nginx_recreate_line" ] ||
+  [ "$nginx_recreate_line" -ge "$migration_line" ] ||
+  [ "$migration_line" -ge "$backend_converge_line" ]; then
+  echo "deployment must validate/recreate nginx before migrating and replacing backends" >&2
+  exit 1
+fi
 if grep -Eq -- '--env-file|systemctl|daily-insights[.]service' "$temporary_dir/deployment.log"; then
   echo "deployment unexpectedly used a host env file or app systemd unit" >&2
   exit 1
