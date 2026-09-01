@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 TAIPEI = ZoneInfo("Asia/Taipei")
-DEFAULT_RUN_AT = time(hour=7, minute=0)
+DEFAULT_RUN_AT = time(hour=8, minute=0)
 EditionRunner = Callable[[date], Awaitable[None]]
 
 

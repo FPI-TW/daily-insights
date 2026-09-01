@@ -244,7 +244,7 @@ function reportSummary(marketCode, locale) {
     edition_date: "2026-08-30",
     revision: 1,
     source_as_of: "2026-08-29",
-    published_at: "2026-08-30T07:00:00+08:00",
+    published_at: "2026-08-30T08:00:00+08:00",
     stale: false,
     stale_reason: null,
     status: "complete",
