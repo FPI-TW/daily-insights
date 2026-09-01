@@ -6,6 +6,7 @@ from anyio import Path
 from daily_insights_api.core.config import get_settings, is_placeholder_value
 from daily_insights_api.core.database import create_engine, create_session_factory
 from daily_insights_api.modules.news.llm import DeepSeekClient
+from daily_insights_api.modules.news.prompts import load_selection_criteria
 from daily_insights_api.modules.news.service import run_news_edition
 from daily_insights_api.modules.reports.scheduler import (
     TAIPEI,
@@ -33,6 +34,7 @@ async def main() -> None:
         base_url=settings.model_api_base_url,
         api_key=api_key.get_secret_value(),
         model=settings.model_name,
+        selection_criteria=load_selection_criteria(),
     )
 
     async def runner(edition_date: date) -> None:

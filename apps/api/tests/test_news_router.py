@@ -59,8 +59,19 @@ class _EditionDatabase:
         return _Scalars(self.edition)
 
     async def execute(self, statement: object) -> _Rows:
-        del statement
-        return _Rows([(self.item, SimpleNamespace(headline="Headline", summary="Summary"))])
+        params = statement.compile().params  # type: ignore[attr-defined]
+        locale = next(value for value in params.values() if value in {"zh-hant", "zh-hans", "en"})
+        return _Rows(
+            [
+                (
+                    self.item,
+                    SimpleNamespace(
+                        headline=f"{locale} headline",
+                        summary=f"{locale} summary",
+                    ),
+                )
+            ]
+        )
 
 
 async def test_latest_news_requires_authentication() -> None:
@@ -125,6 +136,13 @@ async def test_latest_news_localizes_existing_partial_edition_caveat_for_every_l
         ),
     }
     assert all(response.json()["items"] for response in responses.values())
+    assert {
+        locale: response.json()["items"][0]["headline"] for locale, response in responses.items()
+    } == {
+        "zh-hant": "zh-hant headline",
+        "zh-hans": "zh-hans headline",
+        "en": "en headline",
+    }
 
 
 def test_localized_caveat_is_null_only_for_complete_five_item_editions() -> None:

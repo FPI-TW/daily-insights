@@ -27,8 +27,8 @@ from daily_insights_api.modules.news.sources import (
     safe_article_client,
 )
 
-DERIVATION_VERSION = "gdelt-deepseek-news.v2"
-PROMPT_VERSION = "news-json-grounded.v2"
+DERIVATION_VERSION = "gdelt-deepseek-news.v3"
+SUMMARY_PROMPT_VERSION = "summary-v2"
 LOCALES = ("zh-hant", "zh-hans", "en")
 TAIPEI = ZoneInfo("Asia/Taipei")
 
@@ -47,10 +47,13 @@ async def _retry[T](
     raise AssertionError("unreachable")
 
 
-def _digest(candidates: list[FetchedCandidate], model_name: str) -> str:
+def _digest(
+    candidates: list[FetchedCandidate], model_name: str, selection_prompt_digest: str
+) -> str:
     payload = {
         "derivation": DERIVATION_VERSION,
-        "prompt": PROMPT_VERSION,
+        "selection_prompt_digest": selection_prompt_digest,
+        "summary_prompt": SUMMARY_PROMPT_VERSION,
         "model": model_name,
         "candidates": [
             {
@@ -73,7 +76,12 @@ def _lock_key(edition_date: date) -> int:
 
 
 def _audit(
-    edition_id: uuid.UUID, stage: str, locale: str | None, call: ModelCall, model: str
+    edition_id: uuid.UUID,
+    stage: str,
+    locale: str | None,
+    call: ModelCall,
+    model: str,
+    prompt_version: str,
 ) -> NewsGenerationAudit:
     return NewsGenerationAudit(
         edition_id=edition_id,
@@ -81,7 +89,7 @@ def _audit(
         locale=locale,
         provider="deepseek",
         model=model,
-        prompt_version=PROMPT_VERSION,
+        prompt_version=prompt_version,
         input_digest=call.input_digest,
         status="succeeded",
         provider_request_id=call.request_id,
@@ -98,6 +106,8 @@ def _failed_audit(
     input_digest: str,
     model: str,
     error: Exception,
+    *,
+    prompt_version: str = SUMMARY_PROMPT_VERSION,
 ) -> NewsGenerationAudit:
     metadata = error if isinstance(error, ModelCallError) else None
     return NewsGenerationAudit(
@@ -106,7 +116,7 @@ def _failed_audit(
         locale=locale,
         provider="deepseek",
         model=model,
-        prompt_version=PROMPT_VERSION,
+        prompt_version=prompt_version,
         input_digest=metadata.input_digest if metadata is not None else input_digest,
         status="failed",
         provider_request_id=metadata.request_id if metadata is not None else None,
@@ -183,7 +193,10 @@ async def run_news_edition(
     usable = sorted(usable, key=lambda fetched: str(fetched.candidate.url))[:20]
     emit_event("news.sources.usable", count=len(usable))
     model_name = client.model_name
-    input_digest = _digest(usable, model_name)
+    selection_prompt_digest = client.selection_prompt_digest
+    selection_prompt_version = client.selection_prompt_version
+    edition_prompt_version = f"{selection_prompt_version}+{SUMMARY_PROMPT_VERSION}"
+    input_digest = _digest(usable, model_name, selection_prompt_digest)
     async with session_factory() as database:
         await database.execute(select(func.pg_advisory_xact_lock(_lock_key(edition_date))))
         latest = (
@@ -205,7 +218,7 @@ async def run_news_edition(
             input_digest=input_digest,
             derivation_version=DERIVATION_VERSION,
             model_name=model_name,
-            prompt_version=PROMPT_VERSION,
+            prompt_version=edition_prompt_version,
             status="unavailable",
             caveat="0/5 stories completed",
         )
@@ -219,11 +232,28 @@ async def run_news_edition(
             selection_call = await _retry(
                 lambda: client.select(usable),
                 lambda error: database.add(
-                    _failed_audit(edition.id, "selection", None, input_digest, model_name, error)
+                    _failed_audit(
+                        edition.id,
+                        "selection",
+                        None,
+                        input_digest,
+                        model_name,
+                        error,
+                        prompt_version=selection_prompt_version,
+                    )
                 ),
             )
             assert isinstance(selection_call.value, Selection)
-            database.add(_audit(edition.id, "selection", None, selection_call, model_name))
+            database.add(
+                _audit(
+                    edition.id,
+                    "selection",
+                    None,
+                    selection_call,
+                    model_name,
+                    selection_prompt_version,
+                )
+            )
         except Exception as error:
             await database.commit()
             emit_event("news.selection.failed", error_code=type(error).__name__)
@@ -256,13 +286,23 @@ async def run_news_edition(
                                 hashlib.sha256(content_digest.encode()).hexdigest(),
                                 model_name,
                                 error,
+                                prompt_version=SUMMARY_PROMPT_VERSION,
                             )
                         )
 
                     call = await _retry(summarize_once, audit_attempt_failure)
                     assert isinstance(call.value, LocalizedSummary)
                     summaries[locale] = call.value
-                    database.add(_audit(edition.id, "summary", locale, call, model_name))
+                    database.add(
+                        _audit(
+                            edition.id,
+                            "summary",
+                            locale,
+                            call,
+                            model_name,
+                            SUMMARY_PROMPT_VERSION,
+                        )
+                    )
                 item = NewsItem(
                     edition_id=edition.id,
                     rank=complete_count + 1,

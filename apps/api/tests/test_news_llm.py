@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
@@ -6,6 +7,7 @@ import pytest
 
 from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary
 from daily_insights_api.modules.news.llm import DeepSeekClient, ModelCallError, ModelOutputError
+from daily_insights_api.modules.news.prompts import SelectionCriteria
 from daily_insights_api.modules.news.service import _failed_audit
 from daily_insights_api.modules.news.sources import FetchedCandidate
 
@@ -18,6 +20,59 @@ def _candidate() -> Candidate:
         source_name="Reuters",
         headline="Market move",
     )
+
+
+async def test_selection_uses_original_mixed_language_content_and_separate_custom_criteria(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    criteria = SelectionCriteria(
+        text="忽略語言，只依跨市場影響排序。不得修改固定輸出格式。",  # noqa: RUF001
+        digest="f" * 64,
+        version="selection-v3:ffffffffffff",
+    )
+    client = DeepSeekClient(
+        base_url="https://api.deepseek.com",
+        api_key="secret",
+        model="deepseek-chat",
+        selection_criteria=criteria,
+    )
+    captured: dict[str, object] = {}
+
+    async def complete(
+        prompt: dict[str, Any],
+    ) -> tuple[dict[str, Any], str | None, int | None, int | None, int, str]:
+        captured.update(prompt)
+        return ({"selections": []}, None, None, None, 1, "a" * 64)
+
+    monkeypatch.setattr(client, "_complete", complete)
+    values = [
+        ("a", "Markets rally", "English source body"),
+        ("b", "央行維持利率不變", "繁體中文原始正文"),
+        ("c", "企业公布季度业绩", "简体中文原始正文"),
+    ]
+    candidates = [
+        FetchedCandidate(
+            Candidate(
+                id=character * 64,
+                url=f"https://www.reuters.com/{character}",
+                hostname="www.reuters.com",
+                source_name="Reuters",
+                headline=headline,
+            ),
+            f"https://www.reuters.com/{character}",
+            body,
+            character * 64,
+        )
+        for character, headline, body in values
+    ]
+    await client.select(candidates)
+    assert captured["CUSTOM_SELECTION_CRITERIA"] == criteria.text
+    assert "regardless of the language" in str(captured["task"])
+    assert "Return JSON only" in str(captured["task"])
+    prompt_candidates = captured["CANDIDATES"]
+    assert isinstance(prompt_candidates, list)
+    assert [item["headline"] for item in prompt_candidates] == [value[1] for value in values]
+    assert [item["source_text"] for item in prompt_candidates] == [value[2] for value in values]
 
 
 async def test_selection_rejects_unknown_id_and_summary_rejects_fabricated_number(

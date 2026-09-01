@@ -15,7 +15,10 @@ ALLOWED = configured_hostnames("www.reuters.com,apnews.com")
 
 
 async def test_gdelt_filters_window_schema_exact_host_and_deduplicates() -> None:
-    async def handler(_: httpx.Request) -> httpx.Response:
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
         return httpx.Response(
             200,
             json={
@@ -24,6 +27,16 @@ async def test_gdelt_filters_window_schema_exact_host_and_deduplicates() -> None
                         "url": "https://www.reuters.com/markets/a",
                         "title": "Market rises",
                         "seendate": "20260901100000",
+                    },
+                    {
+                        "url": "https://apnews.com/traditional-chinese",
+                        "title": "央行維持利率不變",
+                        "seendate": "20260901100500",
+                    },
+                    {
+                        "url": "https://apnews.com/simplified-chinese",
+                        "title": "企业公布季度业绩",
+                        "seendate": "20260901101000",
                     },
                     {
                         "url": "https://www.reuters.com/markets/a",
@@ -42,7 +55,17 @@ async def test_gdelt_filters_window_schema_exact_host_and_deduplicates() -> None
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         result = await discover_candidates(client, ALLOWED, datetime(2026, 9, 1, 11, tzinfo=UTC))
-    assert [item.headline for item in result] == ["Market rises"]
+    assert [item.headline for item in result] == [
+        "Market rises",
+        "央行維持利率不變",
+        "企业公布季度业绩",
+    ]
+    query = requests[0].url.params["query"]
+    assert query == "(domain:apnews.com OR domain:www.reuters.com)"
+    assert "sourcelang" not in requests[0].url.params
+    assert all(
+        keyword not in query for keyword in ("market", "economy", "stocks", "finance", "business")
+    )
 
 
 def test_extraction_prioritizes_article_and_removes_navigation() -> None:

@@ -81,10 +81,7 @@ class NewsItem(UUIDPrimaryKeyMixin, Base):
 
 class NewsPresentation(Base):
     __tablename__ = "news_presentations"
-    __table_args__ = (
-        CheckConstraint("locale IN ('zh-hant','zh-hans','en')", name="locale_valid"),
-        UniqueConstraint("item_id", "locale", name="uq_news_presentation_locale"),
-    )
+    __table_args__ = (CheckConstraint("locale IN ('zh-hant','zh-hans','en')", name="locale_valid"),)
     item_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("news_items.id", ondelete="RESTRICT"), primary_key=True
     )

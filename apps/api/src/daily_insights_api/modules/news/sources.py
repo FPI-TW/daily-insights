@@ -344,9 +344,7 @@ async def discover_candidates(
     response = await client.get(
         GDELT_DOC_URL,
         params={
-            "query": (
-                f"({query}) AND (market OR markets OR economy OR stocks OR finance OR business)"
-            ),
+            "query": f"({query})",
             "mode": "artlist",
             "format": "json",
             "maxrecords": 50,
