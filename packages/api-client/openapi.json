@@ -389,6 +389,84 @@
         "title": "InternalUserResponse",
         "type": "object"
       },
+      "LatestNewsResponse": {
+        "properties": {
+          "caveat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caveat"
+          },
+          "edition_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edition Date"
+          },
+          "generated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generated At"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NewsItemResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "locale": {
+            "enum": ["zh-hant", "zh-hans", "en"],
+            "title": "Locale",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "status": {
+            "enum": ["complete", "partial", "unavailable"],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "edition_date",
+          "revision",
+          "generated_at",
+          "status",
+          "locale",
+          "caveat",
+          "items"
+        ],
+        "title": "LatestNewsResponse",
+        "type": "object"
+      },
       "LocalizedElementText": {
         "additionalProperties": false,
         "properties": {
@@ -734,6 +812,71 @@
         },
         "required": ["id", "value", "unit_code"],
         "title": "MetricValue",
+        "type": "object"
+      },
+      "NewsItemResponse": {
+        "properties": {
+          "headline": {
+            "title": "Headline",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "importance": {
+            "title": "Importance",
+            "type": "integer"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "source_name": {
+            "title": "Source Name",
+            "type": "string"
+          },
+          "source_published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Published At"
+          },
+          "source_url": {
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "title": "Source Url",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "topic": {
+            "title": "Topic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "rank",
+          "importance",
+          "topic",
+          "headline",
+          "summary",
+          "source_name",
+          "source_url",
+          "source_published_at"
+        ],
+        "title": "NewsItemResponse",
         "type": "object"
       },
       "OrganizationCreate": {
@@ -3479,6 +3622,48 @@
         },
         "summary": "List Visible Markets",
         "tags": ["markets"]
+      }
+    },
+    "/api/news/latest": {
+      "get": {
+        "operationId": "latest_news_api_news_latest_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "locale",
+            "required": false,
+            "schema": {
+              "default": "zh-hant",
+              "enum": ["zh-hant", "zh-hans", "en"],
+              "title": "Locale",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LatestNewsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Latest News",
+        "tags": ["news"]
       }
     },
     "/api/podcasts": {

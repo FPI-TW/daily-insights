@@ -392,6 +392,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/news/latest": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Latest News */
+    get: operations["latest_news_api_news_latest_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/podcasts": {
     parameters: {
       query?: never
@@ -630,6 +647,29 @@ export interface components {
       status: components["schemas"]["UserStatus"]
       system_role: components["schemas"]["SystemRole"]
     }
+    /** LatestNewsResponse */
+    LatestNewsResponse: {
+      /** Caveat */
+      caveat: string | null
+      /** Edition Date */
+      edition_date: string | null
+      /** Generated At */
+      generated_at: string | null
+      /** Items */
+      items: components["schemas"]["NewsItemResponse"][]
+      /**
+       * Locale
+       * @enum {string}
+       */
+      locale: "zh-hant" | "zh-hans" | "en"
+      /** Revision */
+      revision: number | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "complete" | "partial" | "unavailable"
+    }
     /** LocalizedElementText */
     LocalizedElementText: {
       /** Description */
@@ -754,6 +794,33 @@ export interface components {
       unit_code: string
       /** Value */
       value: string
+    }
+    /** NewsItemResponse */
+    NewsItemResponse: {
+      /** Headline */
+      headline: string
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Importance */
+      importance: number
+      /** Rank */
+      rank: number
+      /** Source Name */
+      source_name: string
+      /** Source Published At */
+      source_published_at: string | null
+      /**
+       * Source Url
+       * Format: uri
+       */
+      source_url: string
+      /** Summary */
+      summary: string
+      /** Topic */
+      topic: string
     }
     /** OrganizationCreate */
     OrganizationCreate: {
@@ -2218,6 +2285,37 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["MarketResponse"][]
+        }
+      }
+    }
+  }
+  latest_news_api_news_latest_get: {
+    parameters: {
+      query?: {
+        locale?: "zh-hant" | "zh-hans" | "en"
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["LatestNewsResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
         }
       }
     }

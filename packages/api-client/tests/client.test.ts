@@ -5,6 +5,7 @@ import {
   createBrowserTransport,
   createPodcastAdminClient,
   createPodcastClient,
+  createNewsClient,
   createReportClient,
 } from "../src"
 import { createServerTransport } from "../src/server"
@@ -82,6 +83,26 @@ describe("API client trust boundary", () => {
     )
 
     await expect(client.list("zh-hant")).resolves.toHaveLength(1)
+  })
+
+  it("requests and validates the authenticated latest-news contract", async () => {
+    const transport = vi.fn(async () =>
+      Response.json({
+        edition_date: "2026-09-01",
+        revision: 1,
+        generated_at: "2026-09-01T00:00:00+00:00",
+        status: "partial",
+        locale: "en",
+        caveat: "1/5 stories completed",
+        items: [],
+      })
+    )
+    await expect(
+      createNewsClient(transport).latest("en")
+    ).resolves.toMatchObject({
+      status: "partial",
+    })
+    expect(transport).toHaveBeenCalledWith("/api/news/latest?locale=en")
   })
 
   it("rejects an invalid Podcast locale returned by the API", async () => {
