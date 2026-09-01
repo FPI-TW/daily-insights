@@ -104,11 +104,6 @@ function mapBlock(
     status: block.status,
     titleKey,
     title: literal(presentationLabel?.title ?? titleKey),
-    caption:
-      presentationLabel?.description === null ||
-      presentationLabel?.description === undefined
-        ? null
-        : literal(presentationLabel.description),
     unitCode: block.unit_code,
     unitLabel:
       presentationLabel?.unit_label === null ||

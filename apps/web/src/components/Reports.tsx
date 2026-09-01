@@ -8,15 +8,8 @@ import {
   type MarketCode,
   type ProvisionalReport,
   type ReportBlock,
-  type ReportStatus,
   type ReportValue,
 } from "#/lib/provisional-reports"
-
-const statusStyles: Record<ReportStatus, string> = {
-  complete: "border-lagoon/35 bg-lagoon/10 text-lagoon-deep",
-  partial: "border-market-caution/40 bg-market-caution/10 text-market-caution",
-  unavailable: "border-market-up/40 bg-market-up/10 text-market-up",
-}
 
 function valueText(value: ReportValue | null, t: (key: string) => string) {
   if (value === null) return "—"
@@ -46,34 +39,6 @@ export function ReportLoadingScreen() {
         </div>
       </div>
     </main>
-  )
-}
-
-function StatusBadge({ status }: { status: ReportStatus }) {
-  const { t } = useTranslation()
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-extrabold ${statusStyles[status]}`}
-    >
-      {t(`reportStatus_${status}`)}
-    </span>
-  )
-}
-
-function BlockStatusBadge({ status }: { status: ReportBlock["status"] }) {
-  const { t } = useTranslation()
-  const style =
-    status === "error"
-      ? "border-market-up/40 bg-market-up/10 text-market-up"
-      : status === "missing"
-        ? "border-market-caution/40 bg-market-caution/10 text-market-caution"
-        : "border-lagoon/35 bg-lagoon/10 text-lagoon-deep"
-  return (
-    <span
-      className={`rounded-full border px-2 py-1 text-[10px] font-bold ${style}`}
-    >
-      {t(`reportBlockStatus_${status}`)}
-    </span>
   )
 }
 
@@ -111,24 +76,12 @@ function ReportMarketNav({
   )
 }
 
-function PageHeading({
-  title,
-  description,
-  eyebrow,
-}: {
-  title: string
-  description: string
-  eyebrow: string
-}) {
+function PageHeading({ title }: { title: string }) {
   return (
     <header className="mb-6">
-      <p className="eyebrow">{eyebrow}</p>
-      <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h1 className="m-0 text-[30px] leading-tight font-extrabold tracking-[-0.035em] text-sea-ink max-sm:text-[26px]">
-          {title}
-        </h1>
-        <p className="m-0 text-sm text-sea-ink-soft">{description}</p>
-      </div>
+      <h1 className="m-0 text-[30px] leading-tight font-extrabold tracking-[-0.035em] text-sea-ink max-sm:text-[26px]">
+        {title}
+      </h1>
       <div className="mt-3 h-[3px] w-[54px] bg-lagoon" />
     </header>
   )
@@ -144,23 +97,8 @@ export function ReportList({
   const { t } = useTranslation()
   return (
     <main className="page-shell">
-      <PageHeading
-        title={t("reportsTitle")}
-        description={t("reportsDescription")}
-        eyebrow={t("reportsEyebrow")}
-      />
+      <PageHeading title={t("reportsTitle")} />
       <ReportMarketNav locale={locale} />
-      <section
-        className="mb-5 flex flex-wrap items-center justify-between gap-3 border-l-4 border-market-caution bg-market-caution/10 px-4 py-3"
-        aria-label={t("reportStatus")}
-      >
-        <p className="m-0 text-sm font-semibold text-sea-ink">
-          {t("reportOverviewStrip")}
-        </p>
-        <span className="text-xs text-sea-ink-soft">
-          {t("reportLiveNotice")}
-        </span>
-      </section>
       {reports.length === 0 ? (
         <section className="surface-panel p-10 text-center">
           <h2 className="mt-0 text-xl">{t("reportsEmptyTitle")}</h2>
@@ -187,12 +125,8 @@ export function ReportList({
                     {t(`reportMarket_${report.marketCode}`)}
                   </h2>
                 </div>
-                <StatusBadge status={report.status} />
               </div>
-              <p className="mt-3 mb-4 min-h-10 text-sm leading-6 text-sea-ink-soft">
-                {t(`reportMarketDescription_${report.marketCode}`)}
-              </p>
-              <dl className="grid grid-cols-2 border-y border-line py-3 text-xs">
+              <dl className="border-y border-line py-3 text-xs">
                 <div>
                   <dt className="text-sea-ink-soft">
                     {t("reportEditionDate")}
@@ -201,16 +135,7 @@ export function ReportList({
                     {report.editionDate}
                   </dd>
                 </div>
-                <div className="border-l border-line pl-3">
-                  <dt className="text-sea-ink-soft">{t("reportSourceDate")}</dt>
-                  <dd className="mt-1 font-mono font-semibold text-sea-ink tabular-nums">
-                    {report.sourceDate ?? "—"}
-                  </dd>
-                </div>
               </dl>
-              <p className="mt-3 mb-0 text-xs leading-5 text-sea-ink-soft">
-                {t(report.summaryKey)}
-              </p>
               <Link
                 to="/$locale/reports/$marketCode"
                 params={{ locale, marketCode: report.marketCode }}
@@ -236,48 +161,8 @@ export function ReportDetail({
   const { t } = useTranslation()
   return (
     <main className="page-shell">
-      <PageHeading
-        title={t(`reportMarket_${report.marketCode}`)}
-        description={t(`reportMarketDescription_${report.marketCode}`)}
-        eyebrow={t("reportsEyebrow")}
-      />
+      <PageHeading title={t(`reportMarket_${report.marketCode}`)} />
       <ReportMarketNav locale={locale} activeMarket={report.marketCode} />
-      {report.preview ? (
-        <aside
-          className="mb-5 border-l-4 border-market-caution bg-market-caution/10 px-4 py-3 text-sm font-semibold text-sea-ink"
-          role="status"
-        >
-          {t("reportPreviewNotice")}
-        </aside>
-      ) : null}
-      <section
-        className="mb-5 grid overflow-hidden rounded-[13px] border border-line bg-surface sm:grid-cols-[1fr_auto]"
-        aria-label={t("reportStatus")}
-      >
-        <div className="flex items-center gap-3 px-5 py-4">
-          <StatusBadge status={report.status} />
-          <p className="m-0 text-sm text-sea-ink-soft">
-            {t(`reportStatusDescription_${report.status}`)}
-          </p>
-        </div>
-        <dl className="flex border-t border-line text-xs sm:border-t-0 sm:border-l">
-          <div className="min-w-[130px] px-4 py-3">
-            <dt className="text-sea-ink-soft">{t("reportEditionDate")}</dt>
-            <dd className="mt-1 font-mono font-bold text-sea-ink tabular-nums">
-              {report.editionDate}
-            </dd>
-          </div>
-          <div className="min-w-[130px] border-l border-line px-4 py-3">
-            <dt className="text-sea-ink-soft">{t("reportSourceDate")}</dt>
-            <dd className="mt-1 font-mono font-bold text-sea-ink tabular-nums">
-              {report.sourceDate ?? "—"}
-            </dd>
-          </div>
-        </dl>
-      </section>
-      <aside className="mb-5 border-l-4 border-lagoon bg-lagoon/8 px-4 py-3 text-sm leading-6 text-sea-ink-soft">
-        {t(report.caveatKey)}
-      </aside>
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">
         {report.blocks.map((block, index) => (
           <ReportBlockView block={block} key={`${block.titleKey}-${index}`} />
@@ -375,12 +260,6 @@ function ReportBlockView({ block }: { block: ReportBlock }) {
     block.kind === "series" && block.title
       ? valueText(block.title, t)
       : t(block.titleKey)
-  const blockCaption =
-    block.kind === "series" && block.caption
-      ? valueText(block.caption, t)
-      : block.captionKey
-        ? t(block.captionKey)
-        : null
   return (
     <section
       className={`surface-panel min-w-0 p-5 ${block.kind === "series" ? "xl:col-span-2" : ""}`}
@@ -390,15 +269,13 @@ function ReportBlockView({ block }: { block: ReportBlock }) {
           <h2 className="m-0 text-base font-extrabold tracking-[-0.015em] text-sea-ink">
             {blockTitle}
           </h2>
-          {blockCaption ? (
-            <p className="mt-1 mb-0 text-xs text-sea-ink-soft">
-              {blockCaption}
-            </p>
-          ) : null}
         </div>
-        <BlockStatusBadge status={block.status} />
       </div>
-      {block.kind === "metric" ? (
+      {block.status !== "ok" ? (
+        <p className="m-0 border-y border-line py-5 text-sm text-sea-ink-soft">
+          {t("reportBlockUnavailable")}
+        </p>
+      ) : block.kind === "metric" ? (
         <div className="grid min-w-0 divide-y divide-line border-y border-line sm:grid-cols-3 sm:divide-x sm:divide-y-0">
           {block.metrics.map(item => (
             <div
@@ -422,7 +299,7 @@ function ReportBlockView({ block }: { block: ReportBlock }) {
           ))}
         </div>
       ) : null}
-      {block.kind === "table" ? (
+      {block.status === "ok" && block.kind === "table" ? (
         <div className="min-w-0 max-w-full overflow-x-auto border-y border-line">
           <table className="w-full min-w-[480px] text-sm">
             <thead className="bg-link-hover text-xs text-sea-ink-soft">
@@ -454,7 +331,7 @@ function ReportBlockView({ block }: { block: ReportBlock }) {
           </table>
         </div>
       ) : null}
-      {block.kind === "series" ? (
+      {block.status === "ok" && block.kind === "series" ? (
         <>
           <div className="h-84 min-w-0 w-full overflow-hidden border-y border-line py-2 sm:h-96">
             <ClientOnly
@@ -561,18 +438,6 @@ function ReportBlockView({ block }: { block: ReportBlock }) {
                   : (block.unitCode ?? "—")}
               </dd>
             </div>
-            <div className="flex gap-1">
-              <dt>{t("reportChartSourceDate")}</dt>
-              <dd className="m-0 font-mono text-sea-ink tabular-nums">
-                {block.sourceDate ?? "—"}
-              </dd>
-            </div>
-            {block.caveat ? (
-              <div className="basis-full">
-                <dt className="inline">{t("reportChartCaveat")}</dt>{" "}
-                <dd className="inline m-0">{valueText(block.caveat, t)}</dd>
-              </div>
-            ) : null}
           </dl>
           <div className="sr-only">
             <table>
@@ -629,20 +494,15 @@ export function ReportNotGeneratedScreen({
   const { t } = useTranslation()
   return (
     <main className="page-shell">
-      <PageHeading
-        title={t(`reportMarket_${marketCode}`)}
-        description={t("reportsDescription")}
-        eyebrow={t("reportsEyebrow")}
-      />
+      <PageHeading title={t(`reportMarket_${marketCode}`)} />
       <ReportMarketNav locale={locale} activeMarket={marketCode} />
       <section
         className="surface-panel border-market-caution/35 p-10 text-center"
         role="status"
         aria-live="polite"
       >
-        <h2 className="mt-0 text-xl">{t("reportNotGeneratedTitle")}</h2>
-        <p className="mx-auto mb-0 max-w-xl text-sea-ink-soft">
-          {t("reportNotGeneratedDescription")}
+        <p className="m-0 text-sm text-sea-ink-soft">
+          {t("reportBlockUnavailable")}
         </p>
       </section>
     </main>
