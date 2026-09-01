@@ -106,6 +106,8 @@ const resources: Resource = {
       role_asset_manager: "內容管理員",
       role_org_member: "組織會員",
       signOut: "登出",
+      settings: "設定",
+      theme: "外觀",
       themeMode_light: "淺色",
       themeMode_dark: "深色",
       themeMode_auto: "自動",
@@ -121,65 +123,27 @@ const resources: Resource = {
       requestId: "請求編號：{{id}}",
       submitting: "處理中…",
       reportsNav: "晨間報告",
-      reportsEyebrow: "三市場晨報",
       reportsTitle: "市場晨間報告",
-      reportsDescription: "依固定市場順序檢視本日資料覆蓋與細節。",
       reportMockNotice:
         "展示資料：以下數值為 provisional mock data，僅供介面驗證。",
-      reportLiveNotice:
-        "正式資料由 Twelve Data 供應；缺漏會依區塊狀態如實標示。",
-      reportPreviewNotice:
-        "尚未上線／示意資料：此台灣市場頁面僅供介面預覽，不是正式晨報。",
-      reportCaveatLive:
-        "資料來源為 Twelve Data；來源日期與缺漏狀態以各區塊為準。",
       reportViewDetails: "查看詳情",
       reportBack: "返回所有報告",
       reportEditionDate: "報告日期",
-      reportSourceDate: "更新／來源日期",
-      reportStatus: "報告狀態",
-      reportStatus_complete: "完整",
-      reportStatus_partial: "部分資料",
-      reportStatus_unavailable: "暫不可用",
-      reportStatusDescription_complete: "本報告的展示區塊已準備完成。",
-      reportStatusDescription_partial:
-        "部分正式資料缺漏；請參閱區塊狀態與注意事項。",
-      reportStatusDescription_unavailable:
-        "此報告目前無可用正式資料；固定區塊會保留來源失敗標記。",
-      reportBlockStatus_missing: "資料缺漏",
-      reportBlockStatus_error: "資料錯誤",
-      reportBlockStatus_ok: "資料完整",
+      reportBlockUnavailable: "本區塊資料尚未產生。",
       reportLoadingAnnouncement: "正在載入市場晨間報告。",
       reportsEmptyTitle: "目前沒有晨間報告",
       reportsEmptyDescription: "請稍後重新整理，以取得最新的市場晨間報告。",
-      reportNotGeneratedTitle: "晨報尚未產生",
-      reportNotGeneratedDescription:
-        "此市場目前尚無正式晨報；產報完成後即可在此查看。",
       reportsErrorTitle: "無法載入晨間報告",
       reportsErrorDescription: "請重試載入；若問題持續，請稍後再試。",
-      reportCaveatMock:
-        "此頁全部數字均為明確標示的範例／mock 資料，並非投資建議或即時資料。",
-      reportCaveatPartial:
-        "此頁使用範例／mock 資料；部分區塊刻意呈現缺漏狀態，以驗證資料覆蓋處理。",
-      reportCaveatUnavailable:
-        "此頁使用範例／mock 資料；此市場目前以不可用狀態展示，並非正式市場報告。",
       reportChartSummary: "圖表的文字資料摘要",
       reportChartBase100: "指數（基期 100）",
       reportChartBase100Reference: "基期 100",
       reportChartUnit: "單位：",
-      reportChartSourceDate: "區塊來源日期：",
-      reportChartCaveat: "注意：",
       reportMarket_global_macro_bonds: "全球宏觀與債券",
       reportMarket_crypto: "加密資產",
       reportMarket_us_equity: "美國股票",
       reportMarket_tw_equity: "台灣股票",
       reportMarket_tw_index_derivatives: "台指衍生品",
-      reportMarketDescription_global_macro_bonds:
-        "商品快照與布蘭特原油、黃金標準化表現。",
-      reportMarketDescription_crypto: "主要加密資產概況與標準化表現。",
-      reportMarketDescription_us_equity: "美股十一大類股相對表現。",
-      reportMarketDescription_tw_equity: "台股指數、廣度、類股與技術訊號。",
-      reportMarketDescription_tw_index_derivatives:
-        "TX、MTX、TMF 報價與歷史部位百分位。",
       reportBlockCommodities: "商品",
       reportBlockCryptoOverview: "加密資產概況",
       reportBlockNormalizedPerformance: "標準化表現",
@@ -259,14 +223,6 @@ const resources: Resource = {
       reportMarketShort_us_equity: "美股",
       reportMarketShort_tw_equity: "台股",
       reportMarketShort_tw_index_derivatives: "台指期權",
-      reportOverviewStrip:
-        "三個市場依固定晨報順序更新；請留意各卡片的資料覆蓋狀態。",
-      reportSummary_global_macro_bonds:
-        "布蘭特原油與黃金的商品快照及標準化表現。",
-      reportSummary_crypto: "主流幣走高，ETF 資金流與穩定幣供給仍有缺漏。",
-      reportSummary_us_equity: "科技與能源領漲，市場廣度轉佳。",
-      reportSummary_tw_equity: "電子權值帶動指數，技術訊號部分等待更新。",
-      reportSummary_tw_index_derivatives: "期權與部位資料正等待來源補齊。",
       reportBlockMacroSnapshot: "宏觀快照",
       reportBlockCryptoSnapshot: "加密市場快照",
       reportBlockCryptoFlows: "資金流與穩定幣",
@@ -464,6 +420,8 @@ const resources: Resource = {
       role_asset_manager: "内容管理员",
       role_org_member: "组织会员",
       signOut: "退出登录",
+      settings: "设置",
+      theme: "外观",
       themeMode_light: "浅色",
       themeMode_dark: "深色",
       themeMode_auto: "自动",
@@ -479,65 +437,27 @@ const resources: Resource = {
       requestId: "请求编号：{{id}}",
       submitting: "处理中…",
       reportsNav: "晨间报告",
-      reportsEyebrow: "三市场晨报",
       reportsTitle: "市场晨间报告",
-      reportsDescription: "依固定市场顺序查看当日数据覆盖与详情。",
       reportMockNotice:
         "展示数据：以下数值为 provisional mock data，仅用于界面验证。",
-      reportLiveNotice:
-        "正式数据由 Twelve Data 提供；缺漏会按区块状态如实标示。",
-      reportPreviewNotice:
-        "尚未上线／示意数据：此台湾市场页面仅供界面预览，不是正式晨报。",
-      reportCaveatLive:
-        "数据来源为 Twelve Data；来源日期与缺漏状态以各区块为准。",
       reportViewDetails: "查看详情",
       reportBack: "返回全部报告",
       reportEditionDate: "报告日期",
-      reportSourceDate: "更新／来源日期",
-      reportStatus: "报告状态",
-      reportStatus_complete: "完整",
-      reportStatus_partial: "部分数据",
-      reportStatus_unavailable: "暂不可用",
-      reportStatusDescription_complete: "本报告的展示区块已准备完成。",
-      reportStatusDescription_partial:
-        "部分正式数据缺失；请参阅区块状态与注意事项。",
-      reportStatusDescription_unavailable:
-        "此报告目前没有可用正式数据；固定区块会保留来源失败标记。",
-      reportBlockStatus_missing: "数据缺失",
-      reportBlockStatus_error: "数据错误",
-      reportBlockStatus_ok: "数据完整",
+      reportBlockUnavailable: "此区块资料尚未生成。",
       reportLoadingAnnouncement: "正在加载市场晨间报告。",
       reportsEmptyTitle: "目前没有晨间报告",
       reportsEmptyDescription: "请稍后刷新，以取得最新的市场晨间报告。",
-      reportNotGeneratedTitle: "晨报尚未生成",
-      reportNotGeneratedDescription:
-        "此市场目前尚无正式晨报；生成完成后即可在此查看。",
       reportsErrorTitle: "无法加载晨间报告",
       reportsErrorDescription: "请重试加载；若问题持续，请稍后再试。",
-      reportCaveatMock:
-        "此页全部数字均为明确标示的范例／mock 数据，并非投资建议或实时数据。",
-      reportCaveatPartial:
-        "此页使用范例／mock 数据；部分区块刻意呈现缺失状态。",
-      reportCaveatUnavailable:
-        "此页使用范例／mock 数据；此市场目前以不可用状态展示。",
       reportChartSummary: "图表文字数据摘要",
       reportChartBase100: "指数（基期 100）",
       reportChartBase100Reference: "基期 100",
       reportChartUnit: "单位：",
-      reportChartSourceDate: "区块来源日期：",
-      reportChartCaveat: "注意：",
       reportMarket_global_macro_bonds: "全球宏观与债券",
       reportMarket_crypto: "加密资产",
       reportMarket_us_equity: "美国股票",
       reportMarket_tw_equity: "台湾股票",
       reportMarket_tw_index_derivatives: "台指衍生品",
-      reportMarketDescription_global_macro_bonds:
-        "商品快照与布兰特原油、黄金标准化表现。",
-      reportMarketDescription_crypto: "主要加密资产概况与标准化表现。",
-      reportMarketDescription_us_equity: "美股十一大类股相对表现。",
-      reportMarketDescription_tw_equity: "台股指数、广度、类股与技术信号。",
-      reportMarketDescription_tw_index_derivatives:
-        "TX、MTX、TMF 报价与历史仓位百分位。",
       reportBlockCommodities: "商品",
       reportBlockCryptoOverview: "加密资产概况",
       reportBlockNormalizedPerformance: "标准化表现",
@@ -617,14 +537,6 @@ const resources: Resource = {
       reportMarketShort_us_equity: "美股",
       reportMarketShort_tw_equity: "台股",
       reportMarketShort_tw_index_derivatives: "台指期权",
-      reportOverviewStrip:
-        "三个市场依固定晨报顺序更新；请留意各卡片的数据覆盖状态。",
-      reportSummary_global_macro_bonds:
-        "布兰特原油与黄金的商品快照及标准化表现。",
-      reportSummary_crypto: "主流币走高，ETF 资金流与稳定币供给仍有缺失。",
-      reportSummary_us_equity: "科技与能源领涨，市场广度改善。",
-      reportSummary_tw_equity: "电子权重带动指数，技术信号部分等待更新。",
-      reportSummary_tw_index_derivatives: "期权与仓位数据正等待来源补齐。",
       reportBlockMacroSnapshot: "宏观快照",
       reportBlockCryptoSnapshot: "加密市场快照",
       reportBlockCryptoFlows: "资金流与稳定币",
@@ -828,6 +740,8 @@ const resources: Resource = {
       role_asset_manager: "Content manager",
       role_org_member: "Organization member",
       signOut: "Sign out",
+      settings: "Settings",
+      theme: "Appearance",
       themeMode_light: "Light",
       themeMode_dark: "Dark",
       themeMode_auto: "Auto",
@@ -844,72 +758,29 @@ const resources: Resource = {
       requestId: "Request ID: {{id}}",
       submitting: "Working…",
       reportsNav: "Reports",
-      reportsEyebrow: "Three-market morning report",
       reportsTitle: "Market morning reports",
-      reportsDescription:
-        "Review daily coverage and details in a fixed market order.",
       reportMockNotice:
         "Demo data: all numbers below are provisional mock data for interface validation only.",
-      reportLiveNotice:
-        "Official data is supplied by Twelve Data; gaps are shown explicitly at block level.",
-      reportPreviewNotice:
-        "Not launched / illustrative data: this Taiwan market page is a UI preview, not an official report.",
-      reportCaveatLive:
-        "Source: Twelve Data. See each block for source date and availability.",
       reportViewDetails: "View details",
       reportBack: "Back to all reports",
       reportEditionDate: "Edition date",
-      reportSourceDate: "Update / source date",
-      reportStatus: "Report status",
-      reportStatus_complete: "Complete",
-      reportStatus_partial: "Partial",
-      reportStatus_unavailable: "Unavailable",
-      reportStatusDescription_complete:
-        "All presentation blocks for this report are ready.",
-      reportStatusDescription_partial:
-        "Some presentation data is absent; see block states and caveats.",
-      reportStatusDescription_unavailable:
-        "No official data is currently available; fixed blocks retain their source failure states.",
-      reportBlockStatus_missing: "Data missing",
-      reportBlockStatus_error: "Data error",
-      reportBlockStatus_ok: "Data ready",
+      reportBlockUnavailable: "This section has not been generated yet.",
       reportLoadingAnnouncement: "Loading market morning reports.",
       reportsEmptyTitle: "No morning reports yet",
       reportsEmptyDescription:
         "Refresh shortly to check for the latest market morning reports.",
-      reportNotGeneratedTitle: "Morning report not generated yet",
-      reportNotGeneratedDescription:
-        "No formal morning report is available for this market yet. It will appear here after generation completes.",
       reportsErrorTitle: "Unable to load morning reports",
       reportsErrorDescription:
         "Retry loading the reports. If the issue continues, try again shortly.",
-      reportCaveatMock:
-        "Every figure on this page is explicitly identified sample/mock data, not investment advice or live data.",
-      reportCaveatPartial:
-        "This page uses sample/mock data; selected blocks intentionally demonstrate missing-data handling.",
-      reportCaveatUnavailable:
-        "This page uses sample/mock data; this market is intentionally shown unavailable, not as a formal report.",
       reportChartSummary: "Textual chart data summary",
       reportChartBase100: "Index (Base 100)",
       reportChartBase100Reference: "Base 100",
       reportChartUnit: "Unit:",
-      reportChartSourceDate: "Block source date:",
-      reportChartCaveat: "Caveat:",
       reportMarket_global_macro_bonds: "Global macro & bonds",
       reportMarket_crypto: "Crypto",
       reportMarket_us_equity: "US equities",
       reportMarket_tw_equity: "Taiwan equities",
       reportMarket_tw_index_derivatives: "Taiwan index derivatives",
-      reportMarketDescription_global_macro_bonds:
-        "Commodity snapshots and normalized Brent and gold performance.",
-      reportMarketDescription_crypto:
-        "Major crypto overview and normalized performance.",
-      reportMarketDescription_us_equity:
-        "Performance across the 11 US equity sectors.",
-      reportMarketDescription_tw_equity:
-        "Taiwan index, breadth, sectors, and technical signals.",
-      reportMarketDescription_tw_index_derivatives:
-        "TX, MTX, TMF quotes and historical positioning percentiles.",
       reportBlockCommodities: "Commodities",
       reportBlockCryptoOverview: "Crypto overview",
       reportBlockNormalizedPerformance: "Normalized performance",
@@ -990,18 +861,6 @@ const resources: Resource = {
       reportMarketShort_us_equity: "US equities",
       reportMarketShort_tw_equity: "Taiwan equities",
       reportMarketShort_tw_index_derivatives: "Taiwan derivatives",
-      reportOverviewStrip:
-        "The three markets update in a fixed morning-report order. Review each card's coverage state.",
-      reportSummary_global_macro_bonds:
-        "Commodity snapshots and normalized Brent and gold performance.",
-      reportSummary_crypto:
-        "Major tokens advance; ETF flows and stablecoin supply remain partially covered.",
-      reportSummary_us_equity:
-        "Technology and energy lead while breadth improves.",
-      reportSummary_tw_equity:
-        "Electronic heavyweights lead the index; selected technical signals await refresh.",
-      reportSummary_tw_index_derivatives:
-        "Options and positioning data are still awaiting a source refresh.",
       reportBlockMacroSnapshot: "Macro snapshot",
       reportBlockCryptoSnapshot: "Crypto market snapshot",
       reportBlockCryptoFlows: "Flows & stablecoins",

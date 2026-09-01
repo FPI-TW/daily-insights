@@ -70,7 +70,7 @@ async function renderLocalized(
 }
 
 describe("three-market report presentation", () => {
-  it("shows only three formal market tabs and labels Taiwan direct routes as previews", async () => {
+  it("shows only three formal market tabs and keeps Taiwan direct routes available", async () => {
     const reports = await getProvisionalReportList()
     await renderLocalized(<ReportList locale="en" reports={reports} />, "en")
     expect(screen.getByRole("navigation").querySelectorAll("a")).toHaveLength(4)
@@ -79,7 +79,9 @@ describe("three-market report presentation", () => {
     const taiwan = await getProvisionalReport("tw_equity")
     if (!taiwan) throw new Error("Expected Taiwan preview fixture")
     await renderLocalized(<ReportDetail locale="en" report={taiwan} />, "en")
-    expect(screen.getByText(/Not launched \/ illustrative data/)).toBeVisible()
+    expect(
+      screen.queryByText(/Not launched \/ illustrative data/)
+    ).not.toBeInTheDocument()
   })
   it("uses an accessible in-frame fallback before chart hydration", async () => {
     const crypto = await getProvisionalReport("crypto")
@@ -206,8 +208,9 @@ describe("three-market report presentation", () => {
       expect(chart).toHaveTextContent('"type":"scroll"')
       expect(chart).toHaveTextContent('"yAxis":100')
       expect(chart).toHaveTextContent(`"formatter":"${base100}"`)
-      expect(screen.getAllByText("2026-08-29")).toHaveLength(2)
-      expect(screen.getByText("Provider holiday adjustment")).toBeVisible()
+      expect(
+        screen.queryByText("Provider holiday adjustment")
+      ).not.toBeInTheDocument()
     }
   )
 
@@ -321,26 +324,12 @@ describe("three-market report presentation", () => {
   })
 
   it.each([
-    ["zh-hant", "8 月 22 日", "上漲", "3,412 億元", "週一", "穩定幣供給"],
-    ["zh-hans", "8 月 22 日", "上涨", "3,412 亿元", "周一", "稳定币供给"],
-    [
-      "en",
-      "Aug 22",
-      "Advancers",
-      "NT$341.2 billion",
-      "Mon",
-      "Stablecoin supply",
-    ],
+    ["zh-hant", "8 月 22 日", "上漲", "3,412 億元", "週一"],
+    ["zh-hans", "8 月 22 日", "上涨", "3,412 亿元", "周一"],
+    ["en", "Aug 22", "Advancers", "NT$341.2 billion", "Mon"],
   ] as const)(
     "localizes provisional table values, units, and chart labels in %s",
-    async (
-      locale,
-      axisLabel,
-      breadthLabel,
-      unit,
-      weekdayLabel,
-      stablecoinLabel
-    ) => {
+    async (locale, axisLabel, breadthLabel, unit, weekdayLabel) => {
       const crypto = await getProvisionalReport("crypto")
       const taiwan = await getProvisionalReport("tw_equity")
       const usEquity = await getProvisionalReport("us_equity")
@@ -361,7 +350,6 @@ describe("three-market report presentation", () => {
       expect(screen.getByText(breadthLabel)).toBeVisible()
       expect(screen.getByText(unit)).toBeVisible()
       expect(screen.getByText(weekdayLabel)).toBeVisible()
-      expect(screen.getByText(stablecoinLabel)).toBeVisible()
     }
   )
 
@@ -403,6 +391,18 @@ describe("three-market report presentation", () => {
     )
   })
 
+  it("replaces an unavailable block with a local placeholder", async () => {
+    const crypto = await getProvisionalReport("crypto")
+    if (!crypto) throw new Error("Expected crypto fixture")
+
+    await renderLocalized(<ReportDetail locale="en" report={crypto} />, "en")
+
+    expect(
+      screen.getByText("This section has not been generated yet.")
+    ).toBeVisible()
+    expect(screen.queryByText("Data missing")).not.toBeInTheDocument()
+  })
+
   it("resolves chart colors from tokens and refreshes them after a theme change", async () => {
     const crypto = await getProvisionalReport("crypto")
     if (!crypto) throw new Error("Expected report fixture")
@@ -434,7 +434,7 @@ describe("three-market report presentation", () => {
     }
   })
 
-  it("visibly represents translated ok, missing, and error block states while retaining chart gaps", async () => {
+  it("uses a local placeholder for unavailable blocks while retaining chart gaps", async () => {
     const complete = await getProvisionalReport("global_macro_bonds")
     const unavailable = await getProvisionalReport("tw_index_derivatives")
     if (!complete || !unavailable) throw new Error("Expected report fixtures")
@@ -446,14 +446,13 @@ describe("three-market report presentation", () => {
       </>
     )
 
-    expect(screen.getAllByText("資料完整").length).toBeGreaterThan(0)
-    expect(screen.getAllByText("資料缺漏").length).toBeGreaterThan(0)
-    expect(screen.getByText("資料錯誤")).toBeVisible()
+    expect(screen.getAllByText("本區塊資料尚未產生。").length).toBeGreaterThan(
+      0
+    )
     expect(screen.getAllByText("—").length).toBeGreaterThan(0)
     expect(screen.getAllByTestId("chart")[0]).toHaveTextContent(
       '"connectNulls":false'
     )
-    expect(screen.getAllByTestId("chart")[1]).toHaveTextContent("null")
   })
 
   it("announces loading and presents localized empty and route-error states", async () => {
@@ -476,18 +475,18 @@ describe("three-market report presentation", () => {
   })
 
   it.each([
-    ["zh-hant", "晨報尚未產生"],
-    ["zh-hans", "晨报尚未生成"],
-    ["en", "Morning report not generated yet"],
+    ["zh-hant", "本區塊資料尚未產生。"],
+    ["zh-hans", "此区块资料尚未生成。"],
+    ["en", "This section has not been generated yet."],
   ] as const)(
-    "presents a dedicated non-error state in %s when publication is absent",
-    async (locale, title) => {
+    "presents a minimal non-error state in %s when publication is absent",
+    async (locale, placeholder) => {
       await renderLocalized(
         <ReportNotGeneratedScreen locale={locale} marketCode="us_equity" />,
         locale
       )
 
-      expect(screen.getByRole("status")).toHaveTextContent(title)
+      expect(screen.getByRole("status")).toHaveTextContent(placeholder)
       expect(screen.queryByRole("alert")).not.toBeInTheDocument()
       expect(screen.getByRole("navigation")).toBeVisible()
     }
