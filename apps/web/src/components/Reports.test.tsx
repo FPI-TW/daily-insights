@@ -141,12 +141,88 @@ describe("three-market report presentation", () => {
   })
 
   it.each([
-    ["zh-hant", "布蘭特原油與黃金標準化表現"],
-    ["zh-hans", "布兰特原油与黄金标准化表现"],
-    ["en", "Brent and gold normalized performance"],
+    ["zh-hant", "加密資產標準化表現", "比特幣", "乙太幣", "基期 100"],
+    ["zh-hans", "加密资产标准化表现", "比特币", "以太币", "基期 100"],
+    ["en", "Normalized crypto performance", "Bitcoin", "Ether", "Base 100"],
   ] as const)(
-    "renders the macro commodity chart title in %s",
-    async (locale, title) => {
+    "uses localized live series labels and preserves chart semantics in %s",
+    async (locale, title, bitcoin, ether, base100) => {
+      const report = {
+        marketCode: "crypto",
+        status: "complete",
+        editionDate: "2026-08-30",
+        sourceDate: "2026-08-29",
+        caveatKey: "reportCaveatLive",
+        summaryKey: "reportSummary_crypto",
+        blocks: [
+          {
+            kind: "series",
+            id: "crypto.normalized_performance",
+            status: "ok",
+            titleKey: "reportBlockNormalizedPerformance",
+            title: { kind: "literal", value: title },
+            unitCode: "index",
+            unitLabel: { kind: "literal", value: base100 },
+            sourceDate: "2026-08-29",
+            caveat: { kind: "literal", value: "Provider holiday adjustment" },
+            series: [
+              {
+                id: "btc",
+                label: { kind: "literal", value: bitcoin },
+                points: [
+                  {
+                    label: { kind: "literal", value: "2026-08-28" },
+                    value: 100,
+                  },
+                ],
+              },
+              {
+                id: "eth",
+                label: { kind: "literal", value: ether },
+                points: [
+                  {
+                    label: { kind: "literal", value: "2026-08-29" },
+                    value: 104,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      } satisfies ProvisionalReport
+
+      await renderLocalized(
+        <ReportDetail locale={locale} report={report} />,
+        locale
+      )
+
+      const chart = screen.getByTestId("chart")
+      expect(screen.getByRole("heading", { name: title })).toBeVisible()
+      expect(chart).toHaveTextContent(`"name":"${bitcoin}"`)
+      expect(chart).toHaveTextContent(`"name":"${ether}"`)
+      expect(chart).toHaveTextContent('"data":["2026-08-28","2026-08-29"]')
+      expect(chart).toHaveTextContent('"data":[100,null]')
+      expect(chart).toHaveTextContent('"data":[null,104]')
+      expect(chart).toHaveTextContent('"type":"scroll"')
+      expect(chart).toHaveTextContent('"yAxis":100')
+      expect(chart).toHaveTextContent(`"formatter":"${base100}"`)
+      expect(screen.getAllByText("2026-08-29")).toHaveLength(2)
+      expect(screen.getByText("Provider holiday adjustment")).toBeVisible()
+    }
+  )
+
+  it.each([
+    ["zh-hant", "布蘭特原油與黃金標準化表現", "指數（基期 100）", "基期 100"],
+    ["zh-hans", "布兰特原油与黄金标准化表现", "指数（基期 100）", "基期 100"],
+    [
+      "en",
+      "Brent and gold normalized performance",
+      "Index (Base 100)",
+      "Base 100",
+    ],
+  ] as const)(
+    "uses Base-100 chart semantics for the formal macro normalized block in %s",
+    async (locale, title, axisName, base100) => {
       const report = {
         marketCode: "global_macro_bonds",
         status: "complete",
@@ -157,8 +233,10 @@ describe("three-market report presentation", () => {
         blocks: [
           {
             kind: "series",
+            id: "macro.commodity_normalized_performance",
             status: "ok",
             titleKey: "reportBlockMacroCommodityNormalizedPerformance",
+            unitCode: "index",
             series: [
               {
                 id: "brent",
@@ -184,10 +262,63 @@ describe("three-market report presentation", () => {
         locale
       )
       expect(screen.getByRole("heading", { name: title })).toBeVisible()
-      expect(screen.getByTestId("chart")).toHaveTextContent('"name":"BRENT"')
-      expect(screen.getByTestId("chart")).toHaveTextContent('"name":"GOLD"')
+      const chart = screen.getByTestId("chart")
+      expect(chart).toHaveTextContent('"name":"BRENT"')
+      expect(chart).toHaveTextContent('"name":"GOLD"')
+      expect(chart).toHaveTextContent(`"name":"${axisName}"`)
+      expect(chart).toHaveTextContent(`"formatter":"${base100}"`)
+      expect(chart).toHaveTextContent('"yAxis":100')
     }
   )
+
+  it("sorts an uneven ISO-date category union and aligns each series with null gaps", async () => {
+    const report = {
+      marketCode: "crypto",
+      status: "complete",
+      editionDate: "2026-08-30",
+      sourceDate: "2026-08-30",
+      caveatKey: "reportCaveatLive",
+      summaryKey: "reportSummary_crypto",
+      blocks: [
+        {
+          kind: "series",
+          status: "ok",
+          titleKey: "reportBlockNormalizedPerformance",
+          series: [
+            {
+              id: "first",
+              label: { kind: "literal", value: "First" },
+              points: [
+                { label: { kind: "literal", value: "2026-08-28" }, value: 100 },
+                { label: { kind: "literal", value: "2026-08-30" }, value: 103 },
+              ],
+            },
+            {
+              id: "second",
+              label: { kind: "literal", value: "Second" },
+              points: [
+                { label: { kind: "literal", value: "2026-08-27" }, value: 98 },
+                {
+                  label: { kind: "literal", value: "2026-08-29" },
+                  value: null,
+                },
+                { label: { kind: "literal", value: "2026-08-30" }, value: 104 },
+              ],
+            },
+          ],
+        },
+      ],
+    } satisfies ProvisionalReport
+
+    await renderLocalized(<ReportDetail locale="en" report={report} />, "en")
+
+    const chart = screen.getByTestId("chart")
+    expect(chart).toHaveTextContent(
+      '"data":["2026-08-27","2026-08-28","2026-08-29","2026-08-30"]'
+    )
+    expect(chart).toHaveTextContent('"data":[null,100,null,103]')
+    expect(chart).toHaveTextContent('"data":[98,null,null,104]')
+  })
 
   it.each([
     ["zh-hant", "8 月 22 日", "上漲", "3,412 億元", "週一", "穩定幣供給"],

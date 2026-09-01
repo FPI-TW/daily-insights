@@ -38,9 +38,16 @@ export type TableBlock = {
 }
 export type SeriesBlock = {
   kind: "series"
+  id?: string
   status: BlockStatus
   titleKey: string
+  title?: ReportValue
   captionKey?: string
+  caption?: ReportValue | null
+  unitCode?: string
+  unitLabel?: ReportValue | null
+  sourceDate?: string | null
+  caveat?: ReportValue | null
   series: ReadonlyArray<{
     id: string
     label: ReportValue

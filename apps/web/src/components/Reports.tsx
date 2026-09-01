@@ -319,9 +319,68 @@ function useChartColors() {
   return colors
 }
 
+function chartCategories(
+  block: Extract<ReportBlock, { kind: "series" }>,
+  t: (key: string) => string
+) {
+  const categories = Array.from(
+    new Set(
+      block.series.flatMap(line =>
+        line.points.map(point => valueText(point.label, t))
+      )
+    )
+  )
+  return categories.length > 0 && categories.every(isIsoDateLabel)
+    ? [...categories].sort()
+    : categories
+}
+
+function chartDataForCategories(
+  line: Extract<ReportBlock, { kind: "series" }>["series"][number],
+  categories: ReadonlyArray<string>,
+  t: (key: string) => string
+) {
+  const valuesByCategory = new Map(
+    line.points.map(point => [valueText(point.label, t), point.value])
+  )
+  return categories.map(category => valuesByCategory.get(category) ?? null)
+}
+
+function isIsoDateLabel(label: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(label)
+  if (!match) return false
+
+  const [, year, month, day] = match
+  return (
+    new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
+      .toISOString()
+      .slice(0, 10) === label
+  )
+}
+
+function isBase100Series(
+  block: Pick<Extract<ReportBlock, { kind: "series" }>, "id" | "unitCode">
+) {
+  return (
+    block.id === "macro.commodity_normalized_performance" ||
+    block.id === "crypto.normalized_performance" ||
+    /base[-_ ]?100|normalized/i.test(block.unitCode ?? "")
+  )
+}
+
 function ReportBlockView({ block }: { block: ReportBlock }) {
   const { t } = useTranslation()
   const chartColors = useChartColors()
+  const blockTitle =
+    block.kind === "series" && block.title
+      ? valueText(block.title, t)
+      : t(block.titleKey)
+  const blockCaption =
+    block.kind === "series" && block.caption
+      ? valueText(block.caption, t)
+      : block.captionKey
+        ? t(block.captionKey)
+        : null
   return (
     <section
       className={`surface-panel min-w-0 p-5 ${block.kind === "series" ? "xl:col-span-2" : ""}`}
@@ -329,11 +388,11 @@ function ReportBlockView({ block }: { block: ReportBlock }) {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="m-0 text-base font-extrabold tracking-[-0.015em] text-sea-ink">
-            {t(block.titleKey)}
+            {blockTitle}
           </h2>
-          {block.captionKey ? (
+          {blockCaption ? (
             <p className="mt-1 mb-0 text-xs text-sea-ink-soft">
-              {t(block.captionKey)}
+              {blockCaption}
             </p>
           ) : null}
         </div>
@@ -397,7 +456,7 @@ function ReportBlockView({ block }: { block: ReportBlock }) {
       ) : null}
       {block.kind === "series" ? (
         <>
-          <div className="h-64 min-w-0 w-full overflow-hidden border-y border-line py-2">
+          <div className="h-84 min-w-0 w-full overflow-hidden border-y border-line py-2 sm:h-96">
             <ClientOnly
               fallback={
                 <div
@@ -411,39 +470,110 @@ function ReportBlockView({ block }: { block: ReportBlock }) {
                 style={{ height: "100%", width: "100%" }}
                 option={{
                   animation: false,
+                  aria: {
+                    enabled: true,
+                    description: `${blockTitle}. ${t("reportChartSummary")}`,
+                  },
                   color: chartColors.series,
-                  grid: { left: 48, right: 18, top: 18, bottom: 30 },
-                  tooltip: { trigger: "axis" },
+                  grid: { left: 58, right: 18, top: 42, bottom: 72 },
+                  legend: {
+                    type: "scroll",
+                    top: 6,
+                    textStyle: { color: chartColors.text },
+                  },
+                  tooltip: {
+                    trigger: "axis",
+                    appendToBody: true,
+                    valueFormatter: (value: number | string) =>
+                      `${value}${block.unitLabel ? ` ${valueText(block.unitLabel, t)}` : ""}`,
+                  },
                   xAxis: {
                     type: "category",
-                    data: (block.series[0]?.points ?? []).map(point =>
-                      valueText(point.label, t)
-                    ),
+                    data: chartCategories(block, t),
+                    boundaryGap: false,
                     axisLabel: { color: chartColors.text },
                     axisLine: { lineStyle: { color: chartColors.grid } },
                   },
                   yAxis: {
                     type: "value",
                     scale: true,
+                    name: isBase100Series(block)
+                      ? t("reportChartBase100")
+                      : block.unitLabel
+                        ? valueText(block.unitLabel, t)
+                        : block.unitCode,
+                    nameTextStyle: { color: chartColors.text },
                     axisLabel: { color: chartColors.text },
                     splitLine: {
                       lineStyle: { color: chartColors.grid, type: "dashed" },
                     },
                   },
-                  series: block.series.map(line => ({
+                  dataZoom: [
+                    { type: "inside", start: 0, end: 100 },
+                    {
+                      type: "slider",
+                      height: 18,
+                      bottom: 12,
+                      borderColor: chartColors.grid,
+                      textStyle: { color: chartColors.text },
+                    },
+                  ],
+                  series: block.series.map((line, index) => ({
                     name: valueText(line.label, t),
                     type: "line",
-                    data: line.points.map(point => point.value),
+                    data: chartDataForCategories(
+                      line,
+                      chartCategories(block, t),
+                      t
+                    ),
                     connectNulls: false,
                     symbolSize: 6,
                     smooth: 0.18,
                     lineStyle: { width: 2 },
                     areaStyle: { color: "transparent" },
+                    ...(isBase100Series(block) && index === 0
+                      ? {
+                          markLine: {
+                            symbol: "none",
+                            lineStyle: {
+                              color: chartColors.grid,
+                              type: "dashed",
+                            },
+                            label: {
+                              color: chartColors.text,
+                              formatter: t("reportChartBase100Reference"),
+                            },
+                            data: [{ yAxis: 100 }],
+                          },
+                        }
+                      : {}),
                   })),
                 }}
               />
             </ClientOnly>
           </div>
+          <dl className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-sea-ink-soft">
+            <div className="flex gap-1">
+              <dt>{t("reportChartUnit")}</dt>
+              <dd className="m-0 text-sea-ink">
+                {block.unitLabel
+                  ? valueText(block.unitLabel, t)
+                  : (block.unitCode ?? "—")}
+              </dd>
+            </div>
+            <div className="flex gap-1">
+              <dt>{t("reportChartSourceDate")}</dt>
+              <dd className="m-0 font-mono text-sea-ink tabular-nums">
+                {block.sourceDate ?? "—"}
+              </dd>
+            </div>
+            {block.caveat ? (
+              <div className="basis-full">
+                <dt className="inline">{t("reportChartCaveat")}</dt>{" "}
+                <dd className="inline m-0">{valueText(block.caveat, t)}</dd>
+              </div>
+            ) : null}
+          </dl>
           <div className="sr-only">
             <table>
               <caption>{t("reportChartSummary")}</caption>

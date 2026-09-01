@@ -65,7 +65,10 @@ function serverReportClient() {
   )
 }
 
-function mapBlock(block: ApiReportBlock): ReportBlock {
+function mapBlock(
+  block: ApiReportBlock,
+  presentationLabel?: ApiReportDetail["presentation"]["labels"][string]
+): ReportBlock {
   const titleKey = blockTitleKeys[block.id] ?? "reportsTitle"
   if (block.kind === "metric") {
     return {
@@ -97,11 +100,28 @@ function mapBlock(block: ApiReportBlock): ReportBlock {
   }
   return {
     kind: "series",
+    id: block.id,
     status: block.status,
     titleKey,
+    title: literal(presentationLabel?.title ?? titleKey),
+    caption:
+      presentationLabel?.description === null ||
+      presentationLabel?.description === undefined
+        ? null
+        : literal(presentationLabel.description),
+    unitCode: block.unit_code,
+    unitLabel:
+      presentationLabel?.unit_label === null ||
+      presentationLabel?.unit_label === undefined
+        ? null
+        : literal(presentationLabel.unit_label),
+    sourceDate: block.source_as_of,
+    caveat: block.caveat === null ? null : literal(block.caveat),
     series: block.series.map(line => ({
       id: line.id,
-      label: literal(line.id.toUpperCase()),
+      label: literal(
+        presentationLabel?.series_labels[line.id] ?? line.id.toUpperCase()
+      ),
       points: line.points.map(point => ({
         label: literal(point.x),
         value: point.value === null ? null : Number(point.value),
@@ -122,8 +142,13 @@ function summary(report: ApiReportSummary): ProvisionalReport {
   }
 }
 
-function detail(report: ApiReportDetail): ProvisionalReport {
-  return { ...summary(report), blocks: report.content.blocks.map(mapBlock) }
+export function mapReportDetail(report: ApiReportDetail): ProvisionalReport {
+  return {
+    ...summary(report),
+    blocks: report.content.blocks.map(block =>
+      mapBlock(block, report.presentation.labels[block.id])
+    ),
+  }
 }
 
 export const getReportList = createServerFn({ method: "GET" })
@@ -150,7 +175,7 @@ export const getReportDetail = createServerFn({ method: "GET" })
     try {
       return {
         kind: "report" as const,
-        report: detail(
+        report: mapReportDetail(
           await serverReportClient().latest(marketCode, data.locale)
         ),
       }
