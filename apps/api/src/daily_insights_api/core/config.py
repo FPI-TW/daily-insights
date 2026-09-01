@@ -44,6 +44,15 @@ class Settings(BaseSettings):
     twelve_data_retry_attempts: int = Field(default=3, ge=1, le=10)
     twelve_data_max_concurrency: int = Field(default=4, ge=1, le=20)
     morning_reports_enabled: bool = False
+    daily_news_enabled: bool = False
+    news_allowed_hostnames: str = (
+        "www.reuters.com,apnews.com,www.bbc.com,www.cnbc.com,news.cnyes.com,finance.eastmoney.com"
+    )
+    model_provider: str = "deepseek"
+    model_name: str = "deepseek-chat"
+    model_api_base_url: str = "https://api.deepseek.com"
+    model_api_key: SecretStr | None = None
+    news_fetch_timeout_seconds: float = Field(default=25, gt=0, le=120)
     report_freshness_max_age_days: int = Field(default=3, ge=1, le=30)
     r2_endpoint_url: str | None = None
     r2_bucket_name: str | None = None
@@ -96,6 +105,27 @@ class Settings(BaseSettings):
                 or is_placeholder_value(self.twelve_data_api_key.get_secret_value())
             ):
                 raise ValueError("twelve_data_api_key is required and cannot be a placeholder")
+        if self.daily_news_enabled:
+            model_url = urlparse(self.model_api_base_url)
+            if (
+                self.model_provider != "deepseek"
+                or model_url.scheme != "https"
+                or not model_url.netloc
+            ):
+                raise ValueError("daily news requires a DeepSeek absolute HTTPS model API URL")
+            if (
+                self.model_api_key is None
+                or not self.model_api_key.get_secret_value().strip()
+                or is_placeholder_value(self.model_api_key.get_secret_value())
+            ):
+                raise ValueError("model_api_key is required and cannot be a placeholder")
+            hostnames = [
+                item.strip().lower().rstrip(".") for item in self.news_allowed_hostnames.split(",")
+            ]
+            if not hostnames or any(
+                not item or "/" in item or ":" in item or "." not in item for item in hostnames
+            ):
+                raise ValueError("news_allowed_hostnames must contain exact hostnames")
         required_r2_values = {
             "r2_endpoint_url": self.r2_endpoint_url,
             "r2_bucket_name": self.r2_bucket_name,

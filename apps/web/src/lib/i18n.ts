@@ -350,6 +350,15 @@ const resources: Resource = {
       podcastBatchReplacementWarning:
         "以下語系已有音檔：{{locales}}。確認後將覆寫檔案。",
       podcastMissingLocales: "缺少語系：{{locales}}",
+      dailyNewsEyebrow: "每日精選",
+      dailyNewsTitle: "本日重大新聞",
+      dailyNewsStatus_complete: "完整",
+      dailyNewsStatus_partial: "部分可用",
+      dailyNewsStatus_unavailable: "暫不可用",
+      dailyNewsUnavailable: "本日重大新聞尚未產生，請稍後再試。",
+      dailyNewsImportance: "重要性 {{count}} 星",
+      dailyNewsTimeUnknown: "時間未提供",
+      dailyNewsSourceLink: "閱讀原文",
     },
   },
   "zh-hans": {
@@ -699,6 +708,15 @@ const resources: Resource = {
       podcastBatchReplacementWarning:
         "以下语言已有音频：{{locales}}。确认后将覆盖文件。",
       podcastMissingLocales: "缺少语言：{{locales}}",
+      dailyNewsEyebrow: "每日精选",
+      dailyNewsTitle: "本日重大新闻",
+      dailyNewsStatus_complete: "完整",
+      dailyNewsStatus_partial: "部分可用",
+      dailyNewsStatus_unavailable: "暂不可用",
+      dailyNewsUnavailable: "本日重大新闻尚未生成，请稍后再试。",
+      dailyNewsImportance: "重要性 {{count}} 星",
+      dailyNewsTimeUnknown: "未提供时间",
+      dailyNewsSourceLink: "阅读原文",
     },
   },
   en: {
@@ -1073,6 +1091,16 @@ const resources: Resource = {
       podcastBatchReplacementWarning:
         "Audio already exists for: {{locales}}. Confirm to overwrite the files.",
       podcastMissingLocales: "Missing languages: {{locales}}",
+      dailyNewsEyebrow: "DAILY SELECTION",
+      dailyNewsTitle: "Today’s major news",
+      dailyNewsStatus_complete: "Complete",
+      dailyNewsStatus_partial: "Partial",
+      dailyNewsStatus_unavailable: "Unavailable",
+      dailyNewsUnavailable:
+        "Today’s major news has not been generated yet. Please try again later.",
+      dailyNewsImportance: "Importance {{count}} stars",
+      dailyNewsTimeUnknown: "Time unavailable",
+      dailyNewsSourceLink: "Read source",
     },
   },
 }

@@ -24,6 +24,7 @@ import {
   provisionedMemberSchema,
   reportDetailSchema,
   reportListSchema,
+  latestNewsSchema,
   type LaunchMarketCode,
   userSchema,
 } from "./schemas"
@@ -54,6 +55,18 @@ export function createReportClient(transport: ApiTransport) {
       return parseResponse(
         await transport(`/api/reports/${marketCode}/latest?${query}`),
         reportDetailSchema
+      )
+    },
+  }
+}
+
+export function createNewsClient(transport: ApiTransport) {
+  return {
+    async latest(locale: Locale) {
+      const query = new URLSearchParams({ locale })
+      return parseResponse(
+        await transport(`/api/news/latest?${query}`),
+        latestNewsSchema
       )
     },
   }

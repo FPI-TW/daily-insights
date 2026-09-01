@@ -15,6 +15,12 @@ from daily_insights_api.modules.model_runtime.models import (
     GenerationRecord,
     ModelConfiguration,
 )
+from daily_insights_api.modules.news.models import (
+    NewsEdition,
+    NewsGenerationAudit,
+    NewsItem,
+    NewsPresentation,
+)
 from daily_insights_api.modules.operations.models import ReportPipelineRun, SourceRun
 from daily_insights_api.modules.podcasts.models import (
     PodcastEpisode,
@@ -37,6 +43,10 @@ __all__ = [
     "Membership",
     "Message",
     "ModelConfiguration",
+    "NewsEdition",
+    "NewsGenerationAudit",
+    "NewsItem",
+    "NewsPresentation",
     "Organization",
     "OrganizationMarketPolicy",
     "PodcastEpisode",

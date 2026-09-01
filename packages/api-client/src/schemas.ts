@@ -118,6 +118,36 @@ export const reportDetailSchema = reportSummarySchema.extend({
 })
 export type ReportDetail = z.infer<typeof reportDetailSchema>
 
+export const newsItemSchema = z.object({
+  id: z.uuid(),
+  rank: z.number().int().positive(),
+  importance: z.number().int().min(1).max(5),
+  topic: z.enum([
+    "markets",
+    "economy",
+    "companies",
+    "policy",
+    "technology",
+    "commodities",
+  ]),
+  headline: z.string(),
+  summary: z.string(),
+  source_name: z.string(),
+  source_url: z.url(),
+  source_published_at: z.iso.datetime({ offset: true }).nullable(),
+})
+export type NewsItem = z.infer<typeof newsItemSchema>
+export const latestNewsSchema = z.object({
+  edition_date: z.iso.date().nullable(),
+  revision: z.number().int().positive().nullable(),
+  generated_at: z.iso.datetime({ offset: true }).nullable(),
+  status: reportStatusSchema,
+  locale: localeSchema,
+  caveat: z.string().nullable(),
+  items: z.array(newsItemSchema),
+})
+export type LatestNews = z.infer<typeof latestNewsSchema>
+
 export const systemRoleSchema = z.enum(["admin", "asset_manager", "org_member"])
 export type SystemRole = z.infer<typeof systemRoleSchema>
 
