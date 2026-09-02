@@ -56,6 +56,7 @@ export type SeriesBlock = {
 }
 export type ReportBlock = MetricBlock | TableBlock | SeriesBlock
 export type ProvisionalReport = {
+  publicationId?: string
   marketCode: MarketCode
   status: ReportStatus
   editionDate: string

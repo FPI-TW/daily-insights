@@ -4,7 +4,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import BinaryIO
 
@@ -12,6 +12,7 @@ import pytest
 import pytest_asyncio
 from alembic import command
 from alembic.config import Config
+from fastapi import HTTPException
 from pydantic import SecretStr
 from sqlalchemy import create_engine as create_sync_engine
 from sqlalchemy import func, select, text
@@ -39,9 +40,17 @@ from daily_insights_api.modules.assets.service import (
     cutover_migration,
     migrate_podcast_assets,
 )
+from daily_insights_api.modules.chat.api import _create_pending_turn
 from daily_insights_api.modules.chat.models import Conversation, Message
+from daily_insights_api.modules.chat.schemas import ChatStreamRequest, ReportsIndexContext
+from daily_insights_api.modules.identity.auth import AuthContext
 from daily_insights_api.modules.identity.models import User
-from daily_insights_api.modules.model_runtime.models import GenerationRecord, ModelConfiguration
+from daily_insights_api.modules.identity.session_models import Session
+from daily_insights_api.modules.model_runtime.models import (
+    ActiveModelConfiguration,
+    GenerationRecord,
+    ModelConfiguration,
+)
 from daily_insights_api.modules.podcasts.models import (
     PodcastEpisode,
     PodcastEpisodeAudioVariant,
@@ -527,3 +536,167 @@ async def test_retained_history_triggers_enforce_lifecycle(
         with pytest.raises(DBAPIError):
             async with phase2b_database.session_factory.begin() as database:
                 await database.execute(text(statement), {"id": record_id})
+
+
+@pytest.mark.asyncio
+async def test_chat_turn_commits_before_observation_and_enforces_tenant_pending_and_replay(
+    phase2b_database: Phase2BDatabase,
+) -> None:
+    organization_id, other_organization_id, member_id, other_member_id = (
+        uuid.uuid4(),
+        uuid.uuid4(),
+        uuid.uuid4(),
+        uuid.uuid4(),
+    )
+    async with phase2b_database.session_factory.begin() as database:
+        members = [
+            User(
+                id=member_id,
+                email=f"chat-{member_id}@example.com",
+                display_name="Chat",
+                password_hash="x",
+                must_change_password=False,
+                system_role=SystemRole.ORG_MEMBER,
+                status=UserStatus.ACTIVE,
+            ),
+            User(
+                id=other_member_id,
+                email=f"chat-{other_member_id}@example.com",
+                display_name="Other",
+                password_hash="x",
+                must_change_password=False,
+                system_role=SystemRole.ORG_MEMBER,
+                status=UserStatus.ACTIVE,
+            ),
+        ]
+        database.add_all(
+            [
+                Organization(
+                    id=organization_id,
+                    name="Chat org",
+                    slug=f"chat-{organization_id.hex[:8]}",
+                    seat_limit=2,
+                ),
+                Organization(
+                    id=other_organization_id,
+                    name="Other org",
+                    slug=f"other-{organization_id.hex[:8]}",
+                    seat_limit=2,
+                ),
+                *members,
+            ]
+        )
+        await database.flush()
+        database.add_all(
+            [
+                Membership(organization_id=organization_id, user_id=member_id),
+                Membership(organization_id=other_organization_id, user_id=other_member_id),
+            ]
+        )
+        configuration = ModelConfiguration(
+            version=99,
+            provider="test",
+            requested_model="test",
+            prompt_version="v1",
+            parameters={},
+            created_by_user_id=phase2b_database.admin_id,
+        )
+        database.add(configuration)
+        await database.flush()
+        database.add(
+            ActiveModelConfiguration(
+                model_configuration_id=configuration.id,
+                activated_by_user_id=phase2b_database.admin_id,
+            )
+        )
+    member = members[0]
+    context = AuthContext(
+        user=member,
+        session=Session(
+            user_id=member_id,
+            token_hash="a" * 64,
+            csrf_token_hash="b" * 64,
+            expires_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        ),
+        organization_id=organization_id,
+    )
+    payload = ChatStreamRequest(
+        client_request_id=uuid.uuid4(),
+        locale="en",
+        message="Question",
+        page_context=ReportsIndexContext(kind="reports_index", publication_ids=[uuid.uuid4()]),
+    )
+    async with phase2b_database.session_factory() as database:
+        (
+            conversation,
+            user_message,
+            assistant_message,
+            generation,
+            replay,
+        ) = await _create_pending_turn(
+            database,
+            context=context,
+            payload=payload,
+            snapshot={"kind": "test"},
+            report_version=None,
+        )
+        assert replay is False
+    # This is the observation a provider seam makes on entry: it uses a separate
+    # connection, so visibility proves the turn transaction committed first.
+    provider_observations: list[tuple[bool, bool, bool]] = []
+
+    async def observe_provider_entry() -> None:
+        async with phase2b_database.session_factory() as observer:
+            provider_observations.append(
+                (
+                    await observer.get(Message, user_message.id) is not None,
+                    await observer.get(Message, assistant_message.id) is not None,
+                    await observer.get(GenerationRecord, generation.id) is not None,
+                )
+            )
+
+    await observe_provider_entry()
+    assert provider_observations == [(True, True, True)]
+    async with phase2b_database.session_factory() as database:
+        with pytest.raises(HTTPException, match="pending"):
+            await _create_pending_turn(
+                database,
+                context=context,
+                payload=payload.model_copy(
+                    update={"client_request_id": uuid.uuid4(), "conversation_id": conversation.id}
+                ),
+                snapshot={"kind": "test"},
+                report_version=None,
+            )
+        await database.rollback()
+    async with phase2b_database.session_factory.begin() as database:
+        await database.execute(
+            text("UPDATE messages SET status = 'complete' WHERE id = :id"),
+            {"id": assistant_message.id},
+        )
+        await database.execute(
+            text("UPDATE generation_records SET status = 'complete' WHERE id = :id"),
+            {"id": generation.id},
+        )
+    async with phase2b_database.session_factory() as database:
+        _, _, _, _, replay = await _create_pending_turn(
+            database,
+            context=context,
+            payload=payload,
+            snapshot={"kind": "changed"},
+            report_version=None,
+        )
+        assert replay is True
+        with pytest.raises(HTTPException, match="not found"):
+            await _create_pending_turn(
+                database,
+                context=AuthContext(
+                    user=member, session=context.session, organization_id=other_organization_id
+                ),
+                payload=payload.model_copy(
+                    update={"conversation_id": conversation.id, "client_request_id": uuid.uuid4()}
+                ),
+                snapshot={"kind": "test"},
+                report_version=None,
+            )

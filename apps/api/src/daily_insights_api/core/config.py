@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     model_name: str = "deepseek-chat"
     model_api_base_url: str = "https://api.deepseek.com"
     model_api_key: SecretStr | None = None
+    chat_enabled: bool = False
+    chat_model_provider: str = "deepseek"
+    chat_model_name: str = "deepseek-chat"
+    chat_model_api_base_url: str = "https://api.deepseek.com"
+    chat_model_api_key: SecretStr | None = None
+    chat_timeout_seconds: float = Field(default=90, gt=0, le=600)
     news_fetch_timeout_seconds: float = Field(default=25, gt=0, le=120)
     report_freshness_max_age_days: int = Field(default=3, ge=1, le=30)
     r2_endpoint_url: str | None = None
@@ -126,6 +132,18 @@ class Settings(BaseSettings):
                 not item or "/" in item or ":" in item or "." not in item for item in hostnames
             ):
                 raise ValueError("news_allowed_hostnames must contain exact hostnames")
+        if self.chat_enabled:
+            chat_url = urlparse(self.chat_model_api_base_url)
+            if self.chat_model_provider not in {"deepseek", "openai-compatible"}:
+                raise ValueError("chat_model_provider must be deepseek or openai-compatible")
+            if chat_url.scheme != "https" or not chat_url.netloc:
+                raise ValueError("chat_model_api_base_url must be an absolute HTTPS URL")
+            if (
+                self.chat_model_api_key is None
+                or not self.chat_model_api_key.get_secret_value().strip()
+                or is_placeholder_value(self.chat_model_api_key.get_secret_value())
+            ):
+                raise ValueError("chat_model_api_key is required and cannot be a placeholder")
         required_r2_values = {
             "r2_endpoint_url": self.r2_endpoint_url,
             "r2_bucket_name": self.r2_bucket_name,

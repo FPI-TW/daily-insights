@@ -20,6 +20,12 @@ services:
       DAILY_INSIGHTS_MODEL_NAME: ${DAILY_INSIGHTS_MODEL_NAME:-deepseek-chat}
       DAILY_INSIGHTS_MODEL_API_BASE_URL: ${DAILY_INSIGHTS_MODEL_API_BASE_URL:-https://api.deepseek.com}
       DAILY_INSIGHTS_MODEL_API_KEY: ${DAILY_INSIGHTS_MODEL_API_KEY:-}
+      DAILY_INSIGHTS_CHAT_ENABLED: ${DAILY_INSIGHTS_CHAT_ENABLED:-false}
+      DAILY_INSIGHTS_CHAT_MODEL_PROVIDER: ${DAILY_INSIGHTS_CHAT_MODEL_PROVIDER:-deepseek}
+      DAILY_INSIGHTS_CHAT_MODEL_NAME: ${DAILY_INSIGHTS_CHAT_MODEL_NAME:-deepseek-chat}
+      DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL: ${DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL:-https://api.deepseek.com}
+      DAILY_INSIGHTS_CHAT_MODEL_API_KEY: ${DAILY_INSIGHTS_CHAT_MODEL_API_KEY:-}
+      DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS:-90}
       DAILY_INSIGHTS_TWELVE_DATA_BASE_URL: ${DAILY_INSIGHTS_TWELVE_DATA_BASE_URL:-https://api.twelvedata.com}
       DAILY_INSIGHTS_TWELVE_DATA_API_KEY: ${DAILY_INSIGHTS_TWELVE_DATA_API_KEY:-}
       DAILY_INSIGHTS_R2_ENDPOINT_URL: ${DAILY_INSIGHTS_R2_ENDPOINT_URL:?set DAILY_INSIGHTS_R2_ENDPOINT_URL}
@@ -125,7 +131,13 @@ services:
       DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY: ${DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY:?set DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY from GitHub Secrets}
     command: ["python", "-m", "daily_insights_api.scripts.run_daily_news"]
     healthcheck:
-      test: ["CMD", "python", "-c", "import time; from pathlib import Path; p = Path('/tmp/daily-news-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 93600"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import time; from pathlib import Path; p = Path('/tmp/daily-news-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 93600",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3

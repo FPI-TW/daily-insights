@@ -39,7 +39,14 @@ class Message(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         CheckConstraint("sequence_number >= 0", name="sequence_number_nonnegative"),
         UniqueConstraint("conversation_id", "sequence_number"),
+        UniqueConstraint("client_request_id", name="uq_messages_client_request_id"),
         Index("ix_messages_conversation_created", "conversation_id", "created_at"),
+        Index(
+            "uq_messages_pending_assistant_conversation",
+            "conversation_id",
+            unique=True,
+            postgresql_where="role = 'assistant' AND status = 'pending'",
+        ),
     )
 
     conversation_id: Mapped[uuid.UUID] = mapped_column(
@@ -53,6 +60,10 @@ class Message(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    client_request_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    reply_to_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("messages.id", ondelete="RESTRICT")
+    )
     status: Mapped[GenerationStatus] = mapped_column(
         Enum(
             GenerationStatus,

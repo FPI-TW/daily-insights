@@ -6,6 +6,7 @@ import {
   ReportNotGeneratedScreen,
 } from "#/components/Reports"
 import { getReportDetail } from "#/lib/reports"
+import { useChatPageContext } from "#/components/PageContextChat"
 
 export const Route = createFileRoute(
   "/$locale/_authenticated/_customer/reports/$marketCode"
@@ -25,6 +26,11 @@ export const Route = createFileRoute(
 function ReportPage() {
   const result = Route.useLoaderData()
   const { locale } = Route.useRouteContext()
+  useChatPageContext(
+    result.kind === "report" && result.report.publicationId
+      ? { kind: "report_detail", publication_id: result.report.publicationId }
+      : null
+  )
   if (result.kind === "not-generated") {
     return (
       <ReportNotGeneratedScreen

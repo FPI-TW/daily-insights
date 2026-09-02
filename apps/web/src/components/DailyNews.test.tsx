@@ -23,6 +23,7 @@ describe("DailyNews", () => {
       <I18nextProvider i18n={i18n}>
         <DailyNews
           news={{
+            edition_id: "00000000-0000-4000-8000-000000000002",
             edition_date: "2026-09-01",
             revision: 1,
             status: "complete",

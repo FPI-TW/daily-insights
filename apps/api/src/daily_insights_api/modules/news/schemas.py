@@ -20,6 +20,7 @@ class NewsItemResponse(BaseModel):
 
 
 class LatestNewsResponse(BaseModel):
+    edition_id: uuid.UUID | None
     edition_date: date | None
     revision: int | None
     generated_at: datetime | None

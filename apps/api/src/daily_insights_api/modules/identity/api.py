@@ -11,6 +11,7 @@ from daily_insights_api.modules.identity.auth import (
     require_password_changed,
     require_roles,
 )
+from daily_insights_api.modules.identity.models import User
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ __all__ = [
     "AuthContext",
     "IdentityPrincipal",
     "IdentityReader",
+    "User",
     "get_auth_context",
     "require_csrf",
     "require_csrf_roles",
