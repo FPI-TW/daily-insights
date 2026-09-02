@@ -12,9 +12,15 @@ import {
 } from "#/lib/auth"
 import { backdrop, dialogPanel, toast } from "#/lib/motion"
 import { marketCodes } from "#/lib/provisional-reports"
+import { ActiveIndicator, useIndicatorGroup } from "./ActiveIndicator"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
 import { LocaleSwitcher } from "./LocaleSwitcher"
 import ThemeToggle from "./ThemeToggle"
+
+const customerNavLinkClass =
+  "relative isolate shrink-0 rounded-md px-3 py-2 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:bg-link-hover hover:text-sea-ink [&[aria-current=page]]:text-lagoon"
+const adminNavLinkClass =
+  "relative isolate shrink-0 border-b-2 border-transparent px-4 py-3 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&[aria-current=page]]:text-lagoon"
 
 export function AppShell({
   locale,
@@ -37,6 +43,22 @@ export function AppShell({
   const settingsButtonRef = useRef<HTMLButtonElement>(null)
   const settingsDialogRef = useRef<HTMLElement>(null)
   const closeSettingsButtonRef = useRef<HTMLButtonElement>(null)
+  const navGroup = useIndicatorGroup()
+  const pathname = location.pathname
+  const customerSection = pathname.includes("/reports")
+    ? "reports"
+    : pathname.includes("/podcasts")
+      ? "podcasts"
+      : pathname.endsWith("/account")
+        ? "account"
+        : null
+  const adminSection = pathname.includes("/admin/audio")
+    ? "audio"
+    : pathname.includes("/admin/members")
+      ? "members"
+      : pathname.includes("/admin/conversations")
+        ? "conversations"
+        : null
   const reportMarketCode = marketCodes.find(code =>
     location.pathname.endsWith(`/reports/${code}`)
   )
@@ -117,7 +139,7 @@ export function AppShell({
   return (
     <>
       <header
-        className="sticky top-0 z-20 border-b border-line bg-header backdrop-blur-xl"
+        className="sticky top-0 z-20 border-b border-line bg-header backdrop-blur-xl [view-transition-name:app-header]"
         data-surface={surface}
       >
         <div className="mx-auto flex min-h-[68px] w-full max-w-[1240px] items-center justify-between gap-4 px-6 py-3 max-sm:px-4 max-sm:py-2.5">
@@ -151,22 +173,31 @@ export function AppShell({
                 <Link
                   to="/$locale/reports"
                   params={{ locale }}
-                  className="shrink-0 rounded-md px-3 py-2 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:bg-link-hover hover:text-sea-ink [&[aria-current=page]]:bg-lagoon/10 [&[aria-current=page]]:text-lagoon"
+                  className={customerNavLinkClass}
                 >
+                  {customerSection === "reports" ? (
+                    <ActiveIndicator group={navGroup} variant="pill" />
+                  ) : null}
                   {t("reportsNav")}
                 </Link>
                 <Link
                   to="/$locale/podcasts"
                   params={{ locale }}
-                  className="shrink-0 rounded-md px-3 py-2 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:bg-link-hover hover:text-sea-ink [&[aria-current=page]]:bg-lagoon/10 [&[aria-current=page]]:text-lagoon"
+                  className={customerNavLinkClass}
                 >
+                  {customerSection === "podcasts" ? (
+                    <ActiveIndicator group={navGroup} variant="pill" />
+                  ) : null}
                   {t("podcastNav")}
                 </Link>
                 <Link
                   to="/$locale/account"
                   params={{ locale }}
-                  className="shrink-0 rounded-md px-3 py-2 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:bg-link-hover hover:text-sea-ink [&[aria-current=page]]:bg-lagoon/10 [&[aria-current=page]]:text-lagoon"
+                  className={customerNavLinkClass}
                 >
+                  {customerSection === "account" ? (
+                    <ActiveIndicator group={navGroup} variant="pill" />
+                  ) : null}
                   {t("accountNav")}
                 </Link>
               </nav>
@@ -196,8 +227,11 @@ export function AppShell({
               <Link
                 to="/$locale/admin/audio"
                 params={{ locale }}
-                className="shrink-0 border-b-2 border-transparent px-4 py-3 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&[aria-current=page]]:border-lagoon [&[aria-current=page]]:text-lagoon"
+                className={adminNavLinkClass}
               >
+                {adminSection === "audio" ? (
+                  <ActiveIndicator group={navGroup} variant="underline" />
+                ) : null}
                 {t("audioManagementNav")}
               </Link>
               {user.system_role === "admin" ? (
@@ -205,16 +239,22 @@ export function AppShell({
                   <Link
                     to="/$locale/admin/members"
                     params={{ locale }}
-                    className="shrink-0 border-b-2 border-transparent px-4 py-3 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&[aria-current=page]]:border-lagoon [&[aria-current=page]]:text-lagoon"
+                    className={adminNavLinkClass}
                   >
+                    {adminSection === "members" ? (
+                      <ActiveIndicator group={navGroup} variant="underline" />
+                    ) : null}
                     {t("memberManagementNav")}
                   </Link>
                   <Link
                     to="/$locale/admin/conversations"
                     params={{ locale }}
                     search={{ history: [] }}
-                    className="shrink-0 border-b-2 border-transparent px-4 py-3 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&[aria-current=page]]:border-lagoon [&[aria-current=page]]:text-lagoon"
+                    className={adminNavLinkClass}
                   >
+                    {adminSection === "conversations" ? (
+                      <ActiveIndicator group={navGroup} variant="underline" />
+                    ) : null}
                     {t("conversationsNav")}
                   </Link>
                 </>

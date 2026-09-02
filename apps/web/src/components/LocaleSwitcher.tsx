@@ -1,10 +1,8 @@
 import type { Locale } from "@daily-insights/api-client"
 import { Link } from "@tanstack/react-router"
-import { motion } from "motion/react"
-import { useId } from "react"
 import { useTranslation } from "react-i18next"
-import { springs } from "#/lib/motion"
 import type { MarketCode } from "#/lib/provisional-reports"
+import { ActiveIndicator, useIndicatorGroup } from "./ActiveIndicator"
 
 const locales: ReadonlyArray<{ code: Locale; label: string }> = [
   { code: "zh-hant", label: "繁中" },
@@ -45,9 +43,7 @@ export function LocaleSwitcher({
   reportMarketCode?: MarketCode | undefined
 }) {
   const { t } = useTranslation()
-  // Each switcher instance needs its own layout group so the active chip
-  // slides between its own links only.
-  const layoutId = useId()
+  const group = useIndicatorGroup()
   return (
     <nav
       aria-label={t("language")}
@@ -57,14 +53,7 @@ export function LocaleSwitcher({
         const active = locale === code
         const content = (
           <>
-            {active ? (
-              <motion.span
-                className="absolute inset-0 -z-10 rounded-md bg-lagoon-deep"
-                layoutId={layoutId}
-                transition={springs.snappy}
-                aria-hidden="true"
-              />
-            ) : null}
+            {active ? <ActiveIndicator group={group} variant="chip" /> : null}
             {label}
           </>
         )

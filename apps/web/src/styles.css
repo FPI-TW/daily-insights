@@ -225,6 +225,29 @@
 ::view-transition-new(root) {
   animation: page-enter 350ms cubic-bezier(0.22, 1, 0.36, 1) 250ms both;
 }
+/*
+ * The app header and the report market nav carry their own
+ * view-transition-name so they stay put while the page crossfades; their
+ * active-item markers then slide live instead of being frozen in a snapshot.
+ * When only one side has the element (entering or leaving the reports
+ * section) it follows the page's own fade instead of popping.
+ */
+::view-transition-old(app-header):not(:only-child),
+::view-transition-old(report-market-nav):not(:only-child) {
+  display: none;
+}
+::view-transition-new(app-header):not(:only-child),
+::view-transition-new(report-market-nav):not(:only-child) {
+  animation: none;
+}
+::view-transition-old(app-header):only-child,
+::view-transition-old(report-market-nav):only-child {
+  animation: page-exit 250ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+::view-transition-new(app-header):only-child,
+::view-transition-new(report-market-nav):only-child {
+  animation: page-enter 350ms cubic-bezier(0.22, 1, 0.36, 1) 250ms both;
+}
 
 @utility page-shell {
   @apply mx-auto w-full max-w-[1240px] px-6 py-8 max-sm:px-4;
