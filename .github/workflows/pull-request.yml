@@ -1,0 +1,13 @@
+name: Pull Request CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    if: github.event.pull_request.draft == false
+    uses: ./.github/workflows/ci.yml
