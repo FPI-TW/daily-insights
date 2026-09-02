@@ -37,16 +37,23 @@ export function LocaleSwitcher({
   locale,
   destination,
   reportMarketCode,
+  fullWidth = false,
 }: {
   locale: Locale
   destination: LocaleDestination
   reportMarketCode?: MarketCode | undefined
+  // Settings dialog: three equal-width segments filling the row.
+  fullWidth?: boolean
 }) {
   const { t } = useTranslation()
   return (
     <nav
       aria-label={t("language")}
-      className="relative isolate flex min-h-9 shrink-0 items-center rounded-lg border border-chip-line bg-chip p-1 [&>a]:rounded-md [&>a]:px-2 [&>a]:py-1 [&>a]:text-[0.68rem] [&>a]:font-extrabold [&>a]:text-sea-ink-soft [&>a]:no-underline [&>a]:transition-colors [&>a[aria-current=page]]:text-white max-sm:[&>a]:px-1.5"
+      className={`relative isolate flex min-h-9 items-center rounded-lg border border-chip-line bg-chip p-1 [&>a]:rounded-md [&>a]:font-extrabold [&>a]:text-sea-ink-soft [&>a]:no-underline [&>a]:transition-colors [&>a[aria-current=page]]:text-white ${
+        fullWidth
+          ? "w-full [&>a]:min-h-7 [&>a]:flex-1 [&>a]:px-3 [&>a]:py-[5px] [&>a]:text-center [&>a]:text-[11.5px] [&>a:not([aria-current=page])]:hover:text-sea-ink"
+          : "shrink-0 [&>a]:px-2 [&>a]:py-1 [&>a]:text-[0.68rem] max-sm:[&>a]:px-1.5"
+      }`}
     >
       <ActiveIndicator activeKey={locale} variant="chip" />
       {locales.map(({ code, label }) => {

@@ -15,7 +15,7 @@ import { marketCodes } from "#/lib/provisional-reports"
 import { ActiveIndicator } from "./ActiveIndicator"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
 import { LocaleSwitcher } from "./LocaleSwitcher"
-import ThemeToggle from "./ThemeToggle"
+import { ThemeModePicker } from "./ThemeToggle"
 
 const customerNavLinkClass =
   "shrink-0 rounded-md px-3 py-2 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&:not([aria-current=page])]:hover:bg-link-hover [&[aria-current=page]]:text-lagoon"
@@ -294,26 +294,30 @@ export function AppShell({
                   <X className="size-4" aria-hidden="true" />
                 </button>
               </div>
-              <div className="mt-5 space-y-5">
-                <div className="space-y-2">
-                  <p className="m-0 text-xs font-extrabold tracking-[0.08em] text-sea-ink-soft uppercase">
+              <div className="mt-5 grid gap-[18px]">
+                <div className="grid gap-2">
+                  <p className="eyebrow tracking-[0.08em] text-sea-ink-soft">
                     {t("language")}
                   </p>
                   <LocaleSwitcher
                     locale={locale}
                     destination={localeDestination}
                     reportMarketCode={reportMarketCode}
+                    fullWidth
                   />
                 </div>
-                <div className="flex items-center justify-between gap-4 border-t border-line pt-5">
-                  <p className="m-0 text-sm font-bold text-sea-ink">
+                <div className="grid gap-[9px] border-t border-line pt-[18px]">
+                  <p className="eyebrow tracking-[0.08em] text-sea-ink-soft">
                     {t("theme")}
                   </p>
-                  <ThemeToggle />
+                  <ThemeModePicker />
                 </div>
-                <div className="border-t border-line pt-5">
+                <div className="grid gap-[9px] border-t border-line pt-[18px]">
+                  <p className="m-0 truncate text-[11px] font-semibold text-sea-ink-soft">
+                    {t("signedInAs", { email: user.email })}
+                  </p>
                   <button
-                    className="min-h-9 w-full border border-market-up/40 px-3 py-1.5 text-xs font-extrabold text-market-up"
+                    className="min-h-[38px] w-full rounded-lg border border-market-up/40 bg-surface px-3.5 py-2 text-[12.5px] font-extrabold text-market-up hover:bg-market-up/8"
                     type="button"
                     disabled={pending}
                     onClick={() => void signOut()}
