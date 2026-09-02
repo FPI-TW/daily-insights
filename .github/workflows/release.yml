@@ -202,6 +202,7 @@ jobs:
           if [ "$DAILY_INSIGHTS_DAILY_NEWS_ENABLED" = true ] && [ -z "${DAILY_INSIGHTS_MODEL_API_KEY:-}" ]; then
             echo "::error title=Missing daily news launch value::DAILY_INSIGHTS_MODEL_API_KEY is required when daily news is enabled"
             missing=1
+          fi
           if [ "$DAILY_INSIGHTS_CHAT_ENABLED" = true ]; then
             for name in \
               DAILY_INSIGHTS_CHAT_MODEL_PROVIDER \
@@ -275,6 +276,7 @@ jobs:
             [[ "$DAILY_INSIGHTS_MODEL_API_BASE_URL" != https://* ]]; then
             echo "::error title=Invalid HTTPS URL::DAILY_INSIGHTS_MODEL_API_BASE_URL must be an absolute HTTPS URL"
             missing=1
+          fi
           if [ "$DAILY_INSIGHTS_CHAT_ENABLED" = true ]; then
             if [[ "$DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL" != https://* ]]; then
               echo "::error title=Invalid HTTPS URL::DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL must be an absolute HTTPS URL"

@@ -124,6 +124,20 @@ if grep -R -Eq 'daily-insights[.]service|/etc/daily-insights/runtime|/var/lib/da
   exit 1
 fi
 grep -Fq 'envs: GITHUB_TOKEN,GITHUB_ACTOR,API_IMAGE,WEB_IMAGE,PUBLIC_HOSTNAME,' "$workflow_file"
+# The deploy validation is an inline bash script; a merge that drops a `fi`
+# only surfaces as a syntax error at deploy time unless it is parsed here.
+validation_script=$(mktemp)
+awk '
+  /name: Validate deployment configuration/ { capture = 1; next }
+  capture && /^      - name: / { exit }
+  capture && /^          / { sub(/^          /, ""); print }
+' "$workflow_file" >"$validation_script"
+if ! bash -n "$validation_script"; then
+  echo "release.yml deploy validation script does not parse" >&2
+  rm -f "$validation_script"
+  exit 1
+fi
+rm -f "$validation_script"
 for name in \
   DAILY_INSIGHTS_CHAT_ENABLED \
   DAILY_INSIGHTS_CHAT_MODEL_PROVIDER \
