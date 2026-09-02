@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api.core.observability import emit_event
 from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary, Selection
+from daily_insights_api.modules.news.feeds import discover_feed_candidates, feed_client
 from daily_insights_api.modules.news.llm import DeepSeekClient, ModelCall, ModelCallError
 from daily_insights_api.modules.news.models import (
     NewsEdition,
@@ -21,6 +22,7 @@ from daily_insights_api.modules.news.models import (
 )
 from daily_insights_api.modules.news.sources import (
     FetchedCandidate,
+    _dedupe_candidates,
     configured_hostnames,
     discover_candidates,
     fetch_article,
@@ -37,6 +39,9 @@ TAIPEI = ZoneInfo("Asia/Taipei")
 IDEMPOTENT_STATUS = "complete"
 MAX_CANDIDATES = 20
 MAX_CANDIDATES_PER_SOURCE = 5
+# Extraction is the expensive stage, so discovery is capped per source before
+# any article is fetched; the post-extraction cap above then selects the prompt.
+MAX_DISCOVERY_PER_SOURCE = 10
 
 
 async def _retry[T](
@@ -133,6 +138,28 @@ def _failed_audit(
     )
 
 
+def _cap_discovery(
+    candidates: list[Candidate], *, per_source: int = MAX_DISCOVERY_PER_SOURCE
+) -> list[Candidate]:
+    """Bound the number of articles fetched per source, newest first."""
+    ordered = sorted(
+        candidates,
+        key=lambda candidate: (
+            candidate.seen_at is None,
+            -(candidate.seen_at.timestamp() if candidate.seen_at else 0.0),
+            str(candidate.url),
+        ),
+    )
+    per_host: dict[str, int] = {}
+    capped: list[Candidate] = []
+    for candidate in ordered:
+        if per_host.get(candidate.hostname, 0) >= per_source:
+            continue
+        per_host[candidate.hostname] = per_host.get(candidate.hostname, 0) + 1
+        capped.append(candidate)
+    return capped
+
+
 def _limit_candidates(
     usable: list[FetchedCandidate],
     *,
@@ -141,18 +168,21 @@ def _limit_candidates(
 ) -> list[FetchedCandidate]:
     """Keep the freshest candidates while bounding any single source.
 
-    Ordering is newest ``seen_at`` first (unknown timestamps last) with the
-    source URL as a deterministic tie-breaker, so the selection prompt and
-    ``input_digest`` are reproducible for identical discovery results.
+    Ordering is newest first using the extracted publish time, falling back to
+    the discovery ``seen_at`` (unknown timestamps last), with the source URL as
+    a deterministic tie-breaker, so the selection prompt and ``input_digest``
+    are reproducible for identical discovery results.
     """
-    ordered = sorted(
-        usable,
-        key=lambda fetched: (
-            fetched.candidate.seen_at is None,
-            -(fetched.candidate.seen_at.timestamp() if fetched.candidate.seen_at else 0.0),
+
+    def sort_key(fetched: FetchedCandidate) -> tuple[bool, float, str]:
+        freshness = fetched.source_published_at or fetched.candidate.seen_at
+        return (
+            freshness is None,
+            -(freshness.timestamp() if freshness is not None else 0.0),
             fetched.source_url,
-        ),
-    )
+        )
+
+    ordered = sorted(usable, key=sort_key)
     per_host: dict[str, int] = {}
     limited: list[FetchedCandidate] = []
     for fetched in ordered:
@@ -247,6 +277,14 @@ async def run_news_edition(
         emit_event("news.candidates.failed", error_code=type(error).__name__)
         candidates = []
     emit_event("news.candidates.discovered", count=len(candidates))
+    async with feed_client(discovery_timeout_seconds) as feeds_http:
+        feed_candidates = await discover_feed_candidates(feeds_http, allowed)
+    candidates = _cap_discovery(_dedupe_candidates(candidates + feed_candidates))
+    emit_event(
+        "news.candidates.merged",
+        feeds=len(feed_candidates),
+        total=len(candidates),
+    )
     usable = (
         await _fetch_usable_candidates(candidates, allowed, fetch_timeout_seconds)
         if candidates

@@ -346,3 +346,39 @@ async def test_discovery_uses_configured_timeout_and_retries_once(
     )
     assert status == "unavailable"
     assert attempts == [75.0, 75.0]
+
+
+async def test_feed_discovery_supplies_candidates_when_gdelt_is_down(
+    news_database: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidates = _fetched_candidates()
+
+    async def gdelt_down(http: object, allowed: object) -> list[Candidate]:
+        del http, allowed
+        raise ConnectionError("gdelt refused")
+
+    async def feeds(http: object, allowed: object, now: object = None) -> list[Candidate]:
+        del http, allowed, now
+        return [item.candidate for item in candidates]
+
+    fetched_inputs: list[list[Candidate]] = []
+
+    async def fetch(
+        discovered: list[Candidate], *args: object, **kwargs: object
+    ) -> list[FetchedCandidate]:
+        del args, kwargs
+        fetched_inputs.append(discovered)
+        return candidates
+
+    monkeypatch.setattr("daily_insights_api.modules.news.service.discover_candidates", gdelt_down)
+    monkeypatch.setattr("daily_insights_api.modules.news.service.discover_feed_candidates", feeds)
+    monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
+
+    status = await run_news_edition(
+        news_database,
+        cast(DeepSeekClient, _DeterministicNewsClient("a")),
+        datetime.now(TAIPEI).date(),
+        allowed_hostnames="www.reuters.com,news.cnyes.com",
+    )
+    assert status == "partial"
+    assert sorted(candidate.id for candidate in fetched_inputs[0]) == ["a" * 64, "b" * 64]

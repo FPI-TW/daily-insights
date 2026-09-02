@@ -12,8 +12,8 @@
 ## 範圍
 
 - 每日產生一版「本日重大新聞」，最多五則，附三語系標題與摘要。
-- 只從固定白名單的六個新聞來源擷取正文；文章正文不落地，只保存來源中繼資料、
-  摘要與 SHA-256 內容摘要。
+- 只從固定白名單的六個新聞來源擷取正文；候選來自 GDELT 與各來源自己的 RSS 或
+  列表頁兩條路徑。文章正文不落地，只保存來源中繼資料、摘要與 SHA-256 內容摘要。
 - 顯示在客戶報告首頁的清單下方；所有已驗證組織共用同一版，不受市場可見性政策
   影響。
 - 不提供後台編輯、人工覆核或客戶端篩選。
@@ -24,6 +24,7 @@
 flowchart LR
     S["daily-news-scheduler<br/>08:00 Asia/Taipei"] --> G["News generation service<br/>run_news_edition"]
     G --> D["GDELT DOC API<br/>近 24 小時候選，最多 50 筆"]
+    G --> F["來源 RSS / 列表頁<br/>CNBC、BBC RSS；AP、鉅亨、東方財富列表"]
     G --> X["安全正文擷取<br/>DNS pinning / robots / HTTPS 443"]
     X --> W["Reuters / AP / BBC / CNBC<br/>鉅亨 / 東方財富"]
     G --> L["DeepSeek JSON mode<br/>選題 + 三語摘要"]
@@ -41,6 +42,9 @@ flowchart LR
    非 HTTPS、非白名單主機與時間窗外的項目，並以 URL 與標題去重。GDELT 的 HTTPS
    端點實測經常需要 20 到 45 秒回應且偶爾連線失敗，因此探索逾時預設 60 秒並在
    失敗時重試一次；兩次都失敗才視為無候選。
+   `discover_feed_candidates` 同時直接讀取白名單來源自己的 RSS（CNBC、BBC）或
+   列表頁（AP、鉅亨、東方財富），只保留符合各來源文章 URL 樣式的連結，與 GDELT
+   結果合併去重，每個來源最多 10 筆再進入擷取。任一 feed 失敗只影響該來源。
 3. 候選依 GDELT `seendate` 新到舊排序，每個來源最多 5 筆，總數上限 20 筆。
 4. 每筆候選以 SSRF 安全的 client 擷取正文：只允許白名單主機的 443 連接埠、DNS
    解析結果必須全部為公網 IP 且連線固定在該 IP、redirect 逐跳重新驗證、遵守
@@ -123,7 +127,10 @@ flowchart LR
 - 只有一個排程器實例；多實例同時執行時依賴 PostgreSQL advisory lock 避免重複
   寫入，但候選探索與擷取仍會重複執行。
 - GDELT 對來源的涵蓋不完整，候選數量每日不同；其 HTTPS 端點延遲高且不穩定，
-  是 `unavailable` 版本最常見的原因。
+  因此 RSS／列表頁是主要的補充路徑。列表頁沒有發佈時間，這些候選在排序時排在
+  有時間戳的候選之後。
+- Twelve Data 的 `/press_releases` 已評估不採用：必須帶 symbol 查詢、沒有原文
+  URL、內容為付費通稿且近乎沒有當日稿件（2026-09-02 實測 NVDA 近 3 天 0 筆）。
 - Reuters 對非瀏覽器請求回應 `401`，實際上不會有 Reuters 的候選入選。
 - AP、BBC 與東方財富的頁面沒有可解析的發佈時間，UI 會顯示「時間未提供」；
   CNBC 與東方財富的正文開頭會混入站內導覽文字。
