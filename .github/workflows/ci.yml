@@ -1,7 +1,6 @@
 name: CI
 
 on:
-  pull_request:
   # Main pushes are validated once through release.yml before deployment.
   workflow_call:
   workflow_dispatch:
