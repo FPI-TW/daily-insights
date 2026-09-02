@@ -162,7 +162,7 @@ Workflow 在 SSH process 中執行：
 8. 在舊 API／Web 仍存活時，以 `--force-recreate --no-deps nginx` 單獨重建
    nginx，使 Docker DNS 動態解析先開始運作；
 9. 使用 API image 執行 `alembic upgrade head`；
-10. 只 convergence `api web morning-report-scheduler`，不再次重建 nginx；
+10. 只 convergence `api web morning-report-scheduler daily-news-scheduler`，不再次重建 nginx；
 11. 等待所有 container health，並從 nginx container 內分別主動驗證 API
     readiness 與 Web login route；
 12. 輸出失敗 container state/logs，並從 GHCR logout。
@@ -198,7 +198,7 @@ docker logs --tail=200 daily-insights-nginx
 - customer/admin 登入、tenant isolation、會員/組織管理與三語系；
 - Podcast publish/unpublish、R2 CORS/range playback 與 signed URL expiry；
 - RDS backup/PITR 隔離還原結果；
-- EC2 reboot 後三個 container 由 Docker 自動恢復的證據；
+- EC2 reboot 後五個 container（api、web、nginx 與兩個 scheduler）由 Docker 自動恢復的證據；
 - 告警實際送達與目標流量的 CPU、memory、disk、database、latency headroom。
 
 外部驗收完成前，狀態是「可部署，不可正式切流量」。

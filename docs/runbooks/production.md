@@ -11,8 +11,9 @@ The repository now includes an offline-verifiable deployment foundation and an
 Cloudflare, RDS, or R2 resources:
 
 - [`compose.production.yaml`](../../compose.production.yaml) runs only externally
-  built API, Web, and nginx images pinned by digest; PostgreSQL is deliberately
-  absent because production uses RDS;
+  built API, Web, and nginx images pinned by digest, plus the morning-report
+  and daily-news scheduler containers that reuse the API image; PostgreSQL is
+  deliberately absent because production uses RDS;
 - [`deploy.sh`](../../scripts/production/deploy.sh),
   [`preflight.sh`](../../scripts/production/preflight.sh),
   [`health.sh`](../../scripts/production/health.sh), and
@@ -190,7 +191,7 @@ Compose while retaining immutable deployment inputs.
    pulls pinned images, renders and tests the nginx template in a disposable
    container, then recreates only nginx with Docker DNS re-resolution enabled
    while the previous API/Web containers are still available. It next runs the
-   compatible migration and converges only API, Web, and the scheduler.
+   compatible migration and converges only API, Web, and the two schedulers.
 5. Require container health plus active API-readiness and Web-login probes
    through nginx before reporting deployment success. Replaced upstream
    addresses may take up to two seconds to re-resolve; a deployment remains

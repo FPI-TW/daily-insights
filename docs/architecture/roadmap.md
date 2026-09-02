@@ -372,6 +372,18 @@ Accept when:
 Blocking decisions: the open items in
 [`phase-2-data-reports.md`](phase-2-data-reports.md).
 
+## Daily news (delivered outside the phase plan)
+
+Implementation status: implemented locally with API, scheduler, migration
+`0007`, and customer UI coverage. Production deployment ships the
+`daily-news-scheduler` container disabled behind
+`DAILY_INSIGHTS_DAILY_NEWS_ENABLED`; it is enabled only after a local one-shot
+run is verified. Scope, pipeline, retry semantics, configuration, and acceptance
+criteria are recorded in [`daily-news.md`](daily-news.md). This feature does not
+change the Podcast pilot or the three-market morning-report acceptance rules,
+and it does not start Phase 5 chat even though it shares the DeepSeek model
+configuration.
+
 ## Confirmed post-initial-release security work
 
 - Require MFA for every `admin` account, including recovery and factor-reset

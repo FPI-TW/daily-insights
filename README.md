@@ -114,4 +114,6 @@ Compose 設定僅用於開發環境，不代表正式環境拓撲。正式部署
 - [Phase 2 資料來源與結構化報告](docs/architecture/phase-2-data-reports.md)
 - [Phase 2B 完整應用架構與驗收](docs/architecture/phase-2b-application-architecture.md)
 - [Podcast 先行版範圍與決策清單](docs/architecture/podcast-pilot.md)
+- [每日重大新聞架構與部署](docs/architecture/daily-news.md)
 - [正式環境維運操作手冊](docs/runbooks/production.md)
+- [專案審查基準（2026-09-02）](docs/reviews/2026-09-02-project-review.md)
