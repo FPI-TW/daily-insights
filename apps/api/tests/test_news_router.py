@@ -128,14 +128,7 @@ async def test_latest_news_localizes_existing_partial_edition_caveat_for_every_l
             locale: await client.get(f"/api/news/latest?locale={locale}")
             for locale in ("zh-hant", "zh-hans", "en")
         }
-    assert {locale: response.json()["caveat"] for locale, response in responses.items()} == {
-        "zh-hant": "本日完成 1/5 則新聞，其餘資料暫缺。",  # noqa: RUF001
-        "zh-hans": "本日完成 1/5 则新闻，其余资料暂缺。",  # noqa: RUF001
-        "en": (
-            "Today's edition contains 1/5 stories; "
-            "the remaining coverage is temporarily unavailable."
-        ),
-    }
+    assert all(response.json()["caveat"] is None for response in responses.values())
     assert all(response.json()["items"] for response in responses.values())
     assert {
         locale: response.json()["items"][0]["headline"] for locale, response in responses.items()
@@ -146,11 +139,12 @@ async def test_latest_news_localizes_existing_partial_edition_caveat_for_every_l
     }
 
 
-def test_localized_caveat_is_null_only_for_complete_five_item_editions() -> None:
+def test_localized_caveat_only_marks_unavailable_editions() -> None:
     assert _localized_caveat("complete", 5, "en") is None
-    assert (
-        _localized_caveat("complete", 4, "en") == "Today's edition contains 4/5 stories; "
-        "the remaining coverage is temporarily unavailable."
+    assert _localized_caveat("complete", 4, "en") is None
+    assert _localized_caveat("partial", 1, "zh-hant") is None
+    assert _localized_caveat("unavailable", 0, "en") == (
+        "Today's major news has not been generated."
     )
 
 

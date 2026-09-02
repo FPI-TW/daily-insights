@@ -71,11 +71,6 @@ export function DailyNews({
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
-          {news.status === "partial" && news.caveat ? (
-            <p className="lg:col-span-2 m-0 border-l-4 border-market-caution bg-market-caution/10 px-4 py-3 text-sm text-sea-ink-soft">
-              {news.caveat}
-            </p>
-          ) : null}
           {news.items.map((item, index) => (
             <motion.article
               key={item.id}
