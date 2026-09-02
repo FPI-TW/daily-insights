@@ -1,17 +1,23 @@
 import { useRouter } from "@tanstack/react-router"
+import { motion } from "motion/react"
 import { useTranslation } from "react-i18next"
+import { fadeIn, useEnterAnimation } from "#/lib/motion"
 
 export function LoadingScreen() {
   const { t } = useTranslation()
+  const animate = useEnterAnimation()
   return (
-    <main
+    <motion.main
       className="surface-panel mx-auto mt-[12vh] w-[min(calc(100%-2rem),36rem)] border-t-[3px] border-t-lagoon p-8 text-center"
       aria-live="polite"
       role="status"
+      variants={fadeIn}
+      initial={animate ? "hidden" : false}
+      animate="visible"
     >
       <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-line border-t-lagoon-deep" />
       <p className="m-0 text-sea-ink-soft">{t("loading")}</p>
-    </main>
+    </motion.main>
   )
 }
 

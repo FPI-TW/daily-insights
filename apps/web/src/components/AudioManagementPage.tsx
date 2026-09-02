@@ -6,10 +6,12 @@ import {
 } from "@daily-insights/api-client"
 import { useForm } from "@tanstack/react-form"
 import { useRouter } from "@tanstack/react-router"
+import { motion } from "motion/react"
 import { useState, type DragEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { browserPodcastAdminClient } from "#/lib/admin-podcasts"
 import { requireCsrfToken } from "#/lib/auth"
+import { reveal, useEnterAnimation } from "#/lib/motion"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
 
 const podcastLocales = ["zh-hant", "zh-hans", "en"] as const
@@ -55,6 +57,7 @@ export function AudioManagementPage({
   locale: Locale
 }) {
   const { t } = useTranslation()
+  const animate = useEnterAnimation()
   const episodeGroups = groupEpisodesByMonth(episodes)
   return (
     <main className="page-shell">
@@ -72,7 +75,11 @@ export function AudioManagementPage({
         </p>
       </header>
       <PodcastUploadForm locale={locale} />
-      <section className="mt-8 grid gap-5" aria-labelledby="audio-list-title">
+      <motion.section
+        className="mt-8 grid gap-5"
+        aria-labelledby="audio-list-title"
+        {...reveal(animate)}
+      >
         <h2 className="mb-0 text-2xl" id="audio-list-title">
           {t("audioFiles")}
         </h2>
@@ -109,7 +116,7 @@ export function AudioManagementPage({
             </section>
           ))
         )}
-      </section>
+      </motion.section>
     </main>
   )
 }

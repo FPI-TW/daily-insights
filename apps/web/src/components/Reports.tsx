@@ -1,5 +1,6 @@
 import { ClientOnly, Link, useRouter } from "@tanstack/react-router"
 import ReactECharts from "echarts-for-react"
+import { motion } from "motion/react"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { Locale } from "@daily-insights/api-client"
@@ -10,6 +11,13 @@ import {
   type ReportBlock,
   type ReportValue,
 } from "#/lib/provisional-reports"
+import {
+  fadeIn,
+  hoverLift,
+  reveal,
+  springs,
+  useEnterAnimation,
+} from "#/lib/motion"
 
 function valueText(value: ReportValue | null, t: (key: string) => string) {
   if (value === null) return "—"
@@ -25,10 +33,16 @@ function directionClass(value: ReportValue | null, t: (key: string) => string) {
 
 export function ReportLoadingScreen() {
   const { t } = useTranslation()
+  const animate = useEnterAnimation()
   return (
     <main className="page-shell" role="status" aria-live="polite">
       <p className="sr-only">{t("reportLoadingAnnouncement")}</p>
-      <div className="animate-pulse space-y-5">
+      <motion.div
+        className="animate-pulse space-y-5"
+        variants={fadeIn}
+        initial={animate ? "hidden" : false}
+        animate="visible"
+      >
         <div className="h-3 w-24 rounded bg-line" />
         <div className="h-9 w-72 max-w-full rounded bg-line" />
         <div className="h-1 w-14 rounded bg-lagoon/40" />
@@ -37,7 +51,7 @@ export function ReportLoadingScreen() {
           <div className="h-44 rounded-[13px] bg-line" />
           <div className="h-44 rounded-[13px] bg-line" />
         </div>
-      </div>
+      </motion.div>
     </main>
   )
 }
@@ -95,6 +109,7 @@ export function ReportList({
   reports: ReadonlyArray<ProvisionalReport>
 }) {
   const { t } = useTranslation()
+  const animate = useEnterAnimation()
   return (
     <main className="page-shell">
       <PageHeading title={t("reportsTitle")} />
@@ -111,10 +126,13 @@ export function ReportList({
           className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
           aria-label={t("reportsTitle")}
         >
-          {reports.map(report => (
-            <article
+          {reports.map((report, index) => (
+            <motion.article
               key={report.marketCode}
-              className="surface-panel flex min-w-0 flex-col p-5"
+              className="surface-panel flex min-w-0 flex-col p-5 transition-shadow hover:shadow-[0_16px_34px_rgb(14_20_19/9%)]"
+              {...reveal(animate, index)}
+              whileHover={hoverLift}
+              transition={springs.snappy}
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -143,7 +161,7 @@ export function ReportList({
               >
                 {t("reportViewDetails")}
               </Link>
-            </article>
+            </motion.article>
           ))}
         </section>
       )}
@@ -165,7 +183,11 @@ export function ReportDetail({
       <ReportMarketNav locale={locale} activeMarket={report.marketCode} />
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">
         {report.blocks.map((block, index) => (
-          <ReportBlockView block={block} key={`${block.titleKey}-${index}`} />
+          <ReportBlockView
+            block={block}
+            index={index}
+            key={`${block.titleKey}-${index}`}
+          />
         ))}
       </div>
     </main>
@@ -253,16 +275,24 @@ function isBase100Series(
   )
 }
 
-function ReportBlockView({ block }: { block: ReportBlock }) {
+function ReportBlockView({
+  block,
+  index,
+}: {
+  block: ReportBlock
+  index: number
+}) {
   const { t } = useTranslation()
   const chartColors = useChartColors()
+  const animate = useEnterAnimation()
   const blockTitle =
     block.kind === "series" && block.title
       ? valueText(block.title, t)
       : t(block.titleKey)
   return (
-    <section
+    <motion.section
       className={`surface-panel min-w-0 p-5 ${block.kind === "series" ? "xl:col-span-2" : ""}`}
+      {...reveal(animate, index)}
     >
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -458,7 +488,7 @@ function ReportBlockView({ block }: { block: ReportBlock }) {
           </div>
         </>
       ) : null}
-    </section>
+    </motion.section>
   )
 }
 

@@ -1,12 +1,24 @@
 import type { LatestNews } from "@daily-insights/api-client"
+import { motion } from "motion/react"
 import { useTranslation } from "react-i18next"
+import {
+  fadeIn,
+  hoverLift,
+  reveal,
+  springs,
+  useEnterAnimation,
+} from "#/lib/motion"
 
 export function DailyNewsLoading() {
+  const animate = useEnterAnimation()
   return (
-    <section
+    <motion.section
       className="surface-panel animate-pulse p-5"
       role="status"
       aria-live="polite"
+      variants={fadeIn}
+      initial={animate ? "hidden" : false}
+      animate="visible"
     >
       <div className="h-3 w-28 rounded bg-line" />
       <div className="mt-3 h-7 w-56 rounded bg-line" />
@@ -14,7 +26,7 @@ export function DailyNewsLoading() {
         <div className="h-20 rounded bg-line" />
         <div className="h-20 rounded bg-line" />
       </div>
-    </section>
+    </motion.section>
   )
 }
 
@@ -28,6 +40,7 @@ export function DailyNews({
   titleKey?: string
 }) {
   const { t } = useTranslation()
+  const animate = useEnterAnimation()
   const status = news?.status ?? "unavailable"
   return (
     <section className="mt-7" aria-labelledby="daily-news-title">
@@ -63,8 +76,14 @@ export function DailyNews({
               {news.caveat}
             </p>
           ) : null}
-          {news.items.map(item => (
-            <article key={item.id} className="surface-panel p-5">
+          {news.items.map((item, index) => (
+            <motion.article
+              key={item.id}
+              className="surface-panel p-5 transition-shadow hover:shadow-[0_16px_34px_rgb(14_20_19/9%)]"
+              {...reveal(animate, index)}
+              whileHover={hoverLift}
+              transition={springs.snappy}
+            >
               <div className="flex items-center justify-between gap-3 text-xs text-sea-ink-soft">
                 <span>{item.source_name}</span>
                 <span
@@ -104,7 +123,7 @@ export function DailyNews({
                   {t("dailyNewsSourceLink")}
                 </a>
               </div>
-            </article>
+            </motion.article>
           ))}
         </div>
       )}
