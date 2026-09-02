@@ -105,6 +105,12 @@ jobs:
       DAILY_INSIGHTS_SESSION_SECRET: ${{ secrets.DAILY_INSIGHTS_SESSION_SECRET }}
       DAILY_INSIGHTS_PASSWORD_PEPPER: ${{ secrets.DAILY_INSIGHTS_PASSWORD_PEPPER }}
       DAILY_INSIGHTS_MORNING_REPORTS_ENABLED: ${{ vars.DAILY_INSIGHTS_MORNING_REPORTS_ENABLED }}
+      DAILY_INSIGHTS_CHAT_ENABLED: ${{ vars.DAILY_INSIGHTS_CHAT_ENABLED }}
+      DAILY_INSIGHTS_CHAT_MODEL_PROVIDER: ${{ vars.DAILY_INSIGHTS_CHAT_MODEL_PROVIDER }}
+      DAILY_INSIGHTS_CHAT_MODEL_NAME: ${{ vars.DAILY_INSIGHTS_CHAT_MODEL_NAME }}
+      DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL: ${{ vars.DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL }}
+      DAILY_INSIGHTS_CHAT_MODEL_API_KEY: ${{ secrets.DAILY_INSIGHTS_CHAT_MODEL_API_KEY }}
+      DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS: ${{ vars.DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS }}
       DAILY_INSIGHTS_TWELVE_DATA_BASE_URL: ${{ vars.DAILY_INSIGHTS_TWELVE_DATA_BASE_URL }}
       DAILY_INSIGHTS_TWELVE_DATA_API_KEY: ${{ secrets.DAILY_INSIGHTS_TWELVE_DATA_API_KEY }}
       DAILY_INSIGHTS_R2_ENDPOINT_URL: ${{ vars.DAILY_INSIGHTS_R2_ENDPOINT_URL }}
@@ -135,6 +141,7 @@ jobs:
             DAILY_INSIGHTS_SESSION_SECRET \
             DAILY_INSIGHTS_PASSWORD_PEPPER \
             DAILY_INSIGHTS_MORNING_REPORTS_ENABLED \
+            DAILY_INSIGHTS_CHAT_ENABLED \
             DAILY_INSIGHTS_R2_ENDPOINT_URL \
             DAILY_INSIGHTS_R2_BUCKET_NAME \
             DAILY_INSIGHTS_R2_ACCESS_KEY_ID \
@@ -168,6 +175,10 @@ jobs:
             echo "::error title=Invalid scheduler flag::DAILY_INSIGHTS_MORNING_REPORTS_ENABLED must be true or false"
             missing=1
           fi
+          if ! grep -Eq '^(true|false)$' <<<"$DAILY_INSIGHTS_CHAT_ENABLED"; then
+            echo "::error title=Invalid chat flag::DAILY_INSIGHTS_CHAT_ENABLED must be true or false"
+            missing=1
+          fi
           if [ "$DAILY_INSIGHTS_MORNING_REPORTS_ENABLED" = true ]; then
             for name in \
               DAILY_INSIGHTS_TWELVE_DATA_BASE_URL \
@@ -178,10 +189,28 @@ jobs:
               fi
             done
           fi
+          if [ "$DAILY_INSIGHTS_CHAT_ENABLED" = true ]; then
+            for name in \
+              DAILY_INSIGHTS_CHAT_MODEL_PROVIDER \
+              DAILY_INSIGHTS_CHAT_MODEL_NAME \
+              DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL \
+              DAILY_INSIGHTS_CHAT_MODEL_API_KEY \
+              DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS; do
+              if [ -z "${!name:-}" ]; then
+                echo "::error title=Missing chat launch value::$name is required when chat is enabled"
+                missing=1
+              fi
+            done
+          fi
           for name in \
             DAILY_INSIGHTS_DATABASE_URL \
             DAILY_INSIGHTS_SESSION_SECRET \
             DAILY_INSIGHTS_PASSWORD_PEPPER \
+            DAILY_INSIGHTS_CHAT_MODEL_PROVIDER \
+            DAILY_INSIGHTS_CHAT_MODEL_NAME \
+            DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL \
+            DAILY_INSIGHTS_CHAT_MODEL_API_KEY \
+            DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS \
             DAILY_INSIGHTS_TWELVE_DATA_BASE_URL \
             DAILY_INSIGHTS_TWELVE_DATA_API_KEY \
             DAILY_INSIGHTS_R2_ENDPOINT_URL \
@@ -198,6 +227,8 @@ jobs:
             DAILY_INSIGHTS_DATABASE_URL \
             DAILY_INSIGHTS_SESSION_SECRET \
             DAILY_INSIGHTS_PASSWORD_PEPPER \
+            DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL \
+            DAILY_INSIGHTS_CHAT_MODEL_API_KEY \
             DAILY_INSIGHTS_TWELVE_DATA_BASE_URL \
             DAILY_INSIGHTS_TWELVE_DATA_API_KEY \
             DAILY_INSIGHTS_R2_ENDPOINT_URL \
@@ -223,6 +254,21 @@ jobs:
             [[ "$DAILY_INSIGHTS_TWELVE_DATA_BASE_URL" != https://* ]]; then
             echo "::error title=Invalid HTTPS URL::DAILY_INSIGHTS_TWELVE_DATA_BASE_URL must be an absolute HTTPS URL"
             missing=1
+          fi
+          if [ "$DAILY_INSIGHTS_CHAT_ENABLED" = true ]; then
+            if [[ "$DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL" != https://* ]]; then
+              echo "::error title=Invalid HTTPS URL::DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL must be an absolute HTTPS URL"
+              missing=1
+            fi
+            if ! grep -Eq '^(deepseek|openai-compatible)$' <<<"$DAILY_INSIGHTS_CHAT_MODEL_PROVIDER"; then
+              echo "::error title=Invalid chat provider::DAILY_INSIGHTS_CHAT_MODEL_PROVIDER must be deepseek or openai-compatible"
+              missing=1
+            fi
+            if ! grep -Eq '^[0-9]+([.][0-9]+)?$' <<<"$DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS" ||
+              ! awk -v timeout="$DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS" 'BEGIN { exit !(timeout > 0 && timeout <= 600) }'; then
+              echo "::error title=Invalid chat timeout::DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS must be greater than 0 and at most 600"
+              missing=1
+            fi
           fi
           if ! grep -Eq '^[a-z0-9]([a-z0-9.-]*[a-z0-9])$' <<<"$PUBLIC_HOSTNAME" ||
             ! grep -q '[.]' <<<"$PUBLIC_HOSTNAME"; then
@@ -294,7 +340,7 @@ jobs:
           username: ${{ secrets.DAILY_INSIGHTS_EC2_USER }}
           key: ${{ secrets.DAILY_INSIGHTS_EC2_SSH_KEY }}
           command_timeout: 25m
-          envs: GITHUB_TOKEN,GITHUB_ACTOR,API_IMAGE,WEB_IMAGE,PUBLIC_HOSTNAME,DAILY_INSIGHTS_DATABASE_URL,DAILY_INSIGHTS_SESSION_SECRET,DAILY_INSIGHTS_PASSWORD_PEPPER,DAILY_INSIGHTS_MORNING_REPORTS_ENABLED,DAILY_INSIGHTS_TWELVE_DATA_BASE_URL,DAILY_INSIGHTS_TWELVE_DATA_API_KEY,DAILY_INSIGHTS_R2_ENDPOINT_URL,DAILY_INSIGHTS_R2_BUCKET_NAME,DAILY_INSIGHTS_R2_ACCESS_KEY_ID,DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY,DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS
+          envs: GITHUB_TOKEN,GITHUB_ACTOR,API_IMAGE,WEB_IMAGE,PUBLIC_HOSTNAME,DAILY_INSIGHTS_DATABASE_URL,DAILY_INSIGHTS_SESSION_SECRET,DAILY_INSIGHTS_PASSWORD_PEPPER,DAILY_INSIGHTS_MORNING_REPORTS_ENABLED,DAILY_INSIGHTS_CHAT_ENABLED,DAILY_INSIGHTS_CHAT_MODEL_PROVIDER,DAILY_INSIGHTS_CHAT_MODEL_NAME,DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL,DAILY_INSIGHTS_CHAT_MODEL_API_KEY,DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS,DAILY_INSIGHTS_TWELVE_DATA_BASE_URL,DAILY_INSIGHTS_TWELVE_DATA_API_KEY,DAILY_INSIGHTS_R2_ENDPOINT_URL,DAILY_INSIGHTS_R2_BUCKET_NAME,DAILY_INSIGHTS_R2_ACCESS_KEY_ID,DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY,DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS
           script: |
             set -euo pipefail
             deploy_source="$HOME/daily-insights-deploy"

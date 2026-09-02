@@ -62,6 +62,12 @@ for name in \
 done
 grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_BASE_URL: ${DAILY_INSIGHTS_TWELVE_DATA_BASE_URL:-https://api.twelvedata.com}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_API_KEY: ${DAILY_INSIGHTS_TWELVE_DATA_API_KEY:-}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_CHAT_ENABLED: ${DAILY_INSIGHTS_CHAT_ENABLED:-false}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_PROVIDER: ${DAILY_INSIGHTS_CHAT_MODEL_PROVIDER:-deepseek}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_NAME: ${DAILY_INSIGHTS_CHAT_MODEL_NAME:-deepseek-chat}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL: ${DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL:-https://api.deepseek.com}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_KEY: ${DAILY_INSIGHTS_CHAT_MODEL_API_KEY:-}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS:-90}' "$compose_file"
 
 grep -Fq '/etc/daily-insights/cloudflare-realip.conf:/etc/nginx/cloudflare-realip.conf:ro' "$compose_file"
 grep -Fq '/etc/daily-insights/tls/origin.crt:/etc/nginx/tls/origin.crt:ro' "$compose_file"
@@ -114,6 +120,17 @@ if grep -R -Eq 'daily-insights[.]service|/etc/daily-insights/runtime|/var/lib/da
   exit 1
 fi
 grep -Fq 'envs: GITHUB_TOKEN,GITHUB_ACTOR,API_IMAGE,WEB_IMAGE,PUBLIC_HOSTNAME,' "$workflow_file"
+for name in \
+  DAILY_INSIGHTS_CHAT_ENABLED \
+  DAILY_INSIGHTS_CHAT_MODEL_PROVIDER \
+  DAILY_INSIGHTS_CHAT_MODEL_NAME \
+  DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL \
+  DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS; do
+  grep -Fq "${name}: \${{ vars.${name} }}" "$workflow_file"
+  grep -Fq ",${name}" "$workflow_file"
+done
+grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_KEY: ${{ secrets.DAILY_INSIGHTS_CHAT_MODEL_API_KEY }}' "$workflow_file"
+grep -Fq ',DAILY_INSIGHTS_CHAT_MODEL_API_KEY' "$workflow_file"
 grep -Fq '/opt/daily-insights/scripts/production/deploy.sh' "$workflow_file"
 
 for obsolete in \
@@ -187,6 +204,12 @@ export DAILY_INSIGHTS_DATABASE_URL=postgresql+psycopg://daily_insights:test@db.i
 export DAILY_INSIGHTS_SESSION_SECRET=contract-session-secret-12345678901234567890
 export DAILY_INSIGHTS_PASSWORD_PEPPER=contract-password-pepper-098765432109876543
 export DAILY_INSIGHTS_MORNING_REPORTS_ENABLED=false
+export DAILY_INSIGHTS_CHAT_ENABLED=true
+export DAILY_INSIGHTS_CHAT_MODEL_PROVIDER=deepseek
+export DAILY_INSIGHTS_CHAT_MODEL_NAME=deepseek-chat
+export DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL=https://api.deepseek.com
+export DAILY_INSIGHTS_CHAT_MODEL_API_KEY=contract-chat-model-key
+export DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS=90
 export DAILY_INSIGHTS_TWELVE_DATA_BASE_URL=
 export DAILY_INSIGHTS_TWELVE_DATA_API_KEY=
 export DAILY_INSIGHTS_R2_ENDPOINT_URL=https://tenant.r2.cloudflarestorage.com
