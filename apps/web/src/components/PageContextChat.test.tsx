@@ -33,12 +33,12 @@ function ContextFixture() {
   )
 }
 
-function renderChat() {
+function renderChat(enabled = true) {
   const i18n = createI18n("en")
   return i18n.changeLanguage("en").then(() =>
     render(
       <I18nextProvider i18n={i18n}>
-        <PageContextChatProvider locale="en">
+        <PageContextChatProvider locale="en" enabled={enabled}>
           <ContextFixture />
         </PageContextChatProvider>
       </I18nextProvider>
@@ -66,6 +66,14 @@ describe("PageContextChat", () => {
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+  })
+
+  it("does not expose customer chat when the authenticated user is ineligible", async () => {
+    await renderChat(false)
+
+    expect(
+      screen.queryByRole("button", { name: "Report Q&A" })
+    ).not.toBeInTheDocument()
   })
 
   it("reassembles SSE events split across byte and event boundaries", async () => {
