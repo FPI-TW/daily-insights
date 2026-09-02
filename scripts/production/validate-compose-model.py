@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import Any
 
 EXPECTED_PROXY_NETWORK = "172.30.0.0/24"
-SERVICES = ("api", "web", "nginx", "morning-report-scheduler")
+SERVICES = (
+    "api",
+    "web",
+    "nginx",
+    "morning-report-scheduler",
+    "daily-news-scheduler",
+)
 API_ENVIRONMENT_KEYS = {
     "DAILY_INSIGHTS_DATABASE_URL",
     "DAILY_INSIGHTS_ENVIRONMENT",
@@ -39,7 +45,7 @@ def main() -> None:
     services = model.get("services", {})
     require(
         set(services) == set(SERVICES),
-        "production Compose must contain api/web/nginx and the gated morning-report scheduler",
+        "production Compose must contain api/web/nginx and both gated schedulers",
     )
 
     for name in SERVICES:

@@ -1,5 +1,6 @@
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router"
 import { AppShell } from "#/components/AppShell"
+import { PageContextChatProvider } from "#/components/PageContextChat"
 import { canEnterBackOffice, canEnterCustomer } from "#/lib/authorization"
 
 export const Route = createFileRoute("/$locale/_authenticated/_customer")({
@@ -34,8 +35,10 @@ export const Route = createFileRoute("/$locale/_authenticated/_customer")({
 function CustomerLayout() {
   const { locale, user } = Route.useRouteContext()
   return (
-    <AppShell locale={locale} user={user} surface="customer">
-      <Outlet />
-    </AppShell>
+    <PageContextChatProvider locale={locale}>
+      <AppShell locale={locale} user={user} surface="customer">
+        <Outlet />
+      </AppShell>
+    </PageContextChatProvider>
   )
 }

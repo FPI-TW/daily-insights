@@ -55,6 +55,7 @@ async def latest_news(
     ).first()
     if edition is None:
         return LatestNewsResponse(
+            edition_id=None,
             edition_date=None,
             revision=None,
             generated_at=None,
@@ -87,6 +88,7 @@ async def latest_news(
         for item, presentation in rows
     ]
     return LatestNewsResponse(
+        edition_id=edition.id,
         edition_date=edition.edition_date,
         revision=edition.revision,
         generated_at=edition.generated_at,

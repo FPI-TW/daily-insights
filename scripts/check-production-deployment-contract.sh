@@ -43,7 +43,7 @@ for service in api web nginx; do
   grep -q "^  ${service}:" "$compose_file"
   grep -q "container_name: daily-insights-${service}" "$compose_file"
 done
-[ "$(grep -c 'restart: unless-stopped' "$compose_file")" -eq 4 ]
+[ "$(grep -c 'restart: unless-stopped' "$compose_file")" -eq 5 ]
 grep -q 'stop_grace_period:' "$compose_file"
 grep -q 'healthcheck:' "$compose_file"
 grep -Fq "st_mtime < 93600" "$compose_file"

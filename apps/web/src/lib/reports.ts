@@ -127,6 +127,7 @@ function mapBlock(
 
 function summary(report: ApiReportSummary): ProvisionalReport {
   return {
+    publicationId: report.publication_id,
     marketCode: report.market_code,
     status: report.status,
     editionDate: report.edition_date,

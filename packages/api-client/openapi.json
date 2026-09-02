@@ -277,6 +277,355 @@
         "title": "ChartSeries",
         "type": "object"
       },
+      "ChatConversationDetailResponse": {
+        "properties": {
+          "generations": {
+            "items": {
+              "$ref": "#/components/schemas/ChatGenerationResponse"
+            },
+            "title": "Generations",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessageResponse"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "user_id",
+          "messages",
+          "generations"
+        ],
+        "title": "ChatConversationDetailResponse",
+        "type": "object"
+      },
+      "ChatConversationListItem": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "latest_message_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Message At"
+          },
+          "member_email": {
+            "title": "Member Email",
+            "type": "string"
+          },
+          "message_count": {
+            "title": "Message Count",
+            "type": "integer"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "user_id",
+          "member_email",
+          "title",
+          "created_at",
+          "latest_message_at",
+          "message_count"
+        ],
+        "title": "ChatConversationListItem",
+        "type": "object"
+      },
+      "ChatConversationListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ChatConversationListItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": ["items", "next_cursor"],
+        "title": "ChatConversationListResponse",
+        "type": "object"
+      },
+      "ChatGenerationResponse": {
+        "properties": {
+          "context_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Digest"
+          },
+          "context_truncated": {
+            "title": "Context Truncated",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "prompt_version": {
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "requested_model": {
+            "title": "Requested Model",
+            "type": "string"
+          },
+          "resolved_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Model"
+          },
+          "status": {
+            "$ref": "#/components/schemas/GenerationStatus"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "requested_model",
+          "resolved_model",
+          "prompt_version",
+          "context_digest",
+          "context_truncated",
+          "input_tokens",
+          "output_tokens",
+          "latency_ms",
+          "status",
+          "error_code",
+          "created_at"
+        ],
+        "title": "ChatGenerationResponse",
+        "type": "object"
+      },
+      "ChatMessageResponse": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "reply_to_message_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply To Message Id"
+          },
+          "role": {
+            "$ref": "#/components/schemas/MessageRole"
+          },
+          "status": {
+            "$ref": "#/components/schemas/GenerationStatus"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "content",
+          "status",
+          "reply_to_message_id",
+          "created_at"
+        ],
+        "title": "ChatMessageResponse",
+        "type": "object"
+      },
+      "ChatStreamRequest": {
+        "properties": {
+          "client_request_id": {
+            "format": "uuid",
+            "title": "Client Request Id",
+            "type": "string"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "locale": {
+            "enum": ["zh-hant", "zh-hans", "en"],
+            "title": "Locale",
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "page_context": {
+            "discriminator": {
+              "mapping": {
+                "report_detail": "#/components/schemas/ReportDetailContext",
+                "reports_index": "#/components/schemas/ReportsIndexContext"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReportsIndexContext"
+              },
+              {
+                "$ref": "#/components/schemas/ReportDetailContext"
+              }
+            ],
+            "title": "Page Context"
+          }
+        },
+        "required": ["client_request_id", "locale", "message", "page_context"],
+        "title": "ChatStreamRequest",
+        "type": "object"
+      },
       "ComponentHealth": {
         "properties": {
           "status": {
@@ -299,6 +648,11 @@
         "required": ["csrf_token"],
         "title": "CsrfTokenResponse",
         "type": "object"
+      },
+      "GenerationStatus": {
+        "enum": ["pending", "complete", "partial", "error"],
+        "title": "GenerationStatus",
+        "type": "string"
       },
       "HTTPValidationError": {
         "properties": {
@@ -414,6 +768,18 @@
             ],
             "title": "Edition Date"
           },
+          "edition_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edition Id"
+          },
           "generated_at": {
             "anyOf": [
               {
@@ -456,6 +822,7 @@
           }
         },
         "required": [
+          "edition_id",
           "edition_date",
           "revision",
           "generated_at",
@@ -693,6 +1060,11 @@
         "required": ["reason"],
         "title": "MemberUpdate",
         "type": "object"
+      },
+      "MessageRole": {
+        "enum": ["user", "assistant", "system"],
+        "title": "MessageRole",
+        "type": "string"
       },
       "MetricBlock": {
         "additionalProperties": false,
@@ -1696,6 +2068,23 @@
         "title": "ReadinessReport",
         "type": "object"
       },
+      "ReportDetailContext": {
+        "properties": {
+          "kind": {
+            "const": "report_detail",
+            "title": "Kind",
+            "type": "string"
+          },
+          "publication_id": {
+            "format": "uuid",
+            "title": "Publication Id",
+            "type": "string"
+          }
+        },
+        "required": ["kind", "publication_id"],
+        "title": "ReportDetailContext",
+        "type": "object"
+      },
       "ReportDetailResponse": {
         "properties": {
           "content": {
@@ -1912,6 +2301,40 @@
           "locale"
         ],
         "title": "ReportSummaryResponse",
+        "type": "object"
+      },
+      "ReportsIndexContext": {
+        "properties": {
+          "kind": {
+            "const": "reports_index",
+            "title": "Kind",
+            "type": "string"
+          },
+          "news_edition_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "News Edition Id"
+          },
+          "publication_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Publication Ids",
+            "type": "array"
+          }
+        },
+        "required": ["kind", "publication_ids"],
+        "title": "ReportsIndexContext",
         "type": "object"
       },
       "SeriesBlock": {
@@ -2266,6 +2689,172 @@
         },
         "summary": "List Audit Events",
         "tags": ["administration"]
+      }
+    },
+    "/api/admin/conversations": {
+      "get": {
+        "operationId": "list_conversations_api_admin_conversations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Organization Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "member_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Member Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "created_after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "created_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatConversationListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Conversations",
+        "tags": ["chat"]
+      }
+    },
+    "/api/admin/conversations/{conversation_id}": {
+      "get": {
+        "operationId": "conversation_detail_api_admin_conversations__conversation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatConversationDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Conversation Detail",
+        "tags": ["chat"]
       }
     },
     "/api/admin/internal-users": {
@@ -3937,6 +4526,59 @@
         },
         "summary": "Get Latest Report",
         "tags": ["reports"]
+      }
+    },
+    "/api/v1/chat/stream": {
+      "post": {
+        "operationId": "stream_chat_api_v1_chat_stream_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatStreamRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Chat",
+        "tags": ["chat"]
       }
     }
   }
