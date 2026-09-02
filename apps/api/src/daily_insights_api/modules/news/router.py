@@ -74,6 +74,7 @@ async def _latest_response(
         return LatestNewsResponse(
             market_code=spec.market_code,
             target_items=spec.target_items,
+            edition_id=None,
             edition_date=None,
             revision=None,
             generated_at=None,
@@ -108,6 +109,7 @@ async def _latest_response(
     return LatestNewsResponse(
         market_code=spec.market_code,
         target_items=spec.target_items,
+        edition_id=edition.id,
         edition_date=edition.edition_date,
         revision=edition.revision,
         generated_at=edition.generated_at,

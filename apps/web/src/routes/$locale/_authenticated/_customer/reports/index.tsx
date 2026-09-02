@@ -8,6 +8,7 @@ import {
 import { getReportList } from "#/lib/reports"
 import { DailyNews, DailyNewsLoading } from "#/components/DailyNews"
 import { getLatestNews } from "#/lib/news"
+import { useChatPageContext } from "#/components/PageContextChat"
 
 export const Route = createFileRoute(
   "/$locale/_authenticated/_customer/reports/"
@@ -56,6 +57,18 @@ function ReportsAndNewsLoading() {
 function ReportsPage() {
   const { reports, news } = Route.useLoaderData()
   const { locale } = Route.useRouteContext()
+  const publicationIds = reports.flatMap(report =>
+    report.publicationId ? [report.publicationId] : []
+  )
+  useChatPageContext(
+    publicationIds.length
+      ? {
+          kind: "reports_index",
+          publication_ids: publicationIds,
+          news_edition_id: news?.edition_id ?? null,
+        }
+      : null
+  )
   return (
     <>
       <ReportList locale={locale} reports={reports} />

@@ -14,6 +14,7 @@ import {
   type NewsMarketCode,
 } from "#/lib/provisional-reports"
 import { getReportDetail } from "#/lib/reports"
+import { useChatPageContext } from "#/components/PageContextChat"
 
 type ReportResult = Awaited<ReturnType<typeof getReportDetail>>
 type MarketPage = {
@@ -69,6 +70,11 @@ export const Route = createFileRoute(
 function ReportPage() {
   const { report, news } = Route.useLoaderData()
   const { locale } = Route.useRouteContext()
+  useChatPageContext(
+    report.kind === "report" && report.report.publicationId
+      ? { kind: "report_detail", publication_id: report.report.publicationId }
+      : null
+  )
   return (
     <>
       {report.kind === "not-generated" ? (

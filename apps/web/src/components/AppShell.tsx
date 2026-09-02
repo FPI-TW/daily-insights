@@ -201,13 +201,23 @@ export function AppShell({
                 {t("audioManagementNav")}
               </Link>
               {user.system_role === "admin" ? (
-                <Link
-                  to="/$locale/admin/members"
-                  params={{ locale }}
-                  className="shrink-0 border-b-2 border-transparent px-4 py-3 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&[aria-current=page]]:border-lagoon [&[aria-current=page]]:text-lagoon"
-                >
-                  {t("memberManagementNav")}
-                </Link>
+                <>
+                  <Link
+                    to="/$locale/admin/members"
+                    params={{ locale }}
+                    className="shrink-0 border-b-2 border-transparent px-4 py-3 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&[aria-current=page]]:border-lagoon [&[aria-current=page]]:text-lagoon"
+                  >
+                    {t("memberManagementNav")}
+                  </Link>
+                  <Link
+                    to="/$locale/admin/conversations"
+                    params={{ locale }}
+                    search={{ history: [] }}
+                    className="shrink-0 border-b-2 border-transparent px-4 py-3 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&[aria-current=page]]:border-lagoon [&[aria-current=page]]:text-lagoon"
+                  >
+                    {t("conversationsNav")}
+                  </Link>
+                </>
               ) : null}
             </nav>
           </div>

@@ -143,6 +143,7 @@ export type NewsMarketCode = z.infer<typeof newsMarketCodeSchema>
 export const latestNewsSchema = z.object({
   market_code: z.string(),
   target_items: z.number().int().positive(),
+  edition_id: z.uuid().nullable(),
   edition_date: z.iso.date().nullable(),
   revision: z.number().int().positive().nullable(),
   generated_at: z.iso.datetime({ offset: true }).nullable(),
