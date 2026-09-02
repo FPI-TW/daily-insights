@@ -66,6 +66,31 @@ class DeepSeekClient:
         self._model = model
         self._timeout = timeout_seconds
         self._selection_criteria = selection_criteria or load_selection_criteria()
+        self._client: httpx.AsyncClient | None = None
+
+    def _http(self) -> httpx.AsyncClient:
+        # One connection pool per client lifetime: an edition issues up to
+        # sixteen completions and should reuse the provider connection.
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(self._timeout),
+                follow_redirects=False,
+                cookies=None,
+                trust_env=False,
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            client, self._client = self._client, None
+            await client.aclose()
+
+    async def __aenter__(self) -> "DeepSeekClient":
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        del exc_info
+        await self.aclose()
 
     @property
     def model_name(self) -> str:
@@ -169,20 +194,14 @@ class DeepSeekClient:
         response: httpx.Response | None = None
         data: dict[str, Any] | None = None
         try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(self._timeout),
-                follow_redirects=False,
-                cookies=None,
-                trust_env=False,
-            ) as client:
-                response = await client.post(
-                    f"{self._base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self._api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=body,
-                )
+            response = await self._http().post(
+                f"{self._base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            )
             response.raise_for_status()
             raw_data = response.json()
             if not isinstance(raw_data, dict):

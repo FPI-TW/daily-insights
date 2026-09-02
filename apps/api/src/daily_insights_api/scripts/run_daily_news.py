@@ -81,6 +81,7 @@ async def main() -> None:
         else:
             await run_scheduler(runner, now=lambda: datetime.now(TAIPEI), retry=RETRY_POLICY)
     finally:
+        await client.aclose()
         await engine.dispose()
 
 
