@@ -254,6 +254,7 @@ async def run_news_edition(
     fetch_timeout_seconds: float = 25,
     discovery_timeout_seconds: float = 60,
     spec: EditionSpec = GLOBAL_SPEC,
+    gdelt_enabled: bool = False,
 ) -> str:
     """Discover, safely extract, then select and persist today's immutable edition.
 
@@ -286,7 +287,7 @@ async def run_news_edition(
         )
 
     candidates: list[Candidate] = []
-    if spec.uses_gdelt:
+    if spec.uses_gdelt and gdelt_enabled:
         try:
             candidates = await _retry(discover, audit_discovery_failure)
         except Exception as error:
@@ -485,6 +486,7 @@ async def run_all_editions(
     fetch_timeout_seconds: float = 25,
     discovery_timeout_seconds: float = 60,
     markets: tuple[str, ...] = EDITION_ORDER,
+    gdelt_enabled: bool = False,
 ) -> str:
     """Run every configured edition in order and return the worst outcome.
 
@@ -504,6 +506,7 @@ async def run_all_editions(
                 fetch_timeout_seconds=fetch_timeout_seconds,
                 discovery_timeout_seconds=discovery_timeout_seconds,
                 spec=spec,
+                gdelt_enabled=gdelt_enabled,
             )
         except Exception as error:
             emit_event("news.edition.failed", market=market_code, error_code=type(error).__name__)

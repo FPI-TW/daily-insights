@@ -102,6 +102,7 @@ flowchart LR
 | ----------------------------------------------- | --------------------------------------------------------------------------- | ------------------------ |
 | `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`             | `true`／`false`，關閉時排程器只維持 heartbeat                               | GitHub Variables         |
 | `DAILY_INSIGHTS_NEWS_ALLOWED_HOSTNAMES`         | 逗號分隔的精確主機名稱白名單                                                | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_NEWS_GDELT_ENABLED`             | 是否額外查詢 GDELT，預設 `false`；GDELT HTTPS 端點不穩定且只補充全球版本    | GitHub Variables，可省略 |
 | `DAILY_INSIGHTS_MODEL_NAME`                     | DeepSeek 模型名稱，預設 `deepseek-chat`                                     | GitHub Variables，可省略 |
 | `DAILY_INSIGHTS_MODEL_API_BASE_URL`             | 必須是 HTTPS 絕對 URL，預設 `https://api.deepseek.com`                      | GitHub Variables，可省略 |
 | `DAILY_INSIGHTS_MODEL_API_KEY`                  | 啟用時必填，不得為 placeholder                                              | GitHub Secrets           |

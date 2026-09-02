@@ -345,6 +345,7 @@ async def test_discovery_uses_configured_timeout_and_retries_once(
         datetime.now(TAIPEI).date(),
         allowed_hostnames="www.reuters.com",
         discovery_timeout_seconds=75,
+        gdelt_enabled=True,
     )
     assert status == "unavailable"
     assert attempts == [75.0, 75.0]

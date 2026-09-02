@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     # discovery gets a generous budget and one retry before the edition is
     # declared unavailable.
     news_discovery_timeout_seconds: float = Field(default=60, gt=0, le=180)
+    # GDELT's HTTPS endpoint is unreliable and only ever supplemented the
+    # publisher feeds, so it is opt-in; the global digest reads feeds alone.
+    news_gdelt_enabled: bool = False
     report_freshness_max_age_days: int = Field(default=3, ge=1, le=30)
     r2_endpoint_url: str | None = None
     r2_bucket_name: str | None = None
