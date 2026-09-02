@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 from datetime import date, datetime
 
@@ -6,9 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api.core.config import Settings, get_settings, is_placeholder_value
 from daily_insights_api.core.database import create_engine, create_session_factory
+from daily_insights_api.modules.news.editions import EDITION_ORDER, edition_spec
 from daily_insights_api.modules.news.llm import DeepSeekClient
 from daily_insights_api.modules.news.prompts import load_selection_criteria
-from daily_insights_api.modules.news.service import run_news_edition
+from daily_insights_api.modules.news.service import run_all_editions, run_news_edition
 from daily_insights_api.modules.reports.scheduler import (
     TAIPEI,
     EditionRunner,
@@ -26,31 +28,50 @@ HEARTBEAT_PATH = "/tmp/daily-news-heartbeat"
 RETRY_POLICY = SameDayRetry(retry_outcomes=frozenset({"unavailable"}))
 
 
+def configure_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--market",
+        choices=EDITION_ORDER,
+        help="run only this edition (default: every edition in order)",
+    )
+
+
 def build_runner(
     session_factory: async_sessionmaker[AsyncSession],
     client: DeepSeekClient,
     settings: Settings,
     heartbeat: Path,
+    *,
+    market: str | None = None,
 ) -> EditionRunner:
-    async def runner(edition_date: date) -> str | None:
-        return await run_with_heartbeat(
-            lambda target_date: run_news_edition(
+    async def run(target_date: date) -> str:
+        if market is not None:
+            return await run_news_edition(
                 session_factory,
                 client,
                 target_date,
                 allowed_hostnames=settings.news_allowed_hostnames,
                 fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
                 discovery_timeout_seconds=settings.news_discovery_timeout_seconds,
-            ),
-            edition_date,
-            heartbeat,
+                spec=edition_spec(market),
+            )
+        return await run_all_editions(
+            session_factory,
+            client,
+            target_date,
+            allowed_hostnames=settings.news_allowed_hostnames,
+            fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
+            discovery_timeout_seconds=settings.news_discovery_timeout_seconds,
         )
+
+    async def runner(edition_date: date) -> str | None:
+        return await run_with_heartbeat(run, edition_date, heartbeat)
 
     return runner
 
 
 async def main() -> None:
-    args = parse_args(description="Run the daily news scheduler")
+    args = parse_args(description="Run the daily news scheduler", configure=configure_arguments)
     settings = get_settings()
     heartbeat = Path(HEARTBEAT_PATH)
     await heartbeat.touch()
@@ -72,7 +93,9 @@ async def main() -> None:
         timeout_seconds=settings.model_timeout_seconds,
         selection_criteria=load_selection_criteria(),
     )
-    runner = build_runner(session_factory, client, settings, heartbeat)
+    runner = build_runner(
+        session_factory, client, settings, heartbeat, market=getattr(args, "market", None)
+    )
     try:
         now = datetime.now(TAIPEI)
         edition = args.edition_date or (now.date() if args.once else due_edition(now))

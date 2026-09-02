@@ -88,6 +88,8 @@ describe("API client trust boundary", () => {
   it("requests and validates the authenticated latest-news contract", async () => {
     const transport = vi.fn(async () =>
       Response.json({
+        market_code: "global",
+        target_items: 5,
         edition_date: "2026-09-01",
         revision: 1,
         generated_at: "2026-09-01T00:00:00+00:00",

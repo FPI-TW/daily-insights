@@ -13,6 +13,7 @@ import {
   podcastEpisodeListSchema,
   type PodcastEpisodeUpdateInput,
   type Locale,
+  type NewsMarketCode,
   type MemberCreateInput,
   memberListSchema,
   memberSchema,
@@ -66,6 +67,15 @@ export function createNewsClient(transport: ApiTransport) {
       const query = new URLSearchParams({ locale })
       return parseResponse(
         await transport(`/api/news/latest?${query}`),
+        latestNewsSchema
+      )
+    },
+    async latestForMarket(locale: Locale, marketCode: NewsMarketCode) {
+      const query = new URLSearchParams({ locale })
+      return parseResponse(
+        await transport(
+          `/api/news/${encodeURIComponent(marketCode)}/latest?${query}`
+        ),
         latestNewsSchema
       )
     },

@@ -438,6 +438,10 @@
             "title": "Locale",
             "type": "string"
           },
+          "market_code": {
+            "title": "Market Code",
+            "type": "string"
+          },
           "revision": {
             "anyOf": [
               {
@@ -453,9 +457,15 @@
             "enum": ["complete", "partial", "unavailable"],
             "title": "Status",
             "type": "string"
+          },
+          "target_items": {
+            "title": "Target Items",
+            "type": "integer"
           }
         },
         "required": [
+          "market_code",
+          "target_items",
           "edition_date",
           "revision",
           "generated_at",
@@ -3663,6 +3673,57 @@
           }
         },
         "summary": "Latest News",
+        "tags": ["news"]
+      }
+    },
+    "/api/news/{market_code}/latest": {
+      "get": {
+        "operationId": "latest_market_news_api_news__market_code__latest_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "market_code",
+            "required": true,
+            "schema": {
+              "title": "Market Code",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "locale",
+            "required": false,
+            "schema": {
+              "default": "zh-hant",
+              "enum": ["zh-hant", "zh-hans", "en"],
+              "title": "Locale",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LatestNewsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Latest Market News",
         "tags": ["news"]
       }
     },

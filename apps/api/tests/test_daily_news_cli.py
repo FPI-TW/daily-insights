@@ -26,9 +26,16 @@ def _settings(**overrides: object) -> Settings:
 
 
 def test_daily_news_cli_shares_the_scheduler_argument_contract() -> None:
-    args = parse_args(["--once", "--edition-date", "2026-09-02"], description="daily news")
+    args = parse_args(
+        ["--once", "--edition-date", "2026-09-02", "--market", "us_equity"],
+        description="daily news",
+        configure=run_daily_news.configure_arguments,
+    )
     assert args.once is True
     assert args.edition_date == date(2026, 9, 2)
+    assert args.market == "us_equity"
+    with pytest.raises(SystemExit):
+        parse_args(["--market", "fx"], configure=run_daily_news.configure_arguments)
     assert run_daily_news.RETRY_POLICY.retries("unavailable")
     assert run_daily_news.RETRY_POLICY.retries("failed")
     assert not run_daily_news.RETRY_POLICY.retries("partial")
@@ -131,9 +138,9 @@ async def test_runner_returns_edition_status_and_refreshes_heartbeat(
 ) -> None:
     heartbeat = Path(tmp_path / "heartbeat")
     settings = _settings(daily_news_enabled=True, news_allowed_hostnames="www.reuters.com")
-    seen: list[tuple[date, str, float, float]] = []
+    seen: list[tuple[str, date, str, float, float, str | None]] = []
 
-    async def fake_run_news_edition(
+    async def fake_run_all_editions(
         session_factory: object,
         client: object,
         edition_date: date,
@@ -144,26 +151,66 @@ async def test_runner_returns_edition_status_and_refreshes_heartbeat(
     ) -> str:
         del session_factory, client
         seen.append(
-            (edition_date, allowed_hostnames, fetch_timeout_seconds, discovery_timeout_seconds)
+            (
+                "all",
+                edition_date,
+                allowed_hostnames,
+                fetch_timeout_seconds,
+                discovery_timeout_seconds,
+                None,
+            )
         )
         return "unavailable"
 
-    monkeypatch.setattr(run_daily_news, "run_news_edition", fake_run_news_edition)
-    runner = run_daily_news.build_runner(
-        cast(async_sessionmaker[AsyncSession], object()),
-        cast(DeepSeekClient, object()),
-        settings,
-        heartbeat,
-    )
+    async def fake_run_news_edition(
+        session_factory: object,
+        client: object,
+        edition_date: date,
+        *,
+        allowed_hostnames: str,
+        fetch_timeout_seconds: float,
+        discovery_timeout_seconds: float,
+        spec: object,
+    ) -> str:
+        del session_factory, client
+        seen.append(
+            (
+                "one",
+                edition_date,
+                allowed_hostnames,
+                fetch_timeout_seconds,
+                discovery_timeout_seconds,
+                getattr(spec, "market_code", None),
+            )
+        )
+        return "partial"
 
-    assert await runner(date(2026, 9, 2)) == "unavailable"
+    monkeypatch.setattr(run_daily_news, "run_all_editions", fake_run_all_editions)
+    monkeypatch.setattr(run_daily_news, "run_news_edition", fake_run_news_edition)
+    factory = cast(async_sessionmaker[AsyncSession], object())
+    client = cast(DeepSeekClient, object())
+    every = run_daily_news.build_runner(factory, client, settings, heartbeat)
+    single = run_daily_news.build_runner(factory, client, settings, heartbeat, market="tw_equity")
+
+    assert await every(date(2026, 9, 2)) == "unavailable"
+    assert await single(date(2026, 9, 2)) == "partial"
     assert seen == [
         (
+            "all",
             date(2026, 9, 2),
             "www.reuters.com",
             settings.news_fetch_timeout_seconds,
             settings.news_discovery_timeout_seconds,
-        )
+            None,
+        ),
+        (
+            "one",
+            date(2026, 9, 2),
+            "www.reuters.com",
+            settings.news_fetch_timeout_seconds,
+            settings.news_discovery_timeout_seconds,
+            "tw_equity",
+        ),
     ]
     assert settings.news_discovery_timeout_seconds == 60
     assert await heartbeat.exists()

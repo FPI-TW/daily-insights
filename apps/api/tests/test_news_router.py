@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import cast
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 
 from daily_insights_api.core.config import Settings
@@ -155,3 +156,57 @@ def test_localized_caveat_is_null_only_for_complete_five_item_editions() -> None
 
 async def _ready() -> bool:
     return True
+
+
+def _member(role: str, organization_id: uuid.UUID | None) -> AuthContext:
+    return cast(
+        AuthContext,
+        SimpleNamespace(
+            user=SimpleNamespace(system_role=role),
+            organization_id=organization_id,
+        ),
+    )
+
+
+async def test_market_news_is_policy_gated_and_unknown_markets_are_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.core.enums import SystemRole
+    from daily_insights_api.modules.news import router as news_router
+
+    app = create_app(Settings(environment="test"), readiness_checker=lambda: _ready())
+    organization = uuid.uuid4()
+    current = {"context": _member(SystemRole.ORG_MEMBER, organization)}
+
+    async def auth() -> AuthContext:
+        return current["context"]
+
+    async def database():  # type: ignore[no-untyped-def]
+        yield _Database()
+
+    async def visible(database: object, organization_id: uuid.UUID) -> set[str]:
+        del database
+        assert organization_id == organization
+        return {"us_equity", "crypto"}
+
+    monkeypatch.setattr(news_router, "visible_market_codes", visible)
+    app.dependency_overrides[require_password_changed] = auth
+    app.dependency_overrides[get_database_session] = database
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        visible_response = await client.get("/api/news/us_equity/latest?locale=en")
+        hidden_response = await client.get("/api/news/tw_equity/latest?locale=en")
+        unknown_response = await client.get("/api/news/crypto/latest?locale=en")
+        current["context"] = _member(SystemRole.ADMIN, None)
+        internal_response = await client.get("/api/news/tw_equity/latest?locale=zh-hant")
+        current["context"] = _member(SystemRole.ORG_MEMBER, None)
+        orphan_response = await client.get("/api/news/us_equity/latest")
+
+    assert visible_response.status_code == 200
+    assert visible_response.json()["market_code"] == "us_equity"
+    assert visible_response.json()["target_items"] == 8
+    assert visible_response.json()["status"] == "unavailable"
+    assert hidden_response.status_code == 404
+    assert unknown_response.status_code == 404
+    assert internal_response.status_code == 200
+    assert internal_response.json()["market_code"] == "tw_equity"
+    assert orphan_response.status_code == 403

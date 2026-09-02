@@ -12,6 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api.core.observability import emit_event
 from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary, Selection
+from daily_insights_api.modules.news.editions import (
+    EDITION_ORDER,
+    GLOBAL_SPEC,
+    EditionSpec,
+    edition_spec,
+)
 from daily_insights_api.modules.news.feeds import discover_feed_candidates, feed_client
 from daily_insights_api.modules.news.llm import DeepSeekClient, ModelCall, ModelCallError
 from daily_insights_api.modules.news.models import (
@@ -59,10 +65,14 @@ async def _retry[T](
 
 
 def _digest(
-    candidates: list[FetchedCandidate], model_name: str, selection_prompt_digest: str
+    candidates: list[FetchedCandidate],
+    model_name: str,
+    selection_prompt_digest: str,
+    market_code: str = GLOBAL_SPEC.market_code,
 ) -> str:
     payload = {
         "derivation": DERIVATION_VERSION,
+        "market": market_code,
         "selection_prompt_digest": selection_prompt_digest,
         "summary_prompt": SUMMARY_PROMPT_VERSION,
         "model": model_name,
@@ -80,9 +90,11 @@ def _digest(
     ).hexdigest()
 
 
-def _lock_key(edition_date: date) -> int:
+def _lock_key(edition_date: date, market_code: str = GLOBAL_SPEC.market_code) -> int:
     return int.from_bytes(
-        hashlib.sha256(f"daily-news:{edition_date}".encode()).digest()[:8], "big", signed=True
+        hashlib.sha256(f"daily-news:{market_code}:{edition_date}".encode()).digest()[:8],
+        "big",
+        signed=True,
     )
 
 
@@ -196,9 +208,9 @@ def _limit_candidates(
     return limited
 
 
-def _edition_status(count: int) -> tuple[str, str]:
-    status = "complete" if count == 5 else "partial" if count else "unavailable"
-    return status, f"{count}/5 stories completed"
+def _edition_status(count: int, target: int = GLOBAL_SPEC.target_items) -> tuple[str, str]:
+    status = "complete" if count >= target else "partial" if count else "unavailable"
+    return status, f"{count}/{target} stories completed"
 
 
 async def _fetch_usable_candidates(
@@ -241,6 +253,7 @@ async def run_news_edition(
     allowed_hostnames: str,
     fetch_timeout_seconds: float = 25,
     discovery_timeout_seconds: float = 60,
+    spec: EditionSpec = GLOBAL_SPEC,
 ) -> str:
     """Discover, safely extract, then select and persist today's immutable edition.
 
@@ -251,6 +264,7 @@ async def run_news_edition(
     if edition_date != datetime.now(TAIPEI).date():
         raise ValueError("daily news only generates the current Taipei edition")
     allowed = configured_hostnames(allowed_hostnames)
+    market_code = spec.market_code
 
     async def discover() -> list[Candidate]:
         async with httpx.AsyncClient(
@@ -271,17 +285,23 @@ async def run_news_edition(
             status_code=status_code,
         )
 
-    try:
-        candidates = await _retry(discover, audit_discovery_failure)
-    except Exception as error:
-        emit_event("news.candidates.failed", error_code=type(error).__name__)
-        candidates = []
-    emit_event("news.candidates.discovered", count=len(candidates))
+    candidates: list[Candidate] = []
+    if spec.uses_gdelt:
+        try:
+            candidates = await _retry(discover, audit_discovery_failure)
+        except Exception as error:
+            emit_event("news.candidates.failed", error_code=type(error).__name__)
+            candidates = []
+    emit_event("news.candidates.discovered", market=market_code, count=len(candidates))
     async with feed_client(discovery_timeout_seconds) as feeds_http:
-        feed_candidates = await discover_feed_candidates(feeds_http, allowed)
-    candidates = _cap_discovery(_dedupe_candidates(candidates + feed_candidates))
+        feed_candidates = await discover_feed_candidates(feeds_http, allowed, market=market_code)
+    candidates = _cap_discovery(
+        _dedupe_candidates(candidates + feed_candidates),
+        per_source=spec.max_discovery_per_source,
+    )
     emit_event(
         "news.candidates.merged",
+        market=market_code,
         feeds=len(feed_candidates),
         total=len(candidates),
     )
@@ -290,19 +310,24 @@ async def run_news_edition(
         if candidates
         else []
     )
-    usable = _limit_candidates(usable)
-    emit_event("news.sources.usable", count=len(usable))
+    usable = _limit_candidates(usable, total=spec.max_candidates, per_source=spec.max_per_source)
+    emit_event("news.sources.usable", market=market_code, count=len(usable))
     model_name = client.model_name
     selection_prompt_digest = client.selection_prompt_digest
     selection_prompt_version = client.selection_prompt_version
     edition_prompt_version = f"{selection_prompt_version}+{SUMMARY_PROMPT_VERSION}"
-    input_digest = _digest(usable, model_name, selection_prompt_digest)
+    input_digest = _digest(usable, model_name, selection_prompt_digest, market_code)
     async with session_factory() as database:
-        await database.execute(select(func.pg_advisory_xact_lock(_lock_key(edition_date))))
+        await database.execute(
+            select(func.pg_advisory_xact_lock(_lock_key(edition_date, market_code)))
+        )
         latest = (
             await database.scalars(
                 select(NewsEdition)
-                .where(NewsEdition.edition_date == edition_date)
+                .where(
+                    NewsEdition.edition_date == edition_date,
+                    NewsEdition.market_code == market_code,
+                )
                 .order_by(NewsEdition.revision.desc())
                 .limit(1)
                 .with_for_update()
@@ -314,27 +339,28 @@ async def run_news_edition(
             and latest.input_digest == input_digest
         ):
             await database.rollback()
-            emit_event("news.edition.idempotent", edition_date=edition_date)
+            emit_event("news.edition.idempotent", edition_date=edition_date, market=market_code)
             return "idempotent"
         edition = NewsEdition(
             edition_date=edition_date,
+            market_code=market_code,
             revision=(latest.revision + 1 if latest else 1),
             input_digest=input_digest,
             derivation_version=DERIVATION_VERSION,
             model_name=model_name,
             prompt_version=edition_prompt_version,
             status="unavailable",
-            caveat="0/5 stories completed",
+            caveat=_edition_status(0, spec.target_items)[1],
         )
         database.add(edition)
         await database.flush()
         if not usable:
             await database.commit()
-            emit_event("news.shortfall", status="unavailable", count=0)
+            emit_event("news.shortfall", market=market_code, status="unavailable", count=0)
             return edition.status
         try:
             selection_call = await _retry(
-                lambda: client.select(usable),
+                lambda: client.select(usable, policy=spec.selection),
                 lambda error: database.add(
                     _failed_audit(
                         edition.id,
@@ -360,7 +386,7 @@ async def run_news_edition(
             )
         except Exception as error:
             await database.commit()
-            emit_event("news.selection.failed", error_code=type(error).__name__)
+            emit_event("news.selection.failed", market=market_code, error_code=type(error).__name__)
             return edition.status
         selected = {fetched.candidate.id: fetched for fetched in usable}
         complete_count = 0
@@ -439,7 +465,49 @@ async def run_news_edition(
                     hostname=fetched.candidate.hostname,
                     error_code=type(error).__name__,
                 )
-        edition.status, edition.caveat = _edition_status(complete_count)
+        edition.status, edition.caveat = _edition_status(complete_count, spec.target_items)
         await database.commit()
-        emit_event("news.shortfall", status=edition.status, count=complete_count)
+        emit_event(
+            "news.shortfall", market=market_code, status=edition.status, count=complete_count
+        )
         return edition.status
+
+
+OUTCOME_SEVERITY = {"failed": 4, "unavailable": 3, "partial": 2, "idempotent": 1, "complete": 0}
+
+
+async def run_all_editions(
+    session_factory: async_sessionmaker[AsyncSession],
+    client: DeepSeekClient,
+    edition_date: date,
+    *,
+    allowed_hostnames: str,
+    fetch_timeout_seconds: float = 25,
+    discovery_timeout_seconds: float = 60,
+    markets: tuple[str, ...] = EDITION_ORDER,
+) -> str:
+    """Run every configured edition in order and return the worst outcome.
+
+    One edition's exception does not stop the others; it is reported as
+    ``failed`` so the scheduler's same-day retry re-attempts the whole set,
+    where complete editions are idempotent no-ops.
+    """
+    worst = "complete"
+    for market_code in markets:
+        spec = edition_spec(market_code)
+        try:
+            outcome = await run_news_edition(
+                session_factory,
+                client,
+                edition_date,
+                allowed_hostnames=allowed_hostnames,
+                fetch_timeout_seconds=fetch_timeout_seconds,
+                discovery_timeout_seconds=discovery_timeout_seconds,
+                spec=spec,
+            )
+        except Exception as error:
+            emit_event("news.edition.failed", market=market_code, error_code=type(error).__name__)
+            outcome = "failed"
+        if OUTCOME_SEVERITY[outcome] > OUTCOME_SEVERITY[worst]:
+            worst = outcome
+    return "unavailable" if worst == "failed" else worst

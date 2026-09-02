@@ -23,6 +23,8 @@ describe("DailyNews", () => {
       <I18nextProvider i18n={i18n}>
         <DailyNews
           news={{
+            market_code: "global",
+            target_items: 5,
             edition_date: "2026-09-01",
             revision: 1,
             status: "complete",

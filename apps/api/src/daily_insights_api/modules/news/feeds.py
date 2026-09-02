@@ -20,6 +20,7 @@ from defusedxml import ElementTree
 
 from daily_insights_api.core.observability import emit_event
 from daily_insights_api.modules.news.contracts import Candidate
+from daily_insights_api.modules.news.editions import GLOBAL_MARKET
 from daily_insights_api.modules.news.sources import (
     SOURCE_NAMES,
     _dedupe_candidates,
@@ -39,6 +40,9 @@ class FeedSource:
     kind: str
     link_pattern: str | None = None
     host_rewrites: tuple[tuple[str, str], ...] = ()
+    # Which editions read this feed; "global" is the daily digest.
+    markets: frozenset[str] = frozenset({GLOBAL_MARKET})
+    max_items: int = MAX_PER_FEED
 
 
 # Reuters is deliberately absent: it answers non-browser requests with 401, so
@@ -49,6 +53,7 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "https://www.cnbc.com/id/10000664/device/rss/rss.html",
         "rss",
         r"^https://www\.cnbc\.com/\d{4}/\d{2}/\d{2}/[a-z0-9-]+\.html$",
+        markets=frozenset({GLOBAL_MARKET, "us_equity"}),
     ),
     FeedSource(
         "www.bbc.com",
@@ -62,12 +67,29 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "https://apnews.com/business",
         "listing",
         r"^https://apnews\.com/article/[a-z0-9-]+$",
+        markets=frozenset({GLOBAL_MARKET, "us_equity"}),
     ),
     FeedSource(
         "news.cnyes.com",
         "https://news.cnyes.com/news/cat/headline",
         "listing",
         r"^https://news\.cnyes\.com/news/id/\d+$",
+    ),
+    FeedSource(
+        "news.cnyes.com",
+        "https://news.cnyes.com/news/cat/tw_stock",
+        "listing",
+        r"^https://news\.cnyes\.com/news/id/\d+$",
+        markets=frozenset({"tw_equity"}),
+        max_items=24,
+    ),
+    FeedSource(
+        "news.cnyes.com",
+        "https://news.cnyes.com/news/cat/us_stock",
+        "listing",
+        r"^https://news\.cnyes\.com/news/id/\d+$",
+        markets=frozenset({"us_equity"}),
+        max_items=12,
     ),
     FeedSource(
         "finance.eastmoney.com",
@@ -218,8 +240,10 @@ async def discover_feed_candidates(
     client: httpx.AsyncClient,
     allowed: frozenset[str],
     now: datetime | None = None,
+    *,
+    market: str = GLOBAL_MARKET,
 ) -> list[Candidate]:
-    """Read every configured feed whose article host is allowlisted.
+    """Read every feed tagged for ``market`` whose article host is allowlisted.
 
     Failures are isolated per feed and reported as events; the function never
     raises, so a broken publisher cannot take the whole edition down.
@@ -228,7 +252,7 @@ async def discover_feed_candidates(
     start = end - timedelta(hours=24)
     result: list[Candidate] = []
     for source in FEED_SOURCES:
-        if not allowed_hostname(source.hostname, allowed):
+        if market not in source.markets or not allowed_hostname(source.hostname, allowed):
             continue
         feed_host = (urlparse(source.url).hostname or "").lower()
         try:
@@ -246,7 +270,13 @@ async def discover_feed_candidates(
                 error_code=type(error).__name__,
             )
             continue
-        found = found[:MAX_PER_FEED]
-        emit_event("news.feed.discovered", hostname=source.hostname, count=len(found))
+        found = found[: source.max_items]
+        emit_event(
+            "news.feed.discovered",
+            hostname=source.hostname,
+            feed=source.url,
+            market=market,
+            count=len(found),
+        )
         result.extend(found)
     return _dedupe_candidates(result)

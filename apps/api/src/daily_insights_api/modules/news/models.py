@@ -27,10 +27,17 @@ class NewsEdition(UUIDPrimaryKeyMixin, Base):
         CheckConstraint("revision > 0", name="revision_positive"),
         CheckConstraint("char_length(input_digest) = 64", name="input_digest_sha256"),
         CheckConstraint("status IN ('complete', 'partial', 'unavailable')", name="status_valid"),
-        UniqueConstraint("edition_date", "revision", name="uq_news_edition_version"),
-        Index("ix_news_editions_latest", "edition_date", "revision"),
+        CheckConstraint(
+            "market_code IN ('global','tw_equity','us_equity')", name="market_code_valid"
+        ),
+        UniqueConstraint("edition_date", "market_code", "revision", name="uq_news_edition_version"),
+        Index("ix_news_editions_latest", "edition_date", "market_code", "revision"),
     )
     edition_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # "global" is the five-story daily digest; market codes hold market news editions.
+    market_code: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="global", server_default="global"
+    )
     revision: Mapped[int] = mapped_column(Integer, nullable=False)
     input_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     derivation_version: Mapped[str] = mapped_column(String(100), nullable=False)
