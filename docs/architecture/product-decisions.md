@@ -68,11 +68,12 @@ and Traditional Chinese, Simplified Chinese, and English labels for all eight.
 ### First-wave morning-report plan
 
 The long-term catalog remains eight markets, but the current first-wave launch
-is fixed to macro/bonds, crypto, and US equities. Taiwan equities and Taiwan
-index derivatives retain their existing UI code and direct-URL mock previews,
-but are absent from report navigation, the report list, the launch manifest,
-and production publications. FX, Hong Kong, and Mainland China also remain
-outside this wave.
+is fixed to macro/bonds, crypto, and US equities. Taiwan equities appears in
+report navigation only as a not-launched page that carries the Taiwan market
+news edition; it has no report content, launch manifest entry, or production
+publication, and the former direct-URL mock previews for Taiwan equities and
+Taiwan index derivatives were removed on 2026-09-02. FX, Hong Kong, and
+Mainland China also remain outside this wave.
 
 Twelve Data is the temporary sole raw-data provider for the three launch
 markets. There is no runtime fallback to FinDB or another provider, no proxy

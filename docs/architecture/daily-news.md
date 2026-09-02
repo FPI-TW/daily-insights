@@ -55,6 +55,26 @@ flowchart LR
 6. 結果以不可變的 `news_editions` revision 寫入，狀態為 `complete`（5/5）、
    `partial`（1 到 4）或 `unavailable`（0）。
 
+## 版本規格
+
+同一條管線每天產生三個版本，由 `modules/news/editions.py` 的 `EditionSpec` 定義：
+
+| 版本         | `market_code` | 目標則數 | 探索路徑                          | 選題限制                                  |
+| ------------ | ------------- | -------- | --------------------------------- | ----------------------------------------- |
+| 本日重大新聞 | `global`      | 5        | GDELT 加全部 feed                 | 每網域至多 2 則，至少 2 個主題與 2 個市場 |
+| 台股重點新聞 | `tw_equity`   | 8        | 鉅亨台股分類頁                    | 單一來源與市場皆可，至少 2 個主題         |
+| 美股重點新聞 | `us_equity`   | 8        | CNBC RSS、AP 商業、鉅亨美股分類頁 | 每網域至多 4 則，至少 2 個主題            |
+
+市場版本不使用 GDELT，選題 prompt 附帶該市場的 `MARKET_FOCUS` 提示，`market`
+欄位新增 `taiwan`。排程器依序執行三個版本，任一版本例外不影響其他版本，最差
+結果決定是否同日重試。`make generate-daily-news MARKET=tw_equity` 可單獨產生一
+個版本。
+
+市場版本顯示在各市場報告頁下方，並受組織的市場可見性政策限制：
+`GET /api/news/{market_code}/latest` 對不可見或未定義的市場回 404，內部角色可
+預覽所有市場。台股沒有正式報告，其報告頁顯示「報告尚未推出」加台股新聞；原本
+以直接網址提供的台股示範數字已移除。
+
 ## 版本與重試語意
 
 - 每個 `edition_date` 可有多個 `revision`，舊版本不會被修改或刪除。
@@ -67,12 +87,12 @@ flowchart LR
 
 ## 資料表
 
-| 資料表                   | 內容                                                               |
-| ------------------------ | ------------------------------------------------------------------ |
-| `news_editions`          | 每日版本、revision、`input_digest`、模型與 prompt 版本、狀態、警語 |
-| `news_items`             | 入選新聞的來源中繼資料、主題、重要性、內容摘要與數值事實           |
-| `news_presentations`     | 每則新聞的三語標題與摘要                                           |
-| `news_generation_audits` | 每次模型呼叫的 stage、locale、token、延遲、request id 與失敗代碼   |
+| 資料表                   | 內容                                                                              |
+| ------------------------ | --------------------------------------------------------------------------------- |
+| `news_editions`          | 每日版本、`market_code`、revision、`input_digest`、模型與 prompt 版本、狀態、警語 |
+| `news_items`             | 入選新聞的來源中繼資料、主題、重要性、內容摘要與數值事實                          |
+| `news_presentations`     | 每則新聞的三語標題與摘要                                                          |
+| `news_generation_audits` | 每次模型呼叫的 stage、locale、token、延遲、request id 與失敗代碼                  |
 
 文章正文與 prompt 內容不寫入任何資料表。
 

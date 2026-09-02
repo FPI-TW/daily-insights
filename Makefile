@@ -66,9 +66,9 @@ generate-morning-reports: ## 本地使用 Twelve Data 單次產生三市場晨�
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
 	docker compose run --rm --build api python -m daily_insights_api.scripts.run_morning_reports --once $(if $(EDITION_DATE),--edition-date $(EDITION_DATE),)
 
-generate-daily-news: ## 本地使用 DeepSeek 單次產生本日重大新聞（可傳 EDITION_DATE）
+generate-daily-news: ## 本地使用 DeepSeek 單次產生本日新聞（可傳 EDITION_DATE、MARKET=global|tw_equity|us_equity）
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
-	docker compose run --rm --build api python -m daily_insights_api.scripts.run_daily_news --once $(if $(EDITION_DATE),--edition-date $(EDITION_DATE),)
+	docker compose run --rm --build api python -m daily_insights_api.scripts.run_daily_news --once $(if $(EDITION_DATE),--edition-date $(EDITION_DATE),) $(if $(MARKET),--market $(MARKET),)
 
 format: ## 格式化 Web、API 與文件
 	pnpm format
