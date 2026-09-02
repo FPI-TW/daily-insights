@@ -80,6 +80,10 @@ export function DailyNews({ news }: { news: LatestNews | null }) {
                     ? new Intl.DateTimeFormat(news.locale, {
                         dateStyle: "medium",
                         timeStyle: "short",
+                        // The edition is the Taipei day; pinning the zone also
+                        // keeps SSR and browser output identical (no hydration
+                        // mismatch from differing server and client zones).
+                        timeZone: "Asia/Taipei",
                       }).format(new Date(item.source_published_at))
                     : t("dailyNewsTimeUnknown")}
                 </time>

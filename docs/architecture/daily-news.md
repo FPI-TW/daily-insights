@@ -113,6 +113,14 @@ flowchart LR
 4. 隔日 08:00 後檢查 `docker logs daily-insights-daily-news-scheduler` 與
    `/api/news/latest`。
 
+## 畫面
+
+2026-09-02 本機以 `make generate-daily-news` 產生的 `complete` 版本：
+
+| 繁中桌面版                                           | 英文桌面版                                      | 繁中手機版                                          |
+| ---------------------------------------------------- | ----------------------------------------------- | --------------------------------------------------- |
+| ![繁中桌面版](../images/reports-zh-hant-desktop.png) | ![英文桌面版](../images/reports-en-desktop.png) | ![繁中手機版](../images/reports-zh-hant-mobile.png) |
+
 ## 驗收條件
 
 - 契約腳本、compose 模型驗證與部署腳本都認得五個服務。
