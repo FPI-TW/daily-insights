@@ -62,7 +62,7 @@ export function DailyNews({ news }: { news: LatestNews | null }) {
           {news.caveat ?? t("dailyNewsUnavailable")}
         </div>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid items-start gap-4 lg:grid-cols-2">
           {news.items.map((item, index) => (
             <motion.article
               key={item.id}
