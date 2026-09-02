@@ -87,4 +87,5 @@ def test_enabled_chat_requires_a_non_placeholder_key_in_production() -> None:
             r2_access_key_id="r2-access-key",
             r2_secret_access_key="r2-secret-key",
             chat_enabled=True,
+            chat_model_api_key="CHANGE_ME_CHAT_MODEL_API_KEY",
         )
