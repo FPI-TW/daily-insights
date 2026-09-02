@@ -35,6 +35,8 @@ TAIPEI = ZoneInfo("Asia/Taipei")
 # regenerated from identical inputs so a transient provider failure cannot
 # freeze the day's news.
 IDEMPOTENT_STATUS = "complete"
+MAX_CANDIDATES = 20
+MAX_CANDIDATES_PER_SOURCE = 5
 
 
 async def _retry[T](
@@ -131,6 +133,39 @@ def _failed_audit(
     )
 
 
+def _limit_candidates(
+    usable: list[FetchedCandidate],
+    *,
+    total: int = MAX_CANDIDATES,
+    per_source: int = MAX_CANDIDATES_PER_SOURCE,
+) -> list[FetchedCandidate]:
+    """Keep the freshest candidates while bounding any single source.
+
+    Ordering is newest ``seen_at`` first (unknown timestamps last) with the
+    source URL as a deterministic tie-breaker, so the selection prompt and
+    ``input_digest`` are reproducible for identical discovery results.
+    """
+    ordered = sorted(
+        usable,
+        key=lambda fetched: (
+            fetched.candidate.seen_at is None,
+            -(fetched.candidate.seen_at.timestamp() if fetched.candidate.seen_at else 0.0),
+            fetched.source_url,
+        ),
+    )
+    per_host: dict[str, int] = {}
+    limited: list[FetchedCandidate] = []
+    for fetched in ordered:
+        host = fetched.candidate.hostname
+        if per_host.get(host, 0) >= per_source:
+            continue
+        per_host[host] = per_host.get(host, 0) + 1
+        limited.append(fetched)
+        if len(limited) == total:
+            break
+    return limited
+
+
 def _edition_status(count: int) -> tuple[str, str]:
     status = "complete" if count == 5 else "partial" if count else "unavailable"
     return status, f"{count}/5 stories completed"
@@ -199,7 +234,7 @@ async def run_news_edition(
         if candidates
         else []
     )
-    usable = sorted(usable, key=lambda fetched: str(fetched.candidate.url))[:20]
+    usable = _limit_candidates(usable)
     emit_event("news.sources.usable", count=len(usable))
     model_name = client.model_name
     selection_prompt_digest = client.selection_prompt_digest
