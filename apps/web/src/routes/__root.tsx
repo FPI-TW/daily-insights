@@ -6,7 +6,8 @@ import {
   createRootRoute,
   useParams,
 } from "@tanstack/react-router"
-import { useMemo } from "react"
+import { MotionConfig } from "motion/react"
+import { useEffect, useMemo } from "react"
 import { I18nextProvider } from "react-i18next"
 import {
   ErrorScreen,
@@ -14,6 +15,7 @@ import {
   NotFoundScreen,
 } from "#/components/StateScreen"
 import { createI18n } from "#/lib/i18n"
+import { markHydrated } from "#/lib/motion"
 import "../styles.css"
 
 const THEME_INIT_SCRIPT = `(function(){try{var stored=window.localStorage.getItem('theme');var mode=(stored==='light'||stored==='dark'||stored==='auto')?stored:'light';var prefersDark=window.matchMedia('(prefers-color-scheme: dark)').matches;var resolved=mode==='auto'?(prefersDark?'dark':'light'):mode;var root=document.documentElement;root.classList.remove('light','dark');root.classList.add(resolved);if(mode==='auto'){root.removeAttribute('data-theme')}else{root.setAttribute('data-theme',mode)}root.style.colorScheme=resolved;}catch(e){}})();`
@@ -39,6 +41,12 @@ function RootComponent() {
   const locale = parsedLocale.success ? parsedLocale.data : "zh-hant"
   const i18n = useMemo(() => createI18n(locale), [locale])
 
+  // Runs after every child's mount effects in the hydration pass, so content
+  // rendered by the server never plays an enter animation.
+  useEffect(() => {
+    markHydrated()
+  }, [])
+
   return (
     <I18nextProvider i18n={i18n}>
       <html lang={locale} suppressHydrationWarning>
@@ -47,7 +55,9 @@ function RootComponent() {
           <HeadContent />
         </head>
         <body>
-          <Outlet />
+          <MotionConfig reducedMotion="user">
+            <Outlet />
+          </MotionConfig>
           <Scripts />
         </body>
       </html>
