@@ -148,8 +148,10 @@ async def test_runner_returns_edition_status_and_refreshes_heartbeat(
         allowed_hostnames: str,
         fetch_timeout_seconds: float,
         discovery_timeout_seconds: float,
+        gdelt_enabled: bool,
     ) -> str:
         del session_factory, client
+        assert gdelt_enabled is False
         seen.append(
             (
                 "all",
@@ -171,8 +173,10 @@ async def test_runner_returns_edition_status_and_refreshes_heartbeat(
         fetch_timeout_seconds: float,
         discovery_timeout_seconds: float,
         spec: object,
+        gdelt_enabled: bool,
     ) -> str:
         del session_factory, client
+        assert gdelt_enabled is False
         seen.append(
             (
                 "one",
