@@ -15,7 +15,6 @@ export const Route = createFileRoute(
 )({
   loader: loadReportsAndNews,
   pendingComponent: ReportsAndNewsLoading,
-  pendingMs: 0,
   errorComponent: ReportErrorScreen,
   component: ReportsPage,
 })

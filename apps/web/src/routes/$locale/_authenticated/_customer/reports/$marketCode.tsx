@@ -62,7 +62,6 @@ export const Route = createFileRoute(
 )({
   loader: loadMarketPage,
   pendingComponent: ReportLoadingScreen,
-  pendingMs: 0,
   errorComponent: ReportErrorScreen,
   component: ReportPage,
 })
