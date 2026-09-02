@@ -48,9 +48,7 @@ function ReportsAndNewsLoading() {
   return (
     <>
       <ReportLoadingScreen />
-      <main className="page-shell pt-0">
-        <DailyNewsLoading />
-      </main>
+      <DailyNewsLoading />
     </>
   )
 }
@@ -72,9 +70,7 @@ function ReportsPage() {
   return (
     <>
       <ReportList locale={locale} reports={reports} />
-      <main className="page-shell pt-0">
-        <DailyNews news={news} />
-      </main>
+      <DailyNews news={news} />
     </>
   )
 }
