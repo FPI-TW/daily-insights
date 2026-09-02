@@ -151,6 +151,11 @@
   #app {
     min-height: 100%;
   }
+  /* Always reserve the scrollbar gutter so centred layouts (the header
+     included) do not shift when a short page loses its scrollbar. */
+  html {
+    scrollbar-gutter: stable;
+  }
   body {
     @apply m-0 overflow-x-hidden font-sans text-sea-ink antialiased;
     background: var(--bg-base);
