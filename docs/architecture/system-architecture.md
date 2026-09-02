@@ -37,11 +37,13 @@ apps/api
   modules/
     identity       credentials, sessions, password recovery
     tenancy        organizations, memberships, roles
-    market_policy  catalog and organization visibility
-    reports        report versions and localized presentation contracts
-    data_sources   provider adapters and normalized source DTOs
+    markets        catalog and organization visibility
+    reports        report versions, localized presentation contracts, scheduler
+    data_sources   provider adapters (Twelve Data, FinDB) and normalized DTOs
+    news           GDELT discovery, safe extraction, DeepSeek daily news editions
     podcasts       episode catalog, publication lifecycle, localized metadata
     chat           conversations, messages, generation records, SSE
+    model_runtime  globally versioned model configuration
     assets         R2 metadata, authorization, signed URL lifecycle
     admin          privileged use cases composed from domain services
     audit          security and privileged-operation evidence

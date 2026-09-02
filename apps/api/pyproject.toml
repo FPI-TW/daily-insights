@@ -11,6 +11,7 @@ requires-python = ">=3.13"
 dependencies = [
   "alembic>=1.16,<2",
   "boto3>=1.40,<2",
+  "defusedxml>=0.7,<1",
   "fastapi>=0.116,<1",
   "httpx>=0.28,<1",
   "psycopg[binary]>=3.2,<4",
@@ -54,5 +55,5 @@ plugins = ["pydantic.mypy"]
 files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
-module = "alembic.*"
+module = ["alembic.*", "defusedxml.*"]
 ignore_missing_imports = true

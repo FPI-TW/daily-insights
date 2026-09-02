@@ -1,11 +1,11 @@
 import uuid
-from typing import Any
+from typing import Any, get_args
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
-from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary
+from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary, SelectedCandidate
 from daily_insights_api.modules.news.llm import DeepSeekClient, ModelCallError, ModelOutputError
 from daily_insights_api.modules.news.prompts import SelectionCriteria
 from daily_insights_api.modules.news.service import _failed_audit
@@ -69,6 +69,12 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
     assert captured["CUSTOM_SELECTION_CRITERIA"] == criteria.text
     assert "regardless of the language" in str(captured["task"])
     assert "Return JSON only" in str(captured["task"])
+    contract = captured["OUTPUT_CONTRACT"]
+    assert isinstance(contract, dict)
+    # The closed vocabularies shown to the model must match the validated contract.
+    fields = SelectedCandidate.model_fields
+    assert set(contract["topic"]) == set(get_args(fields["topic"].annotation))
+    assert set(contract["market"]) == set(get_args(fields["market"].annotation))
     prompt_candidates = captured["CANDIDATES"]
     assert isinstance(prompt_candidates, list)
     assert [item["headline"] for item in prompt_candidates] == [value[1] for value in values]
@@ -134,24 +140,21 @@ async def test_selection_rejects_unknown_id_and_summary_rejects_fabricated_numbe
 class _FakeAsyncClient:
     def __init__(self, response: httpx.Response) -> None:
         self.response = response
-
-    async def __aenter__(self) -> "_FakeAsyncClient":
-        return self
-
-    async def __aexit__(self, *args: object) -> None:
-        del args
+        self.posts = 0
+        self.closed = False
 
     async def post(self, *args: object, **kwargs: object) -> httpx.Response:
         del args, kwargs
+        self.posts += 1
         return self.response
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 async def test_provider_http_and_invalid_json_failures_keep_digest_and_latency_for_audit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = DeepSeekClient(
-        base_url="https://api.deepseek.com", api_key="secret", model="deepseek-chat"
-    )
     request = httpx.Request("POST", "https://api.deepseek.com/chat/completions")
     failures = [
         httpx.Response(503, headers={"x-request-id": "request-http"}, request=request),
@@ -166,6 +169,9 @@ async def test_provider_http_and_invalid_json_failures_keep_digest_and_latency_f
         ),
     ]
     for response in failures:
+        client = DeepSeekClient(
+            base_url="https://api.deepseek.com", api_key="secret", model="deepseek-chat"
+        )
         monkeypatch.setattr(
             "daily_insights_api.modules.news.llm.httpx.AsyncClient",
             lambda response=response, **_: _FakeAsyncClient(response),
@@ -249,3 +255,29 @@ async def test_numeric_grounding_handles_chinese_adjacent_numbers_without_substr
     else:
         with pytest.raises(ModelCallError, match="ungrounded"):
             await client.summarize(_candidate(), source, "zh-hans")
+
+
+async def test_client_reuses_one_transport_and_closes_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    request = httpx.Request("POST", "https://api.deepseek.com/chat/completions")
+    response = httpx.Response(
+        200,
+        json={"choices": [{"message": {"content": "{}"}}], "usage": {}},
+        request=request,
+    )
+    created: list[_FakeAsyncClient] = []
+
+    def build(**_: object) -> _FakeAsyncClient:
+        fake = _FakeAsyncClient(response)
+        created.append(fake)
+        return fake
+
+    monkeypatch.setattr("daily_insights_api.modules.news.llm.httpx.AsyncClient", build)
+    async with DeepSeekClient(
+        base_url="https://api.deepseek.com", api_key="secret", model="deepseek-chat"
+    ) as client:
+        await client._complete({"task": "first"})
+        await client._complete({"task": "second"})
+
+    assert len(created) == 1
+    assert created[0].posts == 2
+    assert created[0].closed is True

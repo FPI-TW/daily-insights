@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api.core.observability import emit_event
 from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary, Selection
+from daily_insights_api.modules.news.feeds import discover_feed_candidates, feed_client
 from daily_insights_api.modules.news.llm import DeepSeekClient, ModelCall, ModelCallError
 from daily_insights_api.modules.news.models import (
     NewsEdition,
@@ -21,6 +22,7 @@ from daily_insights_api.modules.news.models import (
 )
 from daily_insights_api.modules.news.sources import (
     FetchedCandidate,
+    _dedupe_candidates,
     configured_hostnames,
     discover_candidates,
     fetch_article,
@@ -31,6 +33,15 @@ DERIVATION_VERSION = "gdelt-deepseek-news.v3"
 SUMMARY_PROMPT_VERSION = "summary-v2"
 LOCALES = ("zh-hant", "zh-hans", "en")
 TAIPEI = ZoneInfo("Asia/Taipei")
+# Only a complete edition is final; partial and unavailable editions may be
+# regenerated from identical inputs so a transient provider failure cannot
+# freeze the day's news.
+IDEMPOTENT_STATUS = "complete"
+MAX_CANDIDATES = 20
+MAX_CANDIDATES_PER_SOURCE = 5
+# Extraction is the expensive stage, so discovery is capped per source before
+# any article is fetched; the post-extraction cap above then selects the prompt.
+MAX_DISCOVERY_PER_SOURCE = 10
 
 
 async def _retry[T](
@@ -127,6 +138,64 @@ def _failed_audit(
     )
 
 
+def _cap_discovery(
+    candidates: list[Candidate], *, per_source: int = MAX_DISCOVERY_PER_SOURCE
+) -> list[Candidate]:
+    """Bound the number of articles fetched per source, newest first."""
+    ordered = sorted(
+        candidates,
+        key=lambda candidate: (
+            candidate.seen_at is None,
+            -(candidate.seen_at.timestamp() if candidate.seen_at else 0.0),
+            str(candidate.url),
+        ),
+    )
+    per_host: dict[str, int] = {}
+    capped: list[Candidate] = []
+    for candidate in ordered:
+        if per_host.get(candidate.hostname, 0) >= per_source:
+            continue
+        per_host[candidate.hostname] = per_host.get(candidate.hostname, 0) + 1
+        capped.append(candidate)
+    return capped
+
+
+def _limit_candidates(
+    usable: list[FetchedCandidate],
+    *,
+    total: int = MAX_CANDIDATES,
+    per_source: int = MAX_CANDIDATES_PER_SOURCE,
+) -> list[FetchedCandidate]:
+    """Keep the freshest candidates while bounding any single source.
+
+    Ordering is newest first using the extracted publish time, falling back to
+    the discovery ``seen_at`` (unknown timestamps last), with the source URL as
+    a deterministic tie-breaker, so the selection prompt and ``input_digest``
+    are reproducible for identical discovery results.
+    """
+
+    def sort_key(fetched: FetchedCandidate) -> tuple[bool, float, str]:
+        freshness = fetched.source_published_at or fetched.candidate.seen_at
+        return (
+            freshness is None,
+            -(freshness.timestamp() if freshness is not None else 0.0),
+            fetched.source_url,
+        )
+
+    ordered = sorted(usable, key=sort_key)
+    per_host: dict[str, int] = {}
+    limited: list[FetchedCandidate] = []
+    for fetched in ordered:
+        host = fetched.candidate.hostname
+        if per_host.get(host, 0) >= per_source:
+            continue
+        per_host[host] = per_host.get(host, 0) + 1
+        limited.append(fetched)
+        if len(limited) == total:
+            break
+    return limited
+
+
 def _edition_status(count: int) -> tuple[str, str]:
     status = "complete" if count == 5 else "partial" if count else "unavailable"
     return status, f"{count}/5 stories completed"
@@ -171,26 +240,57 @@ async def run_news_edition(
     *,
     allowed_hostnames: str,
     fetch_timeout_seconds: float = 25,
-) -> None:
-    """Discover, safely extract, then select and persist today's immutable edition."""
+    discovery_timeout_seconds: float = 60,
+) -> str:
+    """Discover, safely extract, then select and persist today's immutable edition.
+
+    Returns the persisted edition status (``complete``, ``partial`` or
+    ``unavailable``), or ``idempotent`` when a complete edition already exists
+    for the same inputs.
+    """
     if edition_date != datetime.now(TAIPEI).date():
         raise ValueError("daily news only generates the current Taipei edition")
     allowed = configured_hostnames(allowed_hostnames)
-    try:
+
+    async def discover() -> list[Candidate]:
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(20), follow_redirects=False, cookies=None, trust_env=False
+            timeout=httpx.Timeout(discovery_timeout_seconds),
+            follow_redirects=False,
+            cookies=None,
+            trust_env=False,
         ) as http:
-            candidates = await discover_candidates(http, allowed)
+            return await discover_candidates(http, allowed)
+
+    def audit_discovery_failure(error: Exception) -> None:
+        status_code = (
+            error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
+        )
+        emit_event(
+            "news.candidates.attempt_failed",
+            error_code=type(error).__name__,
+            status_code=status_code,
+        )
+
+    try:
+        candidates = await _retry(discover, audit_discovery_failure)
     except Exception as error:
         emit_event("news.candidates.failed", error_code=type(error).__name__)
         candidates = []
     emit_event("news.candidates.discovered", count=len(candidates))
+    async with feed_client(discovery_timeout_seconds) as feeds_http:
+        feed_candidates = await discover_feed_candidates(feeds_http, allowed)
+    candidates = _cap_discovery(_dedupe_candidates(candidates + feed_candidates))
+    emit_event(
+        "news.candidates.merged",
+        feeds=len(feed_candidates),
+        total=len(candidates),
+    )
     usable = (
         await _fetch_usable_candidates(candidates, allowed, fetch_timeout_seconds)
         if candidates
         else []
     )
-    usable = sorted(usable, key=lambda fetched: str(fetched.candidate.url))[:20]
+    usable = _limit_candidates(usable)
     emit_event("news.sources.usable", count=len(usable))
     model_name = client.model_name
     selection_prompt_digest = client.selection_prompt_digest
@@ -208,10 +308,14 @@ async def run_news_edition(
                 .with_for_update()
             )
         ).first()
-        if latest is not None and latest.input_digest == input_digest:
+        if (
+            latest is not None
+            and latest.status == IDEMPOTENT_STATUS
+            and latest.input_digest == input_digest
+        ):
             await database.rollback()
             emit_event("news.edition.idempotent", edition_date=edition_date)
-            return
+            return "idempotent"
         edition = NewsEdition(
             edition_date=edition_date,
             revision=(latest.revision + 1 if latest else 1),
@@ -227,7 +331,7 @@ async def run_news_edition(
         if not usable:
             await database.commit()
             emit_event("news.shortfall", status="unavailable", count=0)
-            return
+            return edition.status
         try:
             selection_call = await _retry(
                 lambda: client.select(usable),
@@ -257,7 +361,7 @@ async def run_news_edition(
         except Exception as error:
             await database.commit()
             emit_event("news.selection.failed", error_code=type(error).__name__)
-            return
+            return edition.status
         selected = {fetched.candidate.id: fetched for fetched in usable}
         complete_count = 0
         for selected_item in selection_call.value.selections:
@@ -338,3 +442,4 @@ async def run_news_edition(
         edition.status, edition.caveat = _edition_status(complete_count)
         await database.commit()
         emit_event("news.shortfall", status=edition.status, count=complete_count)
+        return edition.status

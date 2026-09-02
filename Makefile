@@ -4,7 +4,8 @@ export pnpm_config_verify_deps_before_run := false
 
 .PHONY: help init dev dev-detached dev-web dev-api stop restart logs ps \
 	migrate bootstrap-admin format format-check lint type-check test test-db \
-	generate-morning-reports check-nginx check-production-deployment check build
+	generate-morning-reports generate-daily-news check-nginx check-production-deployment \
+	check build
 
 help: ## 顯示可用指令
 	@awk 'BEGIN {FS = ":.*## "; printf "Daily Insights 開發指令：\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -64,6 +65,10 @@ bootstrap-admin: ## 建立初始 admin（需 EMAIL 與 NAME）
 generate-morning-reports: ## 本地使用 Twelve Data 單次產生三市場晨報（可傳 EDITION_DATE）
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
 	docker compose run --rm --build api python -m daily_insights_api.scripts.run_morning_reports --once $(if $(EDITION_DATE),--edition-date $(EDITION_DATE),)
+
+generate-daily-news: ## 本地使用 DeepSeek 單次產生本日重大新聞（可傳 EDITION_DATE）
+	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
+	docker compose run --rm --build api python -m daily_insights_api.scripts.run_daily_news --once $(if $(EDITION_DATE),--edition-date $(EDITION_DATE),)
 
 format: ## 格式化 Web、API 與文件
 	pnpm format

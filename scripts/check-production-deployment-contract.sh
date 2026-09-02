@@ -39,7 +39,7 @@ if grep -q 'postgres:' "$compose_file"; then
   exit 1
 fi
 
-for service in api web nginx; do
+for service in api web nginx morning-report-scheduler daily-news-scheduler; do
   grep -q "^  ${service}:" "$compose_file"
   grep -q "container_name: daily-insights-${service}" "$compose_file"
 done
@@ -62,6 +62,10 @@ for name in \
 done
 grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_BASE_URL: ${DAILY_INSIGHTS_TWELVE_DATA_BASE_URL:-https://api.twelvedata.com}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_API_KEY: ${DAILY_INSIGHTS_TWELVE_DATA_API_KEY:-}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_DAILY_NEWS_ENABLED: ${DAILY_INSIGHTS_DAILY_NEWS_ENABLED:-false}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_MODEL_API_KEY: ${DAILY_INSIGHTS_MODEL_API_KEY:-}' "$compose_file"
+grep -Fq 'daily_insights_api.scripts.run_daily_news' "$compose_file"
+grep -Fq '/tmp/daily-news-heartbeat' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_ENABLED: ${DAILY_INSIGHTS_CHAT_ENABLED:-false}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_PROVIDER: ${DAILY_INSIGHTS_CHAT_MODEL_PROVIDER:-deepseek}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_NAME: ${DAILY_INSIGHTS_CHAT_MODEL_NAME:-deepseek-chat}' "$compose_file"
@@ -212,6 +216,8 @@ export DAILY_INSIGHTS_CHAT_MODEL_API_KEY=contract-chat-model-key
 export DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS=90
 export DAILY_INSIGHTS_TWELVE_DATA_BASE_URL=
 export DAILY_INSIGHTS_TWELVE_DATA_API_KEY=
+export DAILY_INSIGHTS_DAILY_NEWS_ENABLED=false
+export DAILY_INSIGHTS_MODEL_API_KEY=
 export DAILY_INSIGHTS_R2_ENDPOINT_URL=https://tenant.r2.cloudflarestorage.com
 export DAILY_INSIGHTS_R2_BUCKET_NAME=production-podcast-assets
 export DAILY_INSIGHTS_R2_ACCESS_KEY_ID=contract-r2-access
@@ -257,14 +263,14 @@ grep -q 'compose .* pull' "$temporary_dir/deployment.log"
 grep -q 'compose .* run --rm --no-deps nginx nginx -t' "$temporary_dir/deployment.log"
 grep -q 'compose .* up -d --no-build --force-recreate --no-deps nginx' "$temporary_dir/deployment.log"
 grep -q 'compose .* run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log"
-grep -q 'compose .* up -d --no-build --remove-orphans api web morning-report-scheduler' "$temporary_dir/deployment.log"
+grep -q 'compose .* up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler' "$temporary_dir/deployment.log"
 grep -q 'exec daily-insights-nginx wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/api' "$temporary_dir/deployment.log"
 grep -q 'exec daily-insights-nginx wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/web' "$temporary_dir/deployment.log"
 
 nginx_validate_line=$(grep -n 'run --rm --no-deps nginx nginx -t' "$temporary_dir/deployment.log" | cut -d: -f1)
 nginx_recreate_line=$(grep -n 'up -d --no-build --force-recreate --no-deps nginx' "$temporary_dir/deployment.log" | cut -d: -f1)
 migration_line=$(grep -n 'run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log" | cut -d: -f1)
-backend_converge_line=$(grep -n 'up -d --no-build --remove-orphans api web morning-report-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
+backend_converge_line=$(grep -n 'up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
 if [ "$nginx_validate_line" -ge "$nginx_recreate_line" ] ||
   [ "$nginx_recreate_line" -ge "$migration_line" ] ||
   [ "$migration_line" -ge "$backend_converge_line" ]; then
@@ -281,6 +287,14 @@ if PATH="$temporary_dir/stubs:$PATH" \
   DAILY_INSIGHTS_MORNING_REPORTS_ENABLED=true \
   scripts/production/deploy.sh >/dev/null 2>&1; then
   echo "enabled morning reports must require Twelve Data launch configuration" >&2
+  exit 1
+fi
+
+if PATH="$temporary_dir/stubs:$PATH" \
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  DAILY_INSIGHTS_DAILY_NEWS_ENABLED=true \
+  scripts/production/deploy.sh >/dev/null 2>&1; then
+  echo "enabled daily news must require a model API key" >&2
   exit 1
 fi
 

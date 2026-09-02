@@ -1,5 +1,4 @@
 import asyncio
-from collections.abc import Awaitable, Callable
 from datetime import date, datetime
 
 from anyio import Path
@@ -15,34 +14,20 @@ from daily_insights_api.modules.data_sources.api import (
 from daily_insights_api.modules.reports.morning_report import run_morning_report_edition
 from daily_insights_api.modules.reports.scheduler import (
     TAIPEI,
+    SameDayRetry,
     due_edition,
+    maintain_disabled_heartbeat,
     parse_args,
     run_scheduler,
+    run_with_heartbeat,
 )
 
-ReportRunner = Callable[[date], Awaitable[None]]
-Sleeper = Callable[[float], Awaitable[None]]
+__all__ = ["main", "maintain_disabled_heartbeat", "run_with_heartbeat"]
 
-
-async def maintain_disabled_heartbeat(
-    heartbeat: Path,
-    *,
-    sleep: Sleeper = asyncio.sleep,
-) -> None:
-    while True:
-        await heartbeat.touch()
-        await sleep(60)
-
-
-async def run_with_heartbeat(
-    runner: ReportRunner,
-    edition_date: date,
-    heartbeat: Path,
-) -> None:
-    try:
-        await runner(edition_date)
-    finally:
-        await heartbeat.touch()
+# A morning-report run that raises is retried within the morning window instead
+# of crashing the container into an immediate restart loop. Non-exception
+# outcomes are final for the day.
+RETRY_POLICY = SameDayRetry()
 
 
 async def main() -> None:
@@ -73,8 +58,8 @@ async def main() -> None:
     ) as transport:
         adapter = TwelveDataAdapter(transport)
 
-        async def runner(run_date: date) -> None:
-            await run_with_heartbeat(
+        async def runner(run_date: date) -> str | None:
+            return await run_with_heartbeat(
                 lambda target_date: run_morning_report_edition(
                     session_factory,
                     adapter,
@@ -92,6 +77,7 @@ async def main() -> None:
                 await run_scheduler(
                     runner,
                     now=lambda: datetime.now(TAIPEI),
+                    retry=RETRY_POLICY,
                 )
         finally:
             await engine.dispose()

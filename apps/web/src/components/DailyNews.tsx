@@ -30,8 +30,9 @@ export function DailyNewsLoading() {
   )
 }
 
-export function DailyNews({ news }: { news: LatestNews }) {
+export function DailyNews({ news }: { news: LatestNews | null }) {
   const { t } = useTranslation()
+  const status = news?.status ?? "unavailable"
   const animate = useEnterAnimation()
   return (
     <section className="mt-7" aria-labelledby="daily-news-title">
@@ -46,20 +47,22 @@ export function DailyNews({ news }: { news: LatestNews }) {
           </h2>
         </div>
         <span className="rounded-full border border-line px-2.5 py-1 text-xs font-bold text-sea-ink-soft">
-          {t(`dailyNewsStatus_${news.status}`)}
+          {t(`dailyNewsStatus_${status}`)}
         </span>
       </div>
-      {news.status === "unavailable" ? (
+      {news === null ? (
+        <div
+          className="surface-panel p-5 text-sm text-sea-ink-soft"
+          role="status"
+        >
+          {t("dailyNewsLoadFailed")}
+        </div>
+      ) : news.status === "unavailable" ? (
         <div className="surface-panel p-5 text-sm text-sea-ink-soft">
           {news.caveat ?? t("dailyNewsUnavailable")}
         </div>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {news.status === "partial" && news.caveat ? (
-            <p className="lg:col-span-2 m-0 border-l-4 border-market-caution bg-market-caution/10 px-4 py-3 text-sm text-sea-ink-soft">
-              {news.caveat}
-            </p>
-          ) : null}
+        <div className="grid items-start gap-4 lg:grid-cols-2">
           {news.items.map((item, index) => (
             <motion.article
               key={item.id}
@@ -91,6 +94,10 @@ export function DailyNews({ news }: { news: LatestNews }) {
                     ? new Intl.DateTimeFormat(news.locale, {
                         dateStyle: "medium",
                         timeStyle: "short",
+                        // The edition is the Taipei day; pinning the zone also
+                        // keeps SSR and browser output identical (no hydration
+                        // mismatch from differing server and client zones).
+                        timeZone: "Asia/Taipei",
                       }).format(new Date(item.source_published_at))
                     : t("dailyNewsTimeUnknown")}
                 </time>

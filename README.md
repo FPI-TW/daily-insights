@@ -48,6 +48,7 @@ make dev-web       # 僅啟動 TanStack Start，後端位址由 API_INTERNAL_URL
 make dev-api       # 僅啟動 FastAPI
 make migrate       # 升級 API 資料庫 schema
 make generate-morning-reports # 本地以 Twelve Data 單次產生三市場晨報
+make generate-daily-news      # 本地以 DeepSeek 單次產生本日重大新聞
 make test-db       # 以隔離 PostgreSQL 執行完整測試
 make check         # 執行格式、lint、型別、測試與建置
 make stop          # 停止 Compose 開發環境
@@ -70,6 +71,11 @@ make bootstrap-admin EMAIL=admin@example.com NAME="Admin"
 啟用背景排程。正式環境啟用晨報時只驗證功能開關、provider URL 與 API key。
 
 指令只會顯示一次隨機臨時密碼；管理員登入後必須立即更改。
+
+本地需要驗證每日重大新聞時，可執行 `make generate-daily-news`；它同樣只允許
+development／test 環境的一次性執行，使用 `apps/api/.env` 中的 DeepSeek credential，
+並只會產生台北時間當日的版本。正式環境以 `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`
+旗標啟用，詳見[每日重大新聞架構與部署](docs/architecture/daily-news.md)。
 
 目前已完成身份／租戶、結構化報告基礎與 Podcast 先行版的本機實作。正式 R2
 音檔與 browser E2E 驗收狀態請以各階段文件為準；領域出現在文件中不代表已經
@@ -114,5 +120,7 @@ Compose 設定僅用於開發環境，不代表正式環境拓撲。正式部署
 - [Phase 2 資料來源與結構化報告](docs/architecture/phase-2-data-reports.md)
 - [Phase 2B 完整應用架構與驗收](docs/architecture/phase-2b-application-architecture.md)
 - [Podcast 先行版範圍與決策清單](docs/architecture/podcast-pilot.md)
+- [每日重大新聞架構與部署](docs/architecture/daily-news.md)
 - [Web 動畫設計與參數](docs/architecture/web-motion.md)
 - [正式環境維運操作手冊](docs/runbooks/production.md)
+- [專案審查基準（2026-09-02）](docs/reviews/2026-09-02-project-review.md)

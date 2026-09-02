@@ -17,17 +17,11 @@ Member = Annotated[AuthContext, Depends(require_password_changed)]
 
 
 def _localized_caveat(status: str, count: int, locale: Locale) -> str | None:
-    if status == "complete" and count == 5:
-        return None
+    # Complete and partial editions are presented without a caveat: the story
+    # count speaks for itself and the shortfall wording was judged noise.
+    del count
     if status in {"complete", "partial"}:
-        return {
-            "zh-hant": f"本日完成 {count}/5 則新聞，其餘資料暫缺。",  # noqa: RUF001
-            "zh-hans": f"本日完成 {count}/5 则新闻，其余资料暂缺。",  # noqa: RUF001
-            "en": (
-                f"Today's edition contains {count}/5 stories; "
-                "the remaining coverage is temporarily unavailable."
-            ),
-        }[locale]
+        return None
     return {
         "zh-hant": "本日重大新聞尚未產生。",
         "zh-hans": "本日重大新闻尚未生成。",

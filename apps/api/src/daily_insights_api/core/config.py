@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     model_name: str = "deepseek-chat"
     model_api_base_url: str = "https://api.deepseek.com"
     model_api_key: SecretStr | None = None
+    # A selection prompt carries up to ~100k characters of source text; the
+    # provider regularly needs 30-45 seconds to answer it.
+    model_timeout_seconds: float = Field(default=120, gt=0, le=300)
     chat_enabled: bool = False
     chat_model_provider: str = "deepseek"
     chat_model_name: str = "deepseek-chat"
@@ -59,6 +62,10 @@ class Settings(BaseSettings):
     chat_model_api_key: SecretStr | None = None
     chat_timeout_seconds: float = Field(default=90, gt=0, le=600)
     news_fetch_timeout_seconds: float = Field(default=25, gt=0, le=120)
+    # GDELT's HTTPS front end regularly needs 20-30 seconds to answer, so
+    # discovery gets a generous budget and one retry before the edition is
+    # declared unavailable.
+    news_discovery_timeout_seconds: float = Field(default=60, gt=0, le=180)
     report_freshness_max_age_days: int = Field(default=3, ge=1, le=30)
     r2_endpoint_url: str | None = None
     r2_bucket_name: str | None = None

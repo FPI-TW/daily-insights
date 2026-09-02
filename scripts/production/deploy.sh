@@ -21,6 +21,7 @@ DAILY_INSIGHTS_DATABASE_URL
 DAILY_INSIGHTS_SESSION_SECRET
 DAILY_INSIGHTS_PASSWORD_PEPPER
 DAILY_INSIGHTS_MORNING_REPORTS_ENABLED
+DAILY_INSIGHTS_DAILY_NEWS_ENABLED
 DAILY_INSIGHTS_R2_ENDPOINT_URL
 DAILY_INSIGHTS_R2_BUCKET_NAME
 DAILY_INSIGHTS_R2_ACCESS_KEY_ID
@@ -53,6 +54,20 @@ if [ "$DAILY_INSIGHTS_MORNING_REPORTS_ENABLED" = true ]; then
   done
 fi
 
+case "$DAILY_INSIGHTS_DAILY_NEWS_ENABLED" in
+  true | false) ;;
+  *)
+    echo "DAILY_INSIGHTS_DAILY_NEWS_ENABLED must be true or false" >&2
+    exit 1
+    ;;
+esac
+
+if [ "$DAILY_INSIGHTS_DAILY_NEWS_ENABLED" = true ] &&
+  [ -z "$(printenv DAILY_INSIGHTS_MODEL_API_KEY 2>/dev/null || true)" ]; then
+  echo "enabled daily news requires deployment environment: DAILY_INSIGHTS_MODEL_API_KEY" >&2
+  exit 1
+fi
+
 for name in API_IMAGE WEB_IMAGE; do
   value=$(printenv "$name")
   if ! printf '%s\n' "$value" |
@@ -77,7 +92,7 @@ compose up -d --no-build --force-recreate --no-deps nginx
 # previous application version during rollout.
 compose run --rm --no-deps api alembic upgrade head
 
-if ! compose up -d --no-build --remove-orphans api web morning-report-scheduler; then
+if ! compose up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler; then
   "$script_dir/diagnose.sh" >&2
   exit 1
 fi
