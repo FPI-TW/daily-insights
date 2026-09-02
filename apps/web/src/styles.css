@@ -162,7 +162,11 @@
     font: inherit;
   }
   button {
-    @apply cursor-pointer rounded-lg border border-chip-line bg-chip px-4 py-2.5 text-sea-ink transition-colors disabled:cursor-wait disabled:opacity-65;
+    @apply cursor-pointer rounded-lg border border-chip-line bg-chip px-4 py-2.5 text-sea-ink transition-[color,background-color,border-color,transform] duration-150 disabled:cursor-wait disabled:opacity-65;
+  }
+  /* Tap feedback for every plain button; `motion.*` elements use pressScale. */
+  button:not(:disabled):active {
+    transform: scale(0.97);
   }
   label {
     @apply grid gap-2 text-sm font-bold text-sea-ink;
@@ -191,7 +195,35 @@
       transition-duration: 0.01ms !important;
       animation-duration: 0.01ms !important;
     }
+    ::view-transition-group(*),
+    ::view-transition-old(*),
+    ::view-transition-new(*) {
+      animation: none !important;
+    }
   }
+}
+
+/*
+ * Route crossfade (TanStack Router `defaultViewTransition`). The outgoing page
+ * fades out first, then the incoming page fades up, matching
+ * `durations.pageExit` / `durations.pageEnter` in src/lib/motion.ts.
+ */
+@keyframes page-exit {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+::view-transition-old(root) {
+  animation: page-exit 250ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+::view-transition-new(root) {
+  animation: page-enter 350ms cubic-bezier(0.22, 1, 0.36, 1) 250ms both;
 }
 
 @utility page-shell {
