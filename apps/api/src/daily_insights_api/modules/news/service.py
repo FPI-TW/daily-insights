@@ -31,6 +31,10 @@ DERIVATION_VERSION = "gdelt-deepseek-news.v3"
 SUMMARY_PROMPT_VERSION = "summary-v2"
 LOCALES = ("zh-hant", "zh-hans", "en")
 TAIPEI = ZoneInfo("Asia/Taipei")
+# Only a complete edition is final; partial and unavailable editions may be
+# regenerated from identical inputs so a transient provider failure cannot
+# freeze the day's news.
+IDEMPOTENT_STATUS = "complete"
 
 
 async def _retry[T](
@@ -171,8 +175,13 @@ async def run_news_edition(
     *,
     allowed_hostnames: str,
     fetch_timeout_seconds: float = 25,
-) -> None:
-    """Discover, safely extract, then select and persist today's immutable edition."""
+) -> str:
+    """Discover, safely extract, then select and persist today's immutable edition.
+
+    Returns the persisted edition status (``complete``, ``partial`` or
+    ``unavailable``), or ``idempotent`` when a complete edition already exists
+    for the same inputs.
+    """
     if edition_date != datetime.now(TAIPEI).date():
         raise ValueError("daily news only generates the current Taipei edition")
     allowed = configured_hostnames(allowed_hostnames)
@@ -208,10 +217,14 @@ async def run_news_edition(
                 .with_for_update()
             )
         ).first()
-        if latest is not None and latest.input_digest == input_digest:
+        if (
+            latest is not None
+            and latest.status == IDEMPOTENT_STATUS
+            and latest.input_digest == input_digest
+        ):
             await database.rollback()
             emit_event("news.edition.idempotent", edition_date=edition_date)
-            return
+            return "idempotent"
         edition = NewsEdition(
             edition_date=edition_date,
             revision=(latest.revision + 1 if latest else 1),
@@ -227,7 +240,7 @@ async def run_news_edition(
         if not usable:
             await database.commit()
             emit_event("news.shortfall", status="unavailable", count=0)
-            return
+            return edition.status
         try:
             selection_call = await _retry(
                 lambda: client.select(usable),
@@ -257,7 +270,7 @@ async def run_news_edition(
         except Exception as error:
             await database.commit()
             emit_event("news.selection.failed", error_code=type(error).__name__)
-            return
+            return edition.status
         selected = {fetched.candidate.id: fetched for fetched in usable}
         complete_count = 0
         for selected_item in selection_call.value.selections:
@@ -338,3 +351,4 @@ async def run_news_edition(
         edition.status, edition.caveat = _edition_status(complete_count)
         await database.commit()
         emit_event("news.shortfall", status=edition.status, count=complete_count)
+        return edition.status
