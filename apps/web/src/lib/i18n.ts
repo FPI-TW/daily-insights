@@ -312,6 +312,7 @@ const resources: Resource = {
       dailyNewsStatus_partial: "部分可用",
       dailyNewsStatus_unavailable: "暫不可用",
       dailyNewsUnavailable: "本日重大新聞尚未產生，請稍後再試。",
+      dailyNewsLoadFailed: "本日重大新聞暫時無法載入，報告內容不受影響。",
       dailyNewsImportance: "重要性 {{count}} 星",
       dailyNewsTimeUnknown: "時間未提供",
       dailyNewsSourceLink: "閱讀原文",
@@ -626,6 +627,7 @@ const resources: Resource = {
       dailyNewsStatus_partial: "部分可用",
       dailyNewsStatus_unavailable: "暂不可用",
       dailyNewsUnavailable: "本日重大新闻尚未生成，请稍后再试。",
+      dailyNewsLoadFailed: "本日重大新闻暂时无法加载，报告内容不受影响。",
       dailyNewsImportance: "重要性 {{count}} 星",
       dailyNewsTimeUnknown: "未提供时间",
       dailyNewsSourceLink: "阅读原文",
@@ -957,6 +959,8 @@ const resources: Resource = {
       dailyNewsStatus_unavailable: "Unavailable",
       dailyNewsUnavailable:
         "Today’s major news has not been generated yet. Please try again later.",
+      dailyNewsLoadFailed:
+        "Today’s major news could not be loaded right now. Reports are unaffected.",
       dailyNewsImportance: "Importance {{count}} stars",
       dailyNewsTimeUnknown: "Time unavailable",
       dailyNewsSourceLink: "Read source",

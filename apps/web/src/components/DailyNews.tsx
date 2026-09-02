@@ -18,8 +18,9 @@ export function DailyNewsLoading() {
   )
 }
 
-export function DailyNews({ news }: { news: LatestNews }) {
+export function DailyNews({ news }: { news: LatestNews | null }) {
   const { t } = useTranslation()
+  const status = news?.status ?? "unavailable"
   return (
     <section className="mt-7" aria-labelledby="daily-news-title">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -33,10 +34,17 @@ export function DailyNews({ news }: { news: LatestNews }) {
           </h2>
         </div>
         <span className="rounded-full border border-line px-2.5 py-1 text-xs font-bold text-sea-ink-soft">
-          {t(`dailyNewsStatus_${news.status}`)}
+          {t(`dailyNewsStatus_${status}`)}
         </span>
       </div>
-      {news.status === "unavailable" ? (
+      {news === null ? (
+        <div
+          className="surface-panel p-5 text-sm text-sea-ink-soft"
+          role="status"
+        >
+          {t("dailyNewsLoadFailed")}
+        </div>
+      ) : news.status === "unavailable" ? (
         <div className="surface-panel p-5 text-sm text-sea-ink-soft">
           {news.caveat ?? t("dailyNewsUnavailable")}
         </div>

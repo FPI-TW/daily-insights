@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import { I18nextProvider } from "react-i18next"
 import { describe, expect, it } from "vitest"
 import { createI18n } from "#/lib/i18n"
@@ -51,5 +51,21 @@ describe("DailyNews", () => {
     expect(screen.getByLabelText("Importance 4 stars")).toHaveTextContent(
       "★★★★"
     )
+  })
+
+  it("degrades to an unavailable panel when the news request failed", async () => {
+    const i18n = createI18n("en")
+    await i18n.changeLanguage("en")
+    const { container } = render(
+      <I18nextProvider i18n={i18n}>
+        <DailyNews news={null} />
+      </I18nextProvider>
+    )
+    const panel = within(container)
+    expect(
+      panel.getByText(/Today’s major news could not be loaded right now/)
+    ).toHaveAttribute("role", "status")
+    expect(panel.getByText("Unavailable")).toBeInTheDocument()
+    expect(panel.queryByRole("link")).not.toBeInTheDocument()
   })
 })
