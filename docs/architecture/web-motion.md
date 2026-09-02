@@ -39,8 +39,10 @@ hydration 完成後掛載的元件回傳 `true`：
 - 直接開啟或重新整理頁面：所有內容靜態顯示，不播進場。
 - 客戶端導覽、loader 完成、載入骨架、非同步錯誤或播放器狀態：播進場。
 
-根路由在 `useEffect` 中呼叫 `markHydrated()`，它在所有子元件的掛載效果之後執
-行，所以 hydration 這一輪內的元件一律視為伺服器內容。
+判斷方式是 `useSyncExternalStore` 的伺服器快照：React 在任何 hydration 渲染
+（包含串流 SSR 下較晚 hydrate 的 Suspense 邊界）都會回傳伺服器快照，只有沒有
+伺服器 HTML 的掛載才拿到客戶端快照。不能改用根路由 effect 設定的模組旗標：根
+路由的 effect 會比較晚 hydrate 的邊界更早觸發，那些內容會先消失再淡入。
 
 ## 路由過渡
 
