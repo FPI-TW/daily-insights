@@ -1,5 +1,7 @@
+import { motion } from "motion/react"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { pressScale, springs } from "#/lib/motion"
 
 type ThemeMode = "light" | "dark" | "auto"
 
@@ -68,17 +70,19 @@ export default function ThemeToggle() {
   const modeLabel = t(`themeMode_${mode}`)
 
   return (
-    <button
+    <motion.button
       type="button"
       onClick={toggleMode}
       aria-label={label}
       title={label}
       className="min-h-9 shrink-0 px-3 py-1.5 text-xs font-extrabold max-sm:px-2"
+      whileTap={pressScale}
+      transition={springs.tap}
     >
       <span className="max-sm:sr-only">{modeLabel}</span>
       <span className="hidden text-sm max-sm:inline" aria-hidden="true">
         {mode === "auto" ? "◐" : mode === "dark" ? "◒" : "◑"}
       </span>
-    </button>
+    </motion.button>
   )
 }

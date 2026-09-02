@@ -1,7 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router"
+import { motion } from "motion/react"
 import { useTranslation } from "react-i18next"
 import { PodcastPlayer } from "#/components/PodcastPlayer"
 import { ErrorScreen, LoadingScreen } from "#/components/StateScreen"
+import { hoverLift, reveal, springs, useEnterAnimation } from "#/lib/motion"
 import { getPodcastList } from "#/lib/podcasts"
 
 export const Route = createFileRoute(
@@ -17,6 +19,7 @@ function PodcastListPage() {
   const episodes = Route.useLoaderData()
   const { locale, user } = Route.useRouteContext()
   const { t } = useTranslation()
+  const animate = useEnterAnimation()
 
   return (
     <main className="page-shell">
@@ -40,10 +43,13 @@ function PodcastListPage() {
         </section>
       ) : (
         <ol className="m-0 grid list-none gap-4 p-0">
-          {episodes.map(episode => (
-            <li
+          {episodes.map((episode, index) => (
+            <motion.li
               key={episode.id}
-              className="surface-panel grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-5 border-l-[3px] border-l-transparent p-4 text-sea-ink transition hover:border-l-lagoon hover:border-lagoon-deep max-[42rem]:grid-cols-[4.2rem_minmax(0,1fr)] max-[42rem]:gap-3 max-[42rem]:p-3.5"
+              className="surface-panel grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-5 border-l-[3px] border-l-transparent p-4 text-sea-ink transition-[border-color,box-shadow] hover:border-l-lagoon hover:border-lagoon-deep hover:shadow-[0_16px_34px_rgb(14_20_19/9%)] max-[42rem]:grid-cols-[4.2rem_minmax(0,1fr)] max-[42rem]:gap-3 max-[42rem]:p-3.5"
+              {...reveal(animate, index)}
+              whileHover={hoverLift}
+              transition={springs.snappy}
             >
               <div
                 className="grid aspect-square w-[5.5rem] items-end justify-items-start rounded-[10px] bg-lagoon p-2.5 font-mono text-white max-[42rem]:w-[4.2rem]"
@@ -74,7 +80,7 @@ function PodcastListPage() {
                   title={episode.title}
                 />
               </article>
-            </li>
+            </motion.li>
           ))}
         </ol>
       )}
