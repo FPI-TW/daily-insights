@@ -72,14 +72,21 @@ loader 的語意與 `mode="wait"` 相同。時序在 `styles.css` 的
 ### 切換元件的滑動標記
 
 語系切換、客戶端頂部導覽、後台分頁與市場分類列共用
-`components/ActiveIndicator.tsx`：作用中的連結內渲染一個帶 `layoutId` 的
-`motion.span`，切換時標記從舊連結彈到新連結，而不是各自淡入淡出。三種樣式：
-`pill`（淡色底）、`chip`（實色底）、`underline`（底線）。每個導覽以
-`useIndicatorGroup()` 取得自己的群組 id，標記只在同一列的連結之間移動。
+`components/ActiveIndicator.tsx`：它是導覽列內唯一一個絕對定位的
+`motion.span`，在 layout effect 中找出帶 `aria-current="page"` 的連結，量出該
+連結相對於導覽列的位置與大小，再以 spring 動畫移過去；`ResizeObserver` 監看
+導覽列與連結，字型或視窗寬度改變時重新量測。三種樣式：`pill`（淡色底）、
+`chip`（實色底）、`underline`（底線）。
+
+不用 Motion 的 `layoutId` 共用元素：切頁時捲動位置會被重設，共用元素以頁面座
+標量測，會把捲動距離當成標記的位移，標記在切換的前 200 ms 被推到 header 外。
+相對於導覽列量測則不受捲動影響。第一次量測時不做動畫，避免 hydration 時標記
+從角落滑進來。
 
 為了讓標記在路由切換時真的滑動而不是被交叉淡出的截圖蓋住，AppShell 的 header
-與市場分類列各自帶 `view-transition-name`，在 `styles.css` 中把兩側都存在時的
-old 隱藏、new 不做動畫；只有單側存在時（進出報告區）改跟頁面一起淡入淡出。
+與市場分類列各自帶 `view-transition-name`。瀏覽器不接受對 view transition 偽
+元素設 `display: none`，所以 `styles.css` 在兩側都存在時把 old 的動畫關掉並設
+`opacity: 0`、new 不做動畫；只有單側存在時（進出報告區）改跟頁面一起淡入淡出。
 市場分類列與頁面標題並抽到 `_customer/reports.tsx` 這個 layout 路由，列表、
 市場詳細、骨架與錯誤畫面都在其 `Outlet` 內替換，分類列本身不會重新掛載。
 

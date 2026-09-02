@@ -30,6 +30,17 @@ Object.defineProperty(globalThis, "localStorage", {
   value: testLocalStorage,
 })
 
+// jsdom has no ResizeObserver; the active-marker measures its nav with one.
+class TestResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+Object.defineProperty(globalThis, "ResizeObserver", {
+  configurable: true,
+  value: TestResizeObserver,
+})
+
 beforeEach(() => {
   testLocalStorage.clear()
 })

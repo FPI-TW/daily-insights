@@ -2,7 +2,7 @@ import type { Locale } from "@daily-insights/api-client"
 import { Link } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import type { MarketCode } from "#/lib/provisional-reports"
-import { ActiveIndicator, useIndicatorGroup } from "./ActiveIndicator"
+import { ActiveIndicator } from "./ActiveIndicator"
 
 const locales: ReadonlyArray<{ code: Locale; label: string }> = [
   { code: "zh-hant", label: "繁中" },
@@ -43,20 +43,15 @@ export function LocaleSwitcher({
   reportMarketCode?: MarketCode | undefined
 }) {
   const { t } = useTranslation()
-  const group = useIndicatorGroup()
   return (
     <nav
       aria-label={t("language")}
-      className="flex min-h-9 shrink-0 items-center rounded-lg border border-chip-line bg-chip p-1 [&>a]:relative [&>a]:isolate [&>a]:rounded-md [&>a]:px-2 [&>a]:py-1 [&>a]:text-[0.68rem] [&>a]:font-extrabold [&>a]:text-sea-ink-soft [&>a]:no-underline [&>a]:transition-colors [&>a[aria-current=page]]:text-white max-sm:[&>a]:px-1.5"
+      className="relative isolate flex min-h-9 shrink-0 items-center rounded-lg border border-chip-line bg-chip p-1 [&>a]:rounded-md [&>a]:px-2 [&>a]:py-1 [&>a]:text-[0.68rem] [&>a]:font-extrabold [&>a]:text-sea-ink-soft [&>a]:no-underline [&>a]:transition-colors [&>a[aria-current=page]]:text-white max-sm:[&>a]:px-1.5"
     >
+      <ActiveIndicator activeKey={locale} variant="chip" />
       {locales.map(({ code, label }) => {
         const active = locale === code
-        const content = (
-          <>
-            {active ? <ActiveIndicator group={group} variant="chip" /> : null}
-            {label}
-          </>
-        )
+        const content = <>{label}</>
         return reportMarketCode ? (
           <Link
             key={code}

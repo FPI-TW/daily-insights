@@ -12,15 +12,15 @@ import {
 } from "#/lib/auth"
 import { backdrop, dialogPanel, toast } from "#/lib/motion"
 import { marketCodes } from "#/lib/provisional-reports"
-import { ActiveIndicator, useIndicatorGroup } from "./ActiveIndicator"
+import { ActiveIndicator } from "./ActiveIndicator"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
 import { LocaleSwitcher } from "./LocaleSwitcher"
 import ThemeToggle from "./ThemeToggle"
 
 const customerNavLinkClass =
-  "relative isolate shrink-0 rounded-md px-3 py-2 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:bg-link-hover hover:text-sea-ink [&[aria-current=page]]:text-lagoon"
+  "shrink-0 rounded-md px-3 py-2 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&:not([aria-current=page])]:hover:bg-link-hover [&[aria-current=page]]:text-lagoon"
 const adminNavLinkClass =
-  "relative isolate shrink-0 border-b-2 border-transparent px-4 py-3 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&[aria-current=page]]:text-lagoon"
+  "shrink-0 border-b-2 border-transparent px-4 py-3 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&[aria-current=page]]:text-lagoon"
 
 export function AppShell({
   locale,
@@ -43,7 +43,6 @@ export function AppShell({
   const settingsButtonRef = useRef<HTMLButtonElement>(null)
   const settingsDialogRef = useRef<HTMLElement>(null)
   const closeSettingsButtonRef = useRef<HTMLButtonElement>(null)
-  const navGroup = useIndicatorGroup()
   const pathname = location.pathname
   const customerSection = pathname.includes("/reports")
     ? "reports"
@@ -138,9 +137,14 @@ export function AppShell({
 
   return (
     <>
-      <header
+      {/* layoutRoot: the header is sticky, so the active-marker layout
+          animation must measure against the header itself, not the page.
+          Otherwise a route change that resets the scroll position makes the
+          marker appear to travel the scrolled distance. */}
+      <motion.header
         className="sticky top-0 z-20 border-b border-line bg-header backdrop-blur-xl [view-transition-name:app-header]"
         data-surface={surface}
+        layoutRoot
       >
         <div className="mx-auto flex min-h-[68px] w-full max-w-[1240px] items-center justify-between gap-4 px-6 py-3 max-sm:px-4 max-sm:py-2.5">
           <Link
@@ -167,17 +171,18 @@ export function AppShell({
           <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
             {surface === "customer" ? (
               <nav
-                className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                className="relative isolate flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 aria-label={t("customerNav")}
               >
+                <ActiveIndicator
+                  activeKey={`${locale}:${customerSection}`}
+                  variant="pill"
+                />
                 <Link
                   to="/$locale/reports"
                   params={{ locale }}
                   className={customerNavLinkClass}
                 >
-                  {customerSection === "reports" ? (
-                    <ActiveIndicator group={navGroup} variant="pill" />
-                  ) : null}
                   {t("reportsNav")}
                 </Link>
                 <Link
@@ -185,9 +190,6 @@ export function AppShell({
                   params={{ locale }}
                   className={customerNavLinkClass}
                 >
-                  {customerSection === "podcasts" ? (
-                    <ActiveIndicator group={navGroup} variant="pill" />
-                  ) : null}
                   {t("podcastNav")}
                 </Link>
                 <Link
@@ -195,9 +197,6 @@ export function AppShell({
                   params={{ locale }}
                   className={customerNavLinkClass}
                 >
-                  {customerSection === "account" ? (
-                    <ActiveIndicator group={navGroup} variant="pill" />
-                  ) : null}
                   {t("accountNav")}
                 </Link>
               </nav>
@@ -221,17 +220,18 @@ export function AppShell({
         {surface === "admin" ? (
           <div className="border-t border-line">
             <nav
-              className="mx-auto flex w-full max-w-[1240px] overflow-x-auto px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-sm:px-4"
+              className="relative isolate mx-auto flex w-full max-w-[1240px] overflow-x-auto px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-sm:px-4"
               aria-label={t("adminNav")}
             >
+              <ActiveIndicator
+                activeKey={`${locale}:${adminSection}`}
+                variant="underline"
+              />
               <Link
                 to="/$locale/admin/audio"
                 params={{ locale }}
                 className={adminNavLinkClass}
               >
-                {adminSection === "audio" ? (
-                  <ActiveIndicator group={navGroup} variant="underline" />
-                ) : null}
                 {t("audioManagementNav")}
               </Link>
               {user.system_role === "admin" ? (
@@ -241,9 +241,6 @@ export function AppShell({
                     params={{ locale }}
                     className={adminNavLinkClass}
                   >
-                    {adminSection === "members" ? (
-                      <ActiveIndicator group={navGroup} variant="underline" />
-                    ) : null}
                     {t("memberManagementNav")}
                   </Link>
                   <Link
@@ -252,9 +249,6 @@ export function AppShell({
                     search={{ history: [] }}
                     className={adminNavLinkClass}
                   >
-                    {adminSection === "conversations" ? (
-                      <ActiveIndicator group={navGroup} variant="underline" />
-                    ) : null}
                     {t("conversationsNav")}
                   </Link>
                 </>
@@ -262,7 +256,7 @@ export function AppShell({
             </nav>
           </div>
         ) : null}
-      </header>
+      </motion.header>
       <AnimatePresence>
         {settingsOpen ? (
           <motion.div

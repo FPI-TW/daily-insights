@@ -60,24 +60,25 @@ function ReportMarketNav({
   activeMarket?: MarketCode | undefined
 }) {
   const { t } = useTranslation()
-  // Fixed group id: this nav remounts between the list and detail routes and
-  // the underline should still slide from the previous market to the new one.
-  const group = "report-market-nav"
   const linkClass = (active: boolean) =>
-    `relative isolate shrink-0 border-b-2 border-transparent px-4 py-3 text-xs font-extrabold no-underline transition-colors ${active ? "text-lagoon" : "text-sea-ink-soft hover:text-sea-ink"}`
+    `shrink-0 border-b-2 border-transparent px-4 py-3 text-xs font-extrabold no-underline transition-colors ${active ? "text-lagoon" : "text-sea-ink-soft hover:text-sea-ink"}`
   return (
     <nav
-      className="mb-6 flex overflow-x-auto border-y border-line bg-surface [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [view-transition-name:report-market-nav]"
+      className="relative isolate mb-6 flex overflow-x-auto border-y border-line bg-surface [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [view-transition-name:report-market-nav]"
       aria-label={t("reportMarketNav")}
     >
+      <ActiveIndicator
+        activeKey={`${locale}:${activeMarket ?? "all"}`}
+        variant="underline"
+      />
       <Link
         to="/$locale/reports"
         params={{ locale }}
+        // Exact: the list route is a prefix of every market route, and the
+        // marker follows whichever link carries aria-current.
+        activeOptions={{ exact: true }}
         className={linkClass(activeMarket === undefined)}
       >
-        {activeMarket === undefined ? (
-          <ActiveIndicator group={group} variant="underline" />
-        ) : null}
         {t("reportAllMarkets")}
       </Link>
       {navMarketCodes.map(code => (
@@ -87,9 +88,6 @@ function ReportMarketNav({
           params={{ locale, marketCode: code }}
           className={linkClass(activeMarket === code)}
         >
-          {activeMarket === code ? (
-            <ActiveIndicator group={group} variant="underline" />
-          ) : null}
           {t(`reportMarketShort_${code}`)}
         </Link>
       ))}

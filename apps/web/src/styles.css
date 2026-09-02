@@ -237,12 +237,19 @@
  * When only one side has the element (entering or leaving the reports
  * section) it follows the page's own fade instead of popping.
  */
+/* `display: none` is ignored on these pseudo-elements, so the old snapshot
+   is hidden by dropping its fade/blend animation and opacity instead. */
 ::view-transition-old(app-header):not(:only-child),
 ::view-transition-old(report-market-nav):not(:only-child) {
-  display: none;
+  animation: none;
+  opacity: 0;
 }
 ::view-transition-new(app-header):not(:only-child),
 ::view-transition-new(report-market-nav):not(:only-child) {
+  animation: none;
+}
+::view-transition-group(app-header),
+::view-transition-group(report-market-nav) {
   animation: none;
 }
 ::view-transition-old(app-header):only-child,
