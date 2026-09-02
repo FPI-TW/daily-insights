@@ -203,7 +203,9 @@ class DeepSeekClient:
         if policy.market_focus:
             prompt["MARKET_FOCUS"] = (
                 "This edition covers one market only; prefer stories that move or explain "
-                f"it: {policy.market_focus}"
+                f"it: {policy.market_focus} Fill all {policy.max_items} slots whenever the "
+                "candidates contain that many distinct, relevant events; return fewer only "
+                "when the remaining candidates are duplicates or irrelevant to this market."
             )
         call = await self._complete(prompt)
         try:
