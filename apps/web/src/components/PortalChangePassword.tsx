@@ -1,5 +1,6 @@
 import { ApiError, type Locale } from "@daily-insights/api-client"
 import { useRouter } from "@tanstack/react-router"
+import { AnimatePresence, motion } from "motion/react"
 import { useState, type FormEvent } from "react"
 import { useTranslation } from "react-i18next"
 import {
@@ -7,6 +8,7 @@ import {
   rememberCsrfToken,
   requireCsrfToken,
 } from "#/lib/auth"
+import { toast } from "#/lib/motion"
 import { LocaleSwitcher } from "./LocaleSwitcher"
 
 export function PortalChangePassword({
@@ -102,14 +104,20 @@ export function PortalChangePassword({
             required
           />
         </label>
-        {error ? (
-          <p
-            className="m-0 rounded-lg border border-market-up/35 bg-market-up/10 px-3 py-2 text-sm font-bold text-market-up"
-            role="alert"
-          >
-            {error}
-          </p>
-        ) : null}
+        <AnimatePresence>
+          {error ? (
+            <motion.p
+              className="m-0 rounded-lg border border-market-up/35 bg-market-up/10 px-3 py-2 text-sm font-bold text-market-up"
+              role="alert"
+              variants={toast}
+              initial="hidden"
+              animate="visible"
+              exit="hidden"
+            >
+              {error}
+            </motion.p>
+          ) : null}
+        </AnimatePresence>
         <button className="primary-action" type="submit" disabled={pending}>
           {pending ? t("submitting") : t("changePassword")}
         </button>
