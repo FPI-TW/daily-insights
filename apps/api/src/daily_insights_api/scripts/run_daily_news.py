@@ -69,6 +69,7 @@ async def main() -> None:
         base_url=settings.model_api_base_url,
         api_key=api_key.get_secret_value(),
         model=settings.model_name,
+        timeout_seconds=settings.model_timeout_seconds,
         selection_criteria=load_selection_criteria(),
     )
     runner = build_runner(session_factory, client, settings, heartbeat)

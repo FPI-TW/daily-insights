@@ -60,6 +60,49 @@ async def test_daily_news_cli_rejects_unusable_key_before_building_client(
         await run_daily_news.main()
 
 
+async def test_daily_news_cli_builds_the_model_client_with_the_configured_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: FileSystemPath
+) -> None:
+    settings = _settings(
+        daily_news_enabled=True,
+        model_api_key=SecretStr("real-model-key"),
+        model_timeout_seconds=90,
+    )
+    monkeypatch.setattr(run_daily_news, "get_settings", lambda: settings)
+    monkeypatch.setattr(run_daily_news, "HEARTBEAT_PATH", str(tmp_path / "heartbeat"))
+    monkeypatch.setattr(
+        run_daily_news,
+        "parse_args",
+        lambda **_: Namespace(once=True, edition_date=date(2026, 9, 2)),
+    )
+    built: list[dict[str, object]] = []
+
+    class RecordingClient:
+        def __init__(self, **kwargs: object) -> None:
+            built.append(kwargs)
+
+        async def aclose(self) -> None:
+            return None
+
+    class FakeEngine:
+        async def dispose(self) -> None:
+            return None
+
+    def stop(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(run_daily_news, "DeepSeekClient", RecordingClient)
+    monkeypatch.setattr(run_daily_news, "create_engine", lambda _: FakeEngine())
+    monkeypatch.setattr(run_daily_news, "create_session_factory", lambda _: None)
+    monkeypatch.setattr(run_daily_news, "build_runner", stop)
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_daily_news.main()
+    assert built[0]["timeout_seconds"] == 90
+    assert built[0]["model"] == settings.model_name
+
+
 async def test_disabled_daily_news_only_maintains_heartbeat(
     monkeypatch: pytest.MonkeyPatch, tmp_path: FileSystemPath
 ) -> None:

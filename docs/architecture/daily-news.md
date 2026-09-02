@@ -78,15 +78,16 @@ flowchart LR
 
 ## 設定
 
-| 變數                                            | 用途                                                   | 正式環境來源             |
-| ----------------------------------------------- | ------------------------------------------------------ | ------------------------ |
-| `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`             | `true`／`false`，關閉時排程器只維持 heartbeat          | GitHub Variables         |
-| `DAILY_INSIGHTS_NEWS_ALLOWED_HOSTNAMES`         | 逗號分隔的精確主機名稱白名單                           | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_MODEL_NAME`                     | DeepSeek 模型名稱，預設 `deepseek-chat`                | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_MODEL_API_BASE_URL`             | 必須是 HTTPS 絕對 URL，預設 `https://api.deepseek.com` | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_MODEL_API_KEY`                  | 啟用時必填，不得為 placeholder                         | GitHub Secrets           |
-| `DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS`     | 正文擷取逾時，預設 25 秒                               | 開發環境                 |
-| `DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS` | GDELT 探索逾時，預設 60 秒，失敗會重試一次             | 開發環境                 |
+| 變數                                            | 用途                                                                        | 正式環境來源             |
+| ----------------------------------------------- | --------------------------------------------------------------------------- | ------------------------ |
+| `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`             | `true`／`false`，關閉時排程器只維持 heartbeat                               | GitHub Variables         |
+| `DAILY_INSIGHTS_NEWS_ALLOWED_HOSTNAMES`         | 逗號分隔的精確主機名稱白名單                                                | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_MODEL_NAME`                     | DeepSeek 模型名稱，預設 `deepseek-chat`                                     | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_MODEL_API_BASE_URL`             | 必須是 HTTPS 絕對 URL，預設 `https://api.deepseek.com`                      | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_MODEL_API_KEY`                  | 啟用時必填，不得為 placeholder                                              | GitHub Secrets           |
+| `DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS`          | 單次模型呼叫逾時，預設 120 秒；選題 prompt 約 28k token，實測需 30 到 45 秒 | 開發環境                 |
+| `DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS`     | 正文擷取逾時，預設 25 秒                                                    | 開發環境                 |
+| `DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS` | GDELT 探索逾時，預設 60 秒，失敗會重試一次                                  | 開發環境                 |
 
 `core/config.py` 在啟用時會驗證 provider 為 `deepseek`、URL 為 HTTPS 且 API key
 不是 placeholder；不符合時服務啟動即失敗。
