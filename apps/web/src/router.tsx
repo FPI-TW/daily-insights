@@ -7,6 +7,9 @@ export function getRouter() {
     scrollRestoration: true,
     defaultPreload: "intent",
     defaultPreloadStaleTime: 0,
+    // Route changes crossfade through the View Transitions API; the timings
+    // live in styles.css next to the reduced-motion override.
+    defaultViewTransition: true,
   })
 
   return router
