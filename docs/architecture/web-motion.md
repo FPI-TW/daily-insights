@@ -57,6 +57,18 @@ router 狀態驅動的淡出幾乎不會播放。
 loader 的語意與 `mode="wait"` 相同。時序在 `styles.css` 的
 `::view-transition-old(root)` / `::view-transition-new(root)` 規則中定義。
 
+兩個例外：
+
+- 切換語系會停留在同一頁、只替換文字，`router.tsx` 的 `defaultViewTransition.types`
+  對「去掉語系後路徑相同」的導覽回傳 `false`，內容原地更新而不做交叉淡出。
+- 載入骨架的時序由 `defaultPendingMs: 200` 與 `defaultPendingMinMs: 300` 控制：
+  200 ms 內完成的載入直接換內容，較慢的才顯示骨架並至少停留 300 ms。原本報告
+  路由用 `pendingMs: 0` 加上預設 500 ms 的最短停留，每次第一次進入某個語系或
+  市場都要等半秒，看起來像卡住。
+
+另外 `html` 設了 `scrollbar-gutter: stable`，讓長短頁面切換時捲軸出現與否不會
+讓置中的 header 左右位移。
+
 ### 切換元件的滑動標記
 
 語系切換、客戶端頂部導覽、後台分頁與市場分類列共用
