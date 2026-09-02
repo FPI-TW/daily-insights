@@ -1,6 +1,7 @@
 import uuid
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Enum,
     ForeignKey,
@@ -31,8 +32,8 @@ class ModelConfiguration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     requested_model: Mapped[str] = mapped_column(String(200), nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(100), nullable=False)
     parameters: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
-    created_by_user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT")
     )
 
 
@@ -86,6 +87,11 @@ class GenerationRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     error_code: Mapped[str | None] = mapped_column(String(100))
     error_detail: Mapped[str | None] = mapped_column(Text)
+    context_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    context_digest: Mapped[str | None] = mapped_column(String(64))
+    context_truncated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
 
 
 class ActiveModelConfiguration(Base):
@@ -101,8 +107,7 @@ class ActiveModelConfiguration(Base):
         nullable=False,
         unique=True,
     )
-    activated_by_user_id: Mapped[uuid.UUID] = mapped_column(
+    activated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT"),
-        nullable=False,
     )

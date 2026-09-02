@@ -138,6 +138,7 @@ export const newsItemSchema = z.object({
 })
 export type NewsItem = z.infer<typeof newsItemSchema>
 export const latestNewsSchema = z.object({
+  edition_id: z.uuid().nullable(),
   edition_date: z.iso.date().nullable(),
   revision: z.number().int().positive().nullable(),
   generated_at: z.iso.datetime({ offset: true }).nullable(),

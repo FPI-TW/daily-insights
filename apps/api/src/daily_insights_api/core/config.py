@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     # A selection prompt carries up to ~100k characters of source text; the
     # provider regularly needs 30-45 seconds to answer it.
     model_timeout_seconds: float = Field(default=120, gt=0, le=300)
+    chat_enabled: bool = False
+    chat_model_provider: str = "deepseek"
+    chat_model_name: str = "deepseek-chat"
+    chat_model_api_base_url: str = "https://api.deepseek.com"
+    chat_model_api_key: SecretStr | None = None
+    chat_timeout_seconds: float = Field(default=90, gt=0, le=600)
     news_fetch_timeout_seconds: float = Field(default=25, gt=0, le=120)
     # GDELT's HTTPS front end regularly needs 20-30 seconds to answer, so
     # discovery gets a generous budget and one retry before the edition is
@@ -133,6 +139,18 @@ class Settings(BaseSettings):
                 not item or "/" in item or ":" in item or "." not in item for item in hostnames
             ):
                 raise ValueError("news_allowed_hostnames must contain exact hostnames")
+        if self.chat_enabled:
+            chat_url = urlparse(self.chat_model_api_base_url)
+            if self.chat_model_provider not in {"deepseek", "openai-compatible"}:
+                raise ValueError("chat_model_provider must be deepseek or openai-compatible")
+            if chat_url.scheme != "https" or not chat_url.netloc:
+                raise ValueError("chat_model_api_base_url must be an absolute HTTPS URL")
+            if (
+                self.chat_model_api_key is None
+                or not self.chat_model_api_key.get_secret_value().strip()
+                or is_placeholder_value(self.chat_model_api_key.get_secret_value())
+            ):
+                raise ValueError("chat_model_api_key is required and cannot be a placeholder")
         required_r2_values = {
             "r2_endpoint_url": self.r2_endpoint_url,
             "r2_bucket_name": self.r2_bucket_name,

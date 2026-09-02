@@ -14,6 +14,9 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${webPort}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
+    // Drives `MotionConfig reducedMotion="user"` and the CSS reduced-motion
+    // override so assertions never race an in-flight animation.
+    contextOptions: { reducedMotion: "reduce" },
   },
   projects: [
     {

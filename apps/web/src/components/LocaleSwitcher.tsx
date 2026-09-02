@@ -1,6 +1,9 @@
 import type { Locale } from "@daily-insights/api-client"
 import { Link } from "@tanstack/react-router"
+import { motion } from "motion/react"
+import { useId } from "react"
 import { useTranslation } from "react-i18next"
+import { springs } from "#/lib/motion"
 import type { MarketCode } from "#/lib/provisional-reports"
 
 const locales: ReadonlyArray<{ code: Locale; label: string }> = [
@@ -42,32 +45,49 @@ export function LocaleSwitcher({
   reportMarketCode?: MarketCode | undefined
 }) {
   const { t } = useTranslation()
+  // Each switcher instance needs its own layout group so the active chip
+  // slides between its own links only.
+  const layoutId = useId()
   return (
     <nav
       aria-label={t("language")}
-      className="flex min-h-9 shrink-0 items-center rounded-lg border border-chip-line bg-chip p-1 [&>a]:rounded-md [&>a]:px-2 [&>a]:py-1 [&>a]:text-[0.68rem] [&>a]:font-extrabold [&>a]:text-sea-ink-soft [&>a]:no-underline [&>a[aria-current=page]]:bg-lagoon-deep [&>a[aria-current=page]]:text-white max-sm:[&>a]:px-1.5"
+      className="flex min-h-9 shrink-0 items-center rounded-lg border border-chip-line bg-chip p-1 [&>a]:relative [&>a]:isolate [&>a]:rounded-md [&>a]:px-2 [&>a]:py-1 [&>a]:text-[0.68rem] [&>a]:font-extrabold [&>a]:text-sea-ink-soft [&>a]:no-underline [&>a]:transition-colors [&>a[aria-current=page]]:text-white max-sm:[&>a]:px-1.5"
     >
-      {locales.map(({ code, label }) =>
-        reportMarketCode ? (
+      {locales.map(({ code, label }) => {
+        const active = locale === code
+        const content = (
+          <>
+            {active ? (
+              <motion.span
+                className="absolute inset-0 -z-10 rounded-md bg-lagoon-deep"
+                layoutId={layoutId}
+                transition={springs.snappy}
+                aria-hidden="true"
+              />
+            ) : null}
+            {label}
+          </>
+        )
+        return reportMarketCode ? (
           <Link
             key={code}
             to="/$locale/reports/$marketCode"
             params={{ locale: code, marketCode: reportMarketCode }}
-            aria-current={locale === code ? "page" : undefined}
+            aria-current={active ? "page" : undefined}
           >
-            {label}
+            {content}
           </Link>
         ) : (
           <Link
             key={code}
             to={destinations[destination]}
             params={{ locale: code }}
-            aria-current={locale === code ? "page" : undefined}
+            aria-current={active ? "page" : undefined}
           >
-            {label}
+            {content}
           </Link>
         )
-      )}
+      })}
     </nav>
   )
 }

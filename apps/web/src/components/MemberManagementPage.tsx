@@ -7,11 +7,13 @@ import {
 } from "@daily-insights/api-client"
 import { useForm } from "@tanstack/react-form"
 import { useRouter } from "@tanstack/react-router"
+import { motion } from "motion/react"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { browserAdministrationClient } from "#/lib/admin-members"
 import { requireCsrfToken } from "#/lib/auth"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
+import { hoverLift, reveal, springs, useEnterAnimation } from "#/lib/motion"
 
 type DirectoryEntry = {
   organization: Organization
@@ -40,6 +42,7 @@ export function MemberManagementPage({
   locale: Locale
 }) {
   const { t } = useTranslation()
+  const animate = useEnterAnimation()
   const [selectedOrganizationId, setSelectedOrganizationId] = useState(
     directory[0]?.organization.id ?? ""
   )
@@ -129,7 +132,11 @@ export function MemberManagementPage({
           />
         </aside>
 
-        <section className="surface-panel min-w-0 p-[clamp(1rem,3vw,1.5rem)]">
+        <motion.section
+          className="surface-panel min-w-0 p-[clamp(1rem,3vw,1.5rem)]"
+          key={selectedEntry?.organization.id ?? "none"}
+          {...reveal(animate)}
+        >
           {selectedEntry ? (
             <>
               <header className="flex items-end justify-between gap-4 border-b border-line pb-5 max-[42rem]:items-stretch max-[42rem]:flex-col">
@@ -196,7 +203,7 @@ export function MemberManagementPage({
               </p>
             </div>
           )}
-        </section>
+        </motion.section>
       </div>
     </main>
   )
@@ -628,7 +635,11 @@ function MemberCard({
   }
 
   return (
-    <article className="rounded-[13px] border border-line border-l-[3px] border-l-transparent bg-surface p-4 transition-colors hover:border-l-lagoon">
+    <motion.article
+      className="rounded-[13px] border border-line border-l-[3px] border-l-transparent bg-surface p-4 transition-[border-color,box-shadow] hover:border-l-lagoon hover:shadow-[0_16px_34px_rgb(14_20_19/9%)]"
+      whileHover={hoverLift}
+      transition={springs.snappy}
+    >
       <header className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
         <div
           className="grid h-10 w-10 place-items-center rounded-full bg-[linear-gradient(145deg,var(--palm),var(--lagoon-deep))] font-extrabold text-white"
@@ -751,6 +762,6 @@ function MemberCard({
           </div>
         </form>
       </details>
-    </article>
+    </motion.article>
   )
 }

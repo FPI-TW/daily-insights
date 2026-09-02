@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
+import { motion } from "motion/react"
 import { useTranslation } from "react-i18next"
+import { reveal, useEnterAnimation } from "#/lib/motion"
 
 export const Route = createFileRoute(
   "/$locale/_authenticated/_customer/account"
@@ -10,6 +12,7 @@ export const Route = createFileRoute(
 function AccountPage() {
   const { user } = Route.useRouteContext()
   const { t } = useTranslation()
+  const animate = useEnterAnimation()
 
   return (
     <main className="page-shell">
@@ -24,9 +27,10 @@ function AccountPage() {
         />
         <p className="leading-7 text-sea-ink-soft">{t("accountDescription")}</p>
       </header>
-      <section
+      <motion.section
         className="surface-panel grid overflow-hidden border-t-[3px] border-t-lagoon sm:grid-cols-[minmax(0,1fr)_minmax(13rem,0.42fr)]"
         aria-labelledby="profile-title"
+        {...reveal(animate)}
       >
         <div className="flex items-center gap-4 p-[clamp(1.25rem,3vw,1.75rem)]">
           <div
@@ -53,7 +57,7 @@ function AccountPage() {
             {t(`role_${user.system_role}`)}
           </dd>
         </dl>
-      </section>
+      </motion.section>
     </main>
   )
 }

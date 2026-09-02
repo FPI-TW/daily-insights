@@ -1,5 +1,10 @@
 import "@testing-library/jest-dom/vitest"
+import { MotionGlobalConfig } from "motion/react"
 import { beforeEach } from "vitest"
+
+// Component tests assert behaviour, not motion: every Motion animation
+// completes instantly so exit transitions never keep stale DOM around.
+MotionGlobalConfig.skipAnimations = true
 
 const testLocalStorage = (() => {
   const values = new Map<string, string>()

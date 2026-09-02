@@ -2,6 +2,22 @@ import uuid
 from dataclasses import dataclass
 from typing import Protocol
 
+from daily_insights_api.modules.model_runtime.models import (
+    ActiveModelConfiguration as ActiveModelConfigurationRecord,
+)
+from daily_insights_api.modules.model_runtime.models import (
+    GenerationRecord,
+    ModelConfiguration,
+)
+
+__all__ = [
+    "ActiveModelConfiguration",
+    "ActiveModelConfigurationRecord",
+    "GenerationRecord",
+    "ModelConfiguration",
+    "ModelConfigurationReader",
+]
+
 
 @dataclass(frozen=True)
 class ActiveModelConfiguration:

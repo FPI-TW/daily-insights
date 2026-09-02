@@ -3,6 +3,7 @@ import type {
   PodcastAudioPlayback,
   User,
 } from "@daily-insights/api-client"
+import { motion } from "motion/react"
 import {
   useCallback,
   useEffect,
@@ -11,6 +12,7 @@ import {
   useState,
 } from "react"
 import { useTranslation } from "react-i18next"
+import { fadeIn } from "#/lib/motion"
 import { podcastProgressKey, restoredPosition } from "#/lib/podcast-progress"
 import { browserPodcastClient } from "#/lib/podcasts"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
@@ -106,19 +108,27 @@ export function PodcastPlayer({
         </button>
       ) : null}
       {loading ? (
-        <p
+        <motion.p
           className="m-0 flex items-center gap-2 text-sm text-sea-ink-soft"
           role="status"
+          variants={fadeIn}
+          initial="hidden"
+          animate="visible"
         >
           <span
             className="h-3 w-3 animate-spin rounded-full border-2 border-line border-t-lagoon"
             aria-hidden="true"
           />
           {t("podcastAudioLoading")}
-        </p>
+        </motion.p>
       ) : null}
       {unavailable ? (
-        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-market-caution/35 bg-market-caution/10 px-3 py-2">
+        <motion.div
+          className="flex flex-wrap items-center gap-3 rounded-lg border border-market-caution/35 bg-market-caution/10 px-3 py-2"
+          variants={fadeIn}
+          initial="hidden"
+          animate="visible"
+        >
           <p className="m-0 text-sm font-bold" role="alert">
             {t("podcastAudioUnavailable")}
           </p>
@@ -129,7 +139,7 @@ export function PodcastPlayer({
           >
             {t("podcastRetryAudio")}
           </button>
-        </div>
+        </motion.div>
       ) : null}
       {playback && playback.requested_locale !== playback.resolved_locale ? (
         <p className="m-0 rounded-md bg-link-hover px-2.5 py-2 text-[0.85rem] text-sea-ink-soft">
@@ -137,8 +147,11 @@ export function PodcastPlayer({
         </p>
       ) : null}
       {playback ? (
-        <audio
+        <motion.audio
           className="w-full"
+          variants={fadeIn}
+          initial="hidden"
+          animate="visible"
           ref={audioRef}
           controls
           controlsList="nodownload"
@@ -175,7 +188,7 @@ export function PodcastPlayer({
           }}
         >
           {t("podcastAudioUnsupported")}
-        </audio>
+        </motion.audio>
       ) : null}
     </section>
   )

@@ -21,6 +21,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/admin/conversations": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Conversations */
+    get: operations["list_conversations_api_admin_conversations_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/conversations/{conversation_id}": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Conversation Detail */
+    get: operations["conversation_detail_api_admin_conversations__conversation_id__get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/admin/internal-users": {
     parameters: {
       query?: never
@@ -494,6 +528,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/v1/chat/stream": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Stream Chat */
+    post: operations["stream_chat_api_v1_chat_stream_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -598,6 +649,140 @@ export interface components {
       /** Points */
       points: components["schemas"]["ChartPoint"][]
     }
+    /** ChatConversationDetailResponse */
+    ChatConversationDetailResponse: {
+      /** Generations */
+      generations: components["schemas"]["ChatGenerationResponse"][]
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Messages */
+      messages: components["schemas"]["ChatMessageResponse"][]
+      /**
+       * Organization Id
+       * Format: uuid
+       */
+      organization_id: string
+      /**
+       * User Id
+       * Format: uuid
+       */
+      user_id: string
+    }
+    /** ChatConversationListItem */
+    ChatConversationListItem: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Latest Message At */
+      latest_message_at: string | null
+      /** Member Email */
+      member_email: string
+      /** Message Count */
+      message_count: number
+      /**
+       * Organization Id
+       * Format: uuid
+       */
+      organization_id: string
+      /** Title */
+      title: string | null
+      /**
+       * User Id
+       * Format: uuid
+       */
+      user_id: string
+    }
+    /** ChatConversationListResponse */
+    ChatConversationListResponse: {
+      /** Items */
+      items: components["schemas"]["ChatConversationListItem"][]
+      /** Next Cursor */
+      next_cursor: string | null
+    }
+    /** ChatGenerationResponse */
+    ChatGenerationResponse: {
+      /** Context Digest */
+      context_digest: string | null
+      /** Context Truncated */
+      context_truncated: boolean
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /** Error Code */
+      error_code: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Input Tokens */
+      input_tokens: number | null
+      /** Latency Ms */
+      latency_ms: number | null
+      /** Output Tokens */
+      output_tokens: number | null
+      /** Prompt Version */
+      prompt_version: string
+      /** Provider */
+      provider: string
+      /** Requested Model */
+      requested_model: string
+      /** Resolved Model */
+      resolved_model: string | null
+      status: components["schemas"]["GenerationStatus"]
+    }
+    /** ChatMessageResponse */
+    ChatMessageResponse: {
+      /** Content */
+      content: string
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Reply To Message Id */
+      reply_to_message_id: string | null
+      role: components["schemas"]["MessageRole"]
+      status: components["schemas"]["GenerationStatus"]
+    }
+    /** ChatStreamRequest */
+    ChatStreamRequest: {
+      /**
+       * Client Request Id
+       * Format: uuid
+       */
+      client_request_id: string
+      /** Conversation Id */
+      conversation_id?: string | null
+      /**
+       * Locale
+       * @enum {string}
+       */
+      locale: "zh-hant" | "zh-hans" | "en"
+      /** Message */
+      message: string
+      /** Page Context */
+      page_context:
+        | components["schemas"]["ReportsIndexContext"]
+        | components["schemas"]["ReportDetailContext"]
+    }
     /** ComponentHealth */
     ComponentHealth: {
       /**
@@ -611,6 +796,11 @@ export interface components {
       /** Csrf Token */
       csrf_token: string
     }
+    /**
+     * GenerationStatus
+     * @enum {string}
+     */
+    GenerationStatus: "pending" | "complete" | "partial" | "error"
     /** HTTPValidationError */
     HTTPValidationError: {
       /** Detail */
@@ -653,6 +843,8 @@ export interface components {
       caveat: string | null
       /** Edition Date */
       edition_date: string | null
+      /** Edition Id */
+      edition_id: string | null
       /** Generated At */
       generated_at: string | null
       /** Items */
@@ -754,6 +946,11 @@ export interface components {
       reason: string
       status?: components["schemas"]["UserStatus"] | null
     }
+    /**
+     * MessageRole
+     * @enum {string}
+     */
+    MessageRole: "user" | "assistant" | "system"
     /** MetricBlock */
     MetricBlock: {
       /** Caveat */
@@ -1188,6 +1385,19 @@ export interface components {
        */
       status: "ok" | "unhealthy"
     }
+    /** ReportDetailContext */
+    ReportDetailContext: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "report_detail"
+      /**
+       * Publication Id
+       * Format: uuid
+       */
+      publication_id: string
+    }
     /** ReportDetailResponse */
     ReportDetailResponse: {
       content: components["schemas"]["PublicationContent"]
@@ -1281,6 +1491,18 @@ export interface components {
       summary: string | null
       /** Title */
       title: string
+    }
+    /** ReportsIndexContext */
+    ReportsIndexContext: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "reports_index"
+      /** News Edition Id */
+      news_edition_id?: string | null
+      /** Publication Ids */
+      publication_ids: string[]
     }
     /** SeriesBlock */
     SeriesBlock: {
@@ -1411,6 +1633,73 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["AuditEventResponse"][]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  list_conversations_api_admin_conversations_get: {
+    parameters: {
+      query?: {
+        organization_id?: string | null
+        member_id?: string | null
+        created_after?: string | null
+        created_before?: string | null
+        cursor?: string | null
+        limit?: number
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ChatConversationListResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  conversation_detail_api_admin_conversations__conversation_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        conversation_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ChatConversationDetailResponse"]
         }
       }
       /** @description Validation Error */
@@ -2470,6 +2759,41 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ReportDetailResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  stream_chat_api_v1_chat_stream_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ChatStreamRequest"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "text/event-stream": unknown
         }
       }
       /** @description Validation Error */
