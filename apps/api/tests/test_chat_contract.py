@@ -5,7 +5,13 @@ import pytest
 from pydantic import ValidationError
 
 from daily_insights_api.core.config import Settings
-from daily_insights_api.modules.chat.api import _event, _limit_snapshot, _snapshot_digest
+from daily_insights_api.modules.chat.api import (
+    DISCLAIMER_BY_LOCALE,
+    _append_disclaimer,
+    _event,
+    _limit_snapshot,
+    _snapshot_digest,
+)
 from daily_insights_api.modules.chat.schemas import ChatStreamRequest
 
 
@@ -45,6 +51,18 @@ def test_context_limit_preserves_a_digestible_canonical_snapshot() -> None:
 def test_sse_events_are_named_json_events() -> None:
     event = _event("done", {"status": "complete"}).decode()
     assert event == 'event: done\ndata: {"status":"complete"}\n\n'
+
+
+@pytest.mark.parametrize("locale", ["zh-hant", "zh-hans", "en"])
+def test_application_disclaimer_is_localized_and_appended_exactly_once(locale: str) -> None:
+    assert DISCLAIMER_BY_LOCALE["zh-hant"] == (
+        "（內容基於公開資訊及內部分析報告，僅供參考，不構成投資建議。）"  # noqa: RUF001
+    )
+    chunks = ["Answer"]
+    suffix = _append_disclaimer(chunks, locale)
+    assert suffix == f"\n\n{DISCLAIMER_BY_LOCALE[locale]}"
+    assert "".join(chunks).endswith(DISCLAIMER_BY_LOCALE[locale])
+    assert _append_disclaimer(chunks, locale) is None
 
 
 def test_chat_openapi_declares_sse_response_contract() -> None:

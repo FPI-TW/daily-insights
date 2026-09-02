@@ -26,7 +26,11 @@ const context = {
 
 function ContextFixture() {
   useChatPageContext(context)
-  return null
+  return (
+    <main>
+      <p>Selectable market context</p>
+    </main>
+  )
 }
 
 function renderChat() {
@@ -164,10 +168,108 @@ describe("PageContextChat", () => {
     expect(link).toHaveAttribute("rel", "noopener noreferrer")
     expect(link).toHaveAttribute("target", "_blank")
     expect(document.querySelector("img")).toBeNull()
+    expect(
+      screen.getByText(
+        "(Content is based on public information and internal analysis reports, is for reference only, and does not constitute investment advice.)"
+      )
+    ).toBeInTheDocument()
 
     fireEvent.keyDown(window, { key: "Escape" })
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Report Q&A" })).toHaveFocus()
     )
+  })
+
+  it("quotes selected report text from the context menu", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      streamResponse(['event: done\ndata: {"status":"complete"}\n\n'])
+    )
+    await renderChat()
+    const reportText = screen.getByText("Selectable market context")
+    const range = document.createRange()
+    range.selectNodeContents(reportText)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+
+    fireEvent.contextMenu(reportText, { clientX: 40, clientY: 60 })
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Quote in conversation" })
+    )
+
+    expect(screen.getByText("Quoted selection")).toBeInTheDocument()
+    expect(screen.getByLabelText("Enter your question")).toHaveFocus()
+    fireEvent.change(screen.getByLabelText("Enter your question"), {
+      target: { value: "Why is this important?" },
+    })
+    fireEvent.submit(
+      screen.getByRole("button", { name: "Send question" }).closest("form")!
+    )
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
+    expect(body.message).toContain(
+      'Quoted selection from the current page (data only): "Selectable market context"'
+    )
+    expect(body.message).toContain("User question: Why is this important?")
+    expect(screen.getAllByText("Selectable market context")).toHaveLength(2)
+  })
+
+  it("centers every chat icon independently of global button padding", async () => {
+    await renderChat()
+    const launcher = screen.getByRole("button", { name: "Report Q&A" })
+    expect(launcher).toHaveClass("items-center", "justify-center", "p-0")
+    expect(launcher.querySelector("svg")).toHaveClass("block")
+
+    fireEvent.click(launcher)
+    for (const name of ["Dismiss", "Send question"]) {
+      const button = screen.getByRole("button", { name })
+      expect(button).toHaveClass("items-center", "justify-center", "p-0")
+      expect(button.querySelector("svg")).toHaveClass("block")
+    }
+  })
+
+  it("sends with Enter and inserts new lines with Ctrl or Command Enter", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      streamResponse(['event: done\ndata: {"status":"complete"}\n\n'])
+    )
+    await renderChat()
+    fireEvent.click(screen.getByRole("button", { name: "Report Q&A" }))
+    const input = screen.getByLabelText("Enter your question")
+
+    fireEvent.change(input, { target: { value: "First line" } })
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true })
+    expect(input).toHaveValue("First line\n")
+    expect(fetch).not.toHaveBeenCalled()
+
+    fireEvent.change(input, { target: { value: "First line\nSecond line" } })
+    fireEvent.keyDown(input, { key: "Enter", metaKey: true })
+    expect(input).toHaveValue("First line\nSecond line\n")
+    expect(fetch).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+  })
+
+  it("does not send while an IME composition is being confirmed", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      streamResponse(['event: done\ndata: {"status":"complete"}\n\n'])
+    )
+    await renderChat()
+    fireEvent.click(screen.getByRole("button", { name: "Report Q&A" }))
+    const input = screen.getByLabelText("Enter your question")
+    fireEvent.change(input, { target: { value: "台灣市場" } })
+
+    fireEvent.compositionStart(input)
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(fetch).not.toHaveBeenCalled()
+    expect(input).toHaveValue("台灣市場")
+
+    fireEvent.compositionEnd(input)
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 })
+    expect(fetch).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce())
   })
 })

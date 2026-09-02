@@ -44,6 +44,15 @@ from daily_insights_api.web.dependencies import get_database_session
 
 router = APIRouter(tags=["chat"])
 
+DISCLAIMER_BY_LOCALE = {
+    "zh-hant": "（內容基於公開資訊及內部分析報告，僅供參考，不構成投資建議。）",  # noqa: RUF001
+    "zh-hans": "（内容基于公开信息及内部分析报告，仅供参考，不构成投资建议。）",  # noqa: RUF001
+    "en": (
+        "(Content is based on public information and internal analysis reports, "
+        "is for reference only, and does not constitute investment advice.)"
+    ),
+}
+
 
 def require_chat_customer(context: Annotated[AuthContext, Depends(require_csrf)]) -> AuthContext:
     """Chat is a protected customer mutation, including the password-change gate."""
@@ -64,6 +73,19 @@ def _event(name: str, data: dict[str, object]) -> bytes:
     return (
         f"event: {name}\ndata: {json.dumps(data, separators=(',', ':'), default=str)}\n\n".encode()
     )
+
+
+def _append_disclaimer(chunks: list[str], locale: str) -> str | None:
+    """Append the application-owned disclaimer exactly once to a visible reply."""
+    disclaimer = DISCLAIMER_BY_LOCALE.get(locale, DISCLAIMER_BY_LOCALE["en"])
+    content = "".join(chunks).rstrip()
+    if content.endswith(disclaimer):
+        return None
+    suffix = f"\n\n{disclaimer}" if content else disclaimer
+    if not content:
+        chunks.clear()
+    chunks.append(suffix)
+    return suffix
 
 
 def _require_customer(context: AuthContext) -> uuid.UUID:
@@ -363,15 +385,19 @@ async def _cleanup_cancelled_turn(
     assistant_id: uuid.UUID,
     generation_id: uuid.UUID,
     content: str,
+    locale: str,
     metadata: ProviderMetadata,
 ) -> None:
     """Durably release the single-pending constraint after any generator cancellation."""
+    stored_chunks = [content]
+    if content:
+        _append_disclaimer(stored_chunks, locale)
     task = asyncio.create_task(
         _terminalize(
             session_factory,
             assistant_id=assistant_id,
             generation_id=generation_id,
-            content=content,
+            content="".join(stored_chunks),
             terminal=GenerationStatus.PARTIAL if content else GenerationStatus.ERROR,
             metadata=metadata,
             error_code="cancelled",
@@ -472,6 +498,11 @@ async def stream_chat(
                     yield _event("delta", {"text": chunk})
             disconnected = await request.is_disconnected()
             terminal = GenerationStatus.PARTIAL if disconnected else GenerationStatus.COMPLETE
+            disclaimer = (
+                _append_disclaimer(chunks, payload.locale) if chunks or not disconnected else None
+            )
+            if not disconnected and disclaimer is not None:
+                yield _event("delta", {"text": disclaimer})
             metadata = stream.metadata
             metadata.latency_ms = metadata.latency_ms or max(
                 0, round((perf_counter() - started) * 1000)
@@ -496,6 +527,9 @@ async def stream_chat(
         except TimeoutError:
             metadata = stream.metadata if stream is not None else ProviderMetadata()
             metadata.latency_ms = max(0, round((perf_counter() - started) * 1000))
+            disclaimer = _append_disclaimer(chunks, payload.locale) if chunks else None
+            if disclaimer is not None:
+                yield _event("delta", {"text": disclaimer})
             terminal = GenerationStatus.PARTIAL if chunks else GenerationStatus.ERROR
             await _terminalize(
                 session_factory,
@@ -518,12 +552,16 @@ async def stream_chat(
                 assistant_id=assistant.id,
                 generation_id=generation.id,
                 content="".join(chunks),
+                locale=payload.locale,
                 metadata=metadata,
             )
             raise
         except Exception:
             metadata = stream.metadata if stream is not None else ProviderMetadata()
             metadata.latency_ms = max(0, round((perf_counter() - started) * 1000))
+            disclaimer = _append_disclaimer(chunks, payload.locale) if chunks else None
+            if disclaimer is not None:
+                yield _event("delta", {"text": disclaimer})
             terminal = GenerationStatus.PARTIAL if chunks else GenerationStatus.ERROR
             await _terminalize(
                 session_factory,
@@ -550,6 +588,7 @@ async def stream_chat(
                 assistant_id=assistant.id,
                 generation_id=generation.id,
                 content="".join(chunks),
+                locale=payload.locale,
                 metadata=metadata,
             )
             raise
