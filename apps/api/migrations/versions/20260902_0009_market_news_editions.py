@@ -1,7 +1,7 @@
 """Add per-market daily news editions.
 
-Revision ID: 20260902_0008
-Revises: 20260901_0007
+Revision ID: 20260902_0009
+Revises: 20260902_0008
 """
 
 from collections.abc import Sequence
@@ -9,8 +9,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260902_0008"
-down_revision: str | None = "20260901_0007"
+revision: str = "20260902_0009"
+down_revision: str | None = "20260902_0008"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
