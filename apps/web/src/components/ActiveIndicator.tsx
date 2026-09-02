@@ -15,7 +15,7 @@ const variantClass: Record<IndicatorVariant, string> = {
   // Soft tinted background behind top-level navigation.
   pill: "rounded-md bg-lagoon/10",
   // Solid background for compact segmented controls.
-  chip: "rounded-md bg-lagoon-deep",
+  chip: "rounded-md bg-lagoon-deep shadow-[0_6px_16px_rgb(21_158_132/25%)]",
   // Bottom bar for tab rows.
   underline: "bg-lagoon",
 }
