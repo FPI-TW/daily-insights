@@ -2,15 +2,16 @@ import type { Locale, User } from "@daily-insights/api-client"
 import { Link, useLocation, useRouter } from "@tanstack/react-router"
 import { Settings, X } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
+import { Dialog } from "./Dialog"
 import type { ReactNode } from "react"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
   browserAuthClient,
   rememberCsrfToken,
   requireCsrfToken,
 } from "#/lib/auth"
-import { backdrop, dialogPanel, toast } from "#/lib/motion"
+import { toast } from "#/lib/motion"
 import { marketCodes } from "#/lib/provisional-reports"
 import { ActiveIndicator } from "./ActiveIndicator"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
@@ -41,7 +42,6 @@ export function AppShell({
   const [signOutError, setSignOutError] = useState("")
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsButtonRef = useRef<HTMLButtonElement>(null)
-  const settingsDialogRef = useRef<HTMLElement>(null)
   const closeSettingsButtonRef = useRef<HTMLButtonElement>(null)
   const pathname = location.pathname
   const customerSection = pathname.includes("/reports")
@@ -67,43 +67,10 @@ export function AppShell({
     year: "numeric",
   }).format(new Date())
 
-  useEffect(() => {
-    if (!settingsOpen) return
-
-    closeSettingsButtonRef.current?.focus()
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        closeSettings()
-        return
-      }
-      if (event.key !== "Tab") return
-
-      const focusableElements =
-        settingsDialogRef.current?.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        )
-      if (!focusableElements?.length) return
-
-      const first = focusableElements[0]
-      const last = focusableElements[focusableElements.length - 1]
-      if (!first || !last) return
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    document.addEventListener("keydown", handleKeyDown)
-    return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [settingsOpen])
-
-  function closeSettings() {
+  const closeSettings = useCallback(() => {
     setSettingsOpen(false)
     window.requestAnimationFrame(() => settingsButtonRef.current?.focus())
-  }
+  }, [])
 
   async function signOut() {
     setPending(true)
@@ -257,79 +224,62 @@ export function AppShell({
           </div>
         ) : null}
       </motion.header>
-      <AnimatePresence>
-        {settingsOpen ? (
-          <motion.div
-            className="fixed inset-0 z-30 grid place-items-center bg-sea-ink/35 p-4"
-            role="presentation"
-            onMouseDown={closeSettings}
-            variants={backdrop}
-            initial="hidden"
-            animate="visible"
-            exit="hidden"
+      <Dialog
+        open={settingsOpen}
+        onClose={closeSettings}
+        labelledBy="settings-title"
+        initialFocusRef={closeSettingsButtonRef}
+      >
+        <div className="flex items-center justify-between gap-4">
+          <h2
+            className="m-0 text-lg font-extrabold tracking-[-0.02em] text-sea-ink"
+            id="settings-title"
           >
-            <motion.section
-              className="w-full max-w-sm rounded-[13px] border border-line bg-surface p-5 shadow-xl"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="settings-title"
-              ref={settingsDialogRef}
-              onMouseDown={event => event.stopPropagation()}
-              variants={dialogPanel}
+            {t("settings")}
+          </h2>
+          <button
+            className="grid min-h-9 min-w-9 place-items-center rounded-md text-sea-ink-soft transition-colors hover:bg-link-hover hover:text-sea-ink"
+            type="button"
+            ref={closeSettingsButtonRef}
+            onClick={closeSettings}
+            aria-label={t("dismiss")}
+          >
+            <X className="size-4" aria-hidden="true" />
+          </button>
+        </div>
+        <div className="mt-5 grid gap-[18px]">
+          <div className="grid gap-2">
+            <p className="eyebrow tracking-[0.08em] text-sea-ink-soft">
+              {t("language")}
+            </p>
+            <LocaleSwitcher
+              locale={locale}
+              destination={localeDestination}
+              reportMarketCode={reportMarketCode}
+              variant="dialog"
+            />
+          </div>
+          <div className="grid gap-[9px] border-t border-line pt-[18px]">
+            <p className="eyebrow tracking-[0.08em] text-sea-ink-soft">
+              {t("theme")}
+            </p>
+            <ThemeModePicker />
+          </div>
+          <div className="grid gap-[9px] border-t border-line pt-[18px]">
+            <p className="m-0 truncate text-[11px] font-semibold text-sea-ink-soft">
+              {t("signedInAs", { email: user.email })}
+            </p>
+            <button
+              className="min-h-[38px] w-full rounded-lg border border-market-up/40 bg-surface px-3.5 py-2 text-[12.5px] font-extrabold text-market-up hover:bg-market-up/8"
+              type="button"
+              disabled={pending}
+              onClick={() => void signOut()}
             >
-              <div className="flex items-center justify-between gap-4">
-                <h2
-                  className="m-0 text-lg font-extrabold tracking-[-0.02em] text-sea-ink"
-                  id="settings-title"
-                >
-                  {t("settings")}
-                </h2>
-                <button
-                  className="grid min-h-9 min-w-9 place-items-center rounded-md text-sea-ink-soft transition-colors hover:bg-link-hover hover:text-sea-ink"
-                  type="button"
-                  ref={closeSettingsButtonRef}
-                  onClick={closeSettings}
-                  aria-label={t("dismiss")}
-                >
-                  <X className="size-4" aria-hidden="true" />
-                </button>
-              </div>
-              <div className="mt-5 grid gap-[18px]">
-                <div className="grid gap-2">
-                  <p className="eyebrow tracking-[0.08em] text-sea-ink-soft">
-                    {t("language")}
-                  </p>
-                  <LocaleSwitcher
-                    locale={locale}
-                    destination={localeDestination}
-                    reportMarketCode={reportMarketCode}
-                    fullWidth
-                  />
-                </div>
-                <div className="grid gap-[9px] border-t border-line pt-[18px]">
-                  <p className="eyebrow tracking-[0.08em] text-sea-ink-soft">
-                    {t("theme")}
-                  </p>
-                  <ThemeModePicker />
-                </div>
-                <div className="grid gap-[9px] border-t border-line pt-[18px]">
-                  <p className="m-0 truncate text-[11px] font-semibold text-sea-ink-soft">
-                    {t("signedInAs", { email: user.email })}
-                  </p>
-                  <button
-                    className="min-h-[38px] w-full rounded-lg border border-market-up/40 bg-surface px-3.5 py-2 text-[12.5px] font-extrabold text-market-up hover:bg-market-up/8"
-                    type="button"
-                    disabled={pending}
-                    onClick={() => void signOut()}
-                  >
-                    {pending ? t("submitting") : t("signOut")}
-                  </button>
-                </div>
-              </div>
-            </motion.section>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+              {pending ? t("submitting") : t("signOut")}
+            </button>
+          </div>
+        </div>
+      </Dialog>
       <AnimatePresence>
         {signOutError ? (
           <motion.p

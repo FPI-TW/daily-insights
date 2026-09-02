@@ -1,21 +1,16 @@
-import { useEffect, useState } from "react"
+import { useEffect, useSyncExternalStore } from "react"
 import { useTranslation } from "react-i18next"
 
 export type ThemeMode = "light" | "dark" | "auto"
 
 const themeModes: ReadonlyArray<ThemeMode> = ["light", "dark", "auto"]
 
-function getInitialMode(): ThemeMode {
-  if (typeof window === "undefined") {
-    return "light"
-  }
-
+function readStoredMode(): ThemeMode {
+  if (typeof window === "undefined") return "light"
   const stored = window.localStorage.getItem("theme")
-  if (stored === "light" || stored === "dark" || stored === "auto") {
-    return stored
-  }
-
-  return "light"
+  return stored === "light" || stored === "dark" || stored === "auto"
+    ? stored
+    : "light"
 }
 
 function applyThemeMode(mode: ThemeMode) {
@@ -34,38 +29,51 @@ function applyThemeMode(mode: ThemeMode) {
   document.documentElement.style.colorScheme = resolved
 }
 
-// Owns the persisted theme mode: reads localStorage after mount, applies the
-// mode to the document, and follows the OS preference while in "auto".
+// One store shared by every picker on the page (header settings dialog and
+// the account page), so a change in one is reflected in the other.
+let currentMode: ThemeMode = "light"
+const listeners = new Set<() => void>()
+
+function subscribe(listener: () => void) {
+  // First subscriber after a quiet period re-reads storage, which is also
+  // what makes each unit test start from its own localStorage.
+  if (listeners.size === 0) currentMode = readStoredMode()
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+function setThemeMode(mode: ThemeMode) {
+  currentMode = mode
+  applyThemeMode(mode)
+  window.localStorage.setItem("theme", mode)
+  for (const listener of listeners) listener()
+}
+
+// Persisted theme mode. The server renders "light"; after hydration the
+// stored mode takes over (the inline script in __root already applied the
+// matching class before first paint, so nothing flashes).
 export function useThemeMode() {
-  const [mode, setModeState] = useState<ThemeMode>("light")
+  const mode = useSyncExternalStore(
+    subscribe,
+    () => currentMode,
+    () => "light" as ThemeMode
+  )
 
   useEffect(() => {
-    const initialMode = getInitialMode()
-    setModeState(initialMode)
-    applyThemeMode(initialMode)
-  }, [])
-
-  useEffect(() => {
-    if (mode !== "auto") {
-      return
-    }
+    applyThemeMode(mode)
+    if (mode !== "auto") return
 
     const media = window.matchMedia("(prefers-color-scheme: dark)")
     const onChange = () => applyThemeMode("auto")
-
     media.addEventListener("change", onChange)
     return () => {
       media.removeEventListener("change", onChange)
     }
   }, [mode])
 
-  function setMode(nextMode: ThemeMode) {
-    setModeState(nextMode)
-    applyThemeMode(nextMode)
-    window.localStorage.setItem("theme", nextMode)
-  }
-
-  return { mode, setMode }
+  return { mode, setMode: setThemeMode }
 }
 
 // Miniature of each theme. The colours are deliberately literal: a preview
@@ -93,13 +101,26 @@ const previews: Record<
 const barWidths = ["60%", "100%", "75%"]
 
 // Three preview cards (light / dark / auto) behaving as one radio group.
-export function ThemeModePicker() {
+// "dialog": three equal columns, 46px thumbnails with three bars (settings
+// dialog). "row": three fixed 86px cards, 38px thumbnails with two bars
+// (account page setting row).
+export function ThemeModePicker({
+  variant = "dialog",
+}: {
+  variant?: "dialog" | "row"
+}) {
   const { t } = useTranslation()
   const { mode, setMode } = useThemeMode()
+  const row = variant === "row"
+  const barCount = row ? 2 : 3
 
   return (
     <div
-      className="grid grid-cols-3 gap-[9px]"
+      className={
+        row
+          ? "grid grid-cols-[repeat(3,86px)] gap-[9px] max-sm:grid-cols-3"
+          : "grid grid-cols-3 gap-[9px]"
+      }
       role="radiogroup"
       aria-label={t("theme")}
     >
@@ -109,7 +130,7 @@ export function ThemeModePicker() {
         return (
           <label
             key={option}
-            className={`grid cursor-pointer gap-2 rounded-[11px] border bg-surface p-[10px] transition-[border-color,box-shadow] duration-[180ms] ${
+            className={`grid cursor-pointer gap-2 rounded-[11px] border bg-surface transition-[border-color,box-shadow] duration-[180ms] ${row ? "p-2.5" : "p-[10px]"} ${
               selected
                 ? "border-lagoon-deep shadow-[0_0_0_2px_rgb(21_158_132/28%)]"
                 : "border-chip-line hover:border-lagoon-deep/45"
@@ -118,20 +139,20 @@ export function ThemeModePicker() {
             <input
               className="sr-only"
               type="radio"
-              name="theme-mode"
+              name={`theme-mode-${variant}`}
               value={option}
               checked={selected}
               onChange={() => setMode(option)}
             />
             <span
-              className="grid h-[46px] content-start gap-1 rounded-[7px] border border-line p-[7px] max-sm:h-10"
+              className={`grid content-start gap-1 rounded-[7px] border border-line p-[7px] ${row ? "h-[38px] max-sm:h-[34px]" : "h-[46px] max-sm:h-10"}`}
               style={{
                 background: preview.background,
                 borderColor: preview.border,
               }}
               aria-hidden="true"
             >
-              {preview.bars.map((color, index) => (
+              {preview.bars.slice(0, barCount).map((color, index) => (
                 <span
                   key={index}
                   className="h-[5px] rounded-[3px]"

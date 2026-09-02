@@ -483,7 +483,7 @@ test.describe("Customer account", () => {
     await authenticateAs(context, "org_member")
   })
 
-  test("shows the member profile without password controls", async ({
+  test("shows the member profile with preferences and a password dialog", async ({
     page,
     request,
   }) => {
@@ -491,19 +491,41 @@ test.describe("Customer account", () => {
     await page.getByRole("link", { name: "Account" }).click()
 
     await expect(page).toHaveURL("/en/account")
-    await expect(
-      page.getByRole("heading", { name: "Account profile" })
-    ).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Account" })).toBeVisible()
     await expect(
       page.getByRole("heading", { name: "E2E Member" })
     ).toBeVisible()
     await expect(page.getByText("org_member@example.test")).toBeVisible()
     await expect(page.getByText("Organization member")).toBeVisible()
-    await expect(page.getByLabel("Current password")).toHaveCount(0)
-    await expect(page.getByLabel("New password")).toHaveCount(0)
     await expect(
-      page.getByRole("button", { name: "Change password" })
-    ).toHaveCount(0)
+      page.getByRole("radiogroup", { name: "Appearance" })
+    ).toBeVisible()
+    await expect(page.getByLabel("Current password")).toHaveCount(0)
+
+    await page.getByRole("button", { name: "Change password" }).click()
+    const dialog = page.getByRole("dialog", { name: "Change password" })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByLabel("Current password")).toBeFocused()
+    await dialog
+      .getByLabel("Current password")
+      .fill(customerCredentials.password)
+    await dialog.getByLabel("New password").fill("short")
+    await dialog.getByRole("button", { name: "Change password" }).click()
+    await expect(dialog.getByLabel("New password")).toHaveAttribute(
+      "aria-invalid",
+      "true"
+    )
+    await dialog.getByLabel("New password").fill("new-password-1234")
+    await dialog.getByRole("button", { name: "Change password" }).click()
+    await expect(dialog).toBeHidden()
+    await expect(
+      page.getByText("Your password has been updated.")
+    ).toBeVisible()
+    expect(
+      (await getMockApiState(request)).requests.find(
+        item => item.path === "/api/auth/change-password"
+      )
+    ).toMatchObject({ role: "org_member" })
 
     await page.getByRole("button", { name: "Sign out" }).click()
     await expect(page).toHaveURL("/en/login")
