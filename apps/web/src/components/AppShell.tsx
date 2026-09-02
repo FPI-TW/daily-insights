@@ -1,6 +1,7 @@
 import type { Locale, User } from "@daily-insights/api-client"
 import { Link, useLocation, useRouter } from "@tanstack/react-router"
 import { Settings, X } from "lucide-react"
+import { AnimatePresence, motion } from "motion/react"
 import type { ReactNode } from "react"
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -9,6 +10,7 @@ import {
   rememberCsrfToken,
   requireCsrfToken,
 } from "#/lib/auth"
+import { backdrop, dialogPanel, toast } from "#/lib/motion"
 import { marketCodes } from "#/lib/provisional-reports"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
 import { LocaleSwitcher } from "./LocaleSwitcher"
@@ -211,76 +213,89 @@ export function AppShell({
           </div>
         ) : null}
       </header>
-      {settingsOpen ? (
-        <div
-          className="fixed inset-0 z-30 grid place-items-center bg-sea-ink/35 p-4"
-          role="presentation"
-          onMouseDown={closeSettings}
-        >
-          <section
-            className="w-full max-w-sm rounded-[13px] border border-line bg-surface p-5 shadow-xl"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="settings-title"
-            ref={settingsDialogRef}
-            onMouseDown={event => event.stopPropagation()}
+      <AnimatePresence>
+        {settingsOpen ? (
+          <motion.div
+            className="fixed inset-0 z-30 grid place-items-center bg-sea-ink/35 p-4"
+            role="presentation"
+            onMouseDown={closeSettings}
+            variants={backdrop}
+            initial="hidden"
+            animate="visible"
+            exit="hidden"
           >
-            <div className="flex items-center justify-between gap-4">
-              <h2
-                className="m-0 text-lg font-extrabold tracking-[-0.02em] text-sea-ink"
-                id="settings-title"
-              >
-                {t("settings")}
-              </h2>
-              <button
-                className="grid min-h-9 min-w-9 place-items-center rounded-md text-sea-ink-soft transition-colors hover:bg-link-hover hover:text-sea-ink"
-                type="button"
-                ref={closeSettingsButtonRef}
-                onClick={closeSettings}
-                aria-label={t("dismiss")}
-              >
-                <X className="size-4" aria-hidden="true" />
-              </button>
-            </div>
-            <div className="mt-5 space-y-5">
-              <div className="space-y-2">
-                <p className="m-0 text-xs font-extrabold tracking-[0.08em] text-sea-ink-soft uppercase">
-                  {t("language")}
-                </p>
-                <LocaleSwitcher
-                  locale={locale}
-                  destination={localeDestination}
-                  reportMarketCode={reportMarketCode}
-                />
-              </div>
-              <div className="flex items-center justify-between gap-4 border-t border-line pt-5">
-                <p className="m-0 text-sm font-bold text-sea-ink">
-                  {t("theme")}
-                </p>
-                <ThemeToggle />
-              </div>
-              <div className="border-t border-line pt-5">
-                <button
-                  className="min-h-9 w-full border border-market-up/40 px-3 py-1.5 text-xs font-extrabold text-market-up"
-                  type="button"
-                  disabled={pending}
-                  onClick={() => void signOut()}
+            <motion.section
+              className="w-full max-w-sm rounded-[13px] border border-line bg-surface p-5 shadow-xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="settings-title"
+              ref={settingsDialogRef}
+              onMouseDown={event => event.stopPropagation()}
+              variants={dialogPanel}
+            >
+              <div className="flex items-center justify-between gap-4">
+                <h2
+                  className="m-0 text-lg font-extrabold tracking-[-0.02em] text-sea-ink"
+                  id="settings-title"
                 >
-                  {pending ? t("submitting") : t("signOut")}
+                  {t("settings")}
+                </h2>
+                <button
+                  className="grid min-h-9 min-w-9 place-items-center rounded-md text-sea-ink-soft transition-colors hover:bg-link-hover hover:text-sea-ink"
+                  type="button"
+                  ref={closeSettingsButtonRef}
+                  onClick={closeSettings}
+                  aria-label={t("dismiss")}
+                >
+                  <X className="size-4" aria-hidden="true" />
                 </button>
               </div>
-            </div>
-          </section>
-        </div>
-      ) : null}
-      {signOutError ? (
-        <p
-          className="fixed right-4 bottom-4 z-30 rounded-lg border border-market-up/40 bg-surface px-3 py-2 text-xs font-bold text-market-up shadow-lg"
-          role="alert"
-        >
-          {signOutError}
-        </p>
-      ) : null}
+              <div className="mt-5 space-y-5">
+                <div className="space-y-2">
+                  <p className="m-0 text-xs font-extrabold tracking-[0.08em] text-sea-ink-soft uppercase">
+                    {t("language")}
+                  </p>
+                  <LocaleSwitcher
+                    locale={locale}
+                    destination={localeDestination}
+                    reportMarketCode={reportMarketCode}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-4 border-t border-line pt-5">
+                  <p className="m-0 text-sm font-bold text-sea-ink">
+                    {t("theme")}
+                  </p>
+                  <ThemeToggle />
+                </div>
+                <div className="border-t border-line pt-5">
+                  <button
+                    className="min-h-9 w-full border border-market-up/40 px-3 py-1.5 text-xs font-extrabold text-market-up"
+                    type="button"
+                    disabled={pending}
+                    onClick={() => void signOut()}
+                  >
+                    {pending ? t("submitting") : t("signOut")}
+                  </button>
+                </div>
+              </div>
+            </motion.section>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+      <AnimatePresence>
+        {signOutError ? (
+          <motion.p
+            className="fixed right-4 bottom-4 z-30 rounded-lg border border-market-up/40 bg-surface px-3 py-2 text-xs font-bold text-market-up shadow-lg"
+            role="alert"
+            variants={toast}
+            initial="hidden"
+            animate="visible"
+            exit="hidden"
+          >
+            {signOutError}
+          </motion.p>
+        ) : null}
+      </AnimatePresence>
       {children}
     </>
   )

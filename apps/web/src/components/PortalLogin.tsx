@@ -1,9 +1,11 @@
 import { ApiError, type Locale, type User } from "@daily-insights/api-client"
 import { useRouter } from "@tanstack/react-router"
+import { AnimatePresence, motion } from "motion/react"
 import { useState, type FormEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { browserAuthClient, rememberCsrfToken } from "#/lib/auth"
 import { canEnterBackOffice, canEnterCustomer } from "#/lib/authorization"
+import { toast } from "#/lib/motion"
 import { LocaleSwitcher } from "./LocaleSwitcher"
 
 type Portal = "customer" | "admin"
@@ -154,14 +156,20 @@ export function PortalLogin({
               required
             />
           </label>
-          {error ? (
-            <p
-              className="m-0 rounded-lg border border-market-up/35 bg-market-up/10 px-3 py-2 text-sm font-bold text-market-up"
-              role="alert"
-            >
-              {error}
-            </p>
-          ) : null}
+          <AnimatePresence>
+            {error ? (
+              <motion.p
+                className="m-0 rounded-lg border border-market-up/35 bg-market-up/10 px-3 py-2 text-sm font-bold text-market-up"
+                role="alert"
+                variants={toast}
+                initial="hidden"
+                animate="visible"
+                exit="hidden"
+              >
+                {error}
+              </motion.p>
+            ) : null}
+          </AnimatePresence>
           <button
             className={
               portal === "customer"
