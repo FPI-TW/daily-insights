@@ -8,11 +8,17 @@ from pathlib import Path
 from typing import Any
 
 EXPECTED_PROXY_NETWORK = "172.30.0.0/24"
-SERVICES = ("api", "web", "nginx", "morning-report-scheduler")
+SERVICES = ("api", "web", "nginx", "morning-report-scheduler", "daily-news-scheduler")
 API_ENVIRONMENT_KEYS = {
+    "DAILY_INSIGHTS_DAILY_NEWS_ENABLED",
     "DAILY_INSIGHTS_DATABASE_URL",
     "DAILY_INSIGHTS_ENVIRONMENT",
+    "DAILY_INSIGHTS_MODEL_API_BASE_URL",
+    "DAILY_INSIGHTS_MODEL_API_KEY",
+    "DAILY_INSIGHTS_MODEL_NAME",
+    "DAILY_INSIGHTS_MODEL_PROVIDER",
     "DAILY_INSIGHTS_MORNING_REPORTS_ENABLED",
+    "DAILY_INSIGHTS_NEWS_ALLOWED_HOSTNAMES",
     "DAILY_INSIGHTS_TWELVE_DATA_API_KEY",
     "DAILY_INSIGHTS_TWELVE_DATA_BASE_URL",
     "DAILY_INSIGHTS_PASSWORD_PEPPER",
@@ -39,7 +45,8 @@ def main() -> None:
     services = model.get("services", {})
     require(
         set(services) == set(SERVICES),
-        "production Compose must contain api/web/nginx and the gated morning-report scheduler",
+        "production Compose must contain api/web/nginx and the gated morning-report "
+        "and daily-news schedulers",
     )
 
     for name in SERVICES:
@@ -77,6 +84,28 @@ def main() -> None:
         == EXPECTED_PROXY_NETWORK,
         "API trusted proxy setting must match the app network",
     )
+    for scheduler, flag, secret in (
+        (
+            "morning-report-scheduler",
+            "DAILY_INSIGHTS_MORNING_REPORTS_ENABLED",
+            "DAILY_INSIGHTS_TWELVE_DATA_API_KEY",
+        ),
+        (
+            "daily-news-scheduler",
+            "DAILY_INSIGHTS_DAILY_NEWS_ENABLED",
+            "DAILY_INSIGHTS_MODEL_API_KEY",
+        ),
+    ):
+        scheduler_environment = services[scheduler].get("environment", {})
+        require(
+            scheduler_environment.get("DAILY_INSIGHTS_ENVIRONMENT") == "production",
+            f"{scheduler} environment must be production",
+        )
+        require(
+            {flag, secret, "DAILY_INSIGHTS_DATABASE_URL"}.issubset(scheduler_environment),
+            f"{scheduler} must receive its feature flag, provider credential, and database URL",
+        )
+        require(not services[scheduler].get("ports"), f"{scheduler} must not publish a host port")
     web_environment = services["web"].get("environment", {})
     require(web_environment.get("APP_ENV") == "production", "Web environment must be production")
     require(
