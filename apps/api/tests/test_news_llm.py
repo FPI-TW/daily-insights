@@ -1,11 +1,11 @@
 import uuid
-from typing import Any
+from typing import Any, get_args
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
-from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary
+from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary, SelectedCandidate
 from daily_insights_api.modules.news.llm import DeepSeekClient, ModelCallError, ModelOutputError
 from daily_insights_api.modules.news.prompts import SelectionCriteria
 from daily_insights_api.modules.news.service import _failed_audit
@@ -69,6 +69,12 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
     assert captured["CUSTOM_SELECTION_CRITERIA"] == criteria.text
     assert "regardless of the language" in str(captured["task"])
     assert "Return JSON only" in str(captured["task"])
+    contract = captured["OUTPUT_CONTRACT"]
+    assert isinstance(contract, dict)
+    # The closed vocabularies shown to the model must match the validated contract.
+    fields = SelectedCandidate.model_fields
+    assert set(contract["topic"]) == set(get_args(fields["topic"].annotation))
+    assert set(contract["market"]) == set(get_args(fields["market"].annotation))
     prompt_candidates = captured["CANDIDATES"]
     assert isinstance(prompt_candidates, list)
     assert [item["headline"] for item in prompt_candidates] == [value[1] for value in values]
