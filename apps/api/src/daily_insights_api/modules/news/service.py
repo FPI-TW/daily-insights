@@ -210,6 +210,7 @@ async def run_news_edition(
     *,
     allowed_hostnames: str,
     fetch_timeout_seconds: float = 25,
+    discovery_timeout_seconds: float = 60,
 ) -> str:
     """Discover, safely extract, then select and persist today's immutable edition.
 
@@ -220,11 +221,28 @@ async def run_news_edition(
     if edition_date != datetime.now(TAIPEI).date():
         raise ValueError("daily news only generates the current Taipei edition")
     allowed = configured_hostnames(allowed_hostnames)
-    try:
+
+    async def discover() -> list[Candidate]:
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(20), follow_redirects=False, cookies=None, trust_env=False
+            timeout=httpx.Timeout(discovery_timeout_seconds),
+            follow_redirects=False,
+            cookies=None,
+            trust_env=False,
         ) as http:
-            candidates = await discover_candidates(http, allowed)
+            return await discover_candidates(http, allowed)
+
+    def audit_discovery_failure(error: Exception) -> None:
+        status_code = (
+            error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
+        )
+        emit_event(
+            "news.candidates.attempt_failed",
+            error_code=type(error).__name__,
+            status_code=status_code,
+        )
+
+    try:
+        candidates = await _retry(discover, audit_discovery_failure)
     except Exception as error:
         emit_event("news.candidates.failed", error_code=type(error).__name__)
         candidates = []

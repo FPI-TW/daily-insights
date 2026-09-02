@@ -319,3 +319,30 @@ async def test_complete_edition_is_idempotent_but_unavailable_edition_regenerate
             )
             == 5
         )
+
+
+async def test_discovery_uses_configured_timeout_and_retries_once(
+    news_database: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempts: list[float] = []
+
+    async def flaky_discover(http: object, allowed: object) -> list[Candidate]:
+        del allowed
+        timeout = getattr(http, "timeout", None)
+        attempts.append(timeout.connect if timeout is not None else -1.0)
+        if len(attempts) == 1:
+            raise TimeoutError("gdelt slow")
+        return []
+
+    monkeypatch.setattr(
+        "daily_insights_api.modules.news.service.discover_candidates", flaky_discover
+    )
+    status = await run_news_edition(
+        news_database,
+        cast(DeepSeekClient, _CompleteNewsClient("a")),
+        datetime.now(TAIPEI).date(),
+        allowed_hostnames="www.reuters.com",
+        discovery_timeout_seconds=75,
+    )
+    assert status == "unavailable"
+    assert attempts == [75.0, 75.0]

@@ -88,7 +88,7 @@ async def test_runner_returns_edition_status_and_refreshes_heartbeat(
 ) -> None:
     heartbeat = Path(tmp_path / "heartbeat")
     settings = _settings(daily_news_enabled=True, news_allowed_hostnames="www.reuters.com")
-    seen: list[tuple[date, str, float]] = []
+    seen: list[tuple[date, str, float, float]] = []
 
     async def fake_run_news_edition(
         session_factory: object,
@@ -97,9 +97,12 @@ async def test_runner_returns_edition_status_and_refreshes_heartbeat(
         *,
         allowed_hostnames: str,
         fetch_timeout_seconds: float,
+        discovery_timeout_seconds: float,
     ) -> str:
         del session_factory, client
-        seen.append((edition_date, allowed_hostnames, fetch_timeout_seconds))
+        seen.append(
+            (edition_date, allowed_hostnames, fetch_timeout_seconds, discovery_timeout_seconds)
+        )
         return "unavailable"
 
     monkeypatch.setattr(run_daily_news, "run_news_edition", fake_run_news_edition)
@@ -111,5 +114,13 @@ async def test_runner_returns_edition_status_and_refreshes_heartbeat(
     )
 
     assert await runner(date(2026, 9, 2)) == "unavailable"
-    assert seen == [(date(2026, 9, 2), "www.reuters.com", settings.news_fetch_timeout_seconds)]
+    assert seen == [
+        (
+            date(2026, 9, 2),
+            "www.reuters.com",
+            settings.news_fetch_timeout_seconds,
+            settings.news_discovery_timeout_seconds,
+        )
+    ]
+    assert settings.news_discovery_timeout_seconds == 60
     assert await heartbeat.exists()

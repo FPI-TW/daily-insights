@@ -40,6 +40,7 @@ def build_runner(
                 target_date,
                 allowed_hostnames=settings.news_allowed_hostnames,
                 fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
+                discovery_timeout_seconds=settings.news_discovery_timeout_seconds,
             ),
             edition_date,
             heartbeat,
