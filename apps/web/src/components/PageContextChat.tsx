@@ -87,9 +87,11 @@ export function useChatPageContext(value: PageContext | null) {
 export function PageContextChatProvider({
   locale,
   children,
+  enabled,
 }: {
   locale: Locale
   children: ReactNode
+  enabled: boolean
 }) {
   const { t } = useTranslation()
   const location = useLocation()
@@ -117,7 +119,8 @@ export function PageContextChatProvider({
     quote: string
     context: PageContext
   } | null>(null)
-  const visible = location.pathname.includes("/reports") && pageContext !== null
+  const visible =
+    enabled && location.pathname.includes("/reports") && pageContext !== null
   const updatePageContext = useCallback((next: PageContext | null) => {
     setPageContext(next)
     setAttachedQuote("")

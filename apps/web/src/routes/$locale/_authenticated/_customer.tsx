@@ -35,7 +35,12 @@ export const Route = createFileRoute("/$locale/_authenticated/_customer")({
 function CustomerLayout() {
   const { locale, user } = Route.useRouteContext()
   return (
-    <PageContextChatProvider locale={locale}>
+    <PageContextChatProvider
+      locale={locale}
+      enabled={
+        user.system_role === "org_member" && user.organization_id !== null
+      }
+    >
       <AppShell locale={locale} user={user} surface="customer">
         <Outlet />
       </AppShell>
