@@ -18,19 +18,27 @@ export function DailyNewsLoading() {
   )
 }
 
-export function DailyNews({ news }: { news: LatestNews | null }) {
+export function DailyNews({
+  news,
+  eyebrowKey = "dailyNewsEyebrow",
+  titleKey = "dailyNewsTitle",
+}: {
+  news: LatestNews | null
+  eyebrowKey?: string
+  titleKey?: string
+}) {
   const { t } = useTranslation()
   const status = news?.status ?? "unavailable"
   return (
     <section className="mt-7" aria-labelledby="daily-news-title">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="eyebrow">{t("dailyNewsEyebrow")}</p>
+          <p className="eyebrow">{t(eyebrowKey)}</p>
           <h2
             id="daily-news-title"
             className="mt-1 mb-0 text-2xl font-extrabold tracking-[-0.03em] text-sea-ink"
           >
-            {t("dailyNewsTitle")}
+            {t(titleKey)}
           </h2>
         </div>
         <span className="rounded-full border border-line px-2.5 py-1 text-xs font-bold text-sea-ink-soft">
