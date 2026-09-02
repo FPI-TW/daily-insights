@@ -114,8 +114,13 @@ def test_feed_sources_are_tagged_per_market() -> None:
     for source in FEED_SOURCES:
         for market in source.markets:
             by_market.setdefault(market, set()).add(source.url)
-    assert by_market["tw_equity"] == {"https://news.cnyes.com/news/cat/tw_stock"}
-    assert "https://news.cnyes.com/news/cat/us_stock" in by_market["us_equity"]
+    assert by_market["tw_equity"] == {
+        "https://api.cnyes.com/media/api/v1/newslist/category/tw_stock?limit=30&page=1"
+    }
+    assert (
+        "https://api.cnyes.com/media/api/v1/newslist/category/us_stock?limit=30&page=1"
+        in by_market["us_equity"]
+    )
     assert "https://www.cnbc.com/id/10000664/device/rss/rss.html" in by_market["us_equity"]
     assert "https://feeds.bbci.co.uk/news/business/rss.xml" not in by_market["us_equity"]
     assert all(market in EDITION_SPECS for market in by_market)
@@ -138,4 +143,6 @@ async def test_discovery_reads_only_feeds_tagged_for_the_requested_market(
         await discover_feed_candidates(
             client, ALLOWED, datetime(2026, 9, 2, tzinfo=UTC), market="tw_equity"
         )
-    assert requested == ["https://news.cnyes.com/news/cat/tw_stock"]
+    assert requested == [
+        "https://api.cnyes.com/media/api/v1/newslist/category/tw_stock?limit=30&page=1"
+    ]

@@ -8,6 +8,7 @@ downstream SSRF-safe extraction contract is unchanged.
 """
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -69,24 +70,26 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         r"^https://apnews\.com/article/[a-z0-9-]+$",
         markets=frozenset({GLOBAL_MARKET, "us_equity"}),
     ),
+    # cnyes category pages are rendered client-side (the static HTML only
+    # carries the sidebar), so its public JSON list endpoint is used instead.
     FeedSource(
         "news.cnyes.com",
-        "https://news.cnyes.com/news/cat/headline",
-        "listing",
+        "https://api.cnyes.com/media/api/v1/newslist/category/headline?limit=30&page=1",
+        "cnyes_json",
         r"^https://news\.cnyes\.com/news/id/\d+$",
     ),
     FeedSource(
         "news.cnyes.com",
-        "https://news.cnyes.com/news/cat/tw_stock",
-        "listing",
+        "https://api.cnyes.com/media/api/v1/newslist/category/tw_stock?limit=30&page=1",
+        "cnyes_json",
         r"^https://news\.cnyes\.com/news/id/\d+$",
         markets=frozenset({"tw_equity"}),
         max_items=24,
     ),
     FeedSource(
         "news.cnyes.com",
-        "https://news.cnyes.com/news/cat/us_stock",
-        "listing",
+        "https://api.cnyes.com/media/api/v1/newslist/category/us_stock?limit=30&page=1",
+        "cnyes_json",
         r"^https://news\.cnyes\.com/news/id/\d+$",
         markets=frozenset({"us_equity"}),
         max_items=12,
@@ -138,7 +141,7 @@ def feed_client(timeout_seconds: float) -> httpx.AsyncClient:
         trust_env=False,
         headers={
             "User-Agent": USER_AGENT,
-            "Accept": "application/rss+xml, application/xml, text/xml, text/html",
+            "Accept": "application/rss+xml, application/xml, text/xml, application/json, text/html",
         },
     )
 
@@ -195,6 +198,32 @@ def parse_rss(
         if url is None or not title or not _within_window(seen_at, start, end):
             continue
         result.append(_candidate(url, title, seen_at, source))
+    return result
+
+
+def parse_cnyes_json(
+    payload: bytes, source: FeedSource, start: datetime, end: datetime
+) -> list[Candidate]:
+    """Map the cnyes list endpoint (items.data[] with newsId/title/publishAt)."""
+    document = json.loads(payload)
+    items = document.get("items") if isinstance(document, dict) else None
+    data = items.get("data") if isinstance(items, dict) else None
+    if not isinstance(data, list):
+        raise ValueError("cnyes list has no items.data array")
+    result: list[Candidate] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        news_id, title, published = item.get("newsId"), item.get("title"), item.get("publishAt")
+        if not isinstance(news_id, int) or not isinstance(title, str) or not title.strip():
+            continue
+        seen_at = (
+            datetime.fromtimestamp(published, UTC) if isinstance(published, int | float) else None
+        )
+        url = normalize_article_url(f"https://{source.hostname}/news/id/{news_id}", source)
+        if url is None or not _within_window(seen_at, start, end):
+            continue
+        result.append(_candidate(url, " ".join(title.split()), seen_at, source))
     return result
 
 
@@ -261,6 +290,8 @@ async def discover_feed_candidates(
             payload = await _read_capped(client, source.url)
             if source.kind == "rss":
                 found = parse_rss(payload, source, start, end)
+            elif source.kind == "cnyes_json":
+                found = parse_cnyes_json(payload, source, start, end)
             else:
                 found = parse_listing(payload.decode("utf-8", errors="replace"), source)
         except Exception as error:

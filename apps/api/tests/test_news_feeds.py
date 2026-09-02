@@ -19,7 +19,12 @@ START = datetime(2026, 9, 1, 3, 0, tzinfo=UTC)
 CNBC = next(source for source in FEED_SOURCES if source.hostname == "www.cnbc.com")
 BBC = next(source for source in FEED_SOURCES if source.hostname == "www.bbc.com")
 AP = next(source for source in FEED_SOURCES if source.hostname == "apnews.com")
-CNYES = next(source for source in FEED_SOURCES if source.hostname == "news.cnyes.com")
+CNYES = FeedSource(
+    "news.cnyes.com",
+    "https://news.cnyes.com/news/cat/headline",
+    "listing",
+    r"^https://news\.cnyes\.com/news/id/\d+$",
+)
 
 RSS = b"""<?xml version="1.0"?>
 <rss version="2.0"><channel><title>Business</title>
@@ -152,5 +157,28 @@ def test_feed_sources_only_reference_allowlisted_article_hosts() -> None:
         assert isinstance(source, FeedSource)
         assert source.hostname in default_hosts
         assert source.url.startswith("https://")
-        assert source.kind in {"rss", "listing"}
+        assert source.kind in {"rss", "listing", "cnyes_json"}
         assert source.kind == "rss" or source.link_pattern
+
+
+def test_cnyes_json_parsing_maps_ids_titles_and_publish_times() -> None:
+    from daily_insights_api.modules.news.feeds import parse_cnyes_json
+
+    source = next(s for s in FEED_SOURCES if "tw_stock" in s.url)
+    payload = b"""{"items":{"data":[
+      {"newsId":6594061,"title":"  \u3008SEMICON\u3009 \u7cbe\u6e2c  \u7522\u80fd",
+       "publishAt":1788316800},
+      {"newsId":6594062,"title":"Stale","publishAt":1756500000},
+      {"newsId":"bad","title":"Bad id","publishAt":1788316800},
+      {"newsId":6594063,"title":"","publishAt":1788316800},
+      {"newsId":6594064,"title":"No time"}
+    ]},"statusCode":200}"""
+    result = parse_cnyes_json(payload, source, START, NOW)
+    assert [(str(item.url), item.headline) for item in result] == [
+        ("https://news.cnyes.com/news/id/6594061", "\u3008SEMICON\u3009 \u7cbe\u6e2c \u7522\u80fd"),
+        ("https://news.cnyes.com/news/id/6594064", "No time"),
+    ]
+    assert result[0].seen_at == datetime(2026, 9, 2, 2, 40, tzinfo=UTC)
+    assert result[0].hostname == "news.cnyes.com" and result[0].source_name == "\u9245\u4ea8"
+    with pytest.raises(ValueError, match=r"items\.data"):
+        parse_cnyes_json(b'{"items": []}', source, START, NOW)
