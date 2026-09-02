@@ -40,6 +40,12 @@ def test_news_migration_matches_critical_orm_columns_and_constraints() -> None:
         assert columns <= set(Base.metadata.tables[table].columns.keys())
         assert all(f'"{column}"' in migration for column in columns)
     assert "rank_positive" in migration and "topic_valid" in migration
+    market_migration = (
+        Path(__file__).parents[1] / "migrations/versions/20260902_0009_market_news_editions.py"
+    ).read_text()
+    assert "market_code" in Base.metadata.tables["news_editions"].columns
+    assert '"market_code"' in market_migration and "market_code_valid" in market_migration
+    assert "market_code IN ('global','tw_equity','us_equity')" in _checks("news_editions")
 
 
 def test_migration_places_item_constraints_inside_news_items_create_table() -> None:

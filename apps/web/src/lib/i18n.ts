@@ -353,6 +353,12 @@ const resources: Resource = {
       dailyNewsStatus_unavailable: "暫不可用",
       dailyNewsUnavailable: "本日重大新聞尚未產生，請稍後再試。",
       dailyNewsLoadFailed: "本日重大新聞暫時無法載入，報告內容不受影響。",
+      marketNewsEyebrow: "市場新聞",
+      marketNewsTitle_tw_equity: "台股重點新聞",
+      marketNewsTitle_us_equity: "美股重點新聞",
+      reportNotLaunchedTitle: "報告尚未推出",
+      reportNotLaunchedDescription:
+        "此市場的正式晨間報告仍在準備中，目前先提供每日市場新聞。",
       dailyNewsImportance: "重要性 {{count}} 星",
       dailyNewsTimeUnknown: "時間未提供",
       dailyNewsSourceLink: "閱讀原文",
@@ -708,6 +714,12 @@ const resources: Resource = {
       dailyNewsStatus_unavailable: "暂不可用",
       dailyNewsUnavailable: "本日重大新闻尚未生成，请稍后再试。",
       dailyNewsLoadFailed: "本日重大新闻暂时无法加载，报告内容不受影响。",
+      marketNewsEyebrow: "市场新闻",
+      marketNewsTitle_tw_equity: "台股重点新闻",
+      marketNewsTitle_us_equity: "美股重点新闻",
+      reportNotLaunchedTitle: "报告尚未推出",
+      reportNotLaunchedDescription:
+        "该市场的正式晨间报告仍在准备中，目前先提供每日市场新闻。",
       dailyNewsImportance: "重要性 {{count}} 星",
       dailyNewsTimeUnknown: "未提供时间",
       dailyNewsSourceLink: "阅读原文",
@@ -1081,6 +1093,12 @@ const resources: Resource = {
         "Today’s major news has not been generated yet. Please try again later.",
       dailyNewsLoadFailed:
         "Today’s major news could not be loaded right now. Reports are unaffected.",
+      marketNewsEyebrow: "MARKET NEWS",
+      marketNewsTitle_tw_equity: "Taiwan equities news",
+      marketNewsTitle_us_equity: "US equities news",
+      reportNotLaunchedTitle: "Report not launched yet",
+      reportNotLaunchedDescription:
+        "The formal morning report for this market is still in preparation; daily market news is available now.",
       dailyNewsImportance: "Importance {{count}} stars",
       dailyNewsTimeUnknown: "Time unavailable",
       dailyNewsSourceLink: "Read source",

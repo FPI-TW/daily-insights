@@ -13,14 +13,15 @@ import {
   ReportList,
   ReportLoadingScreen,
   ReportNotGeneratedScreen,
+  ReportNotLaunchedScreen,
 } from "./Reports"
 import { LocaleSwitcher } from "./LocaleSwitcher"
 import { createI18n } from "#/lib/i18n"
+import type { ProvisionalReport } from "#/lib/provisional-reports"
 import {
   getProvisionalReport,
   getProvisionalReportList,
-  type ProvisionalReport,
-} from "#/lib/provisional-reports"
+} from "#/test/report-fixtures"
 
 const invalidate = vi.fn()
 let renderClientOnlyFallback = false
@@ -70,18 +71,28 @@ async function renderLocalized(
 }
 
 describe("three-market report presentation", () => {
-  it("shows only three formal market tabs and keeps Taiwan direct routes available", async () => {
+  it("lists the three launch markets plus the Taiwan news tab and keeps Taiwan derivatives out", async () => {
     const reports = await getProvisionalReportList()
     await renderLocalized(<ReportList locale="en" reports={reports} />, "en")
-    expect(screen.getByRole("navigation").querySelectorAll("a")).toHaveLength(4)
-    expect(screen.queryByText("Taiwan equities")).not.toBeInTheDocument()
+    const links = screen.getByRole("navigation").querySelectorAll("a")
+    expect(links).toHaveLength(5)
+    expect(links[4]).toHaveTextContent("Taiwan equities")
+    expect(screen.queryByText(/derivatives/i)).not.toBeInTheDocument()
+    // Report cards still come only from the API launch list.
+    expect(screen.getAllByRole("article")).toHaveLength(3)
+  })
 
-    const taiwan = await getProvisionalReport("tw_equity")
-    if (!taiwan) throw new Error("Expected Taiwan preview fixture")
-    await renderLocalized(<ReportDetail locale="en" report={taiwan} />, "en")
-    expect(
-      screen.queryByText(/Not launched \/ illustrative data/)
-    ).not.toBeInTheDocument()
+  it("renders the not-launched state for a navigable market without a report", async () => {
+    await renderLocalized(
+      <ReportNotLaunchedScreen locale="en" marketCode="tw_equity" />,
+      "en"
+    )
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Report not launched yet"
+    )
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Taiwan equities"
+    )
   })
   it("uses an accessible in-frame fallback before chart hydration", async () => {
     const crypto = await getProvisionalReport("crypto")

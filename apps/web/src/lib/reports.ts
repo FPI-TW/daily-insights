@@ -15,7 +15,8 @@ import {
 } from "@tanstack/react-start/server"
 import { z } from "zod"
 import {
-  getTaiwanPreviewReport,
+  type MarketCode,
+  navMarketCodes,
   type ProvisionalReport,
   type ReportBlock,
   type ReportValue,
@@ -163,10 +164,18 @@ export const getReportDetail = createServerFn({ method: "GET" })
   .validator(detailInputSchema)
   .handler(async ({ data }) => {
     setResponseHeader("Cache-Control", "no-store")
-    const preview = getTaiwanPreviewReport(data.marketCode)
-    if (preview) return { kind: "report" as const, report: preview }
     const parsed = launchMarketCodeSchema.safeParse(data.marketCode)
-    if (!parsed.success) return { kind: "not-found" as const }
+    if (!parsed.success) {
+      // A navigable market without a launched report (Taiwan equities) shows
+      // the not-launched state; anything else is a 404.
+      if ((navMarketCodes as readonly string[]).includes(data.marketCode)) {
+        return {
+          kind: "not-launched" as const,
+          marketCode: data.marketCode as MarketCode,
+        }
+      }
+      return { kind: "not-found" as const }
+    }
     const marketCode = parsed.data
     try {
       return {

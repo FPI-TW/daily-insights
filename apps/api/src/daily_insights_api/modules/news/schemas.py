@@ -20,6 +20,8 @@ class NewsItemResponse(BaseModel):
 
 
 class LatestNewsResponse(BaseModel):
+    market_code: str
+    target_items: int
     edition_id: uuid.UUID | None
     edition_date: date | None
     revision: int | None

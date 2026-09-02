@@ -5,8 +5,8 @@ import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { Locale } from "@daily-insights/api-client"
 import {
-  launchMarketCodes,
   type MarketCode,
+  navMarketCodes,
   type ProvisionalReport,
   type ReportBlock,
   type ReportValue,
@@ -76,7 +76,7 @@ function ReportMarketNav({
       >
         {t("reportAllMarkets")}
       </Link>
-      {launchMarketCodes.map(code => (
+      {navMarketCodes.map(code => (
         <Link
           key={code}
           to="/$locale/reports/$marketCode"
@@ -514,12 +514,38 @@ export function ReportErrorScreen({ error }: { error: Error }) {
   )
 }
 
+export function ReportNotLaunchedScreen({
+  locale,
+  marketCode,
+}: {
+  locale: Locale
+  marketCode: MarketCode
+}) {
+  const { t } = useTranslation()
+  return (
+    <main className="page-shell">
+      <PageHeading title={t(`reportMarket_${marketCode}`)} />
+      <ReportMarketNav locale={locale} activeMarket={marketCode} />
+      <section
+        className="surface-panel p-10 text-center"
+        role="status"
+        aria-live="polite"
+      >
+        <h2 className="mt-0 text-xl">{t("reportNotLaunchedTitle")}</h2>
+        <p className="mb-0 text-sm text-sea-ink-soft">
+          {t("reportNotLaunchedDescription")}
+        </p>
+      </section>
+    </main>
+  )
+}
+
 export function ReportNotGeneratedScreen({
   locale,
   marketCode,
 }: {
   locale: Locale
-  marketCode: (typeof launchMarketCodes)[number]
+  marketCode: MarketCode
 }) {
   const { t } = useTranslation()
   return (

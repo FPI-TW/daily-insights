@@ -145,8 +145,11 @@ def parse_args(
     args: list[str] | None = None,
     *,
     description: str = "Run the three-market morning-report scheduler",
+    configure: Callable[[argparse.ArgumentParser], None] | None = None,
 ) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--once", action="store_true", help="run one edition and exit")
     parser.add_argument("--edition-date", type=date.fromisoformat)
+    if configure is not None:
+        configure(parser)
     return parser.parse_args(args)

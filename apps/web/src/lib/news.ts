@@ -1,6 +1,7 @@
 import {
   createNewsClient,
   localeSchema,
+  newsMarketCodeSchema,
   type LatestNews,
 } from "@daily-insights/api-client"
 import { createServerTransport } from "@daily-insights/api-client/server"
@@ -9,6 +10,12 @@ import {
   getRequestHeader,
   setResponseHeader,
 } from "@tanstack/react-start/server"
+import { z } from "zod"
+
+const marketNewsInputSchema = z.object({
+  locale: localeSchema,
+  marketCode: newsMarketCodeSchema,
+})
 
 function serverNewsClient() {
   const apiUrl = process.env.API_INTERNAL_URL
@@ -28,4 +35,11 @@ export const getLatestNews = createServerFn({ method: "GET" })
   .handler(async ({ data: locale }): Promise<LatestNews> => {
     setResponseHeader("Cache-Control", "no-store")
     return serverNewsClient().latest(locale)
+  })
+
+export const getMarketNews = createServerFn({ method: "GET" })
+  .validator(marketNewsInputSchema)
+  .handler(async ({ data }): Promise<LatestNews> => {
+    setResponseHeader("Cache-Control", "no-store")
+    return serverNewsClient().latestForMarket(data.locale, data.marketCode)
   })

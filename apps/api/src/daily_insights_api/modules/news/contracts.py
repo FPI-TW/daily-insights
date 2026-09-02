@@ -24,28 +24,23 @@ class SelectedCandidate(StrictModel):
     id: str = Field(pattern=r"^[a-f0-9]{64}$")
     topic: Literal["markets", "economy", "companies", "policy", "technology", "commodities"]
     event_key: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{2,79}$")
-    market: Literal["global", "us", "asia", "china", "europe", "commodities", "crypto"]
+    market: Literal["global", "us", "asia", "china", "taiwan", "europe", "commodities", "crypto"]
     importance: int = Field(ge=1, le=5)
 
 
 class Selection(StrictModel):
-    selections: tuple[SelectedCandidate, ...] = Field(max_length=5)
+    """Structural contract only; per-edition limits live in SelectionPolicy."""
+
+    selections: tuple[SelectedCandidate, ...] = Field(max_length=10)
 
     @model_validator(mode="after")
-    def unique_event_and_diversity_checked(self) -> "Selection":
+    def unique_ids_and_event_keys(self) -> "Selection":
         ids = [item.id for item in self.selections]
         if len(ids) != len(set(ids)):
             raise ValueError("selected candidates must be unique")
         event_keys = [item.event_key for item in self.selections]
         if len(event_keys) != len(set(event_keys)):
             raise ValueError("selected candidates must have unique event keys")
-        if len(self.selections) >= 3:
-            topics = {item.topic for item in self.selections}
-            markets = {item.market for item in self.selections}
-            if len(topics) < 2:
-                raise ValueError("three or more selections must cover at least two topics")
-            if len(markets) < 2:
-                raise ValueError("three or more selections must cover at least two markets")
         return self
 
 

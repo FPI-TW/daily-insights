@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest"
 import {
+  isNewsMarketCode,
+  launchMarketCodes,
+  navMarketCodes,
+  newsMarketCodes,
+} from "#/lib/provisional-reports"
+import {
   getProvisionalReport,
   getProvisionalReportList,
-  getTaiwanPreviewReport,
-  launchMarketCodes,
-} from "./provisional-reports"
+} from "./report-fixtures"
 
 describe("provisional reports adapter", () => {
   it("returns exactly the approved markets in fixed order", async () => {
@@ -31,9 +35,11 @@ describe("provisional reports adapter", () => {
     ).resolves.toBeUndefined()
   })
 
-  it("retains Taiwan routes only as clearly marked previews", () => {
-    expect(getTaiwanPreviewReport("tw_equity")?.preview).toBe(true)
-    expect(getTaiwanPreviewReport("tw_index_derivatives")?.preview).toBe(true)
-    expect(getTaiwanPreviewReport("crypto")).toBeUndefined()
+  it("navigates the launch markets plus Taiwan, and publishes news for Taiwan and US", () => {
+    expect(navMarketCodes).toEqual([...launchMarketCodes, "tw_equity"])
+    expect(newsMarketCodes).toEqual(["tw_equity", "us_equity"])
+    expect(isNewsMarketCode("tw_equity")).toBe(true)
+    expect(isNewsMarketCode("crypto")).toBe(false)
+    expect(isNewsMarketCode("tw_index_derivatives")).toBe(false)
   })
 })

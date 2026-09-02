@@ -52,37 +52,25 @@ def test_selection_rejects_duplicate_ids() -> None:
         )
 
 
-def test_selection_requires_topic_and_market_diversity_for_three_or_more_items() -> None:
+def test_selection_contract_is_structural_and_allows_market_editions_up_to_ten() -> None:
     selection = [
         {
             "id": character * 64,
             "topic": "markets",
             "event_key": f"event-{index}",
-            "market": "global",
+            "market": "taiwan",
             "importance": 4,
         }
-        for index, character in enumerate(("a", "b", "c"), start=1)
+        for index, character in enumerate("abcdef01", start=1)
     ]
-    with pytest.raises(ValueError, match="two topics"):
-        Selection.model_validate({"selections": selection})
-
-    diverse_topics = [
-        {**selection[1], "topic": "economy"},
-        {**selection[2], "topic": "companies"},
-    ]
-    with pytest.raises(ValueError, match="two markets"):
-        Selection.model_validate({"selections": [selection[0], *diverse_topics]})
-
-    valid = Selection.model_validate(
-        {
-            "selections": [
-                selection[0],
-                {**selection[1], "topic": "economy", "market": "us"},
-                {**selection[2], "topic": "companies", "market": "asia"},
-            ]
-        }
-    )
-    assert len(valid.selections) == 3
+    # Diversity and per-domain limits are edition policy, not contract shape.
+    assert len(Selection.model_validate({"selections": selection}).selections) == 8
+    with pytest.raises(ValueError, match="unique event keys"):
+        Selection.model_validate(
+            {"selections": [selection[0], {**selection[1], "event_key": "event-1"}]}
+        )
+    with pytest.raises(ValueError):
+        Selection.model_validate({"selections": selection + selection[:3]})
 
 
 def test_contracts_do_not_have_article_body_fields() -> None:

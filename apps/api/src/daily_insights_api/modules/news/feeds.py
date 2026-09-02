@@ -8,6 +8,7 @@ downstream SSRF-safe extraction contract is unchanged.
 """
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -20,6 +21,7 @@ from defusedxml import ElementTree
 
 from daily_insights_api.core.observability import emit_event
 from daily_insights_api.modules.news.contracts import Candidate
+from daily_insights_api.modules.news.editions import GLOBAL_MARKET
 from daily_insights_api.modules.news.sources import (
     SOURCE_NAMES,
     _dedupe_candidates,
@@ -39,6 +41,9 @@ class FeedSource:
     kind: str
     link_pattern: str | None = None
     host_rewrites: tuple[tuple[str, str], ...] = ()
+    # Which editions read this feed; "global" is the daily digest.
+    markets: frozenset[str] = frozenset({GLOBAL_MARKET})
+    max_items: int = MAX_PER_FEED
 
 
 # Reuters is deliberately absent: it answers non-browser requests with 401, so
@@ -49,6 +54,7 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "https://www.cnbc.com/id/10000664/device/rss/rss.html",
         "rss",
         r"^https://www\.cnbc\.com/\d{4}/\d{2}/\d{2}/[a-z0-9-]+\.html$",
+        markets=frozenset({GLOBAL_MARKET, "us_equity"}),
     ),
     FeedSource(
         "www.bbc.com",
@@ -62,12 +68,31 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "https://apnews.com/business",
         "listing",
         r"^https://apnews\.com/article/[a-z0-9-]+$",
+        markets=frozenset({GLOBAL_MARKET, "us_equity"}),
+    ),
+    # cnyes category pages are rendered client-side (the static HTML only
+    # carries the sidebar), so its public JSON list endpoint is used instead.
+    FeedSource(
+        "news.cnyes.com",
+        "https://api.cnyes.com/media/api/v1/newslist/category/headline?limit=30&page=1",
+        "cnyes_json",
+        r"^https://news\.cnyes\.com/news/id/\d+$",
     ),
     FeedSource(
         "news.cnyes.com",
-        "https://news.cnyes.com/news/cat/headline",
-        "listing",
+        "https://api.cnyes.com/media/api/v1/newslist/category/tw_stock?limit=30&page=1",
+        "cnyes_json",
         r"^https://news\.cnyes\.com/news/id/\d+$",
+        markets=frozenset({"tw_equity"}),
+        max_items=24,
+    ),
+    FeedSource(
+        "news.cnyes.com",
+        "https://api.cnyes.com/media/api/v1/newslist/category/us_stock?limit=30&page=1",
+        "cnyes_json",
+        r"^https://news\.cnyes\.com/news/id/\d+$",
+        markets=frozenset({"us_equity"}),
+        max_items=12,
     ),
     FeedSource(
         "finance.eastmoney.com",
@@ -116,7 +141,7 @@ def feed_client(timeout_seconds: float) -> httpx.AsyncClient:
         trust_env=False,
         headers={
             "User-Agent": USER_AGENT,
-            "Accept": "application/rss+xml, application/xml, text/xml, text/html",
+            "Accept": "application/rss+xml, application/xml, text/xml, application/json, text/html",
         },
     )
 
@@ -176,6 +201,32 @@ def parse_rss(
     return result
 
 
+def parse_cnyes_json(
+    payload: bytes, source: FeedSource, start: datetime, end: datetime
+) -> list[Candidate]:
+    """Map the cnyes list endpoint (items.data[] with newsId/title/publishAt)."""
+    document = json.loads(payload)
+    items = document.get("items") if isinstance(document, dict) else None
+    data = items.get("data") if isinstance(items, dict) else None
+    if not isinstance(data, list):
+        raise ValueError("cnyes list has no items.data array")
+    result: list[Candidate] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        news_id, title, published = item.get("newsId"), item.get("title"), item.get("publishAt")
+        if not isinstance(news_id, int) or not isinstance(title, str) or not title.strip():
+            continue
+        seen_at = (
+            datetime.fromtimestamp(published, UTC) if isinstance(published, int | float) else None
+        )
+        url = normalize_article_url(f"https://{source.hostname}/news/id/{news_id}", source)
+        if url is None or not _within_window(seen_at, start, end):
+            continue
+        result.append(_candidate(url, " ".join(title.split()), seen_at, source))
+    return result
+
+
 def parse_listing(payload: str, source: FeedSource) -> list[Candidate]:
     collector = _AnchorCollector()
     collector.feed(payload)
@@ -218,8 +269,10 @@ async def discover_feed_candidates(
     client: httpx.AsyncClient,
     allowed: frozenset[str],
     now: datetime | None = None,
+    *,
+    market: str = GLOBAL_MARKET,
 ) -> list[Candidate]:
-    """Read every configured feed whose article host is allowlisted.
+    """Read every feed tagged for ``market`` whose article host is allowlisted.
 
     Failures are isolated per feed and reported as events; the function never
     raises, so a broken publisher cannot take the whole edition down.
@@ -228,7 +281,7 @@ async def discover_feed_candidates(
     start = end - timedelta(hours=24)
     result: list[Candidate] = []
     for source in FEED_SOURCES:
-        if not allowed_hostname(source.hostname, allowed):
+        if market not in source.markets or not allowed_hostname(source.hostname, allowed):
             continue
         feed_host = (urlparse(source.url).hostname or "").lower()
         try:
@@ -237,6 +290,8 @@ async def discover_feed_candidates(
             payload = await _read_capped(client, source.url)
             if source.kind == "rss":
                 found = parse_rss(payload, source, start, end)
+            elif source.kind == "cnyes_json":
+                found = parse_cnyes_json(payload, source, start, end)
             else:
                 found = parse_listing(payload.decode("utf-8", errors="replace"), source)
         except Exception as error:
@@ -246,7 +301,13 @@ async def discover_feed_candidates(
                 error_code=type(error).__name__,
             )
             continue
-        found = found[:MAX_PER_FEED]
-        emit_event("news.feed.discovered", hostname=source.hostname, count=len(found))
+        found = found[: source.max_items]
+        emit_event(
+            "news.feed.discovered",
+            hostname=source.hostname,
+            feed=source.url,
+            market=market,
+            count=len(found),
+        )
         result.extend(found)
     return _dedupe_candidates(result)

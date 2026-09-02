@@ -348,9 +348,10 @@ Deliver:
 - complete three-locale labels, units, policy behavior, loading/null/chart-gap
   states, and report failure states. AI summary is not part of this phase.
 
-Taiwan equities and Taiwan index derivatives retain direct-URL mock previews but
-have no report navigation, list entry, manifest block, or production publication.
-FX, Hong Kong, and Mainland China also remain outside the first-wave manifest.
+Taiwan equities has a navigable not-launched page that shows its market news
+edition but no report content, list entry, manifest block, or production
+publication; the former direct-URL mock previews are gone. FX, Hong Kong, and
+Mainland China also remain outside the first-wave manifest.
 
 Accept when:
 

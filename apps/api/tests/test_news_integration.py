@@ -53,7 +53,8 @@ class _DeterministicNewsClient:
         self.selection_prompt_digest = prompt_marker * 64
         self.selection_prompt_version = f"selection-v3:{prompt_marker * 12}"
 
-    async def select(self, candidates: list[FetchedCandidate]) -> ModelCall:
+    async def select(self, candidates: list[FetchedCandidate], **kwargs: object) -> ModelCall:
+        del kwargs
         return ModelCall(
             Selection.model_validate(
                 {
@@ -212,7 +213,8 @@ async def test_partial_editions_regenerate_and_revisions_are_prompt_sensitive(
 
 
 class _CompleteNewsClient(_DeterministicNewsClient):
-    async def select(self, candidates: list[FetchedCandidate]) -> ModelCall:
+    async def select(self, candidates: list[FetchedCandidate], **kwargs: object) -> ModelCall:
+        del kwargs
         return ModelCall(
             Selection.model_validate(
                 {
@@ -357,8 +359,10 @@ async def test_feed_discovery_supplies_candidates_when_gdelt_is_down(
         del http, allowed
         raise ConnectionError("gdelt refused")
 
-    async def feeds(http: object, allowed: object, now: object = None) -> list[Candidate]:
-        del http, allowed, now
+    async def feeds(
+        http: object, allowed: object, now: object = None, **kwargs: object
+    ) -> list[Candidate]:
+        del http, allowed, now, kwargs
         return [item.candidate for item in candidates]
 
     fetched_inputs: list[list[Candidate]] = []
@@ -382,3 +386,65 @@ async def test_feed_discovery_supplies_candidates_when_gdelt_is_down(
     )
     assert status == "partial"
     assert sorted(candidate.id for candidate in fetched_inputs[0]) == ["a" * 64, "b" * 64]
+
+
+async def test_market_edition_is_independent_from_the_global_digest(
+    news_database: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from daily_insights_api.modules.news.editions import TW_EQUITY_SPEC
+    from daily_insights_api.modules.news.service import run_all_editions
+
+    candidates = _five_candidates()
+    feed_markets: list[str] = []
+
+    async def gdelt(http: object, allowed: object) -> list[Candidate]:
+        del http, allowed
+        return []
+
+    async def feeds(
+        http: object, allowed: object, now: object = None, *, market: str = "global"
+    ) -> list[Candidate]:
+        del http, allowed, now
+        feed_markets.append(market)
+        return [item.candidate for item in candidates]
+
+    async def fetch(*args: object, **kwargs: object) -> list[FetchedCandidate]:
+        del args, kwargs
+        return candidates
+
+    monkeypatch.setattr("daily_insights_api.modules.news.service.discover_candidates", gdelt)
+    monkeypatch.setattr("daily_insights_api.modules.news.service.discover_feed_candidates", feeds)
+    monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
+    edition_date = datetime.now(TAIPEI).date()
+    client = cast(DeepSeekClient, _CompleteNewsClient("a"))
+    allowed = "www.reuters.com,apnews.com,www.bbc.com,www.cnbc.com,news.cnyes.com"
+
+    status = await run_news_edition(
+        news_database, client, edition_date, allowed_hostnames=allowed, spec=TW_EQUITY_SPEC
+    )
+    # Five stories against a target of eight is a partial market edition.
+    assert status == "partial"
+    assert feed_markets == ["tw_equity"]
+
+    # The global digest still starts at revision 1 with its own idempotency.
+    assert (
+        await run_news_edition(news_database, client, edition_date, allowed_hostnames=allowed)
+        == "complete"
+    )
+    assert (
+        await run_all_editions(news_database, client, edition_date, allowed_hostnames=allowed)
+        == "partial"
+    )
+
+    async with news_database() as database:
+        rows = list(
+            await database.scalars(
+                select(NewsEdition).order_by(NewsEdition.market_code, NewsEdition.revision)
+            )
+        )
+        assert [(row.market_code, row.revision, row.status, row.caveat) for row in rows] == [
+            ("global", 1, "complete", "5/5 stories completed"),
+            ("tw_equity", 1, "partial", "5/8 stories completed"),
+            ("tw_equity", 2, "partial", "5/8 stories completed"),
+            ("us_equity", 1, "partial", "5/8 stories completed"),
+        ]
