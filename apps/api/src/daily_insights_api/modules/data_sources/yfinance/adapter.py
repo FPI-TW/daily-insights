@@ -13,16 +13,21 @@ import math
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Any
-
-import yfinance
-from pandas import DataFrame, Timestamp
+from typing import TYPE_CHECKING, Any
 
 from daily_insights_api.modules.data_sources.dto import DailyBar, MarketCode, Provenance
 from daily_insights_api.modules.data_sources.errors import (
     DataSourceContractError,
     DataSourceTransientError,
 )
+
+if TYPE_CHECKING:
+    from pandas import DataFrame
+
+# yfinance and pandas cost roughly 86MB of resident memory and 0.3s to import.
+# This module is reached through data_sources.api by the API process and the
+# morning-report scheduler, neither of which touches Yahoo, and the feature is
+# off by default, so both imports are deferred to the functions that use them.
 
 YFINANCE_CONTRACT_VERSION = "2026-09-03.v1"
 YFINANCE_CONTRACT_HASH = hashlib.sha256(
@@ -56,6 +61,8 @@ class YfinanceAdapter:
         timeout_seconds: float = 10.0,
         timezone_cache_directory: str = DEFAULT_TIMEZONE_CACHE_DIRECTORY,
     ) -> None:
+        import yfinance
+
         yfinance.set_tz_cache_location(timezone_cache_directory)
         # Without this yfinance swallows upstream failures and returns an empty
         # frame, which is indistinguishable from a symbol that has no data.
@@ -79,7 +86,10 @@ class YfinanceAdapter:
             fetched_at=datetime.now(UTC),
         )
 
-    def _history(self, symbol: str, period: str) -> DataFrame:
+    def _history(self, symbol: str, period: str) -> "DataFrame":
+        import yfinance
+        from pandas import DataFrame
+
         try:
             frame = yfinance.Ticker(symbol).history(
                 period=period,
@@ -103,10 +113,12 @@ def normalize_daily_bars(
     market: MarketCode,
     symbol: str,
     period: str,
-    frame: DataFrame,
+    frame: "DataFrame",
     fetched_at: datetime,
 ) -> DailyBarsResult:
     """Validate the frame at the trust boundary and map it to normalized DTOs."""
+    from pandas import Timestamp
+
     missing = [column for column in REQUIRED_COLUMNS if column not in frame.columns]
     if missing:
         raise DataSourceContractError(

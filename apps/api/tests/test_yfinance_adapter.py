@@ -1,4 +1,6 @@
 import asyncio
+import subprocess
+import sys
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import cast, get_args
@@ -150,3 +152,21 @@ def test_an_untracked_symbol_is_refused_before_the_lookup() -> None:
                 period="7d",
             )
         )
+
+
+def test_the_public_data_source_interface_does_not_import_yfinance() -> None:
+    # yfinance drags in pandas and numpy, roughly 66MB and 0.2s per process.
+    # data_sources.api is imported by the API and the morning-report scheduler,
+    # neither of which touches Yahoo, so the import must stay inside the
+    # functions that need it. A subprocess is required: this test module
+    # imports pandas itself.
+    probe = (
+        "import sys;"
+        "import daily_insights_api.modules.data_sources.api;"
+        "print(sorted({'pandas', 'yfinance'} & set(sys.modules)))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+
+    assert result.stdout.strip() == "[]"
