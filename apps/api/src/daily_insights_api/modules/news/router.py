@@ -95,8 +95,12 @@ async def _latest_response(
             headline=presentation.headline,
             summary=presentation.summary,
             source_name=item.source_name,
+            source_hostname=item.source_hostname,
             source_url=item.source_url,
             source_published_at=item.source_published_at,
+            numeric_facts=list(item.numeric_facts),
+            market=item.market,
+            event_key=item.event_key,
         )
         for item, presentation in rows
     ]

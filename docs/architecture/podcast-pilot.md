@@ -8,6 +8,7 @@ Phase 4 上線驗收仍待執行。八大市場正式內容與報告前端在此
 
 目前已完成：
 
+- 上傳時以 mutagen 讀取音檔長度寫入 `podcast_episode_audio_variants.duration_seconds`，客戶端清單以「約 N 分鐘」顯示；從 R2 登記的音檔不讀取內容，長度為 null。
 - `admin` 與 `asset_manager` 可從後台一次上傳 1–3 個語系音檔，成功上傳後
   episode 預設發布，兩種身份皆可發布及下架；
 - 同交易日唯一性、任一語系 active audio 發布驗證，以及缺漏語系提示；

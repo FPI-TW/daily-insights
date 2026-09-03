@@ -1151,6 +1151,8 @@ export interface components {
     }
     /** NewsItemResponse */
     NewsItemResponse: {
+      /** Event Key */
+      event_key: string | null
       /** Headline */
       headline: string
       /**
@@ -1160,8 +1162,14 @@ export interface components {
       id: string
       /** Importance */
       importance: number
+      /** Market */
+      market: string | null
+      /** Numeric Facts */
+      numeric_facts: string[]
       /** Rank */
       rank: number
+      /** Source Hostname */
+      source_hostname: string
       /** Source Name */
       source_name: string
       /** Source Published At */
@@ -1346,6 +1354,8 @@ export interface components {
     PodcastEpisodeDetailResponse: {
       /** Cover Asset Id */
       cover_asset_id: string | null
+      /** Duration Seconds */
+      duration_seconds?: number | null
       /**
        * Id
        * Format: uuid
@@ -1375,6 +1385,8 @@ export interface components {
     PodcastEpisodeSummaryResponse: {
       /** Cover Asset Id */
       cover_asset_id: string | null
+      /** Duration Seconds */
+      duration_seconds?: number | null
       /**
        * Id
        * Format: uuid

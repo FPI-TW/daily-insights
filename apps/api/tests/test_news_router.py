@@ -51,8 +51,12 @@ class _EditionDatabase:
             importance=4,
             topic="markets",
             source_name="Reuters",
+            source_hostname="www.reuters.com",
             source_url="https://www.reuters.com/article",
             source_published_at=None,
+            numeric_facts=["+3.2%", "1 碼"],
+            market="us",
+            event_key="fed-rate-decision",
         )
 
     async def scalars(self, statement: object) -> _Scalars:

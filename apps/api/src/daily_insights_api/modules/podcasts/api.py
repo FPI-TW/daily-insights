@@ -112,6 +112,9 @@ class PodcastEpisodeSummaryResponse(PodcastContract):
     summary: str
     locale: Locale
     cover_asset_id: uuid.UUID | None
+    # Length of the audio the player will resolve for this locale; null until
+    # an uploaded file could be measured.
+    duration_seconds: int | None = None
 
 
 class PodcastEpisodeDetailResponse(PodcastEpisodeSummaryResponse):

@@ -457,6 +457,8 @@ async def run_news_edition(
                     importance=selected_item.importance,
                     content_digest=fetched.content_digest,
                     numeric_facts=list(summaries["en"].numeric_facts),
+                    market=selected_item.market,
+                    event_key=selected_item.event_key,
                 )
                 database.add(item)
                 await database.flush()

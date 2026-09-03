@@ -362,6 +362,8 @@ async def test_podcast_publish_play_replace_and_unpublish(
     catalog = await podcast_harness.customer.get("/api/podcasts?locale=en")
     assert catalog.status_code == 200, catalog.text
     assert catalog.json()[0]["title"] == "Podcast | 2026-07-24"
+    # Fixture bytes are not real audio, so no length could be measured.
+    assert catalog.json()[0]["duration_seconds"] is None
     detail = await podcast_harness.customer.get(f"/api/podcasts/{episode_id}?locale=zh-hans")
     assert detail.status_code == 200
     assert detail.json()["summary"] == "2026-07-24"

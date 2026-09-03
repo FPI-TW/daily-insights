@@ -135,12 +135,12 @@ JSON 清單（dot-notation 欄位、`unix_s`／`unix_ms`／`iso`／`datetime_str
 
 ## 資料表
 
-| 資料表                   | 內容                                                                              |
-| ------------------------ | --------------------------------------------------------------------------------- |
-| `news_editions`          | 每日版本、`market_code`、revision、`input_digest`、模型與 prompt 版本、狀態、警語 |
-| `news_items`             | 入選新聞的來源中繼資料、主題、重要性、內容摘要與數值事實                          |
-| `news_presentations`     | 每則新聞的三語標題與摘要                                                          |
-| `news_generation_audits` | 每次模型呼叫的 stage、locale、token、延遲、request id 與失敗代碼                  |
+| 資料表                   | 內容                                                                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `news_editions`          | 每日版本、`market_code`、revision、`input_digest`、模型與 prompt 版本、狀態、警語                                                    |
+| `news_items`             | 入選新聞的來源中繼資料、主題、重要性、內容摘要、數值事實，以及選稿階段的 `market` 與 `event_key`（migration 0012 之前的版本為 null） |
+| `news_presentations`     | 每則新聞的三語標題與摘要                                                                                                             |
+| `news_generation_audits` | 每次模型呼叫的 stage、locale、token、延遲、request id 與失敗代碼                                                                     |
 
 文章正文與 prompt 內容不寫入任何資料表。
 
