@@ -21,9 +21,13 @@ from daily_insights_api.modules.analyst_viewpoints.schemas import (
 
 MARKET_MAPPING: Final[dict[str, str]] = {
     "us_macro": "global_macro_bonds",
+    "forex": "forex",
     "crypto": "crypto",
     "us_stocks": "us_equity",
+    "hk_stocks": "hk_equity",
+    "cn_stocks": "cn_equity",
     "tw_stocks": "tw_equity",
+    "tw_futures": "tw_index_derivatives",
 }
 
 

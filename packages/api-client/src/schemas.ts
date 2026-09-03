@@ -122,11 +122,24 @@ export const analystViewpointSchema = z.object({
   viewpoint_date: z.iso.date(),
   market_code: z.enum([
     "global_macro_bonds",
+    "forex",
     "crypto",
     "us_equity",
+    "hk_equity",
+    "cn_equity",
     "tw_equity",
+    "tw_index_derivatives",
   ]),
-  source_market_code: z.enum(["us_macro", "crypto", "us_stocks", "tw_stocks"]),
+  source_market_code: z.enum([
+    "us_macro",
+    "forex",
+    "crypto",
+    "us_stocks",
+    "hk_stocks",
+    "cn_stocks",
+    "tw_stocks",
+    "tw_futures",
+  ]),
   points: z.array(z.string().min(1)),
   fetched_at: z.iso.datetime({ offset: true }),
 })
@@ -134,7 +147,7 @@ export type AnalystViewpoint = z.infer<typeof analystViewpointSchema>
 export const analystViewpointListSchema = z.array(analystViewpointSchema)
 
 export const analystViewpointSyncMarketStatusSchema = z.object({
-  source_market_code: z.enum(["us_macro", "crypto", "us_stocks", "tw_stocks"]),
+  source_market_code: analystViewpointSchema.shape.source_market_code,
   market_code: analystViewpointSchema.shape.market_code,
   status: z.enum(["updated", "missing", "stale"]),
 })

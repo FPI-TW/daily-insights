@@ -19,6 +19,7 @@ from daily_insights_api.modules.analyst_viewpoints.schemas import (
     UpstreamSummary,
 )
 from daily_insights_api.modules.analyst_viewpoints.service import (
+    MARKET_MAPPING,
     AnalystViewpointClient,
     AnalystViewpointSyncError,
     sync_viewpoints,
@@ -70,6 +71,19 @@ def test_upstream_summary_accepts_the_documented_eight_market_response() -> None
         )
     )
     assert summary.tw_futures == ["Futures point"]
+
+
+def test_market_mapping_persists_all_eight_upstream_markets() -> None:
+    assert MARKET_MAPPING == {
+        "us_macro": "global_macro_bonds",
+        "forex": "forex",
+        "crypto": "crypto",
+        "us_stocks": "us_equity",
+        "hk_stocks": "hk_equity",
+        "cn_stocks": "cn_equity",
+        "tw_stocks": "tw_equity",
+        "tw_futures": "tw_index_derivatives",
+    }
 
 
 class _Client:

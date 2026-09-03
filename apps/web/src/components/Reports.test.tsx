@@ -78,7 +78,7 @@ describe("three-market report presentation", () => {
     expect(screen.queryByText(/derivatives/i)).not.toBeInTheDocument()
   })
 
-  it("shows only returned analyst viewpoints directly below market navigation", async () => {
+  it("shows tab-visible analyst viewpoints in navigation order", async () => {
     await renderLocalized(
       <ReportList
         locale="en"
@@ -88,6 +88,13 @@ describe("three-market report presentation", () => {
             market_code: "global_macro_bonds",
             source_market_code: "us_macro",
             points: ["Bond yields remain range-bound."],
+            fetched_at: "2026-09-02T08:00:00+08:00",
+          },
+          {
+            viewpoint_date: "2026-09-02",
+            market_code: "crypto",
+            source_market_code: "crypto",
+            points: ["Crypto is intentionally hidden from the current tabs."],
             fetched_at: "2026-09-02T08:00:00+08:00",
           },
           {
@@ -110,6 +117,7 @@ describe("three-market report presentation", () => {
     expect(section).toHaveTextContent("Global macro & bonds")
     expect(section).toHaveTextContent("Taiwan equities")
     expect(section).not.toHaveTextContent("US equities")
+    expect(section).not.toHaveTextContent("Crypto")
   })
 
   it("renders the not-launched state for a navigable market without a report", async () => {

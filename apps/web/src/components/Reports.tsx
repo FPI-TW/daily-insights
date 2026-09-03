@@ -130,10 +130,9 @@ export function AnalystViewpointsLoading() {
       <p className="sr-only">{t("analystViewpointsLoading")}</p>
       <div className="h-4 w-40 rounded bg-line" />
       <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <div className="h-20 rounded bg-line" />
-        <div className="h-20 rounded bg-line" />
-        <div className="h-20 rounded bg-line" />
-        <div className="h-20 rounded bg-line" />
+        {navMarketCodes.map(marketCode => (
+          <div className="h-20 rounded bg-line" key={marketCode} />
+        ))}
       </div>
     </section>
   )
@@ -145,7 +144,14 @@ function AnalystViewpoints({
   viewpoints: ReadonlyArray<AnalystViewpoint>
 }) {
   const { t } = useTranslation()
-  const latest = viewpoints[0]
+  const viewpointsByMarket = new Map(
+    viewpoints.map(viewpoint => [viewpoint.market_code, viewpoint])
+  )
+  const visibleViewpoints = navMarketCodes.flatMap(marketCode => {
+    const viewpoint = viewpointsByMarket.get(marketCode)
+    return viewpoint ? [viewpoint] : []
+  })
+  const latest = visibleViewpoints[0]
   if (!latest) return null
   return (
     <section className="mb-6" aria-labelledby="analyst-viewpoints-title">
@@ -166,7 +172,7 @@ function AnalystViewpoints({
         </p>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
-        {viewpoints.map(viewpoint => (
+        {visibleViewpoints.map(viewpoint => (
           <article
             key={viewpoint.market_code}
             className="surface-panel border-t-[3px] border-t-lagoon p-4"
