@@ -6,7 +6,7 @@ const resources: Resource = {
   "zh-hant": {
     translation: {
       brand: "Daily Insights",
-      chatTitle: "報告問答",
+      chatTitle: "AI智慧問答",
       chatEmpty: "針對目前報告提出問題。",
       chatThinking: "正在整理回答…",
       chatInput: "輸入你的問題",
@@ -14,11 +14,14 @@ const resources: Resource = {
       chatSend: "送出問題",
       chatStop: "停止產生",
       chatError: "目前無法完成回答，請再試一次。",
+      chatSelectionTooLong: "所選文字過長，無法送出。",
       chatStatus: "回答狀態：{{status}}",
       chatDisclaimer:
         "（內容基於公開資訊及內部分析報告，僅供參考，不構成投資建議。）",
+      chatMarkdownTable: "可橫向捲動的回答表格",
       chatSelectionMenu: "所選文字操作",
-      chatQuoteSelection: "在對話中引用",
+      chatSelectionInsight: "AI 洞察",
+      chatSelectionDiscussion: "AI 申論",
       chatQuoteAttached: "引用內容",
       chatQuoteRemove: "移除引用",
       language: "語言",
@@ -399,7 +402,7 @@ const resources: Resource = {
   "zh-hans": {
     translation: {
       brand: "Daily Insights",
-      chatTitle: "报告问答",
+      chatTitle: "AI智能问答",
       chatEmpty: "针对当前报告提问。",
       chatThinking: "正在整理回答…",
       chatInput: "输入你的问题",
@@ -407,11 +410,14 @@ const resources: Resource = {
       chatSend: "发送问题",
       chatStop: "停止生成",
       chatError: "目前无法完成回答，请再试一次。",
+      chatSelectionTooLong: "所选文字过长，无法发送。",
       chatStatus: "回答状态：{{status}}",
       chatDisclaimer:
         "（内容基于公开信息及内部分析报告，仅供参考，不构成投资建议。）",
+      chatMarkdownTable: "可横向滚动的回答表格",
       chatSelectionMenu: "所选文字操作",
-      chatQuoteSelection: "在对话中引用",
+      chatSelectionInsight: "AI 洞察",
+      chatSelectionDiscussion: "AI 申论",
       chatQuoteAttached: "引用内容",
       chatQuoteRemove: "移除引用",
       language: "语言",
@@ -792,7 +798,7 @@ const resources: Resource = {
   en: {
     translation: {
       brand: "Daily Insights",
-      chatTitle: "Report Q&A",
+      chatTitle: "AI Q&A",
       chatEmpty: "Ask about the report currently on this page.",
       chatThinking: "Preparing an answer…",
       chatInput: "Enter your question",
@@ -800,11 +806,14 @@ const resources: Resource = {
       chatSend: "Send question",
       chatStop: "Stop generating",
       chatError: "The answer could not be completed. Please try again.",
+      chatSelectionTooLong: "The selected text is too long to send.",
       chatStatus: "Answer status: {{status}}",
       chatDisclaimer:
         "(Content is based on public information and internal analysis reports, is for reference only, and does not constitute investment advice.)",
+      chatMarkdownTable: "Scrollable response table",
       chatSelectionMenu: "Selected text actions",
-      chatQuoteSelection: "Quote in conversation",
+      chatSelectionInsight: "AI Insights",
+      chatSelectionDiscussion: "AI Discussion",
       chatQuoteAttached: "Quoted selection",
       chatQuoteRemove: "Remove quote",
       language: "Language",

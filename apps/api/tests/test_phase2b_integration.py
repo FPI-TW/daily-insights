@@ -42,6 +42,7 @@ from daily_insights_api.modules.assets.service import (
 )
 from daily_insights_api.modules.chat.api import _create_pending_turn
 from daily_insights_api.modules.chat.models import Conversation, Message
+from daily_insights_api.modules.chat.prompt import CHAT_CONTEXT_VERSION
 from daily_insights_api.modules.chat.schemas import ChatStreamRequest, ReportsIndexContext
 from daily_insights_api.modules.identity.auth import AuthContext
 from daily_insights_api.modules.identity.models import User
@@ -638,10 +639,11 @@ async def test_chat_turn_commits_before_observation_and_enforces_tenant_pending_
             database,
             context=context,
             payload=payload,
-            snapshot={"kind": "test"},
+            snapshot={"version": CHAT_CONTEXT_VERSION, "kind": "test"},
             report_version=None,
         )
         assert replay is False
+        assert generation.context_version == CHAT_CONTEXT_VERSION
     # This is the observation a provider seam makes on entry: it uses a separate
     # connection, so visibility proves the turn transaction committed first.
     provider_observations: list[tuple[bool, bool, bool]] = []
@@ -666,7 +668,7 @@ async def test_chat_turn_commits_before_observation_and_enforces_tenant_pending_
                 payload=payload.model_copy(
                     update={"client_request_id": uuid.uuid4(), "conversation_id": conversation.id}
                 ),
-                snapshot={"kind": "test"},
+                snapshot={"version": CHAT_CONTEXT_VERSION, "kind": "test"},
                 report_version=None,
             )
         await database.rollback()
@@ -684,7 +686,7 @@ async def test_chat_turn_commits_before_observation_and_enforces_tenant_pending_
             database,
             context=context,
             payload=payload,
-            snapshot={"kind": "changed"},
+            snapshot={"version": CHAT_CONTEXT_VERSION, "kind": "changed"},
             report_version=None,
         )
         assert replay is True
@@ -697,6 +699,6 @@ async def test_chat_turn_commits_before_observation_and_enforces_tenant_pending_
                 payload=payload.model_copy(
                     update={"conversation_id": conversation.id, "client_request_id": uuid.uuid4()}
                 ),
-                snapshot={"kind": "test"},
+                snapshot={"version": CHAT_CONTEXT_VERSION, "kind": "test"},
                 report_version=None,
             )
