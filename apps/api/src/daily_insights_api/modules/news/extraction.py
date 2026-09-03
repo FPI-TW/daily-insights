@@ -1,13 +1,12 @@
-"""Untrusted GDELT discovery and SSRF-safe in-memory article extraction."""
+"""SSRF-safe, in-memory article extraction for allowlisted publishers."""
 
 import asyncio
-import hashlib
 import ipaddress
 import re
 import socket
 from collections.abc import AsyncIterable, Awaitable, Callable, Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
@@ -23,17 +22,8 @@ from httpx._types import AsyncByteStream
 
 from daily_insights_api.modules.news.contracts import Candidate
 
-GDELT_DOC_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 MAX_BYTES = 1_500_000
 MAX_ARTICLE_CHARS = 40_000
-SOURCE_NAMES = {
-    "www.reuters.com": "Reuters",
-    "apnews.com": "AP",
-    "www.bbc.com": "BBC Business",
-    "www.cnbc.com": "CNBC",
-    "news.cnyes.com": "鉅亨",
-    "finance.eastmoney.com": "東方財富",
-}
 
 Resolver = Callable[[str, int], Awaitable[list[str]]]
 
@@ -303,15 +293,6 @@ async def fetch_article(
     raise ValueError("too many redirects")
 
 
-def _seen_at(value: object) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        return datetime.strptime(value, "%Y%m%d%H%M%S").replace(tzinfo=UTC)
-    except ValueError:
-        return None
-
-
 def _title_key(title: str) -> str:
     return " ".join(re.findall(r"[\w]+", title.lower()))[:240]
 
@@ -333,58 +314,3 @@ def _dedupe_candidates(candidates: list[Candidate]) -> list[Candidate]:
         seen_titles.add(key)
         unique.append(candidate)
     return unique
-
-
-async def discover_candidates(
-    client: httpx.AsyncClient, allowed: frozenset[str], now: datetime | None = None
-) -> list[Candidate]:
-    end = now or datetime.now(UTC)
-    start = end - timedelta(hours=24)
-    query = " OR ".join(f"domain:{hostname}" for hostname in sorted(allowed))
-    response = await client.get(
-        GDELT_DOC_URL,
-        params={
-            "query": f"({query})",
-            "mode": "artlist",
-            "format": "json",
-            "maxrecords": 50,
-            "startdatetime": start.strftime("%Y%m%d%H%M%S"),
-            "enddatetime": end.strftime("%Y%m%d%H%M%S"),
-        },
-    )
-    response.raise_for_status()
-    payload = response.json()
-    articles = payload.get("articles")
-    if not isinstance(articles, list):
-        raise ValueError("GDELT response has no articles list")
-    result: list[Candidate] = []
-    for article in articles:
-        if not isinstance(article, dict):
-            continue
-        url, title, seen_at = (
-            article.get("url"),
-            article.get("title"),
-            _seen_at(article.get("seendate")),
-        )
-        if (
-            not isinstance(url, str)
-            or not isinstance(title, str)
-            or seen_at is None
-            or not start <= seen_at <= end
-        ):
-            continue
-        parsed = urlparse(url)
-        hostname = (parsed.hostname or "").lower().rstrip(".")
-        if parsed.scheme != "https" or not hostname or not allowed_hostname(hostname, allowed):
-            continue
-        result.append(
-            Candidate(
-                id=hashlib.sha256(url.encode()).hexdigest(),
-                url=url,
-                hostname=hostname,
-                source_name=SOURCE_NAMES.get(hostname, hostname),
-                headline=title[:1000],
-                seen_at=seen_at,
-            )
-        )
-    return _dedupe_candidates(result)

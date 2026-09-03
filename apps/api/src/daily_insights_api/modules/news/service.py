@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -18,6 +17,11 @@ from daily_insights_api.modules.news.editions import (
     EditionSpec,
     edition_spec,
 )
+from daily_insights_api.modules.news.extraction import (
+    FetchedCandidate,
+    fetch_article,
+    safe_article_client,
+)
 from daily_insights_api.modules.news.feeds import discover_feed_candidates, feed_client
 from daily_insights_api.modules.news.llm import DeepSeekClient, ModelCall, ModelCallError
 from daily_insights_api.modules.news.models import (
@@ -26,16 +30,8 @@ from daily_insights_api.modules.news.models import (
     NewsItem,
     NewsPresentation,
 )
-from daily_insights_api.modules.news.sources import (
-    FetchedCandidate,
-    _dedupe_candidates,
-    configured_hostnames,
-    discover_candidates,
-    fetch_article,
-    safe_article_client,
-)
 
-DERIVATION_VERSION = "gdelt-deepseek-news.v3"
+DERIVATION_VERSION = "feeds-deepseek-news.v4"
 SUMMARY_PROMPT_VERSION = "summary-v2"
 LOCALES = ("zh-hant", "zh-hans", "en")
 TAIPEI = ZoneInfo("Asia/Taipei")
@@ -151,12 +147,21 @@ def _failed_audit(
 
 
 def _cap_discovery(
-    candidates: list[Candidate], *, per_source: int = MAX_DISCOVERY_PER_SOURCE
+    candidates: list[Candidate],
+    *,
+    per_source: int = MAX_DISCOVERY_PER_SOURCE,
+    total: int | None = None,
+    full_text_ids: frozenset[str] = frozenset(),
 ) -> list[Candidate]:
-    """Bound the number of articles fetched per source, newest first."""
+    """Bound the articles fetched per source and in total, newest first.
+
+    Candidates whose body already arrived with the feed are ranked ahead of
+    the rest: they cost no fetch, so the total budget favours them.
+    """
     ordered = sorted(
         candidates,
         key=lambda candidate: (
+            candidate.id not in full_text_ids,
             candidate.seen_at is None,
             -(candidate.seen_at.timestamp() if candidate.seen_at else 0.0),
             str(candidate.url),
@@ -169,6 +174,8 @@ def _cap_discovery(
             continue
         per_host[candidate.hostname] = per_host.get(candidate.hostname, 0) + 1
         capped.append(candidate)
+        if total is not None and len(capped) >= total:
+            break
     return capped
 
 
@@ -214,12 +221,34 @@ def _edition_status(count: int, target: int = GLOBAL_SPEC.target_items) -> tuple
 
 
 async def _fetch_usable_candidates(
-    candidates: list[Candidate], allowed: frozenset[str], timeout_seconds: float = 25
+    candidates: list[Candidate],
+    allowed: frozenset[str],
+    timeout_seconds: float = 25,
+    bodies: dict[str, str] | None = None,
 ) -> list[FetchedCandidate]:
+    """Extract article text, using feed-supplied bodies where a feed carries them."""
     semaphore = asyncio.Semaphore(6)
+    supplied = bodies or {}
     async with safe_article_client(allowed, timeout_seconds) as http:
 
         async def fetch_one(candidate: Candidate) -> FetchedCandidate | None:
+            body = supplied.get(candidate.id)
+            if body:
+                # Full-text feeds already passed the discovery allowlist; the
+                # article page is not fetched, which also spares the publisher.
+                emit_event(
+                    "news.source.fetched",
+                    hostname=candidate.hostname,
+                    bytes=len(body),
+                    full_text=True,
+                )
+                return FetchedCandidate(
+                    candidate,
+                    str(candidate.url),
+                    body,
+                    hashlib.sha256(body.encode()).hexdigest(),
+                    candidate.seen_at,
+                )
             async with semaphore:
                 try:
                     source_url, body, source_published_at = await fetch_article(
@@ -250,11 +279,10 @@ async def run_news_edition(
     client: DeepSeekClient,
     edition_date: date,
     *,
-    allowed_hostnames: str,
+    allowed_hostnames: frozenset[str],
     fetch_timeout_seconds: float = 25,
-    discovery_timeout_seconds: float = 60,
+    discovery_timeout_seconds: float = 30,
     spec: EditionSpec = GLOBAL_SPEC,
-    gdelt_enabled: bool = False,
 ) -> str:
     """Discover, safely extract, then select and persist today's immutable edition.
 
@@ -264,50 +292,33 @@ async def run_news_edition(
     """
     if edition_date != datetime.now(TAIPEI).date():
         raise ValueError("daily news only generates the current Taipei edition")
-    allowed = configured_hostnames(allowed_hostnames)
+    allowed = allowed_hostnames
     market_code = spec.market_code
-
-    async def discover() -> list[Candidate]:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(discovery_timeout_seconds),
-            follow_redirects=False,
-            cookies=None,
-            trust_env=False,
-        ) as http:
-            return await discover_candidates(http, allowed)
-
-    def audit_discovery_failure(error: Exception) -> None:
-        status_code = (
-            error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
-        )
-        emit_event(
-            "news.candidates.attempt_failed",
-            error_code=type(error).__name__,
-            status_code=status_code,
-        )
-
-    candidates: list[Candidate] = []
-    if spec.uses_gdelt and gdelt_enabled:
-        try:
-            candidates = await _retry(discover, audit_discovery_failure)
-        except Exception as error:
-            emit_event("news.candidates.failed", error_code=type(error).__name__)
-            candidates = []
-    emit_event("news.candidates.discovered", market=market_code, count=len(candidates))
+    bodies: dict[str, str] = {}
     async with feed_client(discovery_timeout_seconds) as feeds_http:
-        feed_candidates = await discover_feed_candidates(feeds_http, allowed, market=market_code)
+        feed_candidates = await discover_feed_candidates(
+            feeds_http, allowed, market=market_code, bodies=bodies
+        )
+    emit_event("news.candidates.discovered", market=market_code, count=len(feed_candidates))
+    # With a single discovery path, a registry-wide outage would otherwise
+    # produce a quietly thin edition; the floor makes it visible early.
+    floor = spec.target_items * 2
+    if len(feed_candidates) < floor:
+        emit_event(
+            "news.candidates.below_floor",
+            market=market_code,
+            count=len(feed_candidates),
+            floor=floor,
+        )
     candidates = _cap_discovery(
-        _dedupe_candidates(candidates + feed_candidates),
+        feed_candidates,
         per_source=spec.max_discovery_per_source,
+        total=spec.max_discovery_total,
+        full_text_ids=frozenset(bodies),
     )
-    emit_event(
-        "news.candidates.merged",
-        market=market_code,
-        feeds=len(feed_candidates),
-        total=len(candidates),
-    )
+    emit_event("news.candidates.merged", market=market_code, total=len(candidates))
     usable = (
-        await _fetch_usable_candidates(candidates, allowed, fetch_timeout_seconds)
+        await _fetch_usable_candidates(candidates, allowed, fetch_timeout_seconds, bodies)
         if candidates
         else []
     )
@@ -482,11 +493,10 @@ async def run_all_editions(
     client: DeepSeekClient,
     edition_date: date,
     *,
-    allowed_hostnames: str,
+    allowed_hostnames: frozenset[str],
     fetch_timeout_seconds: float = 25,
-    discovery_timeout_seconds: float = 60,
+    discovery_timeout_seconds: float = 30,
     markets: tuple[str, ...] = EDITION_ORDER,
-    gdelt_enabled: bool = False,
 ) -> str:
     """Run every configured edition in order and return the worst outcome.
 
@@ -506,7 +516,6 @@ async def run_all_editions(
                 fetch_timeout_seconds=fetch_timeout_seconds,
                 discovery_timeout_seconds=discovery_timeout_seconds,
                 spec=spec,
-                gdelt_enabled=gdelt_enabled,
             )
         except Exception as error:
             emit_event("news.edition.failed", market=market_code, error_code=type(error).__name__)

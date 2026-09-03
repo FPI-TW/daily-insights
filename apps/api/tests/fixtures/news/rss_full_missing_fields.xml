@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <item>
+      <link>https://www.example-news.com/news/id/10</link>
+      <pubDate>Wed, 02 Sep 2026 02:30:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>No link</title>
+      <pubDate>Wed, 02 Sep 2026 02:30:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Undated but kept</title>
+      <link>https://www.example-news.com/news/id/11</link>
+    </item>
+  </channel>
+</rss>

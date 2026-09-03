@@ -14,13 +14,15 @@ from daily_insights_api.modules.news.editions import (
     US_EQUITY_SPEC,
     edition_spec,
 )
-from daily_insights_api.modules.news.feeds import FEED_SOURCES, discover_feed_candidates
-from daily_insights_api.modules.news.llm import enforce_selection_policy, selection_output_contract
-from daily_insights_api.modules.news.sources import FetchedCandidate, configured_hostnames
-
-ALLOWED = configured_hostnames(
-    "www.reuters.com,apnews.com,www.bbc.com,www.cnbc.com,news.cnyes.com,finance.eastmoney.com"
+from daily_insights_api.modules.news.extraction import FetchedCandidate
+from daily_insights_api.modules.news.feeds import (
+    FEED_SOURCES,
+    discover_feed_candidates,
+    effective_hostnames,
 )
+from daily_insights_api.modules.news.llm import enforce_selection_policy, selection_output_contract
+
+ALLOWED = effective_hostnames()
 
 
 def _fetched(index: int, host: str) -> FetchedCandidate:
@@ -63,7 +65,6 @@ def test_edition_registry_is_ordered_global_first_and_targets_match_policies() -
         assert spec.target_items == spec.selection.max_items
         assert spec.max_candidates >= spec.target_items
         assert spec.max_per_source >= 1
-    assert GLOBAL_SPEC.uses_gdelt and not TW_EQUITY_SPEC.uses_gdelt
     assert edition_spec("us_equity") is US_EQUITY_SPEC
     with pytest.raises(ValueError, match="unknown news edition market"):
         edition_spec("fx")
@@ -113,17 +114,18 @@ def test_feed_sources_are_tagged_per_market() -> None:
     by_market: dict[str, set[str]] = {}
     for source in FEED_SOURCES:
         for market in source.markets:
-            by_market.setdefault(market, set()).add(source.url)
-    assert by_market["tw_equity"] == {
-        "https://api.cnyes.com/media/api/v1/newslist/category/tw_stock?limit=30&page=1"
-    }
-    assert (
-        "https://api.cnyes.com/media/api/v1/newslist/category/us_stock?limit=30&page=1"
-        in by_market["us_equity"]
-    )
-    assert "https://www.cnbc.com/id/10000664/device/rss/rss.html" in by_market["us_equity"]
-    assert "https://feeds.bbci.co.uk/news/business/rss.xml" not in by_market["us_equity"]
-    assert all(market in EDITION_SPECS for market in by_market)
+            by_market.setdefault(market, set()).add(source.hostname)
+    # Taiwanese media feed only the Taiwan edition; cnyes' international desk
+    # and the English sources feed the US edition alongside the global digest.
+    assert "news.cnyes.com" in by_market["tw_equity"]
+    assert "money.udn.com" in by_market["tw_equity"]
+    assert "www.wsj.com" not in by_market["tw_equity"]
+    assert {"news.cnyes.com", "www.wsj.com", "www.globenewswire.com"} <= by_market["us_equity"]
+    assert "www.sec.gov" in by_market["us_equity"] and "www.sec.gov" not in by_market["global"]
+    assert {"www.cls.cn", "www.etnet.com.hk", "www.hankyung.com"} <= by_market["global"]
+    assert by_market["cn_equity"] <= by_market["global"]
+    assert by_market["hk_equity"] <= by_market["global"]
+    assert all(market in EDITION_SPECS for market in by_market if market in EDITION_ORDER)
 
 
 async def test_discovery_reads_only_feeds_tagged_for_the_requested_market(
@@ -143,6 +145,7 @@ async def test_discovery_reads_only_feeds_tagged_for_the_requested_market(
         await discover_feed_candidates(
             client, ALLOWED, datetime(2026, 9, 2, tzinfo=UTC), market="tw_equity"
         )
-    assert requested == [
-        "https://api.cnyes.com/media/api/v1/newslist/category/tw_stock?limit=30&page=1"
-    ]
+    expected = [source.url for source in FEED_SOURCES if "tw_equity" in source.markets]
+    assert requested == expected
+    assert "https://news.cnyes.com/rss/v1/news/category/tw_stock" in requested
+    assert not any("wsj" in url or "guardianapis" in url for url in requested)

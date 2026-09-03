@@ -30,8 +30,10 @@ class EditionSpec:
     max_candidates: int
     max_per_source: int
     max_discovery_per_source: int
-    uses_gdelt: bool
     selection: SelectionPolicy
+    # Upper bound on articles extracted per run; full-text candidates are kept
+    # first because they cost no fetch.
+    max_discovery_total: int = 80
 
     @property
     def is_global(self) -> bool:
@@ -43,8 +45,7 @@ GLOBAL_SPEC = EditionSpec(
     target_items=5,
     max_candidates=20,
     max_per_source=5,
-    max_discovery_per_source=10,
-    uses_gdelt=True,
+    max_discovery_per_source=5,
     selection=SelectionPolicy(max_items=5, max_per_domain=2, min_topics=2, min_markets=2),
 )
 
@@ -52,9 +53,8 @@ TW_EQUITY_SPEC = EditionSpec(
     market_code="tw_equity",
     target_items=8,
     max_candidates=24,
-    max_per_source=24,
-    max_discovery_per_source=24,
-    uses_gdelt=False,
+    max_per_source=8,
+    max_discovery_per_source=8,
     selection=SelectionPolicy(
         max_items=8,
         max_per_domain=8,
@@ -74,8 +74,7 @@ US_EQUITY_SPEC = EditionSpec(
     target_items=8,
     max_candidates=24,
     max_per_source=8,
-    max_discovery_per_source=12,
-    uses_gdelt=False,
+    max_discovery_per_source=8,
     selection=SelectionPolicy(
         max_items=8,
         max_per_domain=4,

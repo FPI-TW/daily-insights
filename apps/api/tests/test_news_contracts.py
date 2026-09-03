@@ -5,13 +5,13 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary, Selection
-from daily_insights_api.modules.news.llm import DeepSeekClient
-from daily_insights_api.modules.news.service import run_news_edition
-from daily_insights_api.modules.news.sources import (
+from daily_insights_api.modules.news.extraction import (
     allowed_hostname,
     configured_hostnames,
     validate_https_url,
 )
+from daily_insights_api.modules.news.llm import DeepSeekClient
+from daily_insights_api.modules.news.service import run_news_edition
 
 ALLOWED = configured_hostnames(
     "www.reuters.com,apnews.com,www.bbc.com,www.cnbc.com,news.cnyes.com,finance.eastmoney.com"
@@ -91,7 +91,7 @@ async def test_news_runner_refuses_to_backfill_yesterday() -> None:
             cast(async_sessionmaker[AsyncSession], None),
             cast(DeepSeekClient, None),
             datetime.now().date() - timedelta(days=1),
-            allowed_hostnames=",".join(ALLOWED),
+            allowed_hostnames=ALLOWED,
         )
 
 
@@ -101,5 +101,5 @@ async def test_news_runner_refuses_future_edition() -> None:
             cast(async_sessionmaker[AsyncSession], None),
             cast(DeepSeekClient, None),
             datetime.now().date() + timedelta(days=1),
-            allowed_hostnames=",".join(ALLOWED),
+            allowed_hostnames=ALLOWED,
         )

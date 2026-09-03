@@ -1,0 +1,11 @@
+{
+  "response": {
+    "results": [
+      {"id": "no-url", "webTitle": "No url", "webPublicationDate": "2026-09-02T02:30:00Z"},
+      {"id": "no-title", "webUrl": "https://www.example-news.com/no-title", "webPublicationDate": "2026-09-02T02:30:00Z"},
+      {"id": "ok", "webUrl": "https://www.example-news.com/ok", "webTitle": "Has everything", "webPublicationDate": "2026-09-02T02:30:00Z"},
+      "not an object",
+      {"id": "no-fields", "webUrl": "https://www.example-news.com/no-fields", "webTitle": "No fields block", "webPublicationDate": "2026-09-02T02:30:00Z"}
+    ]
+  }
+}
