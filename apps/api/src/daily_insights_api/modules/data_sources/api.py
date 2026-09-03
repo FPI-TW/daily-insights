@@ -30,6 +30,7 @@ from daily_insights_api.modules.data_sources.yfinance import (
     YFINANCE_CONTRACT_HASH,
     YFINANCE_CONTRACT_VERSION,
     DailyBarsResult,
+    IndexSymbol,
     YfinanceAdapter,
 )
 
@@ -46,6 +47,7 @@ __all__ = [
     "DataSourceContractError",
     "DataSourceError",
     "DataSourceTransientError",
+    "IndexSymbol",
     "Instrument",
     "InstrumentQuery",
     "MarketCode",

@@ -9,9 +9,28 @@ Probed on 2026-09-03 with yfinance 1.7.0. Dropped symbols and why:
   jumps straight to today's open bar, roughly seven weeks of missing sessions.
 """
 
+from typing import Literal
+
 from daily_insights_api.modules.data_sources.dto import MarketCode
 
-TRACKED_INDICES: dict[str, MarketCode] = {
+# The tracked set is a type, not a runtime check, so it reaches the request
+# schema and the generated client as an enum instead of a bare string. mypy
+# rejects a TRACKED_INDICES key that is not a member; the reverse direction is
+# covered by a test.
+IndexSymbol = Literal[
+    "^DJI",
+    "^GSPC",
+    "^IXIC",
+    "^RUT",
+    "^SOX",
+    "^HSI",
+    "^TWII",
+    "^TFNI",
+    "^TPLI",
+    "000001.SS",
+]
+
+TRACKED_INDICES: dict[IndexSymbol, MarketCode] = {
     "^DJI": "us_equity",
     "^GSPC": "us_equity",
     "^IXIC": "us_equity",

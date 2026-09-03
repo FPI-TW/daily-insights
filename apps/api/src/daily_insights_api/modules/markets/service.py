@@ -14,6 +14,7 @@ from daily_insights_api.modules.data_sources.api import (
     DailyBar,
     DailyBarsResult,
     DataSourceError,
+    IndexSymbol,
     MarketCode,
     YfinanceAdapter,
 )
@@ -167,7 +168,7 @@ async def refresh_index_daily_bars(
     database: AsyncSession,
     *,
     adapter: YfinanceAdapter,
-    symbols: Sequence[str],
+    symbols: Sequence[IndexSymbol],
     period: str,
 ) -> tuple[list[IndexRefresh], list[IndexRefreshFailure]]:
     """Fetch and upsert one window for each symbol.
@@ -176,13 +177,19 @@ async def refresh_index_daily_bars(
     not discard the symbols that did resolve, which matters most for the nightly
     run where nobody is watching.
     """
+    # Typing keeps checked callers honest; this guard keeps an untyped one from
+    # reaching a bare KeyError on the lookup below.
+    untracked = sorted(set(symbols) - set(TRACKED_INDICES))
+    if untracked:
+        raise ValueError(f"untracked symbols: {', '.join(untracked)}")
+
     # Fetching is the slow part: yfinance issues several HTTP requests per symbol
     # (timezone, cookie/crumb, then the bars), so ten symbols in series can
     # outlast the 60s proxy budget in infra/nginx/conf.d/default.conf whenever
     # Yahoo is slow. Bounded concurrency mirrors TwelveDataTransport.
     semaphore = asyncio.Semaphore(MAX_FETCH_CONCURRENCY)
 
-    async def fetch(symbol: str) -> DailyBarsResult | DataSourceError:
+    async def fetch(symbol: IndexSymbol) -> DailyBarsResult | DataSourceError:
         async with semaphore:
             try:
                 return await adapter.get_daily_bars(

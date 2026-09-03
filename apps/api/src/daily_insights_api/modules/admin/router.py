@@ -730,12 +730,6 @@ async def fetch_yfinance_daily_bars(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "yfinance is not enabled")
 
     requested = list(TRACKED_INDICES) if payload.symbols is None else payload.symbols
-    unknown = sorted(set(requested) - set(TRACKED_INDICES))
-    if unknown:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            f"untracked symbols: {', '.join(unknown)}",
-        )
 
     try:
         # Fail inside the proxy's 60s budget (infra/nginx/conf.d/default.conf,

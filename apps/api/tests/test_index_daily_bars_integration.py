@@ -20,6 +20,7 @@ from daily_insights_api.modules.data_sources.api import (
     TRACKED_INDICES,
     DailyBar,
     DailyBarsResult,
+    IndexSymbol,
     Provenance,
     YfinanceAdapter,
 )
@@ -262,7 +263,7 @@ class _SlowStubAdapter:
         self,
         *,
         market: str,
-        symbol: str,
+        symbol: IndexSymbol,
         period: str = "2y",
     ) -> DailyBarsResult:
         self.in_flight += 1

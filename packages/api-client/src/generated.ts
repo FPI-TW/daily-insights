@@ -1842,7 +1842,20 @@ export interface components {
         | "ytd"
         | "max"
       /** Symbols */
-      symbols?: string[] | null
+      symbols?:
+        | (
+            | "^DJI"
+            | "^GSPC"
+            | "^IXIC"
+            | "^RUT"
+            | "^SOX"
+            | "^HSI"
+            | "^TWII"
+            | "^TFNI"
+            | "^TPLI"
+            | "000001.SS"
+          )[]
+        | null
     }
     /** YfinanceDailyBarsResponse */
     YfinanceDailyBarsResponse: {

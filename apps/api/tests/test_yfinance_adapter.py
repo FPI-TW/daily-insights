@@ -1,15 +1,24 @@
+import asyncio
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import cast, get_args
 from zoneinfo import ZoneInfo
 
 import pytest
 from pandas import DataFrame, DatetimeIndex, Timestamp
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from daily_insights_api.modules.data_sources.api import (
+    TRACKED_INDICES,
+    IndexSymbol,
+    YfinanceAdapter,
+)
 from daily_insights_api.modules.data_sources.errors import DataSourceContractError
 from daily_insights_api.modules.data_sources.yfinance.adapter import (
     DailyBarsResult,
     normalize_daily_bars,
 )
+from daily_insights_api.modules.markets.api import refresh_index_daily_bars
 
 TAIPEI = ZoneInfo("Asia/Taipei")
 FETCHED_AT = datetime(2026, 9, 3, 4, 0, tzinfo=UTC)
@@ -120,3 +129,24 @@ def test_zero_volume_is_accepted() -> None:
 def test_negative_volume_fails_closed() -> None:
     with pytest.raises(DataSourceContractError, match="with volume -1"):
         _normalize(_frame({date(2026, 9, 1): (100.0, 101.0, 99.0, 100.0, -1.0)}))
+
+
+def test_the_tracked_symbol_type_and_mapping_stay_in_step() -> None:
+    # mypy rejects a TRACKED_INDICES key that is not an IndexSymbol member. This
+    # covers the other direction: a member declared but never mapped to a market
+    # would be offered by the API and then raise on lookup.
+    assert set(get_args(IndexSymbol)) == set(TRACKED_INDICES)
+
+
+def test_an_untracked_symbol_is_refused_before_the_lookup() -> None:
+    # refresh_index_daily_bars indexes TRACKED_INDICES directly, so an untyped
+    # caller must get a named error rather than a bare KeyError.
+    with pytest.raises(ValueError, match="untracked symbols: NOT_TRACKED"):
+        asyncio.run(
+            refresh_index_daily_bars(
+                cast(AsyncSession, None),
+                adapter=cast(YfinanceAdapter, None),
+                symbols=[cast(IndexSymbol, "NOT_TRACKED")],
+                period="7d",
+            )
+        )

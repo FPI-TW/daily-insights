@@ -2971,6 +2971,18 @@
             "anyOf": [
               {
                 "items": {
+                  "enum": [
+                    "^DJI",
+                    "^GSPC",
+                    "^IXIC",
+                    "^RUT",
+                    "^SOX",
+                    "^HSI",
+                    "^TWII",
+                    "^TFNI",
+                    "^TPLI",
+                    "000001.SS"
+                  ],
                   "type": "string"
                 },
                 "maxItems": 50,

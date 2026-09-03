@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from daily_insights_api.core.enums import OrganizationStatus, SystemRole, UserStatus
-from daily_insights_api.modules.data_sources.api import MarketCode
+from daily_insights_api.modules.data_sources.api import IndexSymbol, MarketCode
 
 
 class AdminInput(BaseModel):
@@ -98,9 +98,10 @@ class MarketPolicyUpdate(AdminInput):
 
 
 class YfinanceDailyBarsFetch(AdminInput):
-    # Only the reviewed index set in data_sources.yfinance.symbols may be
-    # requested; an arbitrary string must never reach the scraping client.
-    symbols: list[str] | None = Field(default=None, min_length=1, max_length=50)
+    # Typed rather than checked in the router, so the reviewed index set reaches
+    # OpenAPI and the generated client as an enum and an arbitrary string can
+    # never reach the scraping client.
+    symbols: list[IndexSymbol] | None = Field(default=None, min_length=1, max_length=50)
     period: Literal[
         "1d", "5d", "7d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"
     ] = "2y"
