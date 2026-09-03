@@ -1,7 +1,7 @@
 """Store settled daily bars for tracked indices.
 
-Revision ID: 20260903_0012
-Revises: 20260902_0011
+Revision ID: 20260903_0013
+Revises: 20260903_0012
 """
 
 from collections.abc import Sequence
@@ -9,8 +9,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260903_0012"
-down_revision: str | None = "20260902_0011"
+revision: str = "20260903_0013"
+down_revision: str | None = "20260903_0012"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
