@@ -356,9 +356,14 @@ async def test_market_edition_is_independent_from_the_global_digest(
     feed_markets: list[str] = []
 
     async def feeds(
-        http: object, allowed: object, now: object = None, *, market: str = "global"
+        http: object,
+        allowed: object,
+        now: object = None,
+        *,
+        market: str = "global",
+        bodies: dict[str, str] | None = None,
     ) -> list[Candidate]:
-        del http, allowed, now
+        del http, allowed, now, bodies
         feed_markets.append(market)
         return [item.candidate for item in candidates]
 

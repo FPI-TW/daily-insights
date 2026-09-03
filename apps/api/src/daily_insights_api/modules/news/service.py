@@ -211,12 +211,34 @@ def _edition_status(count: int, target: int = GLOBAL_SPEC.target_items) -> tuple
 
 
 async def _fetch_usable_candidates(
-    candidates: list[Candidate], allowed: frozenset[str], timeout_seconds: float = 25
+    candidates: list[Candidate],
+    allowed: frozenset[str],
+    timeout_seconds: float = 25,
+    bodies: dict[str, str] | None = None,
 ) -> list[FetchedCandidate]:
+    """Extract article text, using feed-supplied bodies where a feed carries them."""
     semaphore = asyncio.Semaphore(6)
+    supplied = bodies or {}
     async with safe_article_client(allowed, timeout_seconds) as http:
 
         async def fetch_one(candidate: Candidate) -> FetchedCandidate | None:
+            body = supplied.get(candidate.id)
+            if body:
+                # Full-text feeds already passed the discovery allowlist; the
+                # article page is not fetched, which also spares the publisher.
+                emit_event(
+                    "news.source.fetched",
+                    hostname=candidate.hostname,
+                    bytes=len(body),
+                    full_text=True,
+                )
+                return FetchedCandidate(
+                    candidate,
+                    str(candidate.url),
+                    body,
+                    hashlib.sha256(body.encode()).hexdigest(),
+                    candidate.seen_at,
+                )
             async with semaphore:
                 try:
                     source_url, body, source_published_at = await fetch_article(
@@ -262,8 +284,11 @@ async def run_news_edition(
         raise ValueError("daily news only generates the current Taipei edition")
     allowed = configured_hostnames(allowed_hostnames)
     market_code = spec.market_code
+    bodies: dict[str, str] = {}
     async with feed_client(discovery_timeout_seconds) as feeds_http:
-        feed_candidates = await discover_feed_candidates(feeds_http, allowed, market=market_code)
+        feed_candidates = await discover_feed_candidates(
+            feeds_http, allowed, market=market_code, bodies=bodies
+        )
     emit_event("news.candidates.discovered", market=market_code, count=len(feed_candidates))
     # With a single discovery path, a registry-wide outage would otherwise
     # produce a quietly thin edition; the floor makes it visible early.
@@ -278,7 +303,7 @@ async def run_news_edition(
     candidates = _cap_discovery(feed_candidates, per_source=spec.max_discovery_per_source)
     emit_event("news.candidates.merged", market=market_code, total=len(candidates))
     usable = (
-        await _fetch_usable_candidates(candidates, allowed, fetch_timeout_seconds)
+        await _fetch_usable_candidates(candidates, allowed, fetch_timeout_seconds, bodies)
         if candidates
         else []
     )

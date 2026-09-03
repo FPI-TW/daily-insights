@@ -1,3 +1,4 @@
+import hashlib
 from datetime import UTC, datetime
 
 import httpx
@@ -92,3 +93,44 @@ async def test_fetch_rejects_wrong_content_type_and_short_paywall(
     async with httpx.AsyncClient(transport=httpx.MockTransport(paywall)) as client:
         with pytest.raises(ValueError, match="short"):
             await fetch_article(client, "https://www.reuters.com/article", ALLOWED)
+
+
+async def test_feed_supplied_bodies_skip_article_fetching(monkeypatch: pytest.MonkeyPatch) -> None:
+    from daily_insights_api.modules.news import service
+    from daily_insights_api.modules.news.contracts import Candidate
+
+    fetched_urls: list[str] = []
+
+    async def fetch_article(*args: object, **kwargs: object) -> tuple[str, str, None]:
+        del kwargs
+        fetched_urls.append(str(args[1]))
+        return str(args[1]), "Fetched article body", None
+
+    monkeypatch.setattr(service, "fetch_article", fetch_article)
+    full = Candidate(
+        id="a" * 64,
+        url="https://news.cnyes.com/news/id/1",
+        hostname="news.cnyes.com",
+        source_name="cnyes",
+        headline="Full text",
+        seen_at=datetime(2026, 9, 2, 1, 0, tzinfo=UTC),
+    )
+    partial = Candidate(
+        id="b" * 64,
+        url="https://news.cnyes.com/news/id/2",
+        hostname="news.cnyes.com",
+        source_name="cnyes",
+        headline="Needs fetching",
+    )
+    allowed = configured_hostnames("news.cnyes.com")
+
+    usable = await service._fetch_usable_candidates(
+        [full, partial], allowed, 5, {full.id: "Feed body " * 30}
+    )
+
+    assert fetched_urls == [str(partial.url)]
+    by_id = {item.candidate.id: item for item in usable}
+    assert by_id[full.id].body == "Feed body " * 30
+    assert by_id[full.id].content_digest == hashlib.sha256(("Feed body " * 30).encode()).hexdigest()
+    assert by_id[full.id].source_published_at == full.seen_at
+    assert by_id[partial.id].body == "Fetched article body"

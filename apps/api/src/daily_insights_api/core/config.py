@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     news_fetch_timeout_seconds: float = Field(default=25, gt=0, le=120)
     # Per-feed budget for reading a publisher's RSS, JSON, or listing page.
     news_discovery_timeout_seconds: float = Field(default=30, gt=0, le=180)
+    # Credentialed feeds are skipped (with an event) when their key is unset,
+    # so the digest never depends on an optional publisher.
+    guardian_api_key: SecretStr | None = None
+    # SEC EDGAR requires a contact email in the User-Agent; without it the
+    # 8-K feed is skipped rather than requested anonymously.
+    sec_contact_email: str | None = None
     report_freshness_max_age_days: int = Field(default=3, ge=1, le=30)
     r2_endpoint_url: str | None = None
     r2_bucket_name: str | None = None
