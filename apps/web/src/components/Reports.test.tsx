@@ -14,6 +14,7 @@ import {
   ReportLoadingScreen,
   ReportNotGeneratedScreen,
   ReportNotLaunchedScreen,
+  ReportShell,
 } from "./Reports"
 import { LocaleSwitcher } from "./LocaleSwitcher"
 import { createI18n } from "#/lib/i18n"
@@ -69,7 +70,12 @@ async function renderLocalized(
 
 describe("three-market report presentation", () => {
   it("lists the visible market tabs without crypto or Taiwan derivatives", async () => {
-    await renderLocalized(<ReportList locale="en" />, "en")
+    await renderLocalized(
+      <ReportShell locale="en">
+        <ReportList />
+      </ReportShell>,
+      "en"
+    )
     const links = screen.getByRole("navigation").querySelectorAll("a")
     expect(links).toHaveLength(4)
     expect(links[1]).toHaveTextContent("Macro analysis")
@@ -80,32 +86,33 @@ describe("three-market report presentation", () => {
 
   it("shows tab-visible analyst viewpoints in navigation order", async () => {
     await renderLocalized(
-      <ReportList
-        locale="en"
-        viewpoints={[
-          {
-            viewpoint_date: "2026-09-02",
-            market_code: "global_macro_bonds",
-            source_market_code: "us_macro",
-            points: ["Bond yields remain range-bound."],
-            fetched_at: "2026-09-02T08:00:00+08:00",
-          },
-          {
-            viewpoint_date: "2026-09-02",
-            market_code: "crypto",
-            source_market_code: "crypto",
-            points: ["Crypto is intentionally hidden from the current tabs."],
-            fetched_at: "2026-09-02T08:00:00+08:00",
-          },
-          {
-            viewpoint_date: "2026-09-02",
-            market_code: "tw_equity",
-            source_market_code: "tw_stocks",
-            points: ["Taiwan breadth is improving."],
-            fetched_at: "2026-09-02T08:00:00+08:00",
-          },
-        ]}
-      />,
+      <ReportShell locale="en">
+        <ReportList
+          viewpoints={[
+            {
+              viewpoint_date: "2026-09-02",
+              market_code: "global_macro_bonds",
+              source_market_code: "us_macro",
+              points: ["Bond yields remain range-bound."],
+              fetched_at: "2026-09-02T08:00:00+08:00",
+            },
+            {
+              viewpoint_date: "2026-09-02",
+              market_code: "crypto",
+              source_market_code: "crypto",
+              points: ["Crypto is intentionally hidden from the current tabs."],
+              fetched_at: "2026-09-02T08:00:00+08:00",
+            },
+            {
+              viewpoint_date: "2026-09-02",
+              market_code: "tw_equity",
+              source_market_code: "tw_stocks",
+              points: ["Taiwan breadth is improving."],
+              fetched_at: "2026-09-02T08:00:00+08:00",
+            },
+          ]}
+        />
+      </ReportShell>,
       "en"
     )
 

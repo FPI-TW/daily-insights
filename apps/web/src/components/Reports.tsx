@@ -1,7 +1,7 @@
 import { ClientOnly, Link, useRouter } from "@tanstack/react-router"
 import ReactECharts from "echarts-for-react"
 import { motion } from "motion/react"
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import type { AnalystViewpoint, Locale } from "@daily-insights/api-client"
 import {
@@ -12,6 +12,7 @@ import {
   type ReportValue,
 } from "#/lib/provisional-reports"
 import { fadeIn, reveal, useEnterAnimation } from "#/lib/motion"
+import { ActiveIndicator } from "./ActiveIndicator"
 
 function valueText(value: ReportValue | null, t: (key: string) => string) {
   if (value === null) return "—"
@@ -29,25 +30,19 @@ export function ReportLoadingScreen() {
   const { t } = useTranslation()
   const animate = useEnterAnimation()
   return (
-    <main className="page-shell" role="status" aria-live="polite">
+    <div role="status" aria-live="polite">
       <p className="sr-only">{t("reportLoadingAnnouncement")}</p>
       <motion.div
-        className="animate-pulse space-y-5"
+        className="grid animate-pulse gap-4 md:grid-cols-2 xl:grid-cols-3"
         variants={fadeIn}
         initial={animate ? "hidden" : false}
         animate="visible"
       >
-        <div className="h-3 w-24 rounded bg-line" />
-        <div className="h-9 w-72 max-w-full rounded bg-line" />
-        <div className="h-1 w-14 rounded bg-lagoon/40" />
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <div className="h-44 rounded-[13px] bg-line" />
-          <div className="h-44 rounded-[13px] bg-line" />
-          <div className="h-44 rounded-[13px] bg-line" />
-        </div>
-        <AnalystViewpointsLoading />
+        <div className="h-44 rounded-[13px] bg-line" />
+        <div className="h-44 rounded-[13px] bg-line" />
+        <div className="h-44 rounded-[13px] bg-line" />
       </motion.div>
-    </main>
+    </div>
   )
 }
 
@@ -56,18 +51,25 @@ function ReportMarketNav({
   activeMarket,
 }: {
   locale: Locale
-  activeMarket?: MarketCode
+  activeMarket?: MarketCode | undefined
 }) {
   const { t } = useTranslation()
+  const linkClass = (active: boolean) =>
+    `shrink-0 border-b-2 border-transparent px-4 py-3 text-xs font-extrabold no-underline transition-colors ${active ? "text-lagoon" : "text-sea-ink-soft hover:text-sea-ink"}`
   return (
     <nav
-      className="mb-6 flex overflow-x-auto border-y border-line bg-surface scrollbar-none [&::-webkit-scrollbar]:hidden"
+      className="relative isolate mb-6 flex overflow-x-auto border-y border-line bg-surface scrollbar-none [&::-webkit-scrollbar]:hidden [view-transition-name:report-market-nav]"
       aria-label={t("reportMarketNav")}
     >
+      <ActiveIndicator
+        activeKey={`${locale}:${activeMarket ?? "all"}`}
+        variant="underline"
+      />
       <Link
         to="/$locale/reports"
         params={{ locale }}
-        className={`shrink-0 border-b-2 px-4 py-3 text-xs font-extrabold no-underline transition-colors ${activeMarket === undefined ? "border-lagoon text-lagoon" : "border-transparent text-sea-ink-soft hover:text-sea-ink"}`}
+        activeOptions={{ exact: true }}
+        className={linkClass(activeMarket === undefined)}
       >
         {t("reportAllMarkets")}
       </Link>
@@ -76,7 +78,7 @@ function ReportMarketNav({
           key={code}
           to="/$locale/reports/$marketCode"
           params={{ locale, marketCode: code }}
-          className={`shrink-0 border-b-2 px-4 py-3 text-xs font-extrabold no-underline transition-colors ${activeMarket === code ? "border-lagoon text-lagoon" : "border-transparent text-sea-ink-soft hover:text-sea-ink"}`}
+          className={linkClass(activeMarket === code)}
         >
           {t(`reportMarketShort_${code}`)}
         </Link>
@@ -96,21 +98,37 @@ function PageHeading({ title }: { title: string }) {
   )
 }
 
-export function ReportList({
+export function ReportShell({
   locale,
-  viewpoints = [],
+  activeMarket,
+  children,
 }: {
   locale: Locale
-  viewpoints?: ReadonlyArray<AnalystViewpoint>
+  activeMarket?: MarketCode | undefined
+  children: ReactNode
 }) {
   const { t } = useTranslation()
   return (
     <main className="page-shell">
-      <PageHeading title={t("reportsTitle")} />
-      <ReportMarketNav locale={locale} />
-      <AnalystViewpoints viewpoints={viewpoints} />
+      <PageHeading
+        title={
+          activeMarket ? t(`reportMarket_${activeMarket}`) : t("reportsTitle")
+        }
+      />
+      <ReportMarketNav locale={locale} activeMarket={activeMarket} />
+      {children}
     </main>
   )
+}
+
+export function ReportList({
+  locale: _locale,
+  viewpoints = [],
+}: {
+  locale?: Locale
+  viewpoints?: ReadonlyArray<AnalystViewpoint>
+}) {
+  return <AnalystViewpoints viewpoints={viewpoints} />
 }
 
 export function AnalystViewpointsLoading() {
@@ -187,27 +205,22 @@ function AnalystViewpoints({
 }
 
 export function ReportDetail({
-  locale,
+  locale: _locale,
   report,
 }: {
-  locale: Locale
+  locale?: Locale
   report: ProvisionalReport
 }) {
-  const { t } = useTranslation()
   return (
-    <main className="page-shell">
-      <PageHeading title={t(`reportMarket_${report.marketCode}`)} />
-      <ReportMarketNav locale={locale} activeMarket={report.marketCode} />
-      <div className="grid min-w-0 gap-4 xl:grid-cols-2">
-        {report.blocks.map((block, index) => (
-          <ReportBlockView
-            block={block}
-            index={index}
-            key={`${block.titleKey}-${index}`}
-          />
-        ))}
-      </div>
-    </main>
+    <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+      {report.blocks.map((block, index) => (
+        <ReportBlockView
+          block={block}
+          index={index}
+          key={`${block.titleKey}-${index}`}
+        />
+      ))}
+    </div>
   )
 }
 

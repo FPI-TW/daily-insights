@@ -60,7 +60,6 @@ function ReportsAndNewsLoading() {
 }
 function ReportsPage() {
   const { reports, news, viewpoints } = Route.useLoaderData()
-  const { locale } = Route.useRouteContext()
   const publicationIds = reports.flatMap(report =>
     report.publicationId ? [report.publicationId] : []
   )
@@ -75,10 +74,8 @@ function ReportsPage() {
   )
   return (
     <>
-      <ReportList locale={locale} viewpoints={viewpoints} />
-      <main className="page-shell pt-0">
-        <DailyNews news={news} />
-      </main>
+      <ReportList viewpoints={viewpoints} />
+      <DailyNews news={news} />
     </>
   )
 }
