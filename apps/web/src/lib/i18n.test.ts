@@ -27,6 +27,10 @@ describe("request-local i18n", () => {
     expect(english.t("reportBlockMacroCommodityNormalizedPerformance")).toBe(
       "Brent and gold normalized performance"
     )
+    expect(traditionalChinese.t("reportMarket_us_equity")).toBe("美國股市")
+    expect(traditionalChinese.t("reportMarket_forex")).toBe("外匯市場")
+    expect(simplifiedChinese.t("reportMarket_hk_equity")).toBe("香港股市")
+    expect(english.t("reportMarket_cn_equity")).toBe("China equities")
     expect(english.t("themeToggleLabel_dark")).toContain("dark")
     expect(english.t("role_org_member")).toBe("Organization member")
     expect(traditionalChinese.language).toBe("zh-hant")
