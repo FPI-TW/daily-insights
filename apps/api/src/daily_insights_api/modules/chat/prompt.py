@@ -6,7 +6,7 @@ from daily_insights_api.modules.model_runtime.api import CHAT_PROMPT_VERSION
 
 CHAT_CONTEXT_VERSION = CHAT_PROMPT_VERSION
 
-BASIC_PROMPT = "你是一個『金融市場專家型 AI 助理』\n"  # noqa: RUF001
+BASIC_PROMPT = "你是一個『金融市場專家型 AI 助理』\n"
 
 _LANGUAGE_NAMES = {
     "zh-hant": "Traditional Chinese (繁體中文)",

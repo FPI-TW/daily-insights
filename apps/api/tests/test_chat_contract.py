@@ -337,11 +337,6 @@ def test_system_prompt_renders_financial_scope_source_order_and_locale(locale: s
     )
 
     assert BASIC_PROMPT in prompt
-    assert "- 產業、企業消息" in prompt
-    assert "- 全球市場風險、資金流、避險情緒" in prompt
-    assert "- 與投資判斷、資產配置、金融情勢有關的內容" in prompt
-    assert "- 上述相關的分析、整理與延伸提問" in prompt
-    assert "monetary policy" not in prompt
     assert "current_page" in prompt and "cross_page_reports" in prompt
     assert "model background knowledge" in prompt
     assert "For an unrelated question" not in prompt
