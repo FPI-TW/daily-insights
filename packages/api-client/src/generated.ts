@@ -1882,8 +1882,6 @@ export interface components {
         | "cn_equity"
         | "tw_equity"
         | "tw_index_derivatives"
-      /** Record Count */
-      record_count: number
       /** Stored Count */
       stored_count: number
       /** Symbol */

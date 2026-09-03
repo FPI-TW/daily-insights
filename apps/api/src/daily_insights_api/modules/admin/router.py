@@ -754,7 +754,6 @@ async def fetch_yfinance_daily_bars(
             symbol=entry.result.symbol,
             market=entry.result.market,
             as_of=entry.result.provenance.as_of,
-            record_count=entry.result.provenance.record_count,
             stored_count=entry.stored_count,
             dropped_unsettled_trade_date=entry.result.dropped_unsettled_trade_date,
         )

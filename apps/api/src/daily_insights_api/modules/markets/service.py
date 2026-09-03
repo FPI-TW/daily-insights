@@ -13,11 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from daily_insights_api.modules.data_sources.api import (
     TRACKED_INDICES,
     DailyBar,
-    DailyBarsResult,
     DataSourceError,
     IndexSymbol,
     MarketCode,
     YfinanceAdapter,
+    YfinanceDailyBars,
 )
 from daily_insights_api.modules.markets.models import (
     IndexDailyBar,
@@ -170,7 +170,7 @@ async def store_index_daily_bars(
 
 @dataclass(frozen=True, slots=True)
 class IndexRefresh:
-    result: DailyBarsResult
+    result: YfinanceDailyBars
     stored_count: int
 
 
@@ -206,7 +206,7 @@ async def refresh_index_daily_bars(
     # Yahoo is slow. Bounded concurrency mirrors TwelveDataTransport.
     semaphore = asyncio.Semaphore(MAX_FETCH_CONCURRENCY)
 
-    async def fetch(symbol: IndexSymbol) -> DailyBarsResult | DataSourceError:
+    async def fetch(symbol: IndexSymbol) -> YfinanceDailyBars | DataSourceError:
         async with semaphore:
             try:
                 return await adapter.get_daily_bars(

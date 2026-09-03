@@ -43,7 +43,11 @@ DEFAULT_TIMEZONE_CACHE_DIRECTORY = "/tmp/py-yfinance"
 
 
 @dataclass(frozen=True, slots=True)
-class DailyBarsResult:
+class YfinanceDailyBars:
+    """Named for its provider: twelve_data.adapter has its own DailyBarsResult,
+    and data_sources.api re-exports this one, so the bare name would be
+    ambiguous at the shared boundary."""
+
     symbol: str
     market: MarketCode
     items: tuple[DailyBar, ...]
@@ -75,7 +79,7 @@ class YfinanceAdapter:
         market: MarketCode,
         symbol: str,
         period: str = "2y",
-    ) -> DailyBarsResult:
+    ) -> YfinanceDailyBars:
         # yfinance is synchronous and blocking.
         frame = await asyncio.to_thread(self._history, symbol, period)
         return normalize_daily_bars(
@@ -115,7 +119,7 @@ def normalize_daily_bars(
     period: str,
     frame: "DataFrame",
     fetched_at: datetime,
-) -> DailyBarsResult:
+) -> YfinanceDailyBars:
     """Validate the frame at the trust boundary and map it to normalized DTOs."""
     from pandas import Timestamp
 
@@ -184,7 +188,7 @@ def normalize_daily_bars(
     if not items:
         raise DataSourceContractError(f"yfinance returned no settled daily bars for {symbol}")
 
-    return DailyBarsResult(
+    return YfinanceDailyBars(
         symbol=symbol,
         market=market,
         items=tuple(items),

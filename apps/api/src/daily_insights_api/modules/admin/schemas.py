@@ -120,8 +120,7 @@ class YfinanceSymbolBars(BaseModel):
     symbol: str
     market: MarketCode
     as_of: date
-    record_count: int
-    # Rows upserted into index_daily_bars for this symbol.
+    # Every settled bar fetched is written, so one count says both.
     stored_count: int
     # Yahoo's current still-open session bar, seen and excluded from the stored
     # series.

@@ -3,26 +3,22 @@ import os
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from pathlib import Path
 from typing import cast
 
 import pytest
 import pytest_asyncio
-from alembic import command
-from alembic.config import Config
-from sqlalchemy import create_engine as create_sync_engine
-from sqlalchemy import func, select, text
+from conftest import remigrate_database, reset_database_schema
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from daily_insights_api.core.config import get_settings
 from daily_insights_api.modules.data_sources.api import (
     TRACKED_INDICES,
     DailyBar,
-    DailyBarsResult,
     IndexSymbol,
     Provenance,
     YfinanceAdapter,
+    YfinanceDailyBars,
 )
 from daily_insights_api.modules.markets.api import (
     refresh_index_daily_bars,
@@ -39,37 +35,12 @@ pytestmark = pytest.mark.integration
 FETCHED_AT = datetime(2026, 9, 3, 5, 0, tzinfo=UTC)
 
 
-def _reset_schema(database_url: str) -> None:
-    engine = create_sync_engine(database_url)
-    try:
-        with engine.begin() as connection:
-            connection.execute(text("DROP SCHEMA public CASCADE"))
-            connection.execute(text("CREATE SCHEMA public"))
-    finally:
-        engine.dispose()
-
-
-def _remigrate(database_url: str) -> None:
-    previous = os.environ.get("DAILY_INSIGHTS_DATABASE_URL")
-    os.environ["DAILY_INSIGHTS_DATABASE_URL"] = database_url
-    get_settings.cache_clear()
-    try:
-        _reset_schema(database_url)
-        command.upgrade(Config(str(Path(__file__).parents[1] / "alembic.ini")), "head")
-    finally:
-        if previous is None:
-            os.environ.pop("DAILY_INSIGHTS_DATABASE_URL", None)
-        else:
-            os.environ["DAILY_INSIGHTS_DATABASE_URL"] = previous
-        get_settings.cache_clear()
-
-
 @pytest_asyncio.fixture
 async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     database_url = os.getenv("DAILY_INSIGHTS_TEST_DATABASE_URL")
     if database_url is None:
         pytest.skip("DAILY_INSIGHTS_TEST_DATABASE_URL is required")
-    await asyncio.to_thread(_remigrate, database_url)
+    await asyncio.to_thread(remigrate_database, database_url)
     engine = create_async_engine(database_url)
     try:
         yield async_sessionmaker(engine, expire_on_commit=False)
@@ -77,7 +48,7 @@ async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
         try:
             await engine.dispose()
         finally:
-            await asyncio.to_thread(_reset_schema, database_url)
+            await asyncio.to_thread(reset_database_schema, database_url)
 
 
 def _bar(trade_date: date, close: str, volume: int | None = 1_000) -> DailyBar:
@@ -163,7 +134,7 @@ async def test_unknown_market_code_is_rejected_by_the_database(
 class _StubAdapter:
     """Returns a canned result per symbol so a write failure can be provoked."""
 
-    def __init__(self, results: dict[str, DailyBarsResult]) -> None:
+    def __init__(self, results: dict[str, YfinanceDailyBars]) -> None:
         self._results = results
 
     async def get_daily_bars(
@@ -172,12 +143,12 @@ class _StubAdapter:
         market: str,
         symbol: str,
         period: str = "2y",
-    ) -> DailyBarsResult:
+    ) -> YfinanceDailyBars:
         return self._results[symbol]
 
 
-def _result(symbol: str, market: str, bars: tuple[DailyBar, ...]) -> DailyBarsResult:
-    return DailyBarsResult(
+def _result(symbol: str, market: str, bars: tuple[DailyBar, ...]) -> YfinanceDailyBars:
+    return YfinanceDailyBars(
         symbol=symbol,
         market=market,  # type: ignore[arg-type]
         items=bars,
@@ -265,7 +236,7 @@ class _SlowStubAdapter:
         market: str,
         symbol: IndexSymbol,
         period: str = "2y",
-    ) -> DailyBarsResult:
+    ) -> YfinanceDailyBars:
         self.in_flight += 1
         self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
         try:

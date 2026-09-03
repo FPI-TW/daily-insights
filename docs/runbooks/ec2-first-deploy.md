@@ -76,11 +76,17 @@ Variables：
 ```text
 PUBLIC_HOSTNAME
 DAILY_INSIGHTS_MORNING_REPORTS_ENABLED
+DAILY_INSIGHTS_YFINANCE_ENABLED
 DAILY_INSIGHTS_TWELVE_DATA_BASE_URL
 DAILY_INSIGHTS_R2_ENDPOINT_URL
 DAILY_INSIGHTS_R2_BUCKET_NAME
 DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS
 ```
+
+`DAILY_INSIGHTS_YFINANCE_ENABLED` 必須明確設為 `true` 或 `false`。
+`release.yml` 對每個 scheduler 旗標都要求這兩個值之一，**未設定時部署會直接中止**，
+不會退回預設值。設為 `false` 時 `index-daily-bars-scheduler` 只維持 heartbeat，
+不向 Yahoo 發出請求，後台抓取端點回 503。
 
 `DAILY_INSIGHTS_TWELVE_DATA_BASE_URL` 只在晨報啟用時為必要 Variable，API key 則由
 同名 GitHub Secret 提供。停用時 API 與 scheduler 不執行 provider request；啟用時

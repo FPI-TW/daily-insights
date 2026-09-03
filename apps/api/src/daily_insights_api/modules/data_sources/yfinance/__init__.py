@@ -1,8 +1,6 @@
 from daily_insights_api.modules.data_sources.yfinance.adapter import (
-    YFINANCE_CONTRACT_HASH,
-    YFINANCE_CONTRACT_VERSION,
-    DailyBarsResult,
     YfinanceAdapter,
+    YfinanceDailyBars,
     normalize_daily_bars,
 )
 from daily_insights_api.modules.data_sources.yfinance.symbols import (
@@ -12,10 +10,8 @@ from daily_insights_api.modules.data_sources.yfinance.symbols import (
 
 __all__ = [
     "TRACKED_INDICES",
-    "YFINANCE_CONTRACT_HASH",
-    "YFINANCE_CONTRACT_VERSION",
-    "DailyBarsResult",
     "IndexSymbol",
     "YfinanceAdapter",
+    "YfinanceDailyBars",
     "normalize_daily_bars",
 ]

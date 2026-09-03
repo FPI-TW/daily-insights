@@ -17,7 +17,7 @@ from daily_insights_api.modules.data_sources.api import (
 )
 from daily_insights_api.modules.data_sources.errors import DataSourceContractError
 from daily_insights_api.modules.data_sources.yfinance.adapter import (
-    DailyBarsResult,
+    YfinanceDailyBars,
     normalize_daily_bars,
 )
 from daily_insights_api.modules.markets.api import refresh_index_daily_bars
@@ -38,7 +38,7 @@ def _frame(rows: dict[date, tuple[float, float, float, float, float]]) -> DataFr
     )
 
 
-def _normalize(frame: DataFrame) -> DailyBarsResult:
+def _normalize(frame: DataFrame) -> YfinanceDailyBars:
     return normalize_daily_bars(
         market="tw_equity",
         symbol="^TWII",

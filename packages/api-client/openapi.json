@@ -2992,10 +2992,6 @@
             "title": "Market",
             "type": "string"
           },
-          "record_count": {
-            "title": "Record Count",
-            "type": "integer"
-          },
           "stored_count": {
             "title": "Stored Count",
             "type": "integer"
@@ -3009,7 +3005,6 @@
           "symbol",
           "market",
           "as_of",
-          "record_count",
           "stored_count",
           "dropped_unsettled_trade_date"
         ],

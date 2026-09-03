@@ -27,22 +27,17 @@ from daily_insights_api.modules.data_sources.twelve_data import (
 )
 from daily_insights_api.modules.data_sources.yfinance import (
     TRACKED_INDICES,
-    YFINANCE_CONTRACT_HASH,
-    YFINANCE_CONTRACT_VERSION,
-    DailyBarsResult,
     IndexSymbol,
     YfinanceAdapter,
+    YfinanceDailyBars,
 )
 
 __all__ = [
     "TRACKED_INDICES",
     "TWELVE_DATA_CONTRACT_HASH",
     "TWELVE_DATA_CONTRACT_VERSION",
-    "YFINANCE_CONTRACT_HASH",
-    "YFINANCE_CONTRACT_VERSION",
     "DailyBar",
     "DailyBarQuery",
-    "DailyBarsResult",
     "DataSourceAuthenticationError",
     "DataSourceContractError",
     "DataSourceError",
@@ -62,4 +57,5 @@ __all__ = [
     "TwelveDataTransport",
     "UnsupportedMarketError",
     "YfinanceAdapter",
+    "YfinanceDailyBars",
 ]
