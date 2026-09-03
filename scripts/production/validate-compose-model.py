@@ -115,15 +115,24 @@ def main() -> None:
             "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED",
             "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY",
         ),
+        # Yahoo publishes no API, so this scheduler has no provider credential.
+        (
+            "index-daily-bars-scheduler",
+            "DAILY_INSIGHTS_YFINANCE_ENABLED",
+            None,
+        ),
     ):
         scheduler_environment = services[scheduler].get("environment", {})
         require(
             scheduler_environment.get("DAILY_INSIGHTS_ENVIRONMENT") == "production",
             f"{scheduler} environment must be production",
         )
+        required = {flag, "DAILY_INSIGHTS_DATABASE_URL"}
+        if secret is not None:
+            required.add(secret)
         require(
-            {flag, secret, "DAILY_INSIGHTS_DATABASE_URL"}.issubset(scheduler_environment),
-            f"{scheduler} must receive its feature flag, provider credential, and database URL",
+            required.issubset(scheduler_environment),
+            f"{scheduler} must receive its feature flag, database URL, and provider credential",
         )
         require(not services[scheduler].get("ports"), f"{scheduler} must not publish a host port")
     analyst_scheduler_environment = services["analyst-viewpoints-scheduler"].get("environment", {})

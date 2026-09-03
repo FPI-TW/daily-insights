@@ -72,6 +72,8 @@ grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY: ${DAILY_INSIGHTS_ANALYST_VI
 grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS:-10}' "$compose_file"
 grep -Fq 'daily_insights_api.scripts.run_analyst_viewpoints' "$compose_file"
 grep -Fq '/tmp/analyst-viewpoints-heartbeat' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_YFINANCE_ENABLED: ${DAILY_INSIGHTS_YFINANCE_ENABLED:-false}' "$compose_file"
+grep -Fq 'daily_insights_api.scripts.run_index_daily_bars' "$compose_file"
 grep -Fq '/tmp/index-daily-bars-heartbeat' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_ENABLED: ${DAILY_INSIGHTS_CHAT_ENABLED:-false}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_PROVIDER: ${DAILY_INSIGHTS_CHAT_MODEL_PROVIDER:-deepseek}' "$compose_file"
@@ -149,6 +151,7 @@ for name in \
   DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED \
   DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL \
   DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS \
+  DAILY_INSIGHTS_YFINANCE_ENABLED \
   DAILY_INSIGHTS_CHAT_ENABLED \
   DAILY_INSIGHTS_CHAT_MODEL_PROVIDER \
   DAILY_INSIGHTS_CHAT_MODEL_NAME \
