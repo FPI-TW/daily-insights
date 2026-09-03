@@ -5,6 +5,7 @@ import { PodcastPlayer } from "#/components/PodcastPlayer"
 import { ErrorScreen, LoadingScreen } from "#/components/StateScreen"
 import { hoverLift, reveal, springs, useEnterAnimation } from "#/lib/motion"
 import { getPodcastList } from "#/lib/podcasts"
+import { numberLocales } from "#/lib/format"
 
 export const Route = createFileRoute(
   "/$locale/_authenticated/_customer/podcasts/"
@@ -46,30 +47,27 @@ function PodcastListPage() {
           {episodes.map((episode, index) => (
             <motion.li
               key={episode.id}
-              className="surface-panel grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-5 border-l-[3px] border-l-transparent p-4 text-sea-ink transition-[border-color,box-shadow] hover:border-l-lagoon hover:border-lagoon-deep hover:shadow-[0_16px_34px_rgb(14_20_19/9%)] max-[42rem]:grid-cols-[4.2rem_minmax(0,1fr)] max-[42rem]:gap-3 max-[42rem]:p-3.5"
+              className="surface-panel border-l-[3px] border-l-transparent p-5 text-sea-ink transition-[border-color,box-shadow] hover:border-l-lagoon hover:border-lagoon-deep hover:shadow-[0_16px_34px_rgb(14_20_19/9%)] max-[42rem]:p-4"
               {...reveal(animate, index)}
               whileHover={hoverLift}
               transition={springs.snappy}
             >
-              <div
-                className="grid aspect-square w-[5.5rem] items-end justify-items-start rounded-[10px] bg-lagoon p-2.5 font-mono text-white max-[42rem]:w-[4.2rem]"
-                aria-hidden="true"
-              >
-                <span className="text-xl font-extrabold max-[42rem]:text-base">
-                  {episode.trading_date.slice(5)}
-                </span>
-              </div>
               <article className="min-w-0">
+                {/* The trading date appears once, as the eyebrow; the title is
+                    the episode's own title rather than a date composite. */}
                 <time
                   className="text-xs font-extrabold tracking-[0.06em] text-kicker"
                   dateTime={episode.trading_date}
                 >
-                  {episode.trading_date}
+                  {new Intl.DateTimeFormat(numberLocales[locale], {
+                    dateStyle: "long",
+                    timeZone: "UTC",
+                  }).format(new Date(`${episode.trading_date}T00:00:00Z`))}
                 </time>
                 <h2 className="mt-1 mb-0 text-[clamp(1.05rem,3vw,1.35rem)] tracking-[-0.02em]">
                   {episode.title}
                 </h2>
-                <p className="mt-2 mb-0 line-clamp-2 text-sm leading-6 text-sea-ink-soft">
+                <p className="mt-2 mb-0 line-clamp-3 text-sm leading-6 text-sea-ink-soft">
                   {episode.summary}
                 </p>
                 <PodcastPlayer

@@ -4,10 +4,20 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.config import Settings
+from daily_insights_api.modules.model_runtime.api import CHAT_PROMPT_VERSION
 from daily_insights_api.modules.model_runtime.models import (
     ActiveModelConfiguration,
     ModelConfiguration,
 )
+
+
+def _chat_configuration_desired(settings: Settings) -> dict[str, object]:
+    return {
+        "provider": settings.chat_model_provider,
+        "requested_model": settings.chat_model_name,
+        "prompt_version": CHAT_PROMPT_VERSION,
+        "parameters": {"temperature": 0.2},
+    }
 
 
 async def sync_chat_model_configuration(database: AsyncSession, settings: Settings) -> None:
@@ -15,12 +25,7 @@ async def sync_chat_model_configuration(database: AsyncSession, settings: Settin
     if not settings.chat_enabled:
         return
     await database.execute(text("SELECT pg_advisory_xact_lock(854921017)"))
-    desired = {
-        "provider": settings.chat_model_provider,
-        "requested_model": settings.chat_model_name,
-        "prompt_version": "page-context.v1",
-        "parameters": {"temperature": 0.2},
-    }
+    desired = _chat_configuration_desired(settings)
     active = await database.scalar(
         select(ModelConfiguration)
         .join(

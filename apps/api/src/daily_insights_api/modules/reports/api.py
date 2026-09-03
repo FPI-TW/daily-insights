@@ -6,9 +6,11 @@ from daily_insights_api.modules.reports.contracts import (
     PublicationBundle,
     PublicationContent,
 )
+from daily_insights_api.modules.reports.launch_manifest import LAUNCH_MARKET_ORDER
 from daily_insights_api.modules.reports.models import ReportPublication
 
 __all__ = [
+    "LAUNCH_MARKET_ORDER",
     "Locale",
     "PublicationBundle",
     "PublicationContent",

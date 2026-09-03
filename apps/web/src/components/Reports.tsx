@@ -5,25 +5,66 @@ import { useEffect, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import type { AnalystViewpoint, Locale } from "@daily-insights/api-client"
 import {
+  directionClass,
+  formatChange,
+  formatIsoDate,
+  formatNumber,
+  literalDirection,
+  unitLabel,
+  type Direction,
+} from "#/lib/format"
+import type { NavMarket } from "#/lib/markets"
+import {
   type MarketCode,
-  navMarketCodes,
   type ProvisionalReport,
   type ReportBlock,
   type ReportValue,
+  type TableColumn,
 } from "#/lib/provisional-reports"
 import { fadeIn, reveal, useEnterAnimation } from "#/lib/motion"
 import { ActiveIndicator } from "./ActiveIndicator"
 
-function valueText(value: ReportValue | null, t: (key: string) => string) {
+type Translate = ReturnType<typeof useTranslation>["t"]
+
+/** Display text for a value that is not a number: translation keys and
+ * pre-formatted literals. Numbers go through `formatNumber`/`formatChange`. */
+function valueText(value: ReportValue | null, t: Translate) {
   if (value === null) return "—"
-  return value.kind === "translation" ? t(value.key) : String(value.value)
+  if (value.kind === "translation") return t(value.key)
+  return String(value.value)
 }
 
-function directionClass(value: ReportValue | null, t: (key: string) => string) {
+function isCurrencyCode(unitCode: string | null | undefined) {
+  return /^[a-z]{3}$/i.test(unitCode ?? "")
+}
+
+function formatValue(
+  value: ReportValue | null,
+  unitCode: string | null | undefined,
+  locale: Locale,
+  t: Translate
+) {
+  if (value !== null && value.kind === "number") {
+    return formatNumber(value.value, unitCode, locale)
+  }
+  return valueText(value, t)
+}
+
+function changeOf(
+  value: ReportValue | null | undefined,
+  locale: Locale,
+  t: Translate,
+  percent = true
+): { text: string; direction: Direction } {
+  if (value === null || value === undefined) {
+    return { text: "—", direction: "none" }
+  }
+  const flatLabel = t("reportChangeFlat")
+  if (value.kind === "number") {
+    return formatChange(value.value, locale, { percent, flatLabel })
+  }
   const text = valueText(value, t)
-  if (text.startsWith("+")) return "text-market-up"
-  if (text.startsWith("-")) return "text-market-down"
-  return "text-sea-ink"
+  return { text, direction: literalDirection(text) }
 }
 
 export function ReportLoadingScreen() {
@@ -48,12 +89,14 @@ export function ReportLoadingScreen() {
 
 function ReportMarketNav({
   locale,
+  markets,
   activeMarket,
 }: {
   locale: Locale
+  markets: ReadonlyArray<NavMarket>
   activeMarket?: MarketCode | undefined
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const linkClass = (active: boolean) =>
     `shrink-0 border-b-2 border-transparent px-4 py-3 text-xs font-extrabold no-underline transition-colors ${active ? "text-lagoon" : "text-sea-ink-soft hover:text-sea-ink"}`
   return (
@@ -73,14 +116,16 @@ function ReportMarketNav({
       >
         {t("reportAllMarkets")}
       </Link>
-      {navMarketCodes.map(code => (
+      {markets.map(market => (
         <Link
-          key={code}
+          key={market.code}
           to="/$locale/reports/$marketCode"
-          params={{ locale, marketCode: code }}
-          className={linkClass(activeMarket === code)}
+          params={{ locale, marketCode: market.code }}
+          className={linkClass(activeMarket === market.code)}
         >
-          {t(`reportMarketShort_${code}`)}
+          {i18n.exists(`reportMarketShort_${market.code}`)
+            ? t(`reportMarketShort_${market.code}`)
+            : market.name}
         </Link>
       ))}
     </nav>
@@ -98,12 +143,16 @@ function PageHeading({ title }: { title: string }) {
   )
 }
 
+/** Page frame shared by the report list and every market page: one heading
+ * and one market navigation, driven by the organization's visible markets. */
 export function ReportShell({
   locale,
+  markets = [],
   activeMarket,
   children,
 }: {
   locale: Locale
+  markets?: ReadonlyArray<NavMarket>
   activeMarket?: MarketCode | undefined
   children: ReactNode
 }) {
@@ -115,7 +164,11 @@ export function ReportShell({
           activeMarket ? t(`reportMarket_${activeMarket}`) : t("reportsTitle")
         }
       />
-      <ReportMarketNav locale={locale} activeMarket={activeMarket} />
+      <ReportMarketNav
+        locale={locale}
+        markets={markets}
+        activeMarket={activeMarket}
+      />
       {children}
     </main>
   )
@@ -124,11 +177,13 @@ export function ReportShell({
 export function ReportList({
   locale: _locale,
   viewpoints = [],
+  markets,
 }: {
   locale?: Locale
   viewpoints?: ReadonlyArray<AnalystViewpoint>
+  markets?: ReadonlyArray<NavMarket>
 }) {
-  return <AnalystViewpoints viewpoints={viewpoints} />
+  return <AnalystViewpoints viewpoints={viewpoints} markets={markets} />
 }
 
 export function AnalystViewpointsLoading() {
@@ -142,9 +197,9 @@ export function AnalystViewpointsLoading() {
       <p className="sr-only">{t("analystViewpointsLoading")}</p>
       <div className="h-4 w-40 rounded bg-line" />
       <div className="mt-4 grid gap-3 md:grid-cols-2">
-        {navMarketCodes.map(marketCode => (
-          <div className="h-20 rounded bg-line" key={marketCode} />
-        ))}
+        <div className="h-20 rounded bg-line" />
+        <div className="h-20 rounded bg-line" />
+        <div className="h-20 rounded bg-line" />
       </div>
     </section>
   )
@@ -152,17 +207,20 @@ export function AnalystViewpointsLoading() {
 
 function AnalystViewpoints({
   viewpoints,
+  markets,
 }: {
   viewpoints: ReadonlyArray<AnalystViewpoint>
+  markets?: ReadonlyArray<NavMarket> | undefined
 }) {
   const { t } = useTranslation()
-  const viewpointsByMarket = new Map(
-    viewpoints.map(viewpoint => [viewpoint.market_code, viewpoint])
-  )
-  const visibleViewpoints = navMarketCodes.flatMap(marketCode => {
-    const viewpoint = viewpointsByMarket.get(marketCode)
-    return viewpoint ? [viewpoint] : []
-  })
+  // Viewpoints follow navigation order and only cover navigable markets when
+  // the market list is known; otherwise they are shown as delivered.
+  const visibleViewpoints = markets
+    ? markets.flatMap(market => {
+        const viewpoint = viewpoints.find(v => v.market_code === market.code)
+        return viewpoint ? [viewpoint] : []
+      })
+    : viewpoints
   const latest = visibleViewpoints[0]
   if (!latest) return null
   return (
@@ -204,23 +262,67 @@ function AnalystViewpoints({
   )
 }
 
+/** Freshness line above the blocks: the data cut-off, a stale marker with
+ * its reason, and the report-level caveat when the pipeline attached one. */
+function ReportFreshness({
+  report,
+  locale,
+}: {
+  report: ProvisionalReport
+  locale: Locale
+}) {
+  const { t } = useTranslation()
+  if (!report.sourceDate && !report.stale && !report.caveat) return null
+  return (
+    <div className="mb-4 text-xs text-sea-ink-soft">
+      <div className="flex flex-wrap items-center gap-2">
+        {report.sourceDate ? (
+          <span>
+            {t("reportSourceAsOf", {
+              date: formatIsoDate(report.sourceDate, locale),
+            })}
+          </span>
+        ) : null}
+        {report.stale ? (
+          <span className="rounded-full border border-market-caution/50 bg-market-caution/10 px-2 py-0.5 font-bold text-market-caution">
+            {t("reportStale")}
+          </span>
+        ) : null}
+        {report.status === "partial" ? (
+          <span className="rounded-full border border-line px-2 py-0.5 font-bold">
+            {t("reportStatusPartial")}
+          </span>
+        ) : null}
+      </div>
+      {report.stale && report.staleReason ? (
+        <p className="mt-1 mb-0">{report.staleReason}</p>
+      ) : null}
+      {report.caveat ? <p className="mt-1 mb-0">{report.caveat}</p> : null}
+    </div>
+  )
+}
+
 export function ReportDetail({
-  locale: _locale,
+  locale = "zh-hant",
   report,
 }: {
   locale?: Locale
   report: ProvisionalReport
 }) {
   return (
-    <div className="grid min-w-0 gap-4 xl:grid-cols-2">
-      {report.blocks.map((block, index) => (
-        <ReportBlockView
-          block={block}
-          index={index}
-          key={`${block.titleKey}-${index}`}
-        />
-      ))}
-    </div>
+    <>
+      <ReportFreshness report={report} locale={locale} />
+      <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+        {report.blocks.map((block, index) => (
+          <ReportBlockView
+            block={block}
+            index={index}
+            locale={locale}
+            key={`${block.titleKey}-${index}`}
+          />
+        ))}
+      </div>
+    </>
   )
 }
 
@@ -258,7 +360,7 @@ function useChartColors() {
 
 function chartCategories(
   block: Extract<ReportBlock, { kind: "series" }>,
-  t: (key: string) => string
+  t: Translate
 ) {
   const categories = Array.from(
     new Set(
@@ -275,7 +377,7 @@ function chartCategories(
 function chartDataForCategories(
   line: Extract<ReportBlock, { kind: "series" }>["series"][number],
   categories: ReadonlyArray<string>,
-  t: (key: string) => string
+  t: Translate
 ) {
   const valuesByCategory = new Map(
     line.points.map(point => [valueText(point.label, t), point.value])
@@ -305,15 +407,32 @@ function isBase100Series(
   )
 }
 
+function columnHeading(column: TableColumn, t: Translate) {
+  const label = t(column.labelKey)
+  const unit = unitLabel(column.unitCode, t)
+  return unit ? `${label} (${unit})` : label
+}
+
+function BlockNote({ children }: { children: ReactNode }) {
+  const { t } = useTranslation()
+  return (
+    <p className="mt-3 mb-0 text-xs leading-5 text-sea-ink-soft">
+      <span className="font-bold">{t("reportCaveatLabel")}</span> {children}
+    </p>
+  )
+}
+
 const metricCellClass =
   "min-w-0 border-t border-line py-3 first:border-t-0 sm:border-l sm:px-3 sm:nth-[-n+3]:border-t-0 sm:nth-[3n+1]:border-l-0 sm:nth-[3n+1]:pl-0 sm:nth-[3n]:pr-0"
 
 function ReportBlockView({
   block,
   index,
+  locale,
 }: {
   block: ReportBlock
   index: number
+  locale: Locale
 }) {
   const { t } = useTranslation()
   const chartColors = useChartColors()
@@ -322,6 +441,7 @@ function ReportBlockView({
     block.kind === "series" && block.title
       ? valueText(block.title, t)
       : t(block.titleKey)
+  const caveat = block.caveat ? valueText(block.caveat, t) : null
   return (
     <motion.section
       className={`surface-panel min-w-0 p-5 ${block.kind === "series" ? "xl:col-span-2" : ""}`}
@@ -334,9 +454,17 @@ function ReportBlockView({
           </h2>
         </div>
       </div>
-      {block.status !== "ok" ? (
+      {block.status === "missing" ? (
+        // An honest "nothing today" instead of zeros or an empty panel.
         <p className="m-0 border-y border-line py-5 text-sm text-sea-ink-soft">
-          {t("reportBlockUnavailable")}
+          {t("reportBlockMissing")}
+        </p>
+      ) : block.status === "error" ? (
+        <p
+          className="m-0 border-y border-market-caution/40 py-5 text-sm text-sea-ink-soft"
+          role="status"
+        >
+          {t("reportBlockError")}
         </p>
       ) : block.kind === "metric" ? (
         // Cells own their borders instead of using divide-*: with more metrics
@@ -344,23 +472,34 @@ function ReportBlockView({
         // cell and leaves no rule between the rows. Empty filler cells complete
         // the last row so its rules run the full width of the block.
         <div className="grid min-w-0 border-y border-line sm:grid-cols-3">
-          {block.metrics.map(item => (
-            <div className={metricCellClass} key={item.labelKey}>
-              <p className="m-0 text-xs text-sea-ink-soft">
-                {t(item.labelKey)}
-              </p>
-              <p className="mt-2 mb-0 font-mono text-[22px] font-extrabold tracking-[-0.03em] text-sea-ink tabular-nums">
-                {valueText(item.value, t)}
-              </p>
-              {"change" in item ? (
-                <p
-                  className={`mt-1 mb-0 font-mono text-xs font-bold tabular-nums ${directionClass(item.change ?? null, t)}`}
-                >
-                  {valueText(item.change ?? null, t)}
+          {block.metrics.map(item => {
+            const unit = unitLabel(item.unitCode, t)
+            const change = changeOf(item.change, locale, t)
+            return (
+              <div className={metricCellClass} key={item.labelKey}>
+                <p className="m-0 text-xs text-sea-ink-soft">
+                  {t(item.labelKey)}
                 </p>
-              ) : null}
-            </div>
-          ))}
+                <p className="mt-2 mb-0 font-mono text-[22px] font-extrabold tracking-[-0.03em] text-sea-ink tabular-nums">
+                  {formatValue(item.value, item.unitCode, locale, t)}
+                  {/* Each metric carries its own currency: a block can mix
+                      USD and EUR (gold in dollars, copper in euros). */}
+                  {unit && isCurrencyCode(item.unitCode) ? (
+                    <span className="ml-1.5 align-middle text-xs font-bold text-sea-ink-soft">
+                      {unit}
+                    </span>
+                  ) : null}
+                </p>
+                {"change" in item ? (
+                  <p
+                    className={`mt-1 mb-0 font-mono text-xs font-bold tabular-nums ${directionClass(change.direction)}`}
+                  >
+                    {change.text}
+                  </p>
+                ) : null}
+              </div>
+            )
+          })}
           {Array.from(
             { length: (3 - (block.metrics.length % 3)) % 3 },
             (_, filler) => (
@@ -381,9 +520,9 @@ function ReportBlockView({
                 {block.columns.map((column, index) => (
                   <th
                     className={`whitespace-nowrap px-3 py-2.5 font-bold ${index === 0 ? "text-left" : "text-right"}`}
-                    key={column}
+                    key={column.labelKey}
                   >
-                    {t(column)}
+                    {columnHeading(column, t)}
                   </th>
                 ))}
               </tr>
@@ -391,14 +530,37 @@ function ReportBlockView({
             <tbody>
               {block.rows.map((row, rowIndex) => (
                 <tr className="border-t border-line" key={rowIndex}>
-                  {row.map((cell, cellIndex) => (
-                    <td
-                      className={`whitespace-nowrap px-3 py-2.5 ${cellIndex === 0 ? "font-semibold text-sea-ink" : `text-right font-mono tabular-nums ${directionClass(cell, t)}`}`}
-                      key={cellIndex}
-                    >
-                      {valueText(cell, t)}
-                    </td>
-                  ))}
+                  {row.map((cell, cellIndex) => {
+                    if (cellIndex === 0) {
+                      return (
+                        <td
+                          className="whitespace-nowrap px-3 py-2.5 font-semibold text-sea-ink"
+                          key={cellIndex}
+                        >
+                          {valueText(cell, t)}
+                        </td>
+                      )
+                    }
+                    const column = block.columns[cellIndex]
+                    const isChange = column?.unitCode === "percent"
+                    const shown = isChange
+                      ? changeOf(cell, locale, t)
+                      : {
+                          text: formatValue(cell, column?.unitCode, locale, t),
+                          direction:
+                            cell?.kind === "number"
+                              ? ("none" as const)
+                              : literalDirection(valueText(cell, t)),
+                        }
+                    return (
+                      <td
+                        className={`whitespace-nowrap px-3 py-2.5 text-right font-mono tabular-nums ${shown.direction === "none" ? "text-sea-ink" : directionClass(shown.direction)}`}
+                        key={cellIndex}
+                      >
+                        {shown.text}
+                      </td>
+                    )
+                  })}
                 </tr>
               ))}
             </tbody>
@@ -436,7 +598,7 @@ function ReportBlockView({
                     trigger: "axis",
                     appendToBody: true,
                     valueFormatter: (value: number | string) =>
-                      `${value}${block.unitLabel ? ` ${valueText(block.unitLabel, t)}` : ""}`,
+                      formatNumber(value, block.unitCode, locale),
                   },
                   xAxis: {
                     type: "category",
@@ -452,7 +614,7 @@ function ReportBlockView({
                       ? t("reportChartBase100")
                       : block.unitLabel
                         ? valueText(block.unitLabel, t)
-                        : block.unitCode,
+                        : (unitLabel(block.unitCode, t) ?? ""),
                     nameTextStyle: { color: chartColors.text },
                     axisLabel: { color: chartColors.text },
                     splitLine: {
@@ -509,7 +671,7 @@ function ReportBlockView({
               <dd className="m-0 text-sea-ink">
                 {block.unitLabel
                   ? valueText(block.unitLabel, t)
-                  : (block.unitCode ?? "—")}
+                  : (unitLabel(block.unitCode, t) ?? "—")}
               </dd>
             </div>
           </dl>
@@ -523,7 +685,11 @@ function ReportBlockView({
                       <th>
                         {valueText(line.label, t)} {valueText(point.label, t)}
                       </th>
-                      <td>{point.value ?? "—"}</td>
+                      <td>
+                        {point.value === null
+                          ? "—"
+                          : formatNumber(point.value, block.unitCode, locale)}
+                      </td>
                     </tr>
                   ))
                 )}
@@ -532,6 +698,7 @@ function ReportBlockView({
           </div>
         </>
       ) : null}
+      {caveat ? <BlockNote>{caveat}</BlockNote> : null}
     </motion.section>
   )
 }
@@ -558,53 +725,48 @@ export function ReportErrorScreen({ error }: { error: Error }) {
   )
 }
 
+// The heading and market navigation come from the reports layout, so these
+// states render only their panel; rendering a second nav here is what
+// produced the duplicated tab bar on the Taiwan page.
 export function ReportNotLaunchedScreen({
-  locale,
   marketCode,
 }: {
-  locale: Locale
+  locale?: Locale
   marketCode: MarketCode
 }) {
+  void marketCode
   const { t } = useTranslation()
   return (
-    <main className="page-shell">
-      <PageHeading title={t(`reportMarket_${marketCode}`)} />
-      <ReportMarketNav locale={locale} activeMarket={marketCode} />
-      <section
-        className="surface-panel p-10 text-center"
-        role="status"
-        aria-live="polite"
-      >
-        <h2 className="mt-0 text-xl">{t("reportNotLaunchedTitle")}</h2>
-        <p className="mb-0 text-sm text-sea-ink-soft">
-          {t("reportNotLaunchedDescription")}
-        </p>
-      </section>
-    </main>
+    <section
+      className="surface-panel p-10 text-center"
+      role="status"
+      aria-live="polite"
+    >
+      <h2 className="mt-0 text-xl">{t("reportNotLaunchedTitle")}</h2>
+      <p className="mb-0 text-sm text-sea-ink-soft">
+        {t("reportNotLaunchedDescription")}
+      </p>
+    </section>
   )
 }
 
 export function ReportNotGeneratedScreen({
-  locale,
   marketCode,
 }: {
-  locale: Locale
+  locale?: Locale
   marketCode: MarketCode
 }) {
+  void marketCode
   const { t } = useTranslation()
   return (
-    <main className="page-shell">
-      <PageHeading title={t(`reportMarket_${marketCode}`)} />
-      <ReportMarketNav locale={locale} activeMarket={marketCode} />
-      <section
-        className="surface-panel border-market-caution/35 p-10 text-center"
-        role="status"
-        aria-live="polite"
-      >
-        <p className="m-0 text-sm text-sea-ink-soft">
-          {t("reportBlockUnavailable")}
-        </p>
-      </section>
-    </main>
+    <section
+      className="surface-panel border-market-caution/35 p-10 text-center"
+      role="status"
+      aria-live="polite"
+    >
+      <p className="m-0 text-sm text-sea-ink-soft">
+        {t("reportBlockUnavailable")}
+      </p>
+    </section>
   )
 }

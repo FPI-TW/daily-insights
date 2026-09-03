@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   isNewsMarketCode,
   launchMarketCodes,
-  navMarketCodes,
+  marketCodes,
   newsMarketCodes,
 } from "#/lib/provisional-reports"
 import {
@@ -35,12 +35,10 @@ describe("provisional reports adapter", () => {
     ).resolves.toBeUndefined()
   })
 
-  it("navigates the visible markets and publishes news for Taiwan and US", () => {
-    expect(navMarketCodes).toEqual([
-      "global_macro_bonds",
-      "us_equity",
-      "tw_equity",
-    ])
+  it("knows the full market catalog and publishes news for Taiwan and US", () => {
+    expect(marketCodes).toContain("crypto")
+    expect(marketCodes).toContain("tw_index_derivatives")
+    expect(marketCodes).toHaveLength(8)
     expect(newsMarketCodes).toEqual(["tw_equity", "us_equity"])
     expect(isNewsMarketCode("tw_equity")).toBe(true)
     expect(isNewsMarketCode("crypto")).toBe(false)

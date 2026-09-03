@@ -18,8 +18,16 @@ import {
 } from "./Reports"
 import { LocaleSwitcher } from "./LocaleSwitcher"
 import { createI18n } from "#/lib/i18n"
+import type { NavMarket } from "#/lib/markets"
 import type { ProvisionalReport } from "#/lib/provisional-reports"
 import { getProvisionalReport } from "#/test/report-fixtures"
+
+const markets: NavMarket[] = [
+  { code: "global_macro_bonds", name: "US Macro and Global Bonds" },
+  { code: "crypto", name: "Cryptocurrency" },
+  { code: "us_equity", name: "US Equities" },
+  { code: "tw_equity", name: "Taiwan Equities" },
+]
 
 const invalidate = vi.fn()
 let renderClientOnlyFallback = false
@@ -69,25 +77,36 @@ async function renderLocalized(
 }
 
 describe("three-market report presentation", () => {
-  it("lists the visible market tabs without crypto or Taiwan derivatives", async () => {
+  it("lists every market the API marks visible, in API order", async () => {
     await renderLocalized(
-      <ReportShell locale="en">
+      <ReportShell
+        locale="en"
+        markets={[...markets, { code: "forex", name: "Foreign Exchange" }]}
+      >
         <ReportList />
       </ReportShell>,
       "en"
     )
     const links = screen.getByRole("navigation").querySelectorAll("a")
-    expect(links).toHaveLength(4)
-    expect(links[1]).toHaveTextContent("Macro analysis")
-    expect(links[3]).toHaveTextContent("Taiwan equities")
-    expect(screen.queryByText("Crypto")).not.toBeInTheDocument()
-    expect(screen.queryByText(/derivatives/i)).not.toBeInTheDocument()
+    expect(Array.from(links).map(link => link.textContent)).toEqual([
+      "All markets",
+      "Macro analysis",
+      "Crypto",
+      "US equities",
+      "Taiwan equities",
+      "Forex",
+    ])
+    expect(links[2]).toHaveAttribute(
+      "data-params",
+      JSON.stringify({ locale: "en", marketCode: "crypto" })
+    )
   })
 
   it("shows tab-visible analyst viewpoints in navigation order", async () => {
     await renderLocalized(
-      <ReportShell locale="en">
+      <ReportShell locale="en" markets={markets}>
         <ReportList
+          markets={markets.filter(market => market.code !== "crypto")}
           viewpoints={[
             {
               viewpoint_date: "2026-09-02",
@@ -127,9 +146,11 @@ describe("three-market report presentation", () => {
     expect(section).not.toHaveTextContent("Crypto")
   })
 
-  it("renders the not-launched state for a navigable market without a report", async () => {
+  it("renders the not-launched state inside the shared shell with a single nav", async () => {
     await renderLocalized(
-      <ReportNotLaunchedScreen locale="en" marketCode="tw_equity" />,
+      <ReportShell locale="en" markets={markets} activeMarket="tw_equity">
+        <ReportNotLaunchedScreen locale="en" marketCode="tw_equity" />
+      </ReportShell>,
       "en"
     )
     expect(screen.getByRole("status")).toHaveTextContent(
@@ -138,6 +159,157 @@ describe("three-market report presentation", () => {
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
       "Taiwan equities"
     )
+    expect(screen.getAllByRole("navigation")).toHaveLength(1)
+  })
+
+  it("formats live metrics with thousands, per-item currencies and signed changes", async () => {
+    const report = {
+      marketCode: "global_macro_bonds",
+      status: "complete",
+      editionDate: "2026-09-03",
+      sourceDate: "2026-09-02",
+      stale: true,
+      staleReason: "Provider closed for a holiday.",
+      caveatKey: "reportCaveatLive",
+      summaryKey: "reportSummary_global_macro_bonds",
+      blocks: [
+        {
+          kind: "metric",
+          status: "ok",
+          titleKey: "reportBlockMacroSnapshot",
+          metrics: [
+            {
+              labelKey: "reportLabelBrent",
+              value: { kind: "number", value: "94.3679" },
+              change: { kind: "number", value: "0.0397" },
+              unitCode: "usd",
+            },
+            {
+              labelKey: "reportLabelGold",
+              value: { kind: "number", value: "4437.4020" },
+              change: { kind: "number", value: "-1.1312" },
+              unitCode: "usd",
+            },
+            {
+              labelKey: "reportLabelCopper",
+              value: { kind: "number", value: "24.4000" },
+              change: { kind: "number", value: "0.0000" },
+              unitCode: "eur",
+            },
+          ],
+        },
+      ],
+    } satisfies ProvisionalReport
+
+    await renderLocalized(<ReportDetail locale="en" report={report} />, "en")
+
+    expect(screen.getByText("94.37").parentElement).toHaveTextContent(
+      "94.37USD+0.04%"
+    )
+    expect(screen.getByText("+0.04%")).toHaveClass("text-market-up")
+    expect(screen.getByText("4,437.40").parentElement).toHaveTextContent(
+      "4,437.40USD-1.13%"
+    )
+    expect(screen.getByText("-1.13%")).toHaveClass("text-market-down")
+    expect(screen.getByText("24.40").parentElement).toHaveTextContent(
+      "24.40EURFlat"
+    )
+    expect(screen.getByText("Flat")).toHaveClass("text-sea-ink-soft")
+    expect(screen.getByText("Data as of Sep 2, 2026")).toBeVisible()
+    expect(screen.getByText("Possibly stale")).toBeVisible()
+    expect(screen.getByText("Provider closed for a holiday.")).toBeVisible()
+  })
+
+  it("labels table columns with their units and colours percent cells", async () => {
+    const report = {
+      marketCode: "us_equity",
+      status: "complete",
+      editionDate: "2026-09-03",
+      sourceDate: "2026-09-02",
+      caveatKey: "reportCaveatLive",
+      summaryKey: "reportSummary_us_equity",
+      blocks: [
+        {
+          kind: "table",
+          status: "ok",
+          titleKey: "reportBlockUsLeaders",
+          columns: [
+            { labelKey: "reportColumnInstrument", unitCode: null },
+            { labelKey: "reportColumnPrice", unitCode: "usd" },
+            { labelKey: "reportColumnChange", unitCode: "percent" },
+          ],
+          rows: [
+            [
+              { kind: "literal", value: "BURUD" },
+              { kind: "number", value: "1.4500" },
+              { kind: "number", value: "98.6301" },
+            ],
+            [
+              { kind: "literal", value: "EYES" },
+              { kind: "number", value: "77590.3600" },
+              { kind: "number", value: "-95.1184" },
+            ],
+            [{ kind: "literal", value: "ADBT" }, null, null],
+          ],
+        },
+      ],
+    } satisfies ProvisionalReport
+
+    await renderLocalized(
+      <ReportDetail locale="zh-hant" report={report} />,
+      "zh-hant"
+    )
+
+    expect(
+      screen.getByRole("columnheader", { name: "價格 (USD)" })
+    ).toBeVisible()
+    expect(screen.getByRole("columnheader", { name: "變動 (%)" })).toBeVisible()
+    expect(screen.getByText("1.4500")).toBeVisible()
+    expect(screen.getByText("77,590.36")).toBeVisible()
+    expect(screen.getByText("+98.63%")).toHaveClass("text-market-up")
+    expect(screen.getByText("-95.12%")).toHaveClass("text-market-down")
+    expect(screen.getAllByText("—")).toHaveLength(2)
+  })
+
+  it("explains missing and errored blocks and surfaces caveats", async () => {
+    const report = {
+      marketCode: "tw_equity",
+      status: "partial",
+      editionDate: "2026-09-03",
+      sourceDate: null,
+      caveat: "TWSE T86 had no data for 2026-09-02.",
+      caveatKey: "reportCaveatLive",
+      summaryKey: "reportSummary_tw_equity",
+      blocks: [
+        {
+          kind: "metric",
+          status: "missing",
+          titleKey: "reportBlockTaiwanIndex",
+          metrics: [],
+        },
+        {
+          kind: "metric",
+          status: "error",
+          titleKey: "reportBlockBreadth",
+          caveat: { kind: "literal", value: "Upstream timeout." },
+          metrics: [],
+        },
+      ],
+    } satisfies ProvisionalReport
+
+    await renderLocalized(<ReportDetail locale="en" report={report} />, "en")
+
+    expect(screen.getByText("Some sections missing")).toBeVisible()
+    expect(
+      screen.getByText("TWSE T86 had no data for 2026-09-02.")
+    ).toBeVisible()
+    expect(
+      screen.getByText("No data was received for this section today.")
+    ).toBeVisible()
+    expect(
+      screen.getByText("This section failed to load its data.")
+    ).toBeVisible()
+    expect(screen.getByText("Upstream timeout.")).toBeVisible()
   })
   it("uses an accessible in-frame fallback before chart hydration", async () => {
     const crypto = await getProvisionalReport("crypto")
@@ -264,11 +436,48 @@ describe("three-market report presentation", () => {
       expect(chart).toHaveTextContent('"type":"scroll"')
       expect(chart).toHaveTextContent('"yAxis":100')
       expect(chart).toHaveTextContent(`"formatter":"${base100}"`)
-      expect(
-        screen.queryByText("Provider holiday adjustment")
-      ).not.toBeInTheDocument()
+      expect(screen.getByText("Provider holiday adjustment")).toBeVisible()
     }
   )
+
+  it.each([
+    ["zh-hant", "指數"],
+    ["zh-hans", "指数"],
+    ["en", "Index"],
+  ] as const)("translates the chart unit code in %s", async (locale, unit) => {
+    const report = {
+      marketCode: "crypto",
+      status: "complete",
+      editionDate: "2026-08-30",
+      sourceDate: "2026-08-29",
+      caveatKey: "reportCaveatLive",
+      summaryKey: "reportSummary_crypto",
+      blocks: [
+        {
+          kind: "series",
+          id: "crypto.overview_series",
+          status: "ok",
+          titleKey: "reportBlockNormalizedPerformance",
+          unitCode: "index",
+          series: [
+            {
+              id: "btc",
+              label: { kind: "literal", value: "BTC" },
+              points: [{ label: { kind: "literal", value: "D1" }, value: 100 }],
+            },
+          ],
+        },
+      ],
+    } satisfies ProvisionalReport
+
+    await renderLocalized(
+      <ReportDetail locale={locale} report={report} />,
+      locale
+    )
+
+    expect(screen.getByRole("definition")).toHaveTextContent(unit)
+    expect(screen.queryByText("index")).not.toBeInTheDocument()
+  })
 
   it.each([
     ["zh-hant", "布蘭特原油與黃金標準化表現", "指數（基期 100）", "基期 100"],
@@ -454,7 +663,7 @@ describe("three-market report presentation", () => {
     await renderLocalized(<ReportDetail locale="en" report={crypto} />, "en")
 
     expect(
-      screen.getByText("This section has not been generated yet.")
+      screen.getByText("No data was received for this section today.")
     ).toBeVisible()
     expect(screen.queryByText("Data missing")).not.toBeInTheDocument()
   })
@@ -502,9 +711,9 @@ describe("three-market report presentation", () => {
       </>
     )
 
-    expect(screen.getAllByText("本區塊資料尚未產生。").length).toBeGreaterThan(
-      0
-    )
+    expect(
+      screen.getAllByText("本區塊今日未取得資料。").length
+    ).toBeGreaterThan(0)
     expect(screen.getAllByText("—").length).toBeGreaterThan(0)
     expect(screen.getAllByTestId("chart")[0]).toHaveTextContent(
       '"connectNulls":false'
@@ -538,7 +747,9 @@ describe("three-market report presentation", () => {
     "presents a minimal non-error state in %s when publication is absent",
     async (locale, placeholder) => {
       await renderLocalized(
-        <ReportNotGeneratedScreen locale={locale} marketCode="us_equity" />,
+        <ReportShell locale={locale} markets={markets} activeMarket="us_equity">
+          <ReportNotGeneratedScreen locale={locale} marketCode="us_equity" />
+        </ReportShell>,
         locale
       )
 

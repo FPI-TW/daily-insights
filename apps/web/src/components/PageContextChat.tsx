@@ -1,6 +1,7 @@
 import type { Locale } from "@daily-insights/api-client"
-import { MessageCircle, Quote, Send, Square, X } from "lucide-react"
+import { MessageCircle, Quote, Send, Sparkles, Square, X } from "lucide-react"
 import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import {
   createContext,
   useCallback,
@@ -30,6 +31,10 @@ type DisplayMessage = {
 }
 type ChatState = {
   setPageContext: (value: PageContext | null) => void
+}
+type ChatError = {
+  message: string
+  retryable: boolean
 }
 const Context = createContext<ChatState>({ setPageContext: () => undefined })
 const maximumMessageLength = 4000
@@ -107,7 +112,7 @@ export function PageContextChatProvider({
     y: number
   } | null>(null)
   const [pending, setPending] = useState(false)
-  const [error, setError] = useState("")
+  const [error, setError] = useState<ChatError | null>(null)
   const controller = useRef<AbortController | null>(null)
   const composing = useRef(false)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
@@ -134,7 +139,7 @@ export function PageContextChatProvider({
   useEffect(() => () => controller.current?.abort(), [])
 
   useEffect(() => {
-    if (!visible) return
+    if (!visible || pending) return
     const openSelectionMenu = (event: MouseEvent) => {
       const target = event.target
       const selection = window.getSelection()
@@ -154,14 +159,14 @@ export function PageContextChatProvider({
         return
       event.preventDefault()
       setSelectionMenu({
-        text: prepareQuote(selectedText),
+        text: selectedText,
         x: Math.max(8, Math.min(event.clientX, window.innerWidth - 224)),
-        y: Math.max(8, Math.min(event.clientY, window.innerHeight - 56)),
+        y: Math.max(8, Math.min(event.clientY, window.innerHeight - 96)),
       })
     }
     document.addEventListener("contextmenu", openSelectionMenu)
     return () => document.removeEventListener("contextmenu", openSelectionMenu)
-  }, [visible])
+  }, [pending, visible])
 
   useEffect(() => {
     if (!selectionMenu) return
@@ -217,7 +222,7 @@ export function PageContextChatProvider({
       lastRequest.current = { id: clientRequestId, message, quote, context }
     setInput("")
     setAttachedQuote("")
-    setError("")
+    setError(null)
     setPending(true)
     if (!retrying) {
       setMessages(current => [
@@ -316,7 +321,7 @@ export function PageContextChatProvider({
             "status" in data &&
             (data.status === "error" || data.status === "partial")
           )
-            setError(t("chatError"))
+            setError({ message: t("chatError"), retryable: true })
           if (type === "error") {
             terminalStatus =
               typeof data === "object" &&
@@ -325,7 +330,7 @@ export function PageContextChatProvider({
               data.partial === true
                 ? "partial"
                 : "error"
-            setError(t("chatError"))
+            setError({ message: t("chatError"), retryable: true })
           }
         }
         if (done) break
@@ -336,7 +341,7 @@ export function PageContextChatProvider({
       if (caught instanceof DOMException && caught.name === "AbortError") {
         terminalStatus = "partial"
       } else {
-        setError(t("chatError"))
+        setError({ message: t("chatError"), retryable: true })
       }
     } finally {
       setMessages(current =>
@@ -358,15 +363,30 @@ export function PageContextChatProvider({
   }
 
   function attachSelection() {
-    if (!selectionMenu) return
-    setAttachedQuote(selectionMenu.text)
-    setInput(current =>
-      current.slice(0, maximumQuestionLength(selectionMenu.text))
-    )
+    if (!selectionMenu || pending) return
+    const quote = prepareQuote(selectionMenu.text)
+    setAttachedQuote(quote)
+    setInput(current => current.slice(0, maximumQuestionLength(quote)))
     setSelectionMenu(null)
     setOpen(true)
     window.getSelection()?.removeAllRanges()
     window.requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
+  function sendSelectionInsight() {
+    if (!selectionMenu || pending) return
+    const selection = selectionMenu.text
+    setSelectionMenu(null)
+    setOpen(true)
+    window.getSelection()?.removeAllRanges()
+    if (selection.length > maximumMessageLength) {
+      setInput("")
+      setAttachedQuote("")
+      lastRequest.current = null
+      setError({ message: t("chatSelectionTooLong"), retryable: false })
+      return
+    }
+    void send(selection, pageContext, crypto.randomUUID(), false, "")
   }
 
   return (
@@ -382,13 +402,22 @@ export function PageContextChatProvider({
           style={{ left: selectionMenu.x, top: selectionMenu.y }}
         >
           <button
-            className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-3 py-2 text-left text-sm font-bold text-sea-ink hover:bg-link-hover"
+            className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-3 py-2 text-left text-sm font-bold text-sea-ink hover:bg-link-hover focus:!outline-none focus-visible:!outline-none focus-visible:!outline-offset-0"
+            type="button"
+            role="menuitem"
+            onClick={sendSelectionInsight}
+          >
+            <Sparkles className="block size-4 shrink-0" aria-hidden="true" />
+            {t("chatSelectionInsight")}
+          </button>
+          <button
+            className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-3 py-2 text-left text-sm font-bold text-sea-ink hover:bg-link-hover focus:!outline-none focus-visible:!outline-none focus-visible:!outline-offset-0"
             type="button"
             role="menuitem"
             onClick={attachSelection}
           >
             <Quote className="block size-4 shrink-0" aria-hidden="true" />
-            {t("chatQuoteSelection")}
+            {t("chatSelectionDiscussion")}
           </button>
         </div>
       ) : null}
@@ -435,7 +464,7 @@ export function PageContextChatProvider({
                       className={
                         item.role === "user"
                           ? "ml-8 whitespace-pre-wrap rounded-lg bg-lagoon/10 p-3 text-sm text-sea-ink"
-                          : "mr-8 whitespace-pre-wrap rounded-lg bg-muted p-3 text-sm text-sea-ink"
+                          : "mr-8 break-words rounded-lg bg-muted p-3 text-sm text-sea-ink"
                       }
                       key={`${item.role}-${index}`}
                     >
@@ -446,12 +475,15 @@ export function PageContextChatProvider({
                       ) : null}
                       {item.role === "assistant" && item.content ? (
                         <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          skipHtml
                           components={{
                             a: ({ children, href }) => {
                               const url = safeExternalUrl(href)
                               if (!url) return <>{children}</>
                               return (
                                 <a
+                                  className="font-bold text-link underline decoration-link/40 underline-offset-2 hover:decoration-link"
                                   href={url}
                                   rel="noopener noreferrer"
                                   target="_blank"
@@ -460,6 +492,92 @@ export function PageContextChatProvider({
                                 </a>
                               )
                             },
+                            blockquote: ({ children }) => (
+                              <blockquote className="my-3 border-l-2 border-lagoon/60 pl-3 text-sea-ink-soft">
+                                {children}
+                              </blockquote>
+                            ),
+                            code: ({ children, className }) => (
+                              <code
+                                className={`${className ?? ""} rounded bg-surface/80 px-1 py-0.5 font-mono text-xs`}
+                              >
+                                {children}
+                              </code>
+                            ),
+                            h1: ({ children }) => (
+                              <h1 className="mt-4 mb-2 text-base font-extrabold first:mt-0">
+                                {children}
+                              </h1>
+                            ),
+                            h2: ({ children }) => (
+                              <h2 className="mt-4 mb-2 text-sm font-extrabold first:mt-0">
+                                {children}
+                              </h2>
+                            ),
+                            h3: ({ children }) => (
+                              <h3 className="mt-3 mb-1.5 text-sm font-bold first:mt-0">
+                                {children}
+                              </h3>
+                            ),
+                            img: ({ alt }) =>
+                              alt ? (
+                                <span className="text-sea-ink-soft">{alt}</span>
+                              ) : null,
+                            li: ({ children }) => (
+                              <li className="my-1 pl-0.5">{children}</li>
+                            ),
+                            ol: ({ children }) => (
+                              <ol className="my-2 list-decimal space-y-1 pl-5">
+                                {children}
+                              </ol>
+                            ),
+                            p: ({ children }) => (
+                              <p className="my-2 leading-relaxed first:mt-0 last:mb-0">
+                                {children}
+                              </p>
+                            ),
+                            pre: ({ children }) => (
+                              <pre className="my-3 overflow-x-auto rounded-lg border border-line bg-surface p-3 text-xs whitespace-pre">
+                                {children}
+                              </pre>
+                            ),
+                            table: ({ children }) => (
+                              <div
+                                className="my-3 max-w-full overflow-x-auto rounded-lg border border-line bg-surface"
+                                role="region"
+                                aria-label={t("chatMarkdownTable")}
+                                tabIndex={0}
+                              >
+                                <table className="w-full min-w-max border-collapse text-left text-xs">
+                                  {children}
+                                </table>
+                              </div>
+                            ),
+                            tbody: ({ children }) => (
+                              <tbody className="divide-y divide-line">
+                                {children}
+                              </tbody>
+                            ),
+                            td: ({ children }) => (
+                              <td className="min-w-32 border-r border-line px-3 py-2 align-top last:border-r-0">
+                                {children}
+                              </td>
+                            ),
+                            th: ({ children }) => (
+                              <th className="border-r border-line px-3 py-2 font-extrabold whitespace-nowrap last:border-r-0">
+                                {children}
+                              </th>
+                            ),
+                            thead: ({ children }) => (
+                              <thead className="border-b border-line bg-muted/70">
+                                {children}
+                              </thead>
+                            ),
+                            ul: ({ children }) => (
+                              <ul className="my-2 list-disc space-y-1 pl-5">
+                                {children}
+                              </ul>
+                            ),
                           }}
                         >
                           {item.content}
@@ -491,10 +609,19 @@ export function PageContextChatProvider({
                   className="px-4 pb-2 text-xs font-bold text-market-up"
                   role="alert"
                 >
-                  {error}{" "}
-                  <button className="underline" type="button" onClick={retry}>
-                    {t("retry")}
-                  </button>
+                  {error.message}
+                  {error.retryable ? (
+                    <>
+                      {" "}
+                      <button
+                        className="underline"
+                        type="button"
+                        onClick={retry}
+                      >
+                        {t("retry")}
+                      </button>
+                    </>
+                  ) : null}
                 </div>
               ) : null}
               <form
