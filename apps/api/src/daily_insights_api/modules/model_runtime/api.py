@@ -10,7 +10,7 @@ from daily_insights_api.modules.model_runtime.models import (
     ModelConfiguration,
 )
 
-CHAT_PROMPT_VERSION = "page-context.cross-market.v4"
+CHAT_PROMPT_VERSION = "page-context.cross-market.v5"
 
 __all__ = [
     "CHAT_PROMPT_VERSION",

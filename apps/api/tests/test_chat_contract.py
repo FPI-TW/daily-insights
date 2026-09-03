@@ -337,8 +337,14 @@ def test_system_prompt_renders_financial_scope_source_order_and_locale(locale: s
     )
 
     assert BASIC_PROMPT in prompt
-    assert "current_page" in prompt and "cross_page_reports" in prompt
-    assert "model background knowledge" in prompt
+    tier_1 = prompt.index("Tier 1:")
+    tier_2 = prompt.index("Tier 2:")
+    tier_3 = prompt.index("Tier 3:")
+    assert tier_1 < tier_2 < tier_3
+    assert "current_page and cross_page_reports are equal-priority authoritative sources" in prompt
+    assert "MCP or tool results, when provided" in prompt
+    assert "Skip this tier when no tool result exists" in prompt
+    assert "model background knowledge, only as a clearly labelled non-live supplement" in prompt
     assert "For an unrelated question" not in prompt
     assert "not directly related to financial markets" not in prompt
     assert "此問題與金融市場無直接關聯" not in prompt
@@ -348,7 +354,7 @@ def test_system_prompt_renders_financial_scope_source_order_and_locale(locale: s
 
 def test_chat_model_configuration_uses_the_cross_market_prompt_version() -> None:
     assert CHAT_PROMPT_VERSION == CHAT_CONTEXT_VERSION
-    assert CHAT_PROMPT_VERSION == "page-context.cross-market.v4"
+    assert CHAT_PROMPT_VERSION == "page-context.cross-market.v5"
     assert _chat_configuration_desired(Settings())["prompt_version"] == CHAT_PROMPT_VERSION
 
 
