@@ -14,12 +14,25 @@ import {
   type NewsMarketCode,
 } from "#/lib/provisional-reports"
 import { getReportDetail } from "#/lib/reports"
-import { useChatPageContext } from "#/components/PageContextChat"
+import {
+  type PageContext,
+  useChatPageContext,
+} from "#/components/PageContextChat"
 
 type ReportResult = Awaited<ReturnType<typeof getReportDetail>>
 type MarketPage = {
   report: Exclude<ReportResult, { kind: "not-found" }>
   news: { marketCode: NewsMarketCode; latest: LatestNews | null } | null
+}
+
+export function marketPageChatContext({ report }: MarketPage): PageContext {
+  if (report.kind === "report" && report.report.publicationId) {
+    return {
+      kind: "report_detail",
+      publication_id: report.report.publicationId,
+    }
+  }
+  return { kind: "global" }
 }
 
 // The report is the primary content; market news is secondary and degrades to
@@ -69,23 +82,13 @@ export const Route = createFileRoute(
 function ReportPage() {
   const { report, news } = Route.useLoaderData()
   const { locale } = Route.useRouteContext()
-  useChatPageContext(
-    report.kind === "report" && report.report.publicationId
-      ? { kind: "report_detail", publication_id: report.report.publicationId }
-      : null
-  )
+  useChatPageContext(marketPageChatContext({ report, news }))
   return (
     <>
       {report.kind === "not-generated" ? (
-        <ReportNotGeneratedScreen
-          locale={locale}
-          marketCode={report.marketCode}
-        />
+        <ReportNotGeneratedScreen />
       ) : report.kind === "not-launched" ? (
-        <ReportNotLaunchedScreen
-          locale={locale}
-          marketCode={report.marketCode}
-        />
+        <ReportNotLaunchedScreen />
       ) : (
         <ReportDetail locale={locale} report={report.report} />
       )}

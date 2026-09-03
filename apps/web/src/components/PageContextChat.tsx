@@ -12,11 +12,11 @@ import {
   useRef,
   useState,
 } from "react"
-import { useLocation } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import { requireCsrfToken } from "#/lib/auth"
 
-type PageContext =
+export type PageContext =
+  | { kind: "global" }
   | {
       kind: "reports_index"
       publication_ids: string[]
@@ -37,6 +37,7 @@ type ChatError = {
   retryable: boolean
 }
 const Context = createContext<ChatState>({ setPageContext: () => undefined })
+const globalPageContext = { kind: "global" } as const
 const maximumMessageLength = 4000
 const maximumQuoteLength = 2000
 const maximumQuotePayloadLength = 3000
@@ -84,8 +85,8 @@ export function useChatPageContext(value: PageContext | null) {
   const serialized = JSON.stringify(value)
   const stableValue = useMemo(() => value, [serialized])
   useEffect(() => {
-    setPageContext(stableValue)
-    return () => setPageContext(null)
+    setPageContext(stableValue ?? globalPageContext)
+    return () => setPageContext(globalPageContext)
   }, [setPageContext, stableValue])
 }
 
@@ -99,8 +100,7 @@ export function PageContextChatProvider({
   enabled: boolean
 }) {
   const { t } = useTranslation()
-  const location = useLocation()
-  const [pageContext, setPageContext] = useState<PageContext | null>(null)
+  const [pageContext, setPageContext] = useState<PageContext>(globalPageContext)
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [messages, setMessages] = useState<DisplayMessage[]>([])
   const [open, setOpen] = useState(false)
@@ -124,10 +124,9 @@ export function PageContextChatProvider({
     quote: string
     context: PageContext
   } | null>(null)
-  const visible =
-    enabled && location.pathname.includes("/reports") && pageContext !== null
+  const visible = enabled
   const updatePageContext = useCallback((next: PageContext | null) => {
-    setPageContext(next)
+    setPageContext(next ?? globalPageContext)
     setAttachedQuote("")
     setSelectionMenu(null)
   }, [])

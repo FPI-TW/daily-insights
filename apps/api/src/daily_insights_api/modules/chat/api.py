@@ -31,6 +31,7 @@ from daily_insights_api.modules.chat.schemas import (
     ChatGenerationResponse,
     ChatMessageResponse,
     ChatStreamRequest,
+    GlobalContext,
     ReportDetailContext,
     ReportsIndexContext,
 )
@@ -503,6 +504,16 @@ async def _page_snapshot(
             _cross_page_snapshot(
                 kind=page.kind,
                 current_page=_current_index_context(reports, news),
+                reports=cross_page_reports,
+                locale=payload.locale,
+            ),
+            None,
+        )
+    if isinstance(page, GlobalContext):
+        return (
+            _cross_page_snapshot(
+                kind=page.kind,
+                current_page={},
                 reports=cross_page_reports,
                 locale=payload.locale,
             ),

@@ -7,15 +7,15 @@ const getMarketNews = vi.fn()
 vi.mock("#/lib/reports", () => ({ getReportDetail }))
 vi.mock("#/lib/news", () => ({ getMarketNews }))
 
-const { loadMarketPage } = await import("./$marketCode")
+const { loadMarketPage, marketPageChatContext } = await import("./$marketCode")
 
 const news = {
   market_code: "us_equity",
   target_items: 8,
   edition_date: "2026-09-02",
   revision: 1,
-  status: "complete",
-  locale: "en",
+  status: "complete" as const,
+  locale: "en" as const,
   generated_at: "2026-09-02T00:00:00+00:00",
   caveat: null,
   items: [],
@@ -87,6 +87,22 @@ describe("market report loader", () => {
       news: null,
     })
     expect(getMarketNews).not.toHaveBeenCalled()
+  })
+
+  it("uses global chat context when the Taiwan report is not launched", () => {
+    expect(
+      marketPageChatContext({
+        report: { kind: "not-launched", marketCode: "tw_equity" },
+        news: {
+          marketCode: "tw_equity",
+          latest: {
+            ...news,
+            edition_id: "10000000-0000-4000-8000-000000000001",
+            market_code: "tw_equity",
+          },
+        },
+      })
+    ).toEqual({ kind: "global" })
   })
 
   it("throws notFound for unknown markets", async () => {

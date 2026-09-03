@@ -11,9 +11,6 @@ import type { Locale } from "@daily-insights/api-client"
 import { createI18n } from "#/lib/i18n"
 import { PageContextChatProvider, useChatPageContext } from "./PageContextChat"
 
-vi.mock("@tanstack/react-router", () => ({
-  useLocation: () => ({ pathname: "/en/reports" }),
-}))
 vi.mock("#/lib/auth", () => ({
   requireCsrfToken: vi.fn().mockResolvedValue("csrf-token"),
 }))
@@ -41,6 +38,19 @@ function renderChat(enabled = true) {
       <I18nextProvider i18n={i18n}>
         <PageContextChatProvider locale="en" enabled={enabled}>
           <ContextFixture />
+        </PageContextChatProvider>
+      </I18nextProvider>
+    )
+  )
+}
+
+function renderGlobalChat() {
+  const i18n = createI18n("en")
+  return i18n.changeLanguage("en").then(() =>
+    render(
+      <I18nextProvider i18n={i18n}>
+        <PageContextChatProvider locale="en" enabled>
+          <main>Customer account page</main>
         </PageContextChatProvider>
       </I18nextProvider>
     )
@@ -93,6 +103,27 @@ describe("PageContextChat", () => {
     expect(
       screen.queryByRole("button", { name: "AI Q&A" })
     ).not.toBeInTheDocument()
+  })
+
+  it("uses global market context on customer pages without page-specific context", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      streamResponse(['event: done\ndata: {"status":"complete"}\n\n'])
+    )
+    await renderGlobalChat()
+
+    fireEvent.click(screen.getByRole("button", { name: "AI Q&A" }))
+    fireEvent.change(screen.getByLabelText("Enter your question"), {
+      target: { value: "What changed?" },
+    })
+    fireEvent.submit(
+      screen.getByRole("button", { name: "Send question" }).closest("form")!
+    )
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    const request = JSON.parse(
+      String(vi.mocked(fetch).mock.calls[0]?.[1]?.body)
+    )
+    expect(request.page_context).toEqual({ kind: "global" })
   })
 
   it("reassembles SSE events split across byte and event boundaries", async () => {

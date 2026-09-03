@@ -527,70 +527,48 @@ export function ReportErrorScreen({ error }: { error: Error }) {
   const { t } = useTranslation()
   const router = useRouter()
   return (
-    <main className="page-shell">
-      <section
-        className="surface-panel border-market-up/35 p-10 text-center"
-        role="alert"
-      >
-        <h1 className="mt-0 text-2xl">{t("reportsErrorTitle")}</h1>
-        <p className="mx-auto max-w-xl text-sea-ink-soft">
-          {t("reportsErrorDescription")}
-        </p>
-        <button type="button" onClick={() => void router.invalidate()}>
-          {t("retry")}
-        </button>
-      </section>
-    </main>
+    <section
+      className="surface-panel border-market-up/35 p-10 text-center"
+      role="alert"
+    >
+      <h2 className="mt-0 text-2xl">{t("reportsErrorTitle")}</h2>
+      <p className="mx-auto max-w-xl text-sea-ink-soft">
+        {t("reportsErrorDescription")}
+      </p>
+      <button type="button" onClick={() => void router.invalidate()}>
+        {t("retry")}
+      </button>
+    </section>
   )
 }
 
-export function ReportNotLaunchedScreen({
-  locale,
-  marketCode,
-}: {
-  locale: Locale
-  marketCode: MarketCode
-}) {
+export function ReportNotLaunchedScreen() {
   const { t } = useTranslation()
   return (
-    <main className="page-shell">
-      <PageHeading title={t(`reportMarket_${marketCode}`)} />
-      <ReportMarketNav locale={locale} activeMarket={marketCode} />
-      <section
-        className="surface-panel p-10 text-center"
-        role="status"
-        aria-live="polite"
-      >
-        <h2 className="mt-0 text-xl">{t("reportNotLaunchedTitle")}</h2>
-        <p className="mb-0 text-sm text-sea-ink-soft">
-          {t("reportNotLaunchedDescription")}
-        </p>
-      </section>
-    </main>
+    <section
+      className="surface-panel p-10 text-center"
+      role="status"
+      aria-live="polite"
+    >
+      <h2 className="mt-0 text-xl">{t("reportNotLaunchedTitle")}</h2>
+      <p className="mb-0 text-sm text-sea-ink-soft">
+        {t("reportNotLaunchedDescription")}
+      </p>
+    </section>
   )
 }
 
-export function ReportNotGeneratedScreen({
-  locale,
-  marketCode,
-}: {
-  locale: Locale
-  marketCode: MarketCode
-}) {
+export function ReportNotGeneratedScreen() {
   const { t } = useTranslation()
   return (
-    <main className="page-shell">
-      <PageHeading title={t(`reportMarket_${marketCode}`)} />
-      <ReportMarketNav locale={locale} activeMarket={marketCode} />
-      <section
-        className="surface-panel border-market-caution/35 p-10 text-center"
-        role="status"
-        aria-live="polite"
-      >
-        <p className="m-0 text-sm text-sea-ink-soft">
-          {t("reportBlockUnavailable")}
-        </p>
-      </section>
-    </main>
+    <section
+      className="surface-panel border-market-caution/35 p-10 text-center"
+      role="status"
+      aria-live="polite"
+    >
+      <p className="m-0 text-sm text-sea-ink-soft">
+        {t("reportBlockUnavailable")}
+      </p>
+    </section>
   )
 }

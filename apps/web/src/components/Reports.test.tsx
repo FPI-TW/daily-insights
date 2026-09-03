@@ -129,12 +129,16 @@ describe("three-market report presentation", () => {
 
   it("renders the not-launched state for a navigable market without a report", async () => {
     await renderLocalized(
-      <ReportNotLaunchedScreen locale="en" marketCode="tw_equity" />,
+      <ReportShell locale="en" activeMarket="tw_equity">
+        <ReportNotLaunchedScreen />
+      </ReportShell>,
       "en"
     )
     expect(screen.getByRole("status")).toHaveTextContent(
       "Report not launched yet"
     )
+    expect(screen.getAllByRole("navigation")).toHaveLength(1)
+    expect(document.querySelectorAll("main.page-shell")).toHaveLength(1)
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
       "Taiwan equities"
     )
@@ -538,13 +542,16 @@ describe("three-market report presentation", () => {
     "presents a minimal non-error state in %s when publication is absent",
     async (locale, placeholder) => {
       await renderLocalized(
-        <ReportNotGeneratedScreen locale={locale} marketCode="us_equity" />,
+        <ReportShell locale={locale} activeMarket="us_equity">
+          <ReportNotGeneratedScreen />
+        </ReportShell>,
         locale
       )
 
       expect(screen.getByRole("status")).toHaveTextContent(placeholder)
       expect(screen.queryByRole("alert")).not.toBeInTheDocument()
-      expect(screen.getByRole("navigation")).toBeVisible()
+      expect(screen.getAllByRole("navigation")).toHaveLength(1)
+      expect(document.querySelectorAll("main.page-shell")).toHaveLength(1)
     }
   )
 

@@ -771,12 +771,16 @@
           "page_context": {
             "discriminator": {
               "mapping": {
+                "global": "#/components/schemas/GlobalContext",
                 "report_detail": "#/components/schemas/ReportDetailContext",
                 "reports_index": "#/components/schemas/ReportsIndexContext"
               },
               "propertyName": "kind"
             },
             "oneOf": [
+              {
+                "$ref": "#/components/schemas/GlobalContext"
+              },
               {
                 "$ref": "#/components/schemas/ReportsIndexContext"
               },
@@ -818,6 +822,18 @@
         "enum": ["pending", "complete", "partial", "error"],
         "title": "GenerationStatus",
         "type": "string"
+      },
+      "GlobalContext": {
+        "properties": {
+          "kind": {
+            "const": "global",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": ["kind"],
+        "title": "GlobalContext",
+        "type": "object"
       },
       "HTTPValidationError": {
         "properties": {

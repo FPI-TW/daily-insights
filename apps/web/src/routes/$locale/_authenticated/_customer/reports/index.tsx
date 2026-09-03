@@ -52,9 +52,7 @@ function ReportsAndNewsLoading() {
   return (
     <>
       <ReportLoadingScreen />
-      <main className="page-shell pt-0">
-        <DailyNewsLoading />
-      </main>
+      <DailyNewsLoading />
     </>
   )
 }
