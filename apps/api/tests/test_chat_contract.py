@@ -1,18 +1,100 @@
 import json
 import uuid
+from datetime import date
+from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
 
 from daily_insights_api.core.config import Settings
+from daily_insights_api.core.enums import SystemRole
+from daily_insights_api.modules.chat import api as chat_api
 from daily_insights_api.modules.chat.api import (
     DISCLAIMER_BY_LOCALE,
     _append_disclaimer,
+    _cross_page_snapshot,
+    _current_detail_context,
+    _current_index_context,
     _event,
     _limit_snapshot,
+    _page_snapshot,
     _snapshot_digest,
 )
+from daily_insights_api.modules.chat.prompt import (
+    BASIC_PROMPT,
+    CHAT_CONTEXT_VERSION,
+    UNRELATED_REPLY_BY_LOCALE,
+    build_chat_system_message,
+)
 from daily_insights_api.modules.chat.schemas import ChatStreamRequest
+from daily_insights_api.modules.identity.auth import AuthContext
+from daily_insights_api.modules.identity.models import User
+from daily_insights_api.modules.identity.session_models import Session
+from daily_insights_api.modules.model_runtime.api import CHAT_PROMPT_VERSION
+from daily_insights_api.modules.model_runtime.service import _chat_configuration_desired
+from daily_insights_api.modules.reports.models import ReportPublication
+
+
+class _ScalarRows:
+    def __init__(self, rows: list[ReportPublication]) -> None:
+        self._rows = rows
+
+    def all(self) -> list[ReportPublication]:
+        return self._rows
+
+
+class _SnapshotDatabase:
+    def __init__(
+        self, detail: ReportPublication, cross_page_reports: list[ReportPublication]
+    ) -> None:
+        self.detail = detail
+        self.cross_page_reports = cross_page_reports
+        self.latest_reports_statement: Any = None
+
+    async def get(self, _: object, identifier: uuid.UUID) -> ReportPublication | None:
+        return self.detail if identifier == self.detail.id else None
+
+    async def scalars(self, statement: Any) -> _ScalarRows:
+        self.latest_reports_statement = statement
+        return _ScalarRows(self.cross_page_reports)
+
+
+def _publication(
+    market_code: str,
+    *,
+    content: object = None,
+    summary: str | None = None,
+    title: str | None = None,
+) -> ReportPublication:
+    return ReportPublication(
+        id=uuid.uuid4(),
+        pipeline_run_id=uuid.uuid4(),
+        report_key="daily-market",
+        market_code=market_code,
+        edition_date=date(2026, 9, 3),
+        revision=1,
+        derivation_version="test.v1",
+        content_schema_version="test.v1",
+        input_digest="a" * 64,
+        content={"report": content if content is not None else market_code},
+        presentations={
+            locale: {"title": title or f"{market_code} title", "summary": summary or market_code}
+            for locale in ("zh-hant", "zh-hans", "en")
+        },
+    )
+
+
+def _customer_context() -> AuthContext:
+    return AuthContext(
+        user=cast(
+            User,
+            SimpleNamespace(id=uuid.uuid4(), system_role=SystemRole.ORG_MEMBER),
+        ),
+        session=cast(Session, SimpleNamespace()),
+        organization_id=uuid.uuid4(),
+    )
 
 
 def test_stream_request_requires_a_discriminated_page_context() -> None:
@@ -48,6 +130,233 @@ def test_context_limit_preserves_a_digestible_canonical_snapshot() -> None:
     assert len(_snapshot_digest(bounded)) == 64
 
 
+def test_defensive_context_limit_preserves_cross_market_identity_with_escaped_content() -> None:
+    escaped = '"\\繁體中文' * 20_000
+    snapshot: dict[str, object] = {
+        "version": CHAT_CONTEXT_VERSION,
+        "kind": "report_detail",
+        "current_page": {"content_excerpt": escaped},
+        "cross_page_reports": [
+            {
+                "publication_id": str(uuid.uuid4()),
+                "market_code": market_code,
+                "edition_date": "2026-09-03",
+                "title": escaped,
+                "summary": escaped,
+                "content_excerpt": escaped,
+            }
+            for market_code in ("global_macro_bonds", "crypto", "us_equity")
+        ],
+    }
+
+    bounded = _limit_snapshot(snapshot)
+
+    assert len(json.dumps(bounded, ensure_ascii=False, separators=(",", ":"))) <= 60_000
+    reports = bounded["cross_page_reports"]
+    assert isinstance(reports, list)
+    assert {report["market_code"] for report in reports if isinstance(report, dict)} == {
+        "global_macro_bonds",
+        "crypto",
+        "us_equity",
+    }
+    assert all(report.get("content_excerpt") for report in reports if isinstance(report, dict))
+
+
+@pytest.mark.asyncio
+async def test_detail_snapshot_includes_only_authorized_cross_market_latest_reports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    global_report = _publication("global_macro_bonds", summary="Global report")
+    us_report = _publication("us_equity", summary="US report")
+    database = _SnapshotDatabase(global_report, [global_report, us_report])
+    monkeypatch.setattr(
+        chat_api,
+        "visible_report_market_codes",
+        AsyncMock(return_value=frozenset({"global_macro_bonds", "us_equity"})),
+    )
+    payload = ChatStreamRequest.model_validate(
+        {
+            "client_request_id": str(uuid.uuid4()),
+            "locale": "en",
+            "message": "How are US equities doing?",
+            "page_context": {"kind": "report_detail", "publication_id": str(global_report.id)},
+        }
+    )
+
+    snapshot, _ = await _page_snapshot(database, context=_customer_context(), payload=payload)  # type: ignore[arg-type]
+
+    assert snapshot["version"] == CHAT_CONTEXT_VERSION
+    current_page = snapshot["current_page"]
+    assert isinstance(current_page, dict)
+    assert current_page["market_code"] == "global_macro_bonds"
+    cross_reports = snapshot["cross_page_reports"]
+    assert isinstance(cross_reports, list)
+    assert {report["market_code"] for report in cross_reports if isinstance(report, dict)} == {
+        "global_macro_bonds",
+        "us_equity",
+    }
+    assert "crypto" not in json.dumps(snapshot, ensure_ascii=False)
+    assert database.latest_reports_statement is not None
+    compiled = database.latest_reports_statement.compile()
+    assert "daily-market" in compiled.params.values()
+    assert any(
+        {"global_macro_bonds", "us_equity"} <= set(value)
+        for value in compiled.params.values()
+        if isinstance(value, list)
+    )
+
+
+def test_cross_market_snapshot_fairly_retains_later_market_context() -> None:
+    reports = [
+        _publication("global_macro_bonds", content="a" * 200_000),
+        _publication("crypto", content="crypto context"),
+        _publication("us_equity", content="US equity context"),
+    ]
+    snapshot = _cross_page_snapshot(
+        kind="report_detail",
+        current_page={"market_code": "global_macro_bonds", "content_excerpt": "current"},
+        reports=reports,
+        locale="en",
+    )
+
+    assert len(json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))) <= 60_000
+    cross_reports = snapshot["cross_page_reports"]
+    assert isinstance(cross_reports, list)
+    assert [report["market_code"] for report in cross_reports if isinstance(report, dict)] == [
+        "global_macro_bonds",
+        "crypto",
+        "us_equity",
+    ]
+    assert all(
+        report.get("summary") and report.get("content_excerpt")
+        for report in cross_reports
+        if isinstance(report, dict)
+    )
+    assert snapshot["truncated"] is True
+
+
+def test_cross_market_snapshot_stays_bounded_after_json_escaping() -> None:
+    reports = [
+        _publication(market_code, content='"\\繁體中文' * 30_000)
+        for market_code in ("global_macro_bonds", "crypto", "us_equity")
+    ]
+    snapshot = _cross_page_snapshot(
+        kind="report_detail",
+        current_page={"market_code": "global_macro_bonds", "content_excerpt": '"\\current'},
+        reports=reports,
+        locale="zh-hant",
+    )
+
+    assert len(json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))) <= 60_000
+    cross_reports = snapshot["cross_page_reports"]
+    assert isinstance(cross_reports, list)
+    assert [report["market_code"] for report in cross_reports if isinstance(report, dict)] == [
+        "global_macro_bonds",
+        "crypto",
+        "us_equity",
+    ]
+    assert all(
+        report.get("content_excerpt") for report in cross_reports if isinstance(report, dict)
+    )
+    assert snapshot["truncated"] is True
+
+
+def test_cross_market_metadata_clipping_sets_top_level_truncation() -> None:
+    reports = [
+        _publication(
+            market_code,
+            content="small content",
+            title="t" * 501,
+            summary="s" * 1_501,
+        )
+        for market_code in ("global_macro_bonds", "crypto", "us_equity")
+    ]
+
+    snapshot = _cross_page_snapshot(
+        kind="report_detail",
+        current_page={"market_code": "global_macro_bonds", "content_excerpt": "small"},
+        reports=reports,
+        locale="en",
+    )
+
+    assert len(json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))) <= 60_000
+    assert snapshot["truncated"] is True
+
+
+def test_current_detail_presentation_clipping_sets_top_level_truncation() -> None:
+    report = _publication("global_macro_bonds", content="small content")
+    report.presentations["en"] = {
+        "title": "title",
+        "summary": "summary",
+        "rendered_sections": "p" * 2_001,
+    }
+    current_page = _current_detail_context(report, "en")
+
+    snapshot = _cross_page_snapshot(
+        kind="report_detail",
+        current_page=current_page,
+        reports=[],
+        locale="en",
+    )
+
+    assert len(json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))) <= 60_000
+    assert current_page["truncated"] is True
+    assert snapshot["truncated"] is True
+
+
+def test_reports_index_metadata_clipping_sets_top_level_truncation() -> None:
+    current_page = _current_index_context(
+        [
+            {
+                "publication_id": str(uuid.uuid4()),
+                "market_code": "us_equity",
+                "edition_date": "2026-09-03",
+                "title": "t" * 501,
+                "summary": "s" * 1_501,
+            }
+        ],
+        [{"headline": "h" * 501, "summary": "n" * 1_501}],
+    )
+
+    snapshot = _cross_page_snapshot(
+        kind="reports_index",
+        current_page=current_page,
+        reports=[],
+        locale="en",
+    )
+
+    assert len(json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))) <= 60_000
+    assert current_page["truncated"] is True
+    assert snapshot["truncated"] is True
+
+
+@pytest.mark.parametrize("locale", ["zh-hant", "zh-hans", "en"])
+def test_system_prompt_renders_financial_scope_source_order_and_locale(locale: str) -> None:
+    prompt = build_chat_system_message(
+        locale=locale,
+        snapshot={"version": CHAT_CONTEXT_VERSION, "current_page": {}, "cross_page_reports": []},
+    )
+
+    assert BASIC_PROMPT in prompt
+    assert "- 產業、企業消息" in prompt
+    assert "- 全球市場風險、資金流、避險情緒" in prompt
+    assert "- 與投資判斷、資產配置、金融情勢有關的內容" in prompt
+    assert "- 上述相關的分析、整理與延伸提問" in prompt
+    assert "monetary policy" not in prompt
+    assert "current_page" in prompt and "cross_page_reports" in prompt
+    assert "model background knowledge" in prompt
+    assert UNRELATED_REPLY_BY_LOCALE[locale] in prompt
+    assert "{unrelated_reply}" not in prompt
+    assert "{disclaimer}" not in prompt
+    assert "application appends one exactly once" in prompt
+
+
+def test_chat_model_configuration_uses_the_cross_market_prompt_version() -> None:
+    assert CHAT_PROMPT_VERSION == CHAT_CONTEXT_VERSION
+    assert CHAT_PROMPT_VERSION == "page-context.cross-market.v3"
+    assert _chat_configuration_desired(Settings())["prompt_version"] == CHAT_PROMPT_VERSION
+
+
 def test_sse_events_are_named_json_events() -> None:
     event = _event("done", {"status": "complete"}).decode()
     assert event == 'event: done\ndata: {"status":"complete"}\n\n'
@@ -63,6 +372,14 @@ def test_application_disclaimer_is_localized_and_appended_exactly_once(locale: s
     assert suffix == f"\n\n{DISCLAIMER_BY_LOCALE[locale]}"
     assert "".join(chunks).endswith(DISCLAIMER_BY_LOCALE[locale])
     assert _append_disclaimer(chunks, locale) is None
+
+
+@pytest.mark.parametrize("locale", ["zh-hant", "zh-hans", "en"])
+def test_fixed_unrelated_reply_receives_the_application_disclaimer(locale: str) -> None:
+    chunks = [UNRELATED_REPLY_BY_LOCALE[locale]]
+    suffix = _append_disclaimer(chunks, locale)
+    assert suffix == f"\n\n{DISCLAIMER_BY_LOCALE[locale]}"
+    assert "".join(chunks).endswith(DISCLAIMER_BY_LOCALE[locale])
 
 
 def test_chat_openapi_declares_sse_response_contract() -> None:
