@@ -1,6 +1,5 @@
 import uuid
 from datetime import date, datetime
-from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -110,25 +109,23 @@ class YfinanceDailyBarsFetch(AdminInput):
     # writes above. The audit event still records who fetched what.
 
 
-class YfinanceDailyBar(BaseModel):
-    trade_date: date
-    open: Decimal | None
-    high: Decimal | None
-    low: Decimal | None
-    close: Decimal | None
-    volume: int | None
-
-
 class YfinanceSymbolBars(BaseModel):
+    """What one symbol's refresh did, not the rows themselves.
+
+    The bars live in index_daily_bars; repeating them here cost 717KB for a 2y
+    run and would be several megabytes for `max`, and a reader wants a symbol
+    and a date range, not whatever one refresh happened to touch.
+    """
+
     symbol: str
     market: MarketCode
     as_of: date
     record_count: int
     # Rows upserted into index_daily_bars for this symbol.
     stored_count: int
-    # Yahoo's current still-open session bar, seen and excluded from `bars`.
+    # Yahoo's current still-open session bar, seen and excluded from the stored
+    # series.
     dropped_unsettled_trade_date: date | None
-    bars: list[YfinanceDailyBar]
 
 
 class YfinanceSymbolFailure(BaseModel):

@@ -1803,24 +1803,6 @@ export interface components {
       /** Error Type */
       type: string
     }
-    /** YfinanceDailyBar */
-    YfinanceDailyBar: {
-      /** Close */
-      close: string | null
-      /** High */
-      high: string | null
-      /** Low */
-      low: string | null
-      /** Open */
-      open: string | null
-      /**
-       * Trade Date
-       * Format: date
-       */
-      trade_date: string
-      /** Volume */
-      volume: number | null
-    }
     /** YfinanceDailyBarsFetch */
     YfinanceDailyBarsFetch: {
       /**
@@ -1871,15 +1853,20 @@ export interface components {
       /** Succeeded */
       succeeded: components["schemas"]["YfinanceSymbolBars"][]
     }
-    /** YfinanceSymbolBars */
+    /**
+     * YfinanceSymbolBars
+     * @description What one symbol's refresh did, not the rows themselves.
+     *
+     *     The bars live in index_daily_bars; repeating them here cost 717KB for a 2y
+     *     run and would be several megabytes for `max`, and a reader wants a symbol
+     *     and a date range, not whatever one refresh happened to touch.
+     */
     YfinanceSymbolBars: {
       /**
        * As Of
        * Format: date
        */
       as_of: string
-      /** Bars */
-      bars: components["schemas"]["YfinanceDailyBar"][]
       /** Dropped Unsettled Trade Date */
       dropped_unsettled_trade_date: string | null
       /**

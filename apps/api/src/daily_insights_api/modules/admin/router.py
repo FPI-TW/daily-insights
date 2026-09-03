@@ -28,7 +28,6 @@ from daily_insights_api.modules.admin.schemas import (
     OrganizationUpdate,
     ProvisionedInternalUserResponse,
     ProvisionedMemberResponse,
-    YfinanceDailyBar,
     YfinanceDailyBarsFetch,
     YfinanceDailyBarsResponse,
     YfinanceSymbolBars,
@@ -758,17 +757,6 @@ async def fetch_yfinance_daily_bars(
             record_count=entry.result.provenance.record_count,
             stored_count=entry.stored_count,
             dropped_unsettled_trade_date=entry.result.dropped_unsettled_trade_date,
-            bars=[
-                YfinanceDailyBar(
-                    trade_date=bar.trade_date,
-                    open=bar.open,
-                    high=bar.high,
-                    low=bar.low,
-                    close=bar.close,
-                    volume=bar.volume,
-                )
-                for bar in entry.result.items
-            ],
         )
         for entry in refreshed
     ]

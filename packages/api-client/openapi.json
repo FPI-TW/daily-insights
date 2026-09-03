@@ -2875,77 +2875,6 @@
         "title": "ValidationError",
         "type": "object"
       },
-      "YfinanceDailyBar": {
-        "properties": {
-          "close": {
-            "anyOf": [
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Close"
-          },
-          "high": {
-            "anyOf": [
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "High"
-          },
-          "low": {
-            "anyOf": [
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Low"
-          },
-          "open": {
-            "anyOf": [
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Open"
-          },
-          "trade_date": {
-            "format": "date",
-            "title": "Trade Date",
-            "type": "string"
-          },
-          "volume": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Volume"
-          }
-        },
-        "required": ["trade_date", "open", "high", "low", "close", "volume"],
-        "title": "YfinanceDailyBar",
-        "type": "object"
-      },
       "YfinanceDailyBarsFetch": {
         "properties": {
           "period": {
@@ -3030,18 +2959,12 @@
         "type": "object"
       },
       "YfinanceSymbolBars": {
+        "description": "What one symbol's refresh did, not the rows themselves.\n\nThe bars live in index_daily_bars; repeating them here cost 717KB for a 2y\nrun and would be several megabytes for `max`, and a reader wants a symbol\nand a date range, not whatever one refresh happened to touch.",
         "properties": {
           "as_of": {
             "format": "date",
             "title": "As Of",
             "type": "string"
-          },
-          "bars": {
-            "items": {
-              "$ref": "#/components/schemas/YfinanceDailyBar"
-            },
-            "title": "Bars",
-            "type": "array"
           },
           "dropped_unsettled_trade_date": {
             "anyOf": [
@@ -3088,8 +3011,7 @@
           "as_of",
           "record_count",
           "stored_count",
-          "dropped_unsettled_trade_date",
-          "bars"
+          "dropped_unsettled_trade_date"
         ],
         "title": "YfinanceSymbolBars",
         "type": "object"
