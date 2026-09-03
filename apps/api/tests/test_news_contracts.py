@@ -5,13 +5,13 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary, Selection
-from daily_insights_api.modules.news.llm import DeepSeekClient
-from daily_insights_api.modules.news.service import run_news_edition
-from daily_insights_api.modules.news.sources import (
+from daily_insights_api.modules.news.extraction import (
     allowed_hostname,
     configured_hostnames,
     validate_https_url,
 )
+from daily_insights_api.modules.news.llm import DeepSeekClient
+from daily_insights_api.modules.news.service import run_news_edition
 
 ALLOWED = configured_hostnames(
     "www.reuters.com,apnews.com,www.bbc.com,www.cnbc.com,news.cnyes.com,finance.eastmoney.com"

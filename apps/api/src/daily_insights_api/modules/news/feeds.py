@@ -1,7 +1,6 @@
-"""Second discovery path: the allowlisted sources' own RSS feeds and listing pages.
+"""Candidate discovery: the allowlisted publishers' own feeds and listing pages.
 
-GDELT's HTTPS endpoint is slow and regularly unreachable, so discovery also
-reads each allowlisted publisher directly. Feed URLs are constants owned by
+This registry is the only discovery path. Feed URLs are constants owned by
 this module (never user input), every fetch is byte-capped and honours
 robots.txt, and only article URLs on the allowlisted host survive, so the
 downstream SSRF-safe extraction contract is unchanged.
@@ -22,8 +21,7 @@ from defusedxml import ElementTree
 from daily_insights_api.core.observability import emit_event
 from daily_insights_api.modules.news.contracts import Candidate
 from daily_insights_api.modules.news.editions import GLOBAL_MARKET
-from daily_insights_api.modules.news.sources import (
-    SOURCE_NAMES,
+from daily_insights_api.modules.news.extraction import (
     _dedupe_candidates,
     allowed_hostname,
     robots_allowed,
@@ -44,6 +42,8 @@ class FeedSource:
     # Which editions read this feed; "global" is the daily digest.
     markets: frozenset[str] = frozenset({GLOBAL_MARKET})
     max_items: int = MAX_PER_FEED
+    # Publisher name shown to readers; falls back to the hostname.
+    display_name: str = ""
 
 
 # Reuters is deliberately absent: it answers non-browser requests with 401, so
@@ -55,6 +55,7 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "rss",
         r"^https://www\.cnbc\.com/\d{4}/\d{2}/\d{2}/[a-z0-9-]+\.html$",
         markets=frozenset({GLOBAL_MARKET, "us_equity"}),
+        display_name="CNBC",
     ),
     FeedSource(
         "www.bbc.com",
@@ -62,6 +63,7 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "rss",
         r"^https://www\.bbc\.com/news/articles/[a-z0-9]+$",
         host_rewrites=(("www.bbc.co.uk", "www.bbc.com"),),
+        display_name="BBC Business",
     ),
     FeedSource(
         "apnews.com",
@@ -69,6 +71,7 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "listing",
         r"^https://apnews\.com/article/[a-z0-9-]+$",
         markets=frozenset({GLOBAL_MARKET, "us_equity"}),
+        display_name="AP",
     ),
     # cnyes category pages are rendered client-side (the static HTML only
     # carries the sidebar), so its public JSON list endpoint is used instead.
@@ -77,6 +80,7 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "https://api.cnyes.com/media/api/v1/newslist/category/headline?limit=30&page=1",
         "cnyes_json",
         r"^https://news\.cnyes\.com/news/id/\d+$",
+        display_name="鉅亨",
     ),
     FeedSource(
         "news.cnyes.com",
@@ -85,6 +89,7 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         r"^https://news\.cnyes\.com/news/id/\d+$",
         markets=frozenset({"tw_equity"}),
         max_items=24,
+        display_name="鉅亨",
     ),
     FeedSource(
         "news.cnyes.com",
@@ -93,12 +98,14 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         r"^https://news\.cnyes\.com/news/id/\d+$",
         markets=frozenset({"us_equity"}),
         max_items=12,
+        display_name="鉅亨",
     ),
     FeedSource(
         "finance.eastmoney.com",
         "https://finance.eastmoney.com/a/cywjh.html",
         "listing",
         r"^https://finance\.eastmoney\.com/a/\d+\.html$",
+        display_name="東方財富",
     ),
 )
 
@@ -167,7 +174,7 @@ def _candidate(url: str, headline: str, seen_at: datetime | None, source: FeedSo
         id=hashlib.sha256(url.encode()).hexdigest(),
         url=url,
         hostname=source.hostname,
-        source_name=SOURCE_NAMES.get(source.hostname, source.hostname),
+        source_name=source.display_name or source.hostname,
         headline=headline[:1000],
         seen_at=seen_at,
     )

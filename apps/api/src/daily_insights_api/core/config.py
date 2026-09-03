@@ -62,13 +62,8 @@ class Settings(BaseSettings):
     chat_model_api_key: SecretStr | None = None
     chat_timeout_seconds: float = Field(default=90, gt=0, le=600)
     news_fetch_timeout_seconds: float = Field(default=25, gt=0, le=120)
-    # GDELT's HTTPS front end regularly needs 20-30 seconds to answer, so
-    # discovery gets a generous budget and one retry before the edition is
-    # declared unavailable.
-    news_discovery_timeout_seconds: float = Field(default=60, gt=0, le=180)
-    # GDELT's HTTPS endpoint is unreliable and only ever supplemented the
-    # publisher feeds, so it is opt-in; the global digest reads feeds alone.
-    news_gdelt_enabled: bool = False
+    # Per-feed budget for reading a publisher's RSS, JSON, or listing page.
+    news_discovery_timeout_seconds: float = Field(default=30, gt=0, le=180)
     report_freshness_max_age_days: int = Field(default=3, ge=1, le=30)
     r2_endpoint_url: str | None = None
     r2_bucket_name: str | None = None

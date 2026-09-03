@@ -15,6 +15,7 @@ from daily_insights_api.modules.news.contracts import (
     LocalizedSummary,
     Selection,
 )
+from daily_insights_api.modules.news.extraction import FetchedCandidate
 from daily_insights_api.modules.news.llm import DeepSeekClient, ModelCall, ModelCallError
 from daily_insights_api.modules.news.models import (
     NewsEdition,
@@ -23,7 +24,6 @@ from daily_insights_api.modules.news.models import (
     NewsPresentation,
 )
 from daily_insights_api.modules.news.service import TAIPEI, run_news_edition
-from daily_insights_api.modules.news.sources import FetchedCandidate
 
 pytestmark = pytest.mark.integration
 
@@ -140,15 +140,10 @@ async def test_partial_editions_regenerate_and_revisions_are_prompt_sensitive(
 ) -> None:
     candidates = _fetched_candidates()
 
-    async def discover(*args: object, **kwargs: object) -> list[Candidate]:
-        del args, kwargs
-        return [item.candidate for item in candidates]
-
     async def fetch(*args: object, **kwargs: object) -> list[FetchedCandidate]:
         del args, kwargs
         return candidates
 
-    monkeypatch.setattr("daily_insights_api.modules.news.service.discover_candidates", discover)
     monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
     edition_date = datetime.now(TAIPEI).date()
     first_client = cast(DeepSeekClient, _DeterministicNewsClient("a"))
@@ -274,15 +269,10 @@ async def test_complete_edition_is_idempotent_but_unavailable_edition_regenerate
 ) -> None:
     fetched: list[FetchedCandidate] = []
 
-    async def discover(*args: object, **kwargs: object) -> list[Candidate]:
-        del args, kwargs
-        return [item.candidate for item in fetched]
-
     async def fetch(*args: object, **kwargs: object) -> list[FetchedCandidate]:
         del args, kwargs
         return list(fetched)
 
-    monkeypatch.setattr("daily_insights_api.modules.news.service.discover_candidates", discover)
     monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
     edition_date = datetime.now(TAIPEI).date()
     client = cast(DeepSeekClient, _CompleteNewsClient("a"))
@@ -323,42 +313,10 @@ async def test_complete_edition_is_idempotent_but_unavailable_edition_regenerate
         )
 
 
-async def test_discovery_uses_configured_timeout_and_retries_once(
-    news_database: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    attempts: list[float] = []
-
-    async def flaky_discover(http: object, allowed: object) -> list[Candidate]:
-        del allowed
-        timeout = getattr(http, "timeout", None)
-        attempts.append(timeout.connect if timeout is not None else -1.0)
-        if len(attempts) == 1:
-            raise TimeoutError("gdelt slow")
-        return []
-
-    monkeypatch.setattr(
-        "daily_insights_api.modules.news.service.discover_candidates", flaky_discover
-    )
-    status = await run_news_edition(
-        news_database,
-        cast(DeepSeekClient, _CompleteNewsClient("a")),
-        datetime.now(TAIPEI).date(),
-        allowed_hostnames="www.reuters.com",
-        discovery_timeout_seconds=75,
-        gdelt_enabled=True,
-    )
-    assert status == "unavailable"
-    assert attempts == [75.0, 75.0]
-
-
-async def test_feed_discovery_supplies_candidates_when_gdelt_is_down(
+async def test_feed_discovery_supplies_the_candidates(
     news_database: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     candidates = _fetched_candidates()
-
-    async def gdelt_down(http: object, allowed: object) -> list[Candidate]:
-        del http, allowed
-        raise ConnectionError("gdelt refused")
 
     async def feeds(
         http: object, allowed: object, now: object = None, **kwargs: object
@@ -375,7 +333,6 @@ async def test_feed_discovery_supplies_candidates_when_gdelt_is_down(
         fetched_inputs.append(discovered)
         return candidates
 
-    monkeypatch.setattr("daily_insights_api.modules.news.service.discover_candidates", gdelt_down)
     monkeypatch.setattr("daily_insights_api.modules.news.service.discover_feed_candidates", feeds)
     monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
 
@@ -398,10 +355,6 @@ async def test_market_edition_is_independent_from_the_global_digest(
     candidates = _five_candidates()
     feed_markets: list[str] = []
 
-    async def gdelt(http: object, allowed: object) -> list[Candidate]:
-        del http, allowed
-        return []
-
     async def feeds(
         http: object, allowed: object, now: object = None, *, market: str = "global"
     ) -> list[Candidate]:
@@ -413,7 +366,6 @@ async def test_market_edition_is_independent_from_the_global_digest(
         del args, kwargs
         return candidates
 
-    monkeypatch.setattr("daily_insights_api.modules.news.service.discover_candidates", gdelt)
     monkeypatch.setattr("daily_insights_api.modules.news.service.discover_feed_candidates", feeds)
     monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
     edition_date = datetime.now(TAIPEI).date()

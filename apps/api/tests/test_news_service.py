@@ -1,8 +1,8 @@
 from datetime import UTC, datetime, timedelta
 
 from daily_insights_api.modules.news.contracts import Candidate
+from daily_insights_api.modules.news.extraction import FetchedCandidate
 from daily_insights_api.modules.news.service import _limit_candidates
-from daily_insights_api.modules.news.sources import FetchedCandidate
 
 
 def _fetched(index: int, host: str, seen_at: datetime | None) -> FetchedCandidate:

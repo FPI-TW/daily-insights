@@ -12,8 +12,8 @@
 ## 範圍
 
 - 每日產生一版「本日重大新聞」，最多五則，附三語系標題與摘要。
-- 只從固定白名單的六個新聞來源擷取正文；候選來自 GDELT 與各來源自己的 RSS 或
-  列表頁兩條路徑。文章正文不落地，只保存來源中繼資料、摘要與 SHA-256 內容摘要。
+- 只從白名單新聞來源擷取正文；候選一律來自各來源自己的 RSS、JSON 清單或
+  列表頁（feed 註冊表是唯一的探索路徑）。文章正文不落地，只保存來源中繼資料、摘要與 SHA-256 內容摘要。
 - 顯示在客戶報告首頁的清單下方；所有已驗證組織共用同一版，不受市場可見性政策
   影響。
 - 不提供後台編輯、人工覆核或客戶端篩選。
@@ -23,7 +23,6 @@
 ```mermaid
 flowchart LR
     S["daily-news-scheduler<br/>08:00 Asia/Taipei"] --> G["News generation service<br/>run_news_edition"]
-    G --> D["GDELT DOC API<br/>近 24 小時候選，最多 50 筆"]
     G --> F["來源 RSS / 列表頁<br/>CNBC、BBC RSS；AP、鉅亨、東方財富列表"]
     G --> X["安全正文擷取<br/>DNS pinning / robots / HTTPS 443"]
     X --> W["Reuters / AP / BBC / CNBC<br/>鉅亨 / 東方財富"]
@@ -38,14 +37,10 @@ flowchart LR
 
 1. 排程器在台北時間 08:00 觸發當日版本。若當日結果為 `unavailable` 或執行時拋出
    例外，每 30 分鐘重試一次，直到 12:00 為止；`partial` 不自動重試。
-2. `discover_candidates` 以白名單網域查詢 GDELT DOC API 近 24 小時的文章，過濾
-   非 HTTPS、非白名單主機與時間窗外的項目，並以 URL 與標題去重。GDELT 的 HTTPS
-   端點實測經常需要 20 到 45 秒回應且偶爾連線失敗，因此探索逾時預設 60 秒並在
-   失敗時重試一次；兩次都失敗才視為無候選。
-   `discover_feed_candidates` 同時直接讀取白名單來源自己的 RSS（CNBC、BBC）或
-   列表頁（AP、鉅亨、東方財富），只保留符合各來源文章 URL 樣式的連結，與 GDELT
-   結果合併去重，每個來源最多 10 筆再進入擷取。任一 feed 失敗只影響該來源。
-3. 候選依 GDELT `seendate` 新到舊排序，每個來源最多 5 筆，總數上限 20 筆。
+2. `discover_feed_candidates` 讀取白名單來源自己的 RSS、JSON 清單或列表頁，只保留
+   符合各來源文章 URL 樣式的連結，並以 URL 與標題去重；任一 feed 失敗只影響該
+   來源，事件為 `news.feed.failed`。
+3. 候選依發佈時間新到舊排序，每個來源最多 5 筆，總數上限 20 筆。
 4. 每筆候選以 SSRF 安全的 client 擷取正文：只允許白名單主機的 443 連接埠、DNS
    解析結果必須全部為公網 IP 且連線固定在該 IP、redirect 逐跳重新驗證、遵守
    `robots.txt`、限制位元組數與內容型別，不帶 cookie 也不讀環境代理設定。
@@ -61,11 +56,11 @@ flowchart LR
 
 | 版本         | `market_code` | 目標則數 | 探索路徑                          | 選題限制                                  |
 | ------------ | ------------- | -------- | --------------------------------- | ----------------------------------------- |
-| 本日重大新聞 | `global`      | 5        | GDELT 加全部 feed                 | 每網域至多 2 則，至少 2 個主題與 2 個市場 |
+| 本日重大新聞 | `global`      | 5        | 全部 global feed                  | 每網域至多 2 則，至少 2 個主題與 2 個市場 |
 | 台股重點新聞 | `tw_equity`   | 8        | 鉅亨台股分類頁                    | 單一來源與市場皆可，至少 2 個主題         |
 | 美股重點新聞 | `us_equity`   | 8        | CNBC RSS、AP 商業、鉅亨美股分類頁 | 每網域至多 4 則，至少 2 個主題            |
 
-市場版本不使用 GDELT，選題 prompt 附帶該市場的 `MARKET_FOCUS` 提示，`market`
+各版本只讀取標記給該市場的 feed，選題 prompt 附帶該市場的 `MARKET_FOCUS` 提示，`market`
 欄位新增 `taiwan`。排程器依序執行三個版本，任一版本例外不影響其他版本，最差
 結果決定是否同日重試。`make generate-daily-news MARKET=tw_equity` 可單獨產生一
 個版本。
@@ -102,13 +97,12 @@ flowchart LR
 | ----------------------------------------------- | --------------------------------------------------------------------------- | ------------------------ |
 | `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`             | `true`／`false`，關閉時排程器只維持 heartbeat                               | GitHub Variables         |
 | `DAILY_INSIGHTS_NEWS_ALLOWED_HOSTNAMES`         | 逗號分隔的精確主機名稱白名單                                                | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_NEWS_GDELT_ENABLED`             | 是否額外查詢 GDELT，預設 `false`；GDELT HTTPS 端點不穩定且只補充全球版本    | GitHub Variables，可省略 |
 | `DAILY_INSIGHTS_MODEL_NAME`                     | DeepSeek 模型名稱，預設 `deepseek-chat`                                     | GitHub Variables，可省略 |
 | `DAILY_INSIGHTS_MODEL_API_BASE_URL`             | 必須是 HTTPS 絕對 URL，預設 `https://api.deepseek.com`                      | GitHub Variables，可省略 |
 | `DAILY_INSIGHTS_MODEL_API_KEY`                  | 啟用時必填，不得為 placeholder                                              | GitHub Secrets           |
 | `DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS`          | 單次模型呼叫逾時，預設 120 秒；選題 prompt 約 28k token，實測需 30 到 45 秒 | 開發環境                 |
 | `DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS`     | 正文擷取逾時，預設 25 秒                                                    | 開發環境                 |
-| `DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS` | GDELT 探索逾時，預設 60 秒，失敗會重試一次                                  | 開發環境                 |
+| `DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS` | 讀取單一 feed 的逾時，預設 30 秒                                            | 開發環境                 |
 
 `core/config.py` 在啟用時會驗證 provider 為 `deepseek`、URL 為 HTTPS 且 API key
 不是 placeholder；不符合時服務啟動即失敗。
@@ -162,7 +156,6 @@ flowchart LR
 
 - 只有一個排程器實例；多實例同時執行時依賴 PostgreSQL advisory lock 避免重複
   寫入，但候選探索與擷取仍會重複執行。
-- GDELT 對來源的涵蓋不完整，候選數量每日不同；其 HTTPS 端點延遲高且不穩定，
   因此 RSS／列表頁是主要的補充路徑。列表頁沒有發佈時間，這些候選在排序時排在
   有時間戳的候選之後。
 - Twelve Data 的 `/press_releases` 已評估不採用：必須帶 symbol 查詢、沒有原文

@@ -3,69 +3,14 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from daily_insights_api.modules.news.sources import (
+from daily_insights_api.modules.news.extraction import (
     _ArticleTextExtractor,
     configured_hostnames,
-    discover_candidates,
     fetch_article,
     validate_https_url,
 )
 
 ALLOWED = configured_hostnames("www.reuters.com,apnews.com")
-
-
-async def test_gdelt_filters_window_schema_exact_host_and_deduplicates() -> None:
-    requests: list[httpx.Request] = []
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(
-            200,
-            json={
-                "articles": [
-                    {
-                        "url": "https://www.reuters.com/markets/a",
-                        "title": "Market rises",
-                        "seendate": "20260901100000",
-                    },
-                    {
-                        "url": "https://apnews.com/traditional-chinese",
-                        "title": "央行維持利率不變",
-                        "seendate": "20260901100500",
-                    },
-                    {
-                        "url": "https://apnews.com/simplified-chinese",
-                        "title": "企业公布季度业绩",
-                        "seendate": "20260901101000",
-                    },
-                    {
-                        "url": "https://www.reuters.com/markets/a",
-                        "title": "Market rises",
-                        "seendate": "20260901100000",
-                    },
-                    {
-                        "url": "https://reuters.com/markets/b",
-                        "title": "Rejected hostname",
-                        "seendate": "20260901100000",
-                    },
-                    {"url": "https://apnews.com/b", "title": "Missing timestamp"},
-                ]
-            },
-        )
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await discover_candidates(client, ALLOWED, datetime(2026, 9, 1, 11, tzinfo=UTC))
-    assert [item.headline for item in result] == [
-        "Market rises",
-        "央行維持利率不變",
-        "企业公布季度业绩",
-    ]
-    query = requests[0].url.params["query"]
-    assert query == "(domain:apnews.com OR domain:www.reuters.com)"
-    assert "sourcelang" not in requests[0].url.params
-    assert all(
-        keyword not in query for keyword in ("market", "economy", "stocks", "finance", "business")
-    )
 
 
 def test_extraction_prioritizes_article_and_removes_navigation() -> None:
@@ -99,7 +44,7 @@ def test_url_validation_rejects_non_standard_https_ports() -> None:
 async def test_fetch_revalidates_redirect_and_rejects_unapproved_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import daily_insights_api.modules.news.sources as sources
+    import daily_insights_api.modules.news.extraction as sources
 
     async def public(_: str, __: frozenset[str]) -> None:
         return None
@@ -121,7 +66,7 @@ async def test_fetch_revalidates_redirect_and_rejects_unapproved_target(
 async def test_fetch_rejects_wrong_content_type_and_short_paywall(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import daily_insights_api.modules.news.sources as sources
+    import daily_insights_api.modules.news.extraction as sources
 
     async def public(_: str, __: frozenset[str]) -> None:
         return None
@@ -147,12 +92,3 @@ async def test_fetch_rejects_wrong_content_type_and_short_paywall(
     async with httpx.AsyncClient(transport=httpx.MockTransport(paywall)) as client:
         with pytest.raises(ValueError, match="short"):
             await fetch_article(client, "https://www.reuters.com/article", ALLOWED)
-
-
-async def test_gdelt_schema_failure_is_rejected() -> None:
-    async def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"articles": "not-a-list"})
-
-    with pytest.raises(ValueError, match="articles"):
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            await discover_candidates(client, ALLOWED, datetime(2026, 9, 1, tzinfo=UTC))

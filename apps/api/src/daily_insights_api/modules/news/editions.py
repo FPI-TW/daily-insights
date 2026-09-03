@@ -30,7 +30,6 @@ class EditionSpec:
     max_candidates: int
     max_per_source: int
     max_discovery_per_source: int
-    uses_gdelt: bool
     selection: SelectionPolicy
 
     @property
@@ -44,7 +43,6 @@ GLOBAL_SPEC = EditionSpec(
     max_candidates=20,
     max_per_source=5,
     max_discovery_per_source=10,
-    uses_gdelt=True,
     selection=SelectionPolicy(max_items=5, max_per_domain=2, min_topics=2, min_markets=2),
 )
 
@@ -54,7 +52,6 @@ TW_EQUITY_SPEC = EditionSpec(
     max_candidates=24,
     max_per_source=24,
     max_discovery_per_source=24,
-    uses_gdelt=False,
     selection=SelectionPolicy(
         max_items=8,
         max_per_domain=8,
@@ -75,7 +72,6 @@ US_EQUITY_SPEC = EditionSpec(
     max_candidates=24,
     max_per_source=8,
     max_discovery_per_source=12,
-    uses_gdelt=False,
     selection=SelectionPolicy(
         max_items=8,
         max_per_domain=4,

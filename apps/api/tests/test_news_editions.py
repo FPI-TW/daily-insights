@@ -14,9 +14,9 @@ from daily_insights_api.modules.news.editions import (
     US_EQUITY_SPEC,
     edition_spec,
 )
+from daily_insights_api.modules.news.extraction import FetchedCandidate, configured_hostnames
 from daily_insights_api.modules.news.feeds import FEED_SOURCES, discover_feed_candidates
 from daily_insights_api.modules.news.llm import enforce_selection_policy, selection_output_contract
-from daily_insights_api.modules.news.sources import FetchedCandidate, configured_hostnames
 
 ALLOWED = configured_hostnames(
     "www.reuters.com,apnews.com,www.bbc.com,www.cnbc.com,news.cnyes.com,finance.eastmoney.com"
@@ -63,7 +63,6 @@ def test_edition_registry_is_ordered_global_first_and_targets_match_policies() -
         assert spec.target_items == spec.selection.max_items
         assert spec.max_candidates >= spec.target_items
         assert spec.max_per_source >= 1
-    assert GLOBAL_SPEC.uses_gdelt and not TW_EQUITY_SPEC.uses_gdelt
     assert edition_spec("us_equity") is US_EQUITY_SPEC
     with pytest.raises(ValueError, match="unknown news edition market"):
         edition_spec("fx")

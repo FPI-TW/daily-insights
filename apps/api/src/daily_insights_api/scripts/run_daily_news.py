@@ -54,7 +54,6 @@ def build_runner(
                 fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
                 discovery_timeout_seconds=settings.news_discovery_timeout_seconds,
                 spec=edition_spec(market),
-                gdelt_enabled=settings.news_gdelt_enabled,
             )
         return await run_all_editions(
             session_factory,
@@ -63,7 +62,6 @@ def build_runner(
             allowed_hostnames=settings.news_allowed_hostnames,
             fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
             discovery_timeout_seconds=settings.news_discovery_timeout_seconds,
-            gdelt_enabled=settings.news_gdelt_enabled,
         )
 
     async def runner(edition_date: date) -> str | None:

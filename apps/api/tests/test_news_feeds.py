@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 import daily_insights_api.modules.news.feeds as feeds
+from daily_insights_api.modules.news.extraction import configured_hostnames
 from daily_insights_api.modules.news.feeds import (
     FEED_SOURCES,
     FeedSource,
@@ -12,7 +13,6 @@ from daily_insights_api.modules.news.feeds import (
     parse_listing,
     parse_rss,
 )
-from daily_insights_api.modules.news.sources import configured_hostnames
 
 NOW = datetime(2026, 9, 2, 3, 0, tzinfo=UTC)
 START = datetime(2026, 9, 1, 3, 0, tzinfo=UTC)
