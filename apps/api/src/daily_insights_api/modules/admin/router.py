@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
@@ -55,6 +56,8 @@ from daily_insights_api.web.dependencies import get_database_session
 router = APIRouter(prefix="/api/admin", tags=["administration"])
 AdminRead = Annotated[AuthContext, Depends(require_roles(SystemRole.ADMIN))]
 AdminWrite = Annotated[AuthContext, Depends(require_csrf_roles(SystemRole.ADMIN))]
+# Comfortably inside the 60s proxy_read_timeout that infra/nginx serves /api/ with.
+REFRESH_DEADLINE_SECONDS = 45.0
 
 
 async def _seat_count(database: AsyncSession, organization_id: uuid.UUID) -> int:
@@ -734,12 +737,25 @@ async def fetch_yfinance_daily_bars(
             f"untracked symbols: {', '.join(unknown)}",
         )
 
-    refreshed, failures = await refresh_index_daily_bars(
-        database,
-        adapter=YfinanceAdapter(timeout_seconds=settings.yfinance_timeout_seconds),
-        symbols=requested,
-        period=payload.period,
-    )
+    try:
+        # Fail inside the proxy's 60s budget (infra/nginx/conf.d/default.conf,
+        # `location ^~ /api/`). Letting nginx time out first would hand the
+        # admin a 504 while this request kept fetching, writing rows and
+        # recording an audit event nobody could see.
+        async with asyncio.timeout(REFRESH_DEADLINE_SECONDS):
+            refreshed, failures = await refresh_index_daily_bars(
+                database,
+                adapter=YfinanceAdapter(timeout_seconds=settings.yfinance_timeout_seconds),
+                symbols=requested,
+                period=payload.period,
+            )
+    except TimeoutError:
+        # Nothing committed: the session is rolled back by its dependency.
+        raise HTTPException(
+            status.HTTP_504_GATEWAY_TIMEOUT,
+            "yfinance refresh exceeded its budget; run "
+            "daily_insights_api.scripts.run_index_daily_bars for a large backfill",
+        ) from None
     succeeded = [
         YfinanceSymbolBars(
             symbol=entry.result.symbol,

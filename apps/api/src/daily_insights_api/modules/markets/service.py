@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -24,6 +25,9 @@ from daily_insights_api.modules.markets.models import (
 from daily_insights_api.modules.markets.schemas import MarketResponse
 
 MAX_BIND_PARAMETERS = 65535
+# Yahoo publishes no rate limit and is reached through a scraping client, so
+# this stays conservative; it matches TwelveDataTransport's default.
+MAX_FETCH_CONCURRENCY = 4
 
 
 async def visible_market_codes(
@@ -172,15 +176,33 @@ async def refresh_index_daily_bars(
     not discard the symbols that did resolve, which matters most for the nightly
     run where nobody is watching.
     """
+    # Fetching is the slow part: yfinance issues several HTTP requests per symbol
+    # (timezone, cookie/crumb, then the bars), so ten symbols in series can
+    # outlast the 60s proxy budget in infra/nginx/conf.d/default.conf whenever
+    # Yahoo is slow. Bounded concurrency mirrors TwelveDataTransport.
+    semaphore = asyncio.Semaphore(MAX_FETCH_CONCURRENCY)
+
+    async def fetch(symbol: str) -> DailyBarsResult | DataSourceError:
+        async with semaphore:
+            try:
+                return await adapter.get_daily_bars(
+                    market=TRACKED_INDICES[symbol], symbol=symbol, period=period
+                )
+            except DataSourceError as error:
+                return error
+
+    fetched = await asyncio.gather(*(fetch(symbol) for symbol in symbols))
+
     refreshed: list[IndexRefresh] = []
     failures: list[IndexRefreshFailure] = []
-    for symbol in symbols:
+    # Writes stay sequential and in request order. An AsyncSession is not safe
+    # for concurrent use, so only the fetches above run in parallel.
+    for symbol, outcome in zip(symbols, fetched, strict=True):
         market = TRACKED_INDICES[symbol]
-        try:
-            result = await adapter.get_daily_bars(market=market, symbol=symbol, period=period)
-        except DataSourceError as error:
-            failures.append(IndexRefreshFailure(symbol=symbol, market=market, error=str(error)))
+        if isinstance(outcome, DataSourceError):
+            failures.append(IndexRefreshFailure(symbol=symbol, market=market, error=str(outcome)))
             continue
+        result = outcome
         # Each symbol writes inside its own savepoint. A row that still trips a
         # CHECK or foreign key would otherwise abort the surrounding
         # transaction, discarding every symbol written before it and leaving the

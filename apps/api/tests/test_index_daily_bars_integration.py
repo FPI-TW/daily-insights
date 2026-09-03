@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from daily_insights_api.core.config import get_settings
 from daily_insights_api.modules.data_sources.api import (
+    TRACKED_INDICES,
     DailyBar,
     DailyBarsResult,
     Provenance,
@@ -27,7 +28,10 @@ from daily_insights_api.modules.markets.api import (
     store_index_daily_bars,
 )
 from daily_insights_api.modules.markets.models import IndexDailyBar
-from daily_insights_api.modules.markets.service import MAX_BIND_PARAMETERS
+from daily_insights_api.modules.markets.service import (
+    MAX_BIND_PARAMETERS,
+    MAX_FETCH_CONCURRENCY,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -244,3 +248,51 @@ async def test_a_backfill_larger_than_the_bind_parameter_limit_is_chunked(
 
     async with session_factory() as database:
         assert (await database.scalar(select(func.count()).select_from(IndexDailyBar))) == row_count
+
+
+class _SlowStubAdapter:
+    """Records overlap so concurrent fetching can be observed."""
+
+    def __init__(self, delay: float) -> None:
+        self._delay = delay
+        self.in_flight = 0
+        self.peak_in_flight = 0
+
+    async def get_daily_bars(
+        self,
+        *,
+        market: str,
+        symbol: str,
+        period: str = "2y",
+    ) -> DailyBarsResult:
+        self.in_flight += 1
+        self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
+        try:
+            await asyncio.sleep(self._delay)
+        finally:
+            self.in_flight -= 1
+        return _result(
+            symbol, TRACKED_INDICES[symbol], (_symbol_bar(symbol, "us_equity", "100.0"),)
+        )
+
+
+async def test_symbols_are_fetched_concurrently_and_written_in_order(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # Ten symbols in series can outlast the proxy budget when Yahoo is slow, so
+    # the fetches overlap. The writes must stay sequential: an AsyncSession is
+    # not safe for concurrent use.
+    stub = _SlowStubAdapter(delay=0.05)
+    symbols = list(TRACKED_INDICES)
+
+    async with session_factory.begin() as database:
+        refreshed, failures = await refresh_index_daily_bars(
+            database,
+            adapter=cast(YfinanceAdapter, stub),
+            symbols=symbols,
+            period="7d",
+        )
+
+    assert failures == []
+    assert stub.peak_in_flight == MAX_FETCH_CONCURRENCY
+    assert [entry.result.symbol for entry in refreshed] == symbols
