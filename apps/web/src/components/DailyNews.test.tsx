@@ -106,7 +106,7 @@ describe("DailyNews", () => {
     expect(container.querySelector("time")).toBeNull()
   })
 
-  it("shows numeric facts as chips and groups stories by market", async () => {
+  it("groups stories by market and keeps numeric facts out of the card", async () => {
     const i18n = createI18n("zh-hant")
     await i18n.changeLanguage("zh-hant")
     const item = (index: number, market: "us" | "taiwan", facts: string[]) => ({
@@ -155,9 +155,10 @@ describe("DailyNews", () => {
       "台灣",
       "Story 2",
     ])
-    const chips = panel.getAllByRole("list", { name: "數字重點" })
-    expect(chips).toHaveLength(2)
-    expect(chips[0]).toHaveTextContent("+3.2%1 碼")
+    // numeric_facts is the summary's grounding record, not reader content:
+    // stripped of their sentences the figures are ambiguous, so cards omit them.
+    expect(panel.queryByText("+3.2%")).not.toBeInTheDocument()
+    expect(panel.queryByText("1 碼")).not.toBeInTheDocument()
   })
 
   it("degrades to an unavailable panel when the news request failed", async () => {

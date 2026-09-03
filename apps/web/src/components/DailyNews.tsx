@@ -182,23 +182,6 @@ function NewsCards({
                 <p className="m-0 text-sm leading-6 text-sea-ink-soft">
                   {item.summary}
                 </p>
-                {item.numeric_facts.length > 0 ? (
-                  // The quantitative points are the fastest read of a story;
-                  // chips let a reader grab them without the summary.
-                  <ul
-                    className="mt-3 mb-0 flex list-none flex-wrap gap-1.5 p-0"
-                    aria-label={t("dailyNewsFactsLabel")}
-                  >
-                    {item.numeric_facts.map(fact => (
-                      <li
-                        key={fact}
-                        className="rounded-full border border-chip-line bg-chip px-2 py-0.5 font-mono text-xs font-bold text-sea-ink tabular-nums"
-                      >
-                        {fact}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
                 <div className="mt-4 flex items-center justify-between gap-3 text-xs text-sea-ink-soft">
                   {item.source_published_at ? (
                     <time dateTime={item.source_published_at}>

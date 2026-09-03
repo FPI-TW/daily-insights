@@ -419,7 +419,6 @@ const resources: Resource = {
       dailyNewsImportance: "重要性 {{count}} 星",
       dailyNewsPartialExplanation:
         "本日僅產生 {{count}} 則，目標 {{target}} 則。",
-      dailyNewsFactsLabel: "數字重點",
       newsMarket_global: "全球",
       newsMarket_us: "美國",
       newsMarket_asia: "亞洲",
@@ -848,7 +847,6 @@ const resources: Resource = {
       dailyNewsImportance: "重要性 {{count}} 星",
       dailyNewsPartialExplanation:
         "本日仅生成 {{count}} 则，目标 {{target}} 则。",
-      dailyNewsFactsLabel: "数字重点",
       newsMarket_global: "全球",
       newsMarket_us: "美国",
       newsMarket_asia: "亚洲",
@@ -1296,7 +1294,6 @@ const resources: Resource = {
       dailyNewsImportance: "Importance {{count}} stars",
       dailyNewsPartialExplanation:
         "Only {{count}} of {{target}} stories were produced today.",
-      dailyNewsFactsLabel: "Key figures",
       newsMarket_global: "Global",
       newsMarket_us: "United States",
       newsMarket_asia: "Asia",
