@@ -91,7 +91,7 @@ async def test_news_runner_refuses_to_backfill_yesterday() -> None:
             cast(async_sessionmaker[AsyncSession], None),
             cast(DeepSeekClient, None),
             datetime.now().date() - timedelta(days=1),
-            allowed_hostnames=",".join(ALLOWED),
+            allowed_hostnames=ALLOWED,
         )
 
 
@@ -101,5 +101,5 @@ async def test_news_runner_refuses_future_edition() -> None:
             cast(async_sessionmaker[AsyncSession], None),
             cast(DeepSeekClient, None),
             datetime.now().date() + timedelta(days=1),
-            allowed_hostnames=",".join(ALLOWED),
+            allowed_hostnames=ALLOWED,
         )

@@ -1,4 +1,4 @@
-"""Candidate discovery: the allowlisted publishers' own feeds and listing pages.
+"""Candidate discovery: the allowlisted publishers' own feeds and list APIs.
 
 This registry is the only discovery path. Feed URLs are constants owned by
 this module (never user input), every fetch is byte-capped and honours
@@ -14,13 +14,13 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
-from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 from zoneinfo import ZoneInfo
 
 import httpx
 from defusedxml import ElementTree
+from langdetect import DetectorFactory, LangDetectException, detect
 from pydantic import SecretStr
 
 from daily_insights_api.core.config import Settings, get_settings
@@ -32,6 +32,7 @@ from daily_insights_api.modules.news.extraction import (
     _ArticleTextExtractor,
     _dedupe_candidates,
     allowed_hostname,
+    configured_hostnames,
     robots_allowed,
 )
 
@@ -40,8 +41,18 @@ MAX_PER_FEED = 10
 USER_AGENT = "DailyInsightsNewsBot/1.0"
 # A feed-supplied body shorter than this is treated as a teaser, not full text.
 MIN_FULL_TEXT_CHARS = 200
-FEED_KINDS = frozenset({"rss", "rss_full", "news_sitemap", "json_list", "cnyes_json", "listing"})
+FEED_KINDS = frozenset({"rss", "rss_full", "news_sitemap", "json_list"})
 POLL_GROUPS = frozenset({"flash", "fast", "normal"})
+# Languages the summariser handles; feeds flagged ``language_filter`` drop the rest.
+KEPT_LANGUAGES = frozenset({"en", "zh-cn", "zh-tw", "ja", "ko"})
+GLOBAL = frozenset({GLOBAL_MARKET})
+TAIWAN = frozenset({"tw_equity"})
+US_AND_GLOBAL = frozenset({GLOBAL_MARKET, "us_equity"})
+# cn_equity / hk_equity have no edition yet; the tags pre-sort sources for them.
+CHINA = frozenset({GLOBAL_MARKET, "cn_equity"})
+HONG_KONG = frozenset({GLOBAL_MARKET, "hk_equity"})
+# langdetect is non-deterministic unless seeded.
+DetectorFactory.seed = 0
 _SITEMAP_NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
 _NEWS_NS = "{http://www.google.com/schemas/sitemap-news/0.9}"
 _CONTENT_NS = "{http://purl.org/rss/1.0/modules/content/}"
@@ -70,6 +81,10 @@ class JsonListMapping:
     time_zone: str = "Asia/Shanghai"
     # Some endpoints return a JS assignment (``var x = {...};``) instead of JSON.
     js_prefix: bool = False
+    # Flash feeds often leave the title empty and carry the text in the body.
+    title_fallback_field: str | None = None
+    # Flash items are complete in a sentence or two; article feeds need more.
+    min_body_chars: int = MIN_FULL_TEXT_CHARS
 
 
 @dataclass(frozen=True)
@@ -103,100 +118,582 @@ class FeedSource:
     contact_email_setting: str | None = None
     # Minimum spacing between requests to this feed's host (Guardian: 1/s).
     min_interval_seconds: float = 0.0
+    # Article URLs whose identity lives in the query string (etnet) keep it.
+    keep_query: bool = False
+    # Zone applied to timestamps the feed publishes without an offset.
+    naive_time_zone: str | None = None
+    # Newswires mix languages; drop items the summariser cannot handle.
+    language_filter: bool = False
 
 
-# Reuters is deliberately absent: it answers non-browser requests with 401, so
-# discovered links could never be extracted.
+_GUARDIAN = JsonListMapping(
+    items_path=("response", "results"),
+    url_field="webUrl",
+    title_field="webTitle",
+    time_field="webPublicationDate",
+    time_format="iso",
+    body_field="fields.bodyText",
+)
+_GUARDIAN_FIELDS = "order-by=newest&page-size=50&show-fields=bodyText"
+_GLOBENEWSWIRE = (
+    "https://www.globenewswire.com/RssFeed/subjectcode/{code}-{name}"
+    "/feedTitle/GlobeNewswire%20-%20{name}"
+)
+_GLOBENEWSWIRE_PATTERN = (
+    r"^https://www\.globenewswire\.com/news-release/\d{4}/\d{2}/\d{2}/\d+/\d+/[a-z]{2}/.+$"
+)
+_CNYES_PATTERN = r"^https://news\.cnyes\.com/news/id/\d+$"
+_ETNET_PATTERN = (
+    r"^https://www\.etnet\.com\.hk/www/tc/news/home_categorized_news_detail\.php\?newsid=ETN\d+$"
+)
+_HANKYUNG_PATTERN = r"^https://www\.hankyung\.com/article/\d+[a-z]?$"
+_UDN_PATTERN = r"^https://money\.udn\.com/money/story/\d+/\d+$"
+
+# Every source names the article host (``hostname``) explicitly, even when the
+# feed lives elsewhere (feedburner, CDN, API hosts), because the allowlist is
+# derived from these hostnames. Reuters, CNBC, BBC and AP are deliberately
+# absent: they answer non-browser requests with 401/403 or block crawlers via
+# robots.txt, so discovered links could never be extracted. Verified live on
+# 2026-09-03; see docs/architecture/daily-news.md for what was left out.
 FEED_SOURCES: tuple[FeedSource, ...] = (
+    # --- Chinese flash APIs (poll_group flash) -------------------------------
     FeedSource(
-        "www.cnbc.com",
-        "https://www.cnbc.com/id/10000664/device/rss/rss.html",
-        "rss",
-        r"^https://www\.cnbc\.com/\d{4}/\d{2}/\d{2}/[a-z0-9-]+\.html$",
-        markets=frozenset({GLOBAL_MARKET, "us_equity"}),
-        display_name="CNBC",
+        "www.cls.cn",
+        "https://m.cls.cn/nodeapi/telegraphs?app=CailianpressWap&os=web&sv=1&rn=30",
+        "json_list",
+        r"^https://www\.cls\.cn/detail/\d+$",
+        markets=CHINA,
+        display_name="財聯社",
+        provides_full_text=True,
+        poll_group="flash",
+        mapping=JsonListMapping(
+            items_path=("data", "roll_data"),
+            id_field="id",
+            url_template="https://www.cls.cn/detail/{id}",
+            title_field="title",
+            title_fallback_field="content",
+            time_field="ctime",
+            time_format="unix_s",
+            body_field="content",
+            min_body_chars=20,
+        ),
     ),
     FeedSource(
-        "www.bbc.com",
-        "https://feeds.bbci.co.uk/news/business/rss.xml",
-        "rss",
-        r"^https://www\.bbc\.com/news/articles/[a-z0-9]+$",
-        host_rewrites=(("www.bbc.co.uk", "www.bbc.com"),),
-        display_name="BBC Business",
+        "flash.jin10.com",
+        "https://www.jin10.com/flash_newest.js",
+        "json_list",
+        r"^https://flash\.jin10\.com/detail/\d+$",
+        markets=CHINA,
+        display_name="金十數據",
+        provides_full_text=True,
+        poll_group="flash",
+        mapping=JsonListMapping(
+            items_path=(),
+            id_field="id",
+            url_template="https://flash.jin10.com/detail/{id}",
+            title_field="data.title",
+            title_fallback_field="data.content",
+            time_field="time",
+            time_format="datetime_str",
+            body_field="data.content",
+            min_body_chars=20,
+            js_prefix=True,
+        ),
     ),
     FeedSource(
-        "apnews.com",
-        "https://apnews.com/business",
-        "listing",
-        r"^https://apnews\.com/article/[a-z0-9-]+$",
-        markets=frozenset({GLOBAL_MARKET, "us_equity"}),
-        display_name="AP",
+        "wallstreetcn.com",
+        "https://api-one.wallstcn.com/apiv1/content/lives?channel=global-channel&client=pc&limit=30",
+        "json_list",
+        r"^https://wallstreetcn\.com/livenews/\d+$",
+        markets=CHINA,
+        display_name="華爾街見聞",
+        provides_full_text=True,
+        poll_group="flash",
+        mapping=JsonListMapping(
+            items_path=("data", "items"),
+            url_field="uri",
+            title_field="title",
+            title_fallback_field="content_text",
+            time_field="display_time",
+            time_format="unix_s",
+            body_field="content_text",
+            min_body_chars=20,
+        ),
     ),
-    # cnyes category pages are rendered client-side (the static HTML only
-    # carries the sidebar), so its public JSON list endpoint is used instead.
-    FeedSource(
-        "news.cnyes.com",
-        "https://api.cnyes.com/media/api/v1/newslist/category/headline?limit=30&page=1",
-        "cnyes_json",
-        r"^https://news\.cnyes\.com/news/id/\d+$",
-        display_name="鉅亨",
-    ),
-    FeedSource(
-        "news.cnyes.com",
-        "https://api.cnyes.com/media/api/v1/newslist/category/tw_stock?limit=30&page=1",
-        "cnyes_json",
-        r"^https://news\.cnyes\.com/news/id/\d+$",
-        markets=frozenset({"tw_equity"}),
-        max_items=24,
-        display_name="鉅亨",
-    ),
-    FeedSource(
-        "news.cnyes.com",
-        "https://api.cnyes.com/media/api/v1/newslist/category/us_stock?limit=30&page=1",
-        "cnyes_json",
-        r"^https://news\.cnyes\.com/news/id/\d+$",
-        markets=frozenset({"us_equity"}),
-        max_items=12,
-        display_name="鉅亨",
-    ),
+    # Without a fresh cache-buster the CDN serves a weeks-old copy with HTTP 200.
     FeedSource(
         "finance.eastmoney.com",
-        "https://finance.eastmoney.com/a/cywjh.html",
-        "listing",
+        "https://newsapi.eastmoney.com/kuaixun/v1/getlist_102_ajaxResult_50_1_.html",
+        "json_list",
         r"^https://finance\.eastmoney\.com/a/\d+\.html$",
+        markets=CHINA,
         display_name="東方財富",
+        poll_group="flash",
+        cache_buster_param="r",
+        mapping=JsonListMapping(
+            items_path=("LivesList",),
+            url_field="url_w",
+            title_field="title",
+            time_field="showtime",
+            time_format="datetime_str",
+            js_prefix=True,
+        ),
+    ),
+    FeedSource(
+        "finance.sina.com.cn",
+        "https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid=2516&num=30&page=1",
+        "json_list",
+        r"^https://finance\.sina\.com\.cn/.+\.shtml$",
+        markets=CHINA,
+        display_name="新浪財經",
+        poll_group="flash",
+        mapping=JsonListMapping(
+            items_path=("result", "data"),
+            url_field="url",
+            title_field="title",
+            time_field="ctime",
+            time_format="unix_s",
+        ),
+    ),
+    FeedSource(
+        "www.thepaper.cn",
+        "https://cache.thepaper.cn/contentapi/wwwIndex/rightSidebar",
+        "json_list",
+        r"^https://www\.thepaper\.cn/newsDetail_forward_\d+$",
+        markets=CHINA,
+        display_name="澎湃新聞",
+        poll_group="flash",
+        mapping=JsonListMapping(
+            items_path=("data", "hotNews"),
+            id_field="contId",
+            url_template="https://www.thepaper.cn/newsDetail_forward_{id}",
+            title_field="name",
+            time_field="pubTimeLong",
+            time_format="unix_ms",
+        ),
+    ),
+    # Third-party full-text mirror; the article body arrives in <description>.
+    FeedSource(
+        "m.jiemian.com",
+        "https://feedx.net/rss/jiemian.xml",
+        "rss_full",
+        r"^https://m\.jiemian\.com/article/\d+\.html$",
+        markets=CHINA,
+        display_name="界面新聞",
+        provides_full_text=True,
+        poll_group="flash",
+    ),
+    # --- Taiwan (poll_group fast) ----------------------------------------------
+    # cnyes' content:encoded holds a 300-character teaser, not the article, so
+    # these stay plain RSS and go through extraction.
+    FeedSource(
+        "news.cnyes.com",
+        "https://news.cnyes.com/rss/v1/news/category/tw_stock",
+        "rss",
+        _CNYES_PATTERN,
+        markets=TAIWAN,
+        max_items=30,
+        display_name="鉅亨",
+        poll_group="fast",
+    ),
+    FeedSource(
+        "news.cnyes.com",
+        "https://news.cnyes.com/rss/v1/news/category/headline",
+        "rss",
+        _CNYES_PATTERN,
+        display_name="鉅亨",
+        poll_group="fast",
+    ),
+    FeedSource(
+        "news.cnyes.com",
+        "https://news.cnyes.com/rss/v1/news/category/wd_stock",
+        "rss",
+        _CNYES_PATTERN,
+        markets=US_AND_GLOBAL,
+        max_items=20,
+        display_name="鉅亨",
+        poll_group="fast",
+    ),
+    FeedSource(
+        "money.udn.com",
+        "https://money.udn.com/rssfeed/news/1001/5590?ch=money",
+        "rss",
+        _UDN_PATTERN,
+        markets=TAIWAN,
+        display_name="經濟日報",
+        poll_group="fast",
+    ),
+    FeedSource(
+        "money.udn.com",
+        "https://money.udn.com/rssfeed/news/1001/5591?ch=money",
+        "rss",
+        _UDN_PATTERN,
+        markets=TAIWAN,
+        display_name="經濟日報",
+        poll_group="fast",
+    ),
+    FeedSource(
+        "www.cna.com.tw",
+        "https://feeds.feedburner.com/rsscna/finance",
+        "rss",
+        r"^https://www\.cna\.com\.tw/news/[a-z]+/\d+\.aspx$",
+        markets=TAIWAN,
+        display_name="中央社",
+        poll_group="fast",
+    ),
+    FeedSource(
+        "finance.ettoday.net",
+        "https://feeds.feedburner.com/ettoday/finance",
+        "rss",
+        r"^https://finance\.ettoday\.net/news/\d+$",
+        markets=TAIWAN,
+        display_name="ETtoday 財經",
+        poll_group="fast",
+    ),
+    # One feed, two article hosts: the general site and its finance edition.
+    FeedSource(
+        "technews.tw",
+        "https://cdn.technews.tw/feed/",
+        "rss",
+        r"^https://technews\.tw/\d{4}/\d{2}/\d{2}/[a-z0-9-]+/$",
+        markets=TAIWAN,
+        display_name="科技新報",
+        poll_group="fast",
+    ),
+    FeedSource(
+        "finance.technews.tw",
+        "https://cdn.technews.tw/feed/",
+        "rss",
+        r"^https://finance\.technews\.tw/\d{4}/\d{2}/\d{2}/[a-z0-9-]+/$",
+        markets=TAIWAN,
+        display_name="財經新報",
+        poll_group="fast",
+    ),
+    # The business-only feed lags by days; the site-wide feed is filtered to
+    # the business host by the link pattern.
+    FeedSource(
+        "ec.ltn.com.tw",
+        "https://news.ltn.com.tw/rss/all.xml",
+        "rss",
+        r"^https://ec\.ltn\.com\.tw/article/[a-z]+/\d+$",
+        markets=TAIWAN,
+        display_name="自由財經",
+        poll_group="fast",
+    ),
+    FeedSource(
+        "www.inside.com.tw",
+        "https://www.inside.com.tw/feed/rss",
+        "rss_full",
+        r"^https://www\.inside\.com\.tw/article/\d+-[a-z0-9-]+$",
+        markets=TAIWAN,
+        display_name="INSIDE",
+        provides_full_text=True,
+        poll_group="fast",
+    ),
+    FeedSource(
+        "www.gvm.com.tw",
+        "https://www.gvm.com.tw/rss",
+        "rss",
+        r"^https://www\.gvm\.com\.tw/article/\d+$",
+        markets=TAIWAN,
+        display_name="遠見",
+        poll_group="fast",
+        naive_time_zone="Asia/Taipei",
+    ),
+    FeedSource(
+        "wantrich.chinatimes.com",
+        "https://www.chinatimes.com/sitemaps/sitemap_wantrich_todaynews.xml",
+        "news_sitemap",
+        r"^https://wantrich\.chinatimes\.com/news/\d+-\d+$",
+        markets=TAIWAN,
+        max_items=30,
+        display_name="旺得富",
+        poll_group="fast",
+    ),
+    FeedSource(
+        "www.ctee.com.tw",
+        "https://www.ctee.com.tw/sitemaps/sitemap_newstoday.xml",
+        "news_sitemap",
+        r"^https://www\.ctee\.com\.tw/news/\d+-\d+$",
+        markets=TAIWAN,
+        max_items=30,
+        display_name="工商時報",
+        poll_group="fast",
+    ),
+    FeedSource(
+        "www.businesstoday.com.tw",
+        "https://www.businesstoday.com.tw/news-sitemap.xml",
+        "news_sitemap",
+        r"^https://www\.businesstoday\.com\.tw/article/category/\d+/post/\d+/$",
+        markets=TAIWAN,
+        display_name="今周刊",
+        poll_group="fast",
+    ),
+    FeedSource(
+        "www.storm.mg",
+        "https://www.storm.mg/feed/sitemap/news",
+        "news_sitemap",
+        r"^https://www\.storm\.mg/article/\d+$",
+        markets=TAIWAN,
+        display_name="風傳媒",
+        poll_group="fast",
+    ),
+    # --- Hong Kong, Japan, Korea -------------------------------------------------
+    FeedSource(
+        "www.etnet.com.hk",
+        "https://www.etnet.com.hk/www/tc/news/rss.php?section=editor",
+        "rss",
+        _ETNET_PATTERN,
+        markets=HONG_KONG,
+        display_name="經濟通",
+        poll_group="fast",
+        keep_query=True,
+    ),
+    FeedSource(
+        "www.etnet.com.hk",
+        "https://www.etnet.com.hk/www/tc/news/rss.php?section=rumour",
+        "rss",
+        _ETNET_PATTERN,
+        markets=HONG_KONG,
+        display_name="經濟通",
+        poll_group="fast",
+        keep_query=True,
+    ),
+    FeedSource(
+        "www.etnet.com.hk",
+        "https://www.etnet.com.hk/www/tc/news/rss.php?section=commentary",
+        "rss",
+        _ETNET_PATTERN,
+        markets=HONG_KONG,
+        display_name="經濟通",
+        poll_group="fast",
+        keep_query=True,
+    ),
+    FeedSource(
+        "www.etnet.com.hk",
+        "https://www.etnet.com.hk/www/tc/news/rss.php?section=special",
+        "rss",
+        _ETNET_PATTERN,
+        markets=HONG_KONG,
+        display_name="經濟通",
+        poll_group="fast",
+        keep_query=True,
+    ),
+    FeedSource(
+        "news.rthk.hk",
+        "https://rthk9.rthk.hk/rthk/news/rss/c_expressnews_cfinance.xml",
+        "rss",
+        r"^https://news\.rthk\.hk/rthk/ch/component/k2/\d+-\d+\.htm$",
+        markets=HONG_KONG,
+        display_name="香港電台",
+        poll_group="fast",
+    ),
+    # Site-wide feed; the pattern keeps the finance, property and China desks.
+    FeedSource(
+        "www.stheadline.com",
+        "https://www.stheadline.com/rss",
+        "rss",
+        r"^https://www\.stheadline\.com/realtime-(finance|property|china)/\d+/",
+        markets=HONG_KONG,
+        display_name="星島頭條",
+        poll_group="fast",
+    ),
+    FeedSource(
+        "toyokeizai.net",
+        "https://toyokeizai.net/list/feed/rss",
+        "rss",
+        r"^https://toyokeizai\.net/articles/-/\d+$",
+        display_name="東洋経済",
+    ),
+    FeedSource(
+        "diamond.jp",
+        "https://diamond.jp/list/feed/rss/dol",
+        "rss",
+        r"^https://diamond\.jp/articles/-/\d+$",
+        display_name="ダイヤモンド",
+    ),
+    # Mostly press releases under /pr/, which the pattern excludes.
+    FeedSource(
+        "www.kyodo.co.jp",
+        "https://www.kyodo.co.jp/feed/",
+        "rss",
+        r"^https://www\.kyodo\.co\.jp/(?!pr/)[a-z]+/\d{4}-\d{2}-\d{2}_\d+/$",
+        display_name="共同通信",
+    ),
+    # RSS 1.0 mirror of Nikkei's headlines; items are dated with dc:date.
+    FeedSource(
+        "www.nikkei.com",
+        "https://assets.wor.jp/rss/rdf/nikkei/news.rdf",
+        "rss",
+        r"^https://www\.nikkei\.com/article/[A-Z0-9]+/$",
+        display_name="日本経済新聞",
+    ),
+    FeedSource(
+        "www.hankyung.com",
+        "https://www.hankyung.com/feed/finance",
+        "rss",
+        _HANKYUNG_PATTERN,
+        display_name="한국경제",
+    ),
+    FeedSource(
+        "www.hankyung.com",
+        "https://www.hankyung.com/feed/economy",
+        "rss",
+        _HANKYUNG_PATTERN,
+        display_name="한국경제",
+    ),
+    # --- English and newswires ---------------------------------------------------
+    FeedSource(
+        "www.wsj.com",
+        "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain",
+        "rss",
+        r"^https://www\.wsj\.com/[a-z-]+/.+$",
+        markets=US_AND_GLOBAL,
+        max_items=20,
+        display_name="The Wall Street Journal",
+    ),
+    FeedSource(
+        "www.marketwatch.com",
+        "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+        "rss",
+        r"^https://www\.marketwatch\.com/story/[a-z0-9-]+$",
+        markets=US_AND_GLOBAL,
+        display_name="MarketWatch",
+    ),
+    # pubDate carries no offset; the feed publishes UTC.
+    FeedSource(
+        "www.investing.com",
+        "https://www.investing.com/rss/news.rss",
+        "rss",
+        r"^https://www\.investing\.com/news/[a-z-]+/[a-z0-9-]+$",
+        markets=US_AND_GLOBAL,
+        display_name="Investing.com",
+        naive_time_zone="UTC",
+    ),
+    FeedSource(
+        "www.investing.com",
+        "https://www.investing.com/rss/news_25.rss",
+        "rss",
+        r"^https://www\.investing\.com/news/[a-z-]+/[a-z0-9-]+$",
+        markets=US_AND_GLOBAL,
+        display_name="Investing.com",
+        naive_time_zone="UTC",
+    ),
+    # content:encoded exists but only holds the summary, so it is plain RSS.
+    FeedSource(
+        "www.forbes.com",
+        "https://www.forbes.com/business/feed/",
+        "rss",
+        r"^https://www\.forbes\.com/sites/[a-z0-9-]+/\d{4}/\d{2}/\d{2}/[a-z0-9-]+/$",
+        markets=US_AND_GLOBAL,
+        display_name="Forbes",
+    ),
+    # /.rss/full/ answers 308 to this feed id; the redirect target is used
+    # directly because feed reads refuse redirects.
+    FeedSource(
+        "www.thestreet.com",
+        "https://www.thestreet.com/.rss/feed/a4a58455-5a41-4dfa-899c-86c49b653ed8.xml",
+        "rss_full",
+        r"^https://www\.thestreet\.com/[a-z-]+/[a-z0-9-]+$",
+        markets=US_AND_GLOBAL,
+        display_name="TheStreet",
+        provides_full_text=True,
+    ),
+    FeedSource(
+        "www.cityam.com",
+        "https://www.cityam.com/feed/",
+        "rss_full",
+        r"^https://www\.cityam\.com/[a-z0-9-]+/$",
+        display_name="City A.M.",
+        provides_full_text=True,
+    ),
+    FeedSource(
+        "www.globenewswire.com",
+        _GLOBENEWSWIRE.format(code=13, name="Earnings%20Releases%20and%20Operating%20Results"),
+        "rss",
+        _GLOBENEWSWIRE_PATTERN,
+        markets=US_AND_GLOBAL,
+        display_name="GlobeNewswire",
+        poll_group="flash",
+        language_filter=True,
+    ),
+    FeedSource(
+        "www.globenewswire.com",
+        _GLOBENEWSWIRE.format(code=27, name="Mergers%20and%20Acquisitions"),
+        "rss",
+        _GLOBENEWSWIRE_PATTERN,
+        markets=US_AND_GLOBAL,
+        display_name="GlobeNewswire",
+        language_filter=True,
+    ),
+    FeedSource(
+        "www.globenewswire.com",
+        _GLOBENEWSWIRE.format(code=9, name="Company%20Announcement"),
+        "rss",
+        _GLOBENEWSWIRE_PATTERN,
+        markets=US_AND_GLOBAL,
+        display_name="GlobeNewswire",
+        language_filter=True,
+    ),
+    FeedSource(
+        "www.prnewswire.com",
+        "https://www.prnewswire.com/rss/financial-services-latest-news/financial-services-latest-news-list.rss",
+        "rss",
+        r"^https://www\.prnewswire\.com/news-releases/[a-z0-9-]+\.html$",
+        markets=US_AND_GLOBAL,
+        display_name="PR Newswire",
+        language_filter=True,
+    ),
+    # Guardian Content API: 500 calls/day and 1 call/s on the free tier, so
+    # the three sections are requested one second apart and skipped entirely
+    # while no key is configured.
+    FeedSource(
+        "www.theguardian.com",
+        f"https://content.guardianapis.com/search?section=business&{_GUARDIAN_FIELDS}",
+        "json_list",
+        r"^https://www\.theguardian\.com/[a-z-]+/\d{4}/[a-z]{3}/\d{2}/[a-z0-9-]+$",
+        markets=US_AND_GLOBAL,
+        display_name="The Guardian",
+        provides_full_text=True,
+        mapping=_GUARDIAN,
+        api_key_setting="guardian_api_key",
+        min_interval_seconds=1.0,
+    ),
+    FeedSource(
+        "www.theguardian.com",
+        f"https://content.guardianapis.com/search?section=world&{_GUARDIAN_FIELDS}",
+        "json_list",
+        r"^https://www\.theguardian\.com/[a-z-]+/\d{4}/[a-z]{3}/\d{2}/[a-z0-9-]+$",
+        display_name="The Guardian",
+        provides_full_text=True,
+        mapping=_GUARDIAN,
+        api_key_setting="guardian_api_key",
+        min_interval_seconds=1.0,
+    ),
+    FeedSource(
+        "www.theguardian.com",
+        f"https://content.guardianapis.com/search?section=politics&{_GUARDIAN_FIELDS}",
+        "json_list",
+        r"^https://www\.theguardian\.com/[a-z-]+/\d{4}/[a-z]{3}/\d{2}/[a-z0-9-]+$",
+        display_name="The Guardian",
+        provides_full_text=True,
+        mapping=_GUARDIAN,
+        api_key_setting="guardian_api_key",
+        min_interval_seconds=1.0,
+    ),
+    # SEC requires a contact address in the User-Agent; the feed is skipped
+    # until DAILY_INSIGHTS_SEC_CONTACT_EMAIL is set.
+    FeedSource(
+        "www.sec.gov",
+        "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&output=atom",
+        "rss",
+        r"^https://www\.sec\.gov/Archives/edgar/data/\d+/\d+/[0-9-]+-index\.htm$",
+        markets=frozenset({"us_equity"}),
+        display_name="SEC EDGAR",
+        poll_group="flash",
+        contact_email_setting="sec_contact_email",
     ),
 )
-
-
-class _AnchorCollector(HTMLParser):
-    """Collect (href, visible text) pairs, keeping the longest text per href."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.links: dict[str, str] = {}
-        self._href: str | None = None
-        self._text: list[str] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag != "a":
-            return
-        href = next((value for key, value in attrs if key.lower() == "href" and value), None)
-        self._href = href
-        self._text = []
-
-    def handle_data(self, data: str) -> None:
-        if self._href is not None:
-            self._text.append(data)
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag != "a" or self._href is None:
-            return
-        text = " ".join("".join(self._text).split())
-        if self._href not in self.links or len(text) > len(self.links[self._href]):
-            self.links[self._href] = text
-        self._href = None
-        self._text = []
 
 
 def feed_client(timeout_seconds: float) -> httpx.AsyncClient:
@@ -222,7 +719,8 @@ def normalize_article_url(href: str, source: FeedSource) -> str | None:
             hostname = replacement
     if scheme != "https" or hostname != source.hostname or parsed.port not in {None, 443}:
         return None
-    normalized = urlunparse(("https", hostname, parsed.path, "", "", ""))
+    query = parsed.query if source.keep_query else ""
+    normalized = urlunparse(("https", hostname, parsed.path, "", query, ""))
     if source.link_pattern and not re.match(source.link_pattern, normalized):
         return None
     return normalized
@@ -266,19 +764,24 @@ def _child_text(item: Any, *names: str) -> str:
     return ""
 
 
-def _parse_timestamp(value: str) -> datetime | None:
+def _parse_timestamp(value: str, naive_zone: str | None = None) -> datetime | None:
+    """RFC 2822 or ISO 8601 to UTC; offset-less values need ``naive_zone`` or are dropped."""
     text = value.strip()
     if not text:
         return None
+    parsed: datetime | None = None
     try:
-        return parsedate_to_datetime(text).astimezone(UTC)
+        parsed = parsedate_to_datetime(text)
     except (TypeError, ValueError):
-        pass
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed.astimezone(UTC) if parsed.tzinfo is not None else None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        if naive_zone is None:
+            return None
+        parsed = parsed.replace(tzinfo=ZoneInfo(naive_zone))
+    return parsed.astimezone(UTC)
 
 
 def _html_to_text(html: str) -> str:
@@ -293,33 +796,45 @@ def parse_rss(payload: bytes, source: FeedSource) -> list[Candidate]:
 
 
 def parse_rss_entries(payload: bytes, source: FeedSource) -> list[tuple[Candidate, str | None]]:
-    """RSS/RDF items with an optional full-text body from ``content:encoded``.
+    """RSS, RDF and Atom entries with an optional full-text body.
 
     RSS 2.0 nests ``item`` under ``channel``; RSS 1.0 (RDF) places ``item``
-    under the root and dates it with ``dc:date``, so items are found by local
-    name anywhere in the tree. Bodies shorter than MIN_FULL_TEXT_CHARS are
-    teasers (Forbes ships a content:encoded tag holding only a summary) and
-    are dropped so extraction fetches the article instead.
+    under the root and dates it with ``dc:date``; Atom uses ``entry`` with
+    ``link href`` and ``updated``. Entries are therefore found by local name
+    anywhere in the tree. For ``rss_full`` sources the body comes from
+    ``content:encoded`` (or ``description`` when a third-party feed inlines
+    the article there); bodies shorter than MIN_FULL_TEXT_CHARS are teasers
+    (Forbes ships a content:encoded tag holding only a summary) and are
+    dropped so extraction fetches the article instead.
     """
     # defusedxml rejects entity expansion and external DTDs; payloads are also
     # byte-capped before reaching the parser.
     root = ElementTree.fromstring(payload)
     result: list[tuple[Candidate, str | None]] = []
     for item in root.iter():
-        if _local_name(item.tag) != "item":
+        if _local_name(item.tag) not in {"item", "entry"}:
             continue
         link = _child_text(item, "link").strip()
         if not link:
-            link = str(item.attrib.get("{http://www.w3.org/1999/02/22-rdf-syntax-ns#}about", ""))
+            link = next(
+                (
+                    str(child.attrib["href"])
+                    for child in item
+                    if _local_name(child.tag) == "link" and child.attrib.get("href")
+                ),
+                str(item.attrib.get("{http://www.w3.org/1999/02/22-rdf-syntax-ns#}about", "")),
+            )
         title = " ".join(_child_text(item, "title").split())
-        seen_at = _parse_timestamp(_child_text(item, "pubDate", "date", "published", "updated"))
+        seen_at = _parse_timestamp(
+            _child_text(item, "pubDate", "date", "published", "updated"), source.naive_time_zone
+        )
         url = normalize_article_url(link, source) if link else None
         if url is None or not title:
             continue
         body: str | None = None
         if source.kind == "rss_full":
-            encoded = _child_text(item, "encoded")
-            text = _html_to_text(encoded) if encoded else ""
+            raw = _child_text(item, "encoded") or _child_text(item, "description")
+            text = _html_to_text(raw) if raw else ""
             body = text if len(text) >= MIN_FULL_TEXT_CHARS else None
         result.append((_candidate(url, title, seen_at, source), body))
     return result
@@ -336,7 +851,7 @@ def parse_news_sitemap(payload: bytes, source: FeedSource) -> list[Candidate]:
             " ".join((news.findtext(f"{_NEWS_NS}title") or "").split()) if news is not None else ""
         )
         published = news.findtext(f"{_NEWS_NS}publication_date") if news is not None else None
-        seen_at = _parse_timestamp(published) if published else None
+        seen_at = _parse_timestamp(published, source.naive_time_zone) if published else None
         url = normalize_article_url(loc, source) if loc else None
         if url is None or not title:
             continue
@@ -404,6 +919,10 @@ def parse_json_list(payload: bytes, source: FeedSource) -> list[tuple[Candidate,
             continue
         title_value = _lookup(item, mapping.title_field)
         title = " ".join(str(title_value).split()) if isinstance(title_value, str) else ""
+        if not title and mapping.title_fallback_field:
+            fallback = _lookup(item, mapping.title_fallback_field)
+            if isinstance(fallback, str):
+                title = " ".join(_html_to_text(fallback).split())[:200]
         if mapping.url_field:
             raw_url = _lookup(item, mapping.url_field)
         elif mapping.url_template and mapping.id_field:
@@ -427,57 +946,12 @@ def parse_json_list(payload: bytes, source: FeedSource) -> list[tuple[Candidate,
                     _html_to_text(body_value) if "<" in body_value else " ".join(body_value.split())
                 )
                 body = (
-                    text_body[:MAX_ARTICLE_CHARS] if len(text_body) >= MIN_FULL_TEXT_CHARS else None
+                    text_body[:MAX_ARTICLE_CHARS]
+                    if len(text_body) >= mapping.min_body_chars
+                    else None
                 )
         result.append((_candidate(url, title, seen_at, source), body))
     return result
-
-
-def parse_cnyes_json(payload: bytes, source: FeedSource) -> list[Candidate]:
-    """Map the cnyes list endpoint (items.data[] with newsId/title/publishAt)."""
-    document = json.loads(payload)
-    items = document.get("items") if isinstance(document, dict) else None
-    data = items.get("data") if isinstance(items, dict) else None
-    if not isinstance(data, list):
-        raise ValueError("cnyes list has no items.data array")
-    result: list[Candidate] = []
-    for item in data:
-        if not isinstance(item, dict):
-            continue
-        news_id, title, published = item.get("newsId"), item.get("title"), item.get("publishAt")
-        if not isinstance(news_id, int) or not isinstance(title, str) or not title.strip():
-            continue
-        seen_at = (
-            datetime.fromtimestamp(published, UTC) if isinstance(published, int | float) else None
-        )
-        url = normalize_article_url(f"https://{source.hostname}/news/id/{news_id}", source)
-        if url is None:
-            continue
-        result.append(_candidate(url, " ".join(title.split()), seen_at, source))
-    return result
-
-
-def parse_listing(payload: str, source: FeedSource) -> list[Candidate]:
-    collector = _AnchorCollector()
-    collector.feed(payload)
-    result: list[Candidate] = []
-    seen: set[str] = set()
-    for href, text in collector.links.items():
-        url = normalize_article_url(href, source)
-        if url is None or url in seen:
-            continue
-        headline = text if len(text) >= 8 else _slug_headline(url)
-        if not headline:
-            continue
-        seen.add(url)
-        result.append(_candidate(url, headline, None, source))
-    return result
-
-
-def _slug_headline(url: str) -> str:
-    slug = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
-    words = [word for word in re.split(r"[-_]+", slug) if word and not word.isdigit()]
-    return " ".join(words) if len(words) >= 3 else ""
 
 
 async def _read_capped(
@@ -534,14 +1008,40 @@ def parse_feed(source: FeedSource, payload: bytes) -> list[tuple[Candidate, str 
         return [(candidate, None) for candidate in parse_news_sitemap(payload, source)]
     if source.kind == "json_list":
         return parse_json_list(payload, source)
-    if source.kind == "cnyes_json":
-        return [(candidate, None) for candidate in parse_cnyes_json(payload, source)]
-    if source.kind == "listing":
-        return [
-            (candidate, None)
-            for candidate in parse_listing(payload.decode("utf-8", errors="replace"), source)
-        ]
     raise ValueError(f"unknown feed kind {source.kind}")
+
+
+def detected_language(text: str) -> str | None:
+    try:
+        return str(detect(text))
+    except LangDetectException:
+        return None
+
+
+def _keep_language(candidate: Candidate, body: str | None) -> bool:
+    sample = candidate.headline if body is None else f"{candidate.headline} {body[:500]}"
+    language = detected_language(sample)
+    # Undetectable text (numbers, tickers) is kept; only a confident foreign
+    # language drops an item.
+    return language is None or language in KEPT_LANGUAGES
+
+
+def registry_hostnames() -> frozenset[str]:
+    return frozenset(source.hostname for source in FEED_SOURCES)
+
+
+def effective_hostnames(extra: str = "", blocked: str = "") -> frozenset[str]:
+    """Allowlist derived from the registry, plus ``extra`` minus ``blocked``.
+
+    Both overrides are comma-separated exact hostnames; blocking a registry
+    host silently disables its feeds, which is the intended kill switch.
+    """
+    allowed = set(registry_hostnames())
+    if extra.strip():
+        allowed |= configured_hostnames(extra)
+    if blocked.strip():
+        allowed -= configured_hostnames(blocked)
+    return frozenset(allowed)
 
 
 async def discover_feed_candidates(
@@ -607,6 +1107,13 @@ async def discover_feed_candidates(
                 error_code=type(error).__name__,
             )
             continue
+        dropped_language = 0
+        if source.language_filter:
+            readable = [
+                (candidate, body) for candidate, body in entries if _keep_language(candidate, body)
+            ]
+            dropped_language = len(entries) - len(readable)
+            entries = readable
         parsed = [candidate for candidate, _ in entries]
         # Freshness is judged before the window filter: a feed whose newest
         # item is days old would otherwise look like an empty feed. Stale
@@ -638,6 +1145,7 @@ async def discover_feed_candidates(
             count=len(found),
             newest_age_minutes=newest_age_minutes,
             full_text=sum(1 for candidate in found if bodies and candidate.id in bodies),
+            dropped_language=dropped_language,
         )
         result.extend(found)
     return _dedupe_candidates(result)

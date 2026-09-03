@@ -19,7 +19,6 @@ from daily_insights_api.modules.news.editions import (
 )
 from daily_insights_api.modules.news.extraction import (
     FetchedCandidate,
-    configured_hostnames,
     fetch_article,
     safe_article_client,
 )
@@ -148,12 +147,21 @@ def _failed_audit(
 
 
 def _cap_discovery(
-    candidates: list[Candidate], *, per_source: int = MAX_DISCOVERY_PER_SOURCE
+    candidates: list[Candidate],
+    *,
+    per_source: int = MAX_DISCOVERY_PER_SOURCE,
+    total: int | None = None,
+    full_text_ids: frozenset[str] = frozenset(),
 ) -> list[Candidate]:
-    """Bound the number of articles fetched per source, newest first."""
+    """Bound the articles fetched per source and in total, newest first.
+
+    Candidates whose body already arrived with the feed are ranked ahead of
+    the rest: they cost no fetch, so the total budget favours them.
+    """
     ordered = sorted(
         candidates,
         key=lambda candidate: (
+            candidate.id not in full_text_ids,
             candidate.seen_at is None,
             -(candidate.seen_at.timestamp() if candidate.seen_at else 0.0),
             str(candidate.url),
@@ -166,6 +174,8 @@ def _cap_discovery(
             continue
         per_host[candidate.hostname] = per_host.get(candidate.hostname, 0) + 1
         capped.append(candidate)
+        if total is not None and len(capped) >= total:
+            break
     return capped
 
 
@@ -269,7 +279,7 @@ async def run_news_edition(
     client: DeepSeekClient,
     edition_date: date,
     *,
-    allowed_hostnames: str,
+    allowed_hostnames: frozenset[str],
     fetch_timeout_seconds: float = 25,
     discovery_timeout_seconds: float = 30,
     spec: EditionSpec = GLOBAL_SPEC,
@@ -282,7 +292,7 @@ async def run_news_edition(
     """
     if edition_date != datetime.now(TAIPEI).date():
         raise ValueError("daily news only generates the current Taipei edition")
-    allowed = configured_hostnames(allowed_hostnames)
+    allowed = allowed_hostnames
     market_code = spec.market_code
     bodies: dict[str, str] = {}
     async with feed_client(discovery_timeout_seconds) as feeds_http:
@@ -300,7 +310,12 @@ async def run_news_edition(
             count=len(feed_candidates),
             floor=floor,
         )
-    candidates = _cap_discovery(feed_candidates, per_source=spec.max_discovery_per_source)
+    candidates = _cap_discovery(
+        feed_candidates,
+        per_source=spec.max_discovery_per_source,
+        total=spec.max_discovery_total,
+        full_text_ids=frozenset(bodies),
+    )
     emit_event("news.candidates.merged", market=market_code, total=len(candidates))
     usable = (
         await _fetch_usable_candidates(candidates, allowed, fetch_timeout_seconds, bodies)
@@ -478,7 +493,7 @@ async def run_all_editions(
     client: DeepSeekClient,
     edition_date: date,
     *,
-    allowed_hostnames: str,
+    allowed_hostnames: frozenset[str],
     fetch_timeout_seconds: float = 25,
     discovery_timeout_seconds: float = 30,
     markets: tuple[str, ...] = EDITION_ORDER,

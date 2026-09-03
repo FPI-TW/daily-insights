@@ -72,3 +72,25 @@ def test_limit_truncates_to_total() -> None:
         for index in range(40)
     ]
     assert len(_limit_candidates(candidates)) == 20
+
+
+def test_cap_discovery_favours_full_text_candidates_within_the_total_budget() -> None:
+    from daily_insights_api.modules.news.service import _cap_discovery
+
+    base = datetime(2026, 9, 2, 0, 0, tzinfo=UTC)
+    candidates = [
+        _fetched(index, f"host-{index % 4}.example", base + timedelta(minutes=index)).candidate
+        for index in range(20)
+    ]
+    full_text = frozenset(candidate.id for candidate in candidates if candidate.id.endswith("3"))
+
+    capped = _cap_discovery(candidates, per_source=3, total=6, full_text_ids=full_text)
+
+    assert len(capped) == 6
+    # Full-text candidates come first regardless of age; the rest are newest first.
+    assert [candidate.id in full_text for candidate in capped][:2] == [True, True]
+    per_host: dict[str, int] = {}
+    for candidate in capped:
+        per_host[candidate.hostname] = per_host.get(candidate.hostname, 0) + 1
+    assert max(per_host.values()) <= 3
+    assert len(_cap_discovery(candidates, per_source=10)) == 20

@@ -346,6 +346,7 @@ async def test_discovery_sends_the_key_and_collects_full_text_bodies(
             "count": 2,
             "newest_age_minutes": 570,
             "full_text": 1,
+            "dropped_language": 0,
         }
     ]
 

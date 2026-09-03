@@ -15,7 +15,7 @@ from daily_insights_api.modules.news.contracts import (
     LocalizedSummary,
     Selection,
 )
-from daily_insights_api.modules.news.extraction import FetchedCandidate
+from daily_insights_api.modules.news.extraction import FetchedCandidate, configured_hostnames
 from daily_insights_api.modules.news.llm import DeepSeekClient, ModelCall, ModelCallError
 from daily_insights_api.modules.news.models import (
     NewsEdition,
@@ -152,19 +152,19 @@ async def test_partial_editions_regenerate_and_revisions_are_prompt_sensitive(
             news_database,
             first_client,
             edition_date,
-            allowed_hostnames="www.reuters.com,news.cnyes.com",
+            allowed_hostnames=configured_hostnames("www.reuters.com,news.cnyes.com"),
         ),
         await run_news_edition(
             news_database,
             first_client,
             edition_date,
-            allowed_hostnames="www.reuters.com,news.cnyes.com",
+            allowed_hostnames=configured_hostnames("www.reuters.com,news.cnyes.com"),
         ),
         await run_news_edition(
             news_database,
             cast(DeepSeekClient, _DeterministicNewsClient("b")),
             edition_date,
-            allowed_hostnames="www.reuters.com,news.cnyes.com",
+            allowed_hostnames=configured_hostnames("www.reuters.com,news.cnyes.com"),
         ),
     ]
     assert statuses == ["partial", "partial", "partial"]
@@ -276,7 +276,9 @@ async def test_complete_edition_is_idempotent_but_unavailable_edition_regenerate
     monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
     edition_date = datetime.now(TAIPEI).date()
     client = cast(DeepSeekClient, _CompleteNewsClient("a"))
-    allowed = "www.reuters.com,apnews.com,www.bbc.com,www.cnbc.com,news.cnyes.com"
+    allowed = configured_hostnames(
+        "www.reuters.com,apnews.com,www.bbc.com,www.cnbc.com,news.cnyes.com"
+    )
 
     # No usable candidates: the edition is unavailable and may be retried later.
     assert await run_news_edition(
@@ -340,7 +342,7 @@ async def test_feed_discovery_supplies_the_candidates(
         news_database,
         cast(DeepSeekClient, _DeterministicNewsClient("a")),
         datetime.now(TAIPEI).date(),
-        allowed_hostnames="www.reuters.com,news.cnyes.com",
+        allowed_hostnames=configured_hostnames("www.reuters.com,news.cnyes.com"),
     )
     assert status == "partial"
     assert sorted(candidate.id for candidate in fetched_inputs[0]) == ["a" * 64, "b" * 64]
@@ -375,7 +377,9 @@ async def test_market_edition_is_independent_from_the_global_digest(
     monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
     edition_date = datetime.now(TAIPEI).date()
     client = cast(DeepSeekClient, _CompleteNewsClient("a"))
-    allowed = "www.reuters.com,apnews.com,www.bbc.com,www.cnbc.com,news.cnyes.com"
+    allowed = configured_hostnames(
+        "www.reuters.com,apnews.com,www.bbc.com,www.cnbc.com,news.cnyes.com"
+    )
 
     status = await run_news_edition(
         news_database, client, edition_date, allowed_hostnames=allowed, spec=TW_EQUITY_SPEC
@@ -433,7 +437,7 @@ async def test_thin_discovery_reports_the_candidate_floor(
         news_database,
         cast(DeepSeekClient, _DeterministicNewsClient("a")),
         datetime.now(TAIPEI).date(),
-        allowed_hostnames="www.reuters.com,news.cnyes.com",
+        allowed_hostnames=configured_hostnames("www.reuters.com,news.cnyes.com"),
     )
     # Two candidates against a floor of ten (five stories, doubled) still run,
     # but the shortfall is reported before the model is called.

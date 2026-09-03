@@ -45,9 +45,10 @@ class Settings(BaseSettings):
     twelve_data_max_concurrency: int = Field(default=4, ge=1, le=20)
     morning_reports_enabled: bool = False
     daily_news_enabled: bool = False
-    news_allowed_hostnames: str = (
-        "www.reuters.com,apnews.com,www.bbc.com,www.cnbc.com,news.cnyes.com,finance.eastmoney.com"
-    )
+    # The article allowlist is derived from the feed registry; these only add
+    # hosts (for a temporary feed) or block registry hosts (kill switch).
+    news_extra_hostnames: str = ""
+    news_blocked_hostnames: str = ""
     model_provider: str = "deepseek"
     model_name: str = "deepseek-chat"
     model_api_base_url: str = "https://api.deepseek.com"
@@ -136,13 +137,19 @@ class Settings(BaseSettings):
                 or is_placeholder_value(self.model_api_key.get_secret_value())
             ):
                 raise ValueError("model_api_key is required and cannot be a placeholder")
-            hostnames = [
-                item.strip().lower().rstrip(".") for item in self.news_allowed_hostnames.split(",")
-            ]
-            if not hostnames or any(
-                not item or "/" in item or ":" in item or "." not in item for item in hostnames
+            for setting, override in (
+                ("news_extra_hostnames", self.news_extra_hostnames),
+                ("news_blocked_hostnames", self.news_blocked_hostnames),
             ):
-                raise ValueError("news_allowed_hostnames must contain exact hostnames")
+                hostnames = [item.strip().lower().rstrip(".") for item in override.split(",")]
+                if override.strip() and any(
+                    not item or "/" in item or ":" in item or "." not in item for item in hostnames
+                ):
+                    raise ValueError(f"{setting} must contain exact hostnames")
+            if self.guardian_api_key is not None and is_placeholder_value(
+                self.guardian_api_key.get_secret_value()
+            ):
+                raise ValueError("guardian_api_key cannot be a placeholder")
         if self.chat_enabled:
             chat_url = urlparse(self.chat_model_api_base_url)
             if self.chat_model_provider not in {"deepseek", "openai-compatible"}:
