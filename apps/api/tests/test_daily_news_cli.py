@@ -10,6 +10,7 @@ from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api.core.config import Settings
+from daily_insights_api.modules.news.feeds import effective_hostnames
 from daily_insights_api.modules.news.llm import DeepSeekClient
 from daily_insights_api.modules.reports.scheduler import parse_args
 from daily_insights_api.scripts import run_daily_news
@@ -137,21 +138,19 @@ async def test_runner_returns_edition_status_and_refreshes_heartbeat(
     monkeypatch: pytest.MonkeyPatch, tmp_path: FileSystemPath
 ) -> None:
     heartbeat = Path(tmp_path / "heartbeat")
-    settings = _settings(daily_news_enabled=True, news_allowed_hostnames="www.reuters.com")
-    seen: list[tuple[str, date, str, float, float, str | None]] = []
+    settings = _settings(daily_news_enabled=True, news_extra_hostnames="www.reuters.com")
+    seen: list[tuple[str, date, frozenset[str], float, float, str | None]] = []
 
     async def fake_run_all_editions(
         session_factory: object,
         client: object,
         edition_date: date,
         *,
-        allowed_hostnames: str,
+        allowed_hostnames: frozenset[str],
         fetch_timeout_seconds: float,
         discovery_timeout_seconds: float,
-        gdelt_enabled: bool,
     ) -> str:
         del session_factory, client
-        assert gdelt_enabled is False
         seen.append(
             (
                 "all",
@@ -169,14 +168,12 @@ async def test_runner_returns_edition_status_and_refreshes_heartbeat(
         client: object,
         edition_date: date,
         *,
-        allowed_hostnames: str,
+        allowed_hostnames: frozenset[str],
         fetch_timeout_seconds: float,
         discovery_timeout_seconds: float,
         spec: object,
-        gdelt_enabled: bool,
     ) -> str:
         del session_factory, client
-        assert gdelt_enabled is False
         seen.append(
             (
                 "one",
@@ -202,7 +199,7 @@ async def test_runner_returns_edition_status_and_refreshes_heartbeat(
         (
             "all",
             date(2026, 9, 2),
-            "www.reuters.com",
+            effective_hostnames("www.reuters.com"),
             settings.news_fetch_timeout_seconds,
             settings.news_discovery_timeout_seconds,
             None,
@@ -210,11 +207,11 @@ async def test_runner_returns_edition_status_and_refreshes_heartbeat(
         (
             "one",
             date(2026, 9, 2),
-            "www.reuters.com",
+            effective_hostnames("www.reuters.com"),
             settings.news_fetch_timeout_seconds,
             settings.news_discovery_timeout_seconds,
             "tw_equity",
         ),
     ]
-    assert settings.news_discovery_timeout_seconds == 60
+    assert settings.news_discovery_timeout_seconds == 30
     assert await heartbeat.exists()

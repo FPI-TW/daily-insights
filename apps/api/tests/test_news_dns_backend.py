@@ -7,7 +7,7 @@ import pytest
 from httpcore._backends.base import SOCKET_OPTION
 from httpcore._models import Origin
 
-from daily_insights_api.modules.news.sources import (
+from daily_insights_api.modules.news.extraction import (
     _AllowlistedNetworkBackend,
     _SafeArticleTransport,
     safe_article_client,

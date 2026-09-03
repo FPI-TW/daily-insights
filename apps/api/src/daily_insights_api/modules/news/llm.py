@@ -13,8 +13,8 @@ from pydantic import ValidationError
 
 from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary, Selection
 from daily_insights_api.modules.news.editions import GLOBAL_SPEC, SelectionPolicy
+from daily_insights_api.modules.news.extraction import FetchedCandidate
 from daily_insights_api.modules.news.prompts import SelectionCriteria, load_selection_criteria
-from daily_insights_api.modules.news.sources import FetchedCandidate
 
 
 class ModelOutputError(ValueError):

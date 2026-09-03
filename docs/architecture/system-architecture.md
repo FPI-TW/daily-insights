@@ -40,7 +40,7 @@ apps/api
     markets        catalog and organization visibility
     reports        report versions, localized presentation contracts, scheduler
     data_sources   provider adapters (Twelve Data, FinDB) and normalized DTOs
-    news           GDELT discovery, safe extraction, DeepSeek daily news editions
+    news           feed discovery, safe extraction, DeepSeek daily news editions
     podcasts       episode catalog, publication lifecycle, localized metadata
     chat           conversations, messages, generation records, SSE
     model_runtime  globally versioned model configuration

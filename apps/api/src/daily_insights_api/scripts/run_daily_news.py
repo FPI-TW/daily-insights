@@ -7,7 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api.core.config import Settings, get_settings, is_placeholder_value
 from daily_insights_api.core.database import create_engine, create_session_factory
+from daily_insights_api.core.logging import configure_logging
 from daily_insights_api.modules.news.editions import EDITION_ORDER, edition_spec
+from daily_insights_api.modules.news.feeds import effective_hostnames
 from daily_insights_api.modules.news.llm import DeepSeekClient
 from daily_insights_api.modules.news.prompts import load_selection_criteria
 from daily_insights_api.modules.news.service import run_all_editions, run_news_edition
@@ -44,26 +46,26 @@ def build_runner(
     *,
     market: str | None = None,
 ) -> EditionRunner:
+    allowed = effective_hostnames(settings.news_extra_hostnames, settings.news_blocked_hostnames)
+
     async def run(target_date: date) -> str:
         if market is not None:
             return await run_news_edition(
                 session_factory,
                 client,
                 target_date,
-                allowed_hostnames=settings.news_allowed_hostnames,
+                allowed_hostnames=allowed,
                 fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
                 discovery_timeout_seconds=settings.news_discovery_timeout_seconds,
                 spec=edition_spec(market),
-                gdelt_enabled=settings.news_gdelt_enabled,
             )
         return await run_all_editions(
             session_factory,
             client,
             target_date,
-            allowed_hostnames=settings.news_allowed_hostnames,
+            allowed_hostnames=allowed,
             fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
             discovery_timeout_seconds=settings.news_discovery_timeout_seconds,
-            gdelt_enabled=settings.news_gdelt_enabled,
         )
 
     async def runner(edition_date: date) -> str | None:
@@ -73,6 +75,7 @@ def build_runner(
 
 
 async def main() -> None:
+    configure_logging()
     args = parse_args(description="Run the daily news scheduler", configure=configure_arguments)
     settings = get_settings()
     heartbeat = Path(HEARTBEAT_PATH)

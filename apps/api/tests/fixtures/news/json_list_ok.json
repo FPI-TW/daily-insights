@@ -1,0 +1,21 @@
+{
+  "response": {
+    "status": "ok",
+    "results": [
+      {
+        "id": "business/2026/sep/02/fed-holds",
+        "webUrl": "https://www.example-news.com/business/2026/sep/02/fed-holds",
+        "webTitle": "Fed  holds rates",
+        "webPublicationDate": "2026-09-02T02:30:00Z",
+        "fields": {"bodyText": "This paragraph is long enough to count as a full article body because it keeps going well past the two hundred character minimum that separates real full text from the teaser summaries some publishers put in content encoded tags."}
+      },
+      {
+        "id": "business/2026/sep/02/teaser",
+        "webUrl": "https://www.example-news.com/business/2026/sep/02/teaser",
+        "webTitle": "Teaser only",
+        "webPublicationDate": "2026-09-02T01:00:00Z",
+        "fields": {"bodyText": "Too short to be an article."}
+      }
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "response": {
+    "results": [
+      {"id": "bad", "webUrl": "https://www.example-news.com/bad", "webTitle": "Bad time", "webPublicationDate": "not a date"},
+      {"id": "none", "webUrl": "https://www.example-news.com/none", "webTitle": "Null time", "webPublicationDate": null}
+    ]
+  }
+}

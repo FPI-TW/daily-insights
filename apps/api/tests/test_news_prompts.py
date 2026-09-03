@@ -3,13 +3,13 @@ from pathlib import Path
 import pytest
 
 from daily_insights_api.modules.news.contracts import Candidate
+from daily_insights_api.modules.news.extraction import FetchedCandidate
 from daily_insights_api.modules.news.prompts import (
     MAX_SELECTION_CRITERIA_CHARS,
     SelectionCriteriaError,
     load_selection_criteria,
 )
 from daily_insights_api.modules.news.service import _digest
-from daily_insights_api.modules.news.sources import FetchedCandidate
 
 
 def test_packaged_selection_criteria_loads_with_version_and_digest() -> None:

@@ -6,6 +6,7 @@ from anyio import Path
 from daily_insights_api import models as registered_models  # noqa: F401
 from daily_insights_api.core.config import get_settings, is_placeholder_value
 from daily_insights_api.core.database import create_engine, create_session_factory
+from daily_insights_api.core.logging import configure_logging
 from daily_insights_api.modules.data_sources.api import (
     RetryPolicy,
     TwelveDataAdapter,
@@ -31,6 +32,7 @@ RETRY_POLICY = SameDayRetry()
 
 
 async def main() -> None:
+    configure_logging()
     args = parse_args()
     settings = get_settings()
     heartbeat = Path("/tmp/morning-report-heartbeat")

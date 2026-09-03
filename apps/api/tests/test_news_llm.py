@@ -6,10 +6,10 @@ import httpx
 import pytest
 
 from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary, SelectedCandidate
+from daily_insights_api.modules.news.extraction import FetchedCandidate
 from daily_insights_api.modules.news.llm import DeepSeekClient, ModelCallError, ModelOutputError
 from daily_insights_api.modules.news.prompts import SelectionCriteria
 from daily_insights_api.modules.news.service import _failed_audit
-from daily_insights_api.modules.news.sources import FetchedCandidate
 
 
 def _candidate() -> Candidate:
