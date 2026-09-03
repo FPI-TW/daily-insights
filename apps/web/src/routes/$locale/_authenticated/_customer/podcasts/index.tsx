@@ -55,15 +55,24 @@ function PodcastListPage() {
               <article className="min-w-0">
                 {/* The trading date appears once, as the eyebrow; the title is
                     the episode's own title rather than a date composite. */}
-                <time
-                  className="text-xs font-extrabold tracking-[0.06em] text-kicker"
-                  dateTime={episode.trading_date}
-                >
-                  {new Intl.DateTimeFormat(numberLocales[locale], {
-                    dateStyle: "long",
-                    timeZone: "UTC",
-                  }).format(new Date(`${episode.trading_date}T00:00:00Z`))}
-                </time>
+                <p className="m-0 flex flex-wrap items-center gap-2 text-xs font-extrabold tracking-[0.06em] text-kicker">
+                  <time dateTime={episode.trading_date}>
+                    {new Intl.DateTimeFormat(numberLocales[locale], {
+                      dateStyle: "long",
+                      timeZone: "UTC",
+                    }).format(new Date(`${episode.trading_date}T00:00:00Z`))}
+                  </time>
+                  {episode.duration_seconds ? (
+                    <span className="font-bold text-sea-ink-soft">
+                      {t("podcastDuration", {
+                        minutes: Math.max(
+                          1,
+                          Math.round(episode.duration_seconds / 60)
+                        ),
+                      })}
+                    </span>
+                  ) : null}
+                </p>
                 <h2 className="mt-1 mb-0 text-[clamp(1.05rem,3vw,1.35rem)] tracking-[-0.02em]">
                   {episode.title}
                 </h2>

@@ -193,6 +193,17 @@ export type AnalystViewpointSyncStatus = z.infer<
   typeof analystViewpointSyncStatusSchema
 >
 
+export const newsMarketSchema = z.enum([
+  "global",
+  "us",
+  "asia",
+  "china",
+  "taiwan",
+  "europe",
+  "commodities",
+  "crypto",
+])
+export type NewsMarket = z.infer<typeof newsMarketSchema>
 export const newsItemSchema = z.object({
   id: z.uuid(),
   rank: z.number().int().positive(),
@@ -208,8 +219,13 @@ export const newsItemSchema = z.object({
   headline: z.string(),
   summary: z.string(),
   source_name: z.string(),
+  source_hostname: z.string(),
   source_url: z.url(),
   source_published_at: z.iso.datetime({ offset: true }).nullable(),
+  numeric_facts: z.array(z.string()),
+  // Null on editions generated before selection metadata was persisted.
+  market: newsMarketSchema.nullable(),
+  event_key: z.string().nullable(),
 })
 export type NewsItem = z.infer<typeof newsItemSchema>
 export const newsMarketCodeSchema = z.enum(["tw_equity", "us_equity"])
@@ -313,6 +329,7 @@ export const podcastEpisodeSummarySchema = z.object({
   summary: z.string().min(1),
   locale: localeSchema,
   cover_asset_id: z.uuid().nullable(),
+  duration_seconds: z.number().int().positive().nullable().default(null),
 })
 export type PodcastEpisodeSummary = z.infer<typeof podcastEpisodeSummarySchema>
 

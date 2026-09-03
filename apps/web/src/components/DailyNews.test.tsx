@@ -41,8 +41,12 @@ describe("DailyNews", () => {
                 headline: "Markets move",
                 summary: "A grounded summary.",
                 source_name: "Reuters",
+                source_hostname: "www.reuters.com",
                 source_url: "https://www.reuters.com/example",
                 source_published_at: "2026-09-01T00:00:00+00:00",
+                numeric_facts: [],
+                market: null,
+                event_key: null,
               },
             ],
           }}
@@ -81,8 +85,12 @@ describe("DailyNews", () => {
                 headline: "Undated story",
                 summary: "A grounded summary.",
                 source_name: "AP",
+                source_hostname: "apnews.com",
                 source_url: "https://apnews.com/example",
                 source_published_at: null,
+                numeric_facts: [],
+                market: null,
+                event_key: null,
               },
             ],
           }}
@@ -96,6 +104,60 @@ describe("DailyNews", () => {
     ).toBeInTheDocument()
     expect(panel.queryByText(/Time unavailable/)).not.toBeInTheDocument()
     expect(container.querySelector("time")).toBeNull()
+  })
+
+  it("shows numeric facts as chips and groups stories by market", async () => {
+    const i18n = createI18n("zh-hant")
+    await i18n.changeLanguage("zh-hant")
+    const item = (index: number, market: "us" | "taiwan", facts: string[]) => ({
+      id: `00000000-0000-4000-8000-00000000001${index}`,
+      rank: index,
+      importance: 3,
+      topic: "markets" as const,
+      headline: `Story ${index}`,
+      summary: "Summary.",
+      source_name: "Source",
+      source_hostname: "source.example",
+      source_url: `https://source.example/${index}`,
+      source_published_at: null,
+      numeric_facts: facts,
+      market,
+      event_key: `event-${index}`,
+    })
+    const { container } = render(
+      <I18nextProvider i18n={i18n}>
+        <DailyNews
+          news={{
+            market_code: "global",
+            target_items: 5,
+            edition_id: "00000000-0000-4000-8000-000000000002",
+            edition_date: "2026-09-03",
+            revision: 1,
+            status: "complete",
+            locale: "zh-hant",
+            generated_at: "2026-09-03T00:00:00+00:00",
+            caveat: null,
+            items: [
+              item(1, "us", ["+3.2%", "1 碼"]),
+              item(2, "taiwan", []),
+              item(3, "us", ["-0.5%"]),
+            ],
+          }}
+        />
+      </I18nextProvider>
+    )
+    const panel = within(container)
+    const groups = panel.getAllByRole("heading", { level: 3 })
+    expect(groups.map(heading => heading.textContent)).toEqual([
+      "美國",
+      "Story 1",
+      "Story 3",
+      "台灣",
+      "Story 2",
+    ])
+    const chips = panel.getAllByRole("list", { name: "數字重點" })
+    expect(chips).toHaveLength(2)
+    expect(chips[0]).toHaveTextContent("+3.2%1 碼")
   })
 
   it("degrades to an unavailable panel when the news request failed", async () => {
