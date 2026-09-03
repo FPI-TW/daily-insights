@@ -3,8 +3,9 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import Result, func, literal_column, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -130,8 +131,9 @@ async def store_index_daily_bars(
     # column count rather than hardcoded, so it still holds if a column is added.
     chunk_size = MAX_BIND_PARAMETERS // len(rows[0])
     for start in range(0, len(rows), chunk_size):
-        statement = insert(IndexDailyBar).values(rows[start : start + chunk_size])
-        await database.execute(
+        chunk = rows[start : start + chunk_size]
+        statement = insert(IndexDailyBar).values(chunk)
+        result: Result[Any] = await database.execute(
             statement.on_conflict_do_update(
                 index_elements=["symbol", "trade_date"],
                 set_={
@@ -141,13 +143,28 @@ async def store_index_daily_bars(
                     "low": statement.excluded.low,
                     "close": statement.excluded.close,
                     "volume": statement.excluded.volume,
-                    "provider": statement.excluded.provider,
                     "contract_version": statement.excluded.contract_version,
                     "source_fetched_at": statement.excluded.source_fetched_at,
                     "updated_at": func.now(),
                 },
-            )
+                # A row keeps the provider it was created with. Without this the
+                # upsert would let a second provider overwrite an existing
+                # series day by day, which is the splicing that
+                # docs/architecture/twelve-data-three-market-morning-report-plan.md
+                # forbids, and it would leave no trace that it happened.
+                where=IndexDailyBar.provider == statement.excluded.provider,
+            ).returning(literal_column("1"))
         )
+        # Rows skipped by that WHERE are neither inserted nor updated, so a short
+        # count is the only signal that a foreign provider was refused. RETURNING
+        # is what reports it: `rowcount` is -1 on this driver.
+        written = len(result.all())
+        if written != len(chunk):
+            raise ValueError(
+                f"refusing to overwrite {len(chunk) - written} existing "
+                f"index_daily_bars rows with provider {provider!r}: a symbol's series "
+                "belongs to one provider, so switch it by deleting the old rows first"
+            )
     return len(rows)
 
 

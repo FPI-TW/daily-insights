@@ -297,3 +297,43 @@ async def test_symbols_are_fetched_concurrently_and_written_in_order(
     assert failures == []
     assert stub.peak_in_flight == MAX_FETCH_CONCURRENCY
     assert [entry.result.symbol for entry in refreshed] == symbols
+
+
+async def test_a_second_provider_cannot_overwrite_an_existing_series(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # docs/architecture/twelve-data-three-market-morning-report-plan.md forbids
+    # splicing one provider's history onto another's. Without the guard the
+    # upsert would do exactly that, one day at a time and without a trace.
+    async with session_factory.begin() as database:
+        await _store(database, [_bar(date(2026, 9, 1), "100.0")])
+
+    with pytest.raises(ValueError, match="refusing to overwrite 1 existing"):
+        async with session_factory.begin() as database:
+            await store_index_daily_bars(
+                database,
+                bars=[_bar(date(2026, 9, 1), "999.0")],
+                provider="twelve_data",
+                contract_version="other",
+                source_fetched_at=FETCHED_AT,
+            )
+
+    async with session_factory() as database:
+        row = await database.scalar(select(IndexDailyBar))
+        assert row is not None
+        assert row.provider == "yfinance"
+        assert row.close == Decimal("100.0")
+
+
+async def test_the_same_provider_still_updates_an_existing_row(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory.begin() as database:
+        await _store(database, [_bar(date(2026, 9, 1), "100.0")])
+    async with session_factory.begin() as database:
+        assert await _store(database, [_bar(date(2026, 9, 1), "123.5")]) == 1
+
+    async with session_factory() as database:
+        row = await database.scalar(select(IndexDailyBar))
+        assert row is not None
+        assert row.close == Decimal("123.5")
