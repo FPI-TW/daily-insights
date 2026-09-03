@@ -11,13 +11,7 @@ import {
   type ReportBlock,
   type ReportValue,
 } from "#/lib/provisional-reports"
-import {
-  fadeIn,
-  hoverLift,
-  reveal,
-  springs,
-  useEnterAnimation,
-} from "#/lib/motion"
+import { fadeIn, reveal, useEnterAnimation } from "#/lib/motion"
 
 function valueText(value: ReportValue | null, t: (key: string) => string) {
   if (value === null) return "—"
@@ -67,7 +61,7 @@ function ReportMarketNav({
   const { t } = useTranslation()
   return (
     <nav
-      className="mb-6 flex overflow-x-auto border-y border-line bg-surface [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="mb-6 flex overflow-x-auto border-y border-line bg-surface scrollbar-none [&::-webkit-scrollbar]:hidden"
       aria-label={t("reportMarketNav")}
     >
       <Link
@@ -97,7 +91,7 @@ function PageHeading({ title }: { title: string }) {
       <h1 className="m-0 text-[30px] leading-tight font-extrabold tracking-[-0.035em] text-sea-ink max-sm:text-[26px]">
         {title}
       </h1>
-      <div className="mt-3 h-[3px] w-[54px] bg-lagoon" />
+      <div className="mt-3 h-0.75 w-13.5 bg-lagoon" />
     </header>
   )
 }
@@ -354,7 +348,7 @@ function ReportBlockView({
       ) : null}
       {block.status === "ok" && block.kind === "table" ? (
         <div className="min-w-0 max-w-full overflow-x-auto border-y border-line">
-          <table className="w-full min-w-[480px] text-sm">
+          <table className="w-full min-w-120 text-sm">
             <thead className="bg-link-hover text-xs text-sea-ink-soft">
               <tr>
                 {block.columns.map((column, index) => (
