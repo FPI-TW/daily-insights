@@ -1,16 +1,19 @@
 import os
+from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime
 from pathlib import Path as FileSystemPath
 from typing import Any, cast
 
 import pytest
+import pytest_asyncio
 from anyio import Path
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from daily_insights_api import models as registered_models  # noqa: F401
+import daily_insights_api.models as registered_models  # noqa: F401
+import daily_insights_api.scripts.run_analyst_viewpoints as run_analyst_viewpoints
 from daily_insights_api.core.models import Base
 from daily_insights_api.modules.analyst_viewpoints.models import AnalystViewpoint
 from daily_insights_api.modules.analyst_viewpoints.schemas import (
@@ -26,7 +29,6 @@ from daily_insights_api.modules.analyst_viewpoints.service import (
 )
 from daily_insights_api.modules.markets.catalog import MARKETS
 from daily_insights_api.modules.markets.models import Market
-from daily_insights_api.scripts import run_analyst_viewpoints
 
 
 def _upstream_summary(**overrides: object) -> dict[str, object]:
@@ -251,16 +253,15 @@ async def test_scheduler_persists_unexpected_failure_in_an_independent_transacti
     assert persisted_databases[0] is not factory.transactions[0].database
 
 
-@pytest.mark.integration
-async def test_sync_upserts_present_values_without_erasing_missing_market() -> None:
-    database_url = os.getenv("DAILY_INSIGHTS_TEST_DATABASE_URL") or os.getenv(
-        "DAILY_INSIGHTS_DATABASE_URL"
-    )
+@pytest_asyncio.fixture
+async def analyst_viewpoint_database() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    database_url = os.getenv("DAILY_INSIGHTS_TEST_DATABASE_URL")
     if database_url is None:
         pytest.skip("DAILY_INSIGHTS_TEST_DATABASE_URL is required for integration tests")
     engine = create_async_engine(database_url)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.drop_all)
         await connection.run_sync(Base.metadata.create_all)
     async with session_factory.begin() as database:
         database.add_all(
@@ -274,6 +275,19 @@ async def test_sync_upserts_present_values_without_erasing_missing_market() -> N
                 for market in MARKETS
             ]
         )
+    try:
+        yield session_factory
+    finally:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+
+
+@pytest.mark.integration
+async def test_sync_upserts_present_values_without_erasing_missing_market(
+    analyst_viewpoint_database: async_sessionmaker[AsyncSession],
+) -> None:
+    session_factory = analyst_viewpoint_database
 
     target_date = date(2026, 9, 2)
     async with session_factory.begin() as database:
@@ -352,4 +366,3 @@ async def test_sync_upserts_present_values_without_erasing_missing_market() -> N
         )
     assert crypto is not None and crypto.points == ["Crypto point"]
     assert us_macro is not None and us_macro.points == ["Replacement point"]
-    await engine.dispose()
