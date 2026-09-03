@@ -157,9 +157,9 @@ describe("API client trust boundary", () => {
       })
     )
 
-    await expect(client.analystViewpointStatus()).resolves.toMatchObject({
-      viewpoints: expect.toHaveLength(8),
-    })
+    const result = await client.analystViewpointStatus()
+
+    expect(result.viewpoints).toHaveLength(8)
   })
 
   it("rejects an invalid Podcast locale returned by the API", async () => {
