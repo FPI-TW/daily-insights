@@ -95,3 +95,15 @@ def test_missing_column_fails_closed() -> None:
 def test_settled_row_without_a_close_fails_closed() -> None:
     with pytest.raises(DataSourceContractError, match="without a close"):
         _normalize(_frame({date(2026, 9, 1): (100.0, 101.0, 99.0, float("nan"), 1_000.0)}))
+
+
+def test_nonpositive_close_fails_closed() -> None:
+    # Mirrors the index_daily_bars CHECK constraint: rejecting the bar here keeps
+    # a bad row from reaching the database and failing the whole batch on write.
+    with pytest.raises(DataSourceContractError, match="with close 0"):
+        _normalize(_frame({date(2026, 9, 1): (100.0, 101.0, 99.0, 0.0, 1_000.0)}))
+
+
+def test_high_below_low_fails_closed() -> None:
+    with pytest.raises(DataSourceContractError, match=r"high 98\.0 below low 99\.0"):
+        _normalize(_frame({date(2026, 9, 1): (100.0, 98.0, 99.0, 100.0, 1_000.0)}))

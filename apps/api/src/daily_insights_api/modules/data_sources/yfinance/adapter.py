@@ -131,6 +131,21 @@ def normalize_daily_bars(
             raise DataSourceContractError(
                 f"yfinance history for {symbol} returned {trade_date} without a close"
             )
+        # These mirror the CHECK constraints on index_daily_bars. Rejecting an
+        # implausible bar here turns it into a per-symbol contract failure that
+        # the caller already handles, instead of an IntegrityError raised on
+        # write, which would fail the whole batch.
+        if close <= 0:
+            raise DataSourceContractError(
+                f"yfinance history for {symbol} returned {trade_date} with close {close}"
+            )
+        high = _decimal(row["High"])
+        low = _decimal(row["Low"])
+        if high is not None and low is not None and high < low:
+            raise DataSourceContractError(
+                f"yfinance history for {symbol} returned {trade_date} with high {high} "
+                f"below low {low}"
+            )
         items.append(
             DailyBar(
                 instrument_source_id=symbol,
@@ -138,8 +153,8 @@ def normalize_daily_bars(
                 symbol=symbol,
                 trade_date=trade_date,
                 open=_decimal(row["Open"]),
-                high=_decimal(row["High"]),
-                low=_decimal(row["Low"]),
+                high=high,
+                low=low,
                 close=close,
                 volume=_integer(row["Volume"]),
                 source="yfinance",

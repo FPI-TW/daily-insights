@@ -73,8 +73,10 @@ async def run_refresh(
         succeeded=[entry.result.symbol for entry in refreshed],
         failed=[entry.symbol for entry in failures],
     )
-    # Any failed symbol makes the run retryable; the successful symbols are
-    # already committed, and re-running them only rewrites identical rows.
+    # The transaction has committed by this point, and each symbol wrote inside
+    # its own savepoint, so the symbols listed in `succeeded` are durable even
+    # when others failed. Reporting "failed" schedules a same-day retry, which
+    # only rewrites identical rows for the symbols that already worked.
     return "failed" if failures else "complete"
 
 

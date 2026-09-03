@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import cast
 
 import pytest
 import pytest_asyncio
@@ -15,8 +16,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from daily_insights_api.core.config import get_settings
-from daily_insights_api.modules.data_sources.api import DailyBar
-from daily_insights_api.modules.markets.api import store_index_daily_bars
+from daily_insights_api.modules.data_sources.api import (
+    DailyBar,
+    DailyBarsResult,
+    Provenance,
+    YfinanceAdapter,
+)
+from daily_insights_api.modules.markets.api import (
+    refresh_index_daily_bars,
+    store_index_daily_bars,
+)
 from daily_insights_api.modules.markets.models import IndexDailyBar
 
 pytestmark = pytest.mark.integration
@@ -143,3 +152,75 @@ async def test_unknown_market_code_is_rejected_by_the_database(
     with pytest.raises(IntegrityError):
         async with session_factory.begin() as database:
             await _store(database, [bar])
+
+
+class _StubAdapter:
+    """Returns a canned result per symbol so a write failure can be provoked."""
+
+    def __init__(self, results: dict[str, DailyBarsResult]) -> None:
+        self._results = results
+
+    async def get_daily_bars(
+        self,
+        *,
+        market: str,
+        symbol: str,
+        period: str = "2y",
+    ) -> DailyBarsResult:
+        return self._results[symbol]
+
+
+def _result(symbol: str, market: str, bars: tuple[DailyBar, ...]) -> DailyBarsResult:
+    return DailyBarsResult(
+        symbol=symbol,
+        market=market,  # type: ignore[arg-type]
+        items=bars,
+        dropped_unsettled_trade_date=None,
+        provenance=Provenance(
+            provider="yfinance",
+            contract_version="2026-09-03.v1",
+            contract_hash="0" * 64,
+            endpoint="Ticker.history",
+            query_fingerprint="0" * 64,
+            fetched_at=FETCHED_AT,
+            as_of=bars[-1].trade_date,
+            response_digest="0" * 64,
+            record_count=len(bars),
+        ),
+    )
+
+
+def _symbol_bar(symbol: str, market: str, close: str) -> DailyBar:
+    return _bar(date(2026, 9, 1), close).model_copy(
+        update={"symbol": symbol, "instrument_source_id": symbol, "market": market}
+    )
+
+
+async def test_a_failing_symbol_does_not_roll_back_the_others(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # ^HSI carries an unknown market code, so its insert violates the foreign
+    # key. It sits between two healthy symbols to prove the batch neither loses
+    # what came before it nor stops writing what comes after.
+    results = {
+        "^DJI": _result("^DJI", "us_equity", (_symbol_bar("^DJI", "us_equity", "100.0"),)),
+        "^HSI": _result("^HSI", "hk_equity", (_symbol_bar("^HSI", "not_a_market", "200.0"),)),
+        "^TWII": _result("^TWII", "tw_equity", (_symbol_bar("^TWII", "tw_equity", "300.0"),)),
+    }
+    adapter = cast(YfinanceAdapter, _StubAdapter(results))
+
+    async with session_factory.begin() as database:
+        refreshed, failures = await refresh_index_daily_bars(
+            database,
+            adapter=adapter,
+            symbols=["^DJI", "^HSI", "^TWII"],
+            period="7d",
+        )
+
+    assert [entry.result.symbol for entry in refreshed] == ["^DJI", "^TWII"]
+    assert [entry.symbol for entry in failures] == ["^HSI"]
+    assert "IntegrityError" in failures[0].error
+
+    async with session_factory() as database:
+        stored = (await database.scalars(select(IndexDailyBar.symbol))).all()
+        assert sorted(stored) == ["^DJI", "^TWII"]

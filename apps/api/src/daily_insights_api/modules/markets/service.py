@@ -5,6 +5,7 @@ from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.modules.data_sources.api import (
@@ -172,12 +173,27 @@ async def refresh_index_daily_bars(
         except DataSourceError as error:
             failures.append(IndexRefreshFailure(symbol=symbol, market=market, error=str(error)))
             continue
-        stored_count = await store_index_daily_bars(
-            database,
-            bars=result.items,
-            provider=result.provenance.provider,
-            contract_version=result.provenance.contract_version,
-            source_fetched_at=result.provenance.fetched_at,
-        )
+        # Each symbol writes inside its own savepoint. A row that still trips a
+        # CHECK or foreign key would otherwise abort the surrounding
+        # transaction, discarding every symbol written before it and leaving the
+        # session unusable for the ones after.
+        try:
+            async with database.begin_nested():
+                stored_count = await store_index_daily_bars(
+                    database,
+                    bars=result.items,
+                    provider=result.provenance.provider,
+                    contract_version=result.provenance.contract_version,
+                    source_fetched_at=result.provenance.fetched_at,
+                )
+        except (IntegrityError, DataError) as error:
+            failures.append(
+                IndexRefreshFailure(
+                    symbol=symbol,
+                    market=market,
+                    error=f"{type(error).__name__}: {error.orig}",
+                )
+            )
+            continue
         refreshed.append(IndexRefresh(result=result, stored_count=stored_count))
     return refreshed, failures
