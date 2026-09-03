@@ -336,10 +336,13 @@ function ReportBlockView({
           {t("reportBlockUnavailable")}
         </p>
       ) : block.kind === "metric" ? (
-        <div className="grid min-w-0 divide-y divide-line border-y border-line sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        // Cells own their borders instead of using divide-*: with more metrics
+        // than columns, divide-x draws a stray left edge on the row-leading
+        // cell and leaves no rule between the rows.
+        <div className="grid min-w-0 border-y border-line sm:grid-cols-3">
           {block.metrics.map(item => (
             <div
-              className="min-w-0 px-3 py-3 first:pl-0 last:pr-0 max-sm:first:pt-0 max-sm:last:pb-0 sm:first:pl-0 sm:last:pr-0"
+              className="min-w-0 border-t border-line py-3 first:border-t-0 max-sm:first:pt-0 max-sm:last:pb-0 sm:border-l sm:px-3 sm:nth-[-n+3]:border-t-0 sm:nth-[3n+1]:border-l-0 sm:nth-[3n+1]:pl-0 sm:nth-[3n]:pr-0"
               key={item.labelKey}
             >
               <p className="m-0 text-xs text-sea-ink-soft">
