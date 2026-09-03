@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     twelve_data_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     twelve_data_retry_attempts: int = Field(default=3, ge=1, le=10)
     twelve_data_max_concurrency: int = Field(default=4, ge=1, le=20)
+    # Yahoo has no published API contract and is reached through a scraping
+    # client, so the back-office fetch endpoint is opt-in.
+    yfinance_enabled: bool = False
+    yfinance_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     morning_reports_enabled: bool = False
     analyst_viewpoints_enabled: bool = False
     analyst_viewpoints_base_url: str = "https://analyst-viewpoints.invalid"

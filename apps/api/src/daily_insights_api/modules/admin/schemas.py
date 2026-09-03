@@ -1,10 +1,12 @@
 import uuid
-from datetime import datetime
-from typing import Any
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from daily_insights_api.core.enums import OrganizationStatus, SystemRole, UserStatus
+from daily_insights_api.modules.data_sources.api import MarketCode
 
 
 class AdminInput(BaseModel):
@@ -93,6 +95,52 @@ class MarketPolicyUpdate(AdminInput):
     is_visible: bool
     contract_reference: str = Field(min_length=1, max_length=200)
     reason: str = Field(min_length=1, max_length=500)
+
+
+class YfinanceDailyBarsFetch(AdminInput):
+    # Only the reviewed index set in data_sources.yfinance.symbols may be
+    # requested; an arbitrary string must never reach the scraping client.
+    symbols: list[str] | None = Field(default=None, min_length=1, max_length=50)
+    period: Literal[
+        "1d", "5d", "7d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"
+    ] = "2y"
+    # No `reason` here on purpose: this endpoint reads an external source and
+    # changes no business state, unlike the organization and market-policy
+    # writes above. The audit event still records who fetched what.
+
+
+class YfinanceDailyBar(BaseModel):
+    trade_date: date
+    open: Decimal | None
+    high: Decimal | None
+    low: Decimal | None
+    close: Decimal | None
+    volume: int | None
+
+
+class YfinanceSymbolBars(BaseModel):
+    symbol: str
+    market: MarketCode
+    as_of: date
+    record_count: int
+    # Rows upserted into index_daily_bars for this symbol.
+    stored_count: int
+    # Yahoo's current still-open session bar, seen and excluded from `bars`.
+    dropped_unsettled_trade_date: date | None
+    bars: list[YfinanceDailyBar]
+
+
+class YfinanceSymbolFailure(BaseModel):
+    symbol: str
+    market: MarketCode
+    error: str
+
+
+class YfinanceDailyBarsResponse(BaseModel):
+    period: str
+    fetched_at: datetime
+    succeeded: list[YfinanceSymbolBars]
+    failed: list[YfinanceSymbolFailure]
 
 
 class AuditEventResponse(BaseModel):

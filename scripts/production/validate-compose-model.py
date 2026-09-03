@@ -15,6 +15,7 @@ SERVICES = (
     "morning-report-scheduler",
     "daily-news-scheduler",
     "analyst-viewpoints-scheduler",
+    "index-daily-bars-scheduler",
 )
 API_ENVIRONMENT_KEYS = {
     "DAILY_INSIGHTS_DAILY_NEWS_ENABLED",

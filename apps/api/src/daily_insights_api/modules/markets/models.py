@@ -1,7 +1,20 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint, true
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    UniqueConstraint,
+    true,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -41,3 +54,38 @@ class OrganizationMarketPolicy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
     changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class IndexDailyBar(TimestampMixin, Base):
+    """One settled trading day for one tracked index.
+
+    Keyed on (symbol, trade_date) rather than a surrogate id: a daily bar is an
+    immutable fact, so re-fetching a window must confirm the existing rows, not
+    grow a second copy of them. Provenance lives on the row because the fetch is
+    deterministic and has nothing an audit table could add.
+    """
+
+    __tablename__ = "index_daily_bars"
+    __table_args__ = (
+        CheckConstraint("close > 0", name="close_positive"),
+        CheckConstraint("volume IS NULL OR volume >= 0", name="volume_nonnegative"),
+        CheckConstraint(
+            "high IS NULL OR low IS NULL OR high >= low",
+            name="high_not_below_low",
+        ),
+        Index("ix_index_daily_bars_market_date", "market_code", "trade_date"),
+    )
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    market_code: Mapped[str] = mapped_column(
+        String(50), ForeignKey("markets.code", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    open: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
+    high: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
+    low: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
+    close: Mapped[Decimal] = mapped_column(Numeric(20, 10), nullable=False)
+    volume: Mapped[int | None] = mapped_column(BigInteger)
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    contract_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    source_fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

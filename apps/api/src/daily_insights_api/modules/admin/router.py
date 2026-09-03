@@ -27,9 +27,15 @@ from daily_insights_api.modules.admin.schemas import (
     OrganizationUpdate,
     ProvisionedInternalUserResponse,
     ProvisionedMemberResponse,
+    YfinanceDailyBar,
+    YfinanceDailyBarsFetch,
+    YfinanceDailyBarsResponse,
+    YfinanceSymbolBars,
+    YfinanceSymbolFailure,
 )
 from daily_insights_api.modules.audit.api import record_audit_event
 from daily_insights_api.modules.audit.models import AuditEvent
+from daily_insights_api.modules.data_sources.api import TRACKED_INDICES, YfinanceAdapter
 from daily_insights_api.modules.identity.api import (
     AuthContext,
     require_csrf_roles,
@@ -37,7 +43,11 @@ from daily_insights_api.modules.identity.api import (
 )
 from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.identity.session_models import Session
-from daily_insights_api.modules.markets.api import MarketResponse, market_responses
+from daily_insights_api.modules.markets.api import (
+    MarketResponse,
+    market_responses,
+    refresh_index_daily_bars,
+)
 from daily_insights_api.modules.markets.models import Market, OrganizationMarketPolicy
 from daily_insights_api.modules.tenancy.models import Membership, Organization
 from daily_insights_api.web.dependencies import get_database_session
@@ -699,6 +709,84 @@ async def set_organization_market(
         name_zh_hant=market.name_zh_hant,
         name_zh_hans=market.name_zh_hans,
         is_visible=payload.is_visible,
+    )
+
+
+@router.post(
+    "/data-sources/yfinance/daily-bars",
+    response_model=YfinanceDailyBarsResponse,
+)
+async def fetch_yfinance_daily_bars(
+    payload: YfinanceDailyBarsFetch,
+    request: Request,
+    actor: AdminWrite,
+    database: Annotated[AsyncSession, Depends(get_database_session)],
+) -> YfinanceDailyBarsResponse:
+    settings: Settings = request.app.state.settings
+    if not settings.yfinance_enabled:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "yfinance is not enabled")
+
+    requested = list(TRACKED_INDICES) if payload.symbols is None else payload.symbols
+    unknown = sorted(set(requested) - set(TRACKED_INDICES))
+    if unknown:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"untracked symbols: {', '.join(unknown)}",
+        )
+
+    refreshed, failures = await refresh_index_daily_bars(
+        database,
+        adapter=YfinanceAdapter(timeout_seconds=settings.yfinance_timeout_seconds),
+        symbols=requested,
+        period=payload.period,
+    )
+    succeeded = [
+        YfinanceSymbolBars(
+            symbol=entry.result.symbol,
+            market=entry.result.market,
+            as_of=entry.result.provenance.as_of,
+            record_count=entry.result.provenance.record_count,
+            stored_count=entry.stored_count,
+            dropped_unsettled_trade_date=entry.result.dropped_unsettled_trade_date,
+            bars=[
+                YfinanceDailyBar(
+                    trade_date=bar.trade_date,
+                    open=bar.open,
+                    high=bar.high,
+                    low=bar.low,
+                    close=bar.close,
+                    volume=bar.volume,
+                )
+                for bar in entry.result.items
+            ],
+        )
+        for entry in refreshed
+    ]
+    failed = [
+        YfinanceSymbolFailure(symbol=entry.symbol, market=entry.market, error=entry.error)
+        for entry in failures
+    ]
+
+    record_audit_event(
+        database,
+        actor_user_id=actor.user.id,
+        action="data_source.yfinance.fetched",
+        target_type="data_source",
+        target_id="yfinance",
+        after={
+            "period": payload.period,
+            "requested": requested,
+            "succeeded": [entry.symbol for entry in succeeded],
+            "failed": [entry.symbol for entry in failed],
+        },
+        request_id=request.state.request_id,
+    )
+    await database.commit()
+    return YfinanceDailyBarsResponse(
+        period=payload.period,
+        fetched_at=datetime.now(UTC),
+        succeeded=succeeded,
+        failed=failed,
     )
 
 

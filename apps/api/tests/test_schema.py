@@ -20,6 +20,7 @@ EXPECTED_TABLES = {
     "audit_events",
     "conversations",
     "generation_records",
+    "index_daily_bars",
     "login_throttles",
     "markets",
     "memberships",

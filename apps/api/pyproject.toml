@@ -57,5 +57,6 @@ plugins = ["pydantic.mypy"]
 files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
-module = ["alembic.*", "defusedxml.*", "langdetect.*"]
+# yfinance ships no py.typed marker and has no stub package.
+module = ["alembic.*", "defusedxml.*", "langdetect.*", "yfinance.*"]
 ignore_missing_imports = true
