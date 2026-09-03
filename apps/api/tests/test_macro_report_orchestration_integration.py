@@ -21,6 +21,7 @@ from daily_insights_api.modules.data_sources.api import (
 from daily_insights_api.modules.data_sources.twelve_data.adapter import (
     DailyBarsResult,
     QuoteResult,
+    QuotesResult,
     TwelveDataAdapter,
 )
 from daily_insights_api.modules.markets.catalog import MARKETS
@@ -76,37 +77,44 @@ class DeterministicMacroAdapter:
     quote_marker: str = "quote-v1"
     history_marker: str = "history-v1"
 
-    async def get_quote(
+    async def get_quotes(
         self,
         *,
         market: str,
-        symbol: str,
-        expected_currency: str,
-    ) -> QuoteResult:
+        symbols: tuple[str, ...],
+        expected_currencies: dict[str, str],
+        symbol_types: dict[str, str] | None = None,
+    ) -> QuotesResult:
         assert market == "global_macro_bonds"
-        assert expected_currency == ("EUR" if symbol == "HG1" else "USD")
+        assert set(expected_currencies.values()) == {"USD"}
+        assert symbol_types == {"HG1": "commodity"}
         if self.quote_mode == "failed":
             raise DataSourceContractError("api_key=quote-secret")
         as_of = date(2026, 8, 30)
-        return QuoteResult(
-            symbol=symbol,
-            name=None,
-            currency=expected_currency,
-            as_of=as_of,
-            close=Decimal("1"),
-            open=Decimal("1"),
-            high=Decimal("1"),
-            low=Decimal("1"),
-            volume=None,
-            change=Decimal("0"),
-            percent_change=Decimal("0"),
-            provenance=_provenance(
-                endpoint="/quote",
-                marker=f"{self.quote_marker}:{symbol}",
+        items = tuple(
+            QuoteResult(
+                symbol=symbol,
+                name=None,
+                currency=expected_currencies[symbol],
                 as_of=as_of,
-                record_count=1,
-            ),
+                close=Decimal("1"),
+                open=Decimal("1"),
+                high=Decimal("1"),
+                low=Decimal("1"),
+                volume=None,
+                previous_close=Decimal("1"),
+                change=Decimal("0"),
+                percent_change=Decimal("0"),
+                provenance=_provenance(
+                    endpoint="/quote",
+                    marker=f"{self.quote_marker}:{symbol}",
+                    as_of=as_of,
+                    record_count=1,
+                ),
+            )
+            for symbol in symbols
         )
+        return QuotesResult(items=items, provenances=tuple(item.provenance for item in items))
 
     async def get_daily_bars(
         self,

@@ -22,6 +22,10 @@ class DatasetManifest(ManifestModel):
     endpoint: Literal["/quote", "/time_series", "/market_movers/stocks"]
     symbols: tuple[str, ...]
     symbol_units: dict[str, str]
+    # Provider "type" query parameter per symbol. Twelve Data reuses tickers
+    # across asset classes (HG1 is a German stock unless type=commodity), so
+    # ambiguous symbols must pin their class here.
+    symbol_types: dict[str, str] = Field(default_factory=dict)
     expected_asset_types: dict[str, str] = Field(default_factory=dict)
     required_fields: tuple[str, ...]
     minimum_history: int = Field(default=1, ge=1, le=5_000)
@@ -88,6 +92,8 @@ class LaunchManifest(ManifestModel):
             for dataset in self.datasets
         ):
             raise ValueError("asset-type contracts must cover every exact dataset symbol")
+        if any(not set(dataset.symbol_types) <= set(dataset.symbols) for dataset in self.datasets):
+            raise ValueError("symbol type overrides must name declared dataset symbols")
         if any(
             re.fullmatch(r"[A-Z]{3}", unit) is None
             for dataset in self.datasets
@@ -116,7 +122,7 @@ class LaunchManifest(ManifestModel):
 
 
 ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
-    version="three-market.v4",
+    version="three-market.v5",
     provider="twelve_data",
     markets=(
         MarketManifest(
@@ -126,7 +132,10 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
                     id="macro.commodities",
                     kind="metric",
                     datasets=("macro.commodity_quotes",),
-                    formula="provider close and percent_change; no substitution",
+                    formula=(
+                        "provider quote close; percent change="
+                        "(close-previous_close)/previous_close*100; no substitution"
+                    ),
                     unit_code="provider_quote_currency",
                     precision=4,
                     labels={
@@ -184,20 +193,43 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
                 ),
             ),
         ),
+        # A fixed basket replaces provider-ranked market movers: ranking the whole
+        # US universe by percent move surfaces only sub-$5 names, which is a
+        # property of the endpoint rather than a bug.
         MarketManifest(
             market_code="us_equity",
             blocks=(
                 BlockManifest(
-                    id="us.market_movers",
-                    kind="table",
-                    datasets=("us.market_movers",),
-                    formula="top two gainers followed by top two losers as returned by provider",
-                    unit_code="usd_percent",
-                    precision=4,
+                    id="us.index_proxies",
+                    kind="metric",
+                    datasets=("us.index_proxy_quotes",),
+                    formula=(
+                        "fixed basket of four index-proxy ETFs and VIXY; latest provider quote "
+                        "close; percent change=(close-previous_close)/previous_close*100"
+                    ),
+                    unit_code="usd",
+                    precision=2,
                     labels={
-                        "zh-hant": "市場領漲與領跌",
-                        "zh-hans": "市场领涨与领跌",
-                        "en": "Market movers",
+                        "zh-hant": "美股指數快照",
+                        "zh-hans": "美股指数快照",
+                        "en": "US index snapshot",
+                    },
+                ),
+                BlockManifest(
+                    id="us.mega_caps",
+                    kind="table",
+                    datasets=("us.mega_cap_quotes",),
+                    formula=(
+                        "fixed basket of eight mega-cap stocks sorted by percent change "
+                        "descending; latest provider quote close; percent change="
+                        "(close-previous_close)/previous_close*100"
+                    ),
+                    unit_code="usd_percent",
+                    precision=2,
+                    labels={
+                        "zh-hant": "權值股",
+                        "zh-hans": "权值股",
+                        "en": "Mega caps",
                     },
                 ),
             ),
@@ -208,8 +240,11 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
             key="macro.commodity_quotes",
             endpoint="/quote",
             symbols=("XBR/USD", "XAU/USD", "HG1"),
-            symbol_units={"XBR/USD": "USD", "XAU/USD": "USD", "HG1": "EUR"},
-            required_fields=("close", "percent_change", "timestamp"),
+            symbol_units={"XBR/USD": "USD", "XAU/USD": "USD", "HG1": "USD"},
+            # Without type=commodity the provider resolves HG1 to Homag Group AG
+            # (Frankfurt, EUR); the commodity class is copper spot quoted in USD.
+            symbol_types={"HG1": "commodity"},
+            required_fields=("close", "previous_close", "timestamp"),
             timezone="UTC derived from provider Unix timestamp",
             day_boundary="UTC calendar date of provider timestamp",
             freshness="latest completed provider quote",
@@ -250,20 +285,33 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
             freshness="latest completed provider 1day bar; fail if fewer than 30 common dates",
         ),
         DatasetManifest(
-            key="us.market_movers",
-            endpoint="/market_movers/stocks",
-            symbols=(),
-            symbol_units={},
-            required_fields=(
-                "symbol",
-                "name",
-                "last",
-                "percent_change",
-                "volume",
-            ),
-            timezone="provider market-local datetime; endpoint supplies no UTC offset",
-            day_boundary="provider market-local calendar date",
-            freshness="current provider market-movers snapshot",
+            key="us.index_proxy_quotes",
+            endpoint="/quote",
+            symbols=("SPY", "QQQ", "DIA", "IWM", "VIXY"),
+            symbol_units={"SPY": "USD", "QQQ": "USD", "DIA": "USD", "IWM": "USD", "VIXY": "USD"},
+            required_fields=("close", "previous_close", "timestamp"),
+            timezone="UTC derived from provider Unix timestamp",
+            day_boundary="UTC calendar date of provider timestamp",
+            freshness="latest completed provider quote",
+        ),
+        DatasetManifest(
+            key="us.mega_cap_quotes",
+            endpoint="/quote",
+            symbols=("AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "AVGO", "TSLA"),
+            symbol_units={
+                "AAPL": "USD",
+                "MSFT": "USD",
+                "NVDA": "USD",
+                "GOOGL": "USD",
+                "AMZN": "USD",
+                "META": "USD",
+                "AVGO": "USD",
+                "TSLA": "USD",
+            },
+            required_fields=("close", "previous_close", "timestamp"),
+            timezone="UTC derived from provider Unix timestamp",
+            day_boundary="UTC calendar date of provider timestamp",
+            freshness="latest completed provider quote",
         ),
     ),
 )

@@ -41,12 +41,18 @@ const blockTitleKeys: Record<string, string> = {
     "reportBlockMacroCommodityNormalizedPerformance",
   "crypto.overview": "reportBlockCryptoOverview",
   "crypto.normalized_performance": "reportBlockNormalizedPerformance",
-  "us.market_movers": "reportBlockUsLeaders",
+  "us.index_proxies": "reportBlockUsIndices",
+  "us.mega_caps": "reportBlockUsMegaCaps",
 }
 const metricLabelKeys: Record<string, string> = {
   brent: "reportLabelBrent",
   gold: "reportLabelGold",
   copper: "reportLabelCopper",
+  spy: "reportLabelSpy",
+  qqq: "reportLabelQqq",
+  dia: "reportLabelDia",
+  iwm: "reportLabelIwm",
+  vixy: "reportLabelVixy",
 }
 const columnLabelKeys: Record<string, string> = {
   asset: "reportColumnAsset",
