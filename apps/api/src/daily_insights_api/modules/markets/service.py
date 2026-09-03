@@ -23,6 +23,8 @@ from daily_insights_api.modules.markets.models import (
 )
 from daily_insights_api.modules.markets.schemas import MarketResponse
 
+MAX_BIND_PARAMETERS = 65535
+
 
 async def visible_market_codes(
     database: AsyncSession,
@@ -117,24 +119,30 @@ async def store_index_daily_bars(
                 "source_fetched_at": source_fetched_at,
             }
         )
-    statement = insert(IndexDailyBar).values(rows)
-    await database.execute(
-        statement.on_conflict_do_update(
-            index_elements=["symbol", "trade_date"],
-            set_={
-                "market_code": statement.excluded.market_code,
-                "open": statement.excluded.open,
-                "high": statement.excluded.high,
-                "low": statement.excluded.low,
-                "close": statement.excluded.close,
-                "volume": statement.excluded.volume,
-                "provider": statement.excluded.provider,
-                "contract_version": statement.excluded.contract_version,
-                "source_fetched_at": statement.excluded.source_fetched_at,
-                "updated_at": func.now(),
-            },
+    # A multi-row INSERT binds one parameter per column per row, and PostgreSQL's
+    # wire protocol caps a statement at 65535 of them. `period=max` returns 24k+
+    # rows for ^GSPC, so the write is chunked. The chunk size is derived from the
+    # column count rather than hardcoded, so it still holds if a column is added.
+    chunk_size = MAX_BIND_PARAMETERS // len(rows[0])
+    for start in range(0, len(rows), chunk_size):
+        statement = insert(IndexDailyBar).values(rows[start : start + chunk_size])
+        await database.execute(
+            statement.on_conflict_do_update(
+                index_elements=["symbol", "trade_date"],
+                set_={
+                    "market_code": statement.excluded.market_code,
+                    "open": statement.excluded.open,
+                    "high": statement.excluded.high,
+                    "low": statement.excluded.low,
+                    "close": statement.excluded.close,
+                    "volume": statement.excluded.volume,
+                    "provider": statement.excluded.provider,
+                    "contract_version": statement.excluded.contract_version,
+                    "source_fetched_at": statement.excluded.source_fetched_at,
+                    "updated_at": func.now(),
+                },
+            )
         )
-    )
     return len(rows)
 
 

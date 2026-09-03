@@ -1,7 +1,7 @@
 import asyncio
 import os
 from collections.abc import AsyncIterator
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import cast
@@ -27,6 +27,7 @@ from daily_insights_api.modules.markets.api import (
     store_index_daily_bars,
 )
 from daily_insights_api.modules.markets.models import IndexDailyBar
+from daily_insights_api.modules.markets.service import MAX_BIND_PARAMETERS
 
 pytestmark = pytest.mark.integration
 
@@ -224,3 +225,22 @@ async def test_a_failing_symbol_does_not_roll_back_the_others(
     async with session_factory() as database:
         stored = (await database.scalars(select(IndexDailyBar.symbol))).all()
         assert sorted(stored) == ["^DJI", "^TWII"]
+
+
+async def test_a_backfill_larger_than_the_bind_parameter_limit_is_chunked(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # `period=max` returns 24k+ rows for ^GSPC. A single INSERT binds one
+    # parameter per column per row and PostgreSQL caps a statement at 65535, so
+    # anything past MAX_BIND_PARAMETERS // columns rows must be split.
+    columns = 11
+    row_count = (MAX_BIND_PARAMETERS // columns) + 500
+    start = date(1927, 12, 30)
+    bars = [_bar(start + timedelta(days=offset), "100.0") for offset in range(row_count)]
+
+    async with session_factory.begin() as database:
+        stored = await _store(database, bars)
+    assert stored == row_count
+
+    async with session_factory() as database:
+        assert (await database.scalar(select(func.count()).select_from(IndexDailyBar))) == row_count
