@@ -1,5 +1,5 @@
 import type { Locale } from "@daily-insights/api-client"
-import { MessageCircle, Quote, Send, Square, X } from "lucide-react"
+import { MessageCircle, Quote, Send, Sparkles, Square, X } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import {
   createContext,
@@ -30,6 +30,10 @@ type DisplayMessage = {
 }
 type ChatState = {
   setPageContext: (value: PageContext | null) => void
+}
+type ChatError = {
+  message: string
+  retryable: boolean
 }
 const Context = createContext<ChatState>({ setPageContext: () => undefined })
 const maximumMessageLength = 4000
@@ -107,7 +111,7 @@ export function PageContextChatProvider({
     y: number
   } | null>(null)
   const [pending, setPending] = useState(false)
-  const [error, setError] = useState("")
+  const [error, setError] = useState<ChatError | null>(null)
   const controller = useRef<AbortController | null>(null)
   const composing = useRef(false)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
@@ -134,7 +138,7 @@ export function PageContextChatProvider({
   useEffect(() => () => controller.current?.abort(), [])
 
   useEffect(() => {
-    if (!visible) return
+    if (!visible || pending) return
     const openSelectionMenu = (event: MouseEvent) => {
       const target = event.target
       const selection = window.getSelection()
@@ -154,14 +158,14 @@ export function PageContextChatProvider({
         return
       event.preventDefault()
       setSelectionMenu({
-        text: prepareQuote(selectedText),
+        text: selectedText,
         x: Math.max(8, Math.min(event.clientX, window.innerWidth - 224)),
-        y: Math.max(8, Math.min(event.clientY, window.innerHeight - 56)),
+        y: Math.max(8, Math.min(event.clientY, window.innerHeight - 96)),
       })
     }
     document.addEventListener("contextmenu", openSelectionMenu)
     return () => document.removeEventListener("contextmenu", openSelectionMenu)
-  }, [visible])
+  }, [pending, visible])
 
   useEffect(() => {
     if (!selectionMenu) return
@@ -217,7 +221,7 @@ export function PageContextChatProvider({
       lastRequest.current = { id: clientRequestId, message, quote, context }
     setInput("")
     setAttachedQuote("")
-    setError("")
+    setError(null)
     setPending(true)
     if (!retrying) {
       setMessages(current => [
@@ -316,7 +320,7 @@ export function PageContextChatProvider({
             "status" in data &&
             (data.status === "error" || data.status === "partial")
           )
-            setError(t("chatError"))
+            setError({ message: t("chatError"), retryable: true })
           if (type === "error") {
             terminalStatus =
               typeof data === "object" &&
@@ -325,7 +329,7 @@ export function PageContextChatProvider({
               data.partial === true
                 ? "partial"
                 : "error"
-            setError(t("chatError"))
+            setError({ message: t("chatError"), retryable: true })
           }
         }
         if (done) break
@@ -336,7 +340,7 @@ export function PageContextChatProvider({
       if (caught instanceof DOMException && caught.name === "AbortError") {
         terminalStatus = "partial"
       } else {
-        setError(t("chatError"))
+        setError({ message: t("chatError"), retryable: true })
       }
     } finally {
       setMessages(current =>
@@ -358,15 +362,30 @@ export function PageContextChatProvider({
   }
 
   function attachSelection() {
-    if (!selectionMenu) return
-    setAttachedQuote(selectionMenu.text)
-    setInput(current =>
-      current.slice(0, maximumQuestionLength(selectionMenu.text))
-    )
+    if (!selectionMenu || pending) return
+    const quote = prepareQuote(selectionMenu.text)
+    setAttachedQuote(quote)
+    setInput(current => current.slice(0, maximumQuestionLength(quote)))
     setSelectionMenu(null)
     setOpen(true)
     window.getSelection()?.removeAllRanges()
     window.requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
+  function sendSelectionInsight() {
+    if (!selectionMenu || pending) return
+    const selection = selectionMenu.text
+    setSelectionMenu(null)
+    setOpen(true)
+    window.getSelection()?.removeAllRanges()
+    if (selection.length > maximumMessageLength) {
+      setInput("")
+      setAttachedQuote("")
+      lastRequest.current = null
+      setError({ message: t("chatSelectionTooLong"), retryable: false })
+      return
+    }
+    void send(selection, pageContext, crypto.randomUUID(), false, "")
   }
 
   return (
@@ -385,10 +404,19 @@ export function PageContextChatProvider({
             className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-3 py-2 text-left text-sm font-bold text-sea-ink hover:bg-link-hover"
             type="button"
             role="menuitem"
+            onClick={sendSelectionInsight}
+          >
+            <Sparkles className="block size-4 shrink-0" aria-hidden="true" />
+            {t("chatSelectionInsight")}
+          </button>
+          <button
+            className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-3 py-2 text-left text-sm font-bold text-sea-ink hover:bg-link-hover"
+            type="button"
+            role="menuitem"
             onClick={attachSelection}
           >
             <Quote className="block size-4 shrink-0" aria-hidden="true" />
-            {t("chatQuoteSelection")}
+            {t("chatSelectionDiscussion")}
           </button>
         </div>
       ) : null}
@@ -491,10 +519,19 @@ export function PageContextChatProvider({
                   className="px-4 pb-2 text-xs font-bold text-market-up"
                   role="alert"
                 >
-                  {error}{" "}
-                  <button className="underline" type="button" onClick={retry}>
-                    {t("retry")}
-                  </button>
+                  {error.message}
+                  {error.retryable ? (
+                    <>
+                      {" "}
+                      <button
+                        className="underline"
+                        type="button"
+                        onClick={retry}
+                      >
+                        {t("retry")}
+                      </button>
+                    </>
+                  ) : null}
                 </div>
               ) : null}
               <form

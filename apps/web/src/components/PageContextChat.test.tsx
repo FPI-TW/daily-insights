@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react"
 import { I18nextProvider } from "react-i18next"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { Locale } from "@daily-insights/api-client"
 import { createI18n } from "#/lib/i18n"
 import { PageContextChatProvider, useChatPageContext } from "./PageContextChat"
 
@@ -55,6 +56,24 @@ function streamResponse(parts: string[]) {
       },
     })
   )
+}
+
+function pendingStreamResponse() {
+  let streamController: ReadableStreamDefaultController<Uint8Array> | null =
+    null
+  return {
+    response: new Response(
+      new ReadableStream({
+        start(controller) {
+          streamController = controller
+        },
+      })
+    ),
+    finish(parts: string[]) {
+      for (const part of parts) streamController?.enqueue(encoder.encode(part))
+      streamController?.close()
+    },
+  }
 }
 
 describe("PageContextChat", () => {
@@ -188,7 +207,7 @@ describe("PageContextChat", () => {
     )
   })
 
-  it("quotes selected report text from the context menu", async () => {
+  it("offers exactly two selected-text actions and sends AI Insights immediately", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       streamResponse(['event: done\ndata: {"status":"complete"}\n\n'])
     )
@@ -201,12 +220,162 @@ describe("PageContextChat", () => {
     selection?.addRange(range)
 
     fireEvent.contextMenu(reportText, { clientX: 40, clientY: 60 })
-    fireEvent.click(
-      screen.getByRole("menuitem", { name: "Quote in conversation" })
+    expect(screen.getAllByRole("menuitem")).toHaveLength(2)
+    expect(screen.getByRole("menuitem", { name: "AI Insights" })).toBeVisible()
+    expect(
+      screen.getByRole("menuitem", { name: "AI Discussion" })
+    ).toBeVisible()
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "AI Insights" }))
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
+    expect(body.message).toBe("Selectable market context")
+    expect(screen.queryByText("Quoted selection")).not.toBeInTheDocument()
+  })
+
+  it("shows a non-retryable error for an over-limit AI Insight after a request", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      streamResponse(['event: done\ndata: {"status":"complete"}\n\n'])
     )
+    await renderChat()
+    fireEvent.click(screen.getByRole("button", { name: "Report Q&A" }))
+    fireEvent.change(screen.getByLabelText("Enter your question"), {
+      target: { value: "An earlier request" },
+    })
+    fireEvent.submit(
+      screen.getByRole("button", { name: "Send question" }).closest("form")!
+    )
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    await screen.findByText("Answer status: complete")
+
+    const reportText = document.createElement("p")
+    reportText.textContent = "x".repeat(4001)
+    document.querySelector("main")?.append(reportText)
+    const range = document.createRange()
+    range.selectNodeContents(reportText)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+
+    fireEvent.contextMenu(reportText, { clientX: 40, clientY: 60 })
+    fireEvent.click(screen.getByRole("menuitem", { name: "AI Insights" }))
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The selected text is too long to send."
+    )
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull()
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it("preserves Retry for a pending request when an over-limit selection is attempted", async () => {
+    const pendingResponse = pendingStreamResponse()
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(pendingResponse.response)
+      .mockResolvedValueOnce(
+        streamResponse(['event: done\ndata: {"status":"complete"}\n\n'])
+      )
+    await renderChat()
+    fireEvent.click(screen.getByRole("button", { name: "Report Q&A" }))
+    fireEvent.change(screen.getByLabelText("Enter your question"), {
+      target: { value: "Retry the original request" },
+    })
+    fireEvent.submit(
+      screen.getByRole("button", { name: "Send question" }).closest("form")!
+    )
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+
+    const reportText = document.createElement("p")
+    reportText.textContent = "x".repeat(4001)
+    document.querySelector("main")?.append(reportText)
+    const range = document.createRange()
+    range.selectNodeContents(reportText)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    fireEvent.contextMenu(reportText, { clientX: 40, clientY: 60 })
+
+    expect(screen.queryByRole("menu")).toBeNull()
+    expect(fetch).toHaveBeenCalledOnce()
+
+    pendingResponse.finish([
+      'event: error\ndata: {"code":"provider_error","partial":false}\n\n',
+    ])
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }))
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+    const first = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
+    const second = JSON.parse(String(vi.mocked(fetch).mock.calls[1]?.[1]?.body))
+    expect(second.message).toBe("Retry the original request")
+    expect(second.client_request_id).toBe(first.client_request_id)
+  })
+
+  it("keeps the two-row selection menu inside the viewport at the bottom edge", async () => {
+    await renderChat()
+    const reportText = screen.getByText("Selectable market context")
+    const range = document.createRange()
+    range.selectNodeContents(reportText)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+
+    fireEvent.contextMenu(reportText, {
+      clientX: 40,
+      clientY: window.innerHeight,
+    })
+
+    expect(screen.getByRole("menu")).toHaveStyle({
+      top: `${window.innerHeight - 96}px`,
+    })
+  })
+
+  it.each<[string, Locale, string, string]>([
+    ["zh-Hant", "zh-hant", "AI 洞察", "AI 申論"],
+    ["zh-Hans", "zh-hans", "AI 洞察", "AI 申论"],
+  ])(
+    "renders %s selected-text action labels",
+    async (_, locale, insight, discussion) => {
+      const i18n = createI18n(locale)
+      await i18n.changeLanguage(locale)
+      render(
+        <I18nextProvider i18n={i18n}>
+          <PageContextChatProvider locale={locale} enabled>
+            <ContextFixture />
+          </PageContextChatProvider>
+        </I18nextProvider>
+      )
+      const reportText = screen.getByText("Selectable market context")
+      const range = document.createRange()
+      range.selectNodeContents(reportText)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+
+      fireEvent.contextMenu(reportText, { clientX: 40, clientY: 60 })
+
+      expect(screen.getByRole("menuitem", { name: insight })).toBeVisible()
+      expect(screen.getByRole("menuitem", { name: discussion })).toBeVisible()
+    }
+  )
+
+  it("attaches selected report text for AI Discussion until the user submits", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      streamResponse(['event: done\ndata: {"status":"complete"}\n\n'])
+    )
+    await renderChat()
+    const reportText = screen.getByText("Selectable market context")
+    const range = document.createRange()
+    range.selectNodeContents(reportText)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+
+    fireEvent.contextMenu(reportText, { clientX: 40, clientY: 60 })
+    fireEvent.click(screen.getByRole("menuitem", { name: "AI Discussion" }))
 
     expect(screen.getByText("Quoted selection")).toBeInTheDocument()
     expect(screen.getByLabelText("Enter your question")).toHaveFocus()
+    expect(fetch).not.toHaveBeenCalled()
     fireEvent.change(screen.getByLabelText("Enter your question"), {
       target: { value: "Why is this important?" },
     })
