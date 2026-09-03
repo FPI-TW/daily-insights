@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api.core.config import Settings, get_settings, is_placeholder_value
 from daily_insights_api.core.database import create_engine, create_session_factory
+from daily_insights_api.core.logging import configure_logging
 from daily_insights_api.modules.news.editions import EDITION_ORDER, edition_spec
 from daily_insights_api.modules.news.llm import DeepSeekClient
 from daily_insights_api.modules.news.prompts import load_selection_criteria
@@ -71,6 +72,7 @@ def build_runner(
 
 
 async def main() -> None:
+    configure_logging()
     args = parse_args(description="Run the daily news scheduler", configure=configure_arguments)
     settings = get_settings()
     heartbeat = Path(HEARTBEAT_PATH)

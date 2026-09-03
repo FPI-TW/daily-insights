@@ -44,6 +44,11 @@ class FeedSource:
     max_items: int = MAX_PER_FEED
     # Publisher name shown to readers; falls back to the hostname.
     display_name: str = ""
+    # A feed whose newest item is older than this is reported as stale. Feeds
+    # that answer HTTP 200 with months-old items are the most common failure.
+    max_age_hours: int = 24
+    # The feed carries the article body, so extraction can skip fetch_article.
+    provides_full_text: bool = False
 
 
 # Reuters is deliberately absent: it answers non-browser requests with 401, so
@@ -184,9 +189,17 @@ def _within_window(seen_at: datetime | None, start: datetime, end: datetime) -> 
     return seen_at is None or start <= seen_at <= end
 
 
-def parse_rss(
-    payload: bytes, source: FeedSource, start: datetime, end: datetime
-) -> list[Candidate]:
+def filter_window(candidates: list[Candidate], start: datetime, end: datetime) -> list[Candidate]:
+    """Keep undated candidates and those published inside the window."""
+    return [item for item in candidates if _within_window(item.seen_at, start, end)]
+
+
+def newest_seen_at(candidates: list[Candidate]) -> datetime | None:
+    dated = [item.seen_at for item in candidates if item.seen_at is not None]
+    return max(dated) if dated else None
+
+
+def parse_rss(payload: bytes, source: FeedSource) -> list[Candidate]:
     # defusedxml rejects entity expansion and external DTDs; payloads are also
     # byte-capped before reaching the parser.
     root = ElementTree.fromstring(payload)
@@ -202,15 +215,13 @@ def parse_rss(
             except (TypeError, ValueError):
                 seen_at = None
         url = normalize_article_url(link, source) if link else None
-        if url is None or not title or not _within_window(seen_at, start, end):
+        if url is None or not title:
             continue
         result.append(_candidate(url, title, seen_at, source))
     return result
 
 
-def parse_cnyes_json(
-    payload: bytes, source: FeedSource, start: datetime, end: datetime
-) -> list[Candidate]:
+def parse_cnyes_json(payload: bytes, source: FeedSource) -> list[Candidate]:
     """Map the cnyes list endpoint (items.data[] with newsId/title/publishAt)."""
     document = json.loads(payload)
     items = document.get("items") if isinstance(document, dict) else None
@@ -228,7 +239,7 @@ def parse_cnyes_json(
             datetime.fromtimestamp(published, UTC) if isinstance(published, int | float) else None
         )
         url = normalize_article_url(f"https://{source.hostname}/news/id/{news_id}", source)
-        if url is None or not _within_window(seen_at, start, end):
+        if url is None:
             continue
         result.append(_candidate(url, " ".join(title.split()), seen_at, source))
     return result
@@ -296,25 +307,43 @@ async def discover_feed_candidates(
                 raise ValueError("robots disallow feed")
             payload = await _read_capped(client, source.url)
             if source.kind == "rss":
-                found = parse_rss(payload, source, start, end)
+                parsed = parse_rss(payload, source)
             elif source.kind == "cnyes_json":
-                found = parse_cnyes_json(payload, source, start, end)
+                parsed = parse_cnyes_json(payload, source)
             else:
-                found = parse_listing(payload.decode("utf-8", errors="replace"), source)
+                parsed = parse_listing(payload.decode("utf-8", errors="replace"), source)
         except Exception as error:
             emit_event(
                 "news.feed.failed",
                 hostname=source.hostname,
+                feed=source.url,
                 error_code=type(error).__name__,
             )
             continue
-        found = found[: source.max_items]
+        # Freshness is judged before the window filter: a feed whose newest
+        # item is days old would otherwise look like an empty feed. Stale
+        # feeds still contribute so selection, not discovery, decides.
+        newest = newest_seen_at(parsed)
+        newest_age_minutes = (
+            int((end - newest).total_seconds() // 60) if newest is not None else None
+        )
+        if newest is not None and end - newest > timedelta(hours=source.max_age_hours):
+            emit_event(
+                "news.feed.stale",
+                hostname=source.hostname,
+                feed=source.url,
+                market=market,
+                age_hours=round((end - newest).total_seconds() / 3600, 1),
+                max_age_hours=source.max_age_hours,
+            )
+        found = filter_window(parsed, start, end)[: source.max_items]
         emit_event(
-            "news.feed.discovered",
+            "news.feed.ok",
             hostname=source.hostname,
             feed=source.url,
             market=market,
             count=len(found),
+            newest_age_minutes=newest_age_minutes,
         )
         result.extend(found)
     return _dedupe_candidates(result)

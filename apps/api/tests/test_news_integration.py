@@ -401,3 +401,37 @@ async def test_market_edition_is_independent_from_the_global_digest(
             ("tw_equity", 2, "partial", "5/8 stories completed"),
             ("us_equity", 1, "partial", "5/8 stories completed"),
         ]
+
+
+async def test_thin_discovery_reports_the_candidate_floor(
+    news_database: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from daily_insights_api.modules.news import service as news_service
+
+    candidates = _fetched_candidates()
+    events: list[tuple[str, dict[str, object]]] = []
+
+    async def feeds(*args: object, **kwargs: object) -> list[Candidate]:
+        del args, kwargs
+        return [item.candidate for item in candidates]
+
+    async def fetch(*args: object, **kwargs: object) -> list[FetchedCandidate]:
+        del args, kwargs
+        return candidates
+
+    monkeypatch.setattr(news_service, "discover_feed_candidates", feeds)
+    monkeypatch.setattr(news_service, "_fetch_usable_candidates", fetch)
+    monkeypatch.setattr(
+        news_service, "emit_event", lambda name, **fields: events.append((name, fields))
+    )
+    status = await run_news_edition(
+        news_database,
+        cast(DeepSeekClient, _DeterministicNewsClient("a")),
+        datetime.now(TAIPEI).date(),
+        allowed_hostnames="www.reuters.com,news.cnyes.com",
+    )
+    # Two candidates against a floor of ten (five stories, doubled) still run,
+    # but the shortfall is reported before the model is called.
+    assert status == "partial"
+    floor = [fields for name, fields in events if name == "news.candidates.below_floor"]
+    assert floor == [{"market": "global", "count": 2, "floor": 10}]

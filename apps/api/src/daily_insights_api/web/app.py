@@ -14,6 +14,7 @@ from daily_insights_api.core.database import (
     create_session_factory,
     database_is_ready,
 )
+from daily_insights_api.core.logging import configure_logging
 from daily_insights_api.core.observability import emit_event
 from daily_insights_api.modules.admin.router import router as admin_router
 from daily_insights_api.modules.assets.object_store import ObjectStore
@@ -41,6 +42,7 @@ def create_app(
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     object_store: ObjectStore | None = None,
 ) -> FastAPI:
+    configure_logging()
     resolved_settings = settings or get_settings()
     engine: AsyncEngine | None = None
     if (

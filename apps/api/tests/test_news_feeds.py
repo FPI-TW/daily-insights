@@ -9,6 +9,8 @@ from daily_insights_api.modules.news.feeds import (
     FEED_SOURCES,
     FeedSource,
     discover_feed_candidates,
+    filter_window,
+    newest_seen_at,
     normalize_article_url,
     parse_listing,
     parse_rss,
@@ -55,15 +57,18 @@ LISTING = """
 """
 
 
-def test_rss_parsing_rewrites_host_filters_window_and_deduplicates() -> None:
-    result = parse_rss(RSS, BBC, START, NOW)
+def test_rss_parsing_rewrites_host_and_keeps_dated_items_for_the_window_filter() -> None:
+    parsed = parse_rss(RSS, BBC)
+    assert [item.headline for item in parsed] == ["Fresh story", "Stale story", "Fresh story"]
+    assert parsed[0].hostname == "www.bbc.com"
+    assert parsed[0].source_name == "BBC Business"
+    assert parsed[0].seen_at == datetime(2026, 9, 2, 1, 0, tzinfo=UTC)
+    assert newest_seen_at(parsed) == datetime(2026, 9, 2, 1, 0, tzinfo=UTC)
+    result = filter_window(parsed, START, NOW)
     assert [(item.headline, str(item.url)) for item in result] == [
         ("Fresh story", "https://www.bbc.com/news/articles/c1"),
         ("Fresh story", "https://www.bbc.com/news/articles/c1"),
     ]
-    assert result[0].hostname == "www.bbc.com"
-    assert result[0].source_name == "BBC Business"
-    assert result[0].seen_at == datetime(2026, 9, 2, 1, 0, tzinfo=UTC)
 
 
 def test_rss_rejects_entity_expansion() -> None:
@@ -73,7 +78,7 @@ def test_rss_rejects_entity_expansion() -> None:
         b"<rss><channel><item><title>&lol2;</title></item></channel></rss>"
     )
     with pytest.raises(Exception, match=r"(?i)entit"):
-        parse_rss(bomb, CNBC, START, NOW)
+        parse_rss(bomb, CNBC)
 
 
 def test_listing_parsing_uses_anchor_text_slug_fallback_and_pattern() -> None:
@@ -166,14 +171,14 @@ def test_cnyes_json_parsing_maps_ids_titles_and_publish_times() -> None:
 
     source = next(s for s in FEED_SOURCES if "tw_stock" in s.url)
     payload = b"""{"items":{"data":[
-      {"newsId":6594061,"title":"  \u3008SEMICON\u3009 \u7cbe\u6e2c  \u7522\u80fd",
+      {"newsId":6594061,"title":"  \\u3008SEMICON\\u3009 \\u7cbe\\u6e2c  \\u7522\\u80fd",
        "publishAt":1788316800},
       {"newsId":6594062,"title":"Stale","publishAt":1756500000},
       {"newsId":"bad","title":"Bad id","publishAt":1788316800},
       {"newsId":6594063,"title":"","publishAt":1788316800},
       {"newsId":6594064,"title":"No time"}
     ]},"statusCode":200}"""
-    result = parse_cnyes_json(payload, source, START, NOW)
+    result = filter_window(parse_cnyes_json(payload, source), START, NOW)
     assert [(str(item.url), item.headline) for item in result] == [
         ("https://news.cnyes.com/news/id/6594061", "\u3008SEMICON\u3009 \u7cbe\u6e2c \u7522\u80fd"),
         ("https://news.cnyes.com/news/id/6594064", "No time"),
@@ -181,4 +186,67 @@ def test_cnyes_json_parsing_maps_ids_titles_and_publish_times() -> None:
     assert result[0].seen_at == datetime(2026, 9, 2, 2, 40, tzinfo=UTC)
     assert result[0].hostname == "news.cnyes.com" and result[0].source_name == "\u9245\u4ea8"
     with pytest.raises(ValueError, match=r"items\.data"):
-        parse_cnyes_json(b'{"items": []}', source, START, NOW)
+        parse_cnyes_json(b'{"items": []}', source)
+
+
+STALE_RSS = b"""<?xml version="1.0"?>
+<rss version="2.0"><channel><title>Zombie</title>
+<item><title>Ancient one</title><link>https://www.bbc.co.uk/news/articles/z1</link>
+  <pubDate>Mon, 01 Jun 2026 01:00:00 GMT</pubDate></item>
+<item><title>Ancient two</title><link>https://www.bbc.co.uk/news/articles/z2</link>
+  <pubDate>Sun, 31 May 2026 01:00:00 GMT</pubDate></item>
+</channel></rss>"""
+
+
+async def test_discovery_reports_stale_feeds_but_fresh_ones_as_ok(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def robots(_: httpx.AsyncClient, __: str, ___: frozenset[str]) -> bool:
+        return True
+
+    events: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(feeds, "robots_allowed", robots)
+    monkeypatch.setattr(feeds, "emit_event", lambda name, **fields: events.append((name, fields)))
+    monkeypatch.setattr(
+        feeds,
+        "FEED_SOURCES",
+        (
+            FeedSource(
+                "www.bbc.com",
+                "https://stale.example/rss.xml",
+                "rss",
+                r"^https://www\.bbc\.com/news/articles/[a-z0-9]+$",
+                host_rewrites=(("www.bbc.co.uk", "www.bbc.com"),),
+                max_age_hours=48,
+            ),
+            FeedSource(
+                "www.bbc.com",
+                "https://fresh.example/rss.xml",
+                "rss",
+                r"^https://www\.bbc\.com/news/articles/[a-z0-9]+$",
+                host_rewrites=(("www.bbc.co.uk", "www.bbc.com"),),
+            ),
+        ),
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = STALE_RSS if request.url.host == "stale.example" else RSS
+        return httpx.Response(200, content=payload, headers={"content-type": "text/xml"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await discover_feed_candidates(client, configured_hostnames("www.bbc.com"), NOW)
+
+    # The stale feed's items are outside the window, so only the fresh story survives...
+    assert [str(item.url) for item in result] == ["https://www.bbc.com/news/articles/c1"]
+    # ...but the stale feed is reported with its age rather than silently looking empty.
+    stale = [fields for name, fields in events if name == "news.feed.stale"]
+    assert len(stale) == 1
+    assert stale[0]["feed"] == "https://stale.example/rss.xml"
+    age_hours = stale[0]["age_hours"]
+    assert isinstance(age_hours, float) and age_hours > 48
+    assert stale[0]["max_age_hours"] == 48
+    ok = {str(fields["feed"]): fields for name, fields in events if name == "news.feed.ok"}
+    # Two identical "Fresh story" items count before dedupe; discovery dedupes at the end.
+    assert ok["https://fresh.example/rss.xml"]["count"] == 2
+    assert ok["https://fresh.example/rss.xml"]["newest_age_minutes"] == 120
+    assert ok["https://stale.example/rss.xml"]["count"] == 0

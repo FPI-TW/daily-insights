@@ -265,6 +265,16 @@ async def run_news_edition(
     async with feed_client(discovery_timeout_seconds) as feeds_http:
         feed_candidates = await discover_feed_candidates(feeds_http, allowed, market=market_code)
     emit_event("news.candidates.discovered", market=market_code, count=len(feed_candidates))
+    # With a single discovery path, a registry-wide outage would otherwise
+    # produce a quietly thin edition; the floor makes it visible early.
+    floor = spec.target_items * 2
+    if len(feed_candidates) < floor:
+        emit_event(
+            "news.candidates.below_floor",
+            market=market_code,
+            count=len(feed_candidates),
+            floor=floor,
+        )
     candidates = _cap_discovery(feed_candidates, per_source=spec.max_discovery_per_source)
     emit_event("news.candidates.merged", market=market_code, total=len(candidates))
     usable = (

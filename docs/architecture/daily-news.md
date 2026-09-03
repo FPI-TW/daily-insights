@@ -70,6 +70,18 @@ flowchart LR
 預覽所有市場。台股沒有正式報告，其報告頁顯示「報告尚未推出」加台股新聞；原本
 以直接網址提供的台股示範數字已移除。
 
+## 來源監控
+
+- 每個 feed 讀取後先看最新一則的發佈時間，超過該來源的 `max_age_hours`（預設 24
+  小時）就發 `news.feed.stale`（含 `age_hours`），候選仍會進入後續流程，由選題決定
+  取捨；正常時發 `news.feed.ok`（含 `count` 與 `newest_age_minutes`）。回 HTTP 200
+  但內容停在數月前的殭屍 feed 只有這個檢查能看出來。
+- 去重後候選數低於 `target_items * 2` 時發 `news.candidates.below_floor`，版本狀態
+  沿用既有的 `partial`／`unavailable` 判定。feed 註冊表是唯一的探索路徑，這是整批
+  來源失效時最早的警訊。
+- 所有事件經 `core/logging.py` 的 stderr handler 輸出，`docker logs` 可直接查看；告警
+  送達仍待另案接上。
+
 ## 版本與重試語意
 
 - 每個 `edition_date` 可有多個 `revision`，舊版本不會被修改或刪除。
