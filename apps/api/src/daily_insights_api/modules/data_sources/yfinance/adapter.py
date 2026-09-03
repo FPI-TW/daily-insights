@@ -146,6 +146,14 @@ def normalize_daily_bars(
                 f"yfinance history for {symbol} returned {trade_date} with high {high} "
                 f"below low {low}"
             )
+        # Zero is legitimate and common: Yahoo reports no volume at all for some
+        # indices (^SOX is zero on every row), so only a negative volume is a
+        # contract violation.
+        volume = _integer(row["Volume"])
+        if volume is not None and volume < 0:
+            raise DataSourceContractError(
+                f"yfinance history for {symbol} returned {trade_date} with volume {volume}"
+            )
         items.append(
             DailyBar(
                 instrument_source_id=symbol,
@@ -156,7 +164,7 @@ def normalize_daily_bars(
                 high=high,
                 low=low,
                 close=close,
-                volume=_integer(row["Volume"]),
+                volume=volume,
                 source="yfinance",
             )
         )

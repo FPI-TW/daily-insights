@@ -107,3 +107,16 @@ def test_nonpositive_close_fails_closed() -> None:
 def test_high_below_low_fails_closed() -> None:
     with pytest.raises(DataSourceContractError, match=r"high 98\.0 below low 99\.0"):
         _normalize(_frame({date(2026, 9, 1): (100.0, 98.0, 99.0, 100.0, 1_000.0)}))
+
+
+def test_zero_volume_is_accepted() -> None:
+    # Yahoo reports no volume for some indices (^SOX is zero on every row), so
+    # zero must pass; the table's CHECK constraint allows it too.
+    result = _normalize(_frame({date(2026, 9, 1): (100.0, 101.0, 99.0, 100.0, 0.0)}))
+
+    assert result.items[0].volume == 0
+
+
+def test_negative_volume_fails_closed() -> None:
+    with pytest.raises(DataSourceContractError, match="with volume -1"):
+        _normalize(_frame({date(2026, 9, 1): (100.0, 101.0, 99.0, 100.0, -1.0)}))
