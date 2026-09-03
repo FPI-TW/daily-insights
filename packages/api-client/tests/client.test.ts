@@ -108,6 +108,60 @@ describe("API client trust boundary", () => {
     expect(transport).toHaveBeenCalledWith("/api/news/latest?locale=en")
   })
 
+  it("accepts a stale analyst viewpoint status without replacing stored data", async () => {
+    const client = createAdministrationClient(async () =>
+      Response.json({
+        viewpoint_date: "2026-09-02",
+        fetched_at: "2026-09-02T01:00:00Z",
+        status: "partial",
+        markets: [
+          {
+            source_market_code: "us_macro",
+            market_code: "global_macro_bonds",
+            status: "stale",
+          },
+        ],
+      })
+    )
+
+    await expect(
+      client.syncAnalystViewpoints("csrf-token")
+    ).resolves.toMatchObject({
+      markets: [{ status: "stale" }],
+    })
+  })
+
+  it("accepts analyst viewpoint status for every supported market", async () => {
+    const viewpoints = [
+      ["global_macro_bonds", "us_macro"],
+      ["forex", "forex"],
+      ["crypto", "crypto"],
+      ["us_equity", "us_stocks"],
+      ["hk_equity", "hk_stocks"],
+      ["cn_equity", "cn_stocks"],
+      ["tw_equity", "tw_stocks"],
+      ["tw_index_derivatives", "tw_futures"],
+    ].map(([market_code, source_market_code]) => ({
+      viewpoint_date: "2026-09-03",
+      market_code,
+      source_market_code,
+      points: ["A valid analyst viewpoint."],
+      fetched_at: "2026-09-03T02:38:47.299301+00:00",
+    }))
+    const client = createAdministrationClient(async () =>
+      Response.json({
+        enabled: true,
+        today: "2026-09-03",
+        viewpoints,
+        latest_sync: null,
+      })
+    )
+
+    const result = await client.analystViewpointStatus()
+
+    expect(result.viewpoints).toHaveLength(8)
+  })
+
   it("rejects an invalid Podcast locale returned by the API", async () => {
     const client = createPodcastClient(async () =>
       Response.json([

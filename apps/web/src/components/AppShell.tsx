@@ -100,7 +100,9 @@ export function AppShell({
           : "customer-podcasts"
       : location.pathname.endsWith("/admin/members")
         ? "admin-members"
-        : "admin-audio"
+        : location.pathname.endsWith("/admin/analyst-viewpoints")
+          ? "admin-analyst-viewpoints"
+          : "admin-audio"
 
   return (
     <>
@@ -209,6 +211,13 @@ export function AppShell({
                     className={adminNavLinkClass}
                   >
                     {t("memberManagementNav")}
+                  </Link>
+                  <Link
+                    to="/$locale/admin/analyst-viewpoints"
+                    params={{ locale }}
+                    className="shrink-0 border-b-2 border-transparent px-4 py-3 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&[aria-current=page]]:border-lagoon [&[aria-current=page]]:text-lagoon"
+                  >
+                    {t("analystViewpointsAdminNav")}
                   </Link>
                   <Link
                     to="/$locale/admin/conversations"

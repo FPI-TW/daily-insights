@@ -39,11 +39,11 @@ if grep -q 'postgres:' "$compose_file"; then
   exit 1
 fi
 
-for service in api web nginx morning-report-scheduler daily-news-scheduler; do
+for service in api web nginx morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler; do
   grep -q "^  ${service}:" "$compose_file"
   grep -q "container_name: daily-insights-${service}" "$compose_file"
 done
-[ "$(grep -c 'restart: unless-stopped' "$compose_file")" -eq 5 ]
+[ "$(grep -c 'restart: unless-stopped' "$compose_file")" -eq 6 ]
 grep -q 'stop_grace_period:' "$compose_file"
 grep -q 'healthcheck:' "$compose_file"
 grep -Fq "st_mtime < 93600" "$compose_file"
@@ -66,6 +66,12 @@ grep -Fq 'DAILY_INSIGHTS_DAILY_NEWS_ENABLED: ${DAILY_INSIGHTS_DAILY_NEWS_ENABLED
 grep -Fq 'DAILY_INSIGHTS_MODEL_API_KEY: ${DAILY_INSIGHTS_MODEL_API_KEY:-}' "$compose_file"
 grep -Fq 'daily_insights_api.scripts.run_daily_news' "$compose_file"
 grep -Fq '/tmp/daily-news-heartbeat' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED:-false}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL:-https://analyst-viewpoints.invalid}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY:-}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS:-10}' "$compose_file"
+grep -Fq 'daily_insights_api.scripts.run_analyst_viewpoints' "$compose_file"
+grep -Fq '/tmp/analyst-viewpoints-heartbeat' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_ENABLED: ${DAILY_INSIGHTS_CHAT_ENABLED:-false}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_PROVIDER: ${DAILY_INSIGHTS_CHAT_MODEL_PROVIDER:-deepseek}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_NAME: ${DAILY_INSIGHTS_CHAT_MODEL_NAME:-deepseek-chat}' "$compose_file"
@@ -139,6 +145,9 @@ if ! bash -n "$validation_script"; then
 fi
 rm -f "$validation_script"
 for name in \
+  DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED \
+  DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL \
+  DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS \
   DAILY_INSIGHTS_CHAT_ENABLED \
   DAILY_INSIGHTS_CHAT_MODEL_PROVIDER \
   DAILY_INSIGHTS_CHAT_MODEL_NAME \
@@ -147,6 +156,8 @@ for name in \
   grep -Fq "${name}: \${{ vars.${name} }}" "$workflow_file"
   grep -Fq ",${name}" "$workflow_file"
 done
+grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY: ${{ secrets.DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY }}' "$workflow_file"
+grep -Fq ',DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY' "$workflow_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_KEY: ${{ secrets.DAILY_INSIGHTS_CHAT_MODEL_API_KEY }}' "$workflow_file"
 grep -Fq ',DAILY_INSIGHTS_CHAT_MODEL_API_KEY' "$workflow_file"
 grep -Fq '/opt/daily-insights/scripts/production/deploy.sh' "$workflow_file"
@@ -222,6 +233,10 @@ export DAILY_INSIGHTS_DATABASE_URL=postgresql+psycopg://daily_insights:test@db.i
 export DAILY_INSIGHTS_SESSION_SECRET=contract-session-secret-12345678901234567890
 export DAILY_INSIGHTS_PASSWORD_PEPPER=contract-password-pepper-098765432109876543
 export DAILY_INSIGHTS_MORNING_REPORTS_ENABLED=false
+export DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED=false
+export DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL=
+export DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY=
+export DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS=10
 export DAILY_INSIGHTS_CHAT_ENABLED=true
 export DAILY_INSIGHTS_CHAT_MODEL_PROVIDER=deepseek
 export DAILY_INSIGHTS_CHAT_MODEL_NAME=deepseek-chat
@@ -277,14 +292,14 @@ grep -q 'compose .* pull' "$temporary_dir/deployment.log"
 grep -q 'compose .* run --rm --no-deps nginx nginx -t' "$temporary_dir/deployment.log"
 grep -q 'compose .* up -d --no-build --force-recreate --no-deps nginx' "$temporary_dir/deployment.log"
 grep -q 'compose .* run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log"
-grep -q 'compose .* up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler' "$temporary_dir/deployment.log"
+grep -q 'compose .* up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler' "$temporary_dir/deployment.log"
 grep -q 'exec daily-insights-nginx wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/api' "$temporary_dir/deployment.log"
 grep -q 'exec daily-insights-nginx wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/web' "$temporary_dir/deployment.log"
 
 nginx_validate_line=$(grep -n 'run --rm --no-deps nginx nginx -t' "$temporary_dir/deployment.log" | cut -d: -f1)
 nginx_recreate_line=$(grep -n 'up -d --no-build --force-recreate --no-deps nginx' "$temporary_dir/deployment.log" | cut -d: -f1)
 migration_line=$(grep -n 'run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log" | cut -d: -f1)
-backend_converge_line=$(grep -n 'up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
+backend_converge_line=$(grep -n 'up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
 if [ "$nginx_validate_line" -ge "$nginx_recreate_line" ] ||
   [ "$nginx_recreate_line" -ge "$migration_line" ] ||
   [ "$migration_line" -ge "$backend_converge_line" ]; then
@@ -301,6 +316,25 @@ if PATH="$temporary_dir/stubs:$PATH" \
   DAILY_INSIGHTS_MORNING_REPORTS_ENABLED=true \
   scripts/production/deploy.sh >/dev/null 2>&1; then
   echo "enabled morning reports must require Twelve Data launch configuration" >&2
+  exit 1
+fi
+
+if PATH="$temporary_dir/stubs:$PATH" \
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED=true \
+  scripts/production/deploy.sh >/dev/null 2>&1; then
+  echo "enabled analyst viewpoints must require upstream launch configuration" >&2
+  exit 1
+fi
+
+if PATH="$temporary_dir/stubs:$PATH" \
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED=true \
+  DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL=https://analyst.example.test \
+  DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY=contract-analyst-key \
+  DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS=0 \
+  scripts/production/deploy.sh >/dev/null 2>&1; then
+  echo "enabled analyst viewpoints must require a valid upstream timeout" >&2
   exit 1
 fi
 

@@ -19,6 +19,7 @@ type LocaleDestination =
   | "admin-login"
   | "admin-audio"
   | "admin-members"
+  | "admin-analyst-viewpoints"
   | "admin-change-password"
 
 const destinations = {
@@ -30,6 +31,7 @@ const destinations = {
   "admin-login": "/$locale/admin/login",
   "admin-audio": "/$locale/admin/audio",
   "admin-members": "/$locale/admin/members",
+  "admin-analyst-viewpoints": "/$locale/admin/analyst-viewpoints",
   "admin-change-password": "/$locale/admin/change-password",
 } as const
 

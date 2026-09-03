@@ -4,6 +4,40 @@
  */
 
 export interface paths {
+  "/api/admin/analyst-viewpoints/status": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Sync Status */
+    get: operations["get_sync_status_api_admin_analyst_viewpoints_status_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/analyst-viewpoints/sync": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Manually Sync */
+    post: operations["manually_sync_api_admin_analyst_viewpoints_sync_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/admin/audit-events": {
     parameters: {
       query?: never
@@ -277,6 +311,26 @@ export interface paths {
     put?: never
     /** Admin Unpublish */
     post: operations["admin_podcasts_unpublish"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/analyst-viewpoints/today": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Get Today Viewpoints
+     * @description Return only valid, visible viewpoints persisted for the current Taipei day.
+     */
+    get: operations["get_today_viewpoints_api_analyst_viewpoints_today_get"]
+    put?: never
+    post?: never
     delete?: never
     options?: never
     head?: never
@@ -566,6 +620,88 @@ export interface paths {
 export type webhooks = Record<string, never>
 export interface components {
   schemas: {
+    /** AnalystViewpointExecutionResponse */
+    AnalystViewpointExecutionResponse: {
+      /**
+       * Completed At
+       * Format: date-time
+       */
+      completed_at: string
+      /** Error Code */
+      error_code: string | null
+      /** Fetched At */
+      fetched_at: string | null
+      /** Markets */
+      markets: components["schemas"]["SyncMarketStatus"][]
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "complete" | "partial" | "failed"
+      /**
+       * Trigger
+       * @enum {string}
+       */
+      trigger: "scheduler" | "manual"
+      /**
+       * Viewpoint Date
+       * Format: date
+       */
+      viewpoint_date: string
+    }
+    /** AnalystViewpointResponse */
+    AnalystViewpointResponse: {
+      /**
+       * Fetched At
+       * Format: date-time
+       */
+      fetched_at: string
+      /** Market Code */
+      market_code: string
+      /** Points */
+      points: string[]
+      /** Source Market Code */
+      source_market_code: string
+      /**
+       * Viewpoint Date
+       * Format: date
+       */
+      viewpoint_date: string
+    }
+    /** AnalystViewpointSyncResponse */
+    AnalystViewpointSyncResponse: {
+      /**
+       * Fetched At
+       * Format: date-time
+       */
+      fetched_at: string
+      /** Markets */
+      markets: components["schemas"]["SyncMarketStatus"][]
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "complete" | "partial"
+      /**
+       * Viewpoint Date
+       * Format: date
+       */
+      viewpoint_date: string
+    }
+    /** AnalystViewpointSyncStatusResponse */
+    AnalystViewpointSyncStatusResponse: {
+      /** Enabled */
+      enabled: boolean
+      latest_sync:
+        components["schemas"]["AnalystViewpointExecutionResponse"] | null
+      /**
+       * Today
+       * Format: date
+       */
+      today: string
+      /** Viewpoints */
+      viewpoints: components["schemas"]["AnalystViewpointResponse"][]
+    }
     /** AuditEventResponse */
     AuditEventResponse: {
       /** Action */
@@ -1548,6 +1684,18 @@ export interface components {
       /** Unit Code */
       unit_code: string
     }
+    /** SyncMarketStatus */
+    SyncMarketStatus: {
+      /** Market Code */
+      market_code: string
+      /** Source Market Code */
+      source_market_code: string
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "updated" | "missing" | "stale"
+    }
     /**
      * SystemRole
      * @enum {string}
@@ -1635,6 +1783,57 @@ export interface components {
 }
 export type $defs = Record<string, never>
 export interface operations {
+  get_sync_status_api_admin_analyst_viewpoints_status_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["AnalystViewpointSyncStatusResponse"]
+        }
+      }
+    }
+  }
+  manually_sync_api_admin_analyst_viewpoints_sync_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["AnalystViewpointSyncResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
   list_audit_events_api_admin_audit_events_get: {
     parameters: {
       query?: {
@@ -2389,6 +2588,26 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  get_today_viewpoints_api_analyst_viewpoints_today_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["AnalystViewpointResponse"][]
         }
       }
     }

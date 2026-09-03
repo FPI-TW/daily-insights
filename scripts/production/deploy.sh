@@ -22,6 +22,7 @@ DAILY_INSIGHTS_SESSION_SECRET
 DAILY_INSIGHTS_PASSWORD_PEPPER
 DAILY_INSIGHTS_MORNING_REPORTS_ENABLED
 DAILY_INSIGHTS_DAILY_NEWS_ENABLED
+DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED
 DAILY_INSIGHTS_R2_ENDPOINT_URL
 DAILY_INSIGHTS_R2_BUCKET_NAME
 DAILY_INSIGHTS_R2_ACCESS_KEY_ID
@@ -68,6 +69,32 @@ if [ "$DAILY_INSIGHTS_DAILY_NEWS_ENABLED" = true ] &&
   exit 1
 fi
 
+case "$DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED" in
+  true | false) ;;
+  *)
+    echo "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED must be true or false" >&2
+    exit 1
+    ;;
+esac
+
+if [ "$DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED" = true ]; then
+  for name in \
+    DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL \
+    DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY \
+    DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS; do
+    if [ -z "$(printenv "$name" 2>/dev/null || true)" ]; then
+      echo "enabled analyst viewpoints require deployment environment: $name" >&2
+      exit 1
+    fi
+  done
+  if ! printf '%s\n' "$DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS" |
+    grep -Eq '^[0-9]+([.][0-9]+)?$' ||
+    ! awk -v timeout="$DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS" 'BEGIN { exit !(timeout > 0 && timeout <= 120) }'; then
+    echo "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS must be greater than 0 and at most 120" >&2
+    exit 1
+  fi
+fi
+
 for name in API_IMAGE WEB_IMAGE; do
   value=$(printenv "$name")
   if ! printf '%s\n' "$value" |
@@ -92,7 +119,7 @@ compose up -d --no-build --force-recreate --no-deps nginx
 # previous application version during rollout.
 compose run --rm --no-deps api alembic upgrade head
 
-if ! compose up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler; then
+if ! compose up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler; then
   "$script_dir/diagnose.sh" >&2
   exit 1
 fi
