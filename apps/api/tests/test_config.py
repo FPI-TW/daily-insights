@@ -73,6 +73,25 @@ def test_morning_reports_accept_valid_twelve_data_configuration() -> None:
     assert settings.morning_reports_enabled is True
 
 
+def test_analyst_viewpoints_require_a_valid_https_endpoint_and_key() -> None:
+    settings = Settings.model_validate(
+        production_settings(
+            analyst_viewpoints_enabled=True,
+            analyst_viewpoints_base_url="https://analyst.example.invalid",
+            analyst_viewpoints_api_key=SecretStr("analyst-viewpoints-production-key"),
+        )
+    )
+    assert settings.analyst_viewpoints_enabled is True
+
+    with pytest.raises(ValidationError, match="analyst_viewpoints_api_key"):
+        Settings.model_validate(
+            production_settings(
+                analyst_viewpoints_enabled=True,
+                analyst_viewpoints_api_key=SecretStr(""),
+            )
+        )
+
+
 @pytest.mark.parametrize("key", ["", "   \t"])
 def test_enabled_morning_reports_rejects_an_unusable_provider_key(key: str) -> None:
     with pytest.raises(ValidationError, match="twelve_data_api_key is required"):

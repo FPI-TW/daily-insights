@@ -35,8 +35,12 @@ describe("provisional reports adapter", () => {
     ).resolves.toBeUndefined()
   })
 
-  it("navigates the launch markets plus Taiwan, and publishes news for Taiwan and US", () => {
-    expect(navMarketCodes).toEqual([...launchMarketCodes, "tw_equity"])
+  it("navigates the visible markets and publishes news for Taiwan and US", () => {
+    expect(navMarketCodes).toEqual([
+      "global_macro_bonds",
+      "us_equity",
+      "tw_equity",
+    ])
     expect(newsMarketCodes).toEqual(["tw_equity", "us_equity"])
     expect(isNewsMarketCode("tw_equity")).toBe(true)
     expect(isNewsMarketCode("crypto")).toBe(false)

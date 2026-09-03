@@ -11,18 +11,15 @@ import {
   ReportDetail,
   ReportErrorScreen,
   ReportList,
-  ReportShell,
   ReportLoadingScreen,
   ReportNotGeneratedScreen,
   ReportNotLaunchedScreen,
+  ReportShell,
 } from "./Reports"
 import { LocaleSwitcher } from "./LocaleSwitcher"
 import { createI18n } from "#/lib/i18n"
 import type { ProvisionalReport } from "#/lib/provisional-reports"
-import {
-  getProvisionalReport,
-  getProvisionalReportList,
-} from "#/test/report-fixtures"
+import { getProvisionalReport } from "#/test/report-fixtures"
 
 const invalidate = vi.fn()
 let renderClientOnlyFallback = false
@@ -72,27 +69,67 @@ async function renderLocalized(
 }
 
 describe("three-market report presentation", () => {
-  it("lists the three launch markets plus the Taiwan news tab and keeps Taiwan derivatives out", async () => {
-    const reports = await getProvisionalReportList()
+  it("lists the visible market tabs without crypto or Taiwan derivatives", async () => {
     await renderLocalized(
       <ReportShell locale="en">
-        <ReportList locale="en" reports={reports} />
+        <ReportList />
       </ReportShell>,
       "en"
     )
     const links = screen.getByRole("navigation").querySelectorAll("a")
-    expect(links).toHaveLength(5)
-    expect(links[4]).toHaveTextContent("Taiwan equities")
+    expect(links).toHaveLength(4)
+    expect(links[1]).toHaveTextContent("Macro analysis")
+    expect(links[3]).toHaveTextContent("Taiwan equities")
+    expect(screen.queryByText("Crypto")).not.toBeInTheDocument()
     expect(screen.queryByText(/derivatives/i)).not.toBeInTheDocument()
-    // Report cards still come only from the API launch list.
-    expect(screen.getAllByRole("article")).toHaveLength(3)
+  })
+
+  it("shows tab-visible analyst viewpoints in navigation order", async () => {
+    await renderLocalized(
+      <ReportShell locale="en">
+        <ReportList
+          viewpoints={[
+            {
+              viewpoint_date: "2026-09-02",
+              market_code: "global_macro_bonds",
+              source_market_code: "us_macro",
+              points: ["Bond yields remain range-bound."],
+              fetched_at: "2026-09-02T08:00:00+08:00",
+            },
+            {
+              viewpoint_date: "2026-09-02",
+              market_code: "crypto",
+              source_market_code: "crypto",
+              points: ["Crypto is intentionally hidden from the current tabs."],
+              fetched_at: "2026-09-02T08:00:00+08:00",
+            },
+            {
+              viewpoint_date: "2026-09-02",
+              market_code: "tw_equity",
+              source_market_code: "tw_stocks",
+              points: ["Taiwan breadth is improving."],
+              fetched_at: "2026-09-02T08:00:00+08:00",
+            },
+          ]}
+        />
+      </ReportShell>,
+      "en"
+    )
+
+    const navigation = screen.getByRole("navigation")
+    const section = screen.getByRole("region", { name: "Analyst viewpoints" })
+    expect(navigation.compareDocumentPosition(section)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
+    expect(section).toHaveTextContent("Global macro")
+    expect(section).toHaveTextContent("Taiwan equities")
+    expect(section).not.toHaveTextContent("US equities")
+    expect(section).not.toHaveTextContent("Crypto")
   })
 
   it("renders the not-launched state for a navigable market without a report", async () => {
     await renderLocalized(
-      <ReportShell locale="en" activeMarket="tw_equity">
-        <ReportNotLaunchedScreen />
-      </ReportShell>,
+      <ReportNotLaunchedScreen locale="en" marketCode="tw_equity" />,
       "en"
     )
     expect(screen.getByRole("status")).toHaveTextContent(
@@ -108,7 +145,7 @@ describe("three-market report presentation", () => {
 
     renderClientOnlyFallback = true
     try {
-      await renderLocalized(<ReportDetail report={crypto} />, "en")
+      await renderLocalized(<ReportDetail locale="en" report={crypto} />, "en")
 
       const fallback = screen.getByRole("status", {
         name: "Textual chart data summary",
@@ -154,7 +191,7 @@ describe("three-market report presentation", () => {
         },
       ],
     } satisfies ProvisionalReport
-    await renderLocalized(<ReportDetail report={report} />, "en")
+    await renderLocalized(<ReportDetail locale="en" report={report} />, "en")
     const chart = screen.getByTestId("chart")
     expect(chart).toHaveTextContent('"name":"BTC"')
     expect(chart).toHaveTextContent('"name":"ETH"')
@@ -212,7 +249,10 @@ describe("three-market report presentation", () => {
         ],
       } satisfies ProvisionalReport
 
-      await renderLocalized(<ReportDetail report={report} />, locale)
+      await renderLocalized(
+        <ReportDetail locale={locale} report={report} />,
+        locale
+      )
 
       const chart = screen.getByTestId("chart")
       expect(screen.getByRole("heading", { name: title })).toBeVisible()
@@ -276,7 +316,10 @@ describe("three-market report presentation", () => {
         ],
       } satisfies ProvisionalReport
 
-      await renderLocalized(<ReportDetail report={report} />, locale)
+      await renderLocalized(
+        <ReportDetail locale={locale} report={report} />,
+        locale
+      )
       expect(screen.getByRole("heading", { name: title })).toBeVisible()
       const chart = screen.getByTestId("chart")
       expect(chart).toHaveTextContent('"name":"BRENT"')
@@ -326,7 +369,7 @@ describe("three-market report presentation", () => {
       ],
     } satisfies ProvisionalReport
 
-    await renderLocalized(<ReportDetail report={report} />, "en")
+    await renderLocalized(<ReportDetail locale="en" report={report} />, "en")
 
     const chart = screen.getByTestId("chart")
     expect(chart).toHaveTextContent(
@@ -352,9 +395,9 @@ describe("three-market report presentation", () => {
 
       await renderLocalized(
         <>
-          <ReportDetail report={crypto} />
-          <ReportDetail report={taiwan} />
-          <ReportDetail report={usEquity} />
+          <ReportDetail locale={locale} report={crypto} />
+          <ReportDetail locale={locale} report={taiwan} />
+          <ReportDetail locale={locale} report={usEquity} />
         </>,
         locale
       )
@@ -394,7 +437,7 @@ describe("three-market report presentation", () => {
       ],
     } satisfies ProvisionalReport
 
-    await renderLocalized(<ReportDetail report={report} />, "en")
+    await renderLocalized(<ReportDetail locale="en" report={report} />, "en")
 
     expect(screen.getByText("TAIEX").parentElement).toHaveTextContent(
       "TAIEX22,184—"
@@ -408,7 +451,7 @@ describe("three-market report presentation", () => {
     const crypto = await getProvisionalReport("crypto")
     if (!crypto) throw new Error("Expected crypto fixture")
 
-    await renderLocalized(<ReportDetail report={crypto} />, "en")
+    await renderLocalized(<ReportDetail locale="en" report={crypto} />, "en")
 
     expect(
       screen.getByText("This section has not been generated yet.")
@@ -428,7 +471,7 @@ describe("three-market report presentation", () => {
     root.style.setProperty("--lagoon", "rgb(34, 184, 207)")
 
     try {
-      await renderLocalized(<ReportDetail report={crypto} />, "en")
+      await renderLocalized(<ReportDetail locale="en" report={crypto} />, "en")
       const chart = screen.getByTestId("chart")
       await waitFor(() =>
         expect(chart).toHaveTextContent('"color":["rgb(23, 105, 224)"')
@@ -454,8 +497,8 @@ describe("three-market report presentation", () => {
 
     await renderLocalized(
       <>
-        <ReportDetail report={complete} />
-        <ReportDetail report={unavailable} />
+        <ReportDetail locale="en" report={complete} />
+        <ReportDetail locale="en" report={unavailable} />
       </>
     )
 
@@ -468,12 +511,12 @@ describe("three-market report presentation", () => {
     )
   })
 
-  it("announces loading and presents localized empty and route-error states", async () => {
+  it("announces loading and presents a route-error state", async () => {
     invalidate.mockClear()
     await renderLocalized(
       <>
         <ReportLoadingScreen />
-        <ReportList locale="en" reports={[]} />
+        <ReportList locale="en" />
         <ReportErrorScreen error={new Error("fixture failure")} />
       </>
     )
@@ -481,7 +524,7 @@ describe("three-market report presentation", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "正在載入市場晨間報告。"
     )
-    expect(screen.getByText("目前沒有晨間報告")).toBeVisible()
+    expect(screen.queryByText("目前沒有晨間報告")).not.toBeInTheDocument()
     expect(screen.getByRole("alert")).toHaveTextContent("無法載入晨間報告")
     fireEvent.click(screen.getByRole("button", { name: "重試" }))
     expect(invalidate).toHaveBeenCalledOnce()
@@ -495,9 +538,7 @@ describe("three-market report presentation", () => {
     "presents a minimal non-error state in %s when publication is absent",
     async (locale, placeholder) => {
       await renderLocalized(
-        <ReportShell locale={locale} activeMarket="us_equity">
-          <ReportNotGeneratedScreen />
-        </ReportShell>,
+        <ReportNotGeneratedScreen locale={locale} marketCode="us_equity" />,
         locale
       )
 

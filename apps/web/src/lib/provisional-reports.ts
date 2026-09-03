@@ -5,10 +5,14 @@ export const launchMarketCodes = [
 ] as const
 // Markets with a report page in navigation. Taiwan equities has no launched
 // report yet; its page shows the not-launched state plus Taiwan market news.
-export const navMarketCodes = [...launchMarketCodes, "tw_equity"] as const
+export const navMarketCodes = [
+  "global_macro_bonds",
+  "us_equity",
+  "tw_equity",
+] as const
 // Markets that publish their own daily news edition.
 export const newsMarketCodes = ["tw_equity", "us_equity"] as const
-export const marketCodes = navMarketCodes
+export const marketCodes = [...launchMarketCodes, "tw_equity"] as const
 
 export type MarketCode = (typeof marketCodes)[number]
 export type NewsMarketCode = (typeof newsMarketCodes)[number]

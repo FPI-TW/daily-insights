@@ -19,18 +19,18 @@ test("customer login opens reports, then a market detail without mobile overflow
   await page.getByLabel("Password").fill(customerCredentials.password)
   await page.getByRole("button", { name: "Sign in" }).click()
   await expect(page).toHaveURL("/en/reports")
-  await expect(
-    page.getByText(
-      "Official data is supplied by Twelve Data; gaps are shown explicitly at block level."
-    )
-  ).toBeVisible()
-  await page.getByRole("link", { name: "View details" }).first().click()
+  await page
+    .getByRole("navigation", { name: "Market category navigation" })
+    .getByRole("link", { name: "Macro analysis" })
+    .click()
   await expect(page).toHaveURL("/en/reports/global_macro_bonds")
   await expect(
-    page.getByRole("heading", { name: "Global macro & bonds" })
+    page.getByRole("heading", { name: "Global macro" })
   ).toBeVisible()
   await expect(
-    page.getByRole("heading", { name: "Brent and gold normalized performance" })
+    page.getByRole("heading", {
+      name: "Brent and gold normalized performance",
+    })
   ).toBeVisible()
   await page.setViewportSize({ width: 375, height: 720 })
   await expect

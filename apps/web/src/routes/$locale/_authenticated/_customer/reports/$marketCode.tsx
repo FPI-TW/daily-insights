@@ -68,6 +68,7 @@ export const Route = createFileRoute(
 
 function ReportPage() {
   const { report, news } = Route.useLoaderData()
+  const { locale } = Route.useRouteContext()
   useChatPageContext(
     report.kind === "report" && report.report.publicationId
       ? { kind: "report_detail", publication_id: report.report.publicationId }
@@ -76,11 +77,17 @@ function ReportPage() {
   return (
     <>
       {report.kind === "not-generated" ? (
-        <ReportNotGeneratedScreen />
+        <ReportNotGeneratedScreen
+          locale={locale}
+          marketCode={report.marketCode}
+        />
       ) : report.kind === "not-launched" ? (
-        <ReportNotLaunchedScreen />
+        <ReportNotLaunchedScreen
+          locale={locale}
+          marketCode={report.marketCode}
+        />
       ) : (
-        <ReportDetail report={report.report} />
+        <ReportDetail locale={locale} report={report.report} />
       )}
       {news ? (
         <DailyNews

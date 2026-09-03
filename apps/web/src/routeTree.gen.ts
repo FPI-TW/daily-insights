@@ -24,6 +24,7 @@ import { Route as LocaleAuthenticatedCustomerAccountRouteImport } from './routes
 import { Route as LocaleAuthenticatedCustomerPodcastsRouteImport } from './routes/$locale/_authenticated/_customer/podcasts'
 import { Route as LocaleAuthenticatedCustomerReportsRouteImport } from './routes/$locale/_authenticated/_customer/reports'
 import { Route as LocaleAuthenticatedBackOfficePodcastsRouteImport } from './routes/$locale/_authenticated/back-office/podcasts'
+import { Route as LocaleAuthenticatedAdminAdminAnalystViewpointsRouteImport } from './routes/$locale/_authenticated/_admin/admin/analyst-viewpoints'
 import { Route as LocaleAuthenticatedAdminAdminAudioRouteImport } from './routes/$locale/_authenticated/_admin/admin/audio'
 import { Route as LocaleAuthenticatedAdminAdminMembersRouteImport } from './routes/$locale/_authenticated/_admin/admin/members'
 import { Route as LocaleAuthenticatedCustomerPodcastsIndexRouteImport } from './routes/$locale/_authenticated/_customer/podcasts/index'
@@ -113,6 +114,12 @@ const LocaleAuthenticatedBackOfficePodcastsRoute =
     path: '/podcasts',
     getParentRoute: () => LocaleAuthenticatedBackOfficeRoute,
   } as any)
+const LocaleAuthenticatedAdminAdminAnalystViewpointsRoute =
+  LocaleAuthenticatedAdminAdminAnalystViewpointsRouteImport.update({
+    id: '/admin/analyst-viewpoints',
+    path: '/admin/analyst-viewpoints',
+    getParentRoute: () => LocaleAuthenticatedAdminRoute,
+  } as any)
 const LocaleAuthenticatedAdminAdminAudioRoute =
   LocaleAuthenticatedAdminAdminAudioRouteImport.update({
     id: '/admin/audio',
@@ -175,6 +182,7 @@ export interface FileRoutesByFullPath {
   '/$locale/podcasts': typeof LocaleAuthenticatedCustomerPodcastsRouteWithChildren
   '/$locale/reports': typeof LocaleAuthenticatedCustomerReportsRouteWithChildren
   '/$locale/back-office/podcasts': typeof LocaleAuthenticatedBackOfficePodcastsRoute
+  '/$locale/admin/analyst-viewpoints': typeof LocaleAuthenticatedAdminAdminAnalystViewpointsRoute
   '/$locale/admin/audio': typeof LocaleAuthenticatedAdminAdminAudioRoute
   '/$locale/admin/members': typeof LocaleAuthenticatedAdminAdminMembersRoute
   '/$locale/podcasts/$episodeId': typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
@@ -194,6 +202,7 @@ export interface FileRoutesByTo {
   '/$locale/admin/login': typeof LocaleAdminLoginRoute
   '/$locale/account': typeof LocaleAuthenticatedCustomerAccountRoute
   '/$locale/back-office/podcasts': typeof LocaleAuthenticatedBackOfficePodcastsRoute
+  '/$locale/admin/analyst-viewpoints': typeof LocaleAuthenticatedAdminAdminAnalystViewpointsRoute
   '/$locale/admin/audio': typeof LocaleAuthenticatedAdminAdminAudioRoute
   '/$locale/admin/members': typeof LocaleAuthenticatedAdminAdminMembersRoute
   '/$locale/podcasts/$episodeId': typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
@@ -220,6 +229,7 @@ export interface FileRoutesById {
   '/$locale/_authenticated/_customer/podcasts': typeof LocaleAuthenticatedCustomerPodcastsRouteWithChildren
   '/$locale/_authenticated/_customer/reports': typeof LocaleAuthenticatedCustomerReportsRouteWithChildren
   '/$locale/_authenticated/back-office/podcasts': typeof LocaleAuthenticatedBackOfficePodcastsRoute
+  '/$locale/_authenticated/_admin/admin/analyst-viewpoints': typeof LocaleAuthenticatedAdminAdminAnalystViewpointsRoute
   '/$locale/_authenticated/_admin/admin/audio': typeof LocaleAuthenticatedAdminAdminAudioRoute
   '/$locale/_authenticated/_admin/admin/members': typeof LocaleAuthenticatedAdminAdminMembersRoute
   '/$locale/_authenticated/_customer/podcasts/$episodeId': typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
@@ -244,6 +254,7 @@ export interface FileRouteTypes {
     | '/$locale/podcasts'
     | '/$locale/reports'
     | '/$locale/back-office/podcasts'
+    | '/$locale/admin/analyst-viewpoints'
     | '/$locale/admin/audio'
     | '/$locale/admin/members'
     | '/$locale/podcasts/$episodeId'
@@ -263,6 +274,7 @@ export interface FileRouteTypes {
     | '/$locale/admin/login'
     | '/$locale/account'
     | '/$locale/back-office/podcasts'
+    | '/$locale/admin/analyst-viewpoints'
     | '/$locale/admin/audio'
     | '/$locale/admin/members'
     | '/$locale/podcasts/$episodeId'
@@ -288,6 +300,7 @@ export interface FileRouteTypes {
     | '/$locale/_authenticated/_customer/podcasts'
     | '/$locale/_authenticated/_customer/reports'
     | '/$locale/_authenticated/back-office/podcasts'
+    | '/$locale/_authenticated/_admin/admin/analyst-viewpoints'
     | '/$locale/_authenticated/_admin/admin/audio'
     | '/$locale/_authenticated/_admin/admin/members'
     | '/$locale/_authenticated/_customer/podcasts/$episodeId'
@@ -410,6 +423,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LocaleAuthenticatedBackOfficePodcastsRouteImport
       parentRoute: typeof LocaleAuthenticatedBackOfficeRoute
     }
+    '/$locale/_authenticated/_admin/admin/analyst-viewpoints': {
+      id: '/$locale/_authenticated/_admin/admin/analyst-viewpoints'
+      path: '/admin/analyst-viewpoints'
+      fullPath: '/$locale/admin/analyst-viewpoints'
+      preLoaderRoute: typeof LocaleAuthenticatedAdminAdminAnalystViewpointsRouteImport
+      parentRoute: typeof LocaleAuthenticatedAdminRoute
+    }
     '/$locale/_authenticated/_admin/admin/audio': {
       id: '/$locale/_authenticated/_admin/admin/audio'
       path: '/admin/audio'
@@ -470,6 +490,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface LocaleAuthenticatedAdminRouteChildren {
+  LocaleAuthenticatedAdminAdminAnalystViewpointsRoute: typeof LocaleAuthenticatedAdminAdminAnalystViewpointsRoute
   LocaleAuthenticatedAdminAdminAudioRoute: typeof LocaleAuthenticatedAdminAdminAudioRoute
   LocaleAuthenticatedAdminAdminMembersRoute: typeof LocaleAuthenticatedAdminAdminMembersRoute
   LocaleAuthenticatedAdminAdminConversationsConversationIdRoute: typeof LocaleAuthenticatedAdminAdminConversationsConversationIdRoute
@@ -478,6 +499,8 @@ interface LocaleAuthenticatedAdminRouteChildren {
 
 const LocaleAuthenticatedAdminRouteChildren: LocaleAuthenticatedAdminRouteChildren =
   {
+    LocaleAuthenticatedAdminAdminAnalystViewpointsRoute:
+      LocaleAuthenticatedAdminAdminAnalystViewpointsRoute,
     LocaleAuthenticatedAdminAdminAudioRoute:
       LocaleAuthenticatedAdminAdminAudioRoute,
     LocaleAuthenticatedAdminAdminMembersRoute:

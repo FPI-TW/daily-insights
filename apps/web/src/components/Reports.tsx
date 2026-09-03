@@ -3,7 +3,7 @@ import ReactECharts from "echarts-for-react"
 import { motion } from "motion/react"
 import { useEffect, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import type { Locale } from "@daily-insights/api-client"
+import type { AnalystViewpoint, Locale } from "@daily-insights/api-client"
 import {
   type MarketCode,
   navMarketCodes,
@@ -11,13 +11,7 @@ import {
   type ReportBlock,
   type ReportValue,
 } from "#/lib/provisional-reports"
-import {
-  fadeIn,
-  hoverLift,
-  reveal,
-  springs,
-  useEnterAnimation,
-} from "#/lib/motion"
+import { fadeIn, reveal, useEnterAnimation } from "#/lib/motion"
 import { ActiveIndicator } from "./ActiveIndicator"
 
 function valueText(value: ReportValue | null, t: (key: string) => string) {
@@ -64,7 +58,7 @@ function ReportMarketNav({
     `shrink-0 border-b-2 border-transparent px-4 py-3 text-xs font-extrabold no-underline transition-colors ${active ? "text-lagoon" : "text-sea-ink-soft hover:text-sea-ink"}`
   return (
     <nav
-      className="relative isolate mb-6 flex overflow-x-auto border-y border-line bg-surface [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [view-transition-name:report-market-nav]"
+      className="relative isolate mb-6 flex overflow-x-auto border-y border-line bg-surface scrollbar-none [&::-webkit-scrollbar]:hidden [view-transition-name:report-market-nav]"
       aria-label={t("reportMarketNav")}
     >
       <ActiveIndicator
@@ -74,8 +68,6 @@ function ReportMarketNav({
       <Link
         to="/$locale/reports"
         params={{ locale }}
-        // Exact: the list route is a prefix of every market route, and the
-        // marker follows whichever link carries aria-current.
         activeOptions={{ exact: true }}
         className={linkClass(activeMarket === undefined)}
       >
@@ -101,14 +93,11 @@ function PageHeading({ title }: { title: string }) {
       <h1 className="m-0 text-[30px] leading-tight font-extrabold tracking-[-0.035em] text-sea-ink max-sm:text-[26px]">
         {title}
       </h1>
-      <div className="mt-3 h-[3px] w-[54px] bg-lagoon" />
+      <div className="mt-3 h-0.75 w-13.5 bg-lagoon" />
     </header>
   )
 }
 
-// Persistent frame for every reports route: the heading and market nav stay
-// mounted while the list, a market detail, a skeleton or an error swaps
-// underneath, so the nav's active marker slides instead of remounting.
 export function ReportShell({
   locale,
   activeMarket,
@@ -133,72 +122,95 @@ export function ReportShell({
 }
 
 export function ReportList({
-  locale,
-  reports,
+  locale: _locale,
+  viewpoints = [],
 }: {
-  locale: Locale
-  reports: ReadonlyArray<ProvisionalReport>
+  locale?: Locale
+  viewpoints?: ReadonlyArray<AnalystViewpoint>
 }) {
+  return <AnalystViewpoints viewpoints={viewpoints} />
+}
+
+export function AnalystViewpointsLoading() {
   const { t } = useTranslation()
-  const animate = useEnterAnimation()
   return (
-    <>
-      {reports.length === 0 ? (
-        <section className="surface-panel p-10 text-center">
-          <h2 className="mt-0 text-xl">{t("reportsEmptyTitle")}</h2>
-          <p className="mb-0 text-sm text-sea-ink-soft">
-            {t("reportsEmptyDescription")}
-          </p>
-        </section>
-      ) : (
-        <section
-          className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
-          aria-label={t("reportsTitle")}
-        >
-          {reports.map((report, index) => (
-            <motion.article
-              key={report.marketCode}
-              className="surface-panel flex min-w-0 flex-col p-5 transition-shadow hover:shadow-[0_16px_34px_rgb(14_20_19/9%)]"
-              {...reveal(animate, index)}
-              whileHover={hoverLift}
-              transition={springs.snappy}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="m-0 text-[11px] font-bold tracking-[0.08em] text-sea-ink-soft uppercase">
-                    {t(`reportMarketShort_${report.marketCode}`)}
-                  </p>
-                  <h2 className="mt-2 mb-0 text-xl font-extrabold tracking-[-0.025em] text-sea-ink">
-                    {t(`reportMarket_${report.marketCode}`)}
-                  </h2>
-                </div>
-              </div>
-              <dl className="border-y border-line py-3 text-xs">
-                <div>
-                  <dt className="text-sea-ink-soft">
-                    {t("reportEditionDate")}
-                  </dt>
-                  <dd className="mt-1 font-mono font-semibold text-sea-ink tabular-nums">
-                    {report.editionDate}
-                  </dd>
-                </div>
-              </dl>
-              <Link
-                to="/$locale/reports/$marketCode"
-                params={{ locale, marketCode: report.marketCode }}
-                className="mt-5 inline-flex w-fit items-center border-b border-lagoon pb-1 text-sm font-extrabold text-lagoon no-underline transition-colors hover:text-palm"
-              >
-                {t("reportViewDetails")}
-              </Link>
-            </motion.article>
-          ))}
-        </section>
-      )}
-    </>
+    <section
+      className="mb-6 animate-pulse rounded-[13px] border border-line bg-surface p-5"
+      aria-live="polite"
+      aria-label={t("analystViewpointsLoading")}
+    >
+      <p className="sr-only">{t("analystViewpointsLoading")}</p>
+      <div className="h-4 w-40 rounded bg-line" />
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        {navMarketCodes.map(marketCode => (
+          <div className="h-20 rounded bg-line" key={marketCode} />
+        ))}
+      </div>
+    </section>
   )
 }
 
-export function ReportDetail({ report }: { report: ProvisionalReport }) {
+function AnalystViewpoints({
+  viewpoints,
+}: {
+  viewpoints: ReadonlyArray<AnalystViewpoint>
+}) {
+  const { t } = useTranslation()
+  const viewpointsByMarket = new Map(
+    viewpoints.map(viewpoint => [viewpoint.market_code, viewpoint])
+  )
+  const visibleViewpoints = navMarketCodes.flatMap(marketCode => {
+    const viewpoint = viewpointsByMarket.get(marketCode)
+    return viewpoint ? [viewpoint] : []
+  })
+  const latest = visibleViewpoints[0]
+  if (!latest) return null
+  return (
+    <section className="mb-6" aria-labelledby="analyst-viewpoints-title">
+      <div className="mb-3 flex items-baseline justify-between gap-4">
+        <h2
+          id="analyst-viewpoints-title"
+          className="m-0 text-lg font-extrabold tracking-[-0.02em] text-sea-ink"
+        >
+          {t("analystViewpointsTitle")}
+        </h2>
+        <p className="m-0 text-xs text-sea-ink-soft">
+          {t("analystViewpointsUpdated", {
+            timestamp: new Intl.DateTimeFormat(undefined, {
+              dateStyle: "medium",
+              timeStyle: "short",
+            }).format(new Date(latest.fetched_at)),
+          })}
+        </p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        {visibleViewpoints.map(viewpoint => (
+          <article
+            key={viewpoint.market_code}
+            className="surface-panel border-t-[3px] border-t-lagoon p-4"
+          >
+            <h3 className="m-0 text-sm font-extrabold text-sea-ink">
+              {t(`reportMarket_${viewpoint.market_code}`)}
+            </h3>
+            <ul className="mt-3 mb-0 grid list-disc gap-2 pl-5 text-sm leading-6 text-sea-ink-soft">
+              {viewpoint.points.map(point => (
+                <li key={point}>{point}</li>
+              ))}
+            </ul>
+          </article>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+export function ReportDetail({
+  locale: _locale,
+  report,
+}: {
+  locale?: Locale
+  report: ProvisionalReport
+}) {
   return (
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">
       {report.blocks.map((block, index) => (
@@ -349,7 +361,7 @@ function ReportBlockView({
       ) : null}
       {block.status === "ok" && block.kind === "table" ? (
         <div className="min-w-0 max-w-full overflow-x-auto border-y border-line">
-          <table className="w-full min-w-[480px] text-sm">
+          <table className="w-full min-w-120 text-sm">
             <thead className="bg-link-hover text-xs text-sea-ink-soft">
               <tr>
                 {block.columns.map((column, index) => (
@@ -515,48 +527,70 @@ export function ReportErrorScreen({ error }: { error: Error }) {
   const { t } = useTranslation()
   const router = useRouter()
   return (
-    <section
-      className="surface-panel border-market-up/35 p-10 text-center"
-      role="alert"
-    >
-      <h2 className="mt-0 text-2xl">{t("reportsErrorTitle")}</h2>
-      <p className="mx-auto max-w-xl text-sea-ink-soft">
-        {t("reportsErrorDescription")}
-      </p>
-      <button type="button" onClick={() => void router.invalidate()}>
-        {t("retry")}
-      </button>
-    </section>
+    <main className="page-shell">
+      <section
+        className="surface-panel border-market-up/35 p-10 text-center"
+        role="alert"
+      >
+        <h1 className="mt-0 text-2xl">{t("reportsErrorTitle")}</h1>
+        <p className="mx-auto max-w-xl text-sea-ink-soft">
+          {t("reportsErrorDescription")}
+        </p>
+        <button type="button" onClick={() => void router.invalidate()}>
+          {t("retry")}
+        </button>
+      </section>
+    </main>
   )
 }
 
-export function ReportNotLaunchedScreen() {
+export function ReportNotLaunchedScreen({
+  locale,
+  marketCode,
+}: {
+  locale: Locale
+  marketCode: MarketCode
+}) {
   const { t } = useTranslation()
   return (
-    <section
-      className="surface-panel p-10 text-center"
-      role="status"
-      aria-live="polite"
-    >
-      <h2 className="mt-0 text-xl">{t("reportNotLaunchedTitle")}</h2>
-      <p className="mb-0 text-sm text-sea-ink-soft">
-        {t("reportNotLaunchedDescription")}
-      </p>
-    </section>
+    <main className="page-shell">
+      <PageHeading title={t(`reportMarket_${marketCode}`)} />
+      <ReportMarketNav locale={locale} activeMarket={marketCode} />
+      <section
+        className="surface-panel p-10 text-center"
+        role="status"
+        aria-live="polite"
+      >
+        <h2 className="mt-0 text-xl">{t("reportNotLaunchedTitle")}</h2>
+        <p className="mb-0 text-sm text-sea-ink-soft">
+          {t("reportNotLaunchedDescription")}
+        </p>
+      </section>
+    </main>
   )
 }
 
-export function ReportNotGeneratedScreen() {
+export function ReportNotGeneratedScreen({
+  locale,
+  marketCode,
+}: {
+  locale: Locale
+  marketCode: MarketCode
+}) {
   const { t } = useTranslation()
   return (
-    <section
-      className="surface-panel border-market-caution/35 p-10 text-center"
-      role="status"
-      aria-live="polite"
-    >
-      <p className="m-0 text-sm text-sea-ink-soft">
-        {t("reportBlockUnavailable")}
-      </p>
-    </section>
+    <main className="page-shell">
+      <PageHeading title={t(`reportMarket_${marketCode}`)} />
+      <ReportMarketNav locale={locale} activeMarket={marketCode} />
+      <section
+        className="surface-panel border-market-caution/35 p-10 text-center"
+        role="status"
+        aria-live="polite"
+      >
+        <p className="m-0 text-sm text-sea-ink-soft">
+          {t("reportBlockUnavailable")}
+        </p>
+      </section>
+    </main>
   )
 }
