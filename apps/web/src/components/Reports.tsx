@@ -305,6 +305,9 @@ function isBase100Series(
   )
 }
 
+const metricCellClass =
+  "min-w-0 border-t border-line py-3 first:border-t-0 sm:border-l sm:px-3 sm:nth-[-n+3]:border-t-0 sm:nth-[3n+1]:border-l-0 sm:nth-[3n+1]:pl-0 sm:nth-[3n]:pr-0"
+
 function ReportBlockView({
   block,
   index,
@@ -338,13 +341,11 @@ function ReportBlockView({
       ) : block.kind === "metric" ? (
         // Cells own their borders instead of using divide-*: with more metrics
         // than columns, divide-x draws a stray left edge on the row-leading
-        // cell and leaves no rule between the rows.
+        // cell and leaves no rule between the rows. Empty filler cells complete
+        // the last row so its rules run the full width of the block.
         <div className="grid min-w-0 border-y border-line sm:grid-cols-3">
           {block.metrics.map(item => (
-            <div
-              className="min-w-0 border-t border-line py-3 first:border-t-0 max-sm:first:pt-0 max-sm:last:pb-0 sm:border-l sm:px-3 sm:nth-[-n+3]:border-t-0 sm:nth-[3n+1]:border-l-0 sm:nth-[3n+1]:pl-0 sm:nth-[3n]:pr-0"
-              key={item.labelKey}
-            >
+            <div className={metricCellClass} key={item.labelKey}>
               <p className="m-0 text-xs text-sea-ink-soft">
                 {t(item.labelKey)}
               </p>
@@ -360,6 +361,16 @@ function ReportBlockView({
               ) : null}
             </div>
           ))}
+          {Array.from(
+            { length: (3 - (block.metrics.length % 3)) % 3 },
+            (_, filler) => (
+              <div
+                aria-hidden="true"
+                className={`${metricCellClass} max-sm:hidden`}
+                key={`filler-${filler}`}
+              />
+            )
+          )}
         </div>
       ) : null}
       {block.status === "ok" && block.kind === "table" ? (
