@@ -1,6 +1,171 @@
 {
   "components": {
     "schemas": {
+      "AnalystViewpointExecutionResponse": {
+        "properties": {
+          "completed_at": {
+            "format": "date-time",
+            "title": "Completed At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "markets": {
+            "items": {
+              "$ref": "#/components/schemas/SyncMarketStatus"
+            },
+            "title": "Markets",
+            "type": "array"
+          },
+          "status": {
+            "enum": ["complete", "partial", "failed"],
+            "title": "Status",
+            "type": "string"
+          },
+          "trigger": {
+            "enum": ["scheduler", "manual"],
+            "title": "Trigger",
+            "type": "string"
+          },
+          "viewpoint_date": {
+            "format": "date",
+            "title": "Viewpoint Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "viewpoint_date",
+          "trigger",
+          "status",
+          "fetched_at",
+          "completed_at",
+          "error_code",
+          "markets"
+        ],
+        "title": "AnalystViewpointExecutionResponse",
+        "type": "object"
+      },
+      "AnalystViewpointResponse": {
+        "properties": {
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "market_code": {
+            "title": "Market Code",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "source_market_code": {
+            "title": "Source Market Code",
+            "type": "string"
+          },
+          "viewpoint_date": {
+            "format": "date",
+            "title": "Viewpoint Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "viewpoint_date",
+          "market_code",
+          "source_market_code",
+          "points",
+          "fetched_at"
+        ],
+        "title": "AnalystViewpointResponse",
+        "type": "object"
+      },
+      "AnalystViewpointSyncResponse": {
+        "properties": {
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "markets": {
+            "items": {
+              "$ref": "#/components/schemas/SyncMarketStatus"
+            },
+            "title": "Markets",
+            "type": "array"
+          },
+          "status": {
+            "enum": ["complete", "partial"],
+            "title": "Status",
+            "type": "string"
+          },
+          "viewpoint_date": {
+            "format": "date",
+            "title": "Viewpoint Date",
+            "type": "string"
+          }
+        },
+        "required": ["viewpoint_date", "fetched_at", "status", "markets"],
+        "title": "AnalystViewpointSyncResponse",
+        "type": "object"
+      },
+      "AnalystViewpointSyncStatusResponse": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "latest_sync": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnalystViewpointExecutionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "today": {
+            "format": "date",
+            "title": "Today",
+            "type": "string"
+          },
+          "viewpoints": {
+            "items": {
+              "$ref": "#/components/schemas/AnalystViewpointResponse"
+            },
+            "title": "Viewpoints",
+            "type": "array"
+          }
+        },
+        "required": ["enabled", "today", "viewpoints", "latest_sync"],
+        "title": "AnalystViewpointSyncStatusResponse",
+        "type": "object"
+      },
       "AuditEventResponse": {
         "properties": {
           "action": {
@@ -2407,6 +2572,26 @@
         "title": "SeriesBlock",
         "type": "object"
       },
+      "SyncMarketStatus": {
+        "properties": {
+          "market_code": {
+            "title": "Market Code",
+            "type": "string"
+          },
+          "source_market_code": {
+            "title": "Source Market Code",
+            "type": "string"
+          },
+          "status": {
+            "enum": ["updated", "missing", "stale"],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": ["source_market_code", "market_code", "status"],
+        "title": "SyncMarketStatus",
+        "type": "object"
+      },
       "SystemRole": {
         "enum": ["admin", "asset_manager", "org_member"],
         "title": "SystemRole",
@@ -2639,6 +2824,72 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/admin/analyst-viewpoints/status": {
+      "get": {
+        "operationId": "get_sync_status_api_admin_analyst_viewpoints_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalystViewpointSyncStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Sync Status",
+        "tags": ["administration"]
+      }
+    },
+    "/api/admin/analyst-viewpoints/sync": {
+      "post": {
+        "operationId": "manually_sync_api_admin_analyst_viewpoints_sync_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalystViewpointSyncResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Manually Sync",
+        "tags": ["administration"]
+      }
+    },
     "/api/admin/audit-events": {
       "get": {
         "operationId": "list_audit_events_api_admin_audit_events_get",
@@ -3977,6 +4228,30 @@
         },
         "summary": "Admin Unpublish",
         "tags": ["podcasts"]
+      }
+    },
+    "/api/analyst-viewpoints/today": {
+      "get": {
+        "description": "Return only valid, visible viewpoints persisted for the current Taipei day.",
+        "operationId": "get_today_viewpoints_api_analyst_viewpoints_today_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AnalystViewpointResponse"
+                  },
+                  "title": "Response Get Today Viewpoints Api Analyst Viewpoints Today Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Today Viewpoints",
+        "tags": ["analyst viewpoints"]
       }
     },
     "/api/auth/change-password": {

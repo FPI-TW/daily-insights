@@ -28,6 +28,7 @@ async def test_readiness_reflects_database_state(ready: bool, expected_status: i
         "components": {
             "database": {"status": expected},
             "twelve_data_configuration": {"status": "ok"},
+            "analyst_viewpoints_configuration": {"status": "ok"},
             "daily_news_configuration": {"status": "ok"},
             "chat_configuration": {"status": "ok"},
             "r2_runtime": {"status": "ok"},
@@ -65,6 +66,7 @@ async def test_production_readiness_reports_initialized_external_boundaries() ->
     assert response.json()["components"] == {
         "database": {"status": "ok"},
         "twelve_data_configuration": {"status": "ok"},
+        "analyst_viewpoints_configuration": {"status": "ok"},
         "daily_news_configuration": {"status": "ok"},
         "chat_configuration": {"status": "ok"},
         "r2_runtime": {"status": "ok"},

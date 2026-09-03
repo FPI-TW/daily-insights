@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     twelve_data_retry_attempts: int = Field(default=3, ge=1, le=10)
     twelve_data_max_concurrency: int = Field(default=4, ge=1, le=20)
     morning_reports_enabled: bool = False
+    analyst_viewpoints_enabled: bool = False
+    analyst_viewpoints_base_url: str = "https://analyst-viewpoints.invalid"
+    analyst_viewpoints_api_key: SecretStr | None = None
+    analyst_viewpoints_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     daily_news_enabled: bool = False
     news_allowed_hostnames: str = (
         "www.reuters.com,apnews.com,www.bbc.com,www.cnbc.com,news.cnyes.com,finance.eastmoney.com"
@@ -121,6 +125,18 @@ class Settings(BaseSettings):
                 or is_placeholder_value(self.twelve_data_api_key.get_secret_value())
             ):
                 raise ValueError("twelve_data_api_key is required and cannot be a placeholder")
+        if self.analyst_viewpoints_enabled:
+            viewpoints_url = urlparse(self.analyst_viewpoints_base_url)
+            if viewpoints_url.scheme != "https" or not viewpoints_url.netloc:
+                raise ValueError("analyst_viewpoints_base_url must be an absolute HTTPS URL")
+            if (
+                self.analyst_viewpoints_api_key is None
+                or not self.analyst_viewpoints_api_key.get_secret_value().strip()
+                or is_placeholder_value(self.analyst_viewpoints_api_key.get_secret_value())
+            ):
+                raise ValueError(
+                    "analyst_viewpoints_api_key is required and cannot be a placeholder"
+                )
         if self.daily_news_enabled:
             model_url = urlparse(self.model_api_base_url)
             if (

@@ -118,6 +118,55 @@ export const reportDetailSchema = reportSummarySchema.extend({
 })
 export type ReportDetail = z.infer<typeof reportDetailSchema>
 
+export const analystViewpointSchema = z.object({
+  viewpoint_date: z.iso.date(),
+  market_code: z.enum([
+    "global_macro_bonds",
+    "crypto",
+    "us_equity",
+    "tw_equity",
+  ]),
+  source_market_code: z.enum(["us_macro", "crypto", "us_stocks", "tw_stocks"]),
+  points: z.array(z.string().min(1)),
+  fetched_at: z.iso.datetime({ offset: true }),
+})
+export type AnalystViewpoint = z.infer<typeof analystViewpointSchema>
+export const analystViewpointListSchema = z.array(analystViewpointSchema)
+
+export const analystViewpointSyncMarketStatusSchema = z.object({
+  source_market_code: z.enum(["us_macro", "crypto", "us_stocks", "tw_stocks"]),
+  market_code: analystViewpointSchema.shape.market_code,
+  status: z.enum(["updated", "missing", "stale"]),
+})
+export const analystViewpointSyncSchema = z.object({
+  viewpoint_date: z.iso.date(),
+  fetched_at: z.iso.datetime({ offset: true }),
+  status: z.enum(["complete", "partial"]),
+  markets: z.array(analystViewpointSyncMarketStatusSchema),
+})
+export type AnalystViewpointSync = z.infer<typeof analystViewpointSyncSchema>
+export const analystViewpointExecutionSchema = z.object({
+  viewpoint_date: z.iso.date(),
+  trigger: z.enum(["scheduler", "manual"]),
+  status: z.enum(["complete", "partial", "failed"]),
+  fetched_at: z.iso.datetime({ offset: true }).nullable(),
+  completed_at: z.iso.datetime({ offset: true }),
+  error_code: z.string().nullable(),
+  markets: z.array(analystViewpointSyncMarketStatusSchema),
+})
+export type AnalystViewpointExecution = z.infer<
+  typeof analystViewpointExecutionSchema
+>
+export const analystViewpointSyncStatusSchema = z.object({
+  enabled: z.boolean(),
+  today: z.iso.date(),
+  viewpoints: analystViewpointListSchema,
+  latest_sync: analystViewpointExecutionSchema.nullable(),
+})
+export type AnalystViewpointSyncStatus = z.infer<
+  typeof analystViewpointSyncStatusSchema
+>
+
 export const newsItemSchema = z.object({
   id: z.uuid(),
   rank: z.number().int().positive(),

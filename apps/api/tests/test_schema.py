@@ -12,6 +12,8 @@ from daily_insights_api.modules.markets.catalog import MARKETS
 
 EXPECTED_TABLES = {
     "active_model_configuration",
+    "analyst_viewpoints",
+    "analyst_viewpoint_sync_runs",
     "assets",
     "asset_migration_entries",
     "asset_migration_manifests",

@@ -14,9 +14,14 @@ SERVICES = (
     "nginx",
     "morning-report-scheduler",
     "daily-news-scheduler",
+    "analyst-viewpoints-scheduler",
 )
 API_ENVIRONMENT_KEYS = {
     "DAILY_INSIGHTS_DAILY_NEWS_ENABLED",
+    "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY",
+    "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL",
+    "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED",
+    "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS",
     "DAILY_INSIGHTS_DATABASE_URL",
     "DAILY_INSIGHTS_ENVIRONMENT",
     "DAILY_INSIGHTS_MODEL_API_BASE_URL",
@@ -52,7 +57,7 @@ def main() -> None:
     services = model.get("services", {})
     require(
         set(services) == set(SERVICES),
-        "production Compose must contain api/web/nginx and both gated schedulers",
+        "production Compose must contain api/web/nginx and all gated schedulers",
     )
 
     for name in SERVICES:
@@ -101,6 +106,11 @@ def main() -> None:
             "DAILY_INSIGHTS_DAILY_NEWS_ENABLED",
             "DAILY_INSIGHTS_MODEL_API_KEY",
         ),
+        (
+            "analyst-viewpoints-scheduler",
+            "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED",
+            "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY",
+        ),
     ):
         scheduler_environment = services[scheduler].get("environment", {})
         require(
@@ -112,6 +122,14 @@ def main() -> None:
             f"{scheduler} must receive its feature flag, provider credential, and database URL",
         )
         require(not services[scheduler].get("ports"), f"{scheduler} must not publish a host port")
+    analyst_scheduler_environment = services["analyst-viewpoints-scheduler"].get("environment", {})
+    require(
+        {
+            "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL",
+            "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS",
+        }.issubset(analyst_scheduler_environment),
+        "analyst-viewpoints-scheduler must receive its upstream URL and timeout",
+    )
     web_environment = services["web"].get("environment", {})
     require(web_environment.get("APP_ENV") == "production", "Web environment must be production")
     require(

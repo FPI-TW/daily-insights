@@ -26,6 +26,9 @@ import {
   reportDetailSchema,
   reportListSchema,
   latestNewsSchema,
+  analystViewpointListSchema,
+  analystViewpointSyncSchema,
+  analystViewpointSyncStatusSchema,
   type LaunchMarketCode,
   userSchema,
 } from "./schemas"
@@ -56,6 +59,17 @@ export function createReportClient(transport: ApiTransport) {
       return parseResponse(
         await transport(`/api/reports/${marketCode}/latest?${query}`),
         reportDetailSchema
+      )
+    },
+  }
+}
+
+export function createAnalystViewpointClient(transport: ApiTransport) {
+  return {
+    async today() {
+      return parseResponse(
+        await transport("/api/analyst-viewpoints/today"),
+        analystViewpointListSchema
       )
     },
   }
@@ -217,6 +231,21 @@ function mutationHeaders(csrfToken: string) {
 
 export function createAdministrationClient(transport: ApiTransport) {
   return {
+    async analystViewpointStatus() {
+      return parseResponse(
+        await transport("/api/admin/analyst-viewpoints/status"),
+        analystViewpointSyncStatusSchema
+      )
+    },
+    async syncAnalystViewpoints(csrfToken: string) {
+      return parseResponse(
+        await transport("/api/admin/analyst-viewpoints/sync", {
+          method: "POST",
+          headers: { "X-CSRF-Token": csrfToken },
+        }),
+        analystViewpointSyncSchema
+      )
+    },
     async listOrganizations() {
       return parseResponse(
         await transport("/api/admin/organizations"),

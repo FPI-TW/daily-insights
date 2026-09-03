@@ -16,6 +16,10 @@ from daily_insights_api.core.database import (
 )
 from daily_insights_api.core.observability import emit_event
 from daily_insights_api.modules.admin.router import router as admin_router
+from daily_insights_api.modules.analyst_viewpoints.admin import (
+    router as analyst_viewpoints_admin_router,
+)
+from daily_insights_api.modules.analyst_viewpoints.router import router as analyst_viewpoints_router
 from daily_insights_api.modules.assets.object_store import ObjectStore
 from daily_insights_api.modules.assets.r2.store import R2ObjectStore
 from daily_insights_api.modules.chat.api import router as chat_router
@@ -80,6 +84,12 @@ def create_app(
     async def news_runtime_is_ready() -> bool:
         return (
             not resolved_settings.daily_news_enabled or resolved_settings.model_api_key is not None
+        )
+
+    async def analyst_viewpoints_runtime_is_ready() -> bool:
+        return (
+            not resolved_settings.analyst_viewpoints_enabled
+            or resolved_settings.analyst_viewpoints_api_key is not None
         )
 
     async def chat_runtime_is_ready() -> bool:
@@ -150,6 +160,8 @@ def create_app(
 
     app.include_router(identity_router)
     app.include_router(admin_router)
+    app.include_router(analyst_viewpoints_admin_router)
+    app.include_router(analyst_viewpoints_router)
     app.include_router(markets_router)
     app.include_router(reports_router)
     app.include_router(news_router)
@@ -180,6 +192,7 @@ def create_app(
                 "database": readiness_checker,
                 "twelve_data_configuration": provider_runtime_is_ready,
                 "daily_news_configuration": news_runtime_is_ready,
+                "analyst_viewpoints_configuration": analyst_viewpoints_runtime_is_ready,
                 "chat_configuration": chat_runtime_is_ready,
                 "r2_runtime": r2_runtime_is_ready,
             }

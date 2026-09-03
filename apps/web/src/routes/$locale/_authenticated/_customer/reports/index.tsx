@@ -8,6 +8,7 @@ import {
 import { getReportList } from "#/lib/reports"
 import { DailyNews, DailyNewsLoading } from "#/components/DailyNews"
 import { getLatestNews } from "#/lib/news"
+import { getTodayAnalystViewpoints } from "#/lib/analyst-viewpoints"
 import { useChatPageContext } from "#/components/PageContextChat"
 
 export const Route = createFileRoute(
@@ -15,6 +16,7 @@ export const Route = createFileRoute(
 )({
   loader: loadReportsAndNews,
   pendingComponent: ReportsAndNewsLoading,
+  pendingMs: 0,
   errorComponent: ReportErrorScreen,
   component: ReportsPage,
 })
@@ -22,6 +24,7 @@ export const Route = createFileRoute(
 type ReportsAndNews = {
   reports: Awaited<ReturnType<typeof getReportList>>
   news: LatestNews | null
+  viewpoints: Awaited<ReturnType<typeof getTodayAnalystViewpoints>>
 }
 
 // The news panel is secondary: a news API failure must not replace the
@@ -32,14 +35,16 @@ export async function loadReportsAndNews({
 }: {
   context: { locale: Locale }
 }): Promise<ReportsAndNews> {
-  const [reports, news] = await Promise.allSettled([
+  const [reports, news, viewpoints] = await Promise.allSettled([
     getReportList({ data: context.locale }),
     getLatestNews({ data: context.locale }),
+    getTodayAnalystViewpoints(),
   ])
   if (reports.status === "rejected") throw reports.reason
   return {
     reports: reports.value,
     news: news.status === "fulfilled" ? news.value : null,
+    viewpoints: viewpoints.status === "fulfilled" ? viewpoints.value : [],
   }
 }
 
@@ -47,12 +52,14 @@ function ReportsAndNewsLoading() {
   return (
     <>
       <ReportLoadingScreen />
-      <DailyNewsLoading />
+      <main className="page-shell pt-0">
+        <DailyNewsLoading />
+      </main>
     </>
   )
 }
 function ReportsPage() {
-  const { reports, news } = Route.useLoaderData()
+  const { reports, news, viewpoints } = Route.useLoaderData()
   const { locale } = Route.useRouteContext()
   const publicationIds = reports.flatMap(report =>
     report.publicationId ? [report.publicationId] : []
@@ -68,8 +75,10 @@ function ReportsPage() {
   )
   return (
     <>
-      <ReportList locale={locale} reports={reports} />
-      <DailyNews news={news} />
+      <ReportList locale={locale} viewpoints={viewpoints} />
+      <main className="page-shell pt-0">
+        <DailyNews news={news} />
+      </main>
     </>
   )
 }

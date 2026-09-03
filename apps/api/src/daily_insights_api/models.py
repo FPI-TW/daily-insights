@@ -1,5 +1,9 @@
 """Single import point used by Alembic to register all modular tables."""
 
+from daily_insights_api.modules.analyst_viewpoints.models import (
+    AnalystViewpoint,
+    AnalystViewpointSyncRun,
+)
 from daily_insights_api.modules.assets.models import (
     Asset,
     AssetMigrationEntry,
@@ -32,6 +36,8 @@ from daily_insights_api.modules.tenancy.models import Membership, Organization
 
 __all__ = [
     "ActiveModelConfiguration",
+    "AnalystViewpoint",
+    "AnalystViewpointSyncRun",
     "Asset",
     "AssetMigrationEntry",
     "AssetMigrationManifest",

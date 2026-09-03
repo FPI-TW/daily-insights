@@ -108,6 +108,29 @@ describe("API client trust boundary", () => {
     expect(transport).toHaveBeenCalledWith("/api/news/latest?locale=en")
   })
 
+  it("accepts a stale analyst viewpoint status without replacing stored data", async () => {
+    const client = createAdministrationClient(async () =>
+      Response.json({
+        viewpoint_date: "2026-09-02",
+        fetched_at: "2026-09-02T01:00:00Z",
+        status: "partial",
+        markets: [
+          {
+            source_market_code: "us_macro",
+            market_code: "global_macro_bonds",
+            status: "stale",
+          },
+        ],
+      })
+    )
+
+    await expect(
+      client.syncAnalystViewpoints("csrf-token")
+    ).resolves.toMatchObject({
+      markets: [{ status: "stale" }],
+    })
+  })
+
   it("rejects an invalid Podcast locale returned by the API", async () => {
     const client = createPodcastClient(async () =>
       Response.json([
