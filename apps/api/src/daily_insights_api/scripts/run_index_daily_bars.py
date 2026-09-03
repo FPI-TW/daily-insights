@@ -28,14 +28,12 @@ from daily_insights_api.modules.markets.api import refresh_index_daily_bars
 from daily_insights_api.modules.reports.scheduler import (
     TAIPEI,
     SameDayRetry,
-    due_edition,
     maintain_disabled_heartbeat,
-    parse_args,
     run_scheduler,
     run_with_heartbeat,
 )
 
-__all__ = ["main", "run_refresh"]
+__all__ = ["main", "parse_args", "run_refresh"]
 
 HEARTBEAT_PATH = "/tmp/index-daily-bars-heartbeat"
 SCHEDULED_PERIOD = "7d"
@@ -44,12 +42,23 @@ SCHEDULED_PERIOD = "7d"
 RETRY_POLICY = SameDayRetry()
 
 
-def configure_arguments(parser: argparse.ArgumentParser) -> None:
+def parse_args(args: list[str] | None = None) -> argparse.Namespace:
+    """Deliberately not reports.scheduler.parse_args.
+
+    That one offers --edition-date, which this job cannot honour: the window is
+    always `--period` counted back from now, so a date would be accepted and
+    silently ignored by an operator who thought they were backfilling a past
+    day. Reach further back with --period instead; the store upserts, so
+    repeating a window is safe.
+    """
+    parser = argparse.ArgumentParser(description="Refresh tracked index daily bars")
+    parser.add_argument("--once", action="store_true", help="run one refresh and exit")
     parser.add_argument(
         "--period",
         default=SCHEDULED_PERIOD,
         help=f"yfinance history window (default: {SCHEDULED_PERIOD}; use 2y to backfill)",
     )
+    return parser.parse_args(args)
 
 
 async def run_refresh(
@@ -81,22 +90,17 @@ async def run_refresh(
 
 
 async def main() -> None:
-    args = parse_args(
-        description="Refresh tracked index daily bars",
-        configure=configure_arguments,
-    )
+    args = parse_args()
     settings = get_settings()
     heartbeat = Path(HEARTBEAT_PATH)
     await heartbeat.touch()
     if not settings.yfinance_enabled and not args.once:
         await maintain_disabled_heartbeat(heartbeat)
-    now = datetime.now(TAIPEI)
-    edition = args.edition_date or (now.date() if args.once else due_edition(now))
-    if args.once and edition is None:
-        raise SystemExit("no run is due yet; pass --edition-date for a manual run")
     engine = create_engine(settings)
     session_factory = create_session_factory(engine)
 
+    # The scheduler's date decides whether today's run has happened yet, not
+    # what to fetch: the window is always `--period` counted back from now.
     async def refresh(_: date) -> str:
         return await run_refresh(
             session_factory,
@@ -109,8 +113,7 @@ async def main() -> None:
 
     try:
         if args.once:
-            assert edition is not None
-            await runner(edition)
+            await runner(datetime.now(TAIPEI).date())
         else:
             await run_scheduler(runner, now=lambda: datetime.now(TAIPEI), retry=RETRY_POLICY)
     finally:
