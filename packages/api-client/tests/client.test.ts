@@ -5,6 +5,7 @@ import {
   createBrowserTransport,
   createPodcastAdminClient,
   createPodcastClient,
+  createMarketClient,
   createNewsClient,
   createReportClient,
 } from "../src"
@@ -106,6 +107,32 @@ describe("API client trust boundary", () => {
       status: "partial",
     })
     expect(transport).toHaveBeenCalledWith("/api/news/latest?locale=en")
+  })
+
+  it("lists the organization's markets with their visibility", async () => {
+    const transport = vi.fn(async () =>
+      Response.json([
+        {
+          code: "crypto",
+          is_visible: true,
+          name_en: "Cryptocurrency",
+          name_zh_hant: "加密貨幣",
+          name_zh_hans: "加密货币",
+        },
+        {
+          code: "forex",
+          is_visible: false,
+          name_en: "Foreign Exchange",
+          name_zh_hant: "外匯",
+          name_zh_hans: "外汇",
+        },
+      ])
+    )
+    await expect(createMarketClient(transport).list()).resolves.toEqual([
+      expect.objectContaining({ code: "crypto", is_visible: true }),
+      expect.objectContaining({ code: "forex", is_visible: false }),
+    ])
+    expect(transport).toHaveBeenCalledWith("/api/markets")
   })
 
   it("accepts a stale analyst viewpoint status without replacing stored data", async () => {

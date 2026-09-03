@@ -54,10 +54,23 @@ export function DailyNews({
             {t(titleKey)}
           </h2>
         </div>
-        <span className="rounded-full border border-line px-2.5 py-1 text-xs font-bold text-sea-ink-soft">
+        <span
+          className={`rounded-full border px-2.5 py-1 text-xs font-bold ${status === "complete" ? "border-line text-sea-ink-soft" : "border-market-caution/50 bg-market-caution/10 text-market-caution"}`}
+        >
           {t(`dailyNewsStatus_${status}`)}
         </span>
       </div>
+      {news !== null && news.status === "partial" ? (
+        // A partial badge must explain itself: the caveat from the pipeline,
+        // or at least how many stories made it against the target.
+        <p className="mt-0 mb-4 text-xs text-sea-ink-soft">
+          {news.caveat ??
+            t("dailyNewsPartialExplanation", {
+              count: news.items.length,
+              target: news.target_items,
+            })}
+        </p>
+      ) : null}
       {news === null ? (
         <div
           className="surface-panel p-5 text-sm text-sea-ink-soft"
@@ -109,20 +122,20 @@ export function DailyNews({
                       {item.summary}
                     </p>
                     <div className="mt-4 flex items-center justify-between gap-3 text-xs text-sea-ink-soft">
-                      <time dateTime={item.source_published_at ?? undefined}>
-                        {item.source_published_at
-                          ? new Intl.DateTimeFormat(news.locale, {
-                              dateStyle: "medium",
-                              timeStyle: "short",
-                              // The edition is the Taipei day; pinning the zone also
-                              // keeps SSR and browser output identical (no hydration
-                              // mismatch from differing server and client zones).
-                              timeZone: "Asia/Taipei",
-                            }).format(new Date(item.source_published_at))
-                          : t("dailyNewsTimeUnknown")}
-                      </time>
+                      {item.source_published_at ? (
+                        <time dateTime={item.source_published_at}>
+                          {new Intl.DateTimeFormat(news.locale, {
+                            dateStyle: "medium",
+                            timeStyle: "short",
+                            // The edition is the Taipei day; pinning the zone also
+                            // keeps SSR and browser output identical (no hydration
+                            // mismatch from differing server and client zones).
+                            timeZone: "Asia/Taipei",
+                          }).format(new Date(item.source_published_at))}
+                        </time>
+                      ) : null}
                       <a
-                        className="font-bold text-lagoon"
+                        className="ml-auto font-bold text-lagoon"
                         href={item.source_url}
                         target="_blank"
                         rel="noopener noreferrer"

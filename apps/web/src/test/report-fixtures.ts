@@ -2,7 +2,6 @@
 // imported by application code: the customer UI renders API data exclusively.
 import {
   launchMarketCodes,
-  type MarketCode,
   type MetricBlock,
   type ProvisionalReport,
   type ReportValue,
@@ -11,7 +10,8 @@ import {
   type BlockStatus,
 } from "#/lib/provisional-reports"
 
-type FixtureCode = MarketCode | "tw_index_derivatives"
+type FixtureCode =
+  (typeof launchMarketCodes)[number] | "tw_equity" | "tw_index_derivatives"
 
 const text = (key: string): ReportValue => ({ kind: "translation", key })
 const value = (content: string | number): ReportValue => ({
@@ -28,7 +28,13 @@ const table = (
   columns: string[],
   rows: TableBlock["rows"],
   status: BlockStatus = "ok"
-): TableBlock => ({ kind: "table", status, titleKey, columns, rows })
+): TableBlock => ({
+  kind: "table",
+  status,
+  titleKey,
+  columns: columns.map(labelKey => ({ labelKey, unitCode: null })),
+  rows,
+})
 const series = (
   titleKey: string,
   points: SeriesBlock["series"][number]["points"],
