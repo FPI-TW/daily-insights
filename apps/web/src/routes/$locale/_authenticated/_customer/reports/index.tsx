@@ -1,5 +1,5 @@
 import type { LatestNews, Locale } from "@daily-insights/api-client"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useLoaderData } from "@tanstack/react-router"
 import {
   ReportErrorScreen,
   ReportList,
@@ -60,6 +60,9 @@ function ReportsAndNewsLoading() {
 }
 function ReportsPage() {
   const { reports, news, viewpoints } = Route.useLoaderData()
+  const markets = useLoaderData({
+    from: "/$locale/_authenticated/_customer/reports",
+  })
   const publicationIds = reports.flatMap(report =>
     report.publicationId ? [report.publicationId] : []
   )
@@ -74,7 +77,7 @@ function ReportsPage() {
   )
   return (
     <>
-      <ReportList viewpoints={viewpoints} />
+      <ReportList viewpoints={viewpoints} markets={markets} />
       <DailyNews news={news} />
     </>
   )

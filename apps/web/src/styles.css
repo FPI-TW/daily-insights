@@ -89,6 +89,19 @@
   --ring: #2bc5a7;
 }
 
+/* Direction colours follow the reader's market convention: Chinese locales
+   read red as up and green as down; English readers expect the opposite. The
+   tokens swap by document language so components never branch on locale. */
+html[lang="en"] {
+  --market-up: #2f9e69;
+  --market-down: #d6453f;
+}
+
+html[lang="en"].dark {
+  --market-up: #53bd84;
+  --market-down: #f16c63;
+}
+
 @theme inline {
   --font-sans:
     "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", ui-sans-serif,

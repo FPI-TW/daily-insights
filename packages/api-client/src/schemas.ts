@@ -9,6 +9,28 @@ export const launchMarketCodeSchema = z.enum([
   "us_equity",
 ])
 export type LaunchMarketCode = z.infer<typeof launchMarketCodeSchema>
+// Every market in the API catalog; visibility per organization comes from
+// /api/markets, which is what drives customer navigation.
+export const marketCodeSchema = z.enum([
+  "global_macro_bonds",
+  "forex",
+  "crypto",
+  "us_equity",
+  "hk_equity",
+  "cn_equity",
+  "tw_equity",
+  "tw_index_derivatives",
+])
+export type MarketCode = z.infer<typeof marketCodeSchema>
+export const marketSchema = z.object({
+  code: marketCodeSchema,
+  is_visible: z.boolean(),
+  name_en: z.string(),
+  name_zh_hant: z.string(),
+  name_zh_hans: z.string(),
+})
+export type Market = z.infer<typeof marketSchema>
+export const marketListSchema = z.array(marketSchema)
 export const reportStatusSchema = z.enum(["complete", "partial", "unavailable"])
 export const blockStatusSchema = z.enum(["ok", "missing", "error"])
 const decimalSchema = z.string().regex(/^-?\d+(?:\.\d+)?$/)
@@ -120,16 +142,7 @@ export type ReportDetail = z.infer<typeof reportDetailSchema>
 
 export const analystViewpointSchema = z.object({
   viewpoint_date: z.iso.date(),
-  market_code: z.enum([
-    "global_macro_bonds",
-    "forex",
-    "crypto",
-    "us_equity",
-    "hk_equity",
-    "cn_equity",
-    "tw_equity",
-    "tw_index_derivatives",
-  ]),
+  market_code: marketCodeSchema,
   source_market_code: z.enum([
     "us_macro",
     "forex",

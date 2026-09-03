@@ -1,8 +1,10 @@
 import {
   ApiError,
+  createMarketClient,
   createReportClient,
   launchMarketCodeSchema,
   localeSchema,
+  marketCodeSchema,
   type ReportBlock as ApiReportBlock,
   type ReportDetail as ApiReportDetail,
   type ReportSummary as ApiReportSummary,
@@ -15,8 +17,6 @@ import {
 } from "@tanstack/react-start/server"
 import { z } from "zod"
 import {
-  type MarketCode,
-  navMarketCodes,
   type ProvisionalReport,
   type ReportBlock,
   type ReportValue,
@@ -33,6 +33,8 @@ const literal = (value: string | number): ReportValue => ({
   kind: "literal",
   value,
 })
+// API numbers stay Decimal strings until lib/format renders them.
+const number = (value: string): ReportValue => ({ kind: "number", value })
 const blockTitleKeys: Record<string, string> = {
   "macro.commodities": "reportBlockMacroSnapshot",
   "macro.commodity_normalized_performance":
@@ -53,17 +55,19 @@ const columnLabelKeys: Record<string, string> = {
   change: "reportColumnChange",
 }
 
-function serverReportClient() {
+function serverTransport() {
   const apiUrl = process.env.API_INTERNAL_URL
   if (!apiUrl) throw new Error("API_INTERNAL_URL is required by the web server")
   const cookie = getRequestHeader("cookie")
   const requestId = getRequestHeader("x-request-id")
-  return createReportClient(
-    createServerTransport(apiUrl, {
-      ...(cookie ? { cookie } : {}),
-      ...(requestId ? { requestId } : {}),
-    })
-  )
+  return createServerTransport(apiUrl, {
+    ...(cookie ? { cookie } : {}),
+    ...(requestId ? { requestId } : {}),
+  })
+}
+
+function serverReportClient() {
+  return createReportClient(serverTransport())
 }
 
 function mapBlock(
@@ -71,30 +75,37 @@ function mapBlock(
   presentationLabel?: ApiReportDetail["presentation"]["labels"][string]
 ): ReportBlock {
   const titleKey = blockTitleKeys[block.id] ?? "reportsTitle"
+  const meta = {
+    status: block.status,
+    titleKey,
+    sourceDate: block.source_as_of,
+    caveat: block.caveat === null ? null : literal(block.caveat),
+  }
   if (block.kind === "metric") {
     return {
       kind: "metric",
-      status: block.status,
-      titleKey,
+      ...meta,
       metrics: block.metrics.map(metric => ({
         labelKey: metricLabelKeys[metric.id] ?? metric.id,
-        value: metric.value === null ? null : literal(metric.value),
-        change: metric.change === null ? null : literal(metric.change),
+        value: metric.value === null ? null : number(metric.value),
+        change: metric.change === null ? null : number(metric.change),
+        unitCode: metric.unit_code,
       })),
     }
   }
   if (block.kind === "table") {
     return {
       kind: "table",
-      status: block.status,
-      titleKey,
-      columns: block.columns.map(
-        column => columnLabelKeys[column.id] ?? column.id
-      ),
+      ...meta,
+      columns: block.columns.map(column => ({
+        labelKey: columnLabelKeys[column.id] ?? column.id,
+        unitCode: column.unit_code,
+      })),
       rows: block.rows.map(row =>
         row.map(cell => {
           if (cell === null) return null
-          return literal(cell.text ?? cell.value ?? "")
+          if (cell.text !== null) return literal(cell.text)
+          return cell.value === null ? null : number(cell.value)
         })
       ),
     }
@@ -102,8 +113,7 @@ function mapBlock(
   return {
     kind: "series",
     id: block.id,
-    status: block.status,
-    titleKey,
+    ...meta,
     title: literal(presentationLabel?.title ?? titleKey),
     unitCode: block.unit_code,
     unitLabel:
@@ -111,8 +121,6 @@ function mapBlock(
       presentationLabel?.unit_label === undefined
         ? null
         : literal(presentationLabel.unit_label),
-    sourceDate: block.source_as_of,
-    caveat: block.caveat === null ? null : literal(block.caveat),
     series: block.series.map(line => ({
       id: line.id,
       label: literal(
@@ -133,6 +141,8 @@ function summary(report: ApiReportSummary): ProvisionalReport {
     status: report.status,
     editionDate: report.edition_date,
     sourceDate: report.source_as_of,
+    stale: report.stale,
+    staleReason: report.stale_reason,
     caveatKey: "reportCaveatLive",
     summaryKey: `reportSummary_${report.market_code}`,
     blocks: [],
@@ -142,6 +152,7 @@ function summary(report: ApiReportSummary): ProvisionalReport {
 export function mapReportDetail(report: ApiReportDetail): ProvisionalReport {
   return {
     ...summary(report),
+    caveat: report.content.caveat,
     blocks: report.content.blocks.map(block =>
       mapBlock(block, report.presentation.labels[block.id])
     ),
@@ -166,15 +177,20 @@ export const getReportDetail = createServerFn({ method: "GET" })
     setResponseHeader("Cache-Control", "no-store")
     const parsed = launchMarketCodeSchema.safeParse(data.marketCode)
     if (!parsed.success) {
-      // A navigable market without a launched report (Taiwan equities) shows
-      // the not-launched state; anything else is a 404.
-      if ((navMarketCodes as readonly string[]).includes(data.marketCode)) {
-        return {
-          kind: "not-launched" as const,
-          marketCode: data.marketCode as MarketCode,
+      // A catalog market without a launched report shows the not-launched
+      // state when the organization may see it; anything else is a 404.
+      const catalog = marketCodeSchema.safeParse(data.marketCode)
+      if (!catalog.success) return { kind: "not-found" as const }
+      try {
+        const visible = await createMarketClient(serverTransport()).list()
+        if (!visible.some(m => m.code === catalog.data && m.is_visible)) {
+          return { kind: "not-found" as const }
         }
+      } catch (error) {
+        // Internal users (no organization) may preview every market.
+        if (!(error instanceof ApiError && error.status === 403)) throw error
       }
-      return { kind: "not-found" as const }
+      return { kind: "not-launched" as const, marketCode: catalog.data }
     }
     const marketCode = parsed.data
     try {

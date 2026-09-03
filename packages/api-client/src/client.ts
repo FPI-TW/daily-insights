@@ -30,6 +30,7 @@ import {
   analystViewpointSyncSchema,
   analystViewpointSyncStatusSchema,
   type LaunchMarketCode,
+  marketListSchema,
   userSchema,
 } from "./schemas"
 
@@ -60,6 +61,14 @@ export function createReportClient(transport: ApiTransport) {
         await transport(`/api/reports/${marketCode}/latest?${query}`),
         reportDetailSchema
       )
+    },
+  }
+}
+
+export function createMarketClient(transport: ApiTransport) {
+  return {
+    async list() {
+      return parseResponse(await transport("/api/markets"), marketListSchema)
     },
   }
 }
