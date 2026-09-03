@@ -91,7 +91,7 @@ describe("PageContextChat", () => {
     await renderChat(false)
 
     expect(
-      screen.queryByRole("button", { name: "Report Q&A" })
+      screen.queryByRole("button", { name: "AI Q&A" })
     ).not.toBeInTheDocument()
   })
 
@@ -105,7 +105,7 @@ describe("PageContextChat", () => {
       ])
     )
     await renderChat()
-    fireEvent.click(screen.getByRole("button", { name: "Report Q&A" }))
+    fireEvent.click(screen.getByRole("button", { name: "AI Q&A" }))
     fireEvent.change(screen.getByLabelText("Enter your question"), {
       target: { value: "What changed?" },
     })
@@ -133,7 +133,7 @@ describe("PageContextChat", () => {
         streamResponse(['event: done\ndata: {"status":"complete"}\n\n'])
       )
     await renderChat()
-    fireEvent.click(screen.getByRole("button", { name: "Report Q&A" }))
+    fireEvent.click(screen.getByRole("button", { name: "AI Q&A" }))
     fireEvent.change(screen.getByLabelText("Enter your question"), {
       target: { value: "Retry me" },
     })
@@ -159,7 +159,7 @@ describe("PageContextChat", () => {
         streamResponse(['event: done\ndata: {"status":"error"}\n\n'])
       )
     await renderChat()
-    fireEvent.click(screen.getByRole("button", { name: "Report Q&A" }))
+    fireEvent.click(screen.getByRole("button", { name: "AI Q&A" }))
     fireEvent.change(screen.getByLabelText("Enter your question"), {
       target: { value: "Replay the failure" },
     })
@@ -182,7 +182,7 @@ describe("PageContextChat", () => {
       ])
     )
     await renderChat()
-    const launcher = screen.getByRole("button", { name: "Report Q&A" })
+    const launcher = screen.getByRole("button", { name: "AI Q&A" })
     fireEvent.click(launcher)
     expect(screen.getByLabelText("Enter your question")).toHaveFocus()
     fireEvent.change(screen.getByLabelText("Enter your question"), {
@@ -203,8 +203,44 @@ describe("PageContextChat", () => {
 
     fireEvent.keyDown(window, { key: "Escape" })
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Report Q&A" })).toHaveFocus()
+      expect(screen.getByRole("button", { name: "AI Q&A" })).toHaveFocus()
     )
+  })
+
+  it("renders GFM tables in an accessible horizontal scroll container", async () => {
+    const markdown = [
+      "## Market comparison",
+      "",
+      "| Market | Move | View |",
+      "| --- | ---: | --- |",
+      "| US equities | **+1.2%** | Risk-on |",
+      "| Crypto | -0.8% | `Volatile` |",
+    ].join("\n")
+    vi.mocked(fetch).mockResolvedValueOnce(
+      streamResponse([
+        `event: delta\ndata: ${JSON.stringify({ text: markdown })}\n\n`,
+        'event: done\ndata: {"status":"complete"}\n\n',
+      ])
+    )
+    await renderChat()
+    fireEvent.click(screen.getByRole("button", { name: "AI Q&A" }))
+    fireEvent.change(screen.getByLabelText("Enter your question"), {
+      target: { value: "Compare markets" },
+    })
+    fireEvent.submit(
+      screen.getByRole("button", { name: "Send question" }).closest("form")!
+    )
+
+    const table = await screen.findByRole("table")
+    expect(table).toHaveTextContent("US equities")
+    expect(screen.getByRole("columnheader", { name: "Market" })).toBeVisible()
+    expect(screen.getByText("+1.2%").tagName).toBe("STRONG")
+    expect(screen.getByText("Volatile").tagName).toBe("CODE")
+    const scrollContainer = screen.getByRole("region", {
+      name: "Scrollable response table",
+    })
+    expect(scrollContainer).toHaveClass("overflow-x-auto")
+    expect(scrollContainer).toHaveAttribute("tabindex", "0")
   })
 
   it("offers exactly two selected-text actions and sends AI Insights immediately", async () => {
@@ -220,7 +256,15 @@ describe("PageContextChat", () => {
     selection?.addRange(range)
 
     fireEvent.contextMenu(reportText, { clientX: 40, clientY: 60 })
-    expect(screen.getAllByRole("menuitem")).toHaveLength(2)
+    const menuItems = screen.getAllByRole("menuitem")
+    expect(menuItems).toHaveLength(2)
+    for (const menuItem of menuItems) {
+      expect(menuItem).toHaveClass(
+        "focus:!outline-none",
+        "focus-visible:!outline-none",
+        "focus-visible:!outline-offset-0"
+      )
+    }
     expect(screen.getByRole("menuitem", { name: "AI Insights" })).toBeVisible()
     expect(
       screen.getByRole("menuitem", { name: "AI Discussion" })
@@ -239,7 +283,7 @@ describe("PageContextChat", () => {
       streamResponse(['event: done\ndata: {"status":"complete"}\n\n'])
     )
     await renderChat()
-    fireEvent.click(screen.getByRole("button", { name: "Report Q&A" }))
+    fireEvent.click(screen.getByRole("button", { name: "AI Q&A" }))
     fireEvent.change(screen.getByLabelText("Enter your question"), {
       target: { value: "An earlier request" },
     })
@@ -276,7 +320,7 @@ describe("PageContextChat", () => {
         streamResponse(['event: done\ndata: {"status":"complete"}\n\n'])
       )
     await renderChat()
-    fireEvent.click(screen.getByRole("button", { name: "Report Q&A" }))
+    fireEvent.click(screen.getByRole("button", { name: "AI Q&A" }))
     fireEvent.change(screen.getByLabelText("Enter your question"), {
       target: { value: "Retry the original request" },
     })
@@ -394,7 +438,7 @@ describe("PageContextChat", () => {
 
   it("centers every chat icon independently of global button padding", async () => {
     await renderChat()
-    const launcher = screen.getByRole("button", { name: "Report Q&A" })
+    const launcher = screen.getByRole("button", { name: "AI Q&A" })
     expect(launcher).toHaveClass("items-center", "justify-center", "p-0")
     expect(launcher.querySelector("svg")).toHaveClass("block")
 
@@ -411,7 +455,7 @@ describe("PageContextChat", () => {
       streamResponse(['event: done\ndata: {"status":"complete"}\n\n'])
     )
     await renderChat()
-    fireEvent.click(screen.getByRole("button", { name: "Report Q&A" }))
+    fireEvent.click(screen.getByRole("button", { name: "AI Q&A" }))
     const input = screen.getByLabelText("Enter your question")
 
     fireEvent.change(input, { target: { value: "First line" } })
@@ -433,7 +477,7 @@ describe("PageContextChat", () => {
       streamResponse(['event: done\ndata: {"status":"complete"}\n\n'])
     )
     await renderChat()
-    fireEvent.click(screen.getByRole("button", { name: "Report Q&A" }))
+    fireEvent.click(screen.getByRole("button", { name: "AI Q&A" }))
     const input = screen.getByLabelText("Enter your question")
     fireEvent.change(input, { target: { value: "台灣市場" } })
 

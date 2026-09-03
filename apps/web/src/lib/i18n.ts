@@ -6,7 +6,7 @@ const resources: Resource = {
   "zh-hant": {
     translation: {
       brand: "Daily Insights",
-      chatTitle: "報告問答",
+      chatTitle: "AI智慧問答",
       chatEmpty: "針對目前報告提出問題。",
       chatThinking: "正在整理回答…",
       chatInput: "輸入你的問題",
@@ -18,6 +18,7 @@ const resources: Resource = {
       chatStatus: "回答狀態：{{status}}",
       chatDisclaimer:
         "（內容基於公開資訊及內部分析報告，僅供參考，不構成投資建議。）",
+      chatMarkdownTable: "可橫向捲動的回答表格",
       chatSelectionMenu: "所選文字操作",
       chatSelectionInsight: "AI 洞察",
       chatSelectionDiscussion: "AI 申論",
@@ -401,7 +402,7 @@ const resources: Resource = {
   "zh-hans": {
     translation: {
       brand: "Daily Insights",
-      chatTitle: "报告问答",
+      chatTitle: "AI智能问答",
       chatEmpty: "针对当前报告提问。",
       chatThinking: "正在整理回答…",
       chatInput: "输入你的问题",
@@ -413,6 +414,7 @@ const resources: Resource = {
       chatStatus: "回答状态：{{status}}",
       chatDisclaimer:
         "（内容基于公开信息及内部分析报告，仅供参考，不构成投资建议。）",
+      chatMarkdownTable: "可横向滚动的回答表格",
       chatSelectionMenu: "所选文字操作",
       chatSelectionInsight: "AI 洞察",
       chatSelectionDiscussion: "AI 申论",
@@ -796,7 +798,7 @@ const resources: Resource = {
   en: {
     translation: {
       brand: "Daily Insights",
-      chatTitle: "Report Q&A",
+      chatTitle: "AI Q&A",
       chatEmpty: "Ask about the report currently on this page.",
       chatThinking: "Preparing an answer…",
       chatInput: "Enter your question",
@@ -808,6 +810,7 @@ const resources: Resource = {
       chatStatus: "Answer status: {{status}}",
       chatDisclaimer:
         "(Content is based on public information and internal analysis reports, is for reference only, and does not constitute investment advice.)",
+      chatMarkdownTable: "Scrollable response table",
       chatSelectionMenu: "Selected text actions",
       chatSelectionInsight: "AI Insights",
       chatSelectionDiscussion: "AI Discussion",

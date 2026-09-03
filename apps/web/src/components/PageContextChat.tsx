@@ -1,6 +1,7 @@
 import type { Locale } from "@daily-insights/api-client"
 import { MessageCircle, Quote, Send, Sparkles, Square, X } from "lucide-react"
 import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import {
   createContext,
   useCallback,
@@ -401,7 +402,7 @@ export function PageContextChatProvider({
           style={{ left: selectionMenu.x, top: selectionMenu.y }}
         >
           <button
-            className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-3 py-2 text-left text-sm font-bold text-sea-ink hover:bg-link-hover"
+            className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-3 py-2 text-left text-sm font-bold text-sea-ink hover:bg-link-hover focus:!outline-none focus-visible:!outline-none focus-visible:!outline-offset-0"
             type="button"
             role="menuitem"
             onClick={sendSelectionInsight}
@@ -410,7 +411,7 @@ export function PageContextChatProvider({
             {t("chatSelectionInsight")}
           </button>
           <button
-            className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-3 py-2 text-left text-sm font-bold text-sea-ink hover:bg-link-hover"
+            className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-3 py-2 text-left text-sm font-bold text-sea-ink hover:bg-link-hover focus:!outline-none focus-visible:!outline-none focus-visible:!outline-offset-0"
             type="button"
             role="menuitem"
             onClick={attachSelection}
@@ -463,7 +464,7 @@ export function PageContextChatProvider({
                       className={
                         item.role === "user"
                           ? "ml-8 whitespace-pre-wrap rounded-lg bg-lagoon/10 p-3 text-sm text-sea-ink"
-                          : "mr-8 whitespace-pre-wrap rounded-lg bg-muted p-3 text-sm text-sea-ink"
+                          : "mr-8 break-words rounded-lg bg-muted p-3 text-sm text-sea-ink"
                       }
                       key={`${item.role}-${index}`}
                     >
@@ -474,12 +475,15 @@ export function PageContextChatProvider({
                       ) : null}
                       {item.role === "assistant" && item.content ? (
                         <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          skipHtml
                           components={{
                             a: ({ children, href }) => {
                               const url = safeExternalUrl(href)
                               if (!url) return <>{children}</>
                               return (
                                 <a
+                                  className="font-bold text-link underline decoration-link/40 underline-offset-2 hover:decoration-link"
                                   href={url}
                                   rel="noopener noreferrer"
                                   target="_blank"
@@ -488,6 +492,92 @@ export function PageContextChatProvider({
                                 </a>
                               )
                             },
+                            blockquote: ({ children }) => (
+                              <blockquote className="my-3 border-l-2 border-lagoon/60 pl-3 text-sea-ink-soft">
+                                {children}
+                              </blockquote>
+                            ),
+                            code: ({ children, className }) => (
+                              <code
+                                className={`${className ?? ""} rounded bg-surface/80 px-1 py-0.5 font-mono text-xs`}
+                              >
+                                {children}
+                              </code>
+                            ),
+                            h1: ({ children }) => (
+                              <h1 className="mt-4 mb-2 text-base font-extrabold first:mt-0">
+                                {children}
+                              </h1>
+                            ),
+                            h2: ({ children }) => (
+                              <h2 className="mt-4 mb-2 text-sm font-extrabold first:mt-0">
+                                {children}
+                              </h2>
+                            ),
+                            h3: ({ children }) => (
+                              <h3 className="mt-3 mb-1.5 text-sm font-bold first:mt-0">
+                                {children}
+                              </h3>
+                            ),
+                            img: ({ alt }) =>
+                              alt ? (
+                                <span className="text-sea-ink-soft">{alt}</span>
+                              ) : null,
+                            li: ({ children }) => (
+                              <li className="my-1 pl-0.5">{children}</li>
+                            ),
+                            ol: ({ children }) => (
+                              <ol className="my-2 list-decimal space-y-1 pl-5">
+                                {children}
+                              </ol>
+                            ),
+                            p: ({ children }) => (
+                              <p className="my-2 leading-relaxed first:mt-0 last:mb-0">
+                                {children}
+                              </p>
+                            ),
+                            pre: ({ children }) => (
+                              <pre className="my-3 overflow-x-auto rounded-lg border border-line bg-surface p-3 text-xs whitespace-pre">
+                                {children}
+                              </pre>
+                            ),
+                            table: ({ children }) => (
+                              <div
+                                className="my-3 max-w-full overflow-x-auto rounded-lg border border-line bg-surface"
+                                role="region"
+                                aria-label={t("chatMarkdownTable")}
+                                tabIndex={0}
+                              >
+                                <table className="w-full min-w-max border-collapse text-left text-xs">
+                                  {children}
+                                </table>
+                              </div>
+                            ),
+                            tbody: ({ children }) => (
+                              <tbody className="divide-y divide-line">
+                                {children}
+                              </tbody>
+                            ),
+                            td: ({ children }) => (
+                              <td className="min-w-32 border-r border-line px-3 py-2 align-top last:border-r-0">
+                                {children}
+                              </td>
+                            ),
+                            th: ({ children }) => (
+                              <th className="border-r border-line px-3 py-2 font-extrabold whitespace-nowrap last:border-r-0">
+                                {children}
+                              </th>
+                            ),
+                            thead: ({ children }) => (
+                              <thead className="border-b border-line bg-muted/70">
+                                {children}
+                              </thead>
+                            ),
+                            ul: ({ children }) => (
+                              <ul className="my-2 list-disc space-y-1 pl-5">
+                                {children}
+                              </ul>
+                            ),
                           }}
                         >
                           {item.content}

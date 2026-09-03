@@ -25,7 +25,6 @@ from daily_insights_api.modules.chat.api import (
 from daily_insights_api.modules.chat.prompt import (
     BASIC_PROMPT,
     CHAT_CONTEXT_VERSION,
-    UNRELATED_REPLY_BY_LOCALE,
     build_chat_system_message,
 )
 from daily_insights_api.modules.chat.schemas import ChatStreamRequest
@@ -345,15 +344,16 @@ def test_system_prompt_renders_financial_scope_source_order_and_locale(locale: s
     assert "monetary policy" not in prompt
     assert "current_page" in prompt and "cross_page_reports" in prompt
     assert "model background knowledge" in prompt
-    assert UNRELATED_REPLY_BY_LOCALE[locale] in prompt
-    assert "{unrelated_reply}" not in prompt
+    assert "For an unrelated question" not in prompt
+    assert "not directly related to financial markets" not in prompt
+    assert "此問題與金融市場無直接關聯" not in prompt
     assert "{disclaimer}" not in prompt
     assert "application appends one exactly once" in prompt
 
 
 def test_chat_model_configuration_uses_the_cross_market_prompt_version() -> None:
     assert CHAT_PROMPT_VERSION == CHAT_CONTEXT_VERSION
-    assert CHAT_PROMPT_VERSION == "page-context.cross-market.v3"
+    assert CHAT_PROMPT_VERSION == "page-context.cross-market.v4"
     assert _chat_configuration_desired(Settings())["prompt_version"] == CHAT_PROMPT_VERSION
 
 
@@ -372,14 +372,6 @@ def test_application_disclaimer_is_localized_and_appended_exactly_once(locale: s
     assert suffix == f"\n\n{DISCLAIMER_BY_LOCALE[locale]}"
     assert "".join(chunks).endswith(DISCLAIMER_BY_LOCALE[locale])
     assert _append_disclaimer(chunks, locale) is None
-
-
-@pytest.mark.parametrize("locale", ["zh-hant", "zh-hans", "en"])
-def test_fixed_unrelated_reply_receives_the_application_disclaimer(locale: str) -> None:
-    chunks = [UNRELATED_REPLY_BY_LOCALE[locale]]
-    suffix = _append_disclaimer(chunks, locale)
-    assert suffix == f"\n\n{DISCLAIMER_BY_LOCALE[locale]}"
-    assert "".join(chunks).endswith(DISCLAIMER_BY_LOCALE[locale])
 
 
 def test_chat_openapi_declares_sse_response_contract() -> None:
