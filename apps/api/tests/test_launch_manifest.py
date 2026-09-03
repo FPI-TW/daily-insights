@@ -32,8 +32,8 @@ from daily_insights_api.modules.reports.morning_report import (
 
 
 def test_manifest_freezes_three_markets_and_block_order() -> None:
-    assert MORNING_REPORT_DERIVATION_VERSION == "twelve-data.three-market.v4"
-    assert ACTIVE_LAUNCH_MANIFEST.version == "three-market.v4"
+    assert MORNING_REPORT_DERIVATION_VERSION == "twelve-data.three-market.v5"
+    assert ACTIVE_LAUNCH_MANIFEST.version == "three-market.v5"
     assert tuple(market.market_code for market in ACTIVE_LAUNCH_MANIFEST.markets) == (
         "global_macro_bonds",
         "crypto",
@@ -47,19 +47,21 @@ def test_manifest_freezes_three_markets_and_block_order() -> None:
         "macro.commodity_normalized_performance",
         "crypto.overview",
         "crypto.normalized_performance",
-        "us.market_movers",
+        "us.index_proxies",
+        "us.mega_caps",
     ]
     assert {
         block.rounding for market in ACTIVE_LAUNCH_MANIFEST.markets for block in market.blocks
     } == {"ROUND_HALF_EVEN"}
     assert block_precision("crypto.overview") == 4
+    assert block_precision("us.mega_caps") == 2
     assert block_rounding("crypto.overview") == "ROUND_HALF_EVEN"
 
 
 def test_manifest_hash_is_stable_and_changes_with_content() -> None:
     round_trip = LaunchManifest.model_validate(ACTIVE_LAUNCH_MANIFEST.model_dump(mode="json"))
     assert round_trip.sha256 == ACTIVE_LAUNCH_MANIFEST.sha256
-    changed = round_trip.model_copy(update={"version": "three-market.v5"})
+    changed = round_trip.model_copy(update={"version": "three-market.v6"})
     assert changed.sha256 != round_trip.sha256
 
 
@@ -69,7 +71,15 @@ def test_manifest_keeps_atomic_dataset_contracts() -> None:
         dataset.symbol_units
         for dataset in ACTIVE_LAUNCH_MANIFEST.datasets
         if dataset.key == "macro.commodity_quotes"
-    ) == {"XBR/USD": "USD", "XAU/USD": "USD", "HG1": "EUR"}
+    ) == {"XBR/USD": "USD", "XAU/USD": "USD", "HG1": "USD"}
+    quotes = next(
+        dataset
+        for dataset in ACTIVE_LAUNCH_MANIFEST.datasets
+        if dataset.key == "macro.commodity_quotes"
+    )
+    # HG1 without a type resolves to a German stock; the manifest pins copper.
+    assert quotes.symbol_types == {"HG1": "commodity"}
+    assert "previous_close" in quotes.required_fields
     history = next(
         dataset
         for dataset in ACTIVE_LAUNCH_MANIFEST.datasets
@@ -86,6 +96,39 @@ def test_manifest_keeps_atomic_dataset_contracts() -> None:
         "macro.commodity_quotes",
         "macro.commodity_daily_bars",
     )
+
+
+def test_us_equity_uses_fixed_usd_baskets_instead_of_provider_movers() -> None:
+    keys = {dataset.key: dataset for dataset in ACTIVE_LAUNCH_MANIFEST.datasets}
+    assert "us.market_movers" not in keys
+    proxies = keys["us.index_proxy_quotes"]
+    mega_caps = keys["us.mega_cap_quotes"]
+    assert proxies.endpoint == mega_caps.endpoint == "/quote"
+    assert proxies.symbols == ("SPY", "QQQ", "DIA", "IWM", "VIXY")
+    assert len(mega_caps.symbols) == 8 and "NVDA" in mega_caps.symbols
+    assert set(proxies.symbol_units.values()) == set(mega_caps.symbol_units.values()) == {"USD"}
+    assert tuple(dataset.key for dataset in _market_datasets("us_equity")) == (
+        "us.index_proxy_quotes",
+        "us.mega_cap_quotes",
+    )
+    formulas = [
+        block.formula
+        for market in ACTIVE_LAUNCH_MANIFEST.markets
+        for block in market.blocks
+        if block.id.startswith("us.")
+    ]
+    assert all("previous_close" in formula for formula in formulas)
+    assert not any("as returned by provider" in formula for formula in formulas)
+
+
+def test_manifest_rejects_symbol_types_outside_the_dataset() -> None:
+    payload = ACTIVE_LAUNCH_MANIFEST.model_dump(mode="json")
+    next(dataset for dataset in payload["datasets"] if dataset["key"] == "macro.commodity_quotes")[
+        "symbol_types"
+    ] = {"ZZZ": "commodity"}
+
+    with pytest.raises(ValueError, match="symbol type overrides"):
+        LaunchManifest.model_validate(payload)
 
 
 def test_manifest_allows_multiple_datasets_for_one_market() -> None:

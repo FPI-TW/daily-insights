@@ -15,6 +15,8 @@ from daily_insights_api.modules.data_sources.api import (
     DailyBar,
     DataSourceContractError,
     Provenance,
+    QuoteResult,
+    QuotesResult,
     TwelveDataAdapter,
 )
 from daily_insights_api.modules.operations.api import (
@@ -71,7 +73,7 @@ _TITLES = {
     },
 }
 
-MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v4"
+MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v5"
 
 
 @dataclass(frozen=True)
@@ -318,40 +320,68 @@ async def _build_dataset_blocks(
     dataset: DatasetManifest,
 ) -> tuple[tuple[ReportBlock, ...], Provenance]:
     if dataset.key == "macro.commodity_quotes":
-        quotes = await asyncio.gather(
-            *(
-                adapter.get_quote(
-                    market=market_code,
-                    symbol=symbol,
-                    expected_currency=dataset.symbol_units[symbol],
-                )
-                for symbol in dataset.symbols
-            )
-        )
-        as_of = min(item.as_of for item in quotes)
+        quotes = await _dataset_quotes(adapter, market_code, dataset)
         macro_block = MetricBlock(
             id="macro.commodities",
             status="ok",
-            source_as_of=as_of,
+            source_as_of=min(item.as_of for item in quotes.items),
             metrics=tuple(
-                MetricItem(
-                    id=identifier,
-                    value=_quantize(
-                        item.close,
-                        block_precision("macro.commodities"),
-                        block_rounding("macro.commodities"),
-                    ),
-                    change=_quantize(
-                        item.percent_change,
-                        block_precision("macro.commodities"),
-                        block_rounding("macro.commodities"),
-                    ),
-                    unit_code=item.currency.lower(),
-                )
-                for identifier, item in zip(("brent", "gold", "copper"), quotes, strict=True)
+                _metric_item(identifier, item, "macro.commodities")
+                for identifier, item in zip(("brent", "gold", "copper"), quotes.items, strict=True)
             ),
         )
-        return (macro_block,), _aggregate_provenance(tuple(item.provenance for item in quotes))
+        return (macro_block,), _aggregate_provenance(quotes.provenances)
+    if dataset.key == "us.index_proxy_quotes":
+        quotes = await _dataset_quotes(adapter, market_code, dataset)
+        proxies_block = MetricBlock(
+            id="us.index_proxies",
+            status="ok",
+            source_as_of=min(item.as_of for item in quotes.items),
+            metrics=tuple(
+                _metric_item(item.symbol.lower(), item, "us.index_proxies") for item in quotes.items
+            ),
+        )
+        return (proxies_block,), _aggregate_provenance(quotes.provenances)
+    if dataset.key == "us.mega_cap_quotes":
+        quotes = await _dataset_quotes(adapter, market_code, dataset)
+        # The basket is fixed, so ranking by move only orders the rows; it
+        # cannot pull low-priced names in the way provider movers did.
+        ranked = sorted(
+            quotes.items,
+            key=lambda item: _previous_close_change(item.close, item.previous_close),
+            reverse=True,
+        )
+        mega_caps_block = TableBlock(
+            id="us.mega_caps",
+            status="ok",
+            source_as_of=min(item.as_of for item in quotes.items),
+            columns=(
+                TableColumn(id="instrument"),
+                TableColumn(id="price", unit_code="usd"),
+                TableColumn(id="change", unit_code="percent"),
+            ),
+            rows=tuple(
+                (
+                    TableCell(text=item.symbol),
+                    TableCell(
+                        value=_quantize(
+                            item.close,
+                            block_precision("us.mega_caps"),
+                            block_rounding("us.mega_caps"),
+                        )
+                    ),
+                    TableCell(
+                        value=_quantize(
+                            _previous_close_change(item.close, item.previous_close),
+                            block_precision("us.mega_caps"),
+                            block_rounding("us.mega_caps"),
+                        )
+                    ),
+                )
+                for item in ranked
+            ),
+        )
+        return (mega_caps_block,), _aggregate_provenance(quotes.provenances)
     if dataset.key == "macro.commodity_daily_bars":
         results = await asyncio.gather(
             *(
@@ -454,44 +484,41 @@ async def _build_dataset_blocks(
         return (overview, normalized), _aggregate_provenance(
             tuple(result.provenance for result in results)
         )
-    if dataset.key != "us.market_movers":
-        raise DataSourceContractError(f"unsupported report dataset {dataset.key}")
-    gainers, losers = await asyncio.gather(
-        adapter.get_stock_movers(direction="gainers", outputsize=2),
-        adapter.get_stock_movers(direction="losers", outputsize=2),
+    raise DataSourceContractError(f"unsupported report dataset {dataset.key}")
+
+
+async def _dataset_quotes(
+    adapter: TwelveDataAdapter,
+    market_code: LaunchMarketCode,
+    dataset: DatasetManifest,
+) -> QuotesResult:
+    return await adapter.get_quotes(
+        market=market_code,
+        symbols=dataset.symbols,
+        expected_currencies=dict(dataset.symbol_units),
+        symbol_types=dict(dataset.symbol_types),
     )
-    items = gainers.items + losers.items
-    movers_block = TableBlock(
-        id="us.market_movers",
-        status="ok",
-        source_as_of=min(item.as_of for item in items),
-        columns=(
-            TableColumn(id="instrument"),
-            TableColumn(id="price", unit_code="usd"),
-            TableColumn(id="change", unit_code="percent"),
+
+
+def _metric_item(identifier: str, item: QuoteResult, block_id: str) -> MetricItem:
+    return MetricItem(
+        id=identifier,
+        value=_quantize(item.close, block_precision(block_id), block_rounding(block_id)),
+        change=_quantize(
+            _previous_close_change(item.close, item.previous_close),
+            block_precision(block_id),
+            block_rounding(block_id),
         ),
-        rows=tuple(
-            (
-                TableCell(text=item.symbol),
-                TableCell(
-                    value=_quantize(
-                        item.close,
-                        block_precision("us.market_movers"),
-                        block_rounding("us.market_movers"),
-                    )
-                ),
-                TableCell(
-                    value=_quantize(
-                        item.percent_change,
-                        block_precision("us.market_movers"),
-                        block_rounding("us.market_movers"),
-                    )
-                ),
-            )
-            for item in items
-        ),
+        unit_code=item.currency.lower(),
     )
-    return (movers_block,), _aggregate_provenance((gainers.provenance, losers.provenance))
+
+
+def _previous_close_change(close: Decimal, previous_close: Decimal | None) -> Decimal:
+    """Percent move against the previous close; our own definition rather than
+    the provider's undocumented percent_change."""
+    if previous_close is None or previous_close <= 0:
+        raise DataSourceContractError("quote has no usable previous close for the change")
+    return (close - previous_close) / previous_close * Decimal(100)
 
 
 def _normalized_points(
@@ -732,6 +759,7 @@ _ENDPOINT_FIELDS: dict[str, frozenset[str]] = {
             "low",
             "close",
             "volume",
+            "previous_close",
             "change",
             "percent_change",
         }

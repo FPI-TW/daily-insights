@@ -5,14 +5,12 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from itertools import pairwise
-from typing import Literal
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from daily_insights_api.modules.data_sources.dto import DailyBar, MarketCode, Provenance
 from daily_insights_api.modules.data_sources.errors import DataSourceContractError
 from daily_insights_api.modules.data_sources.twelve_data.schemas import (
-    TwelveDataMovers,
     TwelveDataQuote,
     TwelveDataTimeSeries,
 )
@@ -40,9 +38,20 @@ class QuoteResult:
     high: Decimal
     low: Decimal
     volume: int | None
+    previous_close: Decimal | None
     change: Decimal | None
+    # The provider's own figure, kept for provenance; reports derive their
+    # change from previous_close so the definition is ours.
     percent_change: Decimal | None
     provenance: Provenance
+
+
+@dataclass(frozen=True, slots=True)
+class QuotesResult:
+    """Quotes in the requested symbol order plus one provenance per request made."""
+
+    items: tuple[QuoteResult, ...]
+    provenances: tuple[Provenance, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,23 +60,7 @@ class DailyBarsResult:
     provenance: Provenance
 
 
-@dataclass(frozen=True, slots=True)
-class Mover:
-    symbol: str
-    name: str
-    as_of: date
-    close: Decimal
-    high: Decimal
-    low: Decimal
-    volume: int
-    change: Decimal
-    percent_change: Decimal
-
-
-@dataclass(frozen=True, slots=True)
-class MoversResult:
-    items: tuple[Mover, ...]
-    provenance: Provenance
+_BATCH_QUOTES = TypeAdapter(dict[str, TwelveDataQuote])
 
 
 class TwelveDataAdapter:
@@ -80,35 +73,71 @@ class TwelveDataAdapter:
         market: MarketCode,
         symbol: str,
         expected_currency: str,
+        symbol_type: str | None = None,
     ) -> QuoteResult:
-        params: dict[str, QueryValue] = {"symbol": symbol}
-        response = await self._transport.get("/quote", params=params)
-        payload = _parse(response, TwelveDataQuote, "/quote")
-        if payload.symbol != symbol:
-            raise DataSourceContractError("Twelve Data quote symbol did not match the request")
-        if payload.percent_change is None:
-            raise DataSourceContractError("Twelve Data quote omitted a required field")
-        currency = payload.currency or _quote_currency(symbol)
-        if currency is None or re.fullmatch(r"[A-Z]{3}", currency) is None:
-            raise DataSourceContractError("Twelve Data quote returned an invalid currency unit")
-        if currency != expected_currency:
-            raise DataSourceContractError(
-                "Twelve Data quote currency did not match the launch manifest"
+        result = await self.get_quotes(
+            market=market,
+            symbols=(symbol,),
+            expected_currencies={symbol: expected_currency},
+            symbol_types={symbol: symbol_type} if symbol_type else {},
+        )
+        return result.items[0]
+
+    async def get_quotes(
+        self,
+        *,
+        market: MarketCode,
+        symbols: tuple[str, ...],
+        expected_currencies: dict[str, str],
+        symbol_types: dict[str, str] | None = None,
+    ) -> QuotesResult:
+        """Fetch several quotes with one request per asset-class group.
+
+        The provider's ``type`` parameter applies to a whole request, so
+        symbols that pin a type (commodities) are requested apart from the
+        rest. Every quote passes the same contract checks as a single request.
+        """
+        del market
+        if not symbols or len(set(symbols)) != len(symbols):
+            raise ValueError("symbols must be a non-empty tuple of distinct symbols")
+        if set(expected_currencies) != set(symbols):
+            raise ValueError("expected_currencies must cover every requested symbol")
+        types = symbol_types or {}
+        groups: dict[str | None, list[str]] = {}
+        for symbol in symbols:
+            groups.setdefault(types.get(symbol), []).append(symbol)
+        quotes: dict[str, QuoteResult] = {}
+        provenances: list[Provenance] = []
+        for symbol_type, group in groups.items():
+            params: dict[str, QueryValue] = {"symbol": ",".join(group)}
+            if symbol_type is not None:
+                params["type"] = symbol_type
+            response = await self._transport.get("/quote", params=params)
+            payloads = _parse_quotes(response, group)
+            parsed = {
+                symbol: _quote_result(
+                    payloads[symbol],
+                    symbol,
+                    expected_currencies[symbol],
+                    symbol_type,
+                    response,
+                    params,
+                )
+                for symbol in group
+            }
+            quotes.update(parsed)
+            provenances.append(
+                _provenance(
+                    response,
+                    "/quote",
+                    params,
+                    min(item.as_of for item in parsed.values()),
+                    len(parsed),
+                )
             )
-        as_of = datetime.fromtimestamp(payload.timestamp, UTC).date()
-        return QuoteResult(
-            symbol=payload.symbol,
-            name=payload.name,
-            currency=currency,
-            as_of=as_of,
-            close=payload.close,
-            open=payload.open,
-            high=payload.high,
-            low=payload.low,
-            volume=payload.volume,
-            change=payload.change,
-            percent_change=payload.percent_change,
-            provenance=_provenance(response, "/quote", params, as_of, 1),
+        return QuotesResult(
+            items=tuple(quotes[symbol] for symbol in symbols),
+            provenances=tuple(provenances),
         )
 
     async def get_daily_bars(
@@ -180,53 +209,70 @@ class TwelveDataAdapter:
             provenance=_provenance(response, "/time_series", params, as_of, len(items)),
         )
 
-    async def get_stock_movers(
-        self,
-        *,
-        direction: Literal["gainers", "losers"],
-        outputsize: int,
-    ) -> MoversResult:
-        if not 1 <= outputsize <= 50:
-            raise ValueError("outputsize must be between 1 and 50")
-        params: dict[str, QueryValue] = {
-            "direction": direction,
-            "outputsize": outputsize,
-            "country": "USA",
-        }
-        response = await self._transport.get("/market_movers/stocks", params=params)
-        payload = _parse(response, TwelveDataMovers, "/market_movers/stocks")
-        if payload.status != "ok" or len(payload.values) != outputsize:
-            raise DataSourceContractError("Twelve Data returned an incomplete movers result")
-        items = tuple(
-            Mover(
-                symbol=item.symbol,
-                name=item.name,
-                as_of=item.market_date,
-                close=item.last,
-                high=item.high,
-                low=item.low,
-                volume=item.volume,
-                change=item.change,
-                percent_change=item.percent_change,
-            )
-            for item in payload.values
-        )
-        as_of = min(item.as_of for item in items)
-        return MoversResult(
-            items=items,
-            provenance=_provenance(
-                response,
-                "/market_movers/stocks",
-                params,
-                as_of,
-                len(items),
-            ),
-        )
-
 
 def _quote_currency(symbol: str) -> str | None:
     parts = symbol.split("/", maxsplit=1)
     return parts[1] if len(parts) == 2 else None
+
+
+def _parse_quotes(
+    response: TwelveDataTransportResponse, symbols: list[str]
+) -> dict[str, TwelveDataQuote]:
+    """A single-symbol request answers with one flat quote; a batch answers with
+    a symbol-keyed object whose entries may individually be error objects,
+    which fail validation and therefore the whole request."""
+    if len(symbols) == 1:
+        return {symbols[0]: _parse(response, TwelveDataQuote, "/quote")}
+    try:
+        payloads = _BATCH_QUOTES.validate_json(response.content)
+    except ValidationError as error:
+        raise DataSourceContractError(
+            "Twelve Data response no longer matches the reviewed contract for /quote"
+        ) from error
+    if set(payloads) != set(symbols):
+        raise DataSourceContractError("Twelve Data batch quote did not cover every symbol")
+    return payloads
+
+
+def _quote_result(
+    payload: TwelveDataQuote,
+    symbol: str,
+    expected_currency: str,
+    symbol_type: str | None,
+    response: TwelveDataTransportResponse,
+    params: dict[str, QueryValue],
+) -> QuoteResult:
+    if payload.symbol != symbol:
+        raise DataSourceContractError("Twelve Data quote symbol did not match the request")
+    if payload.previous_close is None or payload.previous_close <= 0:
+        raise DataSourceContractError("Twelve Data quote omitted a usable previous close")
+    currency = payload.currency or _quote_currency(symbol)
+    # Commodity quotes carry no currency field; the manifest pins their unit,
+    # and the type parameter already guarantees the asset class.
+    if currency is None and symbol_type == "commodity":
+        currency = expected_currency
+    if currency is None or re.fullmatch(r"[A-Z]{3}", currency) is None:
+        raise DataSourceContractError("Twelve Data quote returned an invalid currency unit")
+    if currency != expected_currency:
+        raise DataSourceContractError(
+            "Twelve Data quote currency did not match the launch manifest"
+        )
+    as_of = datetime.fromtimestamp(payload.timestamp, UTC).date()
+    return QuoteResult(
+        symbol=payload.symbol,
+        name=payload.name,
+        currency=currency,
+        as_of=as_of,
+        close=payload.close,
+        open=payload.open,
+        high=payload.high,
+        low=payload.low,
+        volume=payload.volume,
+        previous_close=payload.previous_close,
+        change=payload.change,
+        percent_change=payload.percent_change,
+        provenance=_provenance(response, "/quote", params, as_of, 1),
+    )
 
 
 def _parse[PayloadT: BaseModel](

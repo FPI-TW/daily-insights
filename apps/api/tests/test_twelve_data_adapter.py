@@ -54,6 +54,7 @@ async def test_quote_is_normalized_to_decimal_and_sanitized_provenance() -> None
                 "high": "2421.00",
                 "low": "2409.90",
                 "close": "2418.25",
+                "previous_close": "2410.10",
                 "change": "8.15",
                 "percent_change": "0.3382",
             },
@@ -78,6 +79,7 @@ async def test_quote_uses_explicit_symbol_quote_currency_when_provider_omits_cur
         "high": "2",
         "low": "1",
         "close": "2",
+        "previous_close": "1",
         "percent_change": "1",
     }
     adapter = TwelveDataAdapter(
@@ -103,6 +105,7 @@ async def test_quote_timestamp_is_normalized_at_utc_date_boundary() -> None:
         "high": "2",
         "low": "1",
         "close": "2",
+        "previous_close": "1",
         "percent_change": "1",
     }
     adapter = TwelveDataAdapter(
@@ -127,6 +130,7 @@ async def test_quote_rejects_non_epoch_timestamp() -> None:
         "high": "2",
         "low": "1",
         "close": "2",
+        "previous_close": "1",
         "percent_change": "1",
     }
     adapter = TwelveDataAdapter(
@@ -150,6 +154,7 @@ async def test_quote_rejects_datetime_outside_observed_calendar_date_format() ->
         "high": "2",
         "low": "1",
         "close": "2",
+        "previous_close": "1",
         "percent_change": "1",
     }
     adapter = TwelveDataAdapter(
@@ -390,96 +395,6 @@ async def test_daily_bars_reject_quote_currency_drift(currency_quote: object) ->
         )
 
 
-async def test_stock_movers_accept_provider_market_local_datetime() -> None:
-    payload = {
-        "values": [
-            {
-                "symbol": "ACME",
-                "name": "Acme Corp",
-                "exchange": "NASDAQ",
-                "mic_code": "XNAS",
-                "datetime": "2026-08-28 15:59:00",
-                "last": 12.5,
-                "high": 13.0,
-                "low": 10.0,
-                "volume": 100,
-                "change": 2.5,
-                "percent_change": 25.0,
-            }
-        ],
-        "status": "ok",
-    }
-    adapter = TwelveDataAdapter(
-        transport(
-            httpx.MockTransport(lambda request: httpx.Response(200, json=payload, request=request))
-        )
-    )
-
-    result = await adapter.get_stock_movers(direction="gainers", outputsize=1)
-
-    assert result.items[0].as_of == date(2026, 8, 28)
-    assert result.items[0].close == Decimal("12.5")
-    assert result.provenance.record_count == 1
-
-
-async def test_stock_movers_reject_datetime_with_utc_offset() -> None:
-    payload = {
-        "values": [
-            {
-                "symbol": "ACME",
-                "name": "Acme Corp",
-                "exchange": "NASDAQ",
-                "mic_code": "XNAS",
-                "datetime": "2026-08-28T15:59:00-04:00",
-                "last": 12.5,
-                "high": 13.0,
-                "low": 10.0,
-                "volume": 100,
-                "change": 2.5,
-                "percent_change": 25.0,
-            }
-        ],
-        "status": "ok",
-    }
-    adapter = TwelveDataAdapter(
-        transport(
-            httpx.MockTransport(lambda request: httpx.Response(200, json=payload, request=request))
-        )
-    )
-
-    with pytest.raises(DataSourceContractError):
-        await adapter.get_stock_movers(direction="gainers", outputsize=1)
-
-
-async def test_stock_movers_reject_datetime_without_zero_padding() -> None:
-    payload = {
-        "values": [
-            {
-                "symbol": "ACME",
-                "name": "Acme Corp",
-                "exchange": "NASDAQ",
-                "mic_code": "XNAS",
-                "datetime": "2026-8-2 3:4:5",
-                "last": 12.5,
-                "high": 13.0,
-                "low": 10.0,
-                "volume": 100,
-                "change": 2.5,
-                "percent_change": 25.0,
-            }
-        ],
-        "status": "ok",
-    }
-    adapter = TwelveDataAdapter(
-        transport(
-            httpx.MockTransport(lambda request: httpx.Response(200, json=payload, request=request))
-        )
-    )
-
-    with pytest.raises(DataSourceContractError):
-        await adapter.get_stock_movers(direction="gainers", outputsize=1)
-
-
 @pytest.mark.parametrize("field", ["open", "high", "low", "close"])
 async def test_daily_bars_reject_each_missing_required_value(field: str) -> None:
     value: dict[str, object] = {
@@ -513,7 +428,7 @@ async def test_daily_bars_reject_each_missing_required_value(field: str) -> None
         )
 
 
-@pytest.mark.parametrize("field", ["percent_change", "timestamp"])
+@pytest.mark.parametrize("field", ["previous_close", "timestamp"])
 async def test_quote_rejects_missing_manifest_required_field(field: str) -> None:
     payload: dict[str, object] = {
         "symbol": "XAU/USD",
@@ -524,6 +439,7 @@ async def test_quote_rejects_missing_manifest_required_field(field: str) -> None
         "high": "2",
         "low": "1",
         "close": "2",
+        "previous_close": "1",
         "percent_change": "1",
     }
     payload[field] = None
@@ -549,6 +465,7 @@ async def test_quote_rejects_non_iso_currency_unit() -> None:
         "high": "2",
         "low": "1",
         "close": "2",
+        "previous_close": "1",
         "percent_change": "1",
     }
     adapter = TwelveDataAdapter(
@@ -573,6 +490,7 @@ async def test_quote_rejects_currency_that_differs_from_manifest_unit() -> None:
         "high": "2",
         "low": "1",
         "close": "2",
+        "previous_close": "1",
         "percent_change": "1",
     }
     adapter = TwelveDataAdapter(
@@ -603,3 +521,114 @@ async def test_invalid_or_missing_decimal_is_a_contract_error(close: object) -> 
     )
     with pytest.raises(DataSourceContractError):
         await adapter.get_quote(market="crypto", symbol="BTC/USD", expected_currency="USD")
+
+
+def _quote_payload(
+    symbol: str, close: str, previous_close: str, **extra: object
+) -> dict[str, object]:
+    return {
+        "symbol": symbol,
+        "currency": "USD",
+        "datetime": "2026-09-02",
+        "timestamp": 1788393600,
+        "open": "1",
+        "high": "2",
+        "low": "1",
+        "close": close,
+        "previous_close": previous_close,
+        "percent_change": "0",
+        **extra,
+    }
+
+
+async def test_batch_quotes_keep_request_order_and_split_commodity_types() -> None:
+    requests: list[dict[str, str]] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        requests.append(params)
+        if params.get("type") == "commodity":
+            # Commodity quotes carry no currency field.
+            return httpx.Response(
+                200,
+                json=_quote_payload("HG1", "6.49132", "6.51794", currency=None, name="Copper Spot"),
+            )
+        return httpx.Response(
+            200,
+            json={
+                "XAU/USD": _quote_payload("XAU/USD", "4427.74", "4387.77", currency=None),
+                "XBR/USD": _quote_payload("XBR/USD", "93.996", "94.33", currency=None),
+            },
+        )
+
+    adapter = TwelveDataAdapter(transport(httpx.MockTransport(respond)))
+    result = await adapter.get_quotes(
+        market="global_macro_bonds",
+        symbols=("XBR/USD", "XAU/USD", "HG1"),
+        expected_currencies={"XBR/USD": "USD", "XAU/USD": "USD", "HG1": "USD"},
+        symbol_types={"HG1": "commodity"},
+    )
+
+    assert [item.symbol for item in result.items] == ["XBR/USD", "XAU/USD", "HG1"]
+    assert [item.currency for item in result.items] == ["USD", "USD", "USD"]
+    assert result.items[2].previous_close == Decimal("6.51794")
+    assert requests == [
+        {"symbol": "XBR/USD,XAU/USD"},
+        {"symbol": "HG1", "type": "commodity"},
+    ]
+    assert len(result.provenances) == 2
+    assert result.provenances[0].record_count == 2
+
+
+async def test_batch_quotes_reject_a_per_symbol_error_object_and_missing_symbols() -> None:
+    def respond_with_error(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "SPY": _quote_payload("SPY", "765.16", "761.78"),
+                "VIX": {"code": 404, "message": "symbol invalid", "status": "error"},
+            },
+        )
+
+    adapter = TwelveDataAdapter(transport(httpx.MockTransport(respond_with_error)))
+    with pytest.raises(DataSourceContractError, match="reviewed contract"):
+        await adapter.get_quotes(
+            market="us_equity",
+            symbols=("SPY", "VIX"),
+            expected_currencies={"SPY": "USD", "VIX": "USD"},
+        )
+
+    def respond_short(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"SPY": _quote_payload("SPY", "765.16", "761.78")})
+
+    adapter = TwelveDataAdapter(transport(httpx.MockTransport(respond_short)))
+    with pytest.raises(DataSourceContractError, match="every symbol"):
+        await adapter.get_quotes(
+            market="us_equity",
+            symbols=("SPY", "QQQ"),
+            expected_currencies={"SPY": "USD", "QQQ": "USD"},
+        )
+
+
+async def test_quote_rejects_zero_previous_close() -> None:
+    payload = _quote_payload("AAPL", "324.96", "0")
+    adapter = TwelveDataAdapter(
+        transport(
+            httpx.MockTransport(lambda request: httpx.Response(200, json=payload, request=request))
+        )
+    )
+
+    with pytest.raises(DataSourceContractError, match="previous close"):
+        await adapter.get_quote(market="us_equity", symbol="AAPL", expected_currency="USD")
+
+
+async def test_non_commodity_quote_without_currency_is_still_rejected() -> None:
+    payload = _quote_payload("AAPL", "324.96", "325.13", currency=None)
+    adapter = TwelveDataAdapter(
+        transport(
+            httpx.MockTransport(lambda request: httpx.Response(200, json=payload, request=request))
+        )
+    )
+
+    with pytest.raises(DataSourceContractError, match="currency unit"):
+        await adapter.get_quote(market="us_equity", symbol="AAPL", expected_currency="USD")
