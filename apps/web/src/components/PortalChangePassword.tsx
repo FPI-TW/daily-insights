@@ -3,11 +3,8 @@ import { useRouter } from "@tanstack/react-router"
 import { AnimatePresence, motion } from "motion/react"
 import { useState, type FormEvent } from "react"
 import { useTranslation } from "react-i18next"
-import {
-  browserAuthClient,
-  rememberCsrfToken,
-  requireCsrfToken,
-} from "#/lib/auth"
+import { rememberCsrfToken } from "#/lib/auth"
+import { changePassword } from "#/lib/change-password"
 import { toast } from "#/lib/motion"
 import { LocaleSwitcher } from "./LocaleSwitcher"
 
@@ -29,14 +26,10 @@ export function PortalChangePassword({
     setError(null)
     const data = new FormData(event.currentTarget)
     try {
-      const result = await browserAuthClient().changePassword(
-        {
-          current_password: String(data.get("currentPassword") ?? ""),
-          new_password: String(data.get("newPassword") ?? ""),
-        },
-        await requireCsrfToken()
+      await changePassword(
+        String(data.get("currentPassword") ?? ""),
+        String(data.get("newPassword") ?? "")
       )
-      rememberCsrfToken(result.csrf_token)
       await router.invalidate()
       await router.navigate({
         to: portal === "customer" ? "/$locale/reports" : "/$locale/admin/audio",

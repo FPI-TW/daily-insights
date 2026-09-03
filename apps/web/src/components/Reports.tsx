@@ -1,7 +1,7 @@
 import { ClientOnly, Link, useRouter } from "@tanstack/react-router"
 import ReactECharts from "echarts-for-react"
 import { motion } from "motion/react"
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import type { Locale } from "@daily-insights/api-client"
 import {
@@ -18,6 +18,7 @@ import {
   springs,
   useEnterAnimation,
 } from "#/lib/motion"
+import { ActiveIndicator } from "./ActiveIndicator"
 
 function valueText(value: ReportValue | null, t: (key: string) => string) {
   if (value === null) return "—"
@@ -35,24 +36,19 @@ export function ReportLoadingScreen() {
   const { t } = useTranslation()
   const animate = useEnterAnimation()
   return (
-    <main className="page-shell" role="status" aria-live="polite">
+    <div role="status" aria-live="polite">
       <p className="sr-only">{t("reportLoadingAnnouncement")}</p>
       <motion.div
-        className="animate-pulse space-y-5"
+        className="grid animate-pulse gap-4 md:grid-cols-2 xl:grid-cols-3"
         variants={fadeIn}
         initial={animate ? "hidden" : false}
         animate="visible"
       >
-        <div className="h-3 w-24 rounded bg-line" />
-        <div className="h-9 w-72 max-w-full rounded bg-line" />
-        <div className="h-1 w-14 rounded bg-lagoon/40" />
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <div className="h-44 rounded-[13px] bg-line" />
-          <div className="h-44 rounded-[13px] bg-line" />
-          <div className="h-44 rounded-[13px] bg-line" />
-        </div>
+        <div className="h-44 rounded-[13px] bg-line" />
+        <div className="h-44 rounded-[13px] bg-line" />
+        <div className="h-44 rounded-[13px] bg-line" />
       </motion.div>
-    </main>
+    </div>
   )
 }
 
@@ -61,18 +57,27 @@ function ReportMarketNav({
   activeMarket,
 }: {
   locale: Locale
-  activeMarket?: MarketCode
+  activeMarket?: MarketCode | undefined
 }) {
   const { t } = useTranslation()
+  const linkClass = (active: boolean) =>
+    `shrink-0 border-b-2 border-transparent px-4 py-3 text-xs font-extrabold no-underline transition-colors ${active ? "text-lagoon" : "text-sea-ink-soft hover:text-sea-ink"}`
   return (
     <nav
-      className="mb-6 flex overflow-x-auto border-y border-line bg-surface [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="relative isolate mb-6 flex overflow-x-auto border-y border-line bg-surface [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [view-transition-name:report-market-nav]"
       aria-label={t("reportMarketNav")}
     >
+      <ActiveIndicator
+        activeKey={`${locale}:${activeMarket ?? "all"}`}
+        variant="underline"
+      />
       <Link
         to="/$locale/reports"
         params={{ locale }}
-        className={`shrink-0 border-b-2 px-4 py-3 text-xs font-extrabold no-underline transition-colors ${activeMarket === undefined ? "border-lagoon text-lagoon" : "border-transparent text-sea-ink-soft hover:text-sea-ink"}`}
+        // Exact: the list route is a prefix of every market route, and the
+        // marker follows whichever link carries aria-current.
+        activeOptions={{ exact: true }}
+        className={linkClass(activeMarket === undefined)}
       >
         {t("reportAllMarkets")}
       </Link>
@@ -81,7 +86,7 @@ function ReportMarketNav({
           key={code}
           to="/$locale/reports/$marketCode"
           params={{ locale, marketCode: code }}
-          className={`shrink-0 border-b-2 px-4 py-3 text-xs font-extrabold no-underline transition-colors ${activeMarket === code ? "border-lagoon text-lagoon" : "border-transparent text-sea-ink-soft hover:text-sea-ink"}`}
+          className={linkClass(activeMarket === code)}
         >
           {t(`reportMarketShort_${code}`)}
         </Link>
@@ -101,6 +106,32 @@ function PageHeading({ title }: { title: string }) {
   )
 }
 
+// Persistent frame for every reports route: the heading and market nav stay
+// mounted while the list, a market detail, a skeleton or an error swaps
+// underneath, so the nav's active marker slides instead of remounting.
+export function ReportShell({
+  locale,
+  activeMarket,
+  children,
+}: {
+  locale: Locale
+  activeMarket?: MarketCode | undefined
+  children: ReactNode
+}) {
+  const { t } = useTranslation()
+  return (
+    <main className="page-shell">
+      <PageHeading
+        title={
+          activeMarket ? t(`reportMarket_${activeMarket}`) : t("reportsTitle")
+        }
+      />
+      <ReportMarketNav locale={locale} activeMarket={activeMarket} />
+      {children}
+    </main>
+  )
+}
+
 export function ReportList({
   locale,
   reports,
@@ -111,9 +142,7 @@ export function ReportList({
   const { t } = useTranslation()
   const animate = useEnterAnimation()
   return (
-    <main className="page-shell">
-      <PageHeading title={t("reportsTitle")} />
-      <ReportMarketNav locale={locale} />
+    <>
       {reports.length === 0 ? (
         <section className="surface-panel p-10 text-center">
           <h2 className="mt-0 text-xl">{t("reportsEmptyTitle")}</h2>
@@ -165,32 +194,21 @@ export function ReportList({
           ))}
         </section>
       )}
-    </main>
+    </>
   )
 }
 
-export function ReportDetail({
-  locale,
-  report,
-}: {
-  locale: Locale
-  report: ProvisionalReport
-}) {
-  const { t } = useTranslation()
+export function ReportDetail({ report }: { report: ProvisionalReport }) {
   return (
-    <main className="page-shell">
-      <PageHeading title={t(`reportMarket_${report.marketCode}`)} />
-      <ReportMarketNav locale={locale} activeMarket={report.marketCode} />
-      <div className="grid min-w-0 gap-4 xl:grid-cols-2">
-        {report.blocks.map((block, index) => (
-          <ReportBlockView
-            block={block}
-            index={index}
-            key={`${block.titleKey}-${index}`}
-          />
-        ))}
-      </div>
-    </main>
+    <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+      {report.blocks.map((block, index) => (
+        <ReportBlockView
+          block={block}
+          index={index}
+          key={`${block.titleKey}-${index}`}
+        />
+      ))}
+    </div>
   )
 }
 
@@ -497,70 +515,48 @@ export function ReportErrorScreen({ error }: { error: Error }) {
   const { t } = useTranslation()
   const router = useRouter()
   return (
-    <main className="page-shell">
-      <section
-        className="surface-panel border-market-up/35 p-10 text-center"
-        role="alert"
-      >
-        <h1 className="mt-0 text-2xl">{t("reportsErrorTitle")}</h1>
-        <p className="mx-auto max-w-xl text-sea-ink-soft">
-          {t("reportsErrorDescription")}
-        </p>
-        <button type="button" onClick={() => void router.invalidate()}>
-          {t("retry")}
-        </button>
-      </section>
-    </main>
+    <section
+      className="surface-panel border-market-up/35 p-10 text-center"
+      role="alert"
+    >
+      <h2 className="mt-0 text-2xl">{t("reportsErrorTitle")}</h2>
+      <p className="mx-auto max-w-xl text-sea-ink-soft">
+        {t("reportsErrorDescription")}
+      </p>
+      <button type="button" onClick={() => void router.invalidate()}>
+        {t("retry")}
+      </button>
+    </section>
   )
 }
 
-export function ReportNotLaunchedScreen({
-  locale,
-  marketCode,
-}: {
-  locale: Locale
-  marketCode: MarketCode
-}) {
+export function ReportNotLaunchedScreen() {
   const { t } = useTranslation()
   return (
-    <main className="page-shell">
-      <PageHeading title={t(`reportMarket_${marketCode}`)} />
-      <ReportMarketNav locale={locale} activeMarket={marketCode} />
-      <section
-        className="surface-panel p-10 text-center"
-        role="status"
-        aria-live="polite"
-      >
-        <h2 className="mt-0 text-xl">{t("reportNotLaunchedTitle")}</h2>
-        <p className="mb-0 text-sm text-sea-ink-soft">
-          {t("reportNotLaunchedDescription")}
-        </p>
-      </section>
-    </main>
+    <section
+      className="surface-panel p-10 text-center"
+      role="status"
+      aria-live="polite"
+    >
+      <h2 className="mt-0 text-xl">{t("reportNotLaunchedTitle")}</h2>
+      <p className="mb-0 text-sm text-sea-ink-soft">
+        {t("reportNotLaunchedDescription")}
+      </p>
+    </section>
   )
 }
 
-export function ReportNotGeneratedScreen({
-  locale,
-  marketCode,
-}: {
-  locale: Locale
-  marketCode: MarketCode
-}) {
+export function ReportNotGeneratedScreen() {
   const { t } = useTranslation()
   return (
-    <main className="page-shell">
-      <PageHeading title={t(`reportMarket_${marketCode}`)} />
-      <ReportMarketNav locale={locale} activeMarket={marketCode} />
-      <section
-        className="surface-panel border-market-caution/35 p-10 text-center"
-        role="status"
-        aria-live="polite"
-      >
-        <p className="m-0 text-sm text-sea-ink-soft">
-          {t("reportBlockUnavailable")}
-        </p>
-      </section>
-    </main>
+    <section
+      className="surface-panel border-market-caution/35 p-10 text-center"
+      role="status"
+      aria-live="polite"
+    >
+      <p className="m-0 text-sm text-sea-ink-soft">
+        {t("reportBlockUnavailable")}
+      </p>
+    </section>
   )
 }

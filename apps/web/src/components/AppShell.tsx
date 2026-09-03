@@ -2,19 +2,26 @@ import type { Locale, User } from "@daily-insights/api-client"
 import { Link, useLocation, useRouter } from "@tanstack/react-router"
 import { Settings, X } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
+import { Dialog } from "./Dialog"
 import type { ReactNode } from "react"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
   browserAuthClient,
   rememberCsrfToken,
   requireCsrfToken,
 } from "#/lib/auth"
-import { backdrop, dialogPanel, toast } from "#/lib/motion"
+import { toast } from "#/lib/motion"
 import { marketCodes } from "#/lib/provisional-reports"
+import { ActiveIndicator } from "./ActiveIndicator"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
 import { LocaleSwitcher } from "./LocaleSwitcher"
-import ThemeToggle from "./ThemeToggle"
+import { ThemeModePicker } from "./ThemeToggle"
+
+const customerNavLinkClass =
+  "shrink-0 rounded-md px-3 py-2 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&:not([aria-current=page])]:hover:bg-link-hover [&[aria-current=page]]:text-lagoon"
+const adminNavLinkClass =
+  "shrink-0 border-b-2 border-transparent px-4 py-3 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&[aria-current=page]]:text-lagoon"
 
 export function AppShell({
   locale,
@@ -35,8 +42,22 @@ export function AppShell({
   const [signOutError, setSignOutError] = useState("")
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsButtonRef = useRef<HTMLButtonElement>(null)
-  const settingsDialogRef = useRef<HTMLElement>(null)
   const closeSettingsButtonRef = useRef<HTMLButtonElement>(null)
+  const pathname = location.pathname
+  const customerSection = pathname.includes("/reports")
+    ? "reports"
+    : pathname.includes("/podcasts")
+      ? "podcasts"
+      : pathname.endsWith("/account")
+        ? "account"
+        : null
+  const adminSection = pathname.includes("/admin/audio")
+    ? "audio"
+    : pathname.includes("/admin/members")
+      ? "members"
+      : pathname.includes("/admin/conversations")
+        ? "conversations"
+        : null
   const reportMarketCode = marketCodes.find(code =>
     location.pathname.endsWith(`/reports/${code}`)
   )
@@ -46,43 +67,10 @@ export function AppShell({
     year: "numeric",
   }).format(new Date())
 
-  useEffect(() => {
-    if (!settingsOpen) return
-
-    closeSettingsButtonRef.current?.focus()
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        closeSettings()
-        return
-      }
-      if (event.key !== "Tab") return
-
-      const focusableElements =
-        settingsDialogRef.current?.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        )
-      if (!focusableElements?.length) return
-
-      const first = focusableElements[0]
-      const last = focusableElements[focusableElements.length - 1]
-      if (!first || !last) return
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    document.addEventListener("keydown", handleKeyDown)
-    return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [settingsOpen])
-
-  function closeSettings() {
+  const closeSettings = useCallback(() => {
     setSettingsOpen(false)
     window.requestAnimationFrame(() => settingsButtonRef.current?.focus())
-  }
+  }, [])
 
   async function signOut() {
     setPending(true)
@@ -116,9 +104,14 @@ export function AppShell({
 
   return (
     <>
-      <header
-        className="sticky top-0 z-20 border-b border-line bg-header backdrop-blur-xl"
+      {/* layoutRoot: the header is sticky, so the active-marker layout
+          animation must measure against the header itself, not the page.
+          Otherwise a route change that resets the scroll position makes the
+          marker appear to travel the scrolled distance. */}
+      <motion.header
+        className="sticky top-0 z-20 border-b border-line bg-header backdrop-blur-xl [view-transition-name:app-header]"
         data-surface={surface}
+        layoutRoot
       >
         <div className="mx-auto flex min-h-[68px] w-full max-w-[1240px] items-center justify-between gap-4 px-6 py-3 max-sm:px-4 max-sm:py-2.5">
           <Link
@@ -145,27 +138,31 @@ export function AppShell({
           <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
             {surface === "customer" ? (
               <nav
-                className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                className="relative isolate flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 aria-label={t("customerNav")}
               >
+                <ActiveIndicator
+                  activeKey={`${locale}:${customerSection}`}
+                  variant="pill"
+                />
                 <Link
                   to="/$locale/reports"
                   params={{ locale }}
-                  className="shrink-0 rounded-md px-3 py-2 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:bg-link-hover hover:text-sea-ink [&[aria-current=page]]:bg-lagoon/10 [&[aria-current=page]]:text-lagoon"
+                  className={customerNavLinkClass}
                 >
                   {t("reportsNav")}
                 </Link>
                 <Link
                   to="/$locale/podcasts"
                   params={{ locale }}
-                  className="shrink-0 rounded-md px-3 py-2 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:bg-link-hover hover:text-sea-ink [&[aria-current=page]]:bg-lagoon/10 [&[aria-current=page]]:text-lagoon"
+                  className={customerNavLinkClass}
                 >
                   {t("podcastNav")}
                 </Link>
                 <Link
                   to="/$locale/account"
                   params={{ locale }}
-                  className="shrink-0 rounded-md px-3 py-2 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:bg-link-hover hover:text-sea-ink [&[aria-current=page]]:bg-lagoon/10 [&[aria-current=page]]:text-lagoon"
+                  className={customerNavLinkClass}
                 >
                   {t("accountNav")}
                 </Link>
@@ -190,13 +187,17 @@ export function AppShell({
         {surface === "admin" ? (
           <div className="border-t border-line">
             <nav
-              className="mx-auto flex w-full max-w-[1240px] overflow-x-auto px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-sm:px-4"
+              className="relative isolate mx-auto flex w-full max-w-[1240px] overflow-x-auto px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-sm:px-4"
               aria-label={t("adminNav")}
             >
+              <ActiveIndicator
+                activeKey={`${locale}:${adminSection}`}
+                variant="underline"
+              />
               <Link
                 to="/$locale/admin/audio"
                 params={{ locale }}
-                className="shrink-0 border-b-2 border-transparent px-4 py-3 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&[aria-current=page]]:border-lagoon [&[aria-current=page]]:text-lagoon"
+                className={adminNavLinkClass}
               >
                 {t("audioManagementNav")}
               </Link>
@@ -205,7 +206,7 @@ export function AppShell({
                   <Link
                     to="/$locale/admin/members"
                     params={{ locale }}
-                    className="shrink-0 border-b-2 border-transparent px-4 py-3 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&[aria-current=page]]:border-lagoon [&[aria-current=page]]:text-lagoon"
+                    className={adminNavLinkClass}
                   >
                     {t("memberManagementNav")}
                   </Link>
@@ -213,7 +214,7 @@ export function AppShell({
                     to="/$locale/admin/conversations"
                     params={{ locale }}
                     search={{ history: [] }}
-                    className="shrink-0 border-b-2 border-transparent px-4 py-3 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&[aria-current=page]]:border-lagoon [&[aria-current=page]]:text-lagoon"
+                    className={adminNavLinkClass}
                   >
                     {t("conversationsNav")}
                   </Link>
@@ -222,76 +223,63 @@ export function AppShell({
             </nav>
           </div>
         ) : null}
-      </header>
-      <AnimatePresence>
-        {settingsOpen ? (
-          <motion.div
-            className="fixed inset-0 z-30 grid place-items-center bg-sea-ink/35 p-4"
-            role="presentation"
-            onMouseDown={closeSettings}
-            variants={backdrop}
-            initial="hidden"
-            animate="visible"
-            exit="hidden"
+      </motion.header>
+      <Dialog
+        open={settingsOpen}
+        onClose={closeSettings}
+        labelledBy="settings-title"
+        initialFocusRef={closeSettingsButtonRef}
+      >
+        <div className="flex items-center justify-between gap-4">
+          <h2
+            className="m-0 text-lg font-extrabold tracking-[-0.02em] text-sea-ink"
+            id="settings-title"
           >
-            <motion.section
-              className="w-full max-w-sm rounded-[13px] border border-line bg-surface p-5 shadow-xl"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="settings-title"
-              ref={settingsDialogRef}
-              onMouseDown={event => event.stopPropagation()}
-              variants={dialogPanel}
+            {t("settings")}
+          </h2>
+          <button
+            className="grid min-h-9 min-w-9 place-items-center rounded-md text-sea-ink-soft transition-colors hover:bg-link-hover hover:text-sea-ink"
+            type="button"
+            ref={closeSettingsButtonRef}
+            onClick={closeSettings}
+            aria-label={t("dismiss")}
+          >
+            <X className="size-4" aria-hidden="true" />
+          </button>
+        </div>
+        <div className="mt-5 grid gap-[18px]">
+          <div className="grid gap-2">
+            <p className="eyebrow tracking-[0.08em] text-sea-ink-soft">
+              {t("language")}
+            </p>
+            <LocaleSwitcher
+              locale={locale}
+              destination={localeDestination}
+              reportMarketCode={reportMarketCode}
+              variant="dialog"
+            />
+          </div>
+          <div className="grid gap-[9px] border-t border-line pt-[18px]">
+            <p className="eyebrow tracking-[0.08em] text-sea-ink-soft">
+              {t("theme")}
+            </p>
+            <ThemeModePicker />
+          </div>
+          <div className="grid gap-[9px] border-t border-line pt-[18px]">
+            <p className="m-0 truncate text-[11px] font-semibold text-sea-ink-soft">
+              {t("signedInAs", { email: user.email })}
+            </p>
+            <button
+              className="min-h-[38px] w-full rounded-lg border border-market-up/40 bg-surface px-3.5 py-2 text-[12.5px] font-extrabold text-market-up hover:bg-market-up/8"
+              type="button"
+              disabled={pending}
+              onClick={() => void signOut()}
             >
-              <div className="flex items-center justify-between gap-4">
-                <h2
-                  className="m-0 text-lg font-extrabold tracking-[-0.02em] text-sea-ink"
-                  id="settings-title"
-                >
-                  {t("settings")}
-                </h2>
-                <button
-                  className="grid min-h-9 min-w-9 place-items-center rounded-md text-sea-ink-soft transition-colors hover:bg-link-hover hover:text-sea-ink"
-                  type="button"
-                  ref={closeSettingsButtonRef}
-                  onClick={closeSettings}
-                  aria-label={t("dismiss")}
-                >
-                  <X className="size-4" aria-hidden="true" />
-                </button>
-              </div>
-              <div className="mt-5 space-y-5">
-                <div className="space-y-2">
-                  <p className="m-0 text-xs font-extrabold tracking-[0.08em] text-sea-ink-soft uppercase">
-                    {t("language")}
-                  </p>
-                  <LocaleSwitcher
-                    locale={locale}
-                    destination={localeDestination}
-                    reportMarketCode={reportMarketCode}
-                  />
-                </div>
-                <div className="flex items-center justify-between gap-4 border-t border-line pt-5">
-                  <p className="m-0 text-sm font-bold text-sea-ink">
-                    {t("theme")}
-                  </p>
-                  <ThemeToggle />
-                </div>
-                <div className="border-t border-line pt-5">
-                  <button
-                    className="min-h-9 w-full border border-market-up/40 px-3 py-1.5 text-xs font-extrabold text-market-up"
-                    type="button"
-                    disabled={pending}
-                    onClick={() => void signOut()}
-                  >
-                    {pending ? t("submitting") : t("signOut")}
-                  </button>
-                </div>
-              </div>
-            </motion.section>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+              {pending ? t("submitting") : t("signOut")}
+            </button>
+          </div>
+        </div>
+      </Dialog>
       <AnimatePresence>
         {signOutError ? (
           <motion.p
