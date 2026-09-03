@@ -39,11 +39,14 @@ if grep -q 'postgres:' "$compose_file"; then
   exit 1
 fi
 
-for service in api web nginx morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler; do
+production_services="api web nginx morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler"
+for service in $production_services; do
   grep -q "^  ${service}:" "$compose_file"
   grep -q "container_name: daily-insights-${service}" "$compose_file"
 done
-[ "$(grep -c 'restart: unless-stopped' "$compose_file")" -eq 6 ]
+# Derived from the list above rather than hardcoded: every service must declare
+# the restart policy, and adding one should not need this number edited too.
+[ "$(grep -c 'restart: unless-stopped' "$compose_file")" -eq "$(printf '%s\n' $production_services | wc -l | tr -d ' ')" ]
 grep -q 'stop_grace_period:' "$compose_file"
 grep -q 'healthcheck:' "$compose_file"
 grep -Fq "st_mtime < 93600" "$compose_file"
