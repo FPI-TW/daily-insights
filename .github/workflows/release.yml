@@ -156,6 +156,7 @@ jobs:
             DAILY_INSIGHTS_MORNING_REPORTS_ENABLED \
             DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED \
             DAILY_INSIGHTS_DAILY_NEWS_ENABLED \
+            DAILY_INSIGHTS_YFINANCE_ENABLED \
             DAILY_INSIGHTS_CHAT_ENABLED \
             DAILY_INSIGHTS_R2_ENDPOINT_URL \
             DAILY_INSIGHTS_R2_BUCKET_NAME \
@@ -210,6 +211,10 @@ jobs:
           fi
           if ! grep -Eq '^(true|false)$' <<<"$DAILY_INSIGHTS_DAILY_NEWS_ENABLED"; then
             echo "::error title=Invalid scheduler flag::DAILY_INSIGHTS_DAILY_NEWS_ENABLED must be true or false"
+            missing=1
+          fi
+          if ! grep -Eq '^(true|false)$' <<<"$DAILY_INSIGHTS_YFINANCE_ENABLED"; then
+            echo "::error title=Invalid scheduler flag::DAILY_INSIGHTS_YFINANCE_ENABLED must be true or false"
             missing=1
           fi
           if [ "$DAILY_INSIGHTS_DAILY_NEWS_ENABLED" = true ] && [ -z "${DAILY_INSIGHTS_MODEL_API_KEY:-}" ]; then

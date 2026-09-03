@@ -21,11 +21,13 @@ dependencies = [
   "python-multipart>=0.0.20,<1",
   "sqlalchemy[asyncio]>=2.0.41,<3",
   "uvicorn[standard]>=0.35,<1",
+  "yfinance>=1.7,<2",
 ]
 
 [dependency-groups]
 dev = [
   "mypy>=1.17,<2",
+  "pandas-stubs>=3.0.5.260730",
   "pytest>=8.4,<9",
   "pytest-asyncio>=1.1,<2",
   "ruff>=0.12,<1",
