@@ -15,6 +15,7 @@ dependencies = [
   "fastapi>=0.116,<1",
   "httpx>=0.28,<1",
   "langdetect>=1.0.9",
+  "mutagen>=1.48.1",
   "psycopg[binary]>=3.2,<4",
   "pydantic-settings>=2.10,<3",
   "python-multipart>=0.0.20,<1",

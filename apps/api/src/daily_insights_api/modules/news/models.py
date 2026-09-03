@@ -65,6 +65,13 @@ class NewsItem(UUIDPrimaryKeyMixin, Base):
         ),
         CheckConstraint("importance BETWEEN 1 AND 5", name="importance_range"),
         CheckConstraint("char_length(content_digest) = 64", name="content_digest_sha256"),
+        # Mirrors SelectedCandidate.market; NULL for editions generated before
+        # the column existed.
+        CheckConstraint(
+            "market IS NULL OR market IN "
+            "('global','us','asia','china','taiwan','europe','commodities','crypto')",
+            name="market_valid",
+        ),
         UniqueConstraint("edition_id", "rank", name="uq_news_item_rank"),
         UniqueConstraint("edition_id", "source_url", name="uq_news_item_url"),
     )
@@ -84,6 +91,10 @@ class NewsItem(UUIDPrimaryKeyMixin, Base):
     importance: Mapped[int] = mapped_column(Integer, nullable=False)
     content_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     numeric_facts: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    # Selection-stage classification kept for grouping and cross-day event
+    # tracking; both are null on editions persisted before migration 0012.
+    market: Mapped[str | None] = mapped_column(String(20))
+    event_key: Mapped[str | None] = mapped_column(String(80))
 
 
 class NewsPresentation(Base):

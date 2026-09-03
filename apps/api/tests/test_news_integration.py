@@ -183,6 +183,9 @@ async def test_partial_editions_regenerate_and_revisions_are_prompt_sensitive(
             )
             assert len(items) == 1
             assert items[0].source_url == "https://www.reuters.com/markets"
+            # Selection-stage classification is persisted for grouping and
+            # cross-day event tracking.
+            assert items[0].market is not None and items[0].event_key is not None
             presentations = list(
                 await database.scalars(
                     select(NewsPresentation).where(NewsPresentation.item_id == items[0].id)

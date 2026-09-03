@@ -1,4 +1,4 @@
-import type { LatestNews } from "@daily-insights/api-client"
+import type { LatestNews, NewsItem } from "@daily-insights/api-client"
 import { motion } from "motion/react"
 import { useTranslation } from "react-i18next"
 import {
@@ -83,72 +83,131 @@ export function DailyNews({
           {news.caveat ?? t("dailyNewsUnavailable")}
         </div>
       ) : (
-        // Two independent stacks so each card sits directly under the previous
-        // card of its column instead of on a shared grid row. Below lg the
-        // stacks are `contents` and the `order` style restores reading order.
-        <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-          {[0, 1].map(column => (
-            <div
-              key={column}
-              className="contents lg:grid lg:content-start lg:gap-4"
-            >
-              {news.items
-                .map((item, index) => ({ item, index }))
-                .filter(({ index }) => index % 2 === column)
-                .map(({ item, index }) => (
-                  <motion.article
-                    key={item.id}
-                    className="surface-panel p-5 transition-shadow hover:shadow-[0_16px_34px_rgb(14_20_19/9%)]"
-                    style={{ order: index }}
-                    {...reveal(animate, index)}
-                    whileHover={hoverLift}
-                    transition={springs.snappy}
-                  >
-                    <div className="flex items-center justify-between gap-3 text-xs text-sea-ink-soft">
-                      <span>{item.source_name}</span>
-                      <span
-                        aria-label={t("dailyNewsImportance", {
-                          count: item.importance,
-                        })}
-                        className="text-market-caution"
-                      >
-                        {"★".repeat(item.importance)}
-                      </span>
-                    </div>
-                    <h3 className="mt-3 mb-2 text-lg font-extrabold leading-6 text-sea-ink">
-                      {item.headline}
-                    </h3>
-                    <p className="m-0 text-sm leading-6 text-sea-ink-soft">
-                      {item.summary}
-                    </p>
-                    <div className="mt-4 flex items-center justify-between gap-3 text-xs text-sea-ink-soft">
-                      {item.source_published_at ? (
-                        <time dateTime={item.source_published_at}>
-                          {new Intl.DateTimeFormat(news.locale, {
-                            dateStyle: "medium",
-                            timeStyle: "short",
-                            // The edition is the Taipei day; pinning the zone also
-                            // keeps SSR and browser output identical (no hydration
-                            // mismatch from differing server and client zones).
-                            timeZone: "Asia/Taipei",
-                          }).format(new Date(item.source_published_at))}
-                        </time>
-                      ) : null}
-                      <a
-                        className="ml-auto font-bold text-lagoon"
-                        href={item.source_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        {t("dailyNewsSourceLink")}
-                      </a>
-                    </div>
-                  </motion.article>
-                ))}
-            </div>
-          ))}
-        </div>
+        <NewsGroups news={news} animate={animate} />
       )}
     </section>
+  )
+}
+
+/** Stories grouped by the market the selection stage assigned. Editions
+ * generated before that was persisted have no market on any item and render
+ * as one flat group without a heading. */
+function NewsGroups({ news, animate }: { news: LatestNews; animate: boolean }) {
+  const { t } = useTranslation()
+  const groups = new Map<string | null, NewsItem[]>()
+  for (const item of news.items) {
+    const key = item.market ?? null
+    groups.set(key, [...(groups.get(key) ?? []), item])
+  }
+  const grouped = news.items.some(item => item.market !== null)
+  let offset = 0
+  return (
+    <div className="grid gap-6">
+      {Array.from(groups.entries()).map(([market, items]) => {
+        const start = offset
+        offset += items.length
+        return (
+          <section
+            key={market ?? "unassigned"}
+            aria-label={
+              grouped && market ? t(`newsMarket_${market}`) : undefined
+            }
+          >
+            {grouped && market ? (
+              <h3 className="mt-0 mb-3 text-sm font-extrabold tracking-[0.04em] text-sea-ink-soft uppercase">
+                {t(`newsMarket_${market}`)}
+              </h3>
+            ) : null}
+            <NewsCards
+              items={items}
+              locale={news.locale}
+              animate={animate}
+              startIndex={start}
+            />
+          </section>
+        )
+      })}
+    </div>
+  )
+}
+
+function NewsCards({
+  items,
+  locale,
+  animate,
+  startIndex,
+}: {
+  items: ReadonlyArray<NewsItem>
+  locale: LatestNews["locale"]
+  animate: boolean
+  startIndex: number
+}) {
+  const { t } = useTranslation()
+  return (
+    // Two independent stacks so each card sits directly under the previous
+    // card of its column instead of on a shared grid row. Below lg the
+    // stacks are `contents` and the `order` style restores reading order.
+    <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+      {[0, 1].map(column => (
+        <div
+          key={column}
+          className="contents lg:grid lg:content-start lg:gap-4"
+        >
+          {items
+            .map((item, index) => ({ item, index }))
+            .filter(({ index }) => index % 2 === column)
+            .map(({ item, index }) => (
+              <motion.article
+                key={item.id}
+                className="surface-panel p-5 transition-shadow hover:shadow-[0_16px_34px_rgb(14_20_19/9%)]"
+                style={{ order: index }}
+                {...reveal(animate, startIndex + index)}
+                whileHover={hoverLift}
+                transition={springs.snappy}
+              >
+                <div className="flex items-center justify-between gap-3 text-xs text-sea-ink-soft">
+                  <span>{item.source_name}</span>
+                  <span
+                    aria-label={t("dailyNewsImportance", {
+                      count: item.importance,
+                    })}
+                    className="text-market-caution"
+                  >
+                    {"★".repeat(item.importance)}
+                  </span>
+                </div>
+                <h3 className="mt-3 mb-2 text-lg font-extrabold leading-6 text-sea-ink">
+                  {item.headline}
+                </h3>
+                <p className="m-0 text-sm leading-6 text-sea-ink-soft">
+                  {item.summary}
+                </p>
+                <div className="mt-4 flex items-center justify-between gap-3 text-xs text-sea-ink-soft">
+                  {item.source_published_at ? (
+                    <time dateTime={item.source_published_at}>
+                      {new Intl.DateTimeFormat(locale, {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                        // The edition is the Taipei day; pinning the zone also
+                        // keeps SSR and browser output identical (no hydration
+                        // mismatch from differing server and client zones).
+                        timeZone: "Asia/Taipei",
+                      }).format(new Date(item.source_published_at))}
+                    </time>
+                  ) : null}
+                  <a
+                    className="ml-auto font-bold text-lagoon"
+                    href={item.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {t("dailyNewsSourceLink")}
+                  </a>
+                </div>
+              </motion.article>
+            ))}
+        </div>
+      ))}
+    </div>
   )
 }

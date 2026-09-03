@@ -15,8 +15,14 @@ class NewsItemResponse(BaseModel):
     headline: str
     summary: str
     source_name: str
+    source_hostname: str
     source_url: HttpUrl
     source_published_at: datetime | None
+    # Quantitative points from the English summary; shown as chips.
+    numeric_facts: list[str]
+    # Null for editions generated before these were persisted.
+    market: str | None
+    event_key: str | None
 
 
 class LatestNewsResponse(BaseModel):

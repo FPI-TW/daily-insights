@@ -1363,6 +1363,17 @@
       },
       "NewsItemResponse": {
         "properties": {
+          "event_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Key"
+          },
           "headline": {
             "title": "Headline",
             "type": "string"
@@ -1376,9 +1387,31 @@
             "title": "Importance",
             "type": "integer"
           },
+          "market": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market"
+          },
+          "numeric_facts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Numeric Facts",
+            "type": "array"
+          },
           "rank": {
             "title": "Rank",
             "type": "integer"
+          },
+          "source_hostname": {
+            "title": "Source Hostname",
+            "type": "string"
           },
           "source_name": {
             "title": "Source Name",
@@ -1420,8 +1453,12 @@
           "headline",
           "summary",
           "source_name",
+          "source_hostname",
           "source_url",
-          "source_published_at"
+          "source_published_at",
+          "numeric_facts",
+          "market",
+          "event_key"
         ],
         "title": "NewsItemResponse",
         "type": "object"
@@ -1830,6 +1867,17 @@
             ],
             "title": "Cover Asset Id"
           },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -1885,6 +1933,17 @@
               }
             ],
             "title": "Cover Asset Id"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
           },
           "id": {
             "format": "uuid",

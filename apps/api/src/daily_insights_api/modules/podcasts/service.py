@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import BinaryIO
 
+from mutagen import File as MutagenFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -72,6 +73,60 @@ class PodcastAudioUpload:
     size_bytes: int
     mime_type: str
     sha256: str
+
+
+def audio_duration_seconds(content: BinaryIO) -> int | None:
+    """Whole seconds of audio in an uploaded file, or None when unreadable.
+
+    The stream is rewound afterwards so the caller can still upload it.
+    """
+    try:
+        content.seek(0)
+        parsed = MutagenFile(content)
+        info = getattr(parsed, "info", None)
+        length = float(getattr(info, "length", 0.0) or 0.0)
+    except Exception:
+        length = 0.0
+    finally:
+        content.seek(0)
+    return round(length) if length >= 1 else None
+
+
+async def active_durations(
+    database: AsyncSession, episode_ids: list[uuid.UUID]
+) -> dict[tuple[uuid.UUID, str], int | None]:
+    if not episode_ids:
+        return {}
+    rows = (
+        await database.execute(
+            select(
+                PodcastEpisodeAudioVariant.episode_id,
+                PodcastEpisodeAudioVariant.locale,
+                PodcastEpisodeAudioVariant.duration_seconds,
+            ).where(
+                PodcastEpisodeAudioVariant.episode_id.in_(episode_ids),
+                PodcastEpisodeAudioVariant.is_active.is_(True),
+            )
+        )
+    ).all()
+    return {(episode_id, locale): duration for episode_id, locale, duration in rows}
+
+
+def duration_for(
+    durations: dict[tuple[uuid.UUID, str], int | None], episode_id: uuid.UUID, locale: str
+) -> int | None:
+    """The requested locale's length, else any locale's (the player falls back the same way)."""
+    exact = durations.get((episode_id, locale))
+    if exact is not None:
+        return exact
+    return next(
+        (
+            duration
+            for (candidate_id, _), duration in durations.items()
+            if candidate_id == episode_id and duration is not None
+        ),
+        None,
+    )
 
 
 def derived_episode_metadata(trading_date: date) -> tuple[PodcastMetadata, ...]:
@@ -189,6 +244,7 @@ async def list_published_episodes(
             .order_by(PodcastEpisode.trading_date.desc())
         )
     ).all()
+    durations = await active_durations(database, [episode.id for episode in episodes])
     responses: list[PodcastEpisodeSummaryResponse] = []
     for episode in episodes:
         metadata = next(
@@ -202,6 +258,7 @@ async def list_published_episodes(
                 summary=metadata.summary,
                 locale=locale,
                 cover_asset_id=episode.cover_asset_id,
+                duration_seconds=duration_for(durations, episode.id, locale),
             )
         )
     return responses
@@ -223,6 +280,7 @@ async def published_episode_detail(
     metadata = next(
         item for item in derived_episode_metadata(episode.trading_date) if item.locale == locale
     )
+    durations = await active_durations(database, [episode.id])
     return PodcastEpisodeDetailResponse(
         id=episode.id,
         trading_date=episode.trading_date,
@@ -230,6 +288,7 @@ async def published_episode_detail(
         summary=metadata.summary,
         locale=locale,
         cover_asset_id=episode.cover_asset_id,
+        duration_seconds=duration_for(durations, episode.id, locale),
         published_at=episode.published_at,
     )
 
@@ -320,6 +379,7 @@ async def upload_audio_batch(
                 mime_type=upload.mime_type,
             ),
         )
+        duration_seconds = audio_duration_seconds(upload.content)
         await store.overwrite(
             target,
             upload.content,
@@ -367,6 +427,7 @@ async def upload_audio_batch(
             current.asset_id = asset.id
             current.activated_by_user_id = actor_user_id
             current.replaced_at = None
+            current.duration_seconds = duration_seconds
             variant = current
         else:
             variant = PodcastEpisodeAudioVariant(
@@ -376,6 +437,7 @@ async def upload_audio_batch(
                 asset_id=asset.id,
                 is_active=True,
                 activated_by_user_id=actor_user_id,
+                duration_seconds=duration_seconds,
             )
             database.add(variant)
         variants.append(variant)

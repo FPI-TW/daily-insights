@@ -77,6 +77,9 @@ class PodcastEpisodeAudioVariant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         CheckConstraint("locale IN ('zh-hant', 'zh-hans', 'en')", name="locale_supported"),
         CheckConstraint("version > 0", name="version_positive"),
+        CheckConstraint(
+            "duration_seconds IS NULL OR duration_seconds > 0", name="duration_positive"
+        ),
         UniqueConstraint(
             "episode_id",
             "locale",
@@ -110,3 +113,6 @@ class PodcastEpisodeAudioVariant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
     replaced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Read from the file at upload time; null when the container could not be
+    # parsed or the audio was registered from R2 without reading it.
+    duration_seconds: Mapped[int | None] = mapped_column(Integer)
