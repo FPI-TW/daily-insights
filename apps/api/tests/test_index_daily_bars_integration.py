@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import cast
+from urllib.parse import quote
 
 import pytest
 import pytest_asyncio
@@ -648,6 +649,38 @@ async def test_daily_bars_are_bounded_by_the_requested_window(
 
     unknown = await member_client.get("/api/markets/indices/NOPE/daily-bars")
     assert unknown.status_code == 404
+
+
+async def test_every_listed_index_is_reachable_on_its_own_route(
+    session_factory: async_sessionmaker[AsyncSession],
+    member_client: AsyncClient,
+) -> None:
+    # The two endpoints must agree on which symbols exist. Nothing deletes
+    # history, so a symbol dropped from the catalog keeps its rows; if the list
+    # were driven by what the table holds while the detail route asked the
+    # catalog, the list would offer a link that answers 404.
+    today = date.today()
+    retired = _bar(today, "100.0").model_copy(
+        update={"symbol": "^RETIRED", "instrument_source_id": "^RETIRED"}
+    )
+    async with session_factory.begin() as database:
+        await _store(database, [_bar(today, "300.0"), _symbol_bar("^DJI", "us_equity", "500.0")])
+        await _store(database, [retired])
+
+    listed = await member_client.get("/api/markets/indices")
+    assert listed.status_code == 200, listed.text
+    symbols = [item["symbol"] for item in listed.json()]
+    assert symbols, "the list must not be empty or the loop below proves nothing"
+    assert "^RETIRED" not in symbols
+
+    for symbol in symbols:
+        detail = await member_client.get(
+            f"/api/markets/indices/{quote(symbol, safe='')}/daily-bars"
+        )
+        assert detail.status_code == 200, f"{symbol} is listed but its route answers {detail.text}"
+
+    orphan = await member_client.get("/api/markets/indices/%5ERETIRED/daily-bars")
+    assert orphan.status_code == 404
 
 
 async def test_exactly_ten_calendar_years_is_accepted_and_a_day_more_is_not(
