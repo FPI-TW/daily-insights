@@ -426,7 +426,7 @@ const resources: Resource = {
       marketNewsTitle_us_equity: "美股重點新聞",
       reportNotLaunchedTitle: "報告尚未推出",
       reportNotLaunchedDescription:
-        "此市場的正式晨間報告仍在準備中，目前先提供每日市場新聞。",
+        "此市場的正式晨間報告仍在準備中，目前先提供分析師觀點與市場新聞。",
       dailyNewsImportance: "重要性 {{count}} 星",
       dailyNewsPartialExplanation:
         "本日僅產生 {{count}} 則，目標 {{target}} 則。",
@@ -865,7 +865,7 @@ const resources: Resource = {
       marketNewsTitle_us_equity: "美股重点新闻",
       reportNotLaunchedTitle: "报告尚未推出",
       reportNotLaunchedDescription:
-        "该市场的正式晨间报告仍在准备中，目前先提供每日市场新闻。",
+        "该市场的正式晨间报告仍在准备中，目前先提供分析师观点与市场新闻。",
       dailyNewsImportance: "重要性 {{count}} 星",
       dailyNewsPartialExplanation:
         "本日仅生成 {{count}} 则，目标 {{target}} 则。",
@@ -1323,7 +1323,7 @@ const resources: Resource = {
       marketNewsTitle_us_equity: "US equities news",
       reportNotLaunchedTitle: "Report not launched yet",
       reportNotLaunchedDescription:
-        "The formal morning report for this market is still in preparation; daily market news is available now.",
+        "The formal morning report for this market is still in preparation; the analyst viewpoint and market news are available now.",
       dailyNewsImportance: "Importance {{count}} stars",
       dailyNewsPartialExplanation:
         "Only {{count}} of {{target}} stories were produced today.",
