@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Result, func, literal_column, select, update
+from sqlalchemy import Result, String, column, func, literal_column, select, true, update, values
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -125,37 +125,45 @@ async def latest_index_bars(
     *,
     market_codes: set[str],
 ) -> list[IndexLatestBarResponse]:
-    """The newest bar per symbol in the given markets, in TRACKED_INDICES order."""
-    if not market_codes:
+    """The newest bar per symbol in the given markets, in TRACKED_INDICES order.
+
+    Which market an index belongs to is settled by the catalog, so the symbols
+    are chosen up front and each one's two newest rows are fetched through the
+    primary key. Ranking the whole table with a window function instead made
+    the cost grow with history: at ten years of bars it sorted 243k rows and
+    spilled to disk on every request, for the twenty rows this returns.
+    """
+    symbols = [symbol for symbol, market in TRACKED_INDICES.items() if market in market_codes]
+    if not symbols:
         return []
-    recency = (
-        func.row_number()
-        .over(partition_by=IndexDailyBar.symbol, order_by=IndexDailyBar.trade_date.desc())
-        .label("recency")
+    wanted = values(column("symbol", String), name="wanted").data([(symbol,) for symbol in symbols])
+    two_newest = (
+        select(IndexDailyBar)
+        .where(IndexDailyBar.symbol == wanted.c.symbol)
+        .order_by(IndexDailyBar.trade_date.desc())
+        .limit(2)
+        .lateral()
     )
-    ranked = (
-        select(IndexDailyBar, recency).where(IndexDailyBar.market_code.in_(market_codes)).subquery()
-    )
-    bar = aliased(IndexDailyBar, ranked)
-    rows = await database.execute(
-        select(bar, ranked.c.recency)
-        .where(ranked.c.recency <= 2)
-        .order_by(bar.symbol, ranked.c.recency)
-    )
-    latest: dict[str, IndexDailyBar] = {}
-    previous: dict[str, IndexDailyBar] = {}
-    for row, position in rows.tuples():
-        (latest if position == 1 else previous)[row.symbol] = row
-    order: dict[str, int] = {symbol: index for index, symbol in enumerate(TRACKED_INDICES)}
-    return [
-        IndexLatestBarResponse(
-            **_bar_response(bar).model_dump(),
-            previous_close=previous[symbol].close if symbol in previous else None,
+    bar = aliased(IndexDailyBar, two_newest)
+    rows = (await database.scalars(select(bar).select_from(wanted).join(two_newest, true()))).all()
+
+    # Ordering inside a lateral join is not a promise the outer query keeps, so
+    # the pair is put back in order here rather than trusted to arrive that way.
+    by_symbol: dict[str, list[IndexDailyBar]] = {}
+    for row in rows:
+        by_symbol.setdefault(row.symbol, []).append(row)
+    responses = []
+    for symbol in symbols:
+        pair = sorted(by_symbol.get(symbol, []), key=lambda row: row.trade_date, reverse=True)
+        if not pair:
+            continue
+        responses.append(
+            IndexLatestBarResponse(
+                **_bar_response(pair[0]).model_dump(),
+                previous_close=pair[1].close if len(pair) > 1 else None,
+            )
         )
-        for symbol, bar in sorted(
-            latest.items(), key=lambda item: (order.get(item[0], len(order)), item[0])
-        )
-    ]
+    return responses
 
 
 async def index_daily_bars(
