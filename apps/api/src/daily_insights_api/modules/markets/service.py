@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from daily_insights_api.modules.markets.catalog import MARKETS
 from daily_insights_api.modules.markets.models import Market, OrganizationMarketPolicy
 from daily_insights_api.modules.markets.schemas import MarketResponse
 
@@ -39,7 +40,13 @@ async def market_responses(
     *,
     visible_only: bool,
 ) -> list[MarketResponse]:
-    markets = (await database.scalars(select(Market).order_by(Market.code))).all()
+    # Navigation follows the catalog order (macro, crypto, forex, US, HK, CN,
+    # TW, TW derivatives), not the alphabetical order of the codes.
+    catalog_order = {definition.code: index for index, definition in enumerate(MARKETS)}
+    markets = sorted(
+        (await database.scalars(select(Market))).all(),
+        key=lambda market: catalog_order.get(market.code, len(catalog_order)),
+    )
     policies = {
         policy.market_code: policy
         for policy in (

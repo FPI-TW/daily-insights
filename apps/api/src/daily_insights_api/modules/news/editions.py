@@ -64,7 +64,10 @@ TW_EQUITY_SPEC = EditionSpec(
             "Taiwan equities: TWSE and TPEx listed companies, TAIEX and Taiwan index "
             "futures, foreign institutional flows, the semiconductor and electronics "
             "supply chain, Taiwan central bank and FSC policy, and global events with a "
-            "direct Taiwan market impact. Use market 'taiwan' for Taiwan-specific stories."
+            "direct Taiwan market impact. Use market 'taiwan' for Taiwan-specific stories. "
+            "Hard rule: a story with no direct link to Taiwan-listed companies or the "
+            "Taiwan market (weather, entertainment, general science, lifestyle) must not "
+            "be selected even if every other candidate is weaker; leave the slot empty."
         ),
     ),
 )
@@ -83,7 +86,9 @@ US_EQUITY_SPEC = EditionSpec(
         market_focus=(
             "US equities: S&P 500, Nasdaq and Dow moves, listed-company earnings and "
             "guidance, Federal Reserve policy, US macro data, and sector or mega-cap "
-            "developments. Use market 'us' for US-specific stories."
+            "developments. Use market 'us' for US-specific stories. Hard rule: a story "
+            "with no direct link to US-listed companies or US markets must not be "
+            "selected; leave the slot empty instead."
         ),
     ),
 )

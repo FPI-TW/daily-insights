@@ -350,16 +350,8 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         display_name="ETtoday 財經",
         poll_group="fast",
     ),
-    # One feed, two article hosts: the general site and its finance edition.
-    FeedSource(
-        "technews.tw",
-        "https://cdn.technews.tw/feed/",
-        "rss",
-        r"^https://technews\.tw/\d{4}/\d{2}/\d{2}/[a-z0-9-]+/$",
-        markets=TAIWAN,
-        display_name="科技新報",
-        poll_group="fast",
-    ),
+    # The general TechNews site (climate, gadgets, science) diluted the Taiwan
+    # edition; only its finance edition feeds the market.
     FeedSource(
         "finance.technews.tw",
         "https://cdn.technews.tw/feed/",

@@ -83,15 +83,15 @@ flowchart LR
 `hostname` 推導，`DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES` 只能加入主機、
 `DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES` 只能排除主機（排除註冊表主機等於停用該來源）。
 
-| 分組（`poll_group`）   | 來源                                                                                                                                         | `kind`                         | 市場標記                      |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ----------------------------- |
-| 中文快訊（`flash`）    | 財聯社、金十數據、華爾街見聞（皆帶全文）、東方財富快訊、新浪財經、澎湃新聞、界面新聞（第三方全文 feed）                                      | `json_list`、`rss_full`        | `global` 加預留的 `cn_equity` |
-| 台灣（`fast`）         | 鉅亨台股、經濟日報要聞與產業、中央社財經、ETtoday 財經、科技新報與財經新報、自由財經、INSIDE（全文）、遠見、旺得富、工商時報、今周刊、風傳媒 | `rss`、`rss_full`、sitemap     | `tw_equity`                   |
-| 香港（`fast`）         | 經濟通四個分類、香港電台財經、星島頭條（只保留財經、地產與中國分類）                                                                         | `rss`                          | `global` 加預留的 `hk_equity` |
-| 日韓（`normal`）       | 東洋経済、ダイヤモンド、共同通信（排除 `/pr/` 通稿）、日經速報 RDF 鏡像、한국경제 증권與 경제                                                | `rss`                          | `global`                      |
-| 英文（`normal`）       | WSJ 市場、MarketWatch 頭條、Investing.com 兩個分類、Forbes、TheStreet（全文）、City A.M.（全文）、Guardian 商業／國際／政治（全文，需金鑰）  | `rss`、`rss_full`、`json_list` | 多數 `global` 加 `us_equity`  |
-| 新聞稿                 | GlobeNewswire 財報（`flash`）、併購、公司公告；PR Newswire 金融服務；SEC EDGAR 8-K Atom（需聯絡信箱，僅 `us_equity`）                        | `rss`                          | `global` 加 `us_equity`       |
-| 鉅亨其他分類（`fast`） | 頭條（`global`）、國際股市（`global` 加 `us_equity`）                                                                                        | `rss`                          |                               |
+| 分組（`poll_group`）   | 來源                                                                                                                                        | `kind`                         | 市場標記                      |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ----------------------------- |
+| 中文快訊（`flash`）    | 財聯社、金十數據、華爾街見聞（皆帶全文）、東方財富快訊、新浪財經、澎湃新聞、界面新聞（第三方全文 feed）                                     | `json_list`、`rss_full`        | `global` 加預留的 `cn_equity` |
+| 台灣（`fast`）         | 鉅亨台股、經濟日報要聞與產業、中央社財經、ETtoday 財經、財經新報、自由財經、INSIDE（全文）、遠見、旺得富、工商時報、今周刊、風傳媒          | `rss`、`rss_full`、sitemap     | `tw_equity`                   |
+| 香港（`fast`）         | 經濟通四個分類、香港電台財經、星島頭條（只保留財經、地產與中國分類）                                                                        | `rss`                          | `global` 加預留的 `hk_equity` |
+| 日韓（`normal`）       | 東洋経済、ダイヤモンド、共同通信（排除 `/pr/` 通稿）、日經速報 RDF 鏡像、한국경제 증권與 경제                                               | `rss`                          | `global`                      |
+| 英文（`normal`）       | WSJ 市場、MarketWatch 頭條、Investing.com 兩個分類、Forbes、TheStreet（全文）、City A.M.（全文）、Guardian 商業／國際／政治（全文，需金鑰） | `rss`、`rss_full`、`json_list` | 多數 `global` 加 `us_equity`  |
+| 新聞稿                 | GlobeNewswire 財報（`flash`）、併購、公司公告；PR Newswire 金融服務；SEC EDGAR 8-K Atom（需聯絡信箱，僅 `us_equity`）                       | `rss`                          | `global` 加 `us_equity`       |
+| 鉅亨其他分類（`fast`） | 頭條（`global`）、國際股市（`global` 加 `us_equity`）                                                                                       | `rss`                          |                               |
 
 adapter 種類：`rss` 同時處理 RSS 2.0、RSS 1.0／RDF（`dc:date`）與 Atom（`link href`、
 `updated`）；`rss_full` 另讀 `content:encoded`（或第三方 feed 的 `description`），內文

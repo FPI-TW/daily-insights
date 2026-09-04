@@ -376,6 +376,17 @@ async def test_admin_provisioning_forces_password_change_and_csrf(harness: Harne
         markets = await member_client.get("/api/markets")
         assert markets.status_code == 200
         assert len(markets.json()) == 8
+        # Catalog order, not alphabetical: macro first, US before HK and CN.
+        assert [market["code"] for market in markets.json()] == [
+            "global_macro_bonds",
+            "crypto",
+            "forex",
+            "us_equity",
+            "hk_equity",
+            "cn_equity",
+            "tw_equity",
+            "tw_index_derivatives",
+        ]
         logged_out = await member_client.post(
             "/api/auth/logout",
             headers={"X-CSRF-Token": member_csrf},
