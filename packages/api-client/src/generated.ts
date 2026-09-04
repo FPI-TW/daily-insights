@@ -933,6 +933,7 @@ export interface components {
       message: string
       /** Page Context */
       page_context:
+        | components["schemas"]["GlobalContext"]
         | components["schemas"]["ReportsIndexContext"]
         | components["schemas"]["ReportDetailContext"]
     }
@@ -954,6 +955,14 @@ export interface components {
      * @enum {string}
      */
     GenerationStatus: "pending" | "complete" | "partial" | "error"
+    /** GlobalContext */
+    GlobalContext: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "global"
+    }
     /** HTTPValidationError */
     HTTPValidationError: {
       /** Detail */

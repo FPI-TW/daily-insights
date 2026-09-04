@@ -116,6 +116,16 @@ def test_stream_request_requires_a_discriminated_page_context() -> None:
             }
         )
 
+    global_request = ChatStreamRequest.model_validate(
+        {
+            "client_request_id": str(uuid.uuid4()),
+            "locale": "en",
+            "message": "What changed?",
+            "page_context": {"kind": "global"},
+        }
+    )
+    assert global_request.page_context.kind == "global"
+
 
 def test_context_limit_preserves_a_digestible_canonical_snapshot() -> None:
     snapshot: dict[str, object] = {
@@ -203,6 +213,42 @@ async def test_detail_snapshot_includes_only_authorized_cross_market_latest_repo
         for value in compiled.params.values()
         if isinstance(value, list)
     )
+
+
+@pytest.mark.asyncio
+async def test_global_context_uses_authorized_latest_reports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    global_report = _publication("global_macro_bonds", summary="Global report")
+    us_report = _publication("us_equity", summary="US report")
+    database = _SnapshotDatabase(global_report, [global_report, us_report])
+    monkeypatch.setattr(
+        chat_api,
+        "visible_report_market_codes",
+        AsyncMock(return_value=frozenset({"global_macro_bonds", "us_equity"})),
+    )
+    payload = ChatStreamRequest.model_validate(
+        {
+            "client_request_id": str(uuid.uuid4()),
+            "locale": "en",
+            "message": "What changed?",
+            "page_context": {"kind": "global"},
+        }
+    )
+
+    snapshot, manifest_version = await _page_snapshot(
+        cast(Any, database), context=_customer_context(), payload=payload
+    )
+
+    assert snapshot["kind"] == "global"
+    assert snapshot["current_page"] == {}
+    cross_page_reports = snapshot["cross_page_reports"]
+    assert isinstance(cross_page_reports, list)
+    assert [report["market_code"] for report in cross_page_reports] == [
+        "global_macro_bonds",
+        "us_equity",
+    ]
+    assert manifest_version is None
 
 
 def test_cross_market_snapshot_fairly_retains_later_market_context() -> None:

@@ -14,12 +14,19 @@ class ReportsIndexContext(BaseModel):
     news_edition_id: uuid.UUID | None = None
 
 
+class GlobalContext(BaseModel):
+    kind: Literal["global"]
+
+
 class ReportDetailContext(BaseModel):
     kind: Literal["report_detail"]
     publication_id: uuid.UUID
 
 
-PageContext = Annotated[ReportsIndexContext | ReportDetailContext, Field(discriminator="kind")]
+PageContext = Annotated[
+    GlobalContext | ReportsIndexContext | ReportDetailContext,
+    Field(discriminator="kind"),
+]
 
 
 class ChatStreamRequest(BaseModel):
