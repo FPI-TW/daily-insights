@@ -58,15 +58,19 @@ GLOBAL_SPEC = EditionSpec(
         max_items=5,
         max_per_domain=2,
         min_topics=2,
-        min_markets=2,
+        min_markets=1,
         market_focus=(
             "This is the global macro digest for a cross-market audience: central bank "
             "decisions and guidance, inflation and growth data, rates and yields, FX, "
             "energy and commodities, geopolitical or trade events with market-wide impact, "
-            "and cross-border capital flows. Single-company or single-country stories "
-            "qualify only when they move more than their home market; the country "
-            "editions cover the rest."
+            "and cross-border capital flows. Hard rule: select only stories whose impact "
+            "reaches investors across regions and tag every selection market 'global'; a "
+            "story that matters mainly to one country or region (a local listed company, "
+            "a domestic policy, one exchange's session) belongs to that market's edition "
+            "and must not be selected even if the remaining candidates are weaker."
         ),
+        # The digest is deliberately region-neutral: only cross-market stories.
+        allowed_markets=frozenset({"global"}),
     ),
 )
 

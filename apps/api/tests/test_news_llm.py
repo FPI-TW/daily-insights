@@ -74,7 +74,10 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
     # The closed vocabularies shown to the model must match the validated contract.
     fields = SelectedCandidate.model_fields
     assert set(contract["topic"]) == set(get_args(fields["topic"].annotation))
-    assert set(contract["market"]) == set(get_args(fields["market"].annotation))
+    # The default (global) policy narrows the market vocabulary to its own tag,
+    # which must still be one of the validated contract's values.
+    assert set(contract["market"]) == {"global"}
+    assert set(contract["market"]) <= set(get_args(fields["market"].annotation))
     prompt_candidates = captured["CANDIDATES"]
     assert isinstance(prompt_candidates, list)
     assert [item["headline"] for item in prompt_candidates] == [value[1] for value in values]

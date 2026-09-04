@@ -207,10 +207,13 @@ class DeepSeekClient:
             "CANDIDATES": allowed,
         }
         if policy.market_focus:
+            single_market = bool(policy.allowed_markets) and "global" not in (
+                policy.allowed_markets or ()
+            )
             scope = (
                 "This edition covers one market only; prefer stories that move or explain "
                 f"it: {policy.market_focus}"
-                if policy.allowed_markets
+                if single_market
                 else policy.market_focus
             )
             prompt["MARKET_FOCUS"] = (

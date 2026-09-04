@@ -111,8 +111,9 @@ function NewsGroups({
     const key = groupingEnabled ? (item.market ?? null) : null
     groups.set(key, [...(groups.get(key) ?? []), item])
   }
-  const grouped =
-    groupingEnabled && news.items.some(item => item.market !== null)
+  // Headings only earn their space when there is more than one group; a
+  // single-market edition reads as a plain list.
+  const grouped = groupingEnabled && groups.size > 1
   let offset = 0
   return (
     <div className="grid gap-6">

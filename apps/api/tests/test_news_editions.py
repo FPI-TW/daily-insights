@@ -108,7 +108,9 @@ def test_output_contract_reflects_each_policy() -> None:
     global_contract = selection_output_contract(GLOBAL_SPEC.selection)
     market_contract = selection_output_contract(TW_EQUITY_SPEC.selection)
     assert "0 to 5 objects" in global_contract["selections"]
-    assert "2 distinct markets" in global_contract["selections"]
+    # Region-neutral by construction: only the global tag is offered.
+    assert "distinct markets" not in global_contract["selections"]
+    assert global_contract["market"] == ["global"]
     assert "0 to 8 objects" in market_contract["selections"]
     assert "distinct markets" not in market_contract["selections"]
     assert "taiwan" in market_contract["market"]
@@ -188,13 +190,15 @@ def test_market_editions_drop_stories_tagged_for_other_markets() -> None:
 
     assert [item.event_key for item in kept.selections] == ["taiex-close", "tsmc-capex"]
     assert [item.market for item in dropped] == ["global"]
-    # The global digest accepts every market tag.
-    assert filter_selection_markets(selection, GLOBAL_SPEC.selection) == (selection, ())
+    # The global digest keeps only region-neutral stories.
+    global_kept, global_dropped = filter_selection_markets(selection, GLOBAL_SPEC.selection)
+    assert [item.event_key for item in global_kept.selections] == ["el-nino"]
+    assert [item.market for item in global_dropped] == ["taiwan", "taiwan"]
 
 
 def test_output_contract_restricts_market_tags_for_market_editions() -> None:
     assert selection_output_contract(TW_EQUITY_SPEC.selection)["market"] == ["taiwan"]
     assert selection_output_contract(US_EQUITY_SPEC.selection)["market"] == ["us"]
-    assert "global" in selection_output_contract(GLOBAL_SPEC.selection)["market"]
+    assert selection_output_contract(GLOBAL_SPEC.selection)["market"] == ["global"]
     assert GLOBAL_SPEC.selection.market_focus is not None
     assert "macro" in GLOBAL_SPEC.selection.market_focus
