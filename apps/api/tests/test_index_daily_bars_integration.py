@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from test_health import readiness
 
 from daily_insights_api.core.config import Settings
-from daily_insights_api.core.enums import SystemRole
+from daily_insights_api.core.enums import SystemRole, UserStatus
 from daily_insights_api.modules.data_sources.api import (
     TRACKED_INDICES,
     DailyBar,
@@ -29,17 +29,23 @@ from daily_insights_api.modules.data_sources.api import (
     YfinanceDailyBars,
 )
 from daily_insights_api.modules.identity.api import AuthContext, require_password_changed
+from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.markets.api import (
     latest_index_bars,
     refresh_index_daily_bars,
     store_index_daily_bars,
 )
-from daily_insights_api.modules.markets.models import IndexDailyBar, IndexDailyBarSeries
+from daily_insights_api.modules.markets.models import (
+    IndexDailyBar,
+    IndexDailyBarSeries,
+    OrganizationMarketPolicy,
+)
 from daily_insights_api.modules.markets.service import (
     MAX_BIND_PARAMETERS,
     MAX_FETCH_CONCURRENCY,
     IndexProviderConflictError,
 )
+from daily_insights_api.modules.tenancy.models import Organization
 from daily_insights_api.web.app import create_app
 
 pytestmark = pytest.mark.integration
@@ -649,6 +655,77 @@ async def test_daily_bars_are_bounded_by_the_requested_window(
 
     unknown = await member_client.get("/api/markets/indices/NOPE/daily-bars")
     assert unknown.status_code == 404
+
+
+async def test_a_hidden_market_is_absent_from_the_list_and_404_on_its_route(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # Exercised through the router on purpose. Asserting that the service
+    # filters by the codes it is handed says nothing about whether the route
+    # still works out which codes those are, so this reaches for a real policy
+    # row and goes over HTTP.
+    hidden_from = uuid.uuid4()
+    sees_everything = uuid.uuid4()
+    author_id = uuid.uuid4()
+    today = date.today()
+    async with session_factory.begin() as database:
+        database.add_all(
+            [
+                Organization(id=hidden_from, name="Contract A", slug="contract-a", seat_limit=1),
+                Organization(
+                    id=sees_everything, name="Contract B", slug="contract-b", seat_limit=1
+                ),
+                User(
+                    id=author_id,
+                    email="policy-author@example.com",
+                    display_name="Policy Author",
+                    # This test never authenticates; the column is only NOT NULL.
+                    password_hash="unused",
+                    must_change_password=False,
+                    system_role=SystemRole.ADMIN,
+                    status=UserStatus.ACTIVE,
+                ),
+            ]
+        )
+        await database.flush()
+        database.add(
+            OrganizationMarketPolicy(
+                organization_id=hidden_from,
+                market_code="hk_equity",
+                is_visible=False,
+                changed_by_user_id=author_id,
+                changed_at=datetime.now(UTC),
+            )
+        )
+        await _store(
+            database,
+            [
+                _bar(today, "300.0"),
+                _symbol_bar("^HSI", "hk_equity", "700.0").model_copy(update={"trade_date": today}),
+            ],
+        )
+
+    async with _signed_in_client(
+        session_factory, role=SystemRole.ORG_MEMBER, organization_id=hidden_from
+    ) as restricted:
+        listed = await restricted.get("/api/markets/indices")
+        hidden_route = await restricted.get("/api/markets/indices/%5EHSI/daily-bars")
+        allowed_route = await restricted.get("/api/markets/indices/%5ETWII/daily-bars")
+    async with _signed_in_client(
+        session_factory, role=SystemRole.ORG_MEMBER, organization_id=sees_everything
+    ) as unrestricted:
+        listed_elsewhere = await unrestricted.get("/api/markets/indices")
+
+    # The row exists; only the contract removes it. Without this the assertions
+    # below would pass just as well against an empty table.
+    assert "^HSI" in [item["symbol"] for item in listed_elsewhere.json()]
+
+    assert listed.status_code == 200, listed.text
+    assert [item["symbol"] for item in listed.json()] == ["^TWII"]
+    assert hidden_route.status_code == 404
+    assert hidden_route.json()["detail"] == "index not found"
+    assert allowed_route.status_code == 200, allowed_route.text
+    assert [bar["close"] for bar in allowed_route.json()] == ["300.0000000000"]
 
 
 async def test_every_listed_index_is_reachable_on_its_own_route(
