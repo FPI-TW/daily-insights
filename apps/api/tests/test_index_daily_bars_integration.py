@@ -1,0 +1,473 @@
+import asyncio
+import os
+from collections.abc import AsyncIterator
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
+from typing import cast
+
+import pytest
+import pytest_asyncio
+from conftest import remigrate_database, reset_database_schema
+from sqlalchemy import delete, func, select, text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from daily_insights_api.modules.data_sources.api import (
+    TRACKED_INDICES,
+    DailyBar,
+    IndexSymbol,
+    Provenance,
+    YfinanceAdapter,
+    YfinanceDailyBars,
+)
+from daily_insights_api.modules.markets.api import (
+    refresh_index_daily_bars,
+    store_index_daily_bars,
+)
+from daily_insights_api.modules.markets.models import IndexDailyBar, IndexDailyBarSeries
+from daily_insights_api.modules.markets.service import (
+    MAX_BIND_PARAMETERS,
+    MAX_FETCH_CONCURRENCY,
+    IndexProviderConflictError,
+)
+
+pytestmark = pytest.mark.integration
+
+FETCHED_AT = datetime(2026, 9, 3, 5, 0, tzinfo=UTC)
+
+
+@pytest_asyncio.fixture
+async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    database_url = os.getenv("DAILY_INSIGHTS_TEST_DATABASE_URL")
+    if database_url is None:
+        pytest.skip("DAILY_INSIGHTS_TEST_DATABASE_URL is required")
+    await asyncio.to_thread(remigrate_database, database_url)
+    engine = create_async_engine(database_url)
+    try:
+        yield async_sessionmaker(engine, expire_on_commit=False)
+    finally:
+        try:
+            await engine.dispose()
+        finally:
+            await asyncio.to_thread(reset_database_schema, database_url)
+
+
+def _bar(trade_date: date, close: str, volume: int | None = 1_000) -> DailyBar:
+    return DailyBar(
+        instrument_source_id="^TWII",
+        market="tw_equity",
+        symbol="^TWII",
+        trade_date=trade_date,
+        open=Decimal("100.0"),
+        high=Decimal("101.0"),
+        low=Decimal("99.0"),
+        close=Decimal(close),
+        volume=volume,
+        source="yfinance",
+    )
+
+
+async def _store(database: AsyncSession, bars: list[DailyBar]) -> int:
+    return await store_index_daily_bars(
+        database,
+        bars=bars,
+        provider="yfinance",
+        contract_version="2026-09-03.v1",
+        source_fetched_at=FETCHED_AT,
+    )
+
+
+async def _store_as(
+    database: AsyncSession,
+    bars: list[DailyBar],
+    provider: str,
+) -> int:
+    return await store_index_daily_bars(
+        database,
+        bars=bars,
+        provider=provider,
+        contract_version="test",
+        source_fetched_at=FETCHED_AT,
+    )
+
+
+async def test_overlapping_fetches_upsert_instead_of_duplicating(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory.begin() as database:
+        await _store(database, [_bar(date(2026, 9, 1), "100.0"), _bar(date(2026, 9, 2), "200.0")])
+
+    # A later window overlaps 09-02 and carries a corrected close.
+    async with session_factory.begin() as database:
+        stored = await _store(
+            database,
+            [_bar(date(2026, 9, 2), "222.5"), _bar(date(2026, 9, 3), "300.0")],
+        )
+    assert stored == 2
+
+    async with session_factory() as database:
+        total = await database.scalar(select(func.count()).select_from(IndexDailyBar))
+        assert total == 3
+        row = await database.scalar(
+            select(IndexDailyBar).where(
+                IndexDailyBar.symbol == "^TWII",
+                IndexDailyBar.trade_date == date(2026, 9, 2),
+            )
+        )
+        assert row is not None
+        assert row.close == Decimal("222.5")
+        assert row.provider == "yfinance"
+        assert row.market_code == "tw_equity"
+
+
+async def test_empty_input_writes_nothing(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory.begin() as database:
+        assert await _store(database, []) == 0
+    async with session_factory() as database:
+        assert await database.scalar(select(func.count()).select_from(IndexDailyBar)) == 0
+
+
+async def test_nonpositive_close_is_rejected_by_the_database(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    with pytest.raises(IntegrityError):
+        async with session_factory.begin() as database:
+            await _store(database, [_bar(date(2026, 9, 1), "0")])
+
+
+async def test_unknown_market_code_is_rejected_by_the_database(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    bar = _bar(date(2026, 9, 1), "100.0").model_copy(update={"market": "not_a_market"})
+    with pytest.raises(IntegrityError):
+        async with session_factory.begin() as database:
+            await _store(database, [bar])
+
+
+class _StubAdapter:
+    """Returns a canned result per symbol so a write failure can be provoked."""
+
+    def __init__(self, results: dict[str, YfinanceDailyBars]) -> None:
+        self._results = results
+
+    async def get_daily_bars(
+        self,
+        *,
+        market: str,
+        symbol: str,
+        period: str = "2y",
+    ) -> YfinanceDailyBars:
+        return self._results[symbol]
+
+
+def _result(symbol: str, market: str, bars: tuple[DailyBar, ...]) -> YfinanceDailyBars:
+    return YfinanceDailyBars(
+        symbol=symbol,
+        market=market,  # type: ignore[arg-type]
+        items=bars,
+        dropped_unsettled_trade_date=None,
+        provenance=Provenance(
+            provider="yfinance",
+            contract_version="2026-09-03.v1",
+            contract_hash="0" * 64,
+            endpoint="Ticker.history",
+            query_fingerprint="0" * 64,
+            fetched_at=FETCHED_AT,
+            as_of=bars[-1].trade_date,
+            response_digest="0" * 64,
+            record_count=len(bars),
+        ),
+    )
+
+
+def _symbol_bar(symbol: str, market: str, close: str) -> DailyBar:
+    return _bar(date(2026, 9, 1), close).model_copy(
+        update={"symbol": symbol, "instrument_source_id": symbol, "market": market}
+    )
+
+
+async def test_a_failing_symbol_does_not_roll_back_the_others(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # ^HSI carries an unknown market code, so its insert violates the foreign
+    # key. It sits between two healthy symbols to prove the batch neither loses
+    # what came before it nor stops writing what comes after.
+    results = {
+        "^DJI": _result("^DJI", "us_equity", (_symbol_bar("^DJI", "us_equity", "100.0"),)),
+        "^HSI": _result("^HSI", "hk_equity", (_symbol_bar("^HSI", "not_a_market", "200.0"),)),
+        "^TWII": _result("^TWII", "tw_equity", (_symbol_bar("^TWII", "tw_equity", "300.0"),)),
+    }
+    adapter = cast(YfinanceAdapter, _StubAdapter(results))
+
+    async with session_factory.begin() as database:
+        refreshed, failures = await refresh_index_daily_bars(
+            database,
+            adapter=adapter,
+            symbols=["^DJI", "^HSI", "^TWII"],
+            period="7d",
+        )
+
+    assert [entry.result.symbol for entry in refreshed] == ["^DJI", "^TWII"]
+    assert [entry.symbol for entry in failures] == ["^HSI"]
+    assert "IntegrityError" in failures[0].error
+
+    async with session_factory() as database:
+        stored = (await database.scalars(select(IndexDailyBar.symbol))).all()
+        assert sorted(stored) == ["^DJI", "^TWII"]
+
+
+async def test_a_backfill_larger_than_the_bind_parameter_limit_is_chunked(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # `period=max` returns 24k+ rows for ^GSPC. A single INSERT binds one
+    # parameter per column per row and PostgreSQL caps a statement at 65535, so
+    # anything past MAX_BIND_PARAMETERS // columns rows must be split.
+    columns = 11
+    row_count = (MAX_BIND_PARAMETERS // columns) + 500
+    start = date(1927, 12, 30)
+    bars = [_bar(start + timedelta(days=offset), "100.0") for offset in range(row_count)]
+
+    async with session_factory.begin() as database:
+        stored = await _store(database, bars)
+    assert stored == row_count
+
+    async with session_factory() as database:
+        assert (await database.scalar(select(func.count()).select_from(IndexDailyBar))) == row_count
+
+
+class _SlowStubAdapter:
+    """Records overlap so concurrent fetching can be observed."""
+
+    def __init__(self, delay: float) -> None:
+        self._delay = delay
+        self.in_flight = 0
+        self.peak_in_flight = 0
+
+    async def get_daily_bars(
+        self,
+        *,
+        market: str,
+        symbol: IndexSymbol,
+        period: str = "2y",
+    ) -> YfinanceDailyBars:
+        self.in_flight += 1
+        self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
+        try:
+            await asyncio.sleep(self._delay)
+        finally:
+            self.in_flight -= 1
+        return _result(
+            symbol, TRACKED_INDICES[symbol], (_symbol_bar(symbol, "us_equity", "100.0"),)
+        )
+
+
+async def test_symbols_are_fetched_concurrently_and_written_in_order(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # Ten symbols in series can outlast the proxy budget when Yahoo is slow, so
+    # the fetches overlap. The writes must stay sequential: an AsyncSession is
+    # not safe for concurrent use.
+    stub = _SlowStubAdapter(delay=0.05)
+    symbols = list(TRACKED_INDICES)
+
+    async with session_factory.begin() as database:
+        refreshed, failures = await refresh_index_daily_bars(
+            database,
+            adapter=cast(YfinanceAdapter, stub),
+            symbols=symbols,
+            period="7d",
+        )
+
+    assert failures == []
+    assert stub.peak_in_flight == MAX_FETCH_CONCURRENCY
+    assert [entry.result.symbol for entry in refreshed] == symbols
+
+
+async def test_a_second_provider_cannot_overwrite_an_existing_series(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # docs/architecture/twelve-data-three-market-morning-report-plan.md forbids
+    # splicing one provider's history onto another's. Without the guard the
+    # upsert would do exactly that, one day at a time and without a trace.
+    async with session_factory.begin() as database:
+        await _store(database, [_bar(date(2026, 9, 1), "100.0")])
+
+    with pytest.raises(ValueError, match="series belongs to provider 'yfinance'"):
+        async with session_factory.begin() as database:
+            await store_index_daily_bars(
+                database,
+                bars=[_bar(date(2026, 9, 1), "999.0")],
+                provider="twelve_data",
+                contract_version="other",
+                source_fetched_at=FETCHED_AT,
+            )
+
+    async with session_factory() as database:
+        row = await database.scalar(select(IndexDailyBar))
+        assert row is not None
+        assert row.provider == "yfinance"
+        assert row.close == Decimal("100.0")
+
+
+async def test_a_second_provider_cannot_append_a_nonoverlapping_window(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory.begin() as database:
+        await _store(database, [_bar(date(2026, 9, 1), "100.0")])
+
+    with pytest.raises(ValueError, match="series belongs to provider 'yfinance'"):
+        async with session_factory.begin() as database:
+            await _store_as(
+                database,
+                [_bar(date(2026, 9, 2), "200.0")],
+                "twelve_data",
+            )
+
+    async with session_factory() as database:
+        rows = (await database.scalars(select(IndexDailyBar))).all()
+        assert [(row.trade_date, row.provider) for row in rows] == [(date(2026, 9, 1), "yfinance")]
+
+
+async def test_provider_can_switch_after_its_old_rows_are_deleted(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory.begin() as database:
+        await _store(database, [_bar(date(2026, 9, 1), "100.0")])
+        await database.execute(delete(IndexDailyBar).where(IndexDailyBar.symbol == "^TWII"))
+        await _store_as(database, [_bar(date(2026, 9, 2), "200.0")], "twelve_data")
+
+    async with session_factory() as database:
+        series = await database.get(IndexDailyBarSeries, "^TWII")
+        row = await database.scalar(select(IndexDailyBar))
+        assert series is not None
+        assert series.provider == "twelve_data"
+        assert row is not None
+        assert row.provider == "twelve_data"
+
+
+async def test_provider_conflict_stays_isolated_to_one_refresh_symbol(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory.begin() as database:
+        await _store_as(
+            database,
+            [_symbol_bar("^HSI", "hk_equity", "50.0")],
+            "twelve_data",
+        )
+
+    results = {
+        "^DJI": _result("^DJI", "us_equity", (_symbol_bar("^DJI", "us_equity", "100.0"),)),
+        "^HSI": _result("^HSI", "hk_equity", (_symbol_bar("^HSI", "hk_equity", "200.0"),)),
+        "^TWII": _result("^TWII", "tw_equity", (_symbol_bar("^TWII", "tw_equity", "300.0"),)),
+    }
+    async with session_factory.begin() as database:
+        refreshed, failures = await refresh_index_daily_bars(
+            database,
+            adapter=cast(YfinanceAdapter, _StubAdapter(results)),
+            symbols=["^DJI", "^HSI", "^TWII"],
+            period="7d",
+        )
+
+    assert [entry.result.symbol for entry in refreshed] == ["^DJI", "^TWII"]
+    assert [entry.symbol for entry in failures] == ["^HSI"]
+    assert "IndexProviderConflictError" in failures[0].error
+    async with session_factory() as database:
+        stored = (await database.scalars(select(IndexDailyBar.symbol))).all()
+        assert sorted(stored) == ["^DJI", "^HSI", "^TWII"]
+
+
+async def test_concurrent_different_provider_claims_serialize(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    first = session_factory()
+    first_transaction = await first.begin()
+    try:
+        await _store(first, [_bar(date(2026, 9, 1), "100.0")])
+
+        async def competing_write() -> None:
+            with pytest.raises(ValueError, match="series belongs to provider 'yfinance'"):
+                async with session_factory.begin() as database:
+                    await _store_as(
+                        database,
+                        [_bar(date(2026, 9, 2), "200.0")],
+                        "twelve_data",
+                    )
+
+        competitor = asyncio.create_task(competing_write())
+        await asyncio.sleep(0.1)
+        assert not competitor.done()
+        await first_transaction.commit()
+        await asyncio.wait_for(competitor, timeout=5)
+    finally:
+        if first_transaction.is_active:
+            await first_transaction.rollback()
+        await first.close()
+
+
+async def test_reversed_multi_symbol_claims_take_locks_in_the_same_order(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # Force opposite callers to pause before their first input symbol. Without
+    # store_index_daily_bars sorting both claim lists, each transaction acquires
+    # one symbol and waits on the other until PostgreSQL detects a deadlock.
+    async with session_factory.begin() as database:
+        await database.execute(
+            text(
+                """
+                CREATE FUNCTION delay_reversed_index_claims() RETURNS trigger AS $$
+                BEGIN
+                  IF (NEW.provider = 'yfinance' AND NEW.symbol = '^DJI')
+                     OR (NEW.provider = 'twelve_data' AND NEW.symbol = '^HSI') THEN
+                    PERFORM pg_sleep(0.2);
+                  END IF;
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """
+            )
+        )
+        await database.execute(
+            text(
+                """
+                CREATE TRIGGER delay_reversed_index_claims
+                BEFORE INSERT ON index_daily_bar_series
+                FOR EACH ROW EXECUTE FUNCTION delay_reversed_index_claims()
+                """
+            )
+        )
+
+    async def write(provider: str, bars: list[DailyBar]) -> int | IndexProviderConflictError:
+        try:
+            async with session_factory.begin() as database:
+                return await _store_as(database, bars, provider)
+        except IndexProviderConflictError as error:
+            return error
+
+    dji = _symbol_bar("^DJI", "us_equity", "100.0")
+    hsi = _symbol_bar("^HSI", "hk_equity", "200.0")
+    outcomes = await asyncio.wait_for(
+        asyncio.gather(
+            write("yfinance", [dji, hsi]),
+            write("twelve_data", [hsi, dji]),
+        ),
+        timeout=5,
+    )
+
+    assert sum(isinstance(outcome, int) for outcome in outcomes) == 1
+    assert sum(isinstance(outcome, IndexProviderConflictError) for outcome in outcomes) == 1
+
+
+async def test_the_same_provider_still_updates_an_existing_row(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory.begin() as database:
+        await _store(database, [_bar(date(2026, 9, 1), "100.0")])
+    async with session_factory.begin() as database:
+        assert await _store(database, [_bar(date(2026, 9, 1), "123.5")]) == 1
+
+    async with session_factory() as database:
+        row = await database.scalar(select(IndexDailyBar))
+        assert row is not None
+        assert row.close == Decimal("123.5")

@@ -39,7 +39,7 @@ apps/api
     tenancy        organizations, memberships, roles
     markets        catalog and organization visibility
     reports        report versions, localized presentation contracts, scheduler
-    data_sources   provider adapters (Twelve Data, FinDB) and normalized DTOs
+    data_sources   provider adapters (Twelve Data, FinDB, yfinance) and normalized DTOs
     news           feed discovery, safe extraction, DeepSeek daily news editions
     podcasts       episode catalog, publication lifecycle, localized metadata
     chat           conversations, messages, generation records, SSE

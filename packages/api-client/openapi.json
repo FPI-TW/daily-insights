@@ -2890,6 +2890,171 @@
         "required": ["loc", "msg", "type"],
         "title": "ValidationError",
         "type": "object"
+      },
+      "YfinanceDailyBarsFetch": {
+        "properties": {
+          "period": {
+            "default": "2y",
+            "enum": [
+              "1d",
+              "5d",
+              "7d",
+              "1mo",
+              "3mo",
+              "6mo",
+              "1y",
+              "2y",
+              "5y",
+              "10y",
+              "ytd",
+              "max"
+            ],
+            "title": "Period",
+            "type": "string"
+          },
+          "symbols": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "^DJI",
+                    "^GSPC",
+                    "^IXIC",
+                    "^RUT",
+                    "^SOX",
+                    "^HSI",
+                    "^TWII",
+                    "^TFNI",
+                    "^TPLI",
+                    "000001.SS"
+                  ],
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbols"
+          }
+        },
+        "title": "YfinanceDailyBarsFetch",
+        "type": "object"
+      },
+      "YfinanceDailyBarsResponse": {
+        "properties": {
+          "failed": {
+            "items": {
+              "$ref": "#/components/schemas/YfinanceSymbolFailure"
+            },
+            "title": "Failed",
+            "type": "array"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "succeeded": {
+            "items": {
+              "$ref": "#/components/schemas/YfinanceSymbolBars"
+            },
+            "title": "Succeeded",
+            "type": "array"
+          }
+        },
+        "required": ["period", "fetched_at", "succeeded", "failed"],
+        "title": "YfinanceDailyBarsResponse",
+        "type": "object"
+      },
+      "YfinanceSymbolBars": {
+        "description": "What one symbol's refresh did, not the rows themselves.\n\nThe bars live in index_daily_bars; repeating them here cost 717KB for a 2y\nrun and would be several megabytes for `max`, and a reader wants a symbol\nand a date range, not whatever one refresh happened to touch.",
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "dropped_unsettled_trade_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dropped Unsettled Trade Date"
+          },
+          "market": {
+            "enum": [
+              "global_macro_bonds",
+              "crypto",
+              "forex",
+              "us_equity",
+              "hk_equity",
+              "cn_equity",
+              "tw_equity",
+              "tw_index_derivatives"
+            ],
+            "title": "Market",
+            "type": "string"
+          },
+          "stored_count": {
+            "title": "Stored Count",
+            "type": "integer"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol",
+          "market",
+          "as_of",
+          "stored_count",
+          "dropped_unsettled_trade_date"
+        ],
+        "title": "YfinanceSymbolBars",
+        "type": "object"
+      },
+      "YfinanceSymbolFailure": {
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "market": {
+            "enum": [
+              "global_macro_bonds",
+              "crypto",
+              "forex",
+              "us_equity",
+              "hk_equity",
+              "cn_equity",
+              "tw_equity",
+              "tw_index_derivatives"
+            ],
+            "title": "Market",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": ["symbol", "market", "error"],
+        "title": "YfinanceSymbolFailure",
+        "type": "object"
       }
     }
   },
@@ -3191,6 +3356,63 @@
         },
         "summary": "Conversation Detail",
         "tags": ["chat"]
+      }
+    },
+    "/api/admin/data-sources/yfinance/daily-bars": {
+      "post": {
+        "operationId": "fetch_yfinance_daily_bars_api_admin_data_sources_yfinance_daily_bars_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/YfinanceDailyBarsFetch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/YfinanceDailyBarsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fetch Yfinance Daily Bars",
+        "tags": ["administration"]
       }
     },
     "/api/admin/internal-users": {

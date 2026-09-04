@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
@@ -27,9 +28,14 @@ from daily_insights_api.modules.admin.schemas import (
     OrganizationUpdate,
     ProvisionedInternalUserResponse,
     ProvisionedMemberResponse,
+    YfinanceDailyBarsFetch,
+    YfinanceDailyBarsResponse,
+    YfinanceSymbolBars,
+    YfinanceSymbolFailure,
 )
 from daily_insights_api.modules.audit.api import record_audit_event
 from daily_insights_api.modules.audit.models import AuditEvent
+from daily_insights_api.modules.data_sources.api import TRACKED_INDICES, YfinanceAdapter
 from daily_insights_api.modules.identity.api import (
     AuthContext,
     require_csrf_roles,
@@ -37,7 +43,11 @@ from daily_insights_api.modules.identity.api import (
 )
 from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.identity.session_models import Session
-from daily_insights_api.modules.markets.api import MarketResponse, market_responses
+from daily_insights_api.modules.markets.api import (
+    MarketResponse,
+    market_responses,
+    refresh_index_daily_bars,
+)
 from daily_insights_api.modules.markets.models import Market, OrganizationMarketPolicy
 from daily_insights_api.modules.tenancy.models import Membership, Organization
 from daily_insights_api.web.dependencies import get_database_session
@@ -45,6 +55,8 @@ from daily_insights_api.web.dependencies import get_database_session
 router = APIRouter(prefix="/api/admin", tags=["administration"])
 AdminRead = Annotated[AuthContext, Depends(require_roles(SystemRole.ADMIN))]
 AdminWrite = Annotated[AuthContext, Depends(require_csrf_roles(SystemRole.ADMIN))]
+# Comfortably inside the 60s proxy_read_timeout that infra/nginx serves /api/ with.
+REFRESH_DEADLINE_SECONDS = 45.0
 
 
 async def _seat_count(database: AsyncSession, organization_id: uuid.UUID) -> int:
@@ -699,6 +711,79 @@ async def set_organization_market(
         name_zh_hant=market.name_zh_hant,
         name_zh_hans=market.name_zh_hans,
         is_visible=payload.is_visible,
+    )
+
+
+@router.post(
+    "/data-sources/yfinance/daily-bars",
+    response_model=YfinanceDailyBarsResponse,
+)
+async def fetch_yfinance_daily_bars(
+    payload: YfinanceDailyBarsFetch,
+    request: Request,
+    actor: AdminWrite,
+    database: Annotated[AsyncSession, Depends(get_database_session)],
+) -> YfinanceDailyBarsResponse:
+    settings: Settings = request.app.state.settings
+    if not settings.yfinance_enabled:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "yfinance is not enabled")
+
+    requested = list(TRACKED_INDICES) if payload.symbols is None else payload.symbols
+
+    try:
+        # Fail inside the proxy's 60s budget (infra/nginx/conf.d/default.conf,
+        # `location ^~ /api/`). Letting nginx time out first would hand the
+        # admin a 504 while this request kept fetching, writing rows and
+        # recording an audit event nobody could see.
+        async with asyncio.timeout(REFRESH_DEADLINE_SECONDS):
+            refreshed, failures = await refresh_index_daily_bars(
+                database,
+                adapter=YfinanceAdapter(timeout_seconds=settings.yfinance_timeout_seconds),
+                symbols=requested,
+                period=payload.period,
+            )
+    except TimeoutError:
+        # Nothing committed: the session is rolled back by its dependency.
+        raise HTTPException(
+            status.HTTP_504_GATEWAY_TIMEOUT,
+            "yfinance refresh exceeded its budget; run "
+            "daily_insights_api.scripts.run_index_daily_bars for a large backfill",
+        ) from None
+    succeeded = [
+        YfinanceSymbolBars(
+            symbol=entry.result.symbol,
+            market=entry.result.market,
+            as_of=entry.result.provenance.as_of,
+            stored_count=entry.stored_count,
+            dropped_unsettled_trade_date=entry.result.dropped_unsettled_trade_date,
+        )
+        for entry in refreshed
+    ]
+    failed = [
+        YfinanceSymbolFailure(symbol=entry.symbol, market=entry.market, error=entry.error)
+        for entry in failures
+    ]
+
+    record_audit_event(
+        database,
+        actor_user_id=actor.user.id,
+        action="data_source.yfinance.fetched",
+        target_type="data_source",
+        target_id="yfinance",
+        after={
+            "period": payload.period,
+            "requested": requested,
+            "succeeded": [entry.symbol for entry in succeeded],
+            "failed": [entry.symbol for entry in failed],
+        },
+        request_id=request.state.request_id,
+    )
+    await database.commit()
+    return YfinanceDailyBarsResponse(
+        period=payload.period,
+        fetched_at=datetime.now(UTC),
+        succeeded=succeeded,
+        failed=failed,
     )
 
 

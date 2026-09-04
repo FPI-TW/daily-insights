@@ -13,9 +13,16 @@
 2. `crypto`：加密貨幣
 3. `us_equity`：美股
 
-Twelve Data 是這三個市場暫時唯一的 raw-data provider。Runtime 不得在請求失敗、
+Twelve Data 是這三個市場晨報的 raw-data provider。晨報 runtime 不得在請求失敗、
 資料過期或缺欄位時自動改用 FinDB、Yahoo、FRED、CMC 或其他來源，也不得把不同
 provider 的歷史序列接在一起。
+
+> **修訂（2026-09-03）**：原文將 Yahoo 全面列為禁止來源。本次修訂把禁令收斂到
+> 「晨報 runtime 的自動 fallback」這一件事。yfinance（Yahoo）自即日起是本專案
+> 認可的獨立 raw-data provider，透過 `modules/data_sources/yfinance` adapter 與
+> 後台觸發的抓取 endpoint 使用，資料自成一條序列。仍然禁止的是：晨報在
+> Twelve Data 失敗時自動改讀 Yahoo，以及把 Yahoo 與其他 provider 的歷史序列
+> 接成同一條。
 
 `tw_equity` 與 `tw_index_derivatives` 不在第一波資料與 publication 範圍。現有
 元件、三語翻譯、mock fixture 與 route code 保留，但不出現在晨報 tab 或報告列表；
@@ -197,7 +204,8 @@ request ID 是否存在等 sanitized metadata。Twelve Data 本次未回傳 requ
 - [x] 每個納入 block 都有 exact endpoint、symbol、欄位、單位、時區、日界與
       freshness 證據。
 - [x] 每個正式市場至少有一個完整通過 probe 的 block，否則該市場為 launch no-go。
-- [x] 不存在 Yahoo、FRED、CMC、FinDB 或其他資料源的執行期 fallback。
+- [x] 晨報 pipeline 不存在 Yahoo、FRED、CMC、FinDB 或其他資料源的執行期 fallback。
+      （yfinance 自 2026-09-03 起可作為獨立來源使用，但不得接進晨報 fallback 路徑。）
 - [x] 不以 ETF、近似指數或不同語意序列替代缺失資料。
 
 ### Launch manifest

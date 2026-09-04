@@ -10,16 +10,14 @@ from typing import BinaryIO
 
 import pytest
 import pytest_asyncio
-from alembic import command
-from alembic.config import Config
+from conftest import remigrate_database, reset_database_schema
 from fastapi import HTTPException
 from pydantic import SecretStr
-from sqlalchemy import create_engine as create_sync_engine
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from daily_insights_api.core.config import Settings, get_settings
+from daily_insights_api.core.config import Settings
 from daily_insights_api.core.enums import (
     AssetKind,
     AssetStatus,
@@ -153,46 +151,12 @@ class Phase2BDatabase:
     blocked_admin_id: uuid.UUID
 
 
-def _remigrate_phase2b(database_url: str) -> None:
-    previous = os.environ.get("DAILY_INSIGHTS_DATABASE_URL")
-    os.environ["DAILY_INSIGHTS_DATABASE_URL"] = database_url
-    get_settings.cache_clear()
-    configuration = Config(
-        str(Path(__file__).parents[1] / "alembic.ini"),
-    )
-    try:
-        engine = create_sync_engine(database_url)
-        try:
-            with engine.begin() as connection:
-                connection.execute(text("DROP SCHEMA public CASCADE"))
-                connection.execute(text("CREATE SCHEMA public"))
-        finally:
-            engine.dispose()
-        command.upgrade(configuration, "head")
-    finally:
-        if previous is None:
-            os.environ.pop("DAILY_INSIGHTS_DATABASE_URL", None)
-        else:
-            os.environ["DAILY_INSIGHTS_DATABASE_URL"] = previous
-        get_settings.cache_clear()
-
-
-def _reset_phase2b_schema(database_url: str) -> None:
-    engine = create_sync_engine(database_url)
-    try:
-        with engine.begin() as connection:
-            connection.execute(text("DROP SCHEMA public CASCADE"))
-            connection.execute(text("CREATE SCHEMA public"))
-    finally:
-        engine.dispose()
-
-
 @pytest_asyncio.fixture
 async def phase2b_database() -> AsyncIterator[Phase2BDatabase]:
     database_url = os.getenv("DAILY_INSIGHTS_TEST_DATABASE_URL")
     if database_url is None:
         pytest.skip("DAILY_INSIGHTS_TEST_DATABASE_URL is required")
-    await asyncio.to_thread(_remigrate_phase2b, database_url)
+    await asyncio.to_thread(remigrate_database, database_url)
     settings = Settings(
         environment="test",
         database_url=database_url,
@@ -232,7 +196,7 @@ async def phase2b_database() -> AsyncIterator[Phase2BDatabase]:
         try:
             await engine.dispose()
         finally:
-            await asyncio.to_thread(_reset_phase2b_schema, database_url)
+            await asyncio.to_thread(reset_database_schema, database_url)
 
 
 async def _verified_migration(
