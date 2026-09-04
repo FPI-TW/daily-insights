@@ -51,7 +51,7 @@ class _DeterministicNewsClient:
 
     def __init__(self, prompt_marker: str) -> None:
         self.selection_prompt_digest = prompt_marker * 64
-        self.selection_prompt_version = f"selection-v3:{prompt_marker * 12}"
+        self.selection_prompt_version = f"selection-v4:{prompt_marker * 12}"
 
     async def select(self, candidates: list[FetchedCandidate], **kwargs: object) -> ModelCall:
         del kwargs
@@ -180,8 +180,8 @@ async def test_partial_editions_regenerate_and_revisions_are_prompt_sensitive(
         # A partial edition is not final: identical inputs produce a new revision.
         assert editions[0].input_digest == editions[1].input_digest
         assert editions[1].input_digest != editions[2].input_digest
-        assert editions[0].prompt_version.startswith("selection-v3:aaaaaaaaaaaa+")
-        assert editions[2].prompt_version.startswith("selection-v3:bbbbbbbbbbbb+")
+        assert editions[0].prompt_version.startswith("selection-v4:aaaaaaaaaaaa+")
+        assert editions[2].prompt_version.startswith("selection-v4:bbbbbbbbbbbb+")
         for edition in editions:
             items = list(
                 await database.scalars(select(NewsItem).where(NewsItem.edition_id == edition.id))
@@ -211,8 +211,8 @@ async def test_partial_editions_regenerate_and_revisions_are_prompt_sensitive(
         )
         audit_versions = set(await database.scalars(select(NewsGenerationAudit.prompt_version)))
         assert "summary-v2" in audit_versions
-        assert "selection-v3:aaaaaaaaaaaa" in audit_versions
-        assert "selection-v3:bbbbbbbbbbbb" in audit_versions
+        assert "selection-v4:aaaaaaaaaaaa" in audit_versions
+        assert "selection-v4:bbbbbbbbbbbb" in audit_versions
 
 
 class _CompleteNewsClient(_DeterministicNewsClient):

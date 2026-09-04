@@ -15,8 +15,14 @@ from daily_insights_api.modules.news.service import _digest
 def test_packaged_selection_criteria_loads_with_version_and_digest() -> None:
     criteria = load_selection_criteria()
     assert "不得因新聞使用的語言" in criteria.text
+    # The packaged criteria carry the dedupe and source-credibility rules but
+    # defer every count to OUTPUT_CONTRACT so one file serves all editions.
+    assert "event_key" in criteria.text
+    assert "來源可信度" in criteria.text
+    assert "OUTPUT_CONTRACT" in criteria.text
+    assert "5 則" not in criteria.text
     assert len(criteria.digest) == 64
-    assert criteria.version == f"selection-v3:{criteria.digest[:12]}"
+    assert criteria.version == f"selection-v4:{criteria.digest[:12]}"
 
 
 @pytest.mark.parametrize("content", ["", "   \n\t"])

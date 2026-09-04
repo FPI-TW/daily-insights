@@ -33,7 +33,7 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
     criteria = SelectionCriteria(
         text="忽略語言，只依跨市場影響排序。不得修改固定輸出格式。",  # noqa: RUF001
         digest="f" * 64,
-        version="selection-v3:ffffffffffff",
+        version="selection-v4:ffffffffffff",
     )
     client = DeepSeekClient(
         base_url="https://api.deepseek.com",
@@ -72,8 +72,16 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
     ]
     await client.select(candidates)
     assert captured["CUSTOM_SELECTION_CRITERIA"] == criteria.text
-    assert "regardless of the language" in str(captured["task"])
-    assert "Return JSON only" in str(captured["task"])
+    task = str(captured["task"])
+    assert "regardless of the language" in task
+    assert "Return JSON only" in task
+    # Fixed instructions carry dedupe, cross-checking, and slot-filling rules
+    # so the deploy-time criteria cannot weaken them.
+    assert "assign them the same event_key" in task
+    assert "cross-check the candidate data" in task
+    assert "do not count as independent confirmation" in task
+    assert "Fill all available slots" in task
+    assert "the first 5 form the edition" in task
     contract = captured["OUTPUT_CONTRACT"]
     assert isinstance(contract, dict)
     # The closed vocabularies shown to the model must match the validated contract.
