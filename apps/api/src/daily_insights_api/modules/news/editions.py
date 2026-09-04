@@ -21,6 +21,9 @@ class SelectionPolicy:
     min_topics: int
     min_markets: int
     market_focus: str | None = None
+    # Market editions accept only their own market tag; anything else the
+    # model picks is dropped before the limits are enforced. None means any.
+    allowed_markets: frozenset[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -46,7 +49,20 @@ GLOBAL_SPEC = EditionSpec(
     max_candidates=20,
     max_per_source=5,
     max_discovery_per_source=5,
-    selection=SelectionPolicy(max_items=5, max_per_domain=2, min_topics=2, min_markets=2),
+    selection=SelectionPolicy(
+        max_items=5,
+        max_per_domain=2,
+        min_topics=2,
+        min_markets=2,
+        market_focus=(
+            "This is the global macro digest for a cross-market audience: central bank "
+            "decisions and guidance, inflation and growth data, rates and yields, FX, "
+            "energy and commodities, geopolitical or trade events with market-wide impact, "
+            "and cross-border capital flows. Single-company or single-country stories "
+            "qualify only when they move more than their home market; the country "
+            "editions cover the rest."
+        ),
+    ),
 )
 
 TW_EQUITY_SPEC = EditionSpec(
@@ -69,6 +85,7 @@ TW_EQUITY_SPEC = EditionSpec(
             "Taiwan market (weather, entertainment, general science, lifestyle) must not "
             "be selected even if every other candidate is weaker; leave the slot empty."
         ),
+        allowed_markets=frozenset({"taiwan"}),
     ),
 )
 
@@ -90,6 +107,7 @@ US_EQUITY_SPEC = EditionSpec(
             "with no direct link to US-listed companies or US markets must not be "
             "selected; leave the slot empty instead."
         ),
+        allowed_markets=frozenset({"us"}),
     ),
 )
 

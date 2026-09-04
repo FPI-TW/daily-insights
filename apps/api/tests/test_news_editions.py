@@ -20,7 +20,11 @@ from daily_insights_api.modules.news.feeds import (
     discover_feed_candidates,
     effective_hostnames,
 )
-from daily_insights_api.modules.news.llm import enforce_selection_policy, selection_output_contract
+from daily_insights_api.modules.news.llm import (
+    enforce_selection_policy,
+    filter_selection_markets,
+    selection_output_contract,
+)
 
 ALLOWED = effective_hostnames()
 
@@ -149,3 +153,48 @@ async def test_discovery_reads_only_feeds_tagged_for_the_requested_market(
     assert requested == expected
     assert "https://news.cnyes.com/rss/v1/news/category/tw_stock" in requested
     assert not any("wsj" in url or "guardianapis" in url for url in requested)
+
+
+def test_market_editions_drop_stories_tagged_for_other_markets() -> None:
+    selection = Selection.model_validate(
+        {
+            "selections": [
+                {
+                    "id": "a" * 64,
+                    "topic": "markets",
+                    "event_key": "taiex-close",
+                    "market": "taiwan",
+                    "importance": 4,
+                },
+                {
+                    "id": "b" * 64,
+                    "topic": "economy",
+                    "event_key": "el-nino",
+                    "market": "global",
+                    "importance": 2,
+                },
+                {
+                    "id": "c" * 64,
+                    "topic": "companies",
+                    "event_key": "tsmc-capex",
+                    "market": "taiwan",
+                    "importance": 5,
+                },
+            ]
+        }
+    )
+
+    kept, dropped = filter_selection_markets(selection, TW_EQUITY_SPEC.selection)
+
+    assert [item.event_key for item in kept.selections] == ["taiex-close", "tsmc-capex"]
+    assert [item.market for item in dropped] == ["global"]
+    # The global digest accepts every market tag.
+    assert filter_selection_markets(selection, GLOBAL_SPEC.selection) == (selection, ())
+
+
+def test_output_contract_restricts_market_tags_for_market_editions() -> None:
+    assert selection_output_contract(TW_EQUITY_SPEC.selection)["market"] == ["taiwan"]
+    assert selection_output_contract(US_EQUITY_SPEC.selection)["market"] == ["us"]
+    assert "global" in selection_output_contract(GLOBAL_SPEC.selection)["market"]
+    assert GLOBAL_SPEC.selection.market_focus is not None
+    assert "macro" in GLOBAL_SPEC.selection.market_focus

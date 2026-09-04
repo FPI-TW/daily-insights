@@ -11,7 +11,13 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 
-from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary, Selection
+from daily_insights_api.core.observability import emit_event
+from daily_insights_api.modules.news.contracts import (
+    Candidate,
+    LocalizedSummary,
+    SelectedCandidate,
+    Selection,
+)
 from daily_insights_api.modules.news.editions import GLOBAL_SPEC, SelectionPolicy
 from daily_insights_api.modules.news.extraction import FetchedCandidate
 from daily_insights_api.modules.news.prompts import SelectionCriteria, load_selection_criteria
@@ -68,7 +74,7 @@ def selection_output_contract(policy: SelectionPolicy) -> dict[str, Any]:
             "starting with a letter or digit; stories about the same event share one key, "
             "so pick only one of them"
         ),
-        "market": MARKET_VALUES,
+        "market": (sorted(policy.allowed_markets) if policy.allowed_markets else MARKET_VALUES),
         "importance": "integer 1 (minor) to 5 (market-moving)",
         "example": {
             "selections": [
@@ -201,17 +207,29 @@ class DeepSeekClient:
             "CANDIDATES": allowed,
         }
         if policy.market_focus:
-            prompt["MARKET_FOCUS"] = (
+            scope = (
                 "This edition covers one market only; prefer stories that move or explain "
-                f"it: {policy.market_focus} Fill all {policy.max_items} slots whenever the "
-                "candidates contain that many distinct, relevant events; return fewer only "
-                "when the remaining candidates are duplicates or irrelevant to this market."
+                f"it: {policy.market_focus}"
+                if policy.allowed_markets
+                else policy.market_focus
+            )
+            prompt["MARKET_FOCUS"] = (
+                f"{scope} Fill all {policy.max_items} slots whenever the candidates "
+                "contain that many distinct, relevant events; return fewer only when the "
+                "remaining candidates are duplicates or off-topic for this edition."
             )
         call = await self._complete(prompt)
         try:
             value = Selection.model_validate(call[0])
         except ValidationError as error:
             raise _failure_from_call("invalid selection JSON", call) from error
+        value, dropped = filter_selection_markets(value, policy)
+        if dropped:
+            emit_event(
+                "news.selection.dropped_market",
+                dropped=len(dropped),
+                markets=sorted({item.market for item in dropped}),
+            )
         try:
             enforce_selection_policy(value, candidates, policy)
         except ValueError as error:
@@ -304,6 +322,24 @@ class DeepSeekClient:
             _elapsed_ms(started),
             input_digest,
         )
+
+
+def filter_selection_markets(
+    value: Selection, policy: SelectionPolicy
+) -> tuple[Selection, tuple[SelectedCandidate, ...]]:
+    """Drop stories tagged outside the edition's market instead of failing.
+
+    A Taiwan edition must never carry a "global" story: the model is told so,
+    but the tag is also enforced here so a stray pick costs one slot rather
+    than the whole edition.
+    """
+    if policy.allowed_markets is None:
+        return value, ()
+    kept = tuple(item for item in value.selections if item.market in policy.allowed_markets)
+    dropped = tuple(item for item in value.selections if item.market not in policy.allowed_markets)
+    if not dropped:
+        return value, ()
+    return value.model_copy(update={"selections": kept}), dropped
 
 
 def enforce_selection_policy(

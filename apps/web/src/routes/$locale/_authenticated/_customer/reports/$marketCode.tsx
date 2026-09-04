@@ -117,6 +117,7 @@ function ReportPage() {
           news={news.latest}
           eyebrowKey="marketNewsEyebrow"
           titleKey={`marketNewsTitle_${news.marketCode}`}
+          groupByMarket={false}
         />
       ) : null}
     </>

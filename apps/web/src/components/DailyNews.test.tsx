@@ -161,6 +161,52 @@ describe("DailyNews", () => {
     expect(panel.queryByText("1 碼")).not.toBeInTheDocument()
   })
 
+  it("renders a market page's stories without market headings", async () => {
+    const i18n = createI18n("zh-hant")
+    await i18n.changeLanguage("zh-hant")
+    const item = (index: number, market: "taiwan" | "global") => ({
+      id: `00000000-0000-4000-8000-00000000002${index}`,
+      rank: index,
+      importance: 3,
+      topic: "markets" as const,
+      headline: `Story ${index}`,
+      summary: "Summary.",
+      source_name: "Source",
+      source_hostname: "source.example",
+      source_url: `https://source.example/${index}`,
+      source_published_at: null,
+      numeric_facts: [],
+      market,
+      event_key: `event-${index}`,
+    })
+    const { container } = render(
+      <I18nextProvider i18n={i18n}>
+        <DailyNews
+          news={{
+            market_code: "tw_equity",
+            target_items: 8,
+            edition_id: "00000000-0000-4000-8000-000000000003",
+            edition_date: "2026-09-04",
+            revision: 1,
+            status: "partial",
+            locale: "zh-hant",
+            generated_at: "2026-09-04T00:00:00+00:00",
+            caveat: null,
+            items: [item(1, "taiwan"), item(2, "global")],
+          }}
+          eyebrowKey="marketNewsEyebrow"
+          titleKey="marketNewsTitle_tw_equity"
+          groupByMarket={false}
+        />
+      </I18nextProvider>
+    )
+    const panel = within(container)
+    expect(
+      panel.getAllByRole("heading", { level: 3 }).map(h => h.textContent)
+    ).toEqual(["Story 1", "Story 2"])
+    expect(panel.queryByText("全球")).not.toBeInTheDocument()
+  })
+
   it("degrades to an unavailable panel when the news request failed", async () => {
     const i18n = createI18n("en")
     await i18n.changeLanguage("en")

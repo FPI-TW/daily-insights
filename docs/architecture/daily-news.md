@@ -65,8 +65,7 @@ flowchart LR
 | 台股重點新聞 | `tw_equity`   | 8        | 台灣媒體 15 支 feed（鉅亨台股、經濟日報、中央社、工商時報等） | 單一來源與市場皆可，至少 2 個主題         |
 | 美股重點新聞 | `us_equity`   | 8        | 英文綜合與新聞稿、Guardian 商業、鉅亨國際股市、SEC 8-K        | 每網域至多 4 則，至少 2 個主題            |
 
-各版本只讀取標記給該市場的 feed，選題 prompt 附帶該市場的 `MARKET_FOCUS` 提示，`market`
-欄位新增 `taiwan`。排程器依序執行三個版本，任一版本例外不影響其他版本，最差
+各版本只讀取標記給該市場的 feed，選題 prompt 附帶該版本的 `MARKET_FOCUS` 提示：全球版以總經（央行、利率、匯率、商品、跨市場風險）為主，台股與美股版只接受 `market` 為 `taiwan`／`us` 的選項，模型標成其他市場的稿件會在限制檢查前被剔除並記錄 `news.selection.dropped_market`。市場頁的新聞不依市場分組，只有首頁的全球版分組顯示。排程器依序執行三個版本，任一版本例外不影響其他版本，最差
 結果決定是否同日重試。`make generate-daily-news MARKET=tw_equity` 可單獨產生一
 個版本。
 

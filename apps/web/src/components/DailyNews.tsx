@@ -34,10 +34,14 @@ export function DailyNews({
   news,
   eyebrowKey = "dailyNewsEyebrow",
   titleKey = "dailyNewsTitle",
+  groupByMarket = true,
 }: {
   news: LatestNews | null
   eyebrowKey?: string
   titleKey?: string
+  // Market pages carry one market's stories, so headings would only repeat
+  // the page title (or expose a stray tag from an older edition).
+  groupByMarket?: boolean
 }) {
   const { t } = useTranslation()
   const animate = useEnterAnimation()
@@ -83,7 +87,7 @@ export function DailyNews({
           {news.caveat ?? t("dailyNewsUnavailable")}
         </div>
       ) : (
-        <NewsGroups news={news} animate={animate} />
+        <NewsGroups news={news} animate={animate} grouped={groupByMarket} />
       )}
     </section>
   )
@@ -92,14 +96,23 @@ export function DailyNews({
 /** Stories grouped by the market the selection stage assigned. Editions
  * generated before that was persisted have no market on any item and render
  * as one flat group without a heading. */
-function NewsGroups({ news, animate }: { news: LatestNews; animate: boolean }) {
+function NewsGroups({
+  news,
+  animate,
+  grouped: groupingEnabled,
+}: {
+  news: LatestNews
+  animate: boolean
+  grouped: boolean
+}) {
   const { t } = useTranslation()
   const groups = new Map<string | null, NewsItem[]>()
   for (const item of news.items) {
-    const key = item.market ?? null
+    const key = groupingEnabled ? (item.market ?? null) : null
     groups.set(key, [...(groups.get(key) ?? []), item])
   }
-  const grouped = news.items.some(item => item.market !== null)
+  const grouped =
+    groupingEnabled && news.items.some(item => item.market !== null)
   let offset = 0
   return (
     <div className="grid gap-6">
