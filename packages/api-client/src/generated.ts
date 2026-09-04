@@ -497,6 +497,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/markets/indices": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Index Latest Bars */
+    get: operations["list_index_latest_bars_api_markets_indices_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/markets/indices/{symbol}/daily-bars": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Index Daily Bars */
+    get: operations["list_index_daily_bars_api_markets_indices__symbol__daily_bars_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/news/latest": {
     parameters: {
       query?: never
@@ -989,6 +1023,55 @@ export interface components {
     HealthResponse: {
       /** Status */
       status: string
+    }
+    /** IndexDailyBarResponse */
+    IndexDailyBarResponse: {
+      /** Close */
+      close: string
+      /** High */
+      high: string | null
+      /** Low */
+      low: string | null
+      /** Market Code */
+      market_code: string
+      /** Open */
+      open: string | null
+      /** Symbol */
+      symbol: string
+      /**
+       * Trade Date
+       * Format: date
+       */
+      trade_date: string
+      /** Volume */
+      volume: number | null
+    }
+    /**
+     * IndexLatestBarResponse
+     * @description The most recent settled bar plus the close before it, for a change figure.
+     */
+    IndexLatestBarResponse: {
+      /** Close */
+      close: string
+      /** High */
+      high: string | null
+      /** Low */
+      low: string | null
+      /** Market Code */
+      market_code: string
+      /** Open */
+      open: string | null
+      /** Previous Close */
+      previous_close: string | null
+      /** Symbol */
+      symbol: string
+      /**
+       * Trade Date
+       * Format: date
+       */
+      trade_date: string
+      /** Volume */
+      volume: number | null
     }
     /** InternalUserCreate */
     InternalUserCreate: {
@@ -2991,6 +3074,60 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["MarketResponse"][]
+        }
+      }
+    }
+  }
+  list_index_latest_bars_api_markets_indices_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["IndexLatestBarResponse"][]
+        }
+      }
+    }
+  }
+  list_index_daily_bars_api_markets_indices__symbol__daily_bars_get: {
+    parameters: {
+      query?: {
+        start?: string | null
+        end?: string | null
+      }
+      header?: never
+      path: {
+        symbol: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["IndexDailyBarResponse"][]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
         }
       }
     }

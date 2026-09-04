@@ -30,6 +30,8 @@ import {
   analystViewpointSyncSchema,
   analystViewpointSyncStatusSchema,
   type LaunchMarketCode,
+  indexDailyBarListSchema,
+  indexLatestBarListSchema,
   marketListSchema,
   userSchema,
 } from "./schemas"
@@ -69,6 +71,27 @@ export function createMarketClient(transport: ApiTransport) {
   return {
     async list() {
       return parseResponse(await transport("/api/markets"), marketListSchema)
+    },
+    async latestIndexBars() {
+      return parseResponse(
+        await transport("/api/markets/indices"),
+        indexLatestBarListSchema
+      )
+    },
+    async indexDailyBars(
+      symbol: string,
+      range: { start?: string; end?: string } = {}
+    ) {
+      const query = new URLSearchParams()
+      if (range.start) query.set("start", range.start)
+      if (range.end) query.set("end", range.end)
+      const suffix = query.size > 0 ? `?${query}` : ""
+      return parseResponse(
+        await transport(
+          `/api/markets/indices/${encodeURIComponent(symbol)}/daily-bars${suffix}`
+        ),
+        indexDailyBarListSchema
+      )
     },
   }
 }

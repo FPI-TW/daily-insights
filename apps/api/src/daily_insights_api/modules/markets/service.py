@@ -2,13 +2,14 @@ import asyncio
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import Result, func, literal_column, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from daily_insights_api.modules.data_sources.api import (
     TRACKED_INDICES,
@@ -26,7 +27,11 @@ from daily_insights_api.modules.markets.models import (
     Market,
     OrganizationMarketPolicy,
 )
-from daily_insights_api.modules.markets.schemas import MarketResponse
+from daily_insights_api.modules.markets.schemas import (
+    IndexDailyBarResponse,
+    IndexLatestBarResponse,
+    MarketResponse,
+)
 
 MAX_BIND_PARAMETERS = 65535
 # Yahoo publishes no rate limit and is reached through a scraping client, so
@@ -100,6 +105,76 @@ async def market_responses(
             )
         )
     return [market for market in responses if market.is_visible] if visible_only else responses
+
+
+def _bar_response(bar: IndexDailyBar) -> IndexDailyBarResponse:
+    return IndexDailyBarResponse(
+        symbol=bar.symbol,
+        market_code=bar.market_code,
+        trade_date=bar.trade_date,
+        open=bar.open,
+        high=bar.high,
+        low=bar.low,
+        close=bar.close,
+        volume=bar.volume,
+    )
+
+
+async def latest_index_bars(
+    database: AsyncSession,
+    *,
+    market_codes: set[str],
+) -> list[IndexLatestBarResponse]:
+    """The newest bar per symbol in the given markets, in TRACKED_INDICES order."""
+    if not market_codes:
+        return []
+    recency = (
+        func.row_number()
+        .over(partition_by=IndexDailyBar.symbol, order_by=IndexDailyBar.trade_date.desc())
+        .label("recency")
+    )
+    ranked = (
+        select(IndexDailyBar, recency).where(IndexDailyBar.market_code.in_(market_codes)).subquery()
+    )
+    bar = aliased(IndexDailyBar, ranked)
+    rows = await database.execute(
+        select(bar, ranked.c.recency)
+        .where(ranked.c.recency <= 2)
+        .order_by(bar.symbol, ranked.c.recency)
+    )
+    latest: dict[str, IndexDailyBar] = {}
+    previous: dict[str, IndexDailyBar] = {}
+    for row, position in rows.tuples():
+        (latest if position == 1 else previous)[row.symbol] = row
+    order: dict[str, int] = {symbol: index for index, symbol in enumerate(TRACKED_INDICES)}
+    return [
+        IndexLatestBarResponse(
+            **_bar_response(bar).model_dump(),
+            previous_close=previous[symbol].close if symbol in previous else None,
+        )
+        for symbol, bar in sorted(
+            latest.items(), key=lambda item: (order.get(item[0], len(order)), item[0])
+        )
+    ]
+
+
+async def index_daily_bars(
+    database: AsyncSession,
+    *,
+    symbol: str,
+    start: date,
+    end: date,
+) -> list[IndexDailyBarResponse]:
+    bars = await database.scalars(
+        select(IndexDailyBar)
+        .where(
+            IndexDailyBar.symbol == symbol,
+            IndexDailyBar.trade_date >= start,
+            IndexDailyBar.trade_date <= end,
+        )
+        .order_by(IndexDailyBar.trade_date)
+    )
+    return [_bar_response(bar) for bar in bars]
 
 
 async def store_index_daily_bars(

@@ -135,6 +135,39 @@ describe("API client trust boundary", () => {
     expect(transport).toHaveBeenCalledWith("/api/markets")
   })
 
+  it("fetches index bars with an encoded symbol and optional date range", async () => {
+    const bar = {
+      symbol: "^TWII",
+      market_code: "tw_equity",
+      trade_date: "2026-09-02",
+      open: "100.0000000000",
+      high: "101.0000000000",
+      low: "99.0000000000",
+      close: "100.5000000000",
+      volume: 1000,
+    }
+    const transport = vi.fn(async (path: string) =>
+      Response.json(
+        path.endsWith("/indices") ? [{ ...bar, previous_close: null }] : [bar]
+      )
+    )
+    const client = createMarketClient(transport)
+    await expect(client.latestIndexBars()).resolves.toEqual([
+      expect.objectContaining({ symbol: "^TWII", previous_close: null }),
+    ])
+    expect(transport).toHaveBeenCalledWith("/api/markets/indices")
+    await expect(
+      client.indexDailyBars("^TWII", { start: "2026-01-01" })
+    ).resolves.toHaveLength(1)
+    expect(transport).toHaveBeenCalledWith(
+      "/api/markets/indices/%5ETWII/daily-bars?start=2026-01-01"
+    )
+    await client.indexDailyBars("^TWII")
+    expect(transport).toHaveBeenCalledWith(
+      "/api/markets/indices/%5ETWII/daily-bars"
+    )
+  })
+
   it("accepts a stale analyst viewpoint status without replacing stored data", async () => {
     const client = createAdministrationClient(async () =>
       Response.json({

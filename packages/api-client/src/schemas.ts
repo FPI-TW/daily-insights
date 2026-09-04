@@ -34,6 +34,23 @@ export const marketListSchema = z.array(marketSchema)
 export const reportStatusSchema = z.enum(["complete", "partial", "unavailable"])
 export const blockStatusSchema = z.enum(["ok", "missing", "error"])
 const decimalSchema = z.string().regex(/^-?\d+(?:\.\d+)?$/)
+export const indexDailyBarSchema = z.object({
+  symbol: z.string().min(1),
+  market_code: marketCodeSchema,
+  trade_date: z.iso.date(),
+  open: decimalSchema.nullable(),
+  high: decimalSchema.nullable(),
+  low: decimalSchema.nullable(),
+  close: decimalSchema,
+  volume: z.number().int().nonnegative().nullable(),
+})
+export type IndexDailyBar = z.infer<typeof indexDailyBarSchema>
+export const indexDailyBarListSchema = z.array(indexDailyBarSchema)
+export const indexLatestBarSchema = indexDailyBarSchema.extend({
+  previous_close: decimalSchema.nullable(),
+})
+export type IndexLatestBar = z.infer<typeof indexLatestBarSchema>
+export const indexLatestBarListSchema = z.array(indexLatestBarSchema)
 const chartPointSchema = z.object({
   x: z.string().min(1),
   value: decimalSchema.nullable(),
