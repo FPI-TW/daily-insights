@@ -506,8 +506,20 @@ async def test_internal_staff_read_indices_without_an_organization(
 ) -> None:
     # Internal users belong to no organization, so a membership check alone
     # would lock them out. reports/access.py grants them the same preview.
+    #
+    # The request below carries no date range, so it gets the default window of
+    # the last 365 days. The row is dated today rather than with this file's
+    # fixed 2026-09-01 so that the window keeps containing it; a fixed date here
+    # would leave the assertion passing until it silently aged out of range.
     async with session_factory.begin() as database:
-        await _store(database, [_symbol_bar("^DJI", "us_equity", "500.0")])
+        await _store(
+            database,
+            [
+                _symbol_bar("^DJI", "us_equity", "500.0").model_copy(
+                    update={"trade_date": date.today()}
+                )
+            ],
+        )
 
     async with _signed_in_client(
         session_factory, role=SystemRole.ADMIN, organization_id=None
