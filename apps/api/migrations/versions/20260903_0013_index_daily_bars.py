@@ -17,6 +17,17 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.create_table(
+        "index_daily_bar_series",
+        sa.Column("symbol", sa.String(20), nullable=False),
+        sa.Column("provider", sa.String(50), nullable=False),
+        sa.PrimaryKeyConstraint("symbol", name="pk_index_daily_bar_series"),
+        sa.UniqueConstraint(
+            "symbol",
+            "provider",
+            name="uq_index_daily_bar_series_symbol_provider",
+        ),
+    )
+    op.create_table(
         "index_daily_bars",
         sa.Column("symbol", sa.String(20), nullable=False),
         sa.Column("trade_date", sa.Date(), nullable=False),
@@ -48,6 +59,12 @@ def upgrade() -> None:
             name="fk_index_daily_bars_market_code_markets",
             ondelete="RESTRICT",
         ),
+        sa.ForeignKeyConstraint(
+            ["symbol", "provider"],
+            ["index_daily_bar_series.symbol", "index_daily_bar_series.provider"],
+            name="fk_index_daily_bars_symbol_index_daily_bar_series",
+            ondelete="RESTRICT",
+        ),
         sa.CheckConstraint("close > 0", name="ck_index_daily_bars_close_positive"),
         sa.CheckConstraint(
             "volume IS NULL OR volume >= 0",
@@ -74,3 +91,4 @@ def downgrade() -> None:
     op.drop_index("ix_index_daily_bars_market_date", table_name="index_daily_bars")
     op.drop_index("ix_index_daily_bars_market_code", table_name="index_daily_bars")
     op.drop_table("index_daily_bars")
+    op.drop_table("index_daily_bar_series")

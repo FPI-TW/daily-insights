@@ -9,6 +9,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Numeric,
     String,
@@ -56,6 +57,22 @@ class OrganizationMarketPolicy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class IndexDailyBarSeries(Base):
+    """Own one symbol's complete history for exactly one provider."""
+
+    __tablename__ = "index_daily_bar_series"
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "provider",
+            name="uq_index_daily_bar_series_symbol_provider",
+        ),
+    )
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+
+
 class IndexDailyBar(TimestampMixin, Base):
     """One settled trading day for one tracked index.
 
@@ -72,6 +89,11 @@ class IndexDailyBar(TimestampMixin, Base):
         CheckConstraint(
             "high IS NULL OR low IS NULL OR high >= low",
             name="high_not_below_low",
+        ),
+        ForeignKeyConstraint(
+            ["symbol", "provider"],
+            ["index_daily_bar_series.symbol", "index_daily_bar_series.provider"],
+            ondelete="RESTRICT",
         ),
         Index("ix_index_daily_bars_market_date", "market_code", "trade_date"),
     )

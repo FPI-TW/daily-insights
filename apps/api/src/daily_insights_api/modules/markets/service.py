@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Result, func, literal_column, select
+from sqlalchemy import Result, func, literal_column, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +21,7 @@ from daily_insights_api.modules.data_sources.api import (
 )
 from daily_insights_api.modules.markets.models import (
     IndexDailyBar,
+    IndexDailyBarSeries,
     Market,
     OrganizationMarketPolicy,
 )
@@ -30,6 +31,10 @@ MAX_BIND_PARAMETERS = 65535
 # Yahoo publishes no rate limit and is reached through a scraping client, so
 # this stays conservative; it matches TwelveDataTransport's default.
 MAX_FETCH_CONCURRENCY = 4
+
+
+class IndexProviderConflictError(ValueError):
+    """A symbol already has durable bars owned by another provider."""
 
 
 async def visible_market_codes(
@@ -124,6 +129,50 @@ async def store_index_daily_bars(
                 "contract_version": contract_version,
                 "source_fetched_at": source_fetched_at,
             }
+        )
+
+    # Claim ownership in a stable order. PostgreSQL's unique-index conflict
+    # waits serialize concurrent first writers; sorting prevents two multi-symbol
+    # callers from waiting on the same ownership rows in opposite order.
+    symbols = sorted({bar.symbol for bar in bars})
+    ownership_statement = insert(IndexDailyBarSeries).values(
+        [{"symbol": symbol, "provider": provider} for symbol in symbols]
+    )
+    await database.execute(
+        ownership_statement.on_conflict_do_nothing(index_elements=[IndexDailyBarSeries.symbol])
+    )
+    ownership = {
+        series.symbol: series.provider
+        for series in (
+            await database.scalars(
+                select(IndexDailyBarSeries)
+                .where(IndexDailyBarSeries.symbol.in_(symbols))
+                .order_by(IndexDailyBarSeries.symbol)
+                .with_for_update()
+            )
+        ).all()
+    }
+    if set(ownership) != set(symbols):
+        raise RuntimeError("failed to establish index daily-bar provider ownership")
+    for symbol in symbols:
+        existing_provider = ownership[symbol]
+        if existing_provider == provider:
+            continue
+        has_bars = await database.scalar(
+            select(IndexDailyBar.symbol).where(IndexDailyBar.symbol == symbol).limit(1)
+        )
+        if has_bars is not None:
+            raise IndexProviderConflictError(
+                f"refusing to add {provider!r} bars to {symbol}: its series belongs to "
+                f"provider {existing_provider!r}; delete the old rows first to switch providers"
+            )
+        # Preserve the documented switch path. The ownership row is locked, and
+        # no child bars remain, so changing the claim and inserting the new
+        # provider's rows is atomic inside the caller's transaction.
+        await database.execute(
+            update(IndexDailyBarSeries)
+            .where(IndexDailyBarSeries.symbol == symbol)
+            .values(provider=provider)
         )
     # A multi-row INSERT binds one parameter per column per row, and PostgreSQL's
     # wire protocol caps a statement at 65535 of them. `period=max` returns 24k+
@@ -240,12 +289,13 @@ async def refresh_index_daily_bars(
                     contract_version=result.provenance.contract_version,
                     source_fetched_at=result.provenance.fetched_at,
                 )
-        except (IntegrityError, DataError) as error:
+        except (IntegrityError, DataError, IndexProviderConflictError) as error:
+            detail = error.orig if isinstance(error, (IntegrityError, DataError)) else error
             failures.append(
                 IndexRefreshFailure(
                     symbol=symbol,
                     market=market,
-                    error=f"{type(error).__name__}: {error.orig}",
+                    error=f"{type(error).__name__}: {detail}",
                 )
             )
             continue

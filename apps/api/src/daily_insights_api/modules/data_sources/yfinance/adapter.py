@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import json
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -81,21 +82,24 @@ class YfinanceAdapter:
         period: str = "2y",
     ) -> YfinanceDailyBars:
         # yfinance is synchronous and blocking.
-        frame = await asyncio.to_thread(self._history, symbol, period)
+        frame, regular_market_end = await asyncio.to_thread(self._history, symbol, period)
+        fetched_at = datetime.now(UTC)
         return normalize_daily_bars(
             market=market,
             symbol=symbol,
             period=period,
             frame=frame,
-            fetched_at=datetime.now(UTC),
+            fetched_at=fetched_at,
+            regular_market_end=regular_market_end,
         )
 
-    def _history(self, symbol: str, period: str) -> "DataFrame":
+    def _history(self, symbol: str, period: str) -> tuple["DataFrame", datetime | None]:
         import yfinance
         from pandas import DataFrame
 
         try:
-            frame = yfinance.Ticker(symbol).history(
+            ticker = yfinance.Ticker(symbol)
+            frame = ticker.history(
                 period=period,
                 interval="1d",
                 actions=False,
@@ -109,7 +113,15 @@ class YfinanceAdapter:
             raise DataSourceContractError(
                 f"yfinance history for {symbol} returned {type(frame).__name__}, not a DataFrame"
             )
-        return frame
+        try:
+            regular_market_end = _regular_market_end(ticker.history_metadata)
+        except Exception:
+            # Metadata is advisory and comes from the same undocumented source.
+            # A missing or malformed close time must not turn valid historical
+            # rows into a failed symbol; normalization conservatively drops a
+            # same-day row when it cannot prove the regular session has ended.
+            regular_market_end = None
+        return frame, regular_market_end
 
 
 def normalize_daily_bars(
@@ -119,6 +131,7 @@ def normalize_daily_bars(
     period: str,
     frame: "DataFrame",
     fetched_at: datetime,
+    regular_market_end: datetime | None = None,
 ) -> YfinanceDailyBars:
     """Validate the frame at the trust boundary and map it to normalized DTOs."""
     from pandas import Timestamp
@@ -137,9 +150,15 @@ def normalize_daily_bars(
                 f"yfinance history for {symbol} returned a naive or non-datetime index"
             )
         trade_date = index.date()
-        # The index carries the exchange's own timezone, so "today" is decided
-        # there rather than in UTC or in the server's local zone.
-        if trade_date >= datetime.now(index.tzinfo).date():
+        # The index carries the exchange's own timezone. A same-day bar is
+        # settled once Yahoo's regular session has ended; before then (or when
+        # that metadata cannot be trusted) it is excluded conservatively.
+        if _is_unsettled_trade_date(
+            trade_date=trade_date,
+            exchange_timezone=index.tzinfo,
+            fetched_at=fetched_at,
+            regular_market_end=regular_market_end,
+        ):
             dropped_unsettled_trade_date = trade_date
             continue
         close = _decimal(row["Close"])
@@ -195,6 +214,45 @@ def normalize_daily_bars(
         dropped_unsettled_trade_date=dropped_unsettled_trade_date,
         provenance=_provenance(symbol=symbol, period=period, items=items, fetched_at=fetched_at),
     )
+
+
+def _regular_market_end(metadata: Any) -> datetime | None:
+    if not isinstance(metadata, Mapping):
+        return None
+    trading_period = metadata.get("currentTradingPeriod")
+    if not isinstance(trading_period, Mapping):
+        return None
+    regular = trading_period.get("regular")
+    if not isinstance(regular, Mapping):
+        return None
+    value = regular.get("end")
+    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+        return None
+    return value
+
+
+def _is_unsettled_trade_date(
+    *,
+    trade_date: date,
+    exchange_timezone: Any,
+    fetched_at: datetime,
+    regular_market_end: datetime | None,
+) -> bool:
+    if fetched_at.tzinfo is None or fetched_at.utcoffset() is None:
+        raise ValueError("fetched_at must include a UTC offset")
+    local_fetched_at = fetched_at.astimezone(exchange_timezone)
+    if trade_date > local_fetched_at.date():
+        return True
+    if trade_date < local_fetched_at.date():
+        return False
+    if (
+        regular_market_end is None
+        or regular_market_end.tzinfo is None
+        or regular_market_end.utcoffset() is None
+    ):
+        return True
+    local_market_end = regular_market_end.astimezone(exchange_timezone)
+    return local_market_end.date() != trade_date or fetched_at < regular_market_end
 
 
 def _provenance(

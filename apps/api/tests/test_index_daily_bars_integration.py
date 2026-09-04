@@ -8,7 +8,7 @@ from typing import cast
 import pytest
 import pytest_asyncio
 from conftest import remigrate_database, reset_database_schema
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -24,10 +24,11 @@ from daily_insights_api.modules.markets.api import (
     refresh_index_daily_bars,
     store_index_daily_bars,
 )
-from daily_insights_api.modules.markets.models import IndexDailyBar
+from daily_insights_api.modules.markets.models import IndexDailyBar, IndexDailyBarSeries
 from daily_insights_api.modules.markets.service import (
     MAX_BIND_PARAMETERS,
     MAX_FETCH_CONCURRENCY,
+    IndexProviderConflictError,
 )
 
 pytestmark = pytest.mark.integration
@@ -72,6 +73,20 @@ async def _store(database: AsyncSession, bars: list[DailyBar]) -> int:
         bars=bars,
         provider="yfinance",
         contract_version="2026-09-03.v1",
+        source_fetched_at=FETCHED_AT,
+    )
+
+
+async def _store_as(
+    database: AsyncSession,
+    bars: list[DailyBar],
+    provider: str,
+) -> int:
+    return await store_index_daily_bars(
+        database,
+        bars=bars,
+        provider=provider,
+        contract_version="test",
         source_fetched_at=FETCHED_AT,
     )
 
@@ -279,7 +294,7 @@ async def test_a_second_provider_cannot_overwrite_an_existing_series(
     async with session_factory.begin() as database:
         await _store(database, [_bar(date(2026, 9, 1), "100.0")])
 
-    with pytest.raises(ValueError, match="refusing to overwrite 1 existing"):
+    with pytest.raises(ValueError, match="series belongs to provider 'yfinance'"):
         async with session_factory.begin() as database:
             await store_index_daily_bars(
                 database,
@@ -294,6 +309,154 @@ async def test_a_second_provider_cannot_overwrite_an_existing_series(
         assert row is not None
         assert row.provider == "yfinance"
         assert row.close == Decimal("100.0")
+
+
+async def test_a_second_provider_cannot_append_a_nonoverlapping_window(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory.begin() as database:
+        await _store(database, [_bar(date(2026, 9, 1), "100.0")])
+
+    with pytest.raises(ValueError, match="series belongs to provider 'yfinance'"):
+        async with session_factory.begin() as database:
+            await _store_as(
+                database,
+                [_bar(date(2026, 9, 2), "200.0")],
+                "twelve_data",
+            )
+
+    async with session_factory() as database:
+        rows = (await database.scalars(select(IndexDailyBar))).all()
+        assert [(row.trade_date, row.provider) for row in rows] == [(date(2026, 9, 1), "yfinance")]
+
+
+async def test_provider_can_switch_after_its_old_rows_are_deleted(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory.begin() as database:
+        await _store(database, [_bar(date(2026, 9, 1), "100.0")])
+        await database.execute(delete(IndexDailyBar).where(IndexDailyBar.symbol == "^TWII"))
+        await _store_as(database, [_bar(date(2026, 9, 2), "200.0")], "twelve_data")
+
+    async with session_factory() as database:
+        series = await database.get(IndexDailyBarSeries, "^TWII")
+        row = await database.scalar(select(IndexDailyBar))
+        assert series is not None
+        assert series.provider == "twelve_data"
+        assert row is not None
+        assert row.provider == "twelve_data"
+
+
+async def test_provider_conflict_stays_isolated_to_one_refresh_symbol(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory.begin() as database:
+        await _store_as(
+            database,
+            [_symbol_bar("^HSI", "hk_equity", "50.0")],
+            "twelve_data",
+        )
+
+    results = {
+        "^DJI": _result("^DJI", "us_equity", (_symbol_bar("^DJI", "us_equity", "100.0"),)),
+        "^HSI": _result("^HSI", "hk_equity", (_symbol_bar("^HSI", "hk_equity", "200.0"),)),
+        "^TWII": _result("^TWII", "tw_equity", (_symbol_bar("^TWII", "tw_equity", "300.0"),)),
+    }
+    async with session_factory.begin() as database:
+        refreshed, failures = await refresh_index_daily_bars(
+            database,
+            adapter=cast(YfinanceAdapter, _StubAdapter(results)),
+            symbols=["^DJI", "^HSI", "^TWII"],
+            period="7d",
+        )
+
+    assert [entry.result.symbol for entry in refreshed] == ["^DJI", "^TWII"]
+    assert [entry.symbol for entry in failures] == ["^HSI"]
+    assert "IndexProviderConflictError" in failures[0].error
+    async with session_factory() as database:
+        stored = (await database.scalars(select(IndexDailyBar.symbol))).all()
+        assert sorted(stored) == ["^DJI", "^HSI", "^TWII"]
+
+
+async def test_concurrent_different_provider_claims_serialize(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    first = session_factory()
+    first_transaction = await first.begin()
+    try:
+        await _store(first, [_bar(date(2026, 9, 1), "100.0")])
+
+        async def competing_write() -> None:
+            with pytest.raises(ValueError, match="series belongs to provider 'yfinance'"):
+                async with session_factory.begin() as database:
+                    await _store_as(
+                        database,
+                        [_bar(date(2026, 9, 2), "200.0")],
+                        "twelve_data",
+                    )
+
+        competitor = asyncio.create_task(competing_write())
+        await asyncio.sleep(0.1)
+        assert not competitor.done()
+        await first_transaction.commit()
+        await asyncio.wait_for(competitor, timeout=5)
+    finally:
+        if first_transaction.is_active:
+            await first_transaction.rollback()
+        await first.close()
+
+
+async def test_reversed_multi_symbol_claims_take_locks_in_the_same_order(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # Force opposite callers to pause before their first input symbol. Without
+    # store_index_daily_bars sorting both claim lists, each transaction acquires
+    # one symbol and waits on the other until PostgreSQL detects a deadlock.
+    async with session_factory.begin() as database:
+        await database.execute(
+            text(
+                """
+                CREATE FUNCTION delay_reversed_index_claims() RETURNS trigger AS $$
+                BEGIN
+                  IF (NEW.provider = 'yfinance' AND NEW.symbol = '^DJI')
+                     OR (NEW.provider = 'twelve_data' AND NEW.symbol = '^HSI') THEN
+                    PERFORM pg_sleep(0.2);
+                  END IF;
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """
+            )
+        )
+        await database.execute(
+            text(
+                """
+                CREATE TRIGGER delay_reversed_index_claims
+                BEFORE INSERT ON index_daily_bar_series
+                FOR EACH ROW EXECUTE FUNCTION delay_reversed_index_claims()
+                """
+            )
+        )
+
+    async def write(provider: str, bars: list[DailyBar]) -> int | IndexProviderConflictError:
+        try:
+            async with session_factory.begin() as database:
+                return await _store_as(database, bars, provider)
+        except IndexProviderConflictError as error:
+            return error
+
+    dji = _symbol_bar("^DJI", "us_equity", "100.0")
+    hsi = _symbol_bar("^HSI", "hk_equity", "200.0")
+    outcomes = await asyncio.wait_for(
+        asyncio.gather(
+            write("yfinance", [dji, hsi]),
+            write("twelve_data", [hsi, dji]),
+        ),
+        timeout=5,
+    )
+
+    assert sum(isinstance(outcome, int) for outcome in outcomes) == 1
+    assert sum(isinstance(outcome, IndexProviderConflictError) for outcome in outcomes) == 1
 
 
 async def test_the_same_provider_still_updates_an_existing_row(

@@ -18,6 +18,7 @@ from daily_insights_api.modules.data_sources.api import (
 from daily_insights_api.modules.data_sources.errors import DataSourceContractError
 from daily_insights_api.modules.data_sources.yfinance.adapter import (
     YfinanceDailyBars,
+    _regular_market_end,
     normalize_daily_bars,
 )
 from daily_insights_api.modules.markets.api import refresh_index_daily_bars
@@ -38,13 +39,19 @@ def _frame(rows: dict[date, tuple[float, float, float, float, float]]) -> DataFr
     )
 
 
-def _normalize(frame: DataFrame) -> YfinanceDailyBars:
+def _normalize(
+    frame: DataFrame,
+    *,
+    fetched_at: datetime = FETCHED_AT,
+    regular_market_end: datetime | None = None,
+) -> YfinanceDailyBars:
     return normalize_daily_bars(
         market="tw_equity",
         symbol="^TWII",
         period="2y",
         frame=frame,
-        fetched_at=FETCHED_AT,
+        fetched_at=fetched_at,
+        regular_market_end=regular_market_end,
     )
 
 
@@ -69,9 +76,10 @@ def test_settled_bars_are_mapped_with_provenance() -> None:
     assert result.provenance.record_count == 2
 
 
-def test_todays_unsettled_bar_is_dropped_and_reported() -> None:
-    today = datetime.now(TAIPEI).date()
+def test_same_day_bar_before_regular_close_is_dropped_and_reported() -> None:
+    today = date(2026, 9, 3)
     yesterday = today - timedelta(days=1)
+    regular_market_end = datetime(2026, 9, 3, 13, 30, tzinfo=TAIPEI)
 
     result = _normalize(
         _frame(
@@ -79,7 +87,9 @@ def test_todays_unsettled_bar_is_dropped_and_reported() -> None:
                 yesterday: (100.0, 101.0, 99.0, 100.0, 1_000.0),
                 today: (100.0, 100.5, 99.8, 100.2, 500.0),
             }
-        )
+        ),
+        fetched_at=datetime(2026, 9, 3, 12, 0, tzinfo=TAIPEI),
+        regular_market_end=regular_market_end,
     )
 
     assert [bar.trade_date for bar in result.items] == [yesterday]
@@ -87,11 +97,64 @@ def test_todays_unsettled_bar_is_dropped_and_reported() -> None:
     assert result.provenance.as_of == yesterday
 
 
-def test_only_an_unsettled_bar_fails_closed() -> None:
-    today = datetime.now(TAIPEI).date()
+@pytest.mark.parametrize(
+    "fetched_at",
+    [
+        datetime(2026, 9, 3, 13, 30, tzinfo=TAIPEI),
+        datetime(2026, 9, 3, 18, 0, tzinfo=TAIPEI),
+    ],
+)
+def test_same_day_bar_at_or_after_regular_close_is_kept(fetched_at: datetime) -> None:
+    today = date(2026, 9, 3)
+    result = _normalize(
+        _frame({today: (100.0, 100.5, 99.8, 100.2, 500.0)}),
+        fetched_at=fetched_at,
+        regular_market_end=datetime(2026, 9, 3, 13, 30, tzinfo=TAIPEI),
+    )
+
+    assert [bar.trade_date for bar in result.items] == [today]
+    assert result.dropped_unsettled_trade_date is None
+
+
+@pytest.mark.parametrize(
+    "regular_market_end",
+    [None, datetime(2026, 9, 2, 13, 30, tzinfo=TAIPEI)],
+)
+def test_same_day_bar_without_matching_close_metadata_fails_closed(
+    regular_market_end: datetime | None,
+) -> None:
+    today = date(2026, 9, 3)
 
     with pytest.raises(DataSourceContractError, match="no settled daily bars"):
-        _normalize(_frame({today: (100.0, 100.5, 99.8, 100.2, 500.0)}))
+        _normalize(
+            _frame({today: (100.0, 100.5, 99.8, 100.2, 500.0)}),
+            fetched_at=datetime(2026, 9, 3, 18, 0, tzinfo=TAIPEI),
+            regular_market_end=regular_market_end,
+        )
+
+
+def test_future_dated_bar_fails_closed() -> None:
+    with pytest.raises(DataSourceContractError, match="no settled daily bars"):
+        _normalize(
+            _frame({date(2026, 9, 4): (100.0, 100.5, 99.8, 100.2, 500.0)}),
+            fetched_at=datetime(2026, 9, 3, 18, 0, tzinfo=TAIPEI),
+            regular_market_end=datetime(2026, 9, 3, 13, 30, tzinfo=TAIPEI),
+        )
+
+
+def test_regular_market_end_parses_yfinance_metadata_shape() -> None:
+    end = Timestamp("2026-09-03 13:30:00", tz=TAIPEI)
+
+    assert _regular_market_end({"currentTradingPeriod": {"regular": {"end": end}}}) == end
+    assert _regular_market_end({"currentTradingPeriod": {"regular": {}}}) is None
+
+
+@pytest.mark.parametrize(
+    "end",
+    ["2026-09-03T13:30:00+08:00", 1_788_413_400, datetime(2026, 9, 3, 13, 30)],
+)
+def test_regular_market_end_rejects_malformed_or_naive_values(end: object) -> None:
+    assert _regular_market_end({"currentTradingPeriod": {"regular": {"end": end}}}) is None
 
 
 def test_missing_column_fails_closed() -> None:
