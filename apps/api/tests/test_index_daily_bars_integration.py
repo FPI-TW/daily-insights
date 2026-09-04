@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from test_health import readiness
 
 from daily_insights_api.core.config import Settings
+from daily_insights_api.core.enums import SystemRole
 from daily_insights_api.modules.data_sources.api import (
     TRACKED_INDICES,
     DailyBar,
@@ -467,19 +468,67 @@ async def test_reversed_multi_symbol_claims_take_locks_in_the_same_order(
     assert sum(isinstance(outcome, IndexProviderConflictError) for outcome in outcomes) == 1
 
 
+def _signed_in_client(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    role: SystemRole,
+    organization_id: uuid.UUID | None,
+) -> AsyncClient:
+    app = create_app(Settings(environment="test"), readiness(True), session_factory)
+
+    async def auth() -> AuthContext:
+        return cast(
+            AuthContext,
+            SimpleNamespace(
+                organization_id=organization_id,
+                user=SimpleNamespace(system_role=role),
+            ),
+        )
+
+    app.dependency_overrides[require_password_changed] = auth
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
 @pytest_asyncio.fixture
 async def member_client(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> AsyncIterator[AsyncClient]:
     """An authenticated organization member with every market visible."""
-    app = create_app(Settings(environment="test"), readiness(True), session_factory)
-
-    async def auth() -> AuthContext:
-        return cast(AuthContext, SimpleNamespace(organization_id=uuid.uuid4()))
-
-    app.dependency_overrides[require_password_changed] = auth
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with _signed_in_client(
+        session_factory, role=SystemRole.ORG_MEMBER, organization_id=uuid.uuid4()
+    ) as client:
         yield client
+
+
+async def test_internal_staff_read_indices_without_an_organization(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # Internal users belong to no organization, so a membership check alone
+    # would lock them out. reports/access.py grants them the same preview.
+    async with session_factory.begin() as database:
+        await _store(database, [_symbol_bar("^DJI", "us_equity", "500.0")])
+
+    async with _signed_in_client(
+        session_factory, role=SystemRole.ADMIN, organization_id=None
+    ) as admin_client:
+        listed = await admin_client.get("/api/markets/indices")
+        bars = await admin_client.get("/api/markets/indices/%5EDJI/daily-bars")
+
+    assert listed.status_code == 200, listed.text
+    assert [item["symbol"] for item in listed.json()] == ["^DJI"]
+    assert bars.status_code == 200, bars.text
+    assert [bar["close"] for bar in bars.json()] == ["500.0000000000"]
+
+
+async def test_a_member_without_an_organization_is_refused(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with _signed_in_client(
+        session_factory, role=SystemRole.ORG_MEMBER, organization_id=None
+    ) as client:
+        response = await client.get("/api/markets/indices")
+    assert response.status_code == 403
+    assert response.json()["detail"] == "organization membership required"
 
 
 async def test_latest_bars_carry_the_previous_close_and_respect_visibility(
