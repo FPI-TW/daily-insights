@@ -140,10 +140,15 @@ async def test_partial_editions_regenerate_and_revisions_are_prompt_sensitive(
 ) -> None:
     candidates = _fetched_candidates()
 
+    async def feeds(*args: object, **kwargs: object) -> list[Candidate]:
+        del args, kwargs
+        return [item.candidate for item in candidates]
+
     async def fetch(*args: object, **kwargs: object) -> list[FetchedCandidate]:
         del args, kwargs
         return candidates
 
+    monkeypatch.setattr("daily_insights_api.modules.news.service.discover_feed_candidates", feeds)
     monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
     edition_date = datetime.now(TAIPEI).date()
     first_client = cast(DeepSeekClient, _DeterministicNewsClient("a"))

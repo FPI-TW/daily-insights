@@ -240,10 +240,13 @@ def test_registry_is_internally_consistent() -> None:
         seen_urls.add((source.hostname, source.url))
     # Publishers that block crawlers stay out of the registry.
     assert not registry_hostnames() & {
-        "www.cnbc.com",
         "www.bbc.com",
         "apnews.com",
         "www.reuters.com",
+        "www.wsj.com",
+        "www.forbes.com",
+        "www.investing.com",
+        "www.marketwatch.com",
     }
 
 

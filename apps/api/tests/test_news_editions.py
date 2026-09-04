@@ -121,16 +121,21 @@ def test_feed_sources_are_tagged_per_market() -> None:
     for source in FEED_SOURCES:
         for market in source.markets:
             by_market.setdefault(market, set()).add(source.hostname)
-    # Taiwanese media feed only the Taiwan edition; cnyes' international desk
-    # and the English sources feed the US edition alongside the global digest.
-    assert "news.cnyes.com" in by_market["tw_equity"]
-    assert "money.udn.com" in by_market["tw_equity"]
-    assert "www.wsj.com" not in by_market["tw_equity"]
-    assert {"news.cnyes.com", "www.wsj.com", "www.globenewswire.com"} <= by_market["us_equity"]
+    # The global digest reads English-native publishers only; Chinese,
+    # Japanese and Korean media carry their own dormant market tags.
+    assert {"www.theguardian.com", "www.cnbc.com", "www.thestreet.com"} <= by_market["global"]
+    assert not (
+        {"www.cls.cn", "www.etnet.com.hk", "www.hankyung.com", "news.cnyes.com"}
+        & by_market["global"]
+    )
+    assert "www.cls.cn" in by_market["cn_equity"]
+    assert "www.etnet.com.hk" in by_market["hk_equity"]
+    assert "www.hankyung.com" in by_market["kr_equity"]
+    # Taiwanese media feed the Taiwan edition; cnyes' international desk and the
+    # English sources feed the US edition.
+    assert {"news.cnyes.com", "money.udn.com"} <= by_market["tw_equity"]
+    assert {"news.cnyes.com", "www.cnbc.com", "www.globenewswire.com"} <= by_market["us_equity"]
     assert "www.sec.gov" in by_market["us_equity"] and "www.sec.gov" not in by_market["global"]
-    assert {"www.cls.cn", "www.etnet.com.hk", "www.hankyung.com"} <= by_market["global"]
-    assert by_market["cn_equity"] <= by_market["global"]
-    assert by_market["hk_equity"] <= by_market["global"]
     assert all(market in EDITION_SPECS for market in by_market if market in EDITION_ORDER)
 
 

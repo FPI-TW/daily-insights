@@ -82,15 +82,14 @@ flowchart LR
 `hostname` 推導，`DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES` 只能加入主機、
 `DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES` 只能排除主機（排除註冊表主機等於停用該來源）。
 
-| 分組（`poll_group`）   | 來源                                                                                                                                        | `kind`                         | 市場標記                      |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ----------------------------- |
-| 中文快訊（`flash`）    | 財聯社、金十數據、華爾街見聞（皆帶全文）、東方財富快訊、新浪財經、澎湃新聞、界面新聞（第三方全文 feed）                                     | `json_list`、`rss_full`        | `global` 加預留的 `cn_equity` |
-| 台灣（`fast`）         | 鉅亨台股、經濟日報要聞與產業、中央社財經、ETtoday 財經、財經新報、自由財經、INSIDE（全文）、遠見、旺得富、工商時報、今周刊、風傳媒          | `rss`、`rss_full`、sitemap     | `tw_equity`                   |
-| 香港（`fast`）         | 經濟通四個分類、香港電台財經、星島頭條（只保留財經、地產與中國分類）                                                                        | `rss`                          | `global` 加預留的 `hk_equity` |
-| 日韓（`normal`）       | 東洋経済、ダイヤモンド、共同通信（排除 `/pr/` 通稿）、日經速報 RDF 鏡像、한국경제 증권與 경제                                               | `rss`                          | `global`                      |
-| 英文（`normal`）       | WSJ 市場、MarketWatch 頭條、Investing.com 兩個分類、Forbes、TheStreet（全文）、City A.M.（全文）、Guardian 商業／國際／政治（全文，需金鑰） | `rss`、`rss_full`、`json_list` | 多數 `global` 加 `us_equity`  |
-| 新聞稿                 | GlobeNewswire 財報（`flash`）、併購、公司公告；PR Newswire 金融服務；SEC EDGAR 8-K Atom（需聯絡信箱，僅 `us_equity`）                       | `rss`                          | `global` 加 `us_equity`       |
-| 鉅亨其他分類（`fast`） | 頭條（`global`）、國際股市（`global` 加 `us_equity`）                                                                                       | `rss`                          |                               |
+| 分組（`poll_group`） | 來源                                                                                                                                                                                    | `kind`                         | 市場標記                         |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | -------------------------------- |
+| 英文（`normal`）     | Guardian 商業與國際 RSS、CNBC 頭條／國際／經濟／財經、Yahoo Finance、FXStreet、Al Jazeera 經濟、聯準會與 ECB 新聞稿、TheStreet（全文）、City A.M.（全文）、Guardian API（全文，需金鑰） | `rss`、`rss_full`、`json_list` | `global`，多數加 `us_equity`     |
+| 新聞稿               | GlobeNewswire 財報（`flash`）、併購、公司公告；PR Newswire 金融服務；SEC EDGAR 8-K Atom（需聯絡信箱，僅 `us_equity`）                                                                   | `rss`                          | `global` 加 `us_equity`          |
+| 台灣（`fast`）       | 鉅亨台股與頭條、經濟日報要聞與產業、中央社財經、ETtoday 財經、財經新報、自由財經、INSIDE（全文）、遠見、旺得富、工商時報、今周刊、風傳媒；鉅亨國際股市掛 `us_equity`                    | `rss`、`rss_full`、sitemap     | `tw_equity`                      |
+| 中文快訊（`flash`）  | 財聯社、金十數據、華爾街見聞（皆帶全文）、東方財富快訊、新浪財經、澎湃新聞、界面新聞                                                                                                    | `json_list`、`rss_full`        | `cn_equity`（休眠，不進全球版）  |
+| 香港（`fast`）       | 經濟通四個分類、香港電台財經、星島頭條（財經、地產與中國分類）                                                                                                                          | `rss`                          | `hk_equity`（休眠）              |
+| 日韓（`normal`）     | 東洋経済、ダイヤモンド、共同通信、日經速報 RDF 鏡像、한국경제                                                                                                                           | `rss`                          | `jp_equity`／`kr_equity`（休眠） |
 
 adapter 種類：`rss` 同時處理 RSS 2.0、RSS 1.0／RDF（`dc:date`）與 Atom（`link href`、
 `updated`）；`rss_full` 另讀 `content:encoded`（或第三方 feed 的 `description`），內文
@@ -101,7 +100,8 @@ JSON 清單（dot-notation 欄位、`unix_s`／`unix_ms`／`iso`／`datetime_str
 
 2026-09-03 實測後未納入的來源與原因：
 
-- CNBC、BBC、AP：RSS 或文章頁回 403，或 robots.txt 封鎖爬蟲，候選無法擷取。
+- BBC、AP：RSS 或文章頁回 403，或 robots.txt 封鎖爬蟲，候選無法擷取。CNBC 在 9 月 3 日的財經分類 feed 回 403，9 月 4 日以頭條、國際、經濟、財經四個分類 feed 實測 feed 與文章頁都可取得，已重新納入。
+- WSJ、MarketWatch、Investing.com、Forbes、Bloomberg：feed 可讀但文章頁 401／403、robots 禁止或只回付費牆導言，已移除。
 - 鉅亨 RSS 的 `content:encoded` 只有約 300 字元的導言，因此鉅亨維持 `rss` 並走擷取。
 - Mining.com 回 403、Benzinga feed 回 404、PR Newswire 全站清單回 404、Nasdaq feed
   逾時無回應。
@@ -216,10 +216,7 @@ Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主�
 - Twelve Data 的 `/press_releases` 已評估不採用：必須帶 symbol 查詢、沒有原文
   URL、內容為付費通稿且近乎沒有當日稿件（2026-09-02 實測 NVDA 近 3 天 0 筆）。
 - Reuters 對非瀏覽器請求回應 `401`，CNBC、BBC 與 AP 封鎖爬蟲，均不在註冊表內。
-- WSJ 與日經的文章頁有付費牆，Forbes、Investing.com 與 MarketWatch 的文章頁對爬蟲
-  回 403 或拒絕擷取，這些候選會在擷取階段以 `news.source.failed` 記錄；feed 仍保留是
-  因為標題與時間對監控有用，若要停用可用 `DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES`。
-  SEC 8-K 的連結是申報索引頁，摘要品質取決於索引頁文字。
+- 日經的文章頁有付費牆，候選會在擷取階段以 `news.source.failed` 記錄；WSJ、MarketWatch、Investing.com、Forbes 已因同樣原因移出註冊表。SEC 8-K 的連結是申報索引頁，摘要品質取決於索引頁文字。
 - `langdetect` 對短標題的判斷不穩定，因此只在新聞稿 feed 啟用語言過濾。
 - 沒有人工覆核流程；若模型選題或摘要品質不佳，只能調整
   `modules/news/prompts` 中的選題準則後重新產生。
