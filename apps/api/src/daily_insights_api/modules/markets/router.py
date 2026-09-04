@@ -23,10 +23,26 @@ router = APIRouter(prefix="/api/markets", tags=["markets"])
 
 DEFAULT_BARS_WINDOW = timedelta(days=365)
 # ~2,500 rows at most per call; a full ^GSPC history would be ~24k.
-MAX_BARS_RANGE = timedelta(days=365 * 10)
+MAX_BARS_RANGE_YEARS = 10
 # Path parameters arrive as str; the Literal-keyed mapping is widened for lookup.
 INDEX_MARKETS: dict[str, str] = {symbol: market for symbol, market in TRACKED_INDICES.items()}
 INTERNAL_PREVIEW_ROLES = frozenset({SystemRole.ADMIN, SystemRole.ASSET_MANAGER})
+
+
+def _earliest_allowed_start(end: date) -> date:
+    """The oldest start a request ending on `end` may ask for.
+
+    Counted in calendar years rather than 365-day steps. Ten calendar years
+    span 3,652 or 3,653 days depending on how many leap days they contain, so
+    a day count would reject exactly the decade the error message offers.
+    """
+    if end.year - MAX_BARS_RANGE_YEARS < date.min.year:
+        return date.min
+    try:
+        return end.replace(year=end.year - MAX_BARS_RANGE_YEARS)
+    except ValueError:
+        # 29 February has no counterpart in a common year.
+        return end.replace(year=end.year - MAX_BARS_RANGE_YEARS, day=28)
 
 
 def _organization_id(context: AuthContext) -> uuid.UUID:
@@ -90,9 +106,9 @@ async def list_index_daily_bars(
         start = end - min(DEFAULT_BARS_WINDOW, end - date.min)
     if start > end:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "start must not be after end")
-    if end - start > MAX_BARS_RANGE:
+    if start < _earliest_allowed_start(end):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
-            f"date range must not exceed {MAX_BARS_RANGE.days // 365} years",
+            f"date range must not exceed {MAX_BARS_RANGE_YEARS} years",
         )
     return await index_daily_bars(database, symbol=symbol, start=start, end=end)

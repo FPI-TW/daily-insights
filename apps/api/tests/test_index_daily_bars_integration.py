@@ -650,6 +650,28 @@ async def test_daily_bars_are_bounded_by_the_requested_window(
     assert unknown.status_code == 404
 
 
+async def test_exactly_ten_calendar_years_is_accepted_and_a_day_more_is_not(
+    session_factory: async_sessionmaker[AsyncSession],
+    member_client: AsyncClient,
+) -> None:
+    # The limit is stated to callers in years, so it has to be counted in
+    # years. A decade spans 3,652 or 3,653 days depending on its leap days,
+    # so a 3,650-day cap would refuse the very range the message offers.
+    async def range_status(start: str, end: str) -> int:
+        response = await member_client.get(
+            "/api/markets/indices/%5ETWII/daily-bars",
+            params={"start": start, "end": end},
+        )
+        return response.status_code
+
+    # 2016-01-01 to 2026-01-01 carries three leap days: 3,653 apart.
+    assert await range_status("2016-01-01", "2026-01-01") == 200
+    assert await range_status("2015-12-31", "2026-01-01") == 422
+    # A leap day has no counterpart ten common years earlier.
+    assert await range_status("2018-02-28", "2028-02-29") == 200
+    assert await range_status("2018-02-27", "2028-02-29") == 422
+
+
 async def test_an_end_at_the_start_of_the_calendar_is_answered_not_crashed(
     session_factory: async_sessionmaker[AsyncSession],
     member_client: AsyncClient,
