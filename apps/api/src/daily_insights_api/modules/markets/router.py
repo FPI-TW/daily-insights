@@ -1,6 +1,7 @@
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,11 @@ from daily_insights_api.web.dependencies import get_database_session
 
 router = APIRouter(prefix="/api/markets", tags=["markets"])
 
+# Every other "today" in this service is Taipei's, and no deployment sets TZ, so
+# the process runs in UTC. A naive today() would put the default window up to
+# eight hours behind the rest of the product for the first eight hours of each
+# Taipei day.
+TAIPEI = ZoneInfo("Asia/Taipei")
 DEFAULT_BARS_WINDOW = timedelta(days=365)
 # ~2,500 rows at most per call; a full ^GSPC history would be ~24k.
 MAX_BARS_RANGE_YEARS = 10
@@ -96,7 +102,7 @@ async def list_index_daily_bars(
     # nothing about which markets an organization's contract excludes.
     if INDEX_MARKETS.get(symbol) not in visible:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "index not found")
-    end = end or date.today()
+    end = end or datetime.now(TAIPEI).date()
     if start is None:
         # Any end in year 1 is less than the window away from date.min, and
         # stepping off the start of the calendar raises OverflowError, which

@@ -8,6 +8,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 from typing import cast
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 import pytest
 import pytest_asyncio
@@ -67,6 +68,15 @@ async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
             await engine.dispose()
         finally:
             await asyncio.to_thread(reset_database_schema, database_url)
+
+
+def _taipei_today() -> date:
+    """The same day the endpoint's default window ends on.
+
+    Using the machine's local date here instead would fail on any host running
+    ahead of Taipei, where a row dated "today" lands after the window closes.
+    """
+    return datetime.now(ZoneInfo("Asia/Taipei")).date()
 
 
 def _bar(trade_date: date, close: str, volume: int | None = 1_000) -> DailyBar:
@@ -523,7 +533,7 @@ async def test_internal_staff_read_indices_without_an_organization(
             database,
             [
                 _symbol_bar("^DJI", "us_equity", "500.0").model_copy(
-                    update={"trade_date": date.today()}
+                    update={"trade_date": _taipei_today()}
                 )
             ],
         )
@@ -616,7 +626,7 @@ async def test_daily_bars_are_bounded_by_the_requested_window(
     session_factory: async_sessionmaker[AsyncSession],
     member_client: AsyncClient,
 ) -> None:
-    today = date.today()
+    today = _taipei_today()
     async with session_factory.begin() as database:
         await _store(
             database,
@@ -667,7 +677,7 @@ async def test_a_hidden_market_is_absent_from_the_list_and_404_on_its_route(
     hidden_from = uuid.uuid4()
     sees_everything = uuid.uuid4()
     author_id = uuid.uuid4()
-    today = date.today()
+    today = _taipei_today()
     async with session_factory.begin() as database:
         database.add_all(
             [
@@ -736,7 +746,7 @@ async def test_every_listed_index_is_reachable_on_its_own_route(
     # history, so a symbol dropped from the catalog keeps its rows; if the list
     # were driven by what the table holds while the detail route asked the
     # catalog, the list would offer a link that answers 404.
-    today = date.today()
+    today = _taipei_today()
     retired = _bar(today, "100.0").model_copy(
         update={"symbol": "^RETIRED", "instrument_source_id": "^RETIRED"}
     )
