@@ -31,6 +31,11 @@
   --chart-3: #159e84;
   --chart-4: #7c5cd6;
   --chart-5: #7d8a87;
+  --chart-index-close: #2b51a1;
+  --chart-index-sma-20: #d97706;
+  --chart-index-sma-60: #7c3aed;
+  --chart-index-sma-120: #059669;
+  --chart-index-sma-240: #dc2626;
   --background: #ffffff;
   --foreground: #1d2b2a;
   --card: #ffffff;
@@ -79,6 +84,11 @@
   --chart-3: #2bc5a7;
   --chart-4: #a58bf0;
   --chart-5: #9aa8a4;
+  --chart-index-close: #60a5fa;
+  --chart-index-sma-20: #fbbf24;
+  --chart-index-sma-60: #c084fc;
+  --chart-index-sma-120: #34d399;
+  --chart-index-sma-240: #fb7185;
   --background: #0e1413;
   --foreground: #e6edeb;
   --card: #161d1c;

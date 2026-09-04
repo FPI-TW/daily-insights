@@ -34,6 +34,14 @@ function symbolLabel(
   return key ? `${t(key)} (${symbol})` : symbol
 }
 
+function indexOptionLabel(
+  symbol: string,
+  t: ReturnType<typeof useTranslation>["t"]
+) {
+  const key = indexNameKey(symbol)
+  return key ? t(key) : symbol
+}
+
 export function IndexHistoryChart({
   history,
   locale,
@@ -125,7 +133,7 @@ export function IndexHistoryChart({
       data: selected.bars.map(bar => Number(bar.close)),
       connectNulls: false,
       showSymbol: false,
-      lineStyle: { width: 2 },
+      lineStyle: { width: 3 },
       areaStyle: { color: "transparent" },
     },
     ...availableMovingAverages.map(item => ({
@@ -163,7 +171,7 @@ export function IndexHistoryChart({
           >
             {history.series.map(item => (
               <option key={item.symbol} value={item.symbol}>
-                {symbolLabel(item.symbol, t)}
+                {indexOptionLabel(item.symbol, t)}
               </option>
             ))}
           </select>
@@ -197,7 +205,7 @@ export function IndexHistoryChart({
                 enabled: true,
                 description: `${label}. ${t("indexChartAccessibleSummary")}`,
               },
-              color: colors.series,
+              color: colors.indexSeries,
               grid: { left: 64, right: 18, top: 48, bottom: 72 },
               tooltip: {
                 trigger: "axis",

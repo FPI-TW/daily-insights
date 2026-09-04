@@ -3,6 +3,7 @@ import { useEffect, useState } from "react"
 export function useChartColors() {
   const [colors, setColors] = useState({
     series: [] as string[],
+    indexSeries: [] as string[],
     text: "",
     grid: "",
   })
@@ -12,11 +13,18 @@ export function useChartColors() {
       const styles = getComputedStyle(document.documentElement)
       setColors({
         series: [
-          styles.getPropertyValue("--lagoon-deep").trim(),
-          styles.getPropertyValue("--lagoon").trim(),
-          styles.getPropertyValue("--market-up").trim(),
-          styles.getPropertyValue("--market-down").trim(),
-          styles.getPropertyValue("--market-caution").trim(),
+          styles.getPropertyValue("--chart-1").trim(),
+          styles.getPropertyValue("--chart-2").trim(),
+          styles.getPropertyValue("--chart-3").trim(),
+          styles.getPropertyValue("--chart-4").trim(),
+          styles.getPropertyValue("--chart-5").trim(),
+        ],
+        indexSeries: [
+          styles.getPropertyValue("--chart-index-close").trim(),
+          styles.getPropertyValue("--chart-index-sma-20").trim(),
+          styles.getPropertyValue("--chart-index-sma-60").trim(),
+          styles.getPropertyValue("--chart-index-sma-120").trim(),
+          styles.getPropertyValue("--chart-index-sma-240").trim(),
         ],
         text: styles.getPropertyValue("--sea-ink-soft").trim(),
         grid: styles.getPropertyValue("--line").trim(),

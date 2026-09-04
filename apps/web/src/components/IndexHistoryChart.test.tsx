@@ -72,7 +72,18 @@ describe("IndexHistoryChart", () => {
     await renderLocalized(<IndexHistoryChart history={history} locale="en" />)
 
     expect(screen.getByTestId("index-chart")).toHaveTextContent("45050.5")
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"lineStyle":{"width":3}'
+    )
     expect(screen.getByRole("status")).toHaveTextContent("^SOX")
+    expect(
+      screen.getByRole("option", { name: "Dow Jones Industrial Average" })
+    ).toHaveValue("^DJI")
+    expect(screen.getByRole("option", { name: "S&P 500 Index" })).toHaveValue(
+      "^GSPC"
+    )
+    expect(screen.getByRole("combobox")).not.toHaveTextContent("^DJI")
+    expect(screen.getByRole("combobox")).not.toHaveTextContent("^GSPC")
 
     fireEvent.change(screen.getByRole("combobox"), {
       target: { value: "^GSPC" },
@@ -101,6 +112,11 @@ describe("IndexHistoryChart", () => {
   })
 
   it("adds aligned available SMA lines without treating absent averages as a bar failure", async () => {
+    document.documentElement.style.setProperty("--chart-index-close", "#2563eb")
+    document.documentElement.style.setProperty(
+      "--chart-index-sma-20",
+      "#d97706"
+    )
     await renderLocalized(
       <IndexHistoryChart
         history={{
@@ -151,6 +167,9 @@ describe("IndexHistoryChart", () => {
     )
     expect(screen.getByTestId("index-chart")).toHaveTextContent("45050")
     expect(screen.getByTestId("index-chart")).not.toHaveTextContent("SMA 60")
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"color":["#2563eb","#d97706"'
+    )
     expect(screen.queryByRole("status")).toBeNull()
   })
 })
