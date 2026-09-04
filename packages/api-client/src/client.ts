@@ -85,7 +85,11 @@ export function createMarketClient(transport: ApiTransport) {
       const query = new URLSearchParams()
       if (range.start) query.set("start", range.start)
       if (range.end) query.set("end", range.end)
-      const suffix = query.size > 0 ? `?${query}` : ""
+      // Serialize and test the string rather than reading `size`, which Safari
+      // gained in 17 and Chrome in 113. On anything older it reads as undefined
+      // and the comparison is false, dropping the range without an error.
+      const search = query.toString()
+      const suffix = search ? `?${search}` : ""
       return parseResponse(
         await transport(
           `/api/markets/indices/${encodeURIComponent(symbol)}/daily-bars${suffix}`
