@@ -37,6 +37,7 @@ const literal = (value: string | number): ReportValue => ({
 const number = (value: string): ReportValue => ({ kind: "number", value })
 const blockTitleKeys: Record<string, string> = {
   "macro.commodities": "reportBlockMacroSnapshot",
+  "macro.rates_fx": "reportBlockMacroRatesFx",
   "macro.commodity_normalized_performance":
     "reportBlockMacroCommodityNormalizedPerformance",
   "crypto.overview": "reportBlockCryptoOverview",
@@ -48,6 +49,12 @@ const metricLabelKeys: Record<string, string> = {
   brent: "reportLabelBrent",
   gold: "reportLabelGold",
   copper: "reportLabelCopper",
+  tlt: "reportLabelTlt",
+  ief: "reportLabelIef",
+  uup: "reportLabelUup",
+  usd_twd: "reportLabelUsdTwd",
+  usd_jpy: "reportLabelUsdJpy",
+  eur_usd: "reportLabelEurUsd",
   spy: "reportLabelSpy",
   qqq: "reportLabelQqq",
   dia: "reportLabelDia",
