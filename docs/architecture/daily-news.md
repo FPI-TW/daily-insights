@@ -49,9 +49,11 @@ flowchart LR
    解析結果必須全部為公網 IP 且連線固定在該 IP、redirect 逐跳重新驗證、遵守
    `robots.txt`、限制位元組數與內容型別，不帶 cookie 也不讀環境代理設定。feed 已
    帶全文（`provides_full_text`）的候選直接以 feed 內文組成擷取結果，不再請求文章頁。
-5. DeepSeek 以 JSON mode 選出最多五則（每個網域至多兩則），再對每則產生
-   `zh-hant`、`zh-hans`、`en` 三語摘要。摘要中的數字必須能在原文找到，否則該次
-   呼叫視為失敗；每次呼叫失敗最多重試一次並記錄 audit。
+5. DeepSeek 以 JSON mode 依重要性選出目標則數加兩則備選（每個網域至多兩則），
+   再依序對每則產生 `zh-hant`、`zh-hans`、`en` 三語摘要，達到目標則數即停止；某則摘要
+   驗證失敗時由備選遞補。摘要中的數字必須能在原文找到：比對以數值為準，千分位、全形
+   數字與 million／億 這類量詞差異不算捏造，原文沒有的數字才算；每次呼叫失敗最多重
+   試一次並記錄 audit。
 6. 結果以不可變的 `news_editions` revision 寫入，狀態為 `complete`（5/5）、
    `partial`（1 到 4）或 `unavailable`（0）。
 

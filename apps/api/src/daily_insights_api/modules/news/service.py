@@ -434,7 +434,11 @@ async def run_news_edition(
             return edition.status
         selected = {fetched.candidate.id: fetched for fetched in usable}
         complete_count = 0
+        # Selections are ranked; reserves past target_items are summarised only
+        # while earlier stories keep failing verification.
         for selected_item in selection_call.value.selections:
+            if complete_count >= spec.target_items:
+                break
             fetched = selected[selected_item.id]
             summaries: dict[str, LocalizedSummary] = {}
             try:

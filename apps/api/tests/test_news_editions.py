@@ -91,7 +91,7 @@ def test_market_policies_allow_a_single_source_and_single_market() -> None:
     # Eight Taiwan stories from one domain and one market satisfy the market policy...
     enforce_selection_policy(diverse, candidates, TW_EQUITY_SPEC.selection)
     # ...but the global digest keeps its two-per-domain and two-market rules.
-    with pytest.raises(ValueError, match="exceeds 5 stories"):
+    with pytest.raises(ValueError, match="exceeds 7 stories"):
         enforce_selection_policy(diverse, candidates, GLOBAL_SPEC.selection)
     three = Selection.model_validate(
         {"selections": [item.model_dump() for item in diverse.selections[:3]]}
@@ -107,11 +107,12 @@ def test_market_policies_allow_a_single_source_and_single_market() -> None:
 def test_output_contract_reflects_each_policy() -> None:
     global_contract = selection_output_contract(GLOBAL_SPEC.selection)
     market_contract = selection_output_contract(TW_EQUITY_SPEC.selection)
-    assert "0 to 5 objects" in global_contract["selections"]
+    assert "0 to 7 objects" in global_contract["selections"]
+    assert "the first 5 form the edition" in global_contract["selections"]
     # Region-neutral by construction: only the global tag is offered.
     assert "distinct markets" not in global_contract["selections"]
     assert global_contract["market"] == ["global"]
-    assert "0 to 8 objects" in market_contract["selections"]
+    assert "0 to 10 objects" in market_contract["selections"]
     assert "distinct markets" not in market_contract["selections"]
     assert "taiwan" in market_contract["market"]
 

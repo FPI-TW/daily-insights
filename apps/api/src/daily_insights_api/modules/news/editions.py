@@ -24,6 +24,14 @@ class SelectionPolicy:
     # Market editions accept only their own market tag; anything else the
     # model picks is dropped before the limits are enforced. None means any.
     allowed_markets: frozenset[str] | None = None
+    # Extra ranked picks the model may return beyond max_items. They are only
+    # summarised when an earlier story fails verification, so a dropped
+    # number no longer costs the edition a slot.
+    reserve_items: int = 2
+
+    @property
+    def selection_limit(self) -> int:
+        return self.max_items + self.reserve_items
 
 
 @dataclass(frozen=True)
