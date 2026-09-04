@@ -1,8 +1,47 @@
+import os
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import create_engine as create_sync_engine
+from sqlalchemy import text
 
 from daily_insights_api.core import security
+from daily_insights_api.core.config import get_settings
+
+
+def reset_database_schema(database_url: str) -> None:
+    """Drop and recreate the integration database's public schema."""
+    engine = create_sync_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DROP SCHEMA public CASCADE"))
+            connection.execute(text("CREATE SCHEMA public"))
+    finally:
+        engine.dispose()
+
+
+def remigrate_database(database_url: str) -> None:
+    """Rebuild the integration database from an empty schema up to head.
+
+    Alembic reads the URL from the environment, so it is set for the duration of
+    the upgrade and restored afterwards along with the settings cache.
+    """
+    previous = os.environ.get("DAILY_INSIGHTS_DATABASE_URL")
+    os.environ["DAILY_INSIGHTS_DATABASE_URL"] = database_url
+    get_settings.cache_clear()
+    try:
+        reset_database_schema(database_url)
+        command.upgrade(Config(str(Path(__file__).parents[1] / "alembic.ini")), "head")
+    finally:
+        if previous is None:
+            os.environ.pop("DAILY_INSIGHTS_DATABASE_URL", None)
+        else:
+            os.environ["DAILY_INSIGHTS_DATABASE_URL"] = previous
+        get_settings.cache_clear()
+
 
 # Integration tests exercise authentication flows, but they are not password-
 # security tests. Keep the production parameters in ``security`` untouched for

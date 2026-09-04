@@ -89,6 +89,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/admin/data-sources/yfinance/daily-bars": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Fetch Yfinance Daily Bars */
+    post: operations["fetch_yfinance_daily_bars_api_admin_data_sources_yfinance_daily_bars_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/admin/internal-users": {
     parameters: {
       query?: never
@@ -1795,6 +1812,110 @@ export interface components {
       /** Error Type */
       type: string
     }
+    /** YfinanceDailyBarsFetch */
+    YfinanceDailyBarsFetch: {
+      /**
+       * Period
+       * @default 2y
+       * @enum {string}
+       */
+      period:
+        | "1d"
+        | "5d"
+        | "7d"
+        | "1mo"
+        | "3mo"
+        | "6mo"
+        | "1y"
+        | "2y"
+        | "5y"
+        | "10y"
+        | "ytd"
+        | "max"
+      /** Symbols */
+      symbols?:
+        | (
+            | "^DJI"
+            | "^GSPC"
+            | "^IXIC"
+            | "^RUT"
+            | "^SOX"
+            | "^HSI"
+            | "^TWII"
+            | "^TFNI"
+            | "^TPLI"
+            | "000001.SS"
+          )[]
+        | null
+    }
+    /** YfinanceDailyBarsResponse */
+    YfinanceDailyBarsResponse: {
+      /** Failed */
+      failed: components["schemas"]["YfinanceSymbolFailure"][]
+      /**
+       * Fetched At
+       * Format: date-time
+       */
+      fetched_at: string
+      /** Period */
+      period: string
+      /** Succeeded */
+      succeeded: components["schemas"]["YfinanceSymbolBars"][]
+    }
+    /**
+     * YfinanceSymbolBars
+     * @description What one symbol's refresh did, not the rows themselves.
+     *
+     *     The bars live in index_daily_bars; repeating them here cost 717KB for a 2y
+     *     run and would be several megabytes for `max`, and a reader wants a symbol
+     *     and a date range, not whatever one refresh happened to touch.
+     */
+    YfinanceSymbolBars: {
+      /**
+       * As Of
+       * Format: date
+       */
+      as_of: string
+      /** Dropped Unsettled Trade Date */
+      dropped_unsettled_trade_date: string | null
+      /**
+       * Market
+       * @enum {string}
+       */
+      market:
+        | "global_macro_bonds"
+        | "crypto"
+        | "forex"
+        | "us_equity"
+        | "hk_equity"
+        | "cn_equity"
+        | "tw_equity"
+        | "tw_index_derivatives"
+      /** Stored Count */
+      stored_count: number
+      /** Symbol */
+      symbol: string
+    }
+    /** YfinanceSymbolFailure */
+    YfinanceSymbolFailure: {
+      /** Error */
+      error: string
+      /**
+       * Market
+       * @enum {string}
+       */
+      market:
+        | "global_macro_bonds"
+        | "crypto"
+        | "forex"
+        | "us_equity"
+        | "hk_equity"
+        | "cn_equity"
+        | "tw_equity"
+        | "tw_index_derivatives"
+      /** Symbol */
+      symbol: string
+    }
   }
   responses: never
   parameters: never
@@ -1941,6 +2062,41 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ChatConversationDetailResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  fetch_yfinance_daily_bars_api_admin_data_sources_yfinance_daily_bars_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["YfinanceDailyBarsFetch"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["YfinanceDailyBarsResponse"]
         }
       }
       /** @description Validation Error */

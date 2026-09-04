@@ -9,7 +9,12 @@ from daily_insights_api.core.models import Base
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Alembic's template omits disable_existing_loggers, which defaults to True
+    # and silently switches off every logger created before this point. That is
+    # harmless for the migration process but not for the integration tests,
+    # which run `alembic upgrade head` in-process and then still expect
+    # `daily_insights` to emit.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 settings = get_settings()
 assert settings.database_url is not None

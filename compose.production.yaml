@@ -19,6 +19,7 @@ services:
       DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY:-}
       DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS:-10}
       DAILY_INSIGHTS_DAILY_NEWS_ENABLED: ${DAILY_INSIGHTS_DAILY_NEWS_ENABLED:-false}
+      DAILY_INSIGHTS_YFINANCE_ENABLED: ${DAILY_INSIGHTS_YFINANCE_ENABLED:-false}
       DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES: ${DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES:-}
       DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES: ${DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES:-}
       DAILY_INSIGHTS_GUARDIAN_API_KEY: ${DAILY_INSIGHTS_GUARDIAN_API_KEY:-}
@@ -189,6 +190,44 @@ services:
           "python",
           "-c",
           "import time; from pathlib import Path; p = Path('/tmp/analyst-viewpoints-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 93600",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    stop_grace_period: 45s
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - app
+
+  index-daily-bars-scheduler:
+    image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}
+    container_name: daily-insights-index-daily-bars-scheduler
+    restart: unless-stopped
+    environment:
+      DAILY_INSIGHTS_ENVIRONMENT: production
+      DAILY_INSIGHTS_DATABASE_URL: ${DAILY_INSIGHTS_DATABASE_URL:?set DAILY_INSIGHTS_DATABASE_URL from GitHub Secrets}
+      DAILY_INSIGHTS_SESSION_SECRET: ${DAILY_INSIGHTS_SESSION_SECRET:?set DAILY_INSIGHTS_SESSION_SECRET from GitHub Secrets}
+      DAILY_INSIGHTS_PASSWORD_PEPPER: ${DAILY_INSIGHTS_PASSWORD_PEPPER:?set DAILY_INSIGHTS_PASSWORD_PEPPER from GitHub Secrets}
+      DAILY_INSIGHTS_YFINANCE_ENABLED: ${DAILY_INSIGHTS_YFINANCE_ENABLED:-false}
+      DAILY_INSIGHTS_R2_ENDPOINT_URL: ${DAILY_INSIGHTS_R2_ENDPOINT_URL:?set DAILY_INSIGHTS_R2_ENDPOINT_URL}
+      DAILY_INSIGHTS_R2_BUCKET_NAME: ${DAILY_INSIGHTS_R2_BUCKET_NAME:?set DAILY_INSIGHTS_R2_BUCKET_NAME}
+      DAILY_INSIGHTS_R2_ACCESS_KEY_ID: ${DAILY_INSIGHTS_R2_ACCESS_KEY_ID:?set DAILY_INSIGHTS_R2_ACCESS_KEY_ID from GitHub Secrets}
+      DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY: ${DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY:?set DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY from GitHub Secrets}
+    command: ["python", "-m", "daily_insights_api.scripts.run_index_daily_bars"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import time; from pathlib import Path; p = Path('/tmp/index-daily-bars-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 93600",
         ]
       interval: 30s
       timeout: 5s
