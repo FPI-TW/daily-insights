@@ -94,3 +94,43 @@ def test_cap_discovery_favours_full_text_candidates_within_the_total_budget() ->
         per_host[candidate.hostname] = per_host.get(candidate.hostname, 0) + 1
     assert max(per_host.values()) <= 3
     assert len(_cap_discovery(candidates, per_source=10)) == 20
+
+
+def test_interleaving_spreads_slots_across_sources_while_keeping_each_newest_first() -> None:
+    from daily_insights_api.modules.news.service import _cap_discovery
+
+    base = datetime(2026, 9, 4, 0, 0, tzinfo=UTC)
+    # One flash feed publishes twelve fresh items; two wires publish two each,
+    # all older. Newest-first alone would hand every slot to the flash feed.
+    flash = [
+        _fetched(index, "flash.example", base + timedelta(minutes=index)) for index in range(12)
+    ]
+    wires = [
+        _fetched(20 + index, "wire-a.example", base - timedelta(hours=1 + index))
+        for index in range(2)
+    ] + [
+        _fetched(30 + index, "wire-b.example", base - timedelta(hours=2 + index))
+        for index in range(2)
+    ]
+    candidates = [item.candidate for item in flash + wires]
+
+    newest_first = _cap_discovery(candidates, per_source=5, total=6)
+    assert {candidate.hostname for candidate in newest_first} == {"flash.example", "wire-a.example"}
+
+    spread = _cap_discovery(candidates, per_source=5, total=6, interleave=True)
+    assert [candidate.hostname for candidate in spread[:3]] == [
+        "flash.example",
+        "wire-a.example",
+        "wire-b.example",
+    ]
+    assert sum(1 for candidate in spread if candidate.hostname == "flash.example") == 2
+    flash_ids = [candidate.id for candidate in spread if candidate.hostname == "flash.example"]
+    assert flash_ids == [flash[11].candidate.id, flash[10].candidate.id]
+
+    limited = _limit_candidates(flash + wires, total=4, per_source=5, interleave=True)
+    assert [item.candidate.hostname for item in limited] == [
+        "flash.example",
+        "wire-a.example",
+        "wire-b.example",
+        "flash.example",
+    ]

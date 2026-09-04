@@ -37,6 +37,10 @@ class EditionSpec:
     # Upper bound on articles extracted per run; full-text candidates are kept
     # first because they cost no fetch.
     max_discovery_total: int = 80
+    # Take candidates from sources in turn instead of newest-first overall. The
+    # global digest needs this: its flash feeds publish dozens of items an hour
+    # and would otherwise fill every slot before a slower wire gets one.
+    interleave_sources: bool = False
 
     @property
     def is_global(self) -> bool:
@@ -49,6 +53,7 @@ GLOBAL_SPEC = EditionSpec(
     max_candidates=20,
     max_per_source=5,
     max_discovery_per_source=5,
+    interleave_sources=True,
     selection=SelectionPolicy(
         max_items=5,
         max_per_domain=2,
