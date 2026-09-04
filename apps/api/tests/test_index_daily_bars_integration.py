@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
@@ -558,6 +559,38 @@ async def test_latest_bars_carry_the_previous_close_and_respect_visibility(
     async with session_factory() as database:
         hk_only = await latest_index_bars(database, market_codes={"hk_equity"})
     assert [item.symbol for item in hk_only] == ["^HSI"]
+
+
+async def test_a_zero_price_is_served_as_fixed_point_not_an_exponent(
+    session_factory: async_sessionmaker[AsyncSession],
+    member_client: AsyncClient,
+) -> None:
+    # Numeric(20,10) returns Decimal("0E-10") for a stored zero. Serialized as
+    # that exponent form it breaks the pattern this API declares for decimals,
+    # and one such row would fail a client's parse of the entire list. Yahoo
+    # does return Open=0 on old rows, and only close is constrained upstream.
+    zero_open = _bar(date(2026, 9, 1), "100.5").model_copy(
+        update={"open": Decimal("0"), "high": Decimal("0"), "low": Decimal("0")}
+    )
+    async with session_factory.begin() as database:
+        await _store(database, [zero_open])
+
+    response = await member_client.get(
+        "/api/markets/indices/%5ETWII/daily-bars",
+        params={"start": "2026-08-01", "end": "2026-09-30"},
+    )
+    assert response.status_code == 200, response.text
+    bar = response.json()[0]
+    assert bar["open"] == "0.0000000000"
+    assert bar["high"] == "0.0000000000"
+    assert bar["close"] == "100.5000000000"
+
+    latest = await member_client.get("/api/markets/indices")
+    assert latest.json()[0]["open"] == "0.0000000000"
+
+    decimal_string = re.compile(r"^-?\d+(?:\.\d+)?$")
+    for field in ("open", "high", "low", "close"):
+        assert decimal_string.match(bar[field]), f"{field}={bar[field]!r} is not a decimal string"
 
 
 async def test_daily_bars_are_bounded_by_the_requested_window(

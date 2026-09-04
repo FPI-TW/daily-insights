@@ -1,7 +1,23 @@
 from datetime import date
 from decimal import Decimal
+from typing import Annotated
 
-from pydantic import BaseModel
+from pydantic import BaseModel, PlainSerializer, WithJsonSchema
+
+# A stored zero comes back from Numeric(20,10) as Decimal("0E-10"), and Pydantic
+# would put that exponent form on the wire. It fails the pattern this schema
+# itself declares in the OpenAPI document, and every client that reads these as
+# decimal strings, so one zero open would break the whole bar list. Yahoo does
+# return Open=0 on old rows, and nothing upstream rejects it: the adapter and
+# the table only constrain close.
+PriceDecimal = Annotated[
+    Decimal,
+    PlainSerializer(lambda value: format(value, "f"), return_type=str),
+    # Pydantic's own Decimal pattern went on the wire while describing a format
+    # Pydantic did not emit. This one states what these fields actually are, and
+    # matches the check the generated client applies.
+    WithJsonSchema({"type": "string", "pattern": r"^-?\d+(?:\.\d+)?$"}, mode="serialization"),
+]
 
 
 class MarketResponse(BaseModel):
@@ -16,14 +32,14 @@ class IndexDailyBarResponse(BaseModel):
     symbol: str
     market_code: str
     trade_date: date
-    open: Decimal | None
-    high: Decimal | None
-    low: Decimal | None
-    close: Decimal
+    open: PriceDecimal | None
+    high: PriceDecimal | None
+    low: PriceDecimal | None
+    close: PriceDecimal
     volume: int | None
 
 
 class IndexLatestBarResponse(IndexDailyBarResponse):
     """The most recent settled bar plus the close before it, for a change figure."""
 
-    previous_close: Decimal | None
+    previous_close: PriceDecimal | None

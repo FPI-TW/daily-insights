@@ -862,14 +862,14 @@
       "IndexDailyBarResponse": {
         "properties": {
           "close": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "pattern": "^-?\\d+(?:\\.\\d+)?$",
             "title": "Close",
             "type": "string"
           },
           "high": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
                 "type": "string"
               },
               {
@@ -881,7 +881,7 @@
           "low": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
                 "type": "string"
               },
               {
@@ -897,7 +897,7 @@
           "open": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
                 "type": "string"
               },
               {
@@ -944,14 +944,14 @@
         "description": "The most recent settled bar plus the close before it, for a change figure.",
         "properties": {
           "close": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "pattern": "^-?\\d+(?:\\.\\d+)?$",
             "title": "Close",
             "type": "string"
           },
           "high": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
                 "type": "string"
               },
               {
@@ -963,7 +963,7 @@
           "low": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
                 "type": "string"
               },
               {
@@ -979,7 +979,7 @@
           "open": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
                 "type": "string"
               },
               {
@@ -991,7 +991,7 @@
           "previous_close": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
                 "type": "string"
               },
               {
