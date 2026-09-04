@@ -73,7 +73,7 @@ _TITLES = {
     },
 }
 
-MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v5"
+MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v6"
 
 
 @dataclass(frozen=True)
@@ -331,6 +331,18 @@ async def _build_dataset_blocks(
             ),
         )
         return (macro_block,), _aggregate_provenance(quotes.provenances)
+    if dataset.key == "macro.rates_fx_quotes":
+        quotes = await _dataset_quotes(adapter, market_code, dataset)
+        rates_block = MetricBlock(
+            id="macro.rates_fx",
+            status="ok",
+            source_as_of=min(item.as_of for item in quotes.items),
+            metrics=tuple(
+                _metric_item(_metric_id(item.symbol), item, "macro.rates_fx")
+                for item in quotes.items
+            ),
+        )
+        return (rates_block,), _aggregate_provenance(quotes.provenances)
     if dataset.key == "us.index_proxy_quotes":
         quotes = await _dataset_quotes(adapter, market_code, dataset)
         proxies_block = MetricBlock(
@@ -498,6 +510,11 @@ async def _dataset_quotes(
         expected_currencies=dict(dataset.symbol_units),
         symbol_types=dict(dataset.symbol_types),
     )
+
+
+def _metric_id(symbol: str) -> str:
+    """Contract-safe metric id: ``USD/TWD`` becomes ``usd_twd``."""
+    return symbol.lower().replace("/", "_")
 
 
 def _metric_item(identifier: str, item: QuoteResult, block_id: str) -> MetricItem:

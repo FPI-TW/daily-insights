@@ -111,6 +111,14 @@ request ID 是否存在等 sanitized metadata。Twelve Data 本次未回傳 requ
   dashboard／合約仍需另行留存證據；runtime 不以 manifest 核准狀態或外部 hash 作為
   啟動條件。
 
+### 2026-09-04 補充：宏觀頁的利率與匯率
+
+- 新增 `macro.rates_fx_quotes` 資料集（`/quote` 批次）：TLT、IEF 代理美債長端與中段殖利率
+  走勢、UUP 代理美元指數（provider 沒有 `US10Y`、`DXY` 等 exact symbol），加上 USD/TWD、
+  USD/JPY、EUR/USD 現貨。對應 `macro.rates_fx` metric 區塊，單位依報價幣別（USD、TWD、JPY），
+  漲跌幅同樣以前收計算。manifest 升為 `three-market.v6`。
+- `/api/markets` 改依市場目錄順序回傳，客戶端導覽不再是代碼字母序。
+
 ### 2026-09-03 修正：固定籃子與銅的資產類別
 
 - `/market_movers/stocks` 依漲跌幅排序全美股票池，前幾名必然是低價股（正式站曾顯示

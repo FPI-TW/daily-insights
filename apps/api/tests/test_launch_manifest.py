@@ -32,8 +32,8 @@ from daily_insights_api.modules.reports.morning_report import (
 
 
 def test_manifest_freezes_three_markets_and_block_order() -> None:
-    assert MORNING_REPORT_DERIVATION_VERSION == "twelve-data.three-market.v5"
-    assert ACTIVE_LAUNCH_MANIFEST.version == "three-market.v5"
+    assert MORNING_REPORT_DERIVATION_VERSION == "twelve-data.three-market.v6"
+    assert ACTIVE_LAUNCH_MANIFEST.version == "three-market.v6"
     assert tuple(market.market_code for market in ACTIVE_LAUNCH_MANIFEST.markets) == (
         "global_macro_bonds",
         "crypto",
@@ -44,6 +44,7 @@ def test_manifest_freezes_three_markets_and_block_order() -> None:
     )
     assert [block.id for market in ACTIVE_LAUNCH_MANIFEST.markets for block in market.blocks] == [
         "macro.commodities",
+        "macro.rates_fx",
         "macro.commodity_normalized_performance",
         "crypto.overview",
         "crypto.normalized_performance",
@@ -61,7 +62,7 @@ def test_manifest_freezes_three_markets_and_block_order() -> None:
 def test_manifest_hash_is_stable_and_changes_with_content() -> None:
     round_trip = LaunchManifest.model_validate(ACTIVE_LAUNCH_MANIFEST.model_dump(mode="json"))
     assert round_trip.sha256 == ACTIVE_LAUNCH_MANIFEST.sha256
-    changed = round_trip.model_copy(update={"version": "three-market.v6"})
+    changed = round_trip.model_copy(update={"version": "three-market.v7"})
     assert changed.sha256 != round_trip.sha256
 
 
@@ -94,8 +95,15 @@ def test_manifest_keeps_atomic_dataset_contracts() -> None:
     }
     assert tuple(dataset.key for dataset in _market_datasets("global_macro_bonds")) == (
         "macro.commodity_quotes",
+        "macro.rates_fx_quotes",
         "macro.commodity_daily_bars",
     )
+    rates = next(
+        dataset
+        for dataset in ACTIVE_LAUNCH_MANIFEST.datasets
+        if dataset.key == "macro.rates_fx_quotes"
+    )
+    assert rates.symbol_units["USD/TWD"] == "TWD" and rates.symbol_units["TLT"] == "USD"
 
 
 def test_us_equity_uses_fixed_usd_baskets_instead_of_provider_movers() -> None:
@@ -177,7 +185,7 @@ def test_manifest_rejects_partial_asset_type_contract() -> None:
 
 
 def test_dataset_input_digest_is_stable_across_dataset_order() -> None:
-    quotes, history = _market_datasets("global_macro_bonds")
+    quotes, _rates, history = _market_datasets("global_macro_bonds")
     quote_failure = DatasetBuild(quotes, (), None, ValueError("quote failed"))
     history_failure = DatasetBuild(history, (), None, ValueError("history failed"))
 
@@ -194,8 +202,10 @@ def test_macro_dataset_failure_preserves_the_other_block_and_status() -> None:
         source_as_of=as_of,
         metrics=(),
     )
+    rates_block = quote_block.model_copy(update={"id": "macro.rates_fx"})
     partial_blocks = (
         quote_block,
+        rates_block,
         *_error_blocks_for_dataset("global_macro_bonds", "macro.commodity_daily_bars"),
     )
     _validate_manifest_output("global_macro_bonds", partial_blocks)

@@ -1,11 +1,13 @@
 import type { LatestNews, Locale } from "@daily-insights/api-client"
 import { createFileRoute, useLoaderData } from "@tanstack/react-router"
 import {
+  type OverviewEntry,
   ReportErrorScreen,
   ReportList,
   ReportLoadingScreen,
+  ReportOverview,
 } from "#/components/Reports"
-import { getReportList } from "#/lib/reports"
+import { getReportDetail, getReportList } from "#/lib/reports"
 import { DailyNews, DailyNewsLoading } from "#/components/DailyNews"
 import { getLatestNews } from "#/lib/news"
 import { getTodayAnalystViewpoints } from "#/lib/analyst-viewpoints"
@@ -23,6 +25,7 @@ export const Route = createFileRoute(
 
 type ReportsAndNews = {
   reports: Awaited<ReturnType<typeof getReportList>>
+  overview: OverviewEntry[]
   news: LatestNews | null
   viewpoints: Awaited<ReturnType<typeof getTodayAnalystViewpoints>>
 }
@@ -41,8 +44,28 @@ export async function loadReportsAndNews({
     getTodayAnalystViewpoints(),
   ])
   if (reports.status === "rejected") throw reports.reason
+  // Headline figures for the overview cards come from each report's detail;
+  // a failed detail only empties that card.
+  const details = await Promise.allSettled(
+    reports.value.map(report =>
+      getReportDetail({
+        data: { marketCode: report.marketCode, locale: context.locale },
+      })
+    )
+  )
+  const overview = reports.value.map((summary, index) => {
+    const detail = details[index]
+    return {
+      summary,
+      detail:
+        detail?.status === "fulfilled" && detail.value.kind === "report"
+          ? detail.value.report
+          : null,
+    }
+  })
   return {
     reports: reports.value,
+    overview,
     news: news.status === "fulfilled" ? news.value : null,
     viewpoints: viewpoints.status === "fulfilled" ? viewpoints.value : [],
   }
@@ -59,7 +82,8 @@ function ReportsAndNewsLoading() {
   )
 }
 function ReportsPage() {
-  const { reports, news, viewpoints } = Route.useLoaderData()
+  const { reports, overview, news, viewpoints } = Route.useLoaderData()
+  const { locale } = Route.useRouteContext()
   const markets = useLoaderData({
     from: "/$locale/_authenticated/_customer/reports",
   })
@@ -77,6 +101,7 @@ function ReportsPage() {
   )
   return (
     <>
+      <ReportOverview locale={locale} entries={overview} />
       <ReportList viewpoints={viewpoints} markets={markets} />
       <DailyNews news={news} />
     </>

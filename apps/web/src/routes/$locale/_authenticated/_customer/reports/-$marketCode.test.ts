@@ -1,11 +1,13 @@
 import { isNotFound } from "@tanstack/react-router"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const getReportDetail = vi.fn()
 const getMarketNews = vi.fn()
+const getTodayAnalystViewpoints = vi.fn()
 
 vi.mock("#/lib/reports", () => ({ getReportDetail }))
 vi.mock("#/lib/news", () => ({ getMarketNews }))
+vi.mock("#/lib/analyst-viewpoints", () => ({ getTodayAnalystViewpoints }))
 
 const { loadMarketPage } = await import("./$marketCode")
 
@@ -22,10 +24,27 @@ const news = {
 }
 const report = { kind: "report", report: { marketCode: "us_equity" } }
 
+const viewpoint = {
+  viewpoint_date: "2026-09-02",
+  market_code: "us_equity",
+  source_market_code: "us_stocks",
+  points: ["Stocks rose on rate-cut hopes."],
+  fetched_at: "2026-09-02T08:00:00+08:00",
+}
+
 describe("market report loader", () => {
-  it("loads the report and market news for a news market", async () => {
+  beforeEach(() => {
+    getTodayAnalystViewpoints.mockReset()
+    getTodayAnalystViewpoints.mockResolvedValue([])
+  })
+
+  it("loads the report, market news and the market's viewpoint", async () => {
     getReportDetail.mockResolvedValueOnce(report)
     getMarketNews.mockResolvedValueOnce(news)
+    getTodayAnalystViewpoints.mockResolvedValueOnce([
+      { ...viewpoint, market_code: "tw_equity" },
+      viewpoint,
+    ])
 
     await expect(
       loadMarketPage({
@@ -35,6 +54,7 @@ describe("market report loader", () => {
     ).resolves.toEqual({
       report,
       news: { marketCode: "us_equity", latest: news },
+      viewpoint,
     })
     expect(getMarketNews).toHaveBeenCalledWith({
       data: { locale: "en", marketCode: "us_equity" },
@@ -53,6 +73,7 @@ describe("market report loader", () => {
     ).resolves.toEqual({
       report,
       news: { marketCode: "us_equity", latest: null },
+      viewpoint: null,
     })
   })
 
@@ -85,6 +106,7 @@ describe("market report loader", () => {
     ).resolves.toEqual({
       report: { kind: "not-generated", marketCode: "crypto" },
       news: null,
+      viewpoint: null,
     })
     expect(getMarketNews).not.toHaveBeenCalled()
   })

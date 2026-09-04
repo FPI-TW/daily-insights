@@ -86,8 +86,8 @@ class DeterministicMacroAdapter:
         symbol_types: dict[str, str] | None = None,
     ) -> QuotesResult:
         assert market == "global_macro_bonds"
-        assert set(expected_currencies.values()) == {"USD"}
-        assert symbol_types == {"HG1": "commodity"}
+        assert set(expected_currencies) == set(symbols)
+        assert symbol_types == ({"HG1": "commodity"} if "HG1" in symbols else {})
         if self.quote_mode == "failed":
             raise DataSourceContractError("api_key=quote-secret")
         as_of = date(2026, 8, 30)
@@ -246,18 +246,21 @@ async def test_macro_orchestration_persists_all_dataset_outcomes_and_revisions(
     assert complete.input_digest == _expected_input_digest(complete_sources)
     assert [block["id"] for block in _blocks(complete)] == [
         "macro.commodities",
+        "macro.rates_fx",
         "macro.commodity_normalized_performance",
     ]
-    assert [block["status"] for block in _blocks(complete)] == ["ok", "ok"]
+    assert [block["status"] for block in _blocks(complete)] == ["ok", "ok", "ok"]
     assert [source.dataset_key for source in complete_sources] == [
         "macro.commodity_daily_bars",
         "macro.commodity_quotes",
+        "macro.rates_fx_quotes",
     ]
     assert all(source.status == "succeeded" for source in complete_sources)
     assert {
         source.dataset_key: (source.provider, source.endpoint) for source in complete_sources
     } == {
         "macro.commodity_quotes": ("twelve_data", "/quote"),
+        "macro.rates_fx_quotes": ("twelve_data", "/quote"),
         "macro.commodity_daily_bars": ("twelve_data", "/time_series"),
     }
     assert all(source.payload_sha256 is not None for source in complete_sources)
@@ -276,13 +279,13 @@ async def test_macro_orchestration_persists_all_dataset_outcomes_and_revisions(
     assert {link.source_run_id for link in complete_links} == {
         source.id for source in complete_sources
     }
-    assert len(complete_links) == 2
+    assert len(complete_links) == 3
     assert not {"payload", "raw_payload", "raw_rows", "rows"} & set(
         SourceRun.__table__.columns.keys()
     )
 
     await _run_market(macro_report_database, adapter_for_run, "global_macro_bonds", edition_date)
-    assert await _counts(macro_report_database) == (1, 2)
+    assert await _counts(macro_report_database) == (1, 3)
 
     adapter.history_mode = "failed"
     await _run_market(macro_report_database, adapter_for_run, "global_macro_bonds", edition_date)
@@ -291,9 +294,10 @@ async def test_macro_orchestration_persists_all_dataset_outcomes_and_revisions(
     assert partial.source_as_of == date(2026, 8, 30)
     assert partial.content["status"] == "partial"
     assert partial.input_digest == _expected_input_digest(partial_sources)
-    assert [block["status"] for block in _blocks(partial)] == ["ok", "error"]
+    assert [block["status"] for block in _blocks(partial)] == ["ok", "ok", "error"]
     assert {source.dataset_key: source.status for source in partial_sources} == {
         "macro.commodity_quotes": "succeeded",
+        "macro.rates_fx_quotes": "succeeded",
         "macro.commodity_daily_bars": "failed",
     }
     failed_history = next(
@@ -311,10 +315,10 @@ async def test_macro_orchestration_persists_all_dataset_outcomes_and_revisions(
     assert {link.source_run_id for link in partial_links} == {
         source.id for source in partial_sources
     }
-    assert len(partial_links) == 2
+    assert len(partial_links) == 3
 
     await _run_market(macro_report_database, adapter_for_run, "global_macro_bonds", edition_date)
-    assert await _counts(macro_report_database) == (2, 4)
+    assert await _counts(macro_report_database) == (2, 6)
 
     adapter.quote_mode = "failed"
     await _run_market(macro_report_database, adapter_for_run, "global_macro_bonds", edition_date)
@@ -325,7 +329,7 @@ async def test_macro_orchestration_persists_all_dataset_outcomes_and_revisions(
     assert unavailable.source_as_of is None
     assert unavailable.content["status"] == "unavailable"
     assert unavailable.input_digest == _expected_input_digest(unavailable_sources)
-    assert [block["status"] for block in _blocks(unavailable)] == ["error", "error"]
+    assert [block["status"] for block in _blocks(unavailable)] == ["error", "error", "error"]
     assert all(source.status == "failed" for source in unavailable_sources)
     assert all(
         source.source_as_of is None
@@ -335,7 +339,7 @@ async def test_macro_orchestration_persists_all_dataset_outcomes_and_revisions(
         and source.record_count is None
         for source in unavailable_sources
     )
-    assert len(unavailable_links) == 2
+    assert len(unavailable_links) == 3
     assert {link.source_run_id for link in unavailable_links} == {
         source.id for source in unavailable_sources
     }
@@ -348,5 +352,5 @@ async def test_macro_orchestration_persists_all_dataset_outcomes_and_revisions(
 
     assert corrected.input_digest == _expected_input_digest(corrected_sources)
     assert corrected.input_digest != complete.input_digest
-    assert [block["status"] for block in _blocks(corrected)] == ["ok", "ok"]
-    assert await _counts(macro_report_database) == (4, 8)
+    assert [block["status"] for block in _blocks(corrected)] == ["ok", "ok", "ok"]
+    assert await _counts(macro_report_database) == (4, 12)

@@ -1,13 +1,19 @@
-import type { LatestNews, Locale } from "@daily-insights/api-client"
+import type {
+  AnalystViewpoint,
+  LatestNews,
+  Locale,
+} from "@daily-insights/api-client"
 import { createFileRoute, notFound } from "@tanstack/react-router"
 import { DailyNews } from "#/components/DailyNews"
 import {
+  MarketViewpoint,
   ReportDetail,
   ReportErrorScreen,
   ReportLoadingScreen,
   ReportNotGeneratedScreen,
   ReportNotLaunchedScreen,
 } from "#/components/Reports"
+import { getTodayAnalystViewpoints } from "#/lib/analyst-viewpoints"
 import { getMarketNews } from "#/lib/news"
 import {
   isNewsMarketCode,
@@ -20,6 +26,7 @@ type ReportResult = Awaited<ReturnType<typeof getReportDetail>>
 type MarketPage = {
   report: Exclude<ReportResult, { kind: "not-found" }>
   news: { marketCode: NewsMarketCode; latest: LatestNews | null } | null
+  viewpoint: AnalystViewpoint | null
 }
 
 // The report is the primary content; market news is secondary and degrades to
@@ -34,7 +41,7 @@ export async function loadMarketPage({
   const newsMarket = isNewsMarketCode(params.marketCode)
     ? params.marketCode
     : null
-  const [report, news] = await Promise.allSettled([
+  const [report, news, viewpoints] = await Promise.allSettled([
     getReportDetail({
       data: { marketCode: params.marketCode, locale: context.locale },
     }),
@@ -43,9 +50,17 @@ export async function loadMarketPage({
           data: { locale: context.locale, marketCode: newsMarket },
         })
       : Promise.resolve(null),
+    getTodayAnalystViewpoints(),
   ])
   if (report.status === "rejected") throw report.reason
   if (report.value.kind === "not-found") throw notFound()
+  // The analyst's bullets are secondary like the news: absent, not fatal.
+  const viewpoint =
+    viewpoints.status === "fulfilled"
+      ? (viewpoints.value.find(
+          item => item.market_code === params.marketCode
+        ) ?? null)
+      : null
   return {
     report: report.value,
     news: newsMarket
@@ -54,6 +69,7 @@ export async function loadMarketPage({
           latest: news.status === "fulfilled" ? news.value : null,
         }
       : null,
+    viewpoint,
   }
 }
 
@@ -67,7 +83,7 @@ export const Route = createFileRoute(
 })
 
 function ReportPage() {
-  const { report, news } = Route.useLoaderData()
+  const { report, news, viewpoint } = Route.useLoaderData()
   const { locale } = Route.useRouteContext()
   useChatPageContext(
     report.kind === "report" && report.report.publicationId
@@ -76,6 +92,9 @@ function ReportPage() {
   )
   return (
     <>
+      {report.kind !== "report" && viewpoint ? (
+        <MarketViewpoint viewpoint={viewpoint} />
+      ) : null}
       {report.kind === "not-generated" ? (
         <ReportNotGeneratedScreen
           locale={locale}
@@ -87,13 +106,18 @@ function ReportPage() {
           marketCode={report.marketCode}
         />
       ) : (
-        <ReportDetail locale={locale} report={report.report} />
+        <ReportDetail
+          locale={locale}
+          report={report.report}
+          viewpoint={viewpoint}
+        />
       )}
       {news ? (
         <DailyNews
           news={news.latest}
           eyebrowKey="marketNewsEyebrow"
           titleKey={`marketNewsTitle_${news.marketCode}`}
+          groupByMarket={false}
         />
       ) : null}
     </>

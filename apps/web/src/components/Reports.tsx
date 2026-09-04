@@ -10,6 +10,7 @@ import {
   formatIsoDate,
   formatNumber,
   literalDirection,
+  numberLocales,
   unitLabel,
   type Direction,
 } from "#/lib/format"
@@ -205,6 +206,20 @@ export function AnalystViewpointsLoading() {
   )
 }
 
+// Rendered on the server and in the browser: the formatter is pinned to the
+// route locale and the Taipei zone so both produce the same text (a locale or
+// zone taken from the environment differs between them and breaks hydration).
+function viewpointTimestamp(language: string) {
+  const locale = (
+    language in numberLocales ? language : "zh-hant"
+  ) as keyof typeof numberLocales
+  return new Intl.DateTimeFormat(numberLocales[locale], {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Asia/Taipei",
+  })
+}
+
 function AnalystViewpoints({
   viewpoints,
   markets,
@@ -212,7 +227,7 @@ function AnalystViewpoints({
   viewpoints: ReadonlyArray<AnalystViewpoint>
   markets?: ReadonlyArray<NavMarket> | undefined
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   // Viewpoints follow navigation order and only cover navigable markets when
   // the market list is known; otherwise they are shown as delivered.
   const visibleViewpoints = markets
@@ -234,10 +249,9 @@ function AnalystViewpoints({
         </h2>
         <p className="m-0 text-xs text-sea-ink-soft">
           {t("analystViewpointsUpdated", {
-            timestamp: new Intl.DateTimeFormat(undefined, {
-              dateStyle: "medium",
-              timeStyle: "short",
-            }).format(new Date(latest.fetched_at)),
+            timestamp: viewpointTimestamp(i18n.language).format(
+              new Date(latest.fetched_at)
+            ),
           })}
         </p>
       </div>
@@ -305,24 +319,206 @@ function ReportFreshness({
 export function ReportDetail({
   locale = "zh-hant",
   report,
+  viewpoint = null,
 }: {
   locale?: Locale
   report: ProvisionalReport
+  viewpoint?: AnalystViewpoint | null
 }) {
+  // A lone metric or table block spans the full width; half-width panels
+  // only make sense when there is a second one to sit beside.
+  const narrowBlocks = report.blocks.filter(block => block.kind !== "series")
   return (
     <>
       <ReportFreshness report={report} locale={locale} />
+      {viewpoint ? <MarketViewpoint viewpoint={viewpoint} /> : null}
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">
         {report.blocks.map((block, index) => (
           <ReportBlockView
             block={block}
             index={index}
             locale={locale}
+            fullWidth={block.kind !== "series" && narrowBlocks.length === 1}
             key={`${block.titleKey}-${index}`}
           />
         ))}
       </div>
     </>
+  )
+}
+
+/** The upstream analyst's bullets for one market, shown above the numbers so
+ * every market page opens with what happened rather than only how much. */
+export function MarketViewpoint({
+  viewpoint,
+}: {
+  viewpoint: AnalystViewpoint
+}) {
+  const { t, i18n } = useTranslation()
+  return (
+    <section
+      className="surface-panel mb-4 border-t-[3px] border-t-lagoon p-5"
+      aria-labelledby={`viewpoint-${viewpoint.market_code}`}
+    >
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-3">
+        <h2
+          id={`viewpoint-${viewpoint.market_code}`}
+          className="m-0 text-base font-extrabold tracking-[-0.015em] text-sea-ink"
+        >
+          {t("marketViewpointTitle")}
+        </h2>
+        <p className="m-0 text-xs text-sea-ink-soft">
+          {t("analystViewpointsUpdated", {
+            timestamp: viewpointTimestamp(i18n.language).format(
+              new Date(viewpoint.fetched_at)
+            ),
+          })}
+        </p>
+      </div>
+      <ul className="m-0 grid list-disc gap-2 pl-5 text-sm leading-6 text-sea-ink">
+        {viewpoint.points.map(point => (
+          <li key={point}>{point}</li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+export type OverviewEntry = {
+  summary: ProvisionalReport
+  detail: ProvisionalReport | null
+}
+
+type OverviewFigure = {
+  label: string
+  value: string
+  change: { text: string; direction: Direction } | null
+}
+
+/** Up to three headline figures from a report: its first metric block, or
+ * the first rows of its first table. */
+function overviewFigures(
+  report: ProvisionalReport,
+  locale: Locale,
+  t: Translate
+): OverviewFigure[] {
+  for (const block of report.blocks) {
+    if (block.status !== "ok") continue
+    if (block.kind === "metric") {
+      return block.metrics.slice(0, 3).map(item => ({
+        label: t(item.labelKey),
+        value: formatValue(item.value, item.unitCode, locale, t),
+        change: "change" in item ? changeOf(item.change, locale, t) : null,
+      }))
+    }
+    if (block.kind === "table") {
+      // Column 0 is the row label; the price is the first later column that
+      // is not a percentage.
+      const price = block.columns.findIndex(
+        (column, index) => index > 0 && column.unitCode !== "percent"
+      )
+      const change = block.columns.findIndex(
+        column => column.unitCode === "percent"
+      )
+      return block.rows.slice(0, 3).map(row => {
+        const priceCell = price > 0 ? (row[price] ?? null) : null
+        const changeCell = change > 0 ? (row[change] ?? null) : null
+        return {
+          label: valueText(row[0] ?? null, t),
+          value: formatValue(
+            priceCell,
+            block.columns[price]?.unitCode,
+            locale,
+            t
+          ),
+          change: change > 0 ? changeOf(changeCell, locale, t) : null,
+        }
+      })
+    }
+  }
+  return []
+}
+
+/** Entry cards for every launched report so the index page carries the
+ * numbers, not only links to them. */
+export function ReportOverview({
+  locale,
+  entries,
+}: {
+  locale: Locale
+  entries: ReadonlyArray<OverviewEntry>
+}) {
+  const { t } = useTranslation()
+  if (entries.length === 0) return null
+  return (
+    <section className="mb-6" aria-labelledby="report-overview-title">
+      <h2
+        id="report-overview-title"
+        className="mt-0 mb-3 text-lg font-extrabold tracking-[-0.02em] text-sea-ink"
+      >
+        {t("reportOverviewTitle")}
+      </h2>
+      <div className="grid gap-3 md:grid-cols-3">
+        {entries.map(({ summary, detail }) => {
+          const figures = detail ? overviewFigures(detail, locale, t) : []
+          return (
+            <article
+              key={summary.marketCode}
+              className="surface-panel flex flex-col gap-3 p-4"
+              aria-label={t(`reportMarket_${summary.marketCode}`)}
+            >
+              <div className="flex items-baseline justify-between gap-2">
+                <h3 className="m-0 text-sm font-extrabold text-sea-ink">
+                  {t(`reportMarket_${summary.marketCode}`)}
+                </h3>
+                <span className="text-xs text-sea-ink-soft">
+                  {summary.sourceDate
+                    ? formatIsoDate(summary.sourceDate, locale)
+                    : ""}
+                </span>
+              </div>
+              {figures.length > 0 ? (
+                <dl className="m-0 grid gap-2">
+                  {figures.map(figure => (
+                    <div
+                      key={figure.label}
+                      className="flex items-baseline justify-between gap-3 text-sm"
+                    >
+                      <dt className="min-w-0 truncate text-sea-ink-soft">
+                        {figure.label}
+                      </dt>
+                      <dd className="m-0 flex shrink-0 items-baseline gap-2 font-mono tabular-nums">
+                        <span className="font-bold text-sea-ink">
+                          {figure.value}
+                        </span>
+                        {figure.change ? (
+                          <span
+                            className={`text-xs font-bold ${directionClass(figure.change.direction)}`}
+                          >
+                            {figure.change.text}
+                          </span>
+                        ) : null}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : (
+                <p className="m-0 text-sm text-sea-ink-soft">
+                  {t("reportOverviewUnavailable")}
+                </p>
+              )}
+              <Link
+                to="/$locale/reports/$marketCode"
+                params={{ locale, marketCode: summary.marketCode }}
+                className="mt-auto text-sm font-bold text-lagoon no-underline"
+              >
+                {t("reportOverviewOpen")}
+              </Link>
+            </article>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 
@@ -337,11 +533,11 @@ function useChartColors() {
       const styles = getComputedStyle(document.documentElement)
       setColors({
         series: [
-          styles.getPropertyValue("--lagoon-deep").trim(),
-          styles.getPropertyValue("--lagoon").trim(),
-          styles.getPropertyValue("--market-up").trim(),
-          styles.getPropertyValue("--market-down").trim(),
-          styles.getPropertyValue("--market-caution").trim(),
+          styles.getPropertyValue("--chart-1").trim(),
+          styles.getPropertyValue("--chart-2").trim(),
+          styles.getPropertyValue("--chart-3").trim(),
+          styles.getPropertyValue("--chart-4").trim(),
+          styles.getPropertyValue("--chart-5").trim(),
         ],
         text: styles.getPropertyValue("--sea-ink-soft").trim(),
         grid: styles.getPropertyValue("--line").trim(),
@@ -429,10 +625,12 @@ function ReportBlockView({
   block,
   index,
   locale,
+  fullWidth = false,
 }: {
   block: ReportBlock
   index: number
   locale: Locale
+  fullWidth?: boolean
 }) {
   const { t } = useTranslation()
   const chartColors = useChartColors()
@@ -444,7 +642,7 @@ function ReportBlockView({
   const caveat = block.caveat ? valueText(block.caveat, t) : null
   return (
     <motion.section
-      className={`surface-panel min-w-0 p-5 ${block.kind === "series" ? "xl:col-span-2" : ""}`}
+      className={`surface-panel min-w-0 p-5 ${block.kind === "series" || fullWidth ? "xl:col-span-2" : ""}`}
       {...reveal(animate, index)}
     >
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">

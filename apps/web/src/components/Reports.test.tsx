@@ -8,12 +8,14 @@ import {
 import { I18nextProvider } from "react-i18next"
 import { describe, expect, it, vi } from "vitest"
 import {
+  MarketViewpoint,
   ReportDetail,
   ReportErrorScreen,
   ReportList,
   ReportLoadingScreen,
   ReportNotGeneratedScreen,
   ReportNotLaunchedScreen,
+  ReportOverview,
   ReportShell,
 } from "./Reports"
 import { LocaleSwitcher } from "./LocaleSwitcher"
@@ -674,10 +676,10 @@ describe("three-market report presentation", () => {
 
     const root = document.documentElement
     const initialClassName = root.className
-    const initialDeep = root.style.getPropertyValue("--lagoon-deep")
-    const initialLagoon = root.style.getPropertyValue("--lagoon")
-    root.style.setProperty("--lagoon-deep", "rgb(23, 105, 224)")
-    root.style.setProperty("--lagoon", "rgb(34, 184, 207)")
+    const initialDeep = root.style.getPropertyValue("--chart-1")
+    const initialLagoon = root.style.getPropertyValue("--chart-2")
+    root.style.setProperty("--chart-1", "rgb(23, 105, 224)")
+    root.style.setProperty("--chart-2", "rgb(34, 184, 207)")
 
     try {
       await renderLocalized(<ReportDetail locale="en" report={crypto} />, "en")
@@ -686,16 +688,16 @@ describe("three-market report presentation", () => {
         expect(chart).toHaveTextContent('"color":["rgb(23, 105, 224)"')
       )
 
-      root.style.setProperty("--lagoon-deep", "rgb(105, 167, 255)")
-      root.style.setProperty("--lagoon", "rgb(34, 211, 238)")
+      root.style.setProperty("--chart-1", "rgb(105, 167, 255)")
+      root.style.setProperty("--chart-2", "rgb(34, 211, 238)")
       root.classList.add("dark")
       await waitFor(() =>
         expect(chart).toHaveTextContent('"color":["rgb(105, 167, 255)"')
       )
     } finally {
       root.className = initialClassName
-      root.style.setProperty("--lagoon-deep", initialDeep)
-      root.style.setProperty("--lagoon", initialLagoon)
+      root.style.setProperty("--chart-1", initialDeep)
+      root.style.setProperty("--chart-2", initialLagoon)
     }
   })
 
@@ -758,6 +760,163 @@ describe("three-market report presentation", () => {
       expect(screen.getByRole("navigation")).toBeVisible()
     }
   )
+
+  it("summarises each report on the index with headline figures and a link", async () => {
+    const macro = {
+      marketCode: "global_macro_bonds",
+      status: "complete",
+      editionDate: "2026-09-04",
+      sourceDate: "2026-09-03",
+      caveatKey: "reportCaveatLive",
+      summaryKey: "reportSummary_global_macro_bonds",
+      blocks: [
+        {
+          kind: "metric",
+          status: "ok",
+          titleKey: "reportBlockMacroSnapshot",
+          metrics: [
+            {
+              labelKey: "reportLabelBrent",
+              value: { kind: "number", value: "94.4500" },
+              change: { kind: "number", value: "-0.1700" },
+              unitCode: "usd",
+            },
+            {
+              labelKey: "reportLabelGold",
+              value: { kind: "number", value: "4477.2900" },
+              change: { kind: "number", value: "0.0800" },
+              unitCode: "usd",
+            },
+          ],
+        },
+      ],
+    } satisfies ProvisionalReport
+    const usEquity = {
+      marketCode: "us_equity",
+      status: "complete",
+      editionDate: "2026-09-04",
+      sourceDate: "2026-09-03",
+      caveatKey: "reportCaveatLive",
+      summaryKey: "reportSummary_us_equity",
+      blocks: [
+        {
+          kind: "table",
+          status: "ok",
+          titleKey: "reportBlockUsMegaCaps",
+          columns: [
+            { labelKey: "reportColumnInstrument", unitCode: null },
+            { labelKey: "reportColumnPrice", unitCode: "usd" },
+            { labelKey: "reportColumnChange", unitCode: "percent" },
+          ],
+          rows: [
+            [
+              { kind: "literal", value: "TSLA" },
+              { kind: "number", value: "376.36" },
+              { kind: "number", value: "5.42" },
+            ],
+          ],
+        },
+      ],
+    } satisfies ProvisionalReport
+
+    await renderLocalized(
+      <ReportOverview
+        locale="en"
+        entries={[
+          { summary: macro, detail: macro },
+          { summary: usEquity, detail: usEquity },
+          { summary: { ...usEquity, marketCode: "crypto" }, detail: null },
+        ]}
+      />,
+      "en"
+    )
+
+    const macroCard = screen.getByRole("article", { name: "Global macro" })
+    expect(macroCard).toHaveTextContent("Brent crude94.45-0.17%")
+    expect(macroCard).toHaveTextContent("Gold4,477.29+0.08%")
+    expect(macroCard).toHaveTextContent("Sep 3, 2026")
+    expect(
+      screen.getByRole("article", { name: "US equities" })
+    ).toHaveTextContent("TSLA376.36+5.42%")
+    expect(screen.getByRole("article", { name: "Crypto" })).toHaveTextContent(
+      "Not generated yet today"
+    )
+    const links = screen.getAllByRole("link", { name: "Open report" })
+    expect(links).toHaveLength(3)
+    expect(links[0]).toHaveAttribute(
+      "data-params",
+      JSON.stringify({ locale: "en", marketCode: "global_macro_bonds" })
+    )
+  })
+
+  it("opens a market page with the analyst viewpoint and widens a lone block", async () => {
+    const report = {
+      marketCode: "crypto",
+      status: "complete",
+      editionDate: "2026-09-04",
+      sourceDate: "2026-09-03",
+      caveatKey: "reportCaveatLive",
+      summaryKey: "reportSummary_crypto",
+      blocks: [
+        {
+          kind: "metric",
+          status: "ok",
+          titleKey: "reportBlockCryptoSnapshot",
+          metrics: [
+            {
+              labelKey: "reportLabelBitcoin",
+              value: { kind: "number", value: "77854.19" },
+              change: { kind: "number", value: "0.66" },
+              unitCode: "usd",
+            },
+          ],
+        },
+      ],
+    } satisfies ProvisionalReport
+
+    await renderLocalized(
+      <ReportDetail
+        locale="en"
+        report={report}
+        viewpoint={{
+          viewpoint_date: "2026-09-04",
+          market_code: "crypto",
+          source_market_code: "crypto",
+          points: ["BTC dominance held near 60%."],
+          fetched_at: "2026-09-04T02:22:00+00:00",
+        }}
+      />,
+      "en"
+    )
+
+    const viewpoint = screen.getByRole("region", { name: "Analyst viewpoint" })
+    expect(viewpoint).toHaveTextContent("BTC dominance held near 60%.")
+    const block = screen
+      .getByRole("heading", { name: "Crypto market snapshot" })
+      .closest("section")
+    expect(block).toHaveClass("xl:col-span-2")
+    expect(
+      viewpoint.compareDocumentPosition(block as Element) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+
+    cleanup()
+    await renderLocalized(
+      <MarketViewpoint
+        viewpoint={{
+          viewpoint_date: "2026-09-04",
+          market_code: "forex",
+          source_market_code: "forex",
+          points: ["Dollar softened."],
+          fetched_at: "2026-09-04T02:22:00+00:00",
+        }}
+      />,
+      "zh-hant"
+    )
+    expect(
+      screen.getByRole("region", { name: "分析師觀點" })
+    ).toHaveTextContent("Dollar softened.")
+  })
 
   it("keeps the current market code in typed locale-switcher links", async () => {
     await renderLocalized(

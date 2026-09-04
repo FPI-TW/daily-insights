@@ -7,7 +7,12 @@ import pytest
 
 from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary, SelectedCandidate
 from daily_insights_api.modules.news.extraction import FetchedCandidate
-from daily_insights_api.modules.news.llm import DeepSeekClient, ModelCallError, ModelOutputError
+from daily_insights_api.modules.news.llm import (
+    DeepSeekClient,
+    ModelCallError,
+    ModelOutputError,
+    numeric_facts_grounded,
+)
 from daily_insights_api.modules.news.prompts import SelectionCriteria
 from daily_insights_api.modules.news.service import _failed_audit
 
@@ -74,7 +79,10 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
     # The closed vocabularies shown to the model must match the validated contract.
     fields = SelectedCandidate.model_fields
     assert set(contract["topic"]) == set(get_args(fields["topic"].annotation))
-    assert set(contract["market"]) == set(get_args(fields["market"].annotation))
+    # The default (global) policy narrows the market vocabulary to its own tag,
+    # which must still be one of the validated contract's values.
+    assert set(contract["market"]) == {"global"}
+    assert set(contract["market"]) <= set(get_args(fields["market"].annotation))
     prompt_candidates = captured["CANDIDATES"]
     assert isinstance(prompt_candidates, list)
     assert [item["headline"] for item in prompt_candidates] == [value[1] for value in values]
@@ -281,3 +289,18 @@ async def test_client_reuses_one_transport_and_closes_it(monkeypatch: pytest.Mon
     assert len(created) == 1
     assert created[0].posts == 2
     assert created[0].closed is True
+
+
+def test_numeric_grounding_matches_values_across_formats_and_magnitudes() -> None:
+    source = (
+        "Bitcoin ETFs took in $731 million on Thursday as gold rose 2% to $4,510 and "
+        "turnover reached NT$993.3 billion; the 10-year yield touched 4.8%."
+    )
+    assert numeric_facts_grounded("比特幣 ETF 單日流入 7.31 億美元, 黃金漲 2% 至 4510 美元", source)
+    assert numeric_facts_grounded("成交額 9933 億元, 十年期殖利率 4.8%", source)
+    assert numeric_facts_grounded("流入 \uff17\uff13\uff11 million 美元", source)
+    # A number the source never states, in any form, is still fabrication.
+    assert not numeric_facts_grounded("比特幣 ETF 流入 7.5 億美元", source)
+    assert not numeric_facts_grounded("黃金漲 3%", source)
+    # Percent and plain values are different facts: 2% is not "2".
+    assert not numeric_facts_grounded("2 家公司", "Turnover rose 2% today.")

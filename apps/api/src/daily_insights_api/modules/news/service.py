@@ -146,17 +146,38 @@ def _failed_audit(
     )
 
 
+def _interleave_by_host[T](items: list[T], host_of: Callable[[T], str]) -> list[T]:
+    """Round-robin across hosts, keeping each host's own order.
+
+    Hosts are visited in the order of their first (best-ranked) item, so the
+    overall ranking still decides who leads while no single host can fill
+    the list on its own.
+    """
+    queues: dict[str, list[T]] = {}
+    for item in items:
+        queues.setdefault(host_of(item), []).append(item)
+    result: list[T] = []
+    while queues:
+        for host in list(queues):
+            result.append(queues[host].pop(0))
+            if not queues[host]:
+                del queues[host]
+    return result
+
+
 def _cap_discovery(
     candidates: list[Candidate],
     *,
     per_source: int = MAX_DISCOVERY_PER_SOURCE,
     total: int | None = None,
     full_text_ids: frozenset[str] = frozenset(),
+    interleave: bool = False,
 ) -> list[Candidate]:
     """Bound the articles fetched per source and in total, newest first.
 
     Candidates whose body already arrived with the feed are ranked ahead of
-    the rest: they cost no fetch, so the total budget favours them.
+    the rest: they cost no fetch, so the total budget favours them. With
+    ``interleave`` the budget is spread across sources in turn.
     """
     ordered = sorted(
         candidates,
@@ -167,6 +188,8 @@ def _cap_discovery(
             str(candidate.url),
         ),
     )
+    if interleave:
+        ordered = _interleave_by_host(ordered, lambda candidate: candidate.hostname)
     per_host: dict[str, int] = {}
     capped: list[Candidate] = []
     for candidate in ordered:
@@ -184,6 +207,7 @@ def _limit_candidates(
     *,
     total: int = MAX_CANDIDATES,
     per_source: int = MAX_CANDIDATES_PER_SOURCE,
+    interleave: bool = False,
 ) -> list[FetchedCandidate]:
     """Keep the freshest candidates while bounding any single source.
 
@@ -202,6 +226,8 @@ def _limit_candidates(
         )
 
     ordered = sorted(usable, key=sort_key)
+    if interleave:
+        ordered = _interleave_by_host(ordered, lambda fetched: fetched.candidate.hostname)
     per_host: dict[str, int] = {}
     limited: list[FetchedCandidate] = []
     for fetched in ordered:
@@ -315,6 +341,7 @@ async def run_news_edition(
         per_source=spec.max_discovery_per_source,
         total=spec.max_discovery_total,
         full_text_ids=frozenset(bodies),
+        interleave=spec.interleave_sources,
     )
     emit_event("news.candidates.merged", market=market_code, total=len(candidates))
     usable = (
@@ -322,7 +349,12 @@ async def run_news_edition(
         if candidates
         else []
     )
-    usable = _limit_candidates(usable, total=spec.max_candidates, per_source=spec.max_per_source)
+    usable = _limit_candidates(
+        usable,
+        total=spec.max_candidates,
+        per_source=spec.max_per_source,
+        interleave=spec.interleave_sources,
+    )
     emit_event("news.sources.usable", market=market_code, count=len(usable))
     model_name = client.model_name
     selection_prompt_digest = client.selection_prompt_digest
@@ -402,7 +434,11 @@ async def run_news_edition(
             return edition.status
         selected = {fetched.candidate.id: fetched for fetched in usable}
         complete_count = 0
+        # Selections are ranked; reserves past target_items are summarised only
+        # while earlier stories keep failing verification.
         for selected_item in selection_call.value.selections:
+            if complete_count >= spec.target_items:
+                break
             fetched = selected[selected_item.id]
             summaries: dict[str, LocalizedSummary] = {}
             try:

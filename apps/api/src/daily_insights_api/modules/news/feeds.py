@@ -48,9 +48,13 @@ KEPT_LANGUAGES = frozenset({"en", "zh-cn", "zh-tw", "ja", "ko"})
 GLOBAL = frozenset({GLOBAL_MARKET})
 TAIWAN = frozenset({"tw_equity"})
 US_AND_GLOBAL = frozenset({GLOBAL_MARKET, "us_equity"})
-# cn_equity / hk_equity have no edition yet; the tags pre-sort sources for them.
-CHINA = frozenset({GLOBAL_MARKET, "cn_equity"})
-HONG_KONG = frozenset({GLOBAL_MARKET, "hk_equity"})
+# The global digest reads English-native sources only, so Chinese, Japanese
+# and Korean publishers carry their own (still dormant) market tags and stay
+# out of it; those tags pre-sort sources for future editions.
+CHINA = frozenset({"cn_equity"})
+HONG_KONG = frozenset({"hk_equity"})
+JAPAN = frozenset({"jp_equity"})
+KOREA = frozenset({"kr_equity"})
 # langdetect is non-deterministic unless seeded.
 DetectorFactory.seed = 0
 _SITEMAP_NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
@@ -143,6 +147,10 @@ _GLOBENEWSWIRE_PATTERN = (
     r"^https://www\.globenewswire\.com/news-release/\d{4}/\d{2}/\d{2}/\d+/\d+/[a-z]{2}/.+$"
 )
 _CNYES_PATTERN = r"^https://news\.cnyes\.com/news/id/\d+$"
+_CNBC_PATTERN = r"^https://www\.cnbc\.com/\d{4}/\d{2}/\d{2}/[a-z0-9-]+\.html$"
+_GUARDIAN_PATTERN = (
+    r"^https://www\.theguardian\.com/[a-z-]+(/[a-z-]+)?/\d{4}/[a-z]{3}/\d{2}/[a-z0-9-]+$"
+)
 _ETNET_PATTERN = (
     r"^https://www\.etnet\.com\.hk/www/tc/news/home_categorized_news_detail\.php\?newsid=ETN\d+$"
 )
@@ -151,10 +159,11 @@ _UDN_PATTERN = r"^https://money\.udn\.com/money/story/\d+/\d+$"
 
 # Every source names the article host (``hostname``) explicitly, even when the
 # feed lives elsewhere (feedburner, CDN, API hosts), because the allowlist is
-# derived from these hostnames. Reuters, CNBC, BBC and AP are deliberately
-# absent: they answer non-browser requests with 401/403 or block crawlers via
-# robots.txt, so discovered links could never be extracted. Verified live on
-# 2026-09-03; see docs/architecture/daily-news.md for what was left out.
+# derived from these hostnames. Reuters, BBC and AP are deliberately absent:
+# they answer non-browser requests with 401/403 or block crawlers via
+# robots.txt, so discovered links could never be extracted; WSJ, MarketWatch,
+# Investing.com and Forbes were dropped for the same reason. Verified live on
+# 2026-09-03 and 2026-09-04; see docs/architecture/daily-news.md.
 FEED_SOURCES: tuple[FeedSource, ...] = (
     # --- Chinese flash APIs (poll_group flash) -------------------------------
     FeedSource(
@@ -301,6 +310,7 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "https://news.cnyes.com/rss/v1/news/category/headline",
         "rss",
         _CNYES_PATTERN,
+        markets=TAIWAN,
         display_name="鉅亨",
         poll_group="fast",
     ),
@@ -309,7 +319,7 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "https://news.cnyes.com/rss/v1/news/category/wd_stock",
         "rss",
         _CNYES_PATTERN,
-        markets=US_AND_GLOBAL,
+        markets=frozenset({"us_equity"}),
         max_items=20,
         display_name="鉅亨",
         poll_group="fast",
@@ -350,16 +360,8 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         display_name="ETtoday 財經",
         poll_group="fast",
     ),
-    # One feed, two article hosts: the general site and its finance edition.
-    FeedSource(
-        "technews.tw",
-        "https://cdn.technews.tw/feed/",
-        "rss",
-        r"^https://technews\.tw/\d{4}/\d{2}/\d{2}/[a-z0-9-]+/$",
-        markets=TAIWAN,
-        display_name="科技新報",
-        poll_group="fast",
-    ),
+    # The general TechNews site (climate, gadgets, science) diluted the Taiwan
+    # edition; only its finance edition feeds the market.
     FeedSource(
         "finance.technews.tw",
         "https://cdn.technews.tw/feed/",
@@ -503,6 +505,7 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "https://toyokeizai.net/list/feed/rss",
         "rss",
         r"^https://toyokeizai\.net/articles/-/\d+$",
+        markets=JAPAN,
         display_name="東洋経済",
     ),
     FeedSource(
@@ -510,6 +513,7 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "https://diamond.jp/list/feed/rss/dol",
         "rss",
         r"^https://diamond\.jp/articles/-/\d+$",
+        markets=JAPAN,
         display_name="ダイヤモンド",
     ),
     # Mostly press releases under /pr/, which the pattern excludes.
@@ -518,6 +522,7 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "https://www.kyodo.co.jp/feed/",
         "rss",
         r"^https://www\.kyodo\.co\.jp/(?!pr/)[a-z]+/\d{4}-\d{2}-\d{2}_\d+/$",
+        markets=JAPAN,
         display_name="共同通信",
     ),
     # RSS 1.0 mirror of Nikkei's headlines; items are dated with dc:date.
@@ -526,6 +531,7 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "https://assets.wor.jp/rss/rdf/nikkei/news.rdf",
         "rss",
         r"^https://www\.nikkei\.com/article/[A-Z0-9]+/$",
+        markets=JAPAN,
         display_name="日本経済新聞",
     ),
     FeedSource(
@@ -533,6 +539,7 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "https://www.hankyung.com/feed/finance",
         "rss",
         _HANKYUNG_PATTERN,
+        markets=KOREA,
         display_name="한국경제",
     ),
     FeedSource(
@@ -540,53 +547,104 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "https://www.hankyung.com/feed/economy",
         "rss",
         _HANKYUNG_PATTERN,
+        markets=KOREA,
         display_name="한국경제",
     ),
-    # --- English and newswires ---------------------------------------------------
+    # --- English-native sources for the global digest (verified 2026-09-04:
+    # feeds answer 200 and article pages extract with the bot User-Agent) ----
     FeedSource(
-        "www.wsj.com",
-        "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain",
+        "www.theguardian.com",
+        "https://www.theguardian.com/uk/business/rss",
         "rss",
-        r"^https://www\.wsj\.com/[a-z-]+/.+$",
+        _GUARDIAN_PATTERN,
         markets=US_AND_GLOBAL,
         max_items=20,
-        display_name="The Wall Street Journal",
+        display_name="The Guardian",
     ),
     FeedSource(
-        "www.marketwatch.com",
-        "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+        "www.theguardian.com",
+        "https://www.theguardian.com/world/rss",
         "rss",
-        r"^https://www\.marketwatch\.com/story/[a-z0-9-]+$",
-        markets=US_AND_GLOBAL,
-        display_name="MarketWatch",
-    ),
-    # pubDate carries no offset; the feed publishes UTC.
-    FeedSource(
-        "www.investing.com",
-        "https://www.investing.com/rss/news.rss",
-        "rss",
-        r"^https://www\.investing\.com/news/[a-z-]+/[a-z0-9-]+$",
-        markets=US_AND_GLOBAL,
-        display_name="Investing.com",
-        naive_time_zone="UTC",
+        _GUARDIAN_PATTERN,
+        max_items=20,
+        display_name="The Guardian",
     ),
     FeedSource(
-        "www.investing.com",
-        "https://www.investing.com/rss/news_25.rss",
+        "www.cnbc.com",
+        "https://www.cnbc.com/id/100003114/device/rss/rss.html",
         "rss",
-        r"^https://www\.investing\.com/news/[a-z-]+/[a-z0-9-]+$",
+        _CNBC_PATTERN,
         markets=US_AND_GLOBAL,
-        display_name="Investing.com",
-        naive_time_zone="UTC",
+        max_items=20,
+        display_name="CNBC",
     ),
-    # content:encoded exists but only holds the summary, so it is plain RSS.
     FeedSource(
-        "www.forbes.com",
-        "https://www.forbes.com/business/feed/",
+        "www.cnbc.com",
+        "https://www.cnbc.com/id/100727362/device/rss/rss.html",
         "rss",
-        r"^https://www\.forbes\.com/sites/[a-z0-9-]+/\d{4}/\d{2}/\d{2}/[a-z0-9-]+/$",
+        _CNBC_PATTERN,
+        display_name="CNBC",
+    ),
+    FeedSource(
+        "www.cnbc.com",
+        "https://www.cnbc.com/id/20910258/device/rss/rss.html",
+        "rss",
+        _CNBC_PATTERN,
         markets=US_AND_GLOBAL,
-        display_name="Forbes",
+        display_name="CNBC",
+    ),
+    FeedSource(
+        "www.cnbc.com",
+        "https://www.cnbc.com/id/10000664/device/rss/rss.html",
+        "rss",
+        _CNBC_PATTERN,
+        markets=US_AND_GLOBAL,
+        display_name="CNBC",
+    ),
+    FeedSource(
+        "finance.yahoo.com",
+        "https://finance.yahoo.com/news/rssindex",
+        "rss",
+        r"^https://finance\.yahoo\.com/(news|[a-z-]+/articles)/[a-z0-9-]+(\.html)?$",
+        markets=US_AND_GLOBAL,
+        max_items=20,
+        display_name="Yahoo Finance",
+    ),
+    # FX and rates commentary; the feed is macro-only.
+    FeedSource(
+        "www.fxstreet.com",
+        "https://www.fxstreet.com/rss/news",
+        "rss",
+        r"^https://www\.fxstreet\.com/news/[a-z0-9-]+$",
+        max_items=20,
+        display_name="FXStreet",
+    ),
+    # Site-wide feed; the pattern keeps the economy desk only.
+    FeedSource(
+        "www.aljazeera.com",
+        "https://www.aljazeera.com/xml/rss/all.xml",
+        "rss",
+        r"^https://www\.aljazeera\.com/economy/\d{4}/\d{1,2}/\d{1,2}/[a-z0-9-]+$",
+        display_name="Al Jazeera",
+    ),
+    # Primary sources: central bank releases carry no publish time in the
+    # page, so they rank after dated items but are never stale by policy.
+    FeedSource(
+        "www.federalreserve.gov",
+        "https://www.federalreserve.gov/feeds/press_all.xml",
+        "rss",
+        r"^https://www\.federalreserve\.gov/newsevents/pressreleases/[a-z0-9]+\.htm$",
+        markets=US_AND_GLOBAL,
+        display_name="Federal Reserve",
+        max_age_hours=72,
+    ),
+    FeedSource(
+        "www.ecb.europa.eu",
+        "https://www.ecb.europa.eu/rss/press.html",
+        "rss",
+        r"^https://www\.ecb\.europa\.eu/+press/.+\.html$",
+        display_name="European Central Bank",
+        max_age_hours=72,
     ),
     # /.rss/full/ answers 308 to this feed id; the redirect target is used
     # directly because feed reads refuse redirects.
@@ -651,7 +709,7 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "www.theguardian.com",
         f"https://content.guardianapis.com/search?section=business&{_GUARDIAN_FIELDS}",
         "json_list",
-        r"^https://www\.theguardian\.com/[a-z-]+/\d{4}/[a-z]{3}/\d{2}/[a-z0-9-]+$",
+        _GUARDIAN_PATTERN,
         markets=US_AND_GLOBAL,
         display_name="The Guardian",
         provides_full_text=True,
@@ -663,7 +721,7 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "www.theguardian.com",
         f"https://content.guardianapis.com/search?section=world&{_GUARDIAN_FIELDS}",
         "json_list",
-        r"^https://www\.theguardian\.com/[a-z-]+/\d{4}/[a-z]{3}/\d{2}/[a-z0-9-]+$",
+        _GUARDIAN_PATTERN,
         display_name="The Guardian",
         provides_full_text=True,
         mapping=_GUARDIAN,
@@ -674,7 +732,7 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         "www.theguardian.com",
         f"https://content.guardianapis.com/search?section=politics&{_GUARDIAN_FIELDS}",
         "json_list",
-        r"^https://www\.theguardian\.com/[a-z-]+/\d{4}/[a-z]{3}/\d{2}/[a-z0-9-]+$",
+        _GUARDIAN_PATTERN,
         display_name="The Guardian",
         provides_full_text=True,
         mapping=_GUARDIAN,

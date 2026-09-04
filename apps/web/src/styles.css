@@ -25,6 +25,12 @@
   --market-up: #d6453f;
   --market-down: #2f9e69;
   --market-caution: #c98a2b;
+  /* Chart series: five hues that stay distinct on one chart. */
+  --chart-1: #2563eb;
+  --chart-2: #e0862b;
+  --chart-3: #159e84;
+  --chart-4: #7c5cd6;
+  --chart-5: #7d8a87;
   --background: #ffffff;
   --foreground: #1d2b2a;
   --card: #ffffff;
@@ -68,6 +74,11 @@
   --market-up: #f16c63;
   --market-down: #53bd84;
   --market-caution: #dfad58;
+  --chart-1: #6ea2ff;
+  --chart-2: #f2a45a;
+  --chart-3: #2bc5a7;
+  --chart-4: #a58bf0;
+  --chart-5: #9aa8a4;
   --background: #0e1413;
   --foreground: #e6edeb;
   --card: #161d1c;

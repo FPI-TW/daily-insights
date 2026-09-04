@@ -21,6 +21,17 @@ class SelectionPolicy:
     min_topics: int
     min_markets: int
     market_focus: str | None = None
+    # Market editions accept only their own market tag; anything else the
+    # model picks is dropped before the limits are enforced. None means any.
+    allowed_markets: frozenset[str] | None = None
+    # Extra ranked picks the model may return beyond max_items. They are only
+    # summarised when an earlier story fails verification, so a dropped
+    # number no longer costs the edition a slot.
+    reserve_items: int = 2
+
+    @property
+    def selection_limit(self) -> int:
+        return self.max_items + self.reserve_items
 
 
 @dataclass(frozen=True)
@@ -34,6 +45,10 @@ class EditionSpec:
     # Upper bound on articles extracted per run; full-text candidates are kept
     # first because they cost no fetch.
     max_discovery_total: int = 80
+    # Take candidates from sources in turn instead of newest-first overall. The
+    # global digest needs this: its flash feeds publish dozens of items an hour
+    # and would otherwise fill every slot before a slower wire gets one.
+    interleave_sources: bool = False
 
     @property
     def is_global(self) -> bool:
@@ -46,7 +61,25 @@ GLOBAL_SPEC = EditionSpec(
     max_candidates=20,
     max_per_source=5,
     max_discovery_per_source=5,
-    selection=SelectionPolicy(max_items=5, max_per_domain=2, min_topics=2, min_markets=2),
+    interleave_sources=True,
+    selection=SelectionPolicy(
+        max_items=5,
+        max_per_domain=2,
+        min_topics=2,
+        min_markets=1,
+        market_focus=(
+            "This is the global macro digest for a cross-market audience: central bank "
+            "decisions and guidance, inflation and growth data, rates and yields, FX, "
+            "energy and commodities, geopolitical or trade events with market-wide impact, "
+            "and cross-border capital flows. Hard rule: select only stories whose impact "
+            "reaches investors across regions and tag every selection market 'global'; a "
+            "story that matters mainly to one country or region (a local listed company, "
+            "a domestic policy, one exchange's session) belongs to that market's edition "
+            "and must not be selected even if the remaining candidates are weaker."
+        ),
+        # The digest is deliberately region-neutral: only cross-market stories.
+        allowed_markets=frozenset({"global"}),
+    ),
 )
 
 TW_EQUITY_SPEC = EditionSpec(
@@ -64,8 +97,12 @@ TW_EQUITY_SPEC = EditionSpec(
             "Taiwan equities: TWSE and TPEx listed companies, TAIEX and Taiwan index "
             "futures, foreign institutional flows, the semiconductor and electronics "
             "supply chain, Taiwan central bank and FSC policy, and global events with a "
-            "direct Taiwan market impact. Use market 'taiwan' for Taiwan-specific stories."
+            "direct Taiwan market impact. Use market 'taiwan' for Taiwan-specific stories. "
+            "Hard rule: a story with no direct link to Taiwan-listed companies or the "
+            "Taiwan market (weather, entertainment, general science, lifestyle) must not "
+            "be selected even if every other candidate is weaker; leave the slot empty."
         ),
+        allowed_markets=frozenset({"taiwan"}),
     ),
 )
 
@@ -83,8 +120,11 @@ US_EQUITY_SPEC = EditionSpec(
         market_focus=(
             "US equities: S&P 500, Nasdaq and Dow moves, listed-company earnings and "
             "guidance, Federal Reserve policy, US macro data, and sector or mega-cap "
-            "developments. Use market 'us' for US-specific stories."
+            "developments. Use market 'us' for US-specific stories. Hard rule: a story "
+            "with no direct link to US-listed companies or US markets must not be "
+            "selected; leave the slot empty instead."
         ),
+        allowed_markets=frozenset({"us"}),
     ),
 )
 

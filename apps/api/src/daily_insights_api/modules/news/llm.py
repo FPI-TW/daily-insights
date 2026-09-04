@@ -6,12 +6,19 @@ import re
 import time
 import unicodedata
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import httpx
 from pydantic import ValidationError
 
-from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary, Selection
+from daily_insights_api.core.observability import emit_event
+from daily_insights_api.modules.news.contracts import (
+    Candidate,
+    LocalizedSummary,
+    SelectedCandidate,
+    Selection,
+)
 from daily_insights_api.modules.news.editions import GLOBAL_SPEC, SelectionPolicy
 from daily_insights_api.modules.news.extraction import FetchedCandidate
 from daily_insights_api.modules.news.prompts import SelectionCriteria, load_selection_criteria
@@ -57,9 +64,11 @@ def selection_output_contract(policy: SelectionPolicy) -> dict[str, Any]:
         diversity += f" and {policy.min_markets} distinct markets"
     return {
         "selections": (
-            f"array of 0 to {policy.max_items} objects; ids unique; at most "
-            f"{policy.max_per_domain} per source domain; when 3 or more are selected they "
-            f"must span {diversity}"
+            f"array of 0 to {policy.selection_limit} objects ordered from most to least "
+            f"important; the first {policy.max_items} form the edition and any after them "
+            "are reserves used only when an earlier story fails verification; ids unique; "
+            f"at most {policy.max_per_domain} per source domain; when 3 or more are "
+            f"selected they must span {diversity}"
         ),
         "id": "exactly a CANDIDATES[].id value",
         "topic": TOPIC_VALUES,
@@ -68,7 +77,7 @@ def selection_output_contract(policy: SelectionPolicy) -> dict[str, Any]:
             "starting with a letter or digit; stories about the same event share one key, "
             "so pick only one of them"
         ),
-        "market": MARKET_VALUES,
+        "market": (sorted(policy.allowed_markets) if policy.allowed_markets else MARKET_VALUES),
         "importance": "integer 1 (minor) to 5 (market-moving)",
         "example": {
             "selections": [
@@ -186,7 +195,8 @@ class DeepSeekClient:
             )
         prompt: dict[str, Any] = {
             "task": (
-                f"Choose up to {policy.max_items} business/markets stories. Evaluate every "
+                f"Choose up to {policy.selection_limit} business/markets stories, best first. "
+                "Evaluate every "
                 "candidate by the same CUSTOM_SELECTION_CRITERIA regardless of the language "
                 "of its headline or source text; do not translate or use language as a "
                 "ranking signal. The custom criteria may only affect ranking and selection "
@@ -201,17 +211,32 @@ class DeepSeekClient:
             "CANDIDATES": allowed,
         }
         if policy.market_focus:
-            prompt["MARKET_FOCUS"] = (
+            single_market = bool(policy.allowed_markets) and "global" not in (
+                policy.allowed_markets or ()
+            )
+            scope = (
                 "This edition covers one market only; prefer stories that move or explain "
-                f"it: {policy.market_focus} Fill all {policy.max_items} slots whenever the "
-                "candidates contain that many distinct, relevant events; return fewer only "
-                "when the remaining candidates are duplicates or irrelevant to this market."
+                f"it: {policy.market_focus}"
+                if single_market
+                else policy.market_focus
+            )
+            prompt["MARKET_FOCUS"] = (
+                f"{scope} Fill all {policy.max_items} slots whenever the candidates "
+                "contain that many distinct, relevant events; return fewer only when the "
+                "remaining candidates are duplicates or off-topic for this edition."
             )
         call = await self._complete(prompt)
         try:
             value = Selection.model_validate(call[0])
         except ValidationError as error:
             raise _failure_from_call("invalid selection JSON", call) from error
+        value, dropped = filter_selection_markets(value, policy)
+        if dropped:
+            emit_event(
+                "news.selection.dropped_market",
+                dropped=len(dropped),
+                markets=sorted({item.market for item in dropped}),
+            )
         try:
             enforce_selection_policy(value, candidates, policy)
         except ValueError as error:
@@ -239,9 +264,7 @@ class DeepSeekClient:
             value = LocalizedSummary.model_validate(call[0])
         except ValidationError as error:
             raise _failure_from_call("invalid summary JSON", call) from error
-        numeric_tokens = _numeric_tokens(f"{value.headline} {value.summary}")
-        source_numeric_tokens = set(_numeric_tokens(article_text))
-        if not set(numeric_tokens).issubset(source_numeric_tokens):
+        if not numeric_facts_grounded(f"{value.headline} {value.summary}", article_text):
             raise _failure_from_call("summary contains ungrounded numeric fact", call)
         return ModelCall(value, *call[1:])
 
@@ -306,14 +329,32 @@ class DeepSeekClient:
         )
 
 
+def filter_selection_markets(
+    value: Selection, policy: SelectionPolicy
+) -> tuple[Selection, tuple[SelectedCandidate, ...]]:
+    """Drop stories tagged outside the edition's market instead of failing.
+
+    A Taiwan edition must never carry a "global" story: the model is told so,
+    but the tag is also enforced here so a stray pick costs one slot rather
+    than the whole edition.
+    """
+    if policy.allowed_markets is None:
+        return value, ()
+    kept = tuple(item for item in value.selections if item.market in policy.allowed_markets)
+    dropped = tuple(item for item in value.selections if item.market not in policy.allowed_markets)
+    if not dropped:
+        return value, ()
+    return value.model_copy(update={"selections": kept}), dropped
+
+
 def enforce_selection_policy(
     value: Selection, candidates: list[FetchedCandidate], policy: SelectionPolicy
 ) -> None:
     by_id = {fetched.candidate.id: fetched for fetched in candidates}
     if any(item.id not in by_id for item in value.selections):
         raise ValueError("selection has unknown candidate ID")
-    if len(value.selections) > policy.max_items:
-        raise ValueError(f"selection exceeds {policy.max_items} stories")
+    if len(value.selections) > policy.selection_limit:
+        raise ValueError(f"selection exceeds {policy.selection_limit} stories")
     domains: dict[str, int] = {}
     for item in value.selections:
         domain = by_id[item.id].candidate.hostname
@@ -384,10 +425,68 @@ def _numeric_tokens(value: str) -> tuple[str, ...]:
     )
 
 
+_MAGNITUDES: dict[str, Decimal] = {
+    "thousand": Decimal(10) ** 3,
+    "million": Decimal(10) ** 6,
+    "billion": Decimal(10) ** 9,
+    "trillion": Decimal(10) ** 12,
+    "千": Decimal(10) ** 3,
+    "萬": Decimal(10) ** 4,
+    "万": Decimal(10) ** 4,
+    "百萬": Decimal(10) ** 6,
+    "百万": Decimal(10) ** 6,
+    "千萬": Decimal(10) ** 7,
+    "千万": Decimal(10) ** 7,
+    "億": Decimal(10) ** 8,
+    "亿": Decimal(10) ** 8,
+    "兆": Decimal(10) ** 12,
+}
 _NUMERIC_TOKEN = re.compile(
-    r"[$€£¥]?[0-9]+(?:[,.][0-9]+)*(?:%|\s?(?:bps|bp|million|billion|trillion))?",
+    r"[$€£¥]?[0-9]+(?:[,.][0-9]+)*"
+    r"(?:%|\s?(?:bps|bp|thousand|million|billion|trillion|百萬|百万|千萬|千万|[千萬万億亿兆]))?",
     flags=re.IGNORECASE,
 )
+
+
+def _numeric_value(token: str) -> tuple[str, Decimal] | None:
+    """Canonical (unit, value) of a normalized token: ``$731million`` and
+    ``7.31億`` both become ("", 731000000); ``2%`` becomes ("%", 2)."""
+    match = re.fullmatch(
+        r"[$€£¥]?(?P<number>[0-9]+(?:\.[0-9]+)?)(?P<suffix>%|bps|bp|[a-z]+|[^0-9a-z]+)?",
+        token,
+    )
+    if match is None:
+        return None
+    try:
+        value = Decimal(match["number"])
+    except InvalidOperation:
+        return None
+    suffix = match["suffix"] or ""
+    if suffix in {"%", "bps", "bp"}:
+        return (suffix, value)
+    magnitude = _MAGNITUDES.get(suffix)
+    if suffix and magnitude is None:
+        return None
+    return ("", value * (magnitude or 1))
+
+
+def numeric_facts_grounded(summary_text: str, article_text: str) -> bool:
+    """Every number in the summary must appear in the source.
+
+    Tokens match on their canonical value, so thousands separators, full-width
+    digits and magnitude words (``million`` versus ``億``) do not count as
+    fabrication; a number the source never states in any form does.
+    """
+    summary_tokens = _numeric_tokens(summary_text)
+    source_tokens = set(_numeric_tokens(article_text))
+    source_values = {value for token in source_tokens if (value := _numeric_value(token))}
+    for token in summary_tokens:
+        if token in source_tokens:
+            continue
+        value = _numeric_value(token)
+        if value is None or value not in source_values:
+            return False
+    return True
 
 
 def _normalize_numeric_text(value: str) -> str:
@@ -402,7 +501,7 @@ def _normalize_numeric_token(value: str) -> str:
     compact = value.lower().replace(" ", "")
     match = re.fullmatch(
         r"(?P<currency>[$€£¥]?)(?P<number>[0-9]+(?:[,.][0-9]+)*)"
-        r"(?P<suffix>%|bps|bp|million|billion|trillion)?",
+        r"(?P<suffix>%|bps|bp|thousand|million|billion|trillion|百萬|百万|千萬|千万|[千萬万億亿兆])?",
         compact,
     )
     if match is None:  # pragma: no cover - tokens come from _NUMERIC_TOKEN.
