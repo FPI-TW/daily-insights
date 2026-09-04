@@ -122,7 +122,7 @@ class LaunchManifest(ManifestModel):
 
 
 ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
-    version="three-market.v5",
+    version="three-market.v6",
     provider="twelve_data",
     markets=(
         MarketManifest(
@@ -142,6 +142,23 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
                         "zh-hant": "商品快照",
                         "zh-hans": "商品快照",
                         "en": "Commodity snapshot",
+                    },
+                ),
+                BlockManifest(
+                    id="macro.rates_fx",
+                    kind="metric",
+                    datasets=("macro.rates_fx_quotes",),
+                    formula=(
+                        "fixed basket of Treasury and dollar-index ETFs plus USD/TWD, USD/JPY "
+                        "and EUR/USD spot; latest provider quote close; percent change="
+                        "(close-previous_close)/previous_close*100"
+                    ),
+                    unit_code="provider_quote_currency",
+                    precision=4,
+                    labels={
+                        "zh-hant": "利率與匯率",
+                        "zh-hans": "利率与汇率",
+                        "en": "Rates and FX",
                     },
                 ),
                 BlockManifest(
@@ -244,6 +261,26 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
             # Without type=commodity the provider resolves HG1 to Homag Group AG
             # (Frankfurt, EUR); the commodity class is copper spot quoted in USD.
             symbol_types={"HG1": "commodity"},
+            required_fields=("close", "previous_close", "timestamp"),
+            timezone="UTC derived from provider Unix timestamp",
+            day_boundary="UTC calendar date of provider timestamp",
+            freshness="latest completed provider quote",
+        ),
+        # Treasury ETFs stand in for yields (the provider has no exact curve
+        # symbols) and UUP for the dollar index; FX pairs quote in the second
+        # currency of the pair.
+        DatasetManifest(
+            key="macro.rates_fx_quotes",
+            endpoint="/quote",
+            symbols=("TLT", "IEF", "UUP", "USD/TWD", "USD/JPY", "EUR/USD"),
+            symbol_units={
+                "TLT": "USD",
+                "IEF": "USD",
+                "UUP": "USD",
+                "USD/TWD": "TWD",
+                "USD/JPY": "JPY",
+                "EUR/USD": "USD",
+            },
             required_fields=("close", "previous_close", "timestamp"),
             timezone="UTC derived from provider Unix timestamp",
             day_boundary="UTC calendar date of provider timestamp",
