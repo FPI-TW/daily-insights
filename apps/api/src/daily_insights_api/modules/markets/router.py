@@ -100,7 +100,8 @@ async def list_index_daily_bars(
     visible = await _readable_index_markets(database, context)
     # Unknown and hidden look the same, as /api/reports does: a 404 reveals
     # nothing about which markets an organization's contract excludes.
-    if INDEX_MARKETS.get(symbol) not in visible:
+    expected_market = INDEX_MARKETS.get(symbol)
+    if expected_market is None or expected_market not in visible:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "index not found")
     end = end or datetime.now(TAIPEI).date()
     if start is None:
@@ -117,4 +118,10 @@ async def list_index_daily_bars(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             f"date range must not exceed {MAX_BARS_RANGE_YEARS} years",
         )
-    return await index_daily_bars(database, symbol=symbol, start=start, end=end)
+    return await index_daily_bars(
+        database,
+        symbol=symbol,
+        market_code=expected_market,
+        start=start,
+        end=end,
+    )

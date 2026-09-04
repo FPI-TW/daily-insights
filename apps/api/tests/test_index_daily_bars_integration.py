@@ -118,6 +118,33 @@ async def _store_as(
     )
 
 
+async def _insert_raw_bar(
+    database: AsyncSession,
+    *,
+    symbol: str,
+    market_code: str,
+    close: str,
+) -> None:
+    """Seed a legacy/corrupt valid-market row that bypasses application writes."""
+    database.add(IndexDailyBarSeries(symbol=symbol, provider="yfinance"))
+    await database.flush()
+    database.add(
+        IndexDailyBar(
+            symbol=symbol,
+            trade_date=date(2026, 9, 1),
+            market_code=market_code,
+            open=Decimal("100.0"),
+            high=Decimal("101.0"),
+            low=Decimal("99.0"),
+            close=Decimal(close),
+            volume=1_000,
+            provider="yfinance",
+            contract_version="test",
+            source_fetched_at=FETCHED_AT,
+        )
+    )
+
+
 async def test_overlapping_fetches_upsert_instead_of_duplicating(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -164,13 +191,32 @@ async def test_nonpositive_close_is_rejected_by_the_database(
             await _store(database, [_bar(date(2026, 9, 1), "0")])
 
 
-async def test_unknown_market_code_is_rejected_by_the_database(
+async def test_malformed_market_code_is_rejected_before_database_writes(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     bar = _bar(date(2026, 9, 1), "100.0").model_copy(update={"market": "not_a_market"})
-    with pytest.raises(IntegrityError):
+    with pytest.raises(ValueError, match="does not match its catalog market"):
         async with session_factory.begin() as database:
             await _store(database, [bar])
+
+
+async def test_store_rejects_a_catalog_market_mismatch_before_writing(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    valid_but_wrong_market = _bar(date(2026, 9, 1), "100.0").model_copy(
+        update={"market": "us_equity"}
+    )
+    malformed_market = _bar(date(2026, 9, 2), "200.0").model_copy(update={"market": "not_a_market"})
+
+    async with session_factory.begin() as database:
+        with pytest.raises(ValueError, match="does not match its catalog market"):
+            await _store(database, [valid_but_wrong_market])
+        with pytest.raises(ValueError, match="does not match its catalog market"):
+            await _store(database, [malformed_market])
+
+    async with session_factory() as database:
+        assert await database.scalar(select(func.count()).select_from(IndexDailyBar)) == 0
+        assert await database.scalar(select(func.count()).select_from(IndexDailyBarSeries)) == 0
 
 
 class _StubAdapter:
@@ -218,9 +264,9 @@ def _symbol_bar(symbol: str, market: str, close: str) -> DailyBar:
 async def test_a_failing_symbol_does_not_roll_back_the_others(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    # ^HSI carries an unknown market code, so its insert violates the foreign
-    # key. It sits between two healthy symbols to prove the batch neither loses
-    # what came before it nor stops writing what comes after.
+    # ^HSI carries an unknown market code. It sits between two healthy symbols
+    # to prove the batch neither loses what came before it nor stops writing
+    # what comes after.
     results = {
         "^DJI": _result("^DJI", "us_equity", (_symbol_bar("^DJI", "us_equity", "100.0"),)),
         "^HSI": _result("^HSI", "hk_equity", (_symbol_bar("^HSI", "not_a_market", "200.0"),)),
@@ -238,7 +284,7 @@ async def test_a_failing_symbol_does_not_roll_back_the_others(
 
     assert [entry.result.symbol for entry in refreshed] == ["^DJI", "^TWII"]
     assert [entry.symbol for entry in failures] == ["^HSI"]
-    assert "IntegrityError" in failures[0].error
+    assert "ValueError" in failures[0].error
 
     async with session_factory() as database:
         stored = (await database.scalars(select(IndexDailyBar.symbol))).all()
@@ -286,7 +332,9 @@ class _SlowStubAdapter:
         finally:
             self.in_flight -= 1
         return _result(
-            symbol, TRACKED_INDICES[symbol], (_symbol_bar(symbol, "us_equity", "100.0"),)
+            symbol,
+            TRACKED_INDICES[symbol],
+            (_symbol_bar(symbol, TRACKED_INDICES[symbol], "100.0"),),
         )
 
 
@@ -593,6 +641,29 @@ async def test_latest_bars_carry_the_previous_close_and_respect_visibility(
     assert [item.symbol for item in hk_only] == ["^HSI"]
 
 
+async def test_catalog_market_filters_reject_mismatched_legacy_rows_from_tenant_reads(
+    session_factory: async_sessionmaker[AsyncSession],
+    member_client: AsyncClient,
+) -> None:
+    # These market codes are valid and the rows satisfy every database
+    # constraint. They model a row written before application-side catalog
+    # validation and must not leak through either reader.
+    async with session_factory.begin() as database:
+        await _insert_raw_bar(database, symbol="^TWII", market_code="us_equity", close="300.0")
+        await _insert_raw_bar(database, symbol="^HSI", market_code="tw_equity", close="700.0")
+
+    latest = await member_client.get("/api/markets/indices")
+    tw_history = await member_client.get("/api/markets/indices/%5ETWII/daily-bars")
+    hk_history = await member_client.get("/api/markets/indices/%5EHSI/daily-bars")
+
+    assert latest.status_code == 200, latest.text
+    assert latest.json() == []
+    assert tw_history.status_code == 200, tw_history.text
+    assert tw_history.json() == []
+    assert hk_history.status_code == 200, hk_history.text
+    assert hk_history.json() == []
+
+
 async def test_a_zero_price_is_served_as_fixed_point_not_an_exponent(
     session_factory: async_sessionmaker[AsyncSession],
     member_client: AsyncClient,
@@ -750,12 +821,9 @@ async def test_every_listed_index_is_reachable_on_its_own_route(
     # were driven by what the table holds while the detail route asked the
     # catalog, the list would offer a link that answers 404.
     today = _taipei_today()
-    retired = _bar(today, "100.0").model_copy(
-        update={"symbol": "^RETIRED", "instrument_source_id": "^RETIRED"}
-    )
     async with session_factory.begin() as database:
         await _store(database, [_bar(today, "300.0"), _symbol_bar("^DJI", "us_equity", "500.0")])
-        await _store(database, [retired])
+        await _insert_raw_bar(database, symbol="^RETIRED", market_code="tw_equity", close="100.0")
 
     listed = await member_client.get("/api/markets/indices")
     assert listed.status_code == 200, listed.text

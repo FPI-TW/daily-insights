@@ -728,7 +728,7 @@ async def fetch_yfinance_daily_bars(
     if not settings.yfinance_enabled:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "yfinance is not enabled")
 
-    requested = list(TRACKED_INDICES) if payload.symbols is None else payload.symbols
+    requested = list(TRACKED_INDICES)
 
     try:
         # Fail inside the proxy's 60s budget (infra/nginx/conf.d/default.conf,
@@ -740,7 +740,7 @@ async def fetch_yfinance_daily_bars(
                 database,
                 adapter=YfinanceAdapter(timeout_seconds=settings.yfinance_timeout_seconds),
                 symbols=requested,
-                period=payload.period,
+                period="7d",
             )
     except TimeoutError:
         # Nothing committed: the session is rolled back by its dependency.
@@ -771,7 +771,7 @@ async def fetch_yfinance_daily_bars(
         target_type="data_source",
         target_id="yfinance",
         after={
-            "period": payload.period,
+            "period": "7d",
             "requested": requested,
             "succeeded": [entry.symbol for entry in succeeded],
             "failed": [entry.symbol for entry in failed],
@@ -780,7 +780,7 @@ async def fetch_yfinance_daily_bars(
     )
     await database.commit()
     return YfinanceDailyBarsResponse(
-        period=payload.period,
+        period="7d",
         fetched_at=datetime.now(UTC),
         succeeded=succeeded,
         failed=failed,

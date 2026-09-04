@@ -133,13 +133,21 @@ async def latest_index_bars(
     the cost grow with history: at ten years of bars it sorted 243k rows and
     spilled to disk on every request, for the twenty rows this returns.
     """
-    symbols = [symbol for symbol, market in TRACKED_INDICES.items() if market in market_codes]
-    if not symbols:
+    wanted_entries = [
+        (symbol, market) for symbol, market in TRACKED_INDICES.items() if market in market_codes
+    ]
+    if not wanted_entries:
         return []
-    wanted = values(column("symbol", String), name="wanted").data([(symbol,) for symbol in symbols])
+    symbols = [symbol for symbol, _market in wanted_entries]
+    wanted = values(column("symbol", String), column("market_code", String), name="wanted").data(
+        wanted_entries
+    )
     two_newest = (
         select(IndexDailyBar)
-        .where(IndexDailyBar.symbol == wanted.c.symbol)
+        .where(
+            IndexDailyBar.symbol == wanted.c.symbol,
+            IndexDailyBar.market_code == wanted.c.market_code,
+        )
         .order_by(IndexDailyBar.trade_date.desc())
         .limit(2)
         .lateral()
@@ -170,6 +178,7 @@ async def index_daily_bars(
     database: AsyncSession,
     *,
     symbol: str,
+    market_code: str,
     start: date,
     end: date,
 ) -> list[IndexDailyBarResponse]:
@@ -177,6 +186,7 @@ async def index_daily_bars(
         select(IndexDailyBar)
         .where(
             IndexDailyBar.symbol == symbol,
+            IndexDailyBar.market_code == market_code,
             IndexDailyBar.trade_date >= start,
             IndexDailyBar.trade_date <= end,
         )
@@ -202,6 +212,12 @@ async def store_index_daily_bars(
         return 0
     rows = []
     for bar in bars:
+        expected_market = TRACKED_INDICES[bar.symbol] if bar.symbol in TRACKED_INDICES else None
+        if expected_market != bar.market:
+            raise ValueError(
+                f"{bar.symbol} market {bar.market!r} does not match its catalog market "
+                f"{expected_market!r}"
+            )
         if bar.close is None:
             # The adapter rejects these; this guard fails loudly if that changes.
             raise ValueError(f"{bar.symbol} {bar.trade_date} has no close")
@@ -379,7 +395,7 @@ async def refresh_index_daily_bars(
                     contract_version=result.provenance.contract_version,
                     source_fetched_at=result.provenance.fetched_at,
                 )
-        except (IntegrityError, DataError, IndexProviderConflictError) as error:
+        except (IntegrityError, DataError, ValueError) as error:
             detail = error.orig if isinstance(error, (IntegrityError, DataError)) else error
             failures.append(
                 IndexRefreshFailure(

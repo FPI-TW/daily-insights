@@ -3068,53 +3068,13 @@
         "type": "object"
       },
       "YfinanceDailyBarsFetch": {
+        "additionalProperties": false,
         "properties": {
           "period": {
-            "default": "2y",
-            "enum": [
-              "1d",
-              "5d",
-              "7d",
-              "1mo",
-              "3mo",
-              "6mo",
-              "1y",
-              "2y",
-              "5y",
-              "10y",
-              "ytd",
-              "max"
-            ],
+            "const": "7d",
+            "default": "7d",
             "title": "Period",
             "type": "string"
-          },
-          "symbols": {
-            "anyOf": [
-              {
-                "items": {
-                  "enum": [
-                    "^DJI",
-                    "^GSPC",
-                    "^IXIC",
-                    "^RUT",
-                    "^SOX",
-                    "^HSI",
-                    "^TWII",
-                    "^TFNI",
-                    "^TPLI",
-                    "000001.SS"
-                  ],
-                  "type": "string"
-                },
-                "maxItems": 50,
-                "minItems": 1,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Symbols"
           }
         },
         "title": "YfinanceDailyBarsFetch",
@@ -3135,6 +3095,7 @@
             "type": "string"
           },
           "period": {
+            "const": "7d",
             "title": "Period",
             "type": "string"
           },

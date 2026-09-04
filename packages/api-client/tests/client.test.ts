@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
+import openapi from "../openapi.json"
 import {
   createAdministrationClient,
   createAuthClient,
@@ -10,6 +11,7 @@ import {
   createReportClient,
 } from "../src"
 import { createServerTransport } from "../src/server"
+import { yfinanceDailyBarsResponseSchema } from "../src/schemas"
 
 describe("API client trust boundary", () => {
   afterEach(() => {
@@ -166,6 +168,88 @@ describe("API client trust boundary", () => {
     expect(transport).toHaveBeenCalledWith(
       "/api/markets/indices/%5ETWII/daily-bars"
     )
+  })
+
+  it("refreshes the seven-day index window with CSRF protection", async () => {
+    const transport = vi.fn(async () =>
+      Response.json({
+        period: "7d",
+        fetched_at: "2026-09-04T00:00:00Z",
+        succeeded: [
+          {
+            symbol: "^TWII",
+            market: "tw_equity",
+            as_of: "2026-09-03",
+            stored_count: 5,
+            dropped_unsettled_trade_date: "2026-09-04",
+          },
+        ],
+        failed: [
+          {
+            symbol: "^HSI",
+            market: "hk_equity",
+            error: "provider unavailable",
+          },
+        ],
+      })
+    )
+
+    const result =
+      await createAdministrationClient(transport).refreshIndexDailyBars(
+        "csrf-token"
+      )
+
+    expect(result.failed).toHaveLength(1)
+    expect(transport).toHaveBeenCalledWith(
+      "/api/admin/data-sources/yfinance/daily-bars",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": "csrf-token",
+        },
+        body: JSON.stringify({ period: "7d" }),
+      }
+    )
+  })
+
+  it("rejects a refresh response outside the fixed seven-day contract", async () => {
+    const client = createAdministrationClient(async () =>
+      Response.json({
+        period: "2y",
+        fetched_at: "2026-09-04T00:00:00Z",
+        succeeded: [],
+        failed: [],
+      })
+    )
+
+    await expect(
+      client.refreshIndexDailyBars("csrf-token")
+    ).rejects.toMatchObject({
+      status: 502,
+    })
+  })
+
+  it("publishes and validates the fixed seven-day refresh response period", () => {
+    const responseSchema = openapi.components.schemas.YfinanceDailyBarsResponse
+
+    expect(responseSchema.properties.period.const).toBe("7d")
+    expect(
+      yfinanceDailyBarsResponseSchema.safeParse({
+        period: "7d",
+        fetched_at: "2026-09-04T00:00:00Z",
+        succeeded: [],
+        failed: [],
+      }).success
+    ).toBe(true)
+    expect(
+      yfinanceDailyBarsResponseSchema.safeParse({
+        period: "2y",
+        fetched_at: "2026-09-04T00:00:00Z",
+        succeeded: [],
+        failed: [],
+      }).success
+    ).toBe(false)
   })
 
   it("accepts a stale analyst viewpoint status without replacing stored data", async () => {

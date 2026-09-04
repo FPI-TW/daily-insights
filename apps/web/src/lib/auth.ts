@@ -9,6 +9,7 @@ import { createServerFn } from "@tanstack/react-start"
 import { getRequestHeader } from "@tanstack/react-start/server"
 
 let csrfToken: string | null = null
+let authSessionEpoch = 0
 
 export const getAuthSnapshot = createServerFn({ method: "GET" }).handler(
   async (): Promise<User | null> => {
@@ -38,7 +39,12 @@ export function browserAuthClient() {
 }
 
 export function rememberCsrfToken(token: string | null) {
+  if (csrfToken !== token) authSessionEpoch += 1
   csrfToken = token
+}
+
+export function getAuthSessionEpoch() {
+  return authSessionEpoch
 }
 
 export async function requireCsrfToken() {

@@ -5,7 +5,7 @@ export pnpm_config_verify_deps_before_run := false
 .PHONY: help init dev dev-detached dev-web dev-api stop restart logs ps \
 	migrate bootstrap-admin format format-check lint type-check test test-db \
 	generate-morning-reports generate-daily-news backfill-index-daily-bars \
-	check-nginx check-production-deployment \
+	check-index-catalog check-nginx check-production-deployment \
 	check build
 
 help: ## 顯示可用指令
@@ -90,6 +90,10 @@ type-check: ## 執行 Web 與 API 型別檢查
 
 test: ## 執行 Web 與 API 測試
 	pnpm test
+
+check-index-catalog: ## 驗證 Python 與 API client 的指數 catalog 契約
+	uv run --project apps/api pytest -c apps/api/pyproject.toml \
+		apps/api/tests/test_tracked_index_catalog_contract.py
 
 test-db: ## 以隔離 PostgreSQL 執行 Web 與 API 完整測試
 	./scripts/test-with-postgres.sh

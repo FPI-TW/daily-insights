@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from daily_insights_api.core.enums import OrganizationStatus, SystemRole, UserStatus
-from daily_insights_api.modules.data_sources.api import IndexSymbol, MarketCode
+from daily_insights_api.modules.data_sources.api import MarketCode
 
 
 class AdminInput(BaseModel):
@@ -97,13 +97,10 @@ class MarketPolicyUpdate(AdminInput):
 
 
 class YfinanceDailyBarsFetch(AdminInput):
-    # Typed rather than checked in the router, so the reviewed index set reaches
-    # OpenAPI and the generated client as an enum and an arbitrary string can
-    # never reach the scraping client.
-    symbols: list[IndexSymbol] | None = Field(default=None, min_length=1, max_length=50)
-    period: Literal[
-        "1d", "5d", "7d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"
-    ] = "2y"
+    # This endpoint is deliberately a fixed incremental refresh. Historical
+    # windows and targeted refreshes belong to the one-time backfill CLI.
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    period: Literal["7d"] = "7d"
     # No `reason` here on purpose: this endpoint reads an external source and
     # changes no business state, unlike the organization and market-policy
     # writes above. The audit event still records who fetched what.
@@ -134,7 +131,7 @@ class YfinanceSymbolFailure(BaseModel):
 
 
 class YfinanceDailyBarsResponse(BaseModel):
-    period: str
+    period: Literal["7d"]
     fetched_at: datetime
     succeeded: list[YfinanceSymbolBars]
     failed: list[YfinanceSymbolFailure]

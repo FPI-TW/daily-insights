@@ -1,0 +1,12 @@
+[
+  { "symbol": "^DJI", "marketCode": "us_equity" },
+  { "symbol": "^GSPC", "marketCode": "us_equity" },
+  { "symbol": "^IXIC", "marketCode": "us_equity" },
+  { "symbol": "^RUT", "marketCode": "us_equity" },
+  { "symbol": "^SOX", "marketCode": "us_equity" },
+  { "symbol": "^HSI", "marketCode": "hk_equity" },
+  { "symbol": "^TWII", "marketCode": "tw_equity" },
+  { "symbol": "^TFNI", "marketCode": "tw_equity" },
+  { "symbol": "^TPLI", "marketCode": "tw_equity" },
+  { "symbol": "000001.SS", "marketCode": "cn_equity" }
+]

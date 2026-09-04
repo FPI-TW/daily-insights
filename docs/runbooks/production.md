@@ -6,6 +6,10 @@ automatic recovery and alerting.
 
 This is a recommendation and readiness checklist. It does not deploy anything.
 
+For the release gate, first historical backfill, validation, and operational
+response for report-page index data, follow the
+[index data operations runbook](index-data-operations.md).
+
 The repository now includes an offline-verifiable deployment foundation and an
 [EC2 first-deploy procedure](ec2-first-deploy.md). It does not create AWS,
 Cloudflare, RDS, or R2 resources:

@@ -1899,37 +1899,10 @@ export interface components {
     YfinanceDailyBarsFetch: {
       /**
        * Period
-       * @default 2y
-       * @enum {string}
+       * @default 7d
+       * @constant
        */
-      period:
-        | "1d"
-        | "5d"
-        | "7d"
-        | "1mo"
-        | "3mo"
-        | "6mo"
-        | "1y"
-        | "2y"
-        | "5y"
-        | "10y"
-        | "ytd"
-        | "max"
-      /** Symbols */
-      symbols?:
-        | (
-            | "^DJI"
-            | "^GSPC"
-            | "^IXIC"
-            | "^RUT"
-            | "^SOX"
-            | "^HSI"
-            | "^TWII"
-            | "^TFNI"
-            | "^TPLI"
-            | "000001.SS"
-          )[]
-        | null
+      period: "7d"
     }
     /** YfinanceDailyBarsResponse */
     YfinanceDailyBarsResponse: {
@@ -1940,8 +1913,11 @@ export interface components {
        * Format: date-time
        */
       fetched_at: string
-      /** Period */
-      period: string
+      /**
+       * Period
+       * @constant
+       */
+      period: "7d"
       /** Succeeded */
       succeeded: components["schemas"]["YfinanceSymbolBars"][]
     }

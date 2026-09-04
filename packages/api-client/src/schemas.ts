@@ -1,4 +1,5 @@
 import { z } from "zod"
+import trackedIndexCatalogContract from "./tracked-index-catalog.json"
 
 export const localeSchema = z.enum(["zh-hant", "zh-hans", "en"])
 export type Locale = z.infer<typeof localeSchema>
@@ -34,6 +35,26 @@ export const marketListSchema = z.array(marketSchema)
 export const reportStatusSchema = z.enum(["complete", "partial", "unavailable"])
 export const blockStatusSchema = z.enum(["ok", "missing", "error"])
 const decimalSchema = z.string().regex(/^-?\d+(?:\.\d+)?$/)
+export const indexSymbolSchema = z.enum([
+  "^DJI",
+  "^GSPC",
+  "^IXIC",
+  "^RUT",
+  "^SOX",
+  "^HSI",
+  "^TWII",
+  "^TFNI",
+  "^TPLI",
+  "000001.SS",
+])
+export type IndexSymbol = z.infer<typeof indexSymbolSchema>
+// This is the reviewed tracked-index catalog, rather than a row-derived
+// discovery list. A missing first backfill row must not hide its symbol.
+export const trackedIndexCatalog =
+  trackedIndexCatalogContract as ReadonlyArray<{
+    readonly symbol: IndexSymbol
+    readonly marketCode: MarketCode
+  }>
 export const indexDailyBarSchema = z.object({
   symbol: z.string().min(1),
   market_code: marketCodeSchema,
@@ -51,6 +72,27 @@ export const indexLatestBarSchema = indexDailyBarSchema.extend({
 })
 export type IndexLatestBar = z.infer<typeof indexLatestBarSchema>
 export const indexLatestBarListSchema = z.array(indexLatestBarSchema)
+export const yfinanceSymbolBarsSchema = z.object({
+  symbol: indexSymbolSchema,
+  market: marketCodeSchema,
+  as_of: z.iso.date(),
+  stored_count: z.number().int().nonnegative(),
+  dropped_unsettled_trade_date: z.iso.date().nullable(),
+})
+export const yfinanceSymbolFailureSchema = z.object({
+  symbol: indexSymbolSchema,
+  market: marketCodeSchema,
+  error: z.string().min(1),
+})
+export const yfinanceDailyBarsResponseSchema = z.object({
+  period: z.literal("7d"),
+  fetched_at: z.iso.datetime({ offset: true }),
+  succeeded: z.array(yfinanceSymbolBarsSchema),
+  failed: z.array(yfinanceSymbolFailureSchema),
+})
+export type YfinanceDailyBarsResponse = z.infer<
+  typeof yfinanceDailyBarsResponseSchema
+>
 const chartPointSchema = z.object({
   x: z.string().min(1),
   value: decimalSchema.nullable(),

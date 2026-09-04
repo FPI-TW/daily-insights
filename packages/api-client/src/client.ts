@@ -33,6 +33,7 @@ import {
   indexDailyBarListSchema,
   indexLatestBarListSchema,
   marketListSchema,
+  yfinanceDailyBarsResponseSchema,
   userSchema,
 } from "./schemas"
 
@@ -267,6 +268,16 @@ function mutationHeaders(csrfToken: string) {
 
 export function createAdministrationClient(transport: ApiTransport) {
   return {
+    async refreshIndexDailyBars(csrfToken: string) {
+      return parseResponse(
+        await transport("/api/admin/data-sources/yfinance/daily-bars", {
+          method: "POST",
+          headers: mutationHeaders(csrfToken),
+          body: JSON.stringify({ period: "7d" }),
+        }),
+        yfinanceDailyBarsResponseSchema
+      )
+    },
     async analystViewpointStatus() {
       return parseResponse(
         await transport("/api/admin/analyst-viewpoints/status"),
