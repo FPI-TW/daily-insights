@@ -5,7 +5,6 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from types import SimpleNamespace
 from typing import cast
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -31,6 +30,7 @@ from daily_insights_api.modules.data_sources.api import (
 )
 from daily_insights_api.modules.identity.api import AuthContext, require_password_changed
 from daily_insights_api.modules.identity.models import User
+from daily_insights_api.modules.identity.session_models import Session
 from daily_insights_api.modules.markets.api import (
     latest_index_bars,
     refresh_index_daily_bars,
@@ -495,12 +495,15 @@ def _signed_in_client(
     app = create_app(Settings(environment="test"), readiness(True), session_factory)
 
     async def auth() -> AuthContext:
-        return cast(
-            AuthContext,
-            SimpleNamespace(
-                organization_id=organization_id,
-                user=SimpleNamespace(system_role=role),
-            ),
+        # A real AuthContext rather than a namespace behind a cast. The cast
+        # silenced the type checker, so a new field on the dataclass, or a route
+        # reaching for one this never set, would have surfaced as an
+        # AttributeError mid-request instead of a type error here. The ORM
+        # instances are never persisted; only these attributes are read.
+        return AuthContext(
+            user=User(system_role=role),
+            session=Session(),
+            organization_id=organization_id,
         )
 
     app.dependency_overrides[require_password_changed] = auth
