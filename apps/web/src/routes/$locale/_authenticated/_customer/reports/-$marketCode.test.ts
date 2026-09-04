@@ -5,6 +5,8 @@ const getReportDetail = vi.fn()
 const getMarketNews = vi.fn()
 const getTodayAnalystViewpoints = vi.fn()
 const getMarketIndexHistory = vi.fn()
+const getMarketIndexMovingAverages = vi.fn()
+const indexRange = { start: "2024-09-02", end: "2026-09-02" }
 
 vi.mock("#/lib/reports", () => ({ getReportDetail }))
 vi.mock("#/lib/news", () => ({ getMarketNews }))
@@ -12,10 +14,15 @@ vi.mock("#/lib/analyst-viewpoints", () => ({ getTodayAnalystViewpoints }))
 vi.mock("#/lib/indices", () => ({
   chartMarketCodes: ["us_equity", "tw_equity"],
   getMarketIndexHistory,
+  getMarketIndexMovingAverages,
+  twoYearTaipeiRange: () => indexRange,
 }))
 
-const { INDEX_HISTORY_DEADLINE_MS, loadMarketPage } =
-  await import("./$marketCode")
+const {
+  INDEX_HISTORY_DEADLINE_MS,
+  INDEX_MOVING_AVERAGES_DEADLINE_MS,
+  loadMarketPage,
+} = await import("./$marketCode")
 
 const news = {
   market_code: "us_equity",
@@ -48,6 +55,7 @@ const viewpoint = {
 describe("market report loader", () => {
   beforeEach(() => {
     getTodayAnalystViewpoints.mockResolvedValue([])
+    getMarketIndexMovingAverages.mockResolvedValue({})
   })
 
   afterEach(() => {
@@ -79,7 +87,10 @@ describe("market report loader", () => {
       data: { locale: "en", marketCode: "us_equity" },
     })
     expect(getMarketIndexHistory).toHaveBeenCalledWith({
-      data: { marketCode: "us_equity" },
+      data: { marketCode: "us_equity", range: indexRange },
+    })
+    expect(getMarketIndexMovingAverages).toHaveBeenCalledWith({
+      data: { marketCode: "us_equity", range: indexRange },
     })
   })
 
@@ -136,6 +147,7 @@ describe("market report loader", () => {
       news: null,
       viewpoint: null,
       indexHistory: null,
+      indexMovingAverages: null,
     })
     expect(getMarketNews).not.toHaveBeenCalled()
   })
@@ -183,5 +195,44 @@ describe("market report loader", () => {
     await vi.advanceTimersByTimeAsync(INDEX_HISTORY_DEADLINE_MS)
 
     await expect(page.indexHistory).resolves.toBeNull()
+  })
+
+  it("keeps close history when moving averages reject", async () => {
+    getReportDetail.mockResolvedValueOnce(report)
+    getMarketNews.mockResolvedValueOnce(news)
+    getMarketIndexHistory.mockResolvedValueOnce(indexHistory)
+    getMarketIndexMovingAverages.mockRejectedValueOnce(new Error("ma down"))
+
+    const page = await loadMarketPage({
+      params: { marketCode: "us_equity" },
+      context: { locale: "en" },
+    })
+    if (!page.indexHistory || !page.indexMovingAverages) {
+      throw new Error("expected deferred chart data")
+    }
+    await expect(page.indexHistory).resolves.toEqual(indexHistory)
+    await expect(page.indexMovingAverages).resolves.toEqual({})
+  })
+
+  it("does not delay report or close history for a stalled moving-average request", async () => {
+    vi.useFakeTimers()
+    getReportDetail.mockResolvedValueOnce(report)
+    getMarketNews.mockResolvedValueOnce(news)
+    getMarketIndexHistory.mockResolvedValueOnce(indexHistory)
+    getMarketIndexMovingAverages.mockImplementationOnce(
+      () => new Promise<never>(() => {})
+    )
+
+    const page = await loadMarketPage({
+      params: { marketCode: "us_equity" },
+      context: { locale: "en" },
+    })
+    expect(page.report).toEqual(report)
+    if (!page.indexHistory || !page.indexMovingAverages) {
+      throw new Error("expected deferred chart data")
+    }
+    await expect(page.indexHistory).resolves.toEqual(indexHistory)
+    await vi.advanceTimersByTimeAsync(INDEX_MOVING_AVERAGES_DEADLINE_MS)
+    await expect(page.indexMovingAverages).resolves.toEqual({})
   })
 })

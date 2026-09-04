@@ -43,8 +43,6 @@ export const indexSymbolSchema = z.enum([
   "^SOX",
   "^HSI",
   "^TWII",
-  "^TFNI",
-  "^TPLI",
   "000001.SS",
 ])
 export type IndexSymbol = z.infer<typeof indexSymbolSchema>
@@ -67,6 +65,40 @@ export const indexDailyBarSchema = z.object({
 })
 export type IndexDailyBar = z.infer<typeof indexDailyBarSchema>
 export const indexDailyBarListSchema = z.array(indexDailyBarSchema)
+export const indexMovingAveragePointSchema = z.object({
+  trade_date: z.iso.date(),
+  value: decimalSchema.nullable(),
+})
+export type IndexMovingAveragePoint = z.infer<
+  typeof indexMovingAveragePointSchema
+>
+export const indexMovingAverageSeriesSchema = z.object({
+  period: z.union([
+    z.literal(20),
+    z.literal(60),
+    z.literal(120),
+    z.literal(240),
+  ]),
+  points: z.array(indexMovingAveragePointSchema),
+})
+export type IndexMovingAverageSeries = z.infer<
+  typeof indexMovingAverageSeriesSchema
+>
+export const indexMovingAveragesSchema = z.object({
+  symbol: z.string().min(1),
+  market_code: marketCodeSchema,
+  method: z.literal("sma"),
+  price_field: z.literal("close"),
+  formula_version: z.literal("sma-close-v1"),
+  as_of: z.iso.date().nullable(),
+  series: z.tuple([
+    indexMovingAverageSeriesSchema.extend({ period: z.literal(20) }),
+    indexMovingAverageSeriesSchema.extend({ period: z.literal(60) }),
+    indexMovingAverageSeriesSchema.extend({ period: z.literal(120) }),
+    indexMovingAverageSeriesSchema.extend({ period: z.literal(240) }),
+  ]),
+})
+export type IndexMovingAverages = z.infer<typeof indexMovingAveragesSchema>
 export const indexLatestBarSchema = indexDailyBarSchema.extend({
   previous_close: decimalSchema.nullable(),
 })

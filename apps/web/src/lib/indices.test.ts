@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
 import {
   indexHistoryOutcomes,
+  indexMovingAverageOutcomes,
   trackedSymbolsForMarket,
   twoYearTaipeiRange,
 } from "./indices"
+import type { IndexMovingAverages } from "@daily-insights/api-client"
 
 describe("twoYearTaipeiRange", () => {
   it("uses an explicit two-calendar-year range", () => {
@@ -52,7 +54,7 @@ describe("indexHistoryOutcomes", () => {
 
   it("makes an all-empty catalog result explicitly unavailable", () => {
     const result = indexHistoryOutcomes(
-      ["^TWII", "^TFNI"],
+      ["^DJI", "^GSPC"],
       [
         { status: "fulfilled", value: [] },
         { status: "fulfilled", value: [] },
@@ -60,7 +62,7 @@ describe("indexHistoryOutcomes", () => {
     )
 
     expect(result.series).toEqual([])
-    expect(result.failedSymbols).toEqual(["^TWII", "^TFNI"])
+    expect(result.failedSymbols).toEqual(["^DJI", "^GSPC"])
   })
 })
 
@@ -73,14 +75,42 @@ describe("trackedSymbolsForMarket", () => {
       "^RUT",
       "^SOX",
     ])
-    expect(trackedSymbolsForMarket("tw_equity")).toEqual([
-      "^TWII",
-      "^TFNI",
-      "^TPLI",
-    ])
+    expect(trackedSymbolsForMarket("tw_equity")).toEqual(["^TWII"])
   })
 
   it("fans out without requiring an organization-backed market list", () => {
     expect(trackedSymbolsForMarket("us_equity")).toHaveLength(5)
+  })
+})
+
+describe("indexMovingAverageOutcomes", () => {
+  it("keeps only successful series with at least one available value", () => {
+    const response: IndexMovingAverages = {
+      symbol: "^TWII",
+      market_code: "tw_equity" as const,
+      method: "sma" as const,
+      price_field: "close" as const,
+      formula_version: "sma-close-v1" as const,
+      as_of: "2026-09-03",
+      series: [
+        {
+          period: 20,
+          points: [{ trade_date: "2026-09-03", value: "1.0000000000" }],
+        },
+        { period: 60, points: [{ trade_date: "2026-09-03", value: null }] },
+        { period: 120, points: [{ trade_date: "2026-09-03", value: null }] },
+        { period: 240, points: [{ trade_date: "2026-09-03", value: null }] },
+      ],
+    }
+
+    expect(
+      indexMovingAverageOutcomes(
+        ["^TWII", "^DJI"],
+        [
+          { status: "fulfilled", value: response },
+          { status: "rejected", reason: new Error("unavailable") },
+        ]
+      )
+    ).toEqual({ "^TWII": response })
   })
 })

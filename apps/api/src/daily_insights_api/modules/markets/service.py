@@ -3,6 +3,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
 
 from sqlalchemy import Result, String, column, func, literal_column, select, true, update, values
@@ -30,6 +31,12 @@ from daily_insights_api.modules.markets.models import (
 from daily_insights_api.modules.markets.schemas import (
     IndexDailyBarResponse,
     IndexLatestBarResponse,
+    IndexMovingAverage20SeriesResponse,
+    IndexMovingAverage60SeriesResponse,
+    IndexMovingAverage120SeriesResponse,
+    IndexMovingAverage240SeriesResponse,
+    IndexMovingAveragePointResponse,
+    IndexMovingAveragesResponse,
     MarketResponse,
 )
 
@@ -37,6 +44,9 @@ MAX_BIND_PARAMETERS = 65535
 # Yahoo publishes no rate limit and is reached through a scraping client, so
 # this stays conservative; it matches TwelveDataTransport's default.
 MAX_FETCH_CONCURRENCY = 4
+MOVING_AVERAGE_PERIODS = (20, 60, 120, 240)
+MOVING_AVERAGE_WARMUP_SESSIONS = max(MOVING_AVERAGE_PERIODS) - 1
+MOVING_AVERAGE_QUANTUM = Decimal("0.0000000001")
 
 
 class IndexProviderConflictError(ValueError):
@@ -193,6 +203,102 @@ async def index_daily_bars(
         .order_by(IndexDailyBar.trade_date)
     )
     return [_bar_response(bar) for bar in bars]
+
+
+def index_moving_averages_response(
+    *,
+    symbol: str,
+    market_code: str,
+    requested_bars: Sequence[IndexDailyBar],
+    warmup_bars: Sequence[IndexDailyBar],
+) -> IndexMovingAveragesResponse:
+    """Calculate fixed SMAs without emitting dates outside the requested range.
+
+    A trading session is a stored settled daily bar, so gaps such as weekends
+    and exchange holidays never produce calendar filler points.  The caller
+    supplies at most 239 earlier sessions: enough context for the longest
+    (240-session) period while keeping the response query bounded.
+    """
+    periods = tuple(MOVING_AVERAGE_PERIODS)
+    values: dict[int, list[Decimal]] = {period: [] for period in periods}
+    points: dict[int, list[IndexMovingAveragePointResponse]] = {period: [] for period in periods}
+    for is_requested, bars in ((False, warmup_bars), (True, requested_bars)):
+        for bar in bars:
+            for period in periods:
+                window = values[period]
+                window.append(bar.close)
+                if len(window) > period:
+                    window.pop(0)
+                if is_requested:
+                    value = (
+                        (sum(window) / Decimal(period)).quantize(
+                            MOVING_AVERAGE_QUANTUM, rounding=ROUND_HALF_EVEN
+                        )
+                        if len(window) == period
+                        else None
+                    )
+                    points[period].append(
+                        IndexMovingAveragePointResponse(trade_date=bar.trade_date, value=value)
+                    )
+    return IndexMovingAveragesResponse(
+        symbol=symbol,
+        market_code=market_code,
+        method="sma",
+        price_field="close",
+        formula_version="sma-close-v1",
+        as_of=requested_bars[-1].trade_date if requested_bars else None,
+        series=(
+            IndexMovingAverage20SeriesResponse(period=20, points=points[20]),
+            IndexMovingAverage60SeriesResponse(period=60, points=points[60]),
+            IndexMovingAverage120SeriesResponse(period=120, points=points[120]),
+            IndexMovingAverage240SeriesResponse(period=240, points=points[240]),
+        ),
+    )
+
+
+async def index_moving_averages(
+    database: AsyncSession,
+    *,
+    symbol: str,
+    market_code: str,
+    start: date,
+    end: date,
+) -> IndexMovingAveragesResponse:
+    requested_bars = list(
+        (
+            await database.scalars(
+                select(IndexDailyBar)
+                .where(
+                    IndexDailyBar.symbol == symbol,
+                    IndexDailyBar.market_code == market_code,
+                    IndexDailyBar.trade_date >= start,
+                    IndexDailyBar.trade_date <= end,
+                )
+                .order_by(IndexDailyBar.trade_date)
+            )
+        ).all()
+    )
+    warmup_bars = list(
+        (
+            await database.scalars(
+                select(IndexDailyBar)
+                .where(
+                    IndexDailyBar.symbol == symbol,
+                    IndexDailyBar.market_code == market_code,
+                    IndexDailyBar.trade_date < start,
+                )
+                .order_by(IndexDailyBar.trade_date.desc())
+                .limit(MOVING_AVERAGE_WARMUP_SESSIONS)
+            )
+        ).all()
+    )
+    warmup_bars.reverse()
+    return index_moving_averages_response(
+        symbol=symbol,
+        market_code=market_code,
+        requested_bars=requested_bars,
+        warmup_bars=warmup_bars,
+    )
 
 
 async def store_index_daily_bars(

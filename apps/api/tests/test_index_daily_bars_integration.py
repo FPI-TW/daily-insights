@@ -594,11 +594,14 @@ async def test_internal_staff_read_indices_without_an_organization(
     ) as admin_client:
         listed = await admin_client.get("/api/markets/indices")
         bars = await admin_client.get("/api/markets/indices/%5EDJI/daily-bars")
+        moving_averages = await admin_client.get("/api/markets/indices/%5EDJI/moving-averages")
 
     assert listed.status_code == 200, listed.text
     assert [item["symbol"] for item in listed.json()] == ["^DJI"]
     assert bars.status_code == 200, bars.text
     assert [bar["close"] for bar in bars.json()] == ["500.0000000000"]
+    assert moving_averages.status_code == 200, moving_averages.text
+    assert moving_averages.json()["symbol"] == "^DJI"
 
 
 async def test_a_member_without_an_organization_is_refused(
@@ -655,6 +658,8 @@ async def test_catalog_market_filters_reject_mismatched_legacy_rows_from_tenant_
     latest = await member_client.get("/api/markets/indices")
     tw_history = await member_client.get("/api/markets/indices/%5ETWII/daily-bars")
     hk_history = await member_client.get("/api/markets/indices/%5EHSI/daily-bars")
+    tw_moving_averages = await member_client.get("/api/markets/indices/%5ETWII/moving-averages")
+    hk_moving_averages = await member_client.get("/api/markets/indices/%5EHSI/moving-averages")
 
     assert latest.status_code == 200, latest.text
     assert latest.json() == []
@@ -662,6 +667,10 @@ async def test_catalog_market_filters_reject_mismatched_legacy_rows_from_tenant_
     assert tw_history.json() == []
     assert hk_history.status_code == 200, hk_history.text
     assert hk_history.json() == []
+    assert tw_moving_averages.status_code == 200, tw_moving_averages.text
+    assert tw_moving_averages.json()["as_of"] is None
+    assert hk_moving_averages.status_code == 200, hk_moving_averages.text
+    assert hk_moving_averages.json()["as_of"] is None
 
 
 async def test_a_zero_price_is_served_as_fixed_point_not_an_exponent(
@@ -741,6 +750,66 @@ async def test_daily_bars_are_bounded_by_the_requested_window(
     assert unknown.status_code == 404
 
 
+async def test_moving_averages_use_hidden_warmup_and_only_expose_requested_dates(
+    session_factory: async_sessionmaker[AsyncSession],
+    member_client: AsyncClient,
+) -> None:
+    start = date(2026, 1, 20)
+    async with session_factory.begin() as database:
+        await _store(
+            database,
+            [
+                *[_bar(start - timedelta(days=offset), "1") for offset in range(1, 20)],
+                _bar(start, "2"),
+                _bar(start + timedelta(days=3), "3"),
+            ],
+        )
+
+    response = await member_client.get(
+        "/api/markets/indices/%5ETWII/moving-averages",
+        params={"start": start.isoformat(), "end": (start + timedelta(days=3)).isoformat()},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["method"] == "sma"
+    assert payload["price_field"] == "close"
+    assert payload["formula_version"] == "sma-close-v1"
+    assert payload["as_of"] == "2026-01-23"
+    assert [item["period"] for item in payload["series"]] == [20, 60, 120, 240]
+    assert payload["series"][0]["points"] == [
+        {"trade_date": "2026-01-20", "value": "1.0500000000"},
+        {"trade_date": "2026-01-23", "value": "1.1500000000"},
+    ]
+    assert payload["series"][1]["points"] == [
+        {"trade_date": "2026-01-20", "value": None},
+        {"trade_date": "2026-01-23", "value": None},
+    ]
+
+
+async def test_moving_average_route_has_daily_bar_visibility_and_range_contract(
+    session_factory: async_sessionmaker[AsyncSession],
+    member_client: AsyncClient,
+) -> None:
+    async with session_factory.begin() as database:
+        await _store(database, [_bar(date(2026, 9, 1), "100")])
+
+    no_data = await member_client.get(
+        "/api/markets/indices/%5ETWII/moving-averages",
+        params={"start": "2026-08-01", "end": "2026-08-31"},
+    )
+    assert no_data.status_code == 200, no_data.text
+    assert no_data.json()["as_of"] is None
+    assert [item["points"] for item in no_data.json()["series"]] == [[], [], [], []]
+
+    unknown = await member_client.get("/api/markets/indices/NOPE/moving-averages")
+    inverted = await member_client.get(
+        "/api/markets/indices/%5ETWII/moving-averages",
+        params={"start": "2026-09-02", "end": "2026-09-01"},
+    )
+    assert unknown.status_code == 404
+    assert inverted.status_code == 422
+
+
 async def test_a_hidden_market_is_absent_from_the_list_and_404_on_its_route(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -794,6 +863,7 @@ async def test_a_hidden_market_is_absent_from_the_list_and_404_on_its_route(
     ) as restricted:
         listed = await restricted.get("/api/markets/indices")
         hidden_route = await restricted.get("/api/markets/indices/%5EHSI/daily-bars")
+        hidden_moving_averages = await restricted.get("/api/markets/indices/%5EHSI/moving-averages")
         allowed_route = await restricted.get("/api/markets/indices/%5ETWII/daily-bars")
     async with _signed_in_client(
         session_factory, role=SystemRole.ORG_MEMBER, organization_id=sees_everything
@@ -808,6 +878,8 @@ async def test_a_hidden_market_is_absent_from_the_list_and_404_on_its_route(
     assert [item["symbol"] for item in listed.json()] == ["^TWII"]
     assert hidden_route.status_code == 404
     assert hidden_route.json()["detail"] == "index not found"
+    assert hidden_moving_averages.status_code == 404
+    assert hidden_moving_averages.json()["detail"] == "index not found"
     assert allowed_route.status_code == 200, allowed_route.text
     assert [bar["close"] for bar in allowed_route.json()] == ["300.0000000000"]
 

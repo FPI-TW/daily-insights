@@ -11,7 +11,10 @@ import {
   createReportClient,
 } from "../src"
 import { createServerTransport } from "../src/server"
-import { yfinanceDailyBarsResponseSchema } from "../src/schemas"
+import {
+  indexMovingAveragesSchema,
+  yfinanceDailyBarsResponseSchema,
+} from "../src/schemas"
 
 describe("API client trust boundary", () => {
   afterEach(() => {
@@ -168,6 +171,65 @@ describe("API client trust boundary", () => {
     expect(transport).toHaveBeenCalledWith(
       "/api/markets/indices/%5ETWII/daily-bars"
     )
+  })
+
+  it("fetches and strictly validates index moving averages", async () => {
+    const response = {
+      symbol: "^TWII",
+      market_code: "tw_equity",
+      method: "sma",
+      price_field: "close",
+      formula_version: "sma-close-v1",
+      as_of: "2026-09-02",
+      series: [20, 60, 120, 240].map(period => ({
+        period,
+        points: [{ trade_date: "2026-09-02", value: null }],
+      })),
+    }
+    const transport = vi.fn(async () => Response.json(response))
+    await expect(
+      createMarketClient(transport).indexMovingAverages("^TWII", {
+        start: "2026-01-01",
+        end: "2026-09-02",
+      })
+    ).resolves.toEqual(response)
+    expect(transport).toHaveBeenCalledWith(
+      "/api/markets/indices/%5ETWII/moving-averages?start=2026-01-01&end=2026-09-02"
+    )
+    expect(
+      indexMovingAveragesSchema.safeParse({ ...response, method: "ema" })
+        .success
+    ).toBe(false)
+    expect(
+      indexMovingAveragesSchema.safeParse({
+        ...response,
+        series: response.series.slice().reverse(),
+      }).success
+    ).toBe(false)
+  })
+
+  it("keeps generated moving-average series ordered and fixed-length", () => {
+    const responseSchema =
+      openapi.components.schemas.IndexMovingAveragesResponse
+    expect(responseSchema).toMatchObject({
+      properties: {
+        series: {
+          type: "array",
+          minItems: 4,
+          maxItems: 4,
+          prefixItems: [
+            { $ref: "#/components/schemas/IndexMovingAverage20SeriesResponse" },
+            { $ref: "#/components/schemas/IndexMovingAverage60SeriesResponse" },
+            {
+              $ref: "#/components/schemas/IndexMovingAverage120SeriesResponse",
+            },
+            {
+              $ref: "#/components/schemas/IndexMovingAverage240SeriesResponse",
+            },
+          ],
+        },
+      },
+    })
   })
 
   it("refreshes the seven-day index window with CSRF protection", async () => {

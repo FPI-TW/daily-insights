@@ -6,6 +6,24 @@ one-year default range. Historical data is read directly from
 `index_daily_bars`; do not introduce a proxy or cache that substitutes another
 instrument for a tracked index.
 
+## Moving-average read contract
+
+`GET /api/markets/indices/{symbol}/moving-averages` has the same authenticated
+catalog visibility, `start`/`end` defaults, and ten-calendar-year limit as the
+daily-bars endpoint. It calculates at query time from settled `close` values;
+there is no materialized indicator table, cache, or scheduler work.
+
+The response declares `method: "sma"`, `price_field: "close"`, and
+`formula_version: "sma-close-v1"`, and always returns SMA periods 20, 60, 120,
+and 240 in that order. Each requested trading session is present in each
+series. A value includes that session's close and the preceding `period - 1`
+settled sessions; it is `null` until sufficient sessions exist. Up to 239
+earlier trading sessions are read solely as warm-up and are never exposed.
+Weekend/holiday calendar rows are not filled. Numeric values are decimal
+strings quantized to ten fractional places with half-even rounding. If the
+requested window has no settled bars, all four point lists are empty and
+`as_of` is `null`.
+
 ## Release gate
 
 Before enabling the feature in production, confirm all of the following:

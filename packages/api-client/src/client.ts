@@ -31,6 +31,7 @@ import {
   analystViewpointSyncStatusSchema,
   type LaunchMarketCode,
   indexDailyBarListSchema,
+  indexMovingAveragesSchema,
   indexLatestBarListSchema,
   marketListSchema,
   yfinanceDailyBarsResponseSchema,
@@ -96,6 +97,22 @@ export function createMarketClient(transport: ApiTransport) {
           `/api/markets/indices/${encodeURIComponent(symbol)}/daily-bars${suffix}`
         ),
         indexDailyBarListSchema
+      )
+    },
+    async indexMovingAverages(
+      symbol: string,
+      range: { start?: string; end?: string } = {}
+    ) {
+      const query = new URLSearchParams()
+      if (range.start) query.set("start", range.start)
+      if (range.end) query.set("end", range.end)
+      const search = query.toString()
+      const suffix = search ? `?${search}` : ""
+      return parseResponse(
+        await transport(
+          `/api/markets/indices/${encodeURIComponent(symbol)}/moving-averages${suffix}`
+        ),
+        indexMovingAveragesSchema
       )
     },
   }

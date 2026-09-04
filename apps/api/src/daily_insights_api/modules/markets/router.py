@@ -12,8 +12,10 @@ from daily_insights_api.modules.identity.api import AuthContext, require_passwor
 from daily_insights_api.modules.markets.api import (
     IndexDailyBarResponse,
     IndexLatestBarResponse,
+    IndexMovingAveragesResponse,
     MarketResponse,
     index_daily_bars,
+    index_moving_averages,
     latest_index_bars,
     market_responses,
     visible_market_codes,
@@ -57,6 +59,31 @@ def _organization_id(context: AuthContext) -> uuid.UUID:
     return context.organization_id
 
 
+def resolve_index_date_range(start: date | None, end: date | None) -> tuple[date, date]:
+    """Apply the shared daily-bar history window contract."""
+    resolved_end = end or datetime.now(TAIPEI).date()
+    if start is None:
+        resolved_start = resolved_end - min(DEFAULT_BARS_WINDOW, resolved_end - date.min)
+    else:
+        resolved_start = start
+    if resolved_start > resolved_end:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "start must not be after end")
+    if resolved_start < _earliest_allowed_start(resolved_end):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"date range must not exceed {MAX_BARS_RANGE_YEARS} years",
+        )
+    return resolved_start, resolved_end
+
+
+async def _readable_index_market(database: AsyncSession, context: AuthContext, symbol: str) -> str:
+    visible = await _readable_index_markets(database, context)
+    expected_market = INDEX_MARKETS.get(symbol)
+    if expected_market is None or expected_market not in visible:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "index not found")
+    return expected_market
+
+
 async def _readable_index_markets(
     database: AsyncSession,
     context: AuthContext,
@@ -97,28 +124,30 @@ async def list_index_daily_bars(
     start: Annotated[date | None, Query()] = None,
     end: Annotated[date | None, Query()] = None,
 ) -> list[IndexDailyBarResponse]:
-    visible = await _readable_index_markets(database, context)
     # Unknown and hidden look the same, as /api/reports does: a 404 reveals
     # nothing about which markets an organization's contract excludes.
-    expected_market = INDEX_MARKETS.get(symbol)
-    if expected_market is None or expected_market not in visible:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "index not found")
-    end = end or datetime.now(TAIPEI).date()
-    if start is None:
-        # Any end in year 1 is less than the window away from date.min, and
-        # stepping off the start of the calendar raises OverflowError, which
-        # would surface as a 500 before either check below could run. The
-        # distance between two real dates is always representable, so the
-        # window is clamped to it.
-        start = end - min(DEFAULT_BARS_WINDOW, end - date.min)
-    if start > end:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "start must not be after end")
-    if start < _earliest_allowed_start(end):
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            f"date range must not exceed {MAX_BARS_RANGE_YEARS} years",
-        )
+    expected_market = await _readable_index_market(database, context, symbol)
+    start, end = resolve_index_date_range(start, end)
     return await index_daily_bars(
+        database,
+        symbol=symbol,
+        market_code=expected_market,
+        start=start,
+        end=end,
+    )
+
+
+@router.get("/indices/{symbol}/moving-averages", response_model=IndexMovingAveragesResponse)
+async def get_index_moving_averages(
+    symbol: str,
+    context: Annotated[AuthContext, Depends(require_password_changed)],
+    database: Annotated[AsyncSession, Depends(get_database_session)],
+    start: Annotated[date | None, Query()] = None,
+    end: Annotated[date | None, Query()] = None,
+) -> IndexMovingAveragesResponse:
+    expected_market = await _readable_index_market(database, context, symbol)
+    start, end = resolve_index_date_range(start, end)
+    return await index_moving_averages(
         database,
         symbol=symbol,
         market_code=expected_market,

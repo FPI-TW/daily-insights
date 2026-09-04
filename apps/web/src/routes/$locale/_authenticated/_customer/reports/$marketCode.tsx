@@ -28,6 +28,9 @@ import { getReportDetail } from "#/lib/reports"
 import {
   chartMarketCodes,
   getMarketIndexHistory,
+  getMarketIndexMovingAverages,
+  twoYearTaipeiRange,
+  type IndexMovingAverageMap,
   type MarketIndexHistory,
 } from "#/lib/indices"
 import { useChatPageContext } from "#/components/PageContextChat"
@@ -38,9 +41,11 @@ type MarketPage = {
   news: { marketCode: NewsMarketCode; latest: LatestNews | null } | null
   viewpoint: AnalystViewpoint | null
   indexHistory: Promise<MarketIndexHistory | null> | null
+  indexMovingAverages: Promise<IndexMovingAverageMap> | null
 }
 
 export const INDEX_HISTORY_DEADLINE_MS = 10_000
+export const INDEX_MOVING_AVERAGES_DEADLINE_MS = 10_000
 
 export function withIndexHistoryDeadline(
   history: Promise<MarketIndexHistory>,
@@ -61,6 +66,25 @@ export function withIndexHistoryDeadline(
   })
 }
 
+export function withMovingAverageDeadline(
+  movingAverages: Promise<IndexMovingAverageMap>,
+  deadlineMs = INDEX_MOVING_AVERAGES_DEADLINE_MS
+): Promise<IndexMovingAverageMap> {
+  return new Promise(resolve => {
+    const deadline = setTimeout(() => resolve({}), deadlineMs)
+    void movingAverages.then(
+      value => {
+        clearTimeout(deadline)
+        resolve(value)
+      },
+      () => {
+        clearTimeout(deadline)
+        resolve({})
+      }
+    )
+  })
+}
+
 // The report is the primary content; market news is secondary and degrades to
 // its unavailable state instead of failing the route.
 export async function loadMarketPage({
@@ -76,11 +100,23 @@ export async function loadMarketPage({
   const supportsIndexChart = (chartMarketCodes as readonly string[]).includes(
     params.marketCode
   )
+  const indexRange = supportsIndexChart ? twoYearTaipeiRange() : null
   const indexHistory = supportsIndexChart
     ? withIndexHistoryDeadline(
         getMarketIndexHistory({
           data: {
             marketCode: params.marketCode as "us_equity" | "tw_equity",
+            range: indexRange!,
+          },
+        })
+      )
+    : null
+  const indexMovingAverages = supportsIndexChart
+    ? withMovingAverageDeadline(
+        getMarketIndexMovingAverages({
+          data: {
+            marketCode: params.marketCode as "us_equity" | "tw_equity",
+            range: indexRange!,
           },
         })
       )
@@ -115,6 +151,7 @@ export async function loadMarketPage({
       : null,
     viewpoint,
     indexHistory,
+    indexMovingAverages,
   }
 }
 
@@ -128,7 +165,8 @@ export const Route = createFileRoute(
 })
 
 function ReportPage() {
-  const { report, news, viewpoint, indexHistory } = Route.useLoaderData()
+  const { report, news, viewpoint, indexHistory, indexMovingAverages } =
+    Route.useLoaderData()
   const { marketCode } = Route.useParams()
   const { locale } = Route.useRouteContext()
   useChatPageContext(
@@ -162,7 +200,13 @@ function ReportPage() {
       indexHistory ? (
         <Suspense fallback={<IndexHistoryLoading />}>
           <Await promise={indexHistory}>
-            {history => <IndexHistoryChart history={history} locale={locale} />}
+            {history => (
+              <IndexHistoryChart
+                history={history}
+                locale={locale}
+                movingAverages={indexMovingAverages}
+              />
+            )}
           </Await>
         </Suspense>
       ) : null}

@@ -3,6 +3,7 @@ import {
   marketCodeSchema,
   trackedIndexCatalog,
   type IndexDailyBar,
+  type IndexMovingAverages,
   type MarketCode,
 } from "@daily-insights/api-client"
 import { createServerTransport } from "@daily-insights/api-client/server"
@@ -25,6 +26,13 @@ export type MarketIndexHistory = {
   series: IndexHistorySeries[]
   failedSymbols: string[]
 }
+
+export type IndexMovingAverageMap = Record<string, IndexMovingAverages>
+
+const marketIndexRequestSchema = z.object({
+  marketCode: marketCodeSchema,
+  range: z.object({ start: z.iso.date(), end: z.iso.date() }).optional(),
+})
 
 export const chartMarketCodes = ["us_equity", "tw_equity"] as const
 
@@ -50,6 +58,25 @@ export function indexHistoryOutcomes(
         : []
     ),
   }
+}
+
+export function indexMovingAverageOutcomes(
+  symbols: readonly string[],
+  outcomes: readonly PromiseSettledResult<IndexMovingAverages>[]
+): IndexMovingAverageMap {
+  return Object.fromEntries(
+    outcomes.flatMap((outcome, index) => {
+      if (
+        outcome.status !== "fulfilled" ||
+        !outcome.value.series.some(series =>
+          series.points.some(point => point.value !== null)
+        )
+      ) {
+        return []
+      }
+      return [[symbols[index]!, outcome.value]]
+    })
+  )
 }
 
 function taipeiDateParts() {
@@ -90,10 +117,10 @@ function serverMarketClient() {
 }
 
 export const getMarketIndexHistory = createServerFn({ method: "GET" })
-  .validator(z.object({ marketCode: marketCodeSchema }))
+  .validator(marketIndexRequestSchema)
   .handler(async ({ data }): Promise<MarketIndexHistory> => {
     setResponseHeader("Cache-Control", "no-store")
-    const range = twoYearTaipeiRange()
+    const range = data.range ?? twoYearTaipeiRange()
     if (
       !(chartMarketCodes as readonly MarketCode[]).includes(data.marketCode)
     ) {
@@ -116,6 +143,24 @@ export const getMarketIndexHistory = createServerFn({ method: "GET" })
       ...range,
       ...indexHistoryOutcomes(symbols, outcomes),
     }
+  })
+
+export const getMarketIndexMovingAverages = createServerFn({ method: "GET" })
+  .validator(marketIndexRequestSchema)
+  .handler(async ({ data }): Promise<IndexMovingAverageMap> => {
+    setResponseHeader("Cache-Control", "no-store")
+    if (
+      !(chartMarketCodes as readonly MarketCode[]).includes(data.marketCode)
+    ) {
+      return {}
+    }
+    const range = data.range ?? twoYearTaipeiRange()
+    const client = serverMarketClient()
+    const symbols = trackedSymbolsForMarket(data.marketCode)
+    const outcomes = await Promise.allSettled(
+      symbols.map(symbol => client.indexMovingAverages(symbol, range))
+    )
+    return indexMovingAverageOutcomes(symbols, outcomes)
   })
 
 export function indexNameKey(symbol: string) {

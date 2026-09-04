@@ -1,6 +1,6 @@
 from datetime import date
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, PlainSerializer, WithJsonSchema
 
@@ -43,3 +43,45 @@ class IndexLatestBarResponse(IndexDailyBarResponse):
     """The most recent settled bar plus the close before it, for a change figure."""
 
     previous_close: PriceDecimal | None
+
+
+class IndexMovingAveragePointResponse(BaseModel):
+    trade_date: date
+    value: PriceDecimal | None
+
+
+class IndexMovingAverage20SeriesResponse(BaseModel):
+    period: Literal[20]
+    points: list[IndexMovingAveragePointResponse]
+
+
+class IndexMovingAverage60SeriesResponse(BaseModel):
+    period: Literal[60]
+    points: list[IndexMovingAveragePointResponse]
+
+
+class IndexMovingAverage120SeriesResponse(BaseModel):
+    period: Literal[120]
+    points: list[IndexMovingAveragePointResponse]
+
+
+class IndexMovingAverage240SeriesResponse(BaseModel):
+    period: Literal[240]
+    points: list[IndexMovingAveragePointResponse]
+
+
+class IndexMovingAveragesResponse(BaseModel):
+    """Read-time simple moving averages of settled daily closing prices."""
+
+    symbol: str
+    market_code: str
+    method: Literal["sma"]
+    price_field: Literal["close"]
+    formula_version: Literal["sma-close-v1"]
+    as_of: date | None
+    series: tuple[
+        IndexMovingAverage20SeriesResponse,
+        IndexMovingAverage60SeriesResponse,
+        IndexMovingAverage120SeriesResponse,
+        IndexMovingAverage240SeriesResponse,
+    ]
