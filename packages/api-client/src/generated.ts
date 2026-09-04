@@ -497,6 +497,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/markets/indices": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Index Latest Bars */
+    get: operations["list_index_latest_bars_api_markets_indices_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/markets/indices/{symbol}/daily-bars": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Index Daily Bars */
+    get: operations["list_index_daily_bars_api_markets_indices__symbol__daily_bars_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/markets/indices/{symbol}/moving-averages": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Index Moving Averages */
+    get: operations["get_index_moving_averages_api_markets_indices__symbol__moving_averages_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/news/latest": {
     parameters: {
       query?: never
@@ -989,6 +1040,139 @@ export interface components {
     HealthResponse: {
       /** Status */
       status: string
+    }
+    /** IndexDailyBarResponse */
+    IndexDailyBarResponse: {
+      /** Close */
+      close: string
+      /** High */
+      high: string | null
+      /** Low */
+      low: string | null
+      /** Market Code */
+      market_code: string
+      /** Open */
+      open: string | null
+      /** Symbol */
+      symbol: string
+      /**
+       * Trade Date
+       * Format: date
+       */
+      trade_date: string
+      /** Volume */
+      volume: number | null
+    }
+    /**
+     * IndexLatestBarResponse
+     * @description The most recent settled bar plus the close before it, for a change figure.
+     */
+    IndexLatestBarResponse: {
+      /** Close */
+      close: string
+      /** High */
+      high: string | null
+      /** Low */
+      low: string | null
+      /** Market Code */
+      market_code: string
+      /** Open */
+      open: string | null
+      /** Previous Close */
+      previous_close: string | null
+      /** Symbol */
+      symbol: string
+      /**
+       * Trade Date
+       * Format: date
+       */
+      trade_date: string
+      /** Volume */
+      volume: number | null
+    }
+    /** IndexMovingAverage120SeriesResponse */
+    IndexMovingAverage120SeriesResponse: {
+      /**
+       * Period
+       * @constant
+       */
+      period: 120
+      /** Points */
+      points: components["schemas"]["IndexMovingAveragePointResponse"][]
+    }
+    /** IndexMovingAverage20SeriesResponse */
+    IndexMovingAverage20SeriesResponse: {
+      /**
+       * Period
+       * @constant
+       */
+      period: 20
+      /** Points */
+      points: components["schemas"]["IndexMovingAveragePointResponse"][]
+    }
+    /** IndexMovingAverage240SeriesResponse */
+    IndexMovingAverage240SeriesResponse: {
+      /**
+       * Period
+       * @constant
+       */
+      period: 240
+      /** Points */
+      points: components["schemas"]["IndexMovingAveragePointResponse"][]
+    }
+    /** IndexMovingAverage60SeriesResponse */
+    IndexMovingAverage60SeriesResponse: {
+      /**
+       * Period
+       * @constant
+       */
+      period: 60
+      /** Points */
+      points: components["schemas"]["IndexMovingAveragePointResponse"][]
+    }
+    /** IndexMovingAveragePointResponse */
+    IndexMovingAveragePointResponse: {
+      /**
+       * Trade Date
+       * Format: date
+       */
+      trade_date: string
+      /** Value */
+      value: string | null
+    }
+    /**
+     * IndexMovingAveragesResponse
+     * @description Read-time simple moving averages of settled daily closing prices.
+     */
+    IndexMovingAveragesResponse: {
+      /** As Of */
+      as_of: string | null
+      /**
+       * Formula Version
+       * @constant
+       */
+      formula_version: "sma-close-v1"
+      /** Market Code */
+      market_code: string
+      /**
+       * Method
+       * @constant
+       */
+      method: "sma"
+      /**
+       * Price Field
+       * @constant
+       */
+      price_field: "close"
+      /** Series */
+      series: [
+        components["schemas"]["IndexMovingAverage20SeriesResponse"],
+        components["schemas"]["IndexMovingAverage60SeriesResponse"],
+        components["schemas"]["IndexMovingAverage120SeriesResponse"],
+        components["schemas"]["IndexMovingAverage240SeriesResponse"],
+      ]
+      /** Symbol */
+      symbol: string
     }
     /** InternalUserCreate */
     InternalUserCreate: {
@@ -1816,37 +2000,10 @@ export interface components {
     YfinanceDailyBarsFetch: {
       /**
        * Period
-       * @default 2y
-       * @enum {string}
+       * @default 7d
+       * @constant
        */
-      period:
-        | "1d"
-        | "5d"
-        | "7d"
-        | "1mo"
-        | "3mo"
-        | "6mo"
-        | "1y"
-        | "2y"
-        | "5y"
-        | "10y"
-        | "ytd"
-        | "max"
-      /** Symbols */
-      symbols?:
-        | (
-            | "^DJI"
-            | "^GSPC"
-            | "^IXIC"
-            | "^RUT"
-            | "^SOX"
-            | "^HSI"
-            | "^TWII"
-            | "^TFNI"
-            | "^TPLI"
-            | "000001.SS"
-          )[]
-        | null
+      period: "7d"
     }
     /** YfinanceDailyBarsResponse */
     YfinanceDailyBarsResponse: {
@@ -1857,8 +2014,11 @@ export interface components {
        * Format: date-time
        */
       fetched_at: string
-      /** Period */
-      period: string
+      /**
+       * Period
+       * @constant
+       */
+      period: "7d"
       /** Succeeded */
       succeeded: components["schemas"]["YfinanceSymbolBars"][]
     }
@@ -2991,6 +3151,94 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["MarketResponse"][]
+        }
+      }
+    }
+  }
+  list_index_latest_bars_api_markets_indices_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["IndexLatestBarResponse"][]
+        }
+      }
+    }
+  }
+  list_index_daily_bars_api_markets_indices__symbol__daily_bars_get: {
+    parameters: {
+      query?: {
+        start?: string | null
+        end?: string | null
+      }
+      header?: never
+      path: {
+        symbol: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["IndexDailyBarResponse"][]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  get_index_moving_averages_api_markets_indices__symbol__moving_averages_get: {
+    parameters: {
+      query?: {
+        start?: string | null
+        end?: string | null
+      }
+      header?: never
+      path: {
+        symbol: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["IndexMovingAveragesResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
         }
       }
     }

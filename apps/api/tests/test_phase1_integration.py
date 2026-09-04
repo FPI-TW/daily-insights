@@ -3,6 +3,8 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import date
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -17,7 +19,9 @@ from daily_insights_api.core.config import Settings
 from daily_insights_api.core.enums import SystemRole, UserStatus
 from daily_insights_api.core.models import Base
 from daily_insights_api.core.security import hash_password, verify_password
+from daily_insights_api.modules.admin import router as admin_router
 from daily_insights_api.modules.audit.models import AuditEvent
+from daily_insights_api.modules.data_sources.api import TRACKED_INDICES
 from daily_insights_api.modules.identity import router as identity_router
 from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.markets.catalog import MARKETS
@@ -413,6 +417,171 @@ async def test_admin_provisioning_forces_password_change_and_csrf(harness: Harne
         assert forbidden.status_code == 403
     finally:
         await asset_client.aclose()
+
+
+async def test_index_refresh_requires_csrf_and_an_administrator(harness: Harness) -> None:
+    admin_csrf = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    missing_csrf = await harness.client.post(
+        "/api/admin/data-sources/yfinance/daily-bars",
+        json={"period": "7d"},
+    )
+    assert missing_csrf.status_code == 403
+
+    asset_manager = await harness.client.post(
+        "/api/admin/internal-users",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={
+            "email": "index-assets@example.com",
+            "display_name": "Index Asset Manager",
+            "system_role": "asset_manager",
+            "reason": "Index refresh authorization test",
+        },
+    )
+    assert asset_manager.status_code == 201, asset_manager.text
+    asset_client, asset_csrf = await activate_member(harness, asset_manager.json())
+    try:
+        forbidden = await asset_client.post(
+            "/api/admin/data-sources/yfinance/daily-bars",
+            headers={"X-CSRF-Token": asset_csrf},
+            json={"period": "7d"},
+        )
+        assert forbidden.status_code == 403
+    finally:
+        await asset_client.aclose()
+
+
+async def test_index_refresh_disabled_returns_503(harness: Harness) -> None:
+    csrf_token = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    response = await harness.client.post(
+        "/api/admin/data-sources/yfinance/daily-bars",
+        headers={"X-CSRF-Token": csrf_token},
+        json={"period": "7d"},
+    )
+    assert response.status_code == 503
+
+
+@pytest.mark.parametrize("payload", [{}, {"period": "7d"}])
+async def test_index_refresh_serializes_partial_result_and_audits(
+    harness: Harness,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, str],
+) -> None:
+    harness.settings.yfinance_enabled = True
+    csrf_token = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    calls: list[tuple[list[str], str]] = []
+
+    async def refresh(
+        *_args: object, symbols: list[str], period: str, **_kwargs: object
+    ) -> tuple[list[object], list[object]]:
+        calls.append((symbols, period))
+        return (
+            [
+                SimpleNamespace(
+                    result=SimpleNamespace(
+                        symbol="^TWII",
+                        market="tw_equity",
+                        provenance=SimpleNamespace(as_of=date(2026, 9, 3)),
+                        dropped_unsettled_trade_date=date(2026, 9, 4),
+                    ),
+                    stored_count=5,
+                )
+            ],
+            [SimpleNamespace(symbol="^HSI", market="hk_equity", error="provider unavailable")],
+        )
+
+    monkeypatch.setattr(admin_router, "YfinanceAdapter", lambda **_kwargs: object())
+    monkeypatch.setattr(admin_router, "refresh_index_daily_bars", refresh)
+    response = await harness.client.post(
+        "/api/admin/data-sources/yfinance/daily-bars",
+        headers={"X-CSRF-Token": csrf_token},
+        json=payload,
+    )
+
+    assert response.status_code == 200, response.text
+    assert calls == [(list(TRACKED_INDICES), "7d")]
+    assert response.json()["succeeded"] == [
+        {
+            "symbol": "^TWII",
+            "market": "tw_equity",
+            "as_of": "2026-09-03",
+            "stored_count": 5,
+            "dropped_unsettled_trade_date": "2026-09-04",
+        }
+    ]
+    assert response.json()["failed"] == [
+        {"symbol": "^HSI", "market": "hk_equity", "error": "provider unavailable"}
+    ]
+    async with harness.session_factory() as database:
+        event = await database.scalar(
+            select(AuditEvent)
+            .where(AuditEvent.action == "data_source.yfinance.fetched")
+            .order_by(AuditEvent.created_at.desc())
+        )
+    assert event is not None
+    assert event.after == {
+        "period": "7d",
+        "requested": list(TRACKED_INDICES),
+        "succeeded": ["^TWII"],
+        "failed": ["^HSI"],
+    }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"period": "2y"},
+        {"symbols": ["^TWII"]},
+    ],
+)
+async def test_index_refresh_rejects_non_incremental_or_subset_payload_before_service(
+    harness: Harness,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, object],
+) -> None:
+    harness.settings.yfinance_enabled = True
+    csrf_token = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    service_called = False
+
+    async def refresh(*_args: object, **_kwargs: object) -> tuple[list[object], list[object]]:
+        nonlocal service_called
+        service_called = True
+        return ([], [])
+
+    monkeypatch.setattr(admin_router, "refresh_index_daily_bars", refresh)
+    response = await harness.client.post(
+        "/api/admin/data-sources/yfinance/daily-bars",
+        headers={"X-CSRF-Token": csrf_token},
+        json=payload,
+    )
+
+    assert response.status_code == 422
+    assert not service_called
+
+
+async def test_index_refresh_timeout_returns_504_without_an_audit_event(
+    harness: Harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness.settings.yfinance_enabled = True
+    csrf_token = await login(harness.client, "admin@example.com", "AdminPassword123!")
+
+    async def time_out(*_args: object, **_kwargs: object) -> tuple[list[object], list[object]]:
+        raise TimeoutError
+
+    monkeypatch.setattr(admin_router, "YfinanceAdapter", lambda **_kwargs: object())
+    monkeypatch.setattr(admin_router, "refresh_index_daily_bars", time_out)
+    response = await harness.client.post(
+        "/api/admin/data-sources/yfinance/daily-bars",
+        headers={"X-CSRF-Token": csrf_token},
+        json={"period": "7d"},
+    )
+
+    assert response.status_code == 504
+    async with harness.session_factory() as database:
+        audit_count = await database.scalar(
+            select(AuditEvent).where(AuditEvent.action == "data_source.yfinance.fetched")
+        )
+    assert audit_count is None
 
 
 async def test_login_rate_limit_is_enforced_at_endpoint(harness: Harness) -> None:

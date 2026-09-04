@@ -859,6 +859,353 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "IndexDailyBarResponse": {
+        "properties": {
+          "close": {
+            "pattern": "^-?\\d+(?:\\.\\d+)?$",
+            "title": "Close",
+            "type": "string"
+          },
+          "high": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "High"
+          },
+          "low": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low"
+          },
+          "market_code": {
+            "title": "Market Code",
+            "type": "string"
+          },
+          "open": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "trade_date": {
+            "format": "date",
+            "title": "Trade Date",
+            "type": "string"
+          },
+          "volume": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume"
+          }
+        },
+        "required": [
+          "symbol",
+          "market_code",
+          "trade_date",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "title": "IndexDailyBarResponse",
+        "type": "object"
+      },
+      "IndexLatestBarResponse": {
+        "description": "The most recent settled bar plus the close before it, for a change figure.",
+        "properties": {
+          "close": {
+            "pattern": "^-?\\d+(?:\\.\\d+)?$",
+            "title": "Close",
+            "type": "string"
+          },
+          "high": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "High"
+          },
+          "low": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low"
+          },
+          "market_code": {
+            "title": "Market Code",
+            "type": "string"
+          },
+          "open": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open"
+          },
+          "previous_close": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Close"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "trade_date": {
+            "format": "date",
+            "title": "Trade Date",
+            "type": "string"
+          },
+          "volume": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume"
+          }
+        },
+        "required": [
+          "symbol",
+          "market_code",
+          "trade_date",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume",
+          "previous_close"
+        ],
+        "title": "IndexLatestBarResponse",
+        "type": "object"
+      },
+      "IndexMovingAverage120SeriesResponse": {
+        "properties": {
+          "period": {
+            "const": 120,
+            "title": "Period",
+            "type": "integer"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/IndexMovingAveragePointResponse"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": ["period", "points"],
+        "title": "IndexMovingAverage120SeriesResponse",
+        "type": "object"
+      },
+      "IndexMovingAverage20SeriesResponse": {
+        "properties": {
+          "period": {
+            "const": 20,
+            "title": "Period",
+            "type": "integer"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/IndexMovingAveragePointResponse"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": ["period", "points"],
+        "title": "IndexMovingAverage20SeriesResponse",
+        "type": "object"
+      },
+      "IndexMovingAverage240SeriesResponse": {
+        "properties": {
+          "period": {
+            "const": 240,
+            "title": "Period",
+            "type": "integer"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/IndexMovingAveragePointResponse"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": ["period", "points"],
+        "title": "IndexMovingAverage240SeriesResponse",
+        "type": "object"
+      },
+      "IndexMovingAverage60SeriesResponse": {
+        "properties": {
+          "period": {
+            "const": 60,
+            "title": "Period",
+            "type": "integer"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/IndexMovingAveragePointResponse"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": ["period", "points"],
+        "title": "IndexMovingAverage60SeriesResponse",
+        "type": "object"
+      },
+      "IndexMovingAveragePointResponse": {
+        "properties": {
+          "trade_date": {
+            "format": "date",
+            "title": "Trade Date",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": ["trade_date", "value"],
+        "title": "IndexMovingAveragePointResponse",
+        "type": "object"
+      },
+      "IndexMovingAveragesResponse": {
+        "description": "Read-time simple moving averages of settled daily closing prices.",
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "formula_version": {
+            "const": "sma-close-v1",
+            "title": "Formula Version",
+            "type": "string"
+          },
+          "market_code": {
+            "title": "Market Code",
+            "type": "string"
+          },
+          "method": {
+            "const": "sma",
+            "title": "Method",
+            "type": "string"
+          },
+          "price_field": {
+            "const": "close",
+            "title": "Price Field",
+            "type": "string"
+          },
+          "series": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "$ref": "#/components/schemas/IndexMovingAverage20SeriesResponse"
+              },
+              {
+                "$ref": "#/components/schemas/IndexMovingAverage60SeriesResponse"
+              },
+              {
+                "$ref": "#/components/schemas/IndexMovingAverage120SeriesResponse"
+              },
+              {
+                "$ref": "#/components/schemas/IndexMovingAverage240SeriesResponse"
+              }
+            ],
+            "title": "Series",
+            "type": "array"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol",
+          "market_code",
+          "method",
+          "price_field",
+          "formula_version",
+          "as_of",
+          "series"
+        ],
+        "title": "IndexMovingAveragesResponse",
+        "type": "object"
+      },
       "InternalUserCreate": {
         "properties": {
           "display_name": {
@@ -2892,53 +3239,13 @@
         "type": "object"
       },
       "YfinanceDailyBarsFetch": {
+        "additionalProperties": false,
         "properties": {
           "period": {
-            "default": "2y",
-            "enum": [
-              "1d",
-              "5d",
-              "7d",
-              "1mo",
-              "3mo",
-              "6mo",
-              "1y",
-              "2y",
-              "5y",
-              "10y",
-              "ytd",
-              "max"
-            ],
+            "const": "7d",
+            "default": "7d",
             "title": "Period",
             "type": "string"
-          },
-          "symbols": {
-            "anyOf": [
-              {
-                "items": {
-                  "enum": [
-                    "^DJI",
-                    "^GSPC",
-                    "^IXIC",
-                    "^RUT",
-                    "^SOX",
-                    "^HSI",
-                    "^TWII",
-                    "^TFNI",
-                    "^TPLI",
-                    "000001.SS"
-                  ],
-                  "type": "string"
-                },
-                "maxItems": 50,
-                "minItems": 1,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Symbols"
           }
         },
         "title": "YfinanceDailyBarsFetch",
@@ -2959,6 +3266,7 @@
             "type": "string"
           },
           "period": {
+            "const": "7d",
             "title": "Period",
             "type": "string"
           },
@@ -4792,6 +5100,181 @@
           }
         },
         "summary": "List Visible Markets",
+        "tags": ["markets"]
+      }
+    },
+    "/api/markets/indices": {
+      "get": {
+        "operationId": "list_index_latest_bars_api_markets_indices_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/IndexLatestBarResponse"
+                  },
+                  "title": "Response List Index Latest Bars Api Markets Indices Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Index Latest Bars",
+        "tags": ["markets"]
+      }
+    },
+    "/api/markets/indices/{symbol}/daily-bars": {
+      "get": {
+        "operationId": "list_index_daily_bars_api_markets_indices__symbol__daily_bars_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "symbol",
+            "required": true,
+            "schema": {
+              "title": "Symbol",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/IndexDailyBarResponse"
+                  },
+                  "title": "Response List Index Daily Bars Api Markets Indices  Symbol  Daily Bars Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Index Daily Bars",
+        "tags": ["markets"]
+      }
+    },
+    "/api/markets/indices/{symbol}/moving-averages": {
+      "get": {
+        "operationId": "get_index_moving_averages_api_markets_indices__symbol__moving_averages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "symbol",
+            "required": true,
+            "schema": {
+              "title": "Symbol",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IndexMovingAveragesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Index Moving Averages",
         "tags": ["markets"]
       }
     },

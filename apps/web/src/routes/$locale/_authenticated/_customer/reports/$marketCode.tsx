@@ -3,8 +3,13 @@ import type {
   LatestNews,
   Locale,
 } from "@daily-insights/api-client"
-import { createFileRoute, notFound } from "@tanstack/react-router"
+import { Await, createFileRoute, notFound } from "@tanstack/react-router"
+import { Suspense } from "react"
 import { DailyNews } from "#/components/DailyNews"
+import {
+  IndexHistoryChart,
+  IndexHistoryLoading,
+} from "#/components/IndexHistoryChart"
 import {
   MarketViewpoint,
   ReportDetail,
@@ -20,6 +25,14 @@ import {
   type NewsMarketCode,
 } from "#/lib/provisional-reports"
 import { getReportDetail } from "#/lib/reports"
+import {
+  chartMarketCodes,
+  getMarketIndexHistory,
+  getMarketIndexMovingAverages,
+  twoYearTaipeiRange,
+  type IndexMovingAverageMap,
+  type MarketIndexHistory,
+} from "#/lib/indices"
 import { useChatPageContext } from "#/components/PageContextChat"
 
 type ReportResult = Awaited<ReturnType<typeof getReportDetail>>
@@ -27,6 +40,49 @@ type MarketPage = {
   report: Exclude<ReportResult, { kind: "not-found" }>
   news: { marketCode: NewsMarketCode; latest: LatestNews | null } | null
   viewpoint: AnalystViewpoint | null
+  indexHistory: Promise<MarketIndexHistory | null> | null
+  indexMovingAverages: Promise<IndexMovingAverageMap> | null
+}
+
+export const INDEX_HISTORY_DEADLINE_MS = 10_000
+export const INDEX_MOVING_AVERAGES_DEADLINE_MS = 10_000
+
+export function withIndexHistoryDeadline(
+  history: Promise<MarketIndexHistory>,
+  deadlineMs = INDEX_HISTORY_DEADLINE_MS
+): Promise<MarketIndexHistory | null> {
+  return new Promise(resolve => {
+    const deadline = setTimeout(() => resolve(null), deadlineMs)
+    void history.then(
+      value => {
+        clearTimeout(deadline)
+        resolve(value)
+      },
+      () => {
+        clearTimeout(deadline)
+        resolve(null)
+      }
+    )
+  })
+}
+
+export function withMovingAverageDeadline(
+  movingAverages: Promise<IndexMovingAverageMap>,
+  deadlineMs = INDEX_MOVING_AVERAGES_DEADLINE_MS
+): Promise<IndexMovingAverageMap> {
+  return new Promise(resolve => {
+    const deadline = setTimeout(() => resolve({}), deadlineMs)
+    void movingAverages.then(
+      value => {
+        clearTimeout(deadline)
+        resolve(value)
+      },
+      () => {
+        clearTimeout(deadline)
+        resolve({})
+      }
+    )
+  })
 }
 
 // The report is the primary content; market news is secondary and degrades to
@@ -40,6 +96,30 @@ export async function loadMarketPage({
 }): Promise<MarketPage> {
   const newsMarket = isNewsMarketCode(params.marketCode)
     ? params.marketCode
+    : null
+  const supportsIndexChart = (chartMarketCodes as readonly string[]).includes(
+    params.marketCode
+  )
+  const indexRange = supportsIndexChart ? twoYearTaipeiRange() : null
+  const indexHistory = supportsIndexChart
+    ? withIndexHistoryDeadline(
+        getMarketIndexHistory({
+          data: {
+            marketCode: params.marketCode as "us_equity" | "tw_equity",
+            range: indexRange!,
+          },
+        })
+      )
+    : null
+  const indexMovingAverages = supportsIndexChart
+    ? withMovingAverageDeadline(
+        getMarketIndexMovingAverages({
+          data: {
+            marketCode: params.marketCode as "us_equity" | "tw_equity",
+            range: indexRange!,
+          },
+        })
+      )
     : null
   const [report, news, viewpoints] = await Promise.allSettled([
     getReportDetail({
@@ -70,6 +150,8 @@ export async function loadMarketPage({
         }
       : null,
     viewpoint,
+    indexHistory,
+    indexMovingAverages,
   }
 }
 
@@ -77,13 +159,15 @@ export const Route = createFileRoute(
   "/$locale/_authenticated/_customer/reports/$marketCode"
 )({
   loader: loadMarketPage,
-  pendingComponent: ReportLoadingScreen,
+  pendingComponent: MarketPageLoading,
   errorComponent: ReportErrorScreen,
   component: ReportPage,
 })
 
 function ReportPage() {
-  const { report, news, viewpoint } = Route.useLoaderData()
+  const { report, news, viewpoint, indexHistory, indexMovingAverages } =
+    Route.useLoaderData()
+  const { marketCode } = Route.useParams()
   const { locale } = Route.useRouteContext()
   useChatPageContext(
     report.kind === "report" && report.report.publicationId
@@ -112,6 +196,20 @@ function ReportPage() {
           viewpoint={viewpoint}
         />
       )}
+      {(chartMarketCodes as readonly string[]).includes(marketCode) &&
+      indexHistory ? (
+        <Suspense fallback={<IndexHistoryLoading />}>
+          <Await promise={indexHistory}>
+            {history => (
+              <IndexHistoryChart
+                history={history}
+                locale={locale}
+                movingAverages={indexMovingAverages}
+              />
+            )}
+          </Await>
+        </Suspense>
+      ) : null}
       {news ? (
         <DailyNews
           news={news.latest}
@@ -120,6 +218,15 @@ function ReportPage() {
           groupByMarket={false}
         />
       ) : null}
+    </>
+  )
+}
+
+function MarketPageLoading() {
+  return (
+    <>
+      <ReportLoadingScreen />
+      <IndexHistoryLoading />
     </>
   )
 }

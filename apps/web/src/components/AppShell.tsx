@@ -55,9 +55,13 @@ export function AppShell({
     ? "audio"
     : pathname.includes("/admin/members")
       ? "members"
-      : pathname.includes("/admin/conversations")
-        ? "conversations"
-        : null
+      : pathname.includes("/admin/index-data")
+        ? "index-data"
+        : pathname.includes("/admin/analyst-viewpoints")
+          ? "analyst-viewpoints"
+          : pathname.includes("/admin/conversations")
+            ? "conversations"
+            : null
   const reportMarketCode = marketCodes.find(code =>
     location.pathname.endsWith(`/reports/${code}`)
   )
@@ -100,9 +104,11 @@ export function AppShell({
           : "customer-podcasts"
       : location.pathname.endsWith("/admin/members")
         ? "admin-members"
-        : location.pathname.endsWith("/admin/analyst-viewpoints")
-          ? "admin-analyst-viewpoints"
-          : "admin-audio"
+        : location.pathname.endsWith("/admin/index-data")
+          ? "admin-index-data"
+          : location.pathname.endsWith("/admin/analyst-viewpoints")
+            ? "admin-analyst-viewpoints"
+            : "admin-audio"
 
   return (
     <>
@@ -211,6 +217,13 @@ export function AppShell({
                     className={adminNavLinkClass}
                   >
                     {t("memberManagementNav")}
+                  </Link>
+                  <Link
+                    to="/$locale/admin/index-data"
+                    params={{ locale }}
+                    className={adminNavLinkClass}
+                  >
+                    {t("indexDataAdminNav")}
                   </Link>
                   <Link
                     to="/$locale/admin/analyst-viewpoints"

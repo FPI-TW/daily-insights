@@ -1,0 +1,43 @@
+import { useEffect, useState } from "react"
+
+export function useChartColors() {
+  const [colors, setColors] = useState({
+    series: [] as string[],
+    indexSeries: [] as string[],
+    text: "",
+    grid: "",
+  })
+
+  useEffect(() => {
+    const updateColors = () => {
+      const styles = getComputedStyle(document.documentElement)
+      setColors({
+        series: [
+          styles.getPropertyValue("--chart-1").trim(),
+          styles.getPropertyValue("--chart-2").trim(),
+          styles.getPropertyValue("--chart-3").trim(),
+          styles.getPropertyValue("--chart-4").trim(),
+          styles.getPropertyValue("--chart-5").trim(),
+        ],
+        indexSeries: [
+          styles.getPropertyValue("--chart-index-close").trim(),
+          styles.getPropertyValue("--chart-index-sma-20").trim(),
+          styles.getPropertyValue("--chart-index-sma-60").trim(),
+          styles.getPropertyValue("--chart-index-sma-120").trim(),
+          styles.getPropertyValue("--chart-index-sma-240").trim(),
+        ],
+        text: styles.getPropertyValue("--sea-ink-soft").trim(),
+        grid: styles.getPropertyValue("--line").trim(),
+      })
+    }
+    updateColors()
+    const observer = new MutationObserver(updateColors)
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-theme"],
+    })
+    return () => observer.disconnect()
+  }, [])
+
+  return colors
+}

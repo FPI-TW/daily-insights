@@ -1,7 +1,7 @@
 import { ClientOnly, Link, useRouter } from "@tanstack/react-router"
 import ReactECharts from "echarts-for-react"
 import { motion } from "motion/react"
-import { useEffect, useState, type ReactNode } from "react"
+import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import type { AnalystViewpoint, Locale } from "@daily-insights/api-client"
 import {
@@ -15,6 +15,7 @@ import {
   type Direction,
 } from "#/lib/format"
 import type { NavMarket } from "#/lib/markets"
+import { useChartColors } from "#/lib/chart"
 import {
   type MarketCode,
   type ProvisionalReport,
@@ -520,38 +521,6 @@ export function ReportOverview({
       </div>
     </section>
   )
-}
-
-function useChartColors() {
-  const [colors, setColors] = useState({
-    series: [] as string[],
-    text: "",
-    grid: "",
-  })
-  useEffect(() => {
-    const updateColors = () => {
-      const styles = getComputedStyle(document.documentElement)
-      setColors({
-        series: [
-          styles.getPropertyValue("--chart-1").trim(),
-          styles.getPropertyValue("--chart-2").trim(),
-          styles.getPropertyValue("--chart-3").trim(),
-          styles.getPropertyValue("--chart-4").trim(),
-          styles.getPropertyValue("--chart-5").trim(),
-        ],
-        text: styles.getPropertyValue("--sea-ink-soft").trim(),
-        grid: styles.getPropertyValue("--line").trim(),
-      })
-    }
-    updateColors()
-    const observer = new MutationObserver(updateColors)
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class", "data-theme"],
-    })
-    return () => observer.disconnect()
-  }, [])
-  return colors
 }
 
 function chartCategories(

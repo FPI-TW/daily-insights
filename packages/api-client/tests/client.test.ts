@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
+import openapi from "../openapi.json"
 import {
   createAdministrationClient,
   createAuthClient,
@@ -10,6 +11,10 @@ import {
   createReportClient,
 } from "../src"
 import { createServerTransport } from "../src/server"
+import {
+  indexMovingAveragesSchema,
+  yfinanceDailyBarsResponseSchema,
+} from "../src/schemas"
 
 describe("API client trust boundary", () => {
   afterEach(() => {
@@ -133,6 +138,180 @@ describe("API client trust boundary", () => {
       expect.objectContaining({ code: "forex", is_visible: false }),
     ])
     expect(transport).toHaveBeenCalledWith("/api/markets")
+  })
+
+  it("fetches index bars with an encoded symbol and optional date range", async () => {
+    const bar = {
+      symbol: "^TWII",
+      market_code: "tw_equity",
+      trade_date: "2026-09-02",
+      open: "100.0000000000",
+      high: "101.0000000000",
+      low: "99.0000000000",
+      close: "100.5000000000",
+      volume: 1000,
+    }
+    const transport = vi.fn(async (path: string) =>
+      Response.json(
+        path.endsWith("/indices") ? [{ ...bar, previous_close: null }] : [bar]
+      )
+    )
+    const client = createMarketClient(transport)
+    await expect(client.latestIndexBars()).resolves.toEqual([
+      expect.objectContaining({ symbol: "^TWII", previous_close: null }),
+    ])
+    expect(transport).toHaveBeenCalledWith("/api/markets/indices")
+    await expect(
+      client.indexDailyBars("^TWII", { start: "2026-01-01" })
+    ).resolves.toHaveLength(1)
+    expect(transport).toHaveBeenCalledWith(
+      "/api/markets/indices/%5ETWII/daily-bars?start=2026-01-01"
+    )
+    await client.indexDailyBars("^TWII")
+    expect(transport).toHaveBeenCalledWith(
+      "/api/markets/indices/%5ETWII/daily-bars"
+    )
+  })
+
+  it("fetches and strictly validates index moving averages", async () => {
+    const response = {
+      symbol: "^TWII",
+      market_code: "tw_equity",
+      method: "sma",
+      price_field: "close",
+      formula_version: "sma-close-v1",
+      as_of: "2026-09-02",
+      series: [20, 60, 120, 240].map(period => ({
+        period,
+        points: [{ trade_date: "2026-09-02", value: null }],
+      })),
+    }
+    const transport = vi.fn(async () => Response.json(response))
+    await expect(
+      createMarketClient(transport).indexMovingAverages("^TWII", {
+        start: "2026-01-01",
+        end: "2026-09-02",
+      })
+    ).resolves.toEqual(response)
+    expect(transport).toHaveBeenCalledWith(
+      "/api/markets/indices/%5ETWII/moving-averages?start=2026-01-01&end=2026-09-02"
+    )
+    expect(
+      indexMovingAveragesSchema.safeParse({ ...response, method: "ema" })
+        .success
+    ).toBe(false)
+    expect(
+      indexMovingAveragesSchema.safeParse({
+        ...response,
+        series: response.series.slice().reverse(),
+      }).success
+    ).toBe(false)
+  })
+
+  it("keeps generated moving-average series ordered and fixed-length", () => {
+    const responseSchema =
+      openapi.components.schemas.IndexMovingAveragesResponse
+    expect(responseSchema).toMatchObject({
+      properties: {
+        series: {
+          type: "array",
+          minItems: 4,
+          maxItems: 4,
+          prefixItems: [
+            { $ref: "#/components/schemas/IndexMovingAverage20SeriesResponse" },
+            { $ref: "#/components/schemas/IndexMovingAverage60SeriesResponse" },
+            {
+              $ref: "#/components/schemas/IndexMovingAverage120SeriesResponse",
+            },
+            {
+              $ref: "#/components/schemas/IndexMovingAverage240SeriesResponse",
+            },
+          ],
+        },
+      },
+    })
+  })
+
+  it("refreshes the seven-day index window with CSRF protection", async () => {
+    const transport = vi.fn(async () =>
+      Response.json({
+        period: "7d",
+        fetched_at: "2026-09-04T00:00:00Z",
+        succeeded: [
+          {
+            symbol: "^TWII",
+            market: "tw_equity",
+            as_of: "2026-09-03",
+            stored_count: 5,
+            dropped_unsettled_trade_date: "2026-09-04",
+          },
+        ],
+        failed: [
+          {
+            symbol: "^HSI",
+            market: "hk_equity",
+            error: "provider unavailable",
+          },
+        ],
+      })
+    )
+
+    const result =
+      await createAdministrationClient(transport).refreshIndexDailyBars(
+        "csrf-token"
+      )
+
+    expect(result.failed).toHaveLength(1)
+    expect(transport).toHaveBeenCalledWith(
+      "/api/admin/data-sources/yfinance/daily-bars",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": "csrf-token",
+        },
+        body: JSON.stringify({ period: "7d" }),
+      }
+    )
+  })
+
+  it("rejects a refresh response outside the fixed seven-day contract", async () => {
+    const client = createAdministrationClient(async () =>
+      Response.json({
+        period: "2y",
+        fetched_at: "2026-09-04T00:00:00Z",
+        succeeded: [],
+        failed: [],
+      })
+    )
+
+    await expect(
+      client.refreshIndexDailyBars("csrf-token")
+    ).rejects.toMatchObject({
+      status: 502,
+    })
+  })
+
+  it("publishes and validates the fixed seven-day refresh response period", () => {
+    const responseSchema = openapi.components.schemas.YfinanceDailyBarsResponse
+
+    expect(responseSchema.properties.period.const).toBe("7d")
+    expect(
+      yfinanceDailyBarsResponseSchema.safeParse({
+        period: "7d",
+        fetched_at: "2026-09-04T00:00:00Z",
+        succeeded: [],
+        failed: [],
+      }).success
+    ).toBe(true)
+    expect(
+      yfinanceDailyBarsResponseSchema.safeParse({
+        period: "2y",
+        fetched_at: "2026-09-04T00:00:00Z",
+        succeeded: [],
+        failed: [],
+      }).success
+    ).toBe(false)
   })
 
   it("accepts a stale analyst viewpoint status without replacing stored data", async () => {

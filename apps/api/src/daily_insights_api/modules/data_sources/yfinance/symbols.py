@@ -25,8 +25,6 @@ IndexSymbol = Literal[
     "^SOX",
     "^HSI",
     "^TWII",
-    "^TFNI",
-    "^TPLI",
     "000001.SS",
 ]
 
@@ -38,7 +36,5 @@ TRACKED_INDICES: dict[IndexSymbol, MarketCode] = {
     "^SOX": "us_equity",
     "^HSI": "hk_equity",
     "^TWII": "tw_equity",
-    "^TFNI": "tw_equity",
-    "^TPLI": "tw_equity",
     "000001.SS": "cn_equity",
 }

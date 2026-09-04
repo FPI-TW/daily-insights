@@ -2,13 +2,15 @@ import asyncio
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
+from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
 
-from sqlalchemy import Result, func, literal_column, select, update
+from sqlalchemy import Result, String, column, func, literal_column, select, true, update, values
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from daily_insights_api.modules.data_sources.api import (
     TRACKED_INDICES,
@@ -26,12 +28,25 @@ from daily_insights_api.modules.markets.models import (
     Market,
     OrganizationMarketPolicy,
 )
-from daily_insights_api.modules.markets.schemas import MarketResponse
+from daily_insights_api.modules.markets.schemas import (
+    IndexDailyBarResponse,
+    IndexLatestBarResponse,
+    IndexMovingAverage20SeriesResponse,
+    IndexMovingAverage60SeriesResponse,
+    IndexMovingAverage120SeriesResponse,
+    IndexMovingAverage240SeriesResponse,
+    IndexMovingAveragePointResponse,
+    IndexMovingAveragesResponse,
+    MarketResponse,
+)
 
 MAX_BIND_PARAMETERS = 65535
 # Yahoo publishes no rate limit and is reached through a scraping client, so
 # this stays conservative; it matches TwelveDataTransport's default.
 MAX_FETCH_CONCURRENCY = 4
+MOVING_AVERAGE_PERIODS = (20, 60, 120, 240)
+MOVING_AVERAGE_WARMUP_SESSIONS = max(MOVING_AVERAGE_PERIODS) - 1
+MOVING_AVERAGE_QUANTUM = Decimal("0.0000000001")
 
 
 class IndexProviderConflictError(ValueError):
@@ -102,6 +117,190 @@ async def market_responses(
     return [market for market in responses if market.is_visible] if visible_only else responses
 
 
+def _bar_response(bar: IndexDailyBar) -> IndexDailyBarResponse:
+    return IndexDailyBarResponse(
+        symbol=bar.symbol,
+        market_code=bar.market_code,
+        trade_date=bar.trade_date,
+        open=bar.open,
+        high=bar.high,
+        low=bar.low,
+        close=bar.close,
+        volume=bar.volume,
+    )
+
+
+async def latest_index_bars(
+    database: AsyncSession,
+    *,
+    market_codes: set[str],
+) -> list[IndexLatestBarResponse]:
+    """The newest bar per symbol in the given markets, in TRACKED_INDICES order.
+
+    Which market an index belongs to is settled by the catalog, so the symbols
+    are chosen up front and each one's two newest rows are fetched through the
+    primary key. Ranking the whole table with a window function instead made
+    the cost grow with history: at ten years of bars it sorted 243k rows and
+    spilled to disk on every request, for the twenty rows this returns.
+    """
+    wanted_entries = [
+        (symbol, market) for symbol, market in TRACKED_INDICES.items() if market in market_codes
+    ]
+    if not wanted_entries:
+        return []
+    symbols = [symbol for symbol, _market in wanted_entries]
+    wanted = values(column("symbol", String), column("market_code", String), name="wanted").data(
+        wanted_entries
+    )
+    two_newest = (
+        select(IndexDailyBar)
+        .where(
+            IndexDailyBar.symbol == wanted.c.symbol,
+            IndexDailyBar.market_code == wanted.c.market_code,
+        )
+        .order_by(IndexDailyBar.trade_date.desc())
+        .limit(2)
+        .lateral()
+    )
+    bar = aliased(IndexDailyBar, two_newest)
+    rows = (await database.scalars(select(bar).select_from(wanted).join(two_newest, true()))).all()
+
+    # Ordering inside a lateral join is not a promise the outer query keeps, so
+    # the pair is put back in order here rather than trusted to arrive that way.
+    by_symbol: dict[str, list[IndexDailyBar]] = {}
+    for row in rows:
+        by_symbol.setdefault(row.symbol, []).append(row)
+    responses = []
+    for symbol in symbols:
+        pair = sorted(by_symbol.get(symbol, []), key=lambda row: row.trade_date, reverse=True)
+        if not pair:
+            continue
+        responses.append(
+            IndexLatestBarResponse(
+                **_bar_response(pair[0]).model_dump(),
+                previous_close=pair[1].close if len(pair) > 1 else None,
+            )
+        )
+    return responses
+
+
+async def index_daily_bars(
+    database: AsyncSession,
+    *,
+    symbol: str,
+    market_code: str,
+    start: date,
+    end: date,
+) -> list[IndexDailyBarResponse]:
+    bars = await database.scalars(
+        select(IndexDailyBar)
+        .where(
+            IndexDailyBar.symbol == symbol,
+            IndexDailyBar.market_code == market_code,
+            IndexDailyBar.trade_date >= start,
+            IndexDailyBar.trade_date <= end,
+        )
+        .order_by(IndexDailyBar.trade_date)
+    )
+    return [_bar_response(bar) for bar in bars]
+
+
+def index_moving_averages_response(
+    *,
+    symbol: str,
+    market_code: str,
+    requested_bars: Sequence[IndexDailyBar],
+    warmup_bars: Sequence[IndexDailyBar],
+) -> IndexMovingAveragesResponse:
+    """Calculate fixed SMAs without emitting dates outside the requested range.
+
+    A trading session is a stored settled daily bar, so gaps such as weekends
+    and exchange holidays never produce calendar filler points.  The caller
+    supplies at most 239 earlier sessions: enough context for the longest
+    (240-session) period while keeping the response query bounded.
+    """
+    periods = tuple(MOVING_AVERAGE_PERIODS)
+    values: dict[int, list[Decimal]] = {period: [] for period in periods}
+    points: dict[int, list[IndexMovingAveragePointResponse]] = {period: [] for period in periods}
+    for is_requested, bars in ((False, warmup_bars), (True, requested_bars)):
+        for bar in bars:
+            for period in periods:
+                window = values[period]
+                window.append(bar.close)
+                if len(window) > period:
+                    window.pop(0)
+                if is_requested:
+                    value = (
+                        (sum(window) / Decimal(period)).quantize(
+                            MOVING_AVERAGE_QUANTUM, rounding=ROUND_HALF_EVEN
+                        )
+                        if len(window) == period
+                        else None
+                    )
+                    points[period].append(
+                        IndexMovingAveragePointResponse(trade_date=bar.trade_date, value=value)
+                    )
+    return IndexMovingAveragesResponse(
+        symbol=symbol,
+        market_code=market_code,
+        method="sma",
+        price_field="close",
+        formula_version="sma-close-v1",
+        as_of=requested_bars[-1].trade_date if requested_bars else None,
+        series=(
+            IndexMovingAverage20SeriesResponse(period=20, points=points[20]),
+            IndexMovingAverage60SeriesResponse(period=60, points=points[60]),
+            IndexMovingAverage120SeriesResponse(period=120, points=points[120]),
+            IndexMovingAverage240SeriesResponse(period=240, points=points[240]),
+        ),
+    )
+
+
+async def index_moving_averages(
+    database: AsyncSession,
+    *,
+    symbol: str,
+    market_code: str,
+    start: date,
+    end: date,
+) -> IndexMovingAveragesResponse:
+    requested_bars = list(
+        (
+            await database.scalars(
+                select(IndexDailyBar)
+                .where(
+                    IndexDailyBar.symbol == symbol,
+                    IndexDailyBar.market_code == market_code,
+                    IndexDailyBar.trade_date >= start,
+                    IndexDailyBar.trade_date <= end,
+                )
+                .order_by(IndexDailyBar.trade_date)
+            )
+        ).all()
+    )
+    warmup_bars = list(
+        (
+            await database.scalars(
+                select(IndexDailyBar)
+                .where(
+                    IndexDailyBar.symbol == symbol,
+                    IndexDailyBar.market_code == market_code,
+                    IndexDailyBar.trade_date < start,
+                )
+                .order_by(IndexDailyBar.trade_date.desc())
+                .limit(MOVING_AVERAGE_WARMUP_SESSIONS)
+            )
+        ).all()
+    )
+    warmup_bars.reverse()
+    return index_moving_averages_response(
+        symbol=symbol,
+        market_code=market_code,
+        requested_bars=requested_bars,
+        warmup_bars=warmup_bars,
+    )
+
+
 async def store_index_daily_bars(
     database: AsyncSession,
     *,
@@ -119,6 +318,12 @@ async def store_index_daily_bars(
         return 0
     rows = []
     for bar in bars:
+        expected_market = TRACKED_INDICES[bar.symbol] if bar.symbol in TRACKED_INDICES else None
+        if expected_market != bar.market:
+            raise ValueError(
+                f"{bar.symbol} market {bar.market!r} does not match its catalog market "
+                f"{expected_market!r}"
+            )
         if bar.close is None:
             # The adapter rejects these; this guard fails loudly if that changes.
             raise ValueError(f"{bar.symbol} {bar.trade_date} has no close")
@@ -296,7 +501,7 @@ async def refresh_index_daily_bars(
                     contract_version=result.provenance.contract_version,
                     source_fetched_at=result.provenance.fetched_at,
                 )
-        except (IntegrityError, DataError, IndexProviderConflictError) as error:
+        except (IntegrityError, DataError, ValueError) as error:
             detail = error.orig if isinstance(error, (IntegrityError, DataError)) else error
             failures.append(
                 IndexRefreshFailure(

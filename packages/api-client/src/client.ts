@@ -30,7 +30,11 @@ import {
   analystViewpointSyncSchema,
   analystViewpointSyncStatusSchema,
   type LaunchMarketCode,
+  indexDailyBarListSchema,
+  indexMovingAveragesSchema,
+  indexLatestBarListSchema,
   marketListSchema,
+  yfinanceDailyBarsResponseSchema,
   userSchema,
 } from "./schemas"
 
@@ -69,6 +73,47 @@ export function createMarketClient(transport: ApiTransport) {
   return {
     async list() {
       return parseResponse(await transport("/api/markets"), marketListSchema)
+    },
+    async latestIndexBars() {
+      return parseResponse(
+        await transport("/api/markets/indices"),
+        indexLatestBarListSchema
+      )
+    },
+    async indexDailyBars(
+      symbol: string,
+      range: { start?: string; end?: string } = {}
+    ) {
+      const query = new URLSearchParams()
+      if (range.start) query.set("start", range.start)
+      if (range.end) query.set("end", range.end)
+      // Serialize and test the string rather than reading `size`, which Safari
+      // gained in 17 and Chrome in 113. On anything older it reads as undefined
+      // and the comparison is false, dropping the range without an error.
+      const search = query.toString()
+      const suffix = search ? `?${search}` : ""
+      return parseResponse(
+        await transport(
+          `/api/markets/indices/${encodeURIComponent(symbol)}/daily-bars${suffix}`
+        ),
+        indexDailyBarListSchema
+      )
+    },
+    async indexMovingAverages(
+      symbol: string,
+      range: { start?: string; end?: string } = {}
+    ) {
+      const query = new URLSearchParams()
+      if (range.start) query.set("start", range.start)
+      if (range.end) query.set("end", range.end)
+      const search = query.toString()
+      const suffix = search ? `?${search}` : ""
+      return parseResponse(
+        await transport(
+          `/api/markets/indices/${encodeURIComponent(symbol)}/moving-averages${suffix}`
+        ),
+        indexMovingAveragesSchema
+      )
     },
   }
 }
@@ -240,6 +285,16 @@ function mutationHeaders(csrfToken: string) {
 
 export function createAdministrationClient(transport: ApiTransport) {
   return {
+    async refreshIndexDailyBars(csrfToken: string) {
+      return parseResponse(
+        await transport("/api/admin/data-sources/yfinance/daily-bars", {
+          method: "POST",
+          headers: mutationHeaders(csrfToken),
+          body: JSON.stringify({ period: "7d" }),
+        }),
+        yfinanceDailyBarsResponseSchema
+      )
+    },
     async analystViewpointStatus() {
       return parseResponse(
         await transport("/api/admin/analyst-viewpoints/status"),
