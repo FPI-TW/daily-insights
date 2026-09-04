@@ -650,6 +650,21 @@ async def test_daily_bars_are_bounded_by_the_requested_window(
     assert unknown.status_code == 404
 
 
+async def test_an_end_at_the_start_of_the_calendar_is_answered_not_crashed(
+    session_factory: async_sessionmaker[AsyncSession],
+    member_client: AsyncClient,
+) -> None:
+    # Deriving the default start subtracts a year from `end`, which underflows
+    # for any date in year 1 and used to surface as a 500. The whole year is
+    # covered, not just date.min, because the window is 365 days wide.
+    for end in ("0001-01-01", "0001-06-15", "0001-12-31"):
+        response = await member_client.get(
+            "/api/markets/indices/%5ETWII/daily-bars", params={"end": end}
+        )
+        assert response.status_code == 200, f"end={end}: {response.text}"
+        assert response.json() == []
+
+
 async def test_the_same_provider_still_updates_an_existing_row(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:

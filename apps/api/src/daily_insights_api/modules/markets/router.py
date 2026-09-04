@@ -81,7 +81,13 @@ async def list_index_daily_bars(
     if INDEX_MARKETS.get(symbol) not in visible:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "index not found")
     end = end or date.today()
-    start = start or end - DEFAULT_BARS_WINDOW
+    if start is None:
+        # Any end in year 1 is less than the window away from date.min, and
+        # stepping off the start of the calendar raises OverflowError, which
+        # would surface as a 500 before either check below could run. The
+        # distance between two real dates is always representable, so the
+        # window is clamped to it.
+        start = end - min(DEFAULT_BARS_WINDOW, end - date.min)
     if start > end:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "start must not be after end")
     if end - start > MAX_BARS_RANGE:
