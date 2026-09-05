@@ -104,11 +104,57 @@ def test_market_policies_allow_a_single_source_and_single_market() -> None:
         enforce_selection_policy(diverse, candidates[:2], TW_EQUITY_SPEC.selection)
 
 
+def _global_or_us_selection(ids: list[int]) -> Selection:
+    return Selection.model_validate(
+        {
+            "selections": [
+                {
+                    "id": f"{index:064x}",
+                    "topic": "companies" if index % 2 else "markets",
+                    "event_key": f"event-{index}",
+                    "market": "us",
+                    "importance": 3,
+                }
+                for index in ids
+            ]
+        }
+    )
+
+
+def test_full_edition_must_spread_across_three_source_domains() -> None:
+    # The US edition allows four per domain, so eight picks could come from
+    # two outlets; the full-edition rule requires a third.
+    hosts = ["a.example"] * 4 + ["b.example"] * 4 + ["c.example"] * 2
+    candidates = [_fetched(index, host) for index, host in enumerate(hosts, start=1)]
+    two_domains = _global_or_us_selection(list(range(1, 9)))
+    with pytest.raises(ValueError, match="at least 3 source domains"):
+        enforce_selection_policy(two_domains, candidates, US_EQUITY_SPEC.selection)
+    # A reserve from a third domain does not rescue the edition set.
+    with pytest.raises(ValueError, match="at least 3 source domains"):
+        enforce_selection_policy(
+            _global_or_us_selection([*range(1, 9), 9]), candidates, US_EQUITY_SPEC.selection
+        )
+    # Seven picks never trigger the rule; a full edition with c.example passes.
+    enforce_selection_policy(
+        _global_or_us_selection(list(range(1, 8))), candidates, US_EQUITY_SPEC.selection
+    )
+    enforce_selection_policy(
+        _global_or_us_selection([1, 2, 3, 4, 5, 6, 7, 9]), candidates, US_EQUITY_SPEC.selection
+    )
+    # The global digest's two-per-domain cap already implies three domains;
+    # Taiwan deliberately allows a single source even when full.
+    assert GLOBAL_SPEC.selection.min_domains_full == 3
+    assert TW_EQUITY_SPEC.selection.min_domains_full == 1
+
+
 def test_output_contract_reflects_each_policy() -> None:
     global_contract = selection_output_contract(GLOBAL_SPEC.selection)
     market_contract = selection_output_contract(TW_EQUITY_SPEC.selection)
     assert "0 to 7 objects" in global_contract["selections"]
     assert "the first 5 form the edition" in global_contract["selections"]
+    assert "event_keys unique" in global_contract["selections"]
+    assert "span at least 3 distinct source domains" in global_contract["selections"]
+    assert "source domains" not in market_contract["selections"].split("topics")[-1]
     # Region-neutral by construction: only the global tag is offered.
     assert "distinct markets" not in global_contract["selections"]
     assert global_contract["market"] == ["global"]

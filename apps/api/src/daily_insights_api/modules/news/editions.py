@@ -28,6 +28,10 @@ class SelectionPolicy:
     # summarised when an earlier story fails verification, so a dropped
     # number no longer costs the edition a slot.
     reserve_items: int = 2
+    # Source spread required once every edition slot is filled: the first
+    # max_items picks must come from at least this many source domains. 1
+    # disables the rule for editions that deliberately allow one source.
+    min_domains_full: int = 1
 
     @property
     def selection_limit(self) -> int:
@@ -67,15 +71,18 @@ GLOBAL_SPEC = EditionSpec(
         max_per_domain=2,
         min_topics=2,
         min_markets=1,
+        min_domains_full=3,
         market_focus=(
             "This is the global macro digest for a cross-market audience: central bank "
             "decisions and guidance, inflation and growth data, rates and yields, FX, "
             "energy and commodities, geopolitical or trade events with market-wide impact, "
-            "and cross-border capital flows. Hard rule: select only stories whose impact "
-            "reaches investors across regions and tag every selection market 'global'; a "
-            "story that matters mainly to one country or region (a local listed company, "
-            "a domestic policy, one exchange's session) belongs to that market's edition "
-            "and must not be selected even if the remaining candidates are weaker."
+            "and cross-border capital flows. Single-company or single-country stories "
+            "qualify only when they move more than their home market; the country "
+            "editions cover the rest. Hard rule: select only stories whose impact reaches "
+            "investors across regions and tag every selection market 'global'; a story "
+            "that matters mainly to one country or region (a local listed company, a "
+            "domestic policy, one exchange's session) must not be selected even if the "
+            "remaining candidates are weaker."
         ),
         # The digest is deliberately region-neutral: only cross-market stories.
         allowed_markets=frozenset({"global"}),
@@ -117,6 +124,7 @@ US_EQUITY_SPEC = EditionSpec(
         max_per_domain=4,
         min_topics=2,
         min_markets=1,
+        min_domains_full=3,
         market_focus=(
             "US equities: S&P 500, Nasdaq and Dow moves, listed-company earnings and "
             "guidance, Federal Reserve policy, US macro data, and sector or mega-cap "
