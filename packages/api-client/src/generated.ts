@@ -300,6 +300,26 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/admin/podcasts/{episode_id}/audio/{locale}/analyze": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Admin Analyze Audio
+     * @description Start (or retry) transcription and AI titling for one audio file.
+     */
+    post: operations["admin_podcasts_analyze_audio"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/admin/podcasts/{episode_id}/audio/{locale}/chapters": {
     parameters: {
       query?: never
@@ -1523,6 +1543,16 @@ export interface components {
     }
     /** PodcastAudioVariantResponse */
     PodcastAudioVariantResponse: {
+      /** Analysis Error */
+      analysis_error?: string | null
+      /**
+       * Analysis Status
+       * @default none
+       * @enum {string}
+       */
+      analysis_status: "none" | "pending" | "succeeded" | "failed"
+      /** Analyzed At */
+      analyzed_at?: string | null
       /**
        * Asset Id
        * Format: uuid
@@ -1533,6 +1563,12 @@ export interface components {
        * @default []
        */
       chapters: components["schemas"]["PodcastChapter"][]
+      /**
+       * Chapters Source
+       * @default none
+       * @enum {string}
+       */
+      chapters_source: "none" | "file" | "ai" | "manual"
       /** Duration Seconds */
       duration_seconds?: number | null
       /** Is Active */
@@ -1578,6 +1614,12 @@ export interface components {
       id: string
       /** Metadata */
       metadata: components["schemas"]["PodcastMetadata"][]
+      /**
+       * Metadata Source
+       * @default derived
+       * @enum {string}
+       */
+      metadata_source: "derived" | "ai" | "manual"
       /** Published At */
       published_at: string | null
       /**
@@ -2895,6 +2937,40 @@ export interface operations {
     responses: {
       /** @description Successful Response */
       200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["PodcastEpisodeAdminResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  admin_podcasts_analyze_audio: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        episode_id: string
+        locale: "zh-hant" | "zh-hans" | "en"
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      202: {
         headers: {
           [name: string]: unknown
         }

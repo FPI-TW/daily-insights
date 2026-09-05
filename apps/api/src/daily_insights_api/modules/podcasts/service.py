@@ -2,7 +2,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, cast
 
 from mutagen import File as MutagenFile
 from mutagen.id3 import ID3
@@ -261,6 +261,39 @@ def derived_episode_metadata(trading_date: date) -> tuple[PodcastMetadata, ...]:
     return tuple(values)
 
 
+async def stored_metadata(
+    database: AsyncSession, episode_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, dict[str, PodcastMetadata]]:
+    """Title and summary per locale as edited or analysed, keyed by episode."""
+    if not episode_ids:
+        return {}
+    rows = (
+        await database.scalars(
+            select(PodcastEpisodeTranslation).where(
+                PodcastEpisodeTranslation.episode_id.in_(episode_ids)
+            )
+        )
+    ).all()
+    result: dict[uuid.UUID, dict[str, PodcastMetadata]] = {}
+    for row in rows:
+        if row.locale not in ("zh-hant", "zh-hans", "en"):
+            continue
+        result.setdefault(row.episode_id, {})[row.locale] = PodcastMetadata(
+            locale=cast(Locale, row.locale), title=row.title, summary=row.summary
+        )
+    return result
+
+
+def metadata_for(
+    stored: dict[str, PodcastMetadata] | None, trading_date: date, locale: str
+) -> PodcastMetadata:
+    """The stored text for the locale when someone (or the analysis) wrote it,
+    else the derived "Podcast | date" placeholder."""
+    if stored is not None and locale in stored:
+        return stored[locale]
+    return next(item for item in derived_episode_metadata(trading_date) if item.locale == locale)
+
+
 async def get_episode(
     database: AsyncSession,
     episode_id: uuid.UUID,
@@ -323,12 +356,17 @@ async def episode_admin_response(
     ).all()
     from daily_insights_api.modules.podcasts.api import PodcastAudioVariantResponse
 
+    stored = (await stored_metadata(database, [episode.id])).get(episode.id)
     return PodcastEpisodeAdminResponse(
         id=episode.id,
         trading_date=episode.trading_date,
         status=episode.status,
         version=episode.version,
-        metadata=derived_episode_metadata(episode.trading_date),
+        metadata=tuple(
+            metadata_for(stored, episode.trading_date, locale)
+            for locale in ("zh-hant", "zh-hans", "en")
+        ),
+        metadata_source=cast(Any, episode.metadata_source),
         audio_variants=tuple(
             PodcastAudioVariantResponse(
                 asset_id=item.asset_id,
@@ -337,6 +375,10 @@ async def episode_admin_response(
                 is_active=item.is_active,
                 duration_seconds=item.duration_seconds,
                 chapters=parsed_chapters(item.chapters),
+                chapters_source=cast(Any, item.chapters_source),
+                analysis_status=cast(Any, item.analysis_status),
+                analysis_error=item.analysis_error,
+                analyzed_at=item.analyzed_at,
             )
             for item in variants
         ),
@@ -356,12 +398,12 @@ async def list_published_episodes(
             .order_by(PodcastEpisode.trading_date.desc())
         )
     ).all()
-    facts = await active_audio_facts(database, [episode.id for episode in episodes])
+    episode_ids = [episode.id for episode in episodes]
+    facts = await active_audio_facts(database, episode_ids)
+    stored = await stored_metadata(database, episode_ids)
     responses: list[PodcastEpisodeSummaryResponse] = []
     for episode in episodes:
-        metadata = next(
-            item for item in derived_episode_metadata(episode.trading_date) if item.locale == locale
-        )
+        metadata = metadata_for(stored.get(episode.id), episode.trading_date, locale)
         responses.append(
             PodcastEpisodeSummaryResponse(
                 id=episode.id,
@@ -391,9 +433,8 @@ async def published_episode_detail(
     )
     if episode is None or episode.published_at is None:
         raise PodcastNotFoundError
-    metadata = next(
-        item for item in derived_episode_metadata(episode.trading_date) if item.locale == locale
-    )
+    stored = (await stored_metadata(database, [episode.id])).get(episode.id)
+    metadata = metadata_for(stored, episode.trading_date, locale)
     facts = await active_audio_facts(database, [episode.id])
     return PodcastEpisodeDetailResponse(
         id=episode.id,
@@ -545,8 +586,13 @@ async def upload_audio_batch(
             current.activated_by_user_id = actor_user_id
             current.replaced_at = None
             current.duration_seconds = duration_seconds
-            # A new recording invalidates the old markers.
+            # A new recording invalidates the old markers and analysis.
             current.chapters = chapters
+            current.chapters_source = "file" if chapters else "none"
+            current.analysis_status = "none"
+            current.analysis_error = None
+            current.analyzed_at = None
+            current.transcript = None
             variant = current
         else:
             variant = PodcastEpisodeAudioVariant(
@@ -558,6 +604,7 @@ async def upload_audio_batch(
                 activated_by_user_id=actor_user_id,
                 duration_seconds=duration_seconds,
                 chapters=chapters,
+                chapters_source="file" if chapters else "none",
             )
             database.add(variant)
         variants.append(variant)
@@ -598,6 +645,7 @@ async def replace_audio_chapters(
     except ValueError as error:
         raise PodcastChaptersError(str(error)) from error
     variant.chapters = serialized_chapters(validated)
+    variant.chapters_source = "manual" if validated else "none"
     episode.version += 1
     await database.flush()
     return variant

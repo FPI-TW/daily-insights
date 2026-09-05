@@ -70,6 +70,16 @@ class Settings(BaseSettings):
     chat_model_api_base_url: str = "https://api.deepseek.com"
     chat_model_api_key: SecretStr | None = None
     chat_timeout_seconds: float = Field(default=90, gt=0, le=600)
+    # Podcast analysis: an uploaded recording is transcribed by OpenAI and the
+    # transcript is turned into a title, summary and chapters by the news
+    # model (model_* settings). Off by default; needs both keys when on.
+    podcast_analysis_enabled: bool = False
+    openai_api_base_url: str = "https://api.openai.com/v1"
+    openai_api_key: SecretStr | None = None
+    transcription_model: str = "whisper-1"
+    # One transcription request carries the whole audio file (up to ~25 MB),
+    # so the budget is generous.
+    podcast_analysis_timeout_seconds: float = Field(default=240, gt=0, le=900)
     news_fetch_timeout_seconds: float = Field(default=25, gt=0, le=120)
     # Per-feed budget for reading a publisher's RSS, JSON, or listing page.
     news_discovery_timeout_seconds: float = Field(default=30, gt=0, le=180)
@@ -170,6 +180,22 @@ class Settings(BaseSettings):
                 self.guardian_api_key.get_secret_value()
             ):
                 raise ValueError("guardian_api_key cannot be a placeholder")
+        if self.podcast_analysis_enabled:
+            openai_url = urlparse(self.openai_api_base_url)
+            if openai_url.scheme != "https" or not openai_url.netloc:
+                raise ValueError("openai_api_base_url must be an absolute HTTPS URL")
+            if (
+                self.openai_api_key is None
+                or not self.openai_api_key.get_secret_value().strip()
+                or is_placeholder_value(self.openai_api_key.get_secret_value())
+            ):
+                raise ValueError("openai_api_key is required and cannot be a placeholder")
+            if (
+                self.model_api_key is None
+                or not self.model_api_key.get_secret_value().strip()
+                or is_placeholder_value(self.model_api_key.get_secret_value())
+            ):
+                raise ValueError("podcast analysis requires model_api_key for the language model")
         if self.chat_enabled:
             chat_url = urlparse(self.chat_model_api_base_url)
             if self.chat_model_provider not in {"deepseek", "openai-compatible"}:
