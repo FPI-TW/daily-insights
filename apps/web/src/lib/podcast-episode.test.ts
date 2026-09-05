@@ -31,10 +31,8 @@ describe("Podcast episode helpers", () => {
     expect(monthDayLabel("2026-09-02", "en")).toBe("Sep 2")
   })
 
-  it("formats the release time in the given zone", () => {
-    expect(
-      releaseTimeLabel("2026-09-02T23:30:00Z", "zh-hant", "Asia/Taipei")
-    ).toBe("07:30")
+  it("formats the release time in Taiwan time by default", () => {
+    expect(releaseTimeLabel("2026-09-02T23:30:00Z", "zh-hant")).toBe("07:30")
     expect(releaseTimeLabel("2026-09-02T23:30:00Z", "en", "UTC")).toBe("23:30")
     expect(releaseTimeLabel("not-a-date", "en")).toBeNull()
   })

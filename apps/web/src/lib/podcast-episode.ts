@@ -44,12 +44,17 @@ export function weekdayLabel(isoDate: string, locale: Locale) {
   }).format(utcDate(isoDate))
 }
 
-/** Release time (`07:30`) of an episode in the viewer's zone, from when its
- * audio file was registered. */
+// Release times are shown in Taiwan time: the briefing is a Taiwan-morning
+// product, and a fixed zone keeps the server-rendered text identical to the
+// client's (a viewer-zone label would mismatch at hydration).
+export const releaseTimeZone = "Asia/Taipei"
+
+/** Release time (`07:30`) of an episode, from when its audio file was
+ * registered. */
 export function releaseTimeLabel(
   isoDateTime: string,
   locale: Locale,
-  timeZone?: string
+  timeZone: string = releaseTimeZone
 ) {
   const instant = new Date(isoDateTime)
   if (Number.isNaN(instant.getTime())) return null
@@ -57,7 +62,7 @@ export function releaseTimeLabel(
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
-    ...(timeZone ? { timeZone } : {}),
+    timeZone,
   }).format(instant)
 }
 
