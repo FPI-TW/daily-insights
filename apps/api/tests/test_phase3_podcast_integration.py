@@ -125,8 +125,15 @@ class FakeTranscriber:
         self.calls: list[tuple[str, str, str | None]] = []
 
     async def transcribe(
-        self, content: bytes, *, filename: str, mime_type: str, language: str | None
+        self,
+        content: bytes,
+        *,
+        filename: str,
+        mime_type: str,
+        language: str | None,
+        prompt: str | None = None,
     ) -> Transcript:
+        assert prompt, "the locale prompt steers script and vocabulary"
         self.calls.append((filename, mime_type, language))
         return Transcript(
             language="chinese",

@@ -119,6 +119,33 @@ def test_parse_analysis_maps_blocks_to_chapter_starts() -> None:
     ]
 
 
+def test_parse_analysis_clips_titles_per_script_without_splitting_words() -> None:
+    blocks = transcript_blocks(sample_transcript())
+    long_en = (
+        "Fed Holds Rates Steady and Signals Easing While Foreign Investors "
+        "Return to Taiwan Stocks Again"
+    )
+    result = parse_analysis(
+        {
+            "title": {"zh-hant": "標" * 50, "zh-hans": "标" * 50, "en": long_en},
+            "summary": localized("s"),
+            "chapters": [
+                {"block": 0, "title": localized("A")},
+                {"block": 2, "title": localized("B")},
+                {"block": 4, "title": localized("C")},
+            ],
+        },
+        blocks,
+        duration_seconds=90,
+    )
+    titles = {item.locale: item.title for item in result.metadata.values}
+    assert titles["zh-hant"] == "標" * 40
+    assert len(titles["en"]) <= 90
+    assert titles["en"] == (
+        "Fed Holds Rates Steady and Signals Easing While Foreign Investors Return to Taiwan Stocks"
+    )
+
+
 def test_parse_analysis_rejects_bad_shapes() -> None:
     blocks = transcript_blocks(sample_transcript())
     good_chapters = [

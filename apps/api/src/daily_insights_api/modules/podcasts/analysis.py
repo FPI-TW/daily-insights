@@ -48,9 +48,28 @@ MIN_BLOCK_SECONDS = 20
 MAX_PROMPT_CHARACTERS = 24_000
 MIN_AI_CHAPTERS = 3
 MAX_AI_CHAPTERS = 6
-TITLE_MAX = 40
+# Titles are capped per script: 40 CJK characters carry as much as ~90
+# Latin characters, and an English title cut at 40 lands mid-word.
+TITLE_MAX: dict[str, int] = {"zh-hant": 40, "zh-hans": 40, "en": 90}
 SUMMARY_MAX = 600
 TRANSCRIPTION_LANGUAGES: dict[str, str] = {"zh-hant": "zh", "zh-hans": "zh", "en": "en"}
+# Whisper writes Chinese in whichever script it guesses (usually Simplified)
+# and mishears domain terms; a short prompt in the expected script with the
+# vocabulary of a market briefing steers both.
+TRANSCRIPTION_PROMPTS: dict[str, str] = {
+    "zh-hant": (
+        "以下是台灣投資人的繁體中文晨間市場 Podcast，"  # noqa: RUF001
+        "談聯準會、台股、外資、新台幣匯率與台積電。"
+    ),
+    "zh-hans": (
+        "以下是简体中文的晨间市场 Podcast，"  # noqa: RUF001
+        "谈联准会、台股、外资、新台币汇率与台积电。"
+    ),
+    "en": (
+        "The following is an English morning market briefing on the Fed, Taiwan stocks, "
+        "foreign investors, the NT dollar and TSMC."
+    ),
+}
 LOCALES: tuple[Locale, ...] = ("zh-hant", "zh-hans", "en")
 ANALYSIS_PROMPT_VERSION = "podcast-analysis-v1"
 
@@ -92,6 +111,7 @@ class Transcriber(Protocol):
         filename: str,
         mime_type: str,
         language: str | None,
+        prompt: str | None = None,
     ) -> Transcript: ...
 
 
@@ -123,6 +143,7 @@ class OpenAITranscriber:
         filename: str,
         mime_type: str,
         language: str | None,
+        prompt: str | None = None,
     ) -> Transcript:
         data: dict[str, str] = {
             "model": self._model,
@@ -131,6 +152,8 @@ class OpenAITranscriber:
         }
         if language:
             data["language"] = language
+        if prompt:
+            data["prompt"] = prompt
         try:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(self._timeout), trust_env=False
@@ -316,7 +339,18 @@ class AnalysisResult:
     chapters: dict[Locale, tuple[PodcastChapter, ...]]
 
 
-def _localized(value: object, *, field: str, limit: int) -> dict[Locale, str]:
+def _clip(text: str, limit: int) -> str:
+    """Trim to `limit` characters, backing up to the last space when the cut
+    would split a Latin word."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    if text[limit] != " " and " " in cut and cut.rfind(" ") > limit // 2:
+        cut = cut[: cut.rfind(" ")]
+    return cut.rstrip(" ,;:-")
+
+
+def _localized(value: object, *, field: str, limit: int | dict[str, int]) -> dict[Locale, str]:
     if not isinstance(value, dict):
         raise PodcastAnalysisError(f"{field} must be an object keyed by locale")
     result: dict[Locale, str] = {}
@@ -324,7 +358,8 @@ def _localized(value: object, *, field: str, limit: int) -> dict[Locale, str]:
         text = value.get(locale)
         if not isinstance(text, str) or not text.strip():
             raise PodcastAnalysisError(f"{field} is missing the {locale} text")
-        result[locale] = " ".join(text.split())[:limit]
+        cap = limit[locale] if isinstance(limit, dict) else limit
+        result[locale] = _clip(" ".join(text.split()), cap)
     return result
 
 
@@ -450,6 +485,7 @@ class PodcastAnalyzer:
                 filename=filename,
                 mime_type=mime_type,
                 language=TRANSCRIPTION_LANGUAGES.get(locale),
+                prompt=TRANSCRIPTION_PROMPTS.get(locale),
             )
             blocks = transcript_blocks(transcript)
             if not blocks:

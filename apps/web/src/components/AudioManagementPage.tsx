@@ -692,10 +692,13 @@ function AnalysisStatus({
   const { t } = useTranslation()
   if (variant.analysis_status === "succeeded") {
     return t("podcastAnalysisStatus_succeeded", {
+      // Pinned to Taiwan time so the server-rendered label matches the
+      // client's (a viewer-zone label would mismatch at hydration).
       time: variant.analyzed_at
         ? new Intl.DateTimeFormat(locale, {
             dateStyle: "short",
             timeStyle: "short",
+            timeZone: "Asia/Taipei",
           }).format(new Date(variant.analyzed_at))
         : "",
     })
