@@ -407,6 +407,16 @@ const resources: Resource = {
       podcastAudioUnavailable: "音檔目前無法播放，請稍後再試。",
       podcastAudioFallback: "此語系尚無音檔，正在播放其他可用語系版本。",
       podcastAudioUnsupported: "你的瀏覽器不支援音訊播放。",
+      podcastChaptersTitle: "章節（{{locale}}）",
+      podcastChaptersHint:
+        "每行一段，格式為「分:秒 標題」，例如 2:10 外資回補三大權值股。上傳的音檔若內含章節標記會自動帶入。",
+      podcastChaptersSave: "儲存章節",
+      podcastChaptersError_format:
+        "第 {{line}} 行格式錯誤，需為「分:秒 標題」。",
+      podcastChaptersError_order: "第 {{line}} 行的時間必須晚於前一段。",
+      podcastChaptersError_too_many: "最多 {{max}} 段。",
+      podcastChaptersError_beyond_duration:
+        "第 {{line}} 行的時間超過音檔長度。",
       podcastToday: "今日",
       podcastPlay: "播放",
       podcastPause: "暫停",
@@ -916,6 +926,16 @@ const resources: Resource = {
       podcastAudioUnavailable: "音频目前无法播放，请稍后再试。",
       podcastAudioFallback: "此语言尚无音频，正在播放其他可用语言版本。",
       podcastAudioUnsupported: "你的浏览器不支持音频播放。",
+      podcastChaptersTitle: "章节（{{locale}}）",
+      podcastChaptersHint:
+        "每行一段，格式为「分:秒 标题」，例如 2:10 外资回补三大权值股。上传的音频若内含章节标记会自动带入。",
+      podcastChaptersSave: "保存章节",
+      podcastChaptersError_format:
+        "第 {{line}} 行格式错误，需为「分:秒 标题」。",
+      podcastChaptersError_order: "第 {{line}} 行的时间必须晚于前一段。",
+      podcastChaptersError_too_many: "最多 {{max}} 段。",
+      podcastChaptersError_beyond_duration:
+        "第 {{line}} 行的时间超过音频长度。",
       podcastToday: "今日",
       podcastPlay: "播放",
       podcastPause: "暂停",
@@ -1444,6 +1464,16 @@ const resources: Resource = {
       podcastAudioFallback:
         "Audio is not yet available in this language. Playing another available edition.",
       podcastAudioUnsupported: "Your browser does not support audio playback.",
+      podcastChaptersTitle: "Chapters ({{locale}})",
+      podcastChaptersHint:
+        'One marker per line as "m:ss title", for example 2:10 Foreign flows. Chapter tags embedded in an uploaded file are filled in automatically.',
+      podcastChaptersSave: "Save chapters",
+      podcastChaptersError_format: 'Line {{line}} must read "m:ss title".',
+      podcastChaptersError_order:
+        "Line {{line}} must start after the previous chapter.",
+      podcastChaptersError_too_many: "At most {{max}} chapters.",
+      podcastChaptersError_beyond_duration:
+        "Line {{line}} is past the end of the audio.",
       podcastToday: "Today",
       podcastPlay: "Play",
       podcastPause: "Pause",

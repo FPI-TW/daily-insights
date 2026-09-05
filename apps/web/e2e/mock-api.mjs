@@ -33,6 +33,7 @@ function reset(overrides = {}) {
     status: "published",
     episodeVersion: 2,
     audioVersion: 1,
+    chapters: [],
     podcastEpisodes: "single",
     reports: "normal",
     requests: [],
@@ -193,6 +194,8 @@ function adminEpisode({
         locale: "zh-hant",
         version: state.audioVersion,
         is_active: true,
+        duration_seconds: 490,
+        chapters: state.chapters,
       },
     ],
     cover_asset_id: null,
@@ -584,6 +587,34 @@ const server = createServer(async (request, response) => {
       expectedVersion: input.expected_version,
     })
     state.status = "draft"
+    state.episodeVersion += 1
+    sendJson(response, 200, adminEpisode())
+    return
+  }
+
+  const chaptersMatch = new RegExp(
+    `^/api/admin/podcasts/${episodeId}/audio/([^/]+)/chapters$`
+  ).exec(url.pathname)
+  if (chaptersMatch && request.method === "PUT") {
+    const role = requireRole(request, response, ["admin", "asset_manager"])
+    if (!role || !requireCsrf(request, response)) return
+    const input = parseJsonBody(await readBody(request))
+    if (input === null || !Array.isArray(input.chapters)) {
+      sendJson(response, 422, { detail: "Invalid chapters" })
+      return
+    }
+    if (input.expected_version !== state.episodeVersion) {
+      sendJson(response, 409, { detail: "Expected version mismatch" })
+      return
+    }
+    recordRequest(request, url, role, {
+      csrf: "valid",
+      locale: chaptersMatch[1],
+      expectedVersion: input.expected_version,
+      chapters: input.chapters,
+      reason: input.reason,
+    })
+    state.chapters = input.chapters
     state.episodeVersion += 1
     sendJson(response, 200, adminEpisode())
     return

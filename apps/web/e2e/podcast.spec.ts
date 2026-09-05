@@ -312,6 +312,54 @@ test.describe("Podcast administration", () => {
     ])
   })
 
+  test("edits the chapter markers of an audio file", async ({
+    page,
+    request,
+  }) => {
+    await openHydrated(
+      page,
+      "/en/admin/audio",
+      'form[data-chapters-locale="zh-hant"] textarea'
+    )
+    const editor = page.locator('form[data-chapters-locale="zh-hant"]')
+    const field = editor.getByLabel("Chapters (zh-hant)")
+    await expect(field).toHaveValue("")
+    const save = editor.getByRole("button", { name: "Save chapters" })
+    await expect(save).toBeDisabled()
+
+    await field.fill("2:10 Foreign flows\n0:00 Fed decision")
+    await save.click()
+    await expect(editor.getByRole("alert")).toHaveText(
+      "Line 2 must start after the previous chapter."
+    )
+
+    await field.fill("0:00 Fed decision\n2:10 Foreign flows")
+    await editor.getByLabel("Reason for change").fill("add markers")
+    await save.click()
+    await expect(field).toHaveValue("0:00 Fed decision\n2:10 Foreign flows")
+    await expect(save).toBeDisabled()
+    await expect(page.getByText("Version 3")).toBeVisible()
+
+    const chapterRequests = (await getMockApiState(request)).requests.filter(
+      item => item.path.endsWith("/chapters")
+    )
+    expect(chapterRequests).toEqual([
+      expect.objectContaining({
+        role: "admin",
+        facts: {
+          csrf: "valid",
+          locale: "zh-hant",
+          expectedVersion: 2,
+          chapters: [
+            { start_seconds: 0, title: "Fed decision" },
+            { start_seconds: 130, title: "Foreign flows" },
+          ],
+          reason: "add markers",
+        },
+      }),
+    ])
+  })
+
   test("groups compact episode cards by localized descending month", async ({
     page,
     request,
