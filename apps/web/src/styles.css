@@ -138,10 +138,10 @@ html[lang="en"].dark {
 
 @theme inline {
   --font-sans:
-    "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", ui-sans-serif,
+    "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", ui-sans-serif,
     system-ui, sans-serif;
   --font-display:
-    "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", ui-sans-serif,
+    "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", ui-sans-serif,
     system-ui, sans-serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --color-sea-ink: var(--sea-ink);
