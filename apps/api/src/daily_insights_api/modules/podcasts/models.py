@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -14,7 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from daily_insights_api.core.models import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -116,3 +117,9 @@ class PodcastEpisodeAudioVariant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Read from the file at upload time; null when the container could not be
     # parsed or the audio was registered from R2 without reading it.
     duration_seconds: Mapped[int | None] = mapped_column(Integer)
+    # Navigation markers for this file: `[{"start_seconds": 0, "title": ...}]`,
+    # read from the file's chapter tags at upload and editable afterwards.
+    # They belong to the variant because every locale is a different recording.
+    chapters: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )

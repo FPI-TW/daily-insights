@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime
+from itertools import pairwise
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -31,6 +32,45 @@ class PodcastMetadataSet(PodcastContract):
             raise ValueError("Podcast metadata locales must be unique")
         if set(locales) != SUPPORTED_LOCALES:
             raise ValueError("Podcast metadata must contain exactly zh-hant, zh-hans, and en")
+        return self
+
+
+MAX_PODCAST_CHAPTERS = 20
+
+
+class PodcastChapter(PodcastContract):
+    """A navigation marker: the segment runs from `start_seconds` to the next
+    chapter's start (or the end of the audio)."""
+
+    start_seconds: int = Field(ge=0)
+    title: str = Field(min_length=1, max_length=120)
+
+
+def validate_chapters(
+    chapters: tuple[PodcastChapter, ...],
+    *,
+    duration_seconds: int | None = None,
+) -> tuple[PodcastChapter, ...]:
+    """Chapters must be few, strictly ascending, and inside the audio."""
+    if len(chapters) > MAX_PODCAST_CHAPTERS:
+        raise ValueError(f"at most {MAX_PODCAST_CHAPTERS} chapters are allowed")
+    for previous, current in pairwise(chapters):
+        if current.start_seconds <= previous.start_seconds:
+            raise ValueError("chapter start times must be strictly ascending")
+    if duration_seconds is not None and chapters:
+        if chapters[-1].start_seconds >= duration_seconds:
+            raise ValueError("chapter start times must fall inside the audio")
+    return chapters
+
+
+class PodcastChaptersUpdate(PodcastContract):
+    expected_version: int = Field(gt=0)
+    chapters: tuple[PodcastChapter, ...]
+    reason: str = Field(min_length=1, max_length=2_000)
+
+    @model_validator(mode="after")
+    def chapters_well_formed(self) -> Self:
+        validate_chapters(self.chapters)
         return self
 
 
@@ -92,6 +132,8 @@ class PodcastAudioVariantResponse(PodcastContract):
     locale: Locale
     version: int
     is_active: bool
+    duration_seconds: int | None = None
+    chapters: tuple[PodcastChapter, ...] = ()
 
 
 class PodcastEpisodeAdminResponse(PodcastContract):
@@ -115,6 +157,12 @@ class PodcastEpisodeSummaryResponse(PodcastContract):
     # Length of the audio the player will resolve for this locale; null until
     # an uploaded file could be measured.
     duration_seconds: int | None = None
+    # When the audio the player will resolve was registered; shown as the
+    # episode's release time. Null until an audio file exists.
+    audio_created_at: datetime | None = None
+    # Chapter markers of the audio the player will resolve; empty when the
+    # file carried none and nobody added any.
+    chapters: tuple[PodcastChapter, ...] = ()
 
 
 class PodcastEpisodeDetailResponse(PodcastEpisodeSummaryResponse):

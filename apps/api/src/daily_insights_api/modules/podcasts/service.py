@@ -2,9 +2,11 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import PurePosixPath
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 from mutagen import File as MutagenFile
+from mutagen.id3 import ID3
+from mutagen.mp4 import MP4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,16 +24,19 @@ from daily_insights_api.modules.assets.api import (
     sign_asset_download,
 )
 from daily_insights_api.modules.podcasts.api import (
+    PODCAST_AUDIO_FALLBACK_ORDER,
     Locale,
     PodcastAudioImportRequest,
     PodcastAudioPlaybackResponse,
     PodcastAudioVariant,
+    PodcastChapter,
     PodcastEpisodeAdminResponse,
     PodcastEpisodeDetailResponse,
     PodcastEpisodeSummaryResponse,
     PodcastMetadata,
     PodcastMetadataSet,
     resolve_audio_variant,
+    validate_chapters,
 )
 from daily_insights_api.modules.podcasts.models import (
     PodcastEpisode,
@@ -92,9 +97,73 @@ def audio_duration_seconds(content: BinaryIO) -> int | None:
     return round(length) if length >= 1 else None
 
 
-async def active_durations(
+def _id3_chapters(content: BinaryIO) -> list[tuple[float, str]]:
+    tags = ID3(content)  # type: ignore[no-untyped-call]
+    found: list[tuple[float, str]] = []
+    for frame in tags.getall("CHAP"):  # type: ignore[no-untyped-call]
+        title_frame = frame.sub_frames.get("TIT2")
+        title = " ".join(str(item) for item in title_frame.text) if title_frame else ""
+        found.append((float(frame.start_time) / 1000.0, title))
+    return found
+
+
+def _mp4_chapters(content: BinaryIO) -> list[tuple[float, str]]:
+    parsed = MP4(content)  # type: ignore[no-untyped-call]
+    chapters = getattr(parsed, "chapters", None) or []
+    return [(float(chapter.start), str(chapter.title or "")) for chapter in chapters]
+
+
+def audio_chapters(content: BinaryIO, mime_type: str) -> tuple[PodcastChapter, ...]:
+    """Chapter markers embedded in an uploaded file (ID3 `CHAP` frames for
+    MP3, the chapter track for MP4), or none when the file carries none or
+    cannot be read. Untitled or out-of-order markers are dropped rather than
+    rejecting the upload; the stream is rewound afterwards."""
+    try:
+        content.seek(0)
+        raw = _mp4_chapters(content) if mime_type == "audio/mp4" else _id3_chapters(content)
+    except Exception:
+        raw = []
+    finally:
+        content.seek(0)
+    chapters: list[PodcastChapter] = []
+    for start, title in sorted(raw, key=lambda item: item[0]):
+        cleaned = title.strip()[:120]
+        start_seconds = max(0, int(start))
+        if not cleaned or (chapters and start_seconds <= chapters[-1].start_seconds):
+            continue
+        chapters.append(PodcastChapter(start_seconds=start_seconds, title=cleaned))
+    try:
+        return validate_chapters(tuple(chapters))
+    except ValueError:
+        return ()
+
+
+def serialized_chapters(chapters: tuple[PodcastChapter, ...]) -> list[dict[str, Any]]:
+    return [chapter.model_dump() for chapter in chapters]
+
+
+def parsed_chapters(raw: object) -> tuple[PodcastChapter, ...]:
+    """Chapters as stored in the JSONB column; anything malformed reads as none."""
+    if not isinstance(raw, list):
+        return ()
+    try:
+        return tuple(PodcastChapter.model_validate(item) for item in raw)
+    except ValueError:
+        return ()
+
+
+@dataclass(frozen=True)
+class ActiveAudioFacts:
+    duration_seconds: int | None
+    # When the audio file was registered; the client shows it as the
+    # episode's release time.
+    created_at: datetime
+    chapters: tuple[PodcastChapter, ...]
+
+
+async def active_audio_facts(
     database: AsyncSession, episode_ids: list[uuid.UUID]
-) -> dict[tuple[uuid.UUID, str], int | None]:
+) -> dict[tuple[uuid.UUID, str], ActiveAudioFacts]:
     if not episode_ids:
         return {}
     rows = (
@@ -103,30 +172,71 @@ async def active_durations(
                 PodcastEpisodeAudioVariant.episode_id,
                 PodcastEpisodeAudioVariant.locale,
                 PodcastEpisodeAudioVariant.duration_seconds,
+                PodcastEpisodeAudioVariant.created_at,
+                PodcastEpisodeAudioVariant.chapters,
             ).where(
                 PodcastEpisodeAudioVariant.episode_id.in_(episode_ids),
                 PodcastEpisodeAudioVariant.is_active.is_(True),
             )
         )
     ).all()
-    return {(episode_id, locale): duration for episode_id, locale, duration in rows}
+    return {
+        (episode_id, locale): ActiveAudioFacts(
+            duration_seconds=duration,
+            created_at=created_at,
+            chapters=parsed_chapters(chapters),
+        )
+        for episode_id, locale, duration, created_at, chapters in rows
+    }
 
 
-def duration_for(
-    durations: dict[tuple[uuid.UUID, str], int | None], episode_id: uuid.UUID, locale: str
-) -> int | None:
-    """The requested locale's length, else any locale's (the player falls back the same way)."""
-    exact = durations.get((episode_id, locale))
+def audio_facts_for(
+    facts: dict[tuple[uuid.UUID, str], ActiveAudioFacts], episode_id: uuid.UUID, locale: str
+) -> ActiveAudioFacts | None:
+    """The requested locale's audio, else the first fallback locale's (the
+    player resolves audio the same way)."""
+    exact = facts.get((episode_id, locale))
     if exact is not None:
         return exact
     return next(
         (
-            duration
-            for (candidate_id, _), duration in durations.items()
-            if candidate_id == episode_id and duration is not None
+            facts[(episode_id, candidate)]
+            for candidate in PODCAST_AUDIO_FALLBACK_ORDER
+            if (episode_id, candidate) in facts
         ),
         None,
     )
+
+
+def duration_for(
+    facts: dict[tuple[uuid.UUID, str], ActiveAudioFacts], episode_id: uuid.UUID, locale: str
+) -> int | None:
+    """The requested locale's length, else any locale's (the player falls back the same way)."""
+    exact = facts.get((episode_id, locale))
+    if exact is not None and exact.duration_seconds is not None:
+        return exact.duration_seconds
+    return next(
+        (
+            item.duration_seconds
+            for (candidate_id, _), item in facts.items()
+            if candidate_id == episode_id and item.duration_seconds is not None
+        ),
+        None,
+    )
+
+
+def audio_created_at_for(
+    facts: dict[tuple[uuid.UUID, str], ActiveAudioFacts], episode_id: uuid.UUID, locale: str
+) -> datetime | None:
+    item = audio_facts_for(facts, episode_id, locale)
+    return item.created_at if item is not None else None
+
+
+def audio_chapters_for(
+    facts: dict[tuple[uuid.UUID, str], ActiveAudioFacts], episode_id: uuid.UUID, locale: str
+) -> tuple[PodcastChapter, ...]:
+    item = audio_facts_for(facts, episode_id, locale)
+    return item.chapters if item is not None else ()
 
 
 def derived_episode_metadata(trading_date: date) -> tuple[PodcastMetadata, ...]:
@@ -225,6 +335,8 @@ async def episode_admin_response(
                 locale=item.locale,
                 version=item.version,
                 is_active=item.is_active,
+                duration_seconds=item.duration_seconds,
+                chapters=parsed_chapters(item.chapters),
             )
             for item in variants
         ),
@@ -244,7 +356,7 @@ async def list_published_episodes(
             .order_by(PodcastEpisode.trading_date.desc())
         )
     ).all()
-    durations = await active_durations(database, [episode.id for episode in episodes])
+    facts = await active_audio_facts(database, [episode.id for episode in episodes])
     responses: list[PodcastEpisodeSummaryResponse] = []
     for episode in episodes:
         metadata = next(
@@ -258,7 +370,9 @@ async def list_published_episodes(
                 summary=metadata.summary,
                 locale=locale,
                 cover_asset_id=episode.cover_asset_id,
-                duration_seconds=duration_for(durations, episode.id, locale),
+                duration_seconds=duration_for(facts, episode.id, locale),
+                audio_created_at=audio_created_at_for(facts, episode.id, locale),
+                chapters=audio_chapters_for(facts, episode.id, locale),
             )
         )
     return responses
@@ -280,7 +394,7 @@ async def published_episode_detail(
     metadata = next(
         item for item in derived_episode_metadata(episode.trading_date) if item.locale == locale
     )
-    durations = await active_durations(database, [episode.id])
+    facts = await active_audio_facts(database, [episode.id])
     return PodcastEpisodeDetailResponse(
         id=episode.id,
         trading_date=episode.trading_date,
@@ -288,7 +402,9 @@ async def published_episode_detail(
         summary=metadata.summary,
         locale=locale,
         cover_asset_id=episode.cover_asset_id,
-        duration_seconds=duration_for(durations, episode.id, locale),
+        duration_seconds=duration_for(facts, episode.id, locale),
+        audio_created_at=audio_created_at_for(facts, episode.id, locale),
+        chapters=audio_chapters_for(facts, episode.id, locale),
         published_at=episode.published_at,
     )
 
@@ -380,6 +496,7 @@ async def upload_audio_batch(
             ),
         )
         duration_seconds = audio_duration_seconds(upload.content)
+        chapters = serialized_chapters(audio_chapters(upload.content, upload.mime_type))
         await store.overwrite(
             target,
             upload.content,
@@ -428,6 +545,8 @@ async def upload_audio_batch(
             current.activated_by_user_id = actor_user_id
             current.replaced_at = None
             current.duration_seconds = duration_seconds
+            # A new recording invalidates the old markers.
+            current.chapters = chapters
             variant = current
         else:
             variant = PodcastEpisodeAudioVariant(
@@ -438,6 +557,7 @@ async def upload_audio_batch(
                 is_active=True,
                 activated_by_user_id=actor_user_id,
                 duration_seconds=duration_seconds,
+                chapters=chapters,
             )
             database.add(variant)
         variants.append(variant)
@@ -445,6 +565,42 @@ async def upload_audio_batch(
     episode.version += 1
     await database.flush()
     return tuple(variants)
+
+
+class PodcastChaptersError(ValueError):
+    pass
+
+
+async def replace_audio_chapters(
+    database: AsyncSession,
+    episode: PodcastEpisode,
+    locale: Locale,
+    chapters: tuple[PodcastChapter, ...],
+) -> PodcastEpisodeAudioVariant:
+    """Overwrite the chapter markers of the active audio for one locale.
+
+    Chapters are navigation aids rather than content, so they may be edited on
+    a published episode; the episode version still moves so concurrent
+    editors notice each other."""
+    variant = await database.scalar(
+        select(PodcastEpisodeAudioVariant)
+        .where(
+            PodcastEpisodeAudioVariant.episode_id == episode.id,
+            PodcastEpisodeAudioVariant.locale == locale,
+            PodcastEpisodeAudioVariant.is_active.is_(True),
+        )
+        .with_for_update()
+    )
+    if variant is None:
+        raise PodcastNotFoundError("no audio for this locale")
+    try:
+        validated = validate_chapters(chapters, duration_seconds=variant.duration_seconds)
+    except ValueError as error:
+        raise PodcastChaptersError(str(error)) from error
+    variant.chapters = serialized_chapters(validated)
+    episode.version += 1
+    await database.flush()
+    return variant
 
 
 async def import_audio(

@@ -1,6 +1,7 @@
 import {
   ApiError,
   type Locale,
+  type PodcastAudioVariantResponse,
   type PodcastEpisodeAdmin,
   type PodcastUploadReason,
 } from "@daily-insights/api-client"
@@ -11,6 +12,11 @@ import { useState, type DragEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { browserPodcastAdminClient } from "#/lib/admin-podcasts"
 import { requireCsrfToken } from "#/lib/auth"
+import {
+  formatChapterText,
+  maxPodcastChapters,
+  parseChapterText,
+} from "#/lib/podcast-chapter-text"
 import { reveal, useEnterAnimation } from "#/lib/motion"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
 
@@ -455,6 +461,17 @@ function EpisodeManager({
           {t("podcastMissingLocales", { locales: missing.join(", ") })}
         </p>
       )}
+      {canPublish &&
+        episode.audio_variants
+          .filter(item => item.is_active)
+          .map(variant => (
+            <ChapterEditor
+              key={`${variant.locale}:${variant.version}`}
+              episode={episode}
+              variant={variant}
+              locale={locale}
+            />
+          ))}
       {canPublish && (
         <div className="flex flex-wrap justify-end gap-3 max-[42rem]:justify-start">
           <button
@@ -476,5 +493,111 @@ function EpisodeManager({
         </p>
       )}
     </article>
+  )
+}
+
+// Chapters are edited as plain text lines ("m:ss title") per active audio
+// file; markers embedded in the upload are the starting point.
+function ChapterEditor({
+  episode,
+  variant,
+  locale,
+}: {
+  episode: PodcastEpisodeAdmin
+  variant: PodcastAudioVariantResponse
+  locale: Locale
+}) {
+  const router = useRouter()
+  const { t } = useTranslation()
+  const redirectExpiredSession = useSessionExpiryRedirect(locale, "admin")
+  const [text, setText] = useState(() => formatChapterText(variant.chapters))
+  const [reason, setReason] = useState("")
+  const [error, setError] = useState("")
+  const [pending, setPending] = useState(false)
+  const fieldId = `podcast-chapters-${episode.id}-${variant.locale}`
+  const reasonId = `${fieldId}-reason`
+  const dirty = text.trim() !== formatChapterText(variant.chapters).trim()
+
+  async function save() {
+    const parsed = parseChapterText(text, variant.duration_seconds)
+    if (!parsed.ok) {
+      setError(
+        t(`podcastChaptersError_${parsed.code}`, {
+          line: parsed.line,
+          max: maxPodcastChapters,
+        })
+      )
+      return
+    }
+    setPending(true)
+    setError("")
+    try {
+      await browserPodcastAdminClient().updateChapters(
+        episode.id,
+        variant.locale,
+        {
+          expected_version: episode.version,
+          chapters: parsed.chapters,
+          reason: reason.trim() || "chapters",
+        },
+        await requireCsrfToken()
+      )
+      setReason("")
+      await router.invalidate({ sync: true })
+    } catch (caught) {
+      if (await redirectExpiredSession(caught)) return
+      setError(caught instanceof Error ? caught.message : t("unexpectedError"))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <form
+      className="col-span-full grid gap-2 border-t border-line pt-3"
+      data-chapters-locale={variant.locale}
+      onSubmit={event => {
+        event.preventDefault()
+        void save()
+      }}
+    >
+      <label htmlFor={fieldId}>
+        {t("podcastChaptersTitle", { locale: variant.locale })}
+        <textarea
+          className="min-h-24 font-mono text-sm"
+          id={fieldId}
+          value={text}
+          rows={Math.max(3, text.split("\n").length + 1)}
+          spellCheck={false}
+          onChange={event => setText(event.target.value)}
+        />
+      </label>
+      <p className="m-0 text-xs leading-5 text-sea-ink-soft">
+        {t("podcastChaptersHint")}
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="min-w-48 flex-1" htmlFor={reasonId}>
+          {t("podcastAuditReason")}
+          <input
+            id={reasonId}
+            value={reason}
+            maxLength={2000}
+            onChange={event => setReason(event.target.value)}
+          />
+        </label>
+        <button
+          className="primary-action"
+          type="submit"
+          disabled={pending || !dirty}
+        >
+          {t("podcastChaptersSave")}
+        </button>
+      </div>
+      {error && (
+        <p className="m-0 text-sm font-bold text-red-700" role="alert">
+          {error}
+        </p>
+      )}
+    </form>
   )
 }

@@ -26,7 +26,21 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Daily Insights" },
     ],
-    links: [{ rel: "icon", href: "/favicon.ico", type: "image/x-icon" }],
+    links: [
+      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      // Noto Sans TC is the design's primary face; the local CJK fonts in the
+      // stack cover the page until it arrives (display=swap).
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
+      {
+        rel: "preconnect",
+        href: "https://fonts.gstatic.com",
+        crossOrigin: "anonymous",
+      },
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap",
+      },
+    ],
   }),
   component: RootComponent,
   pendingComponent: LoadingScreen,

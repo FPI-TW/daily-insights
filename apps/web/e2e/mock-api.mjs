@@ -33,6 +33,7 @@ function reset(overrides = {}) {
     status: "published",
     episodeVersion: 2,
     audioVersion: 1,
+    chapters: [],
     podcastEpisodes: "single",
     reports: "normal",
     requests: [],
@@ -193,6 +194,8 @@ function adminEpisode({
         locale: "zh-hant",
         version: state.audioVersion,
         is_active: true,
+        duration_seconds: 490,
+        chapters: state.chapters,
       },
     ],
     cover_asset_id: null,
@@ -231,7 +234,47 @@ function localizedEpisode(locale) {
       : "測試用繁體中文摘要。",
     locale,
     cover_asset_id: null,
+    duration_seconds: 490,
+    audio_created_at: "2026-07-24T07:30:00+08:00",
+    chapters: [
+      { start_seconds: 0, title: english ? "Fed decision" : "聯準會決議" },
+      { start_seconds: 130, title: english ? "Foreign flows" : "外資動向" },
+      { start_seconds: 285, title: english ? "Currency" : "匯率觀察" },
+      { start_seconds: 410, title: english ? "Watch list" : "今日觀察清單" },
+    ],
   }
+}
+
+// Six more published days for the "past episodes" column; ids are stable so
+// tests can address them.
+const pastEpisodeDates = [
+  "2026-07-23",
+  "2026-07-22",
+  "2026-07-21",
+  "2026-07-20",
+  "2026-07-17",
+  "2026-07-16",
+]
+
+function pastEpisodeId(index) {
+  return `10000000-0000-4000-8000-0000000000${String(index + 11).padStart(2, "0")}`
+}
+
+function pastEpisodes(locale) {
+  const english = locale === "en"
+  return pastEpisodeDates.map((tradingDate, index) => ({
+    id: pastEpisodeId(index),
+    trading_date: tradingDate,
+    title: english ? `Morning brief ${tradingDate}` : `晨間簡報 ${tradingDate}`,
+    summary: english
+      ? `Summary for ${tradingDate}.`
+      : `${tradingDate} 的摘要。`,
+    locale,
+    cover_asset_id: null,
+    duration_seconds: 400 + index * 30,
+    audio_created_at: `${tradingDate}T07:30:00+08:00`,
+    chapters: [],
+  }))
 }
 
 const reportMarkets = ["global_macro_bonds", "crypto", "us_equity"]
@@ -549,6 +592,34 @@ const server = createServer(async (request, response) => {
     return
   }
 
+  const chaptersMatch = new RegExp(
+    `^/api/admin/podcasts/${episodeId}/audio/([^/]+)/chapters$`
+  ).exec(url.pathname)
+  if (chaptersMatch && request.method === "PUT") {
+    const role = requireRole(request, response, ["admin", "asset_manager"])
+    if (!role || !requireCsrf(request, response)) return
+    const input = parseJsonBody(await readBody(request))
+    if (input === null || !Array.isArray(input.chapters)) {
+      sendJson(response, 422, { detail: "Invalid chapters" })
+      return
+    }
+    if (input.expected_version !== state.episodeVersion) {
+      sendJson(response, 409, { detail: "Expected version mismatch" })
+      return
+    }
+    recordRequest(request, url, role, {
+      csrf: "valid",
+      locale: chaptersMatch[1],
+      expectedVersion: input.expected_version,
+      chapters: input.chapters,
+      reason: input.reason,
+    })
+    state.chapters = input.chapters
+    state.episodeVersion += 1
+    sendJson(response, 200, adminEpisode())
+    return
+  }
+
   if (
     url.pathname === `/api/admin/podcasts/${episodeId}/publish` &&
     request.method === "POST"
@@ -671,7 +742,9 @@ const server = createServer(async (request, response) => {
       200,
       state.podcastList === "empty" || state.status !== "published"
         ? []
-        : [localizedEpisode(locale)]
+        : state.podcastList === "multiple"
+          ? [localizedEpisode(locale), ...pastEpisodes(locale)]
+          : [localizedEpisode(locale)]
     )
     return
   }
@@ -697,10 +770,10 @@ const server = createServer(async (request, response) => {
     return
   }
 
-  if (
-    url.pathname === `/api/podcasts/${episodeId}/audio-url` &&
-    request.method === "POST"
-  ) {
+  const audioUrlMatch = /^\/api\/podcasts\/([^/]+)\/audio-url$/.exec(
+    url.pathname
+  )
+  if (audioUrlMatch && request.method === "POST") {
     const role = requireRole(request, response, [
       "admin",
       "asset_manager",
@@ -718,7 +791,7 @@ const server = createServer(async (request, response) => {
       return
     }
     sendJson(response, 200, {
-      episode_id: episodeId,
+      episode_id: audioUrlMatch[1],
       requested_locale: url.searchParams.get("locale") || "zh-hant",
       resolved_locale: "zh-hant",
       asset_id: assetId,

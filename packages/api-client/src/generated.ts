@@ -300,6 +300,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/admin/podcasts/{episode_id}/audio/{locale}/chapters": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Admin Update Chapters */
+    put: operations["admin_podcasts_update_chapters"]
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/admin/podcasts/{episode_id}/publish": {
     parameters: {
       query?: never
@@ -1511,6 +1528,13 @@ export interface components {
        * Format: uuid
        */
       asset_id: string
+      /**
+       * Chapters
+       * @default []
+       */
+      chapters: components["schemas"]["PodcastChapter"][]
+      /** Duration Seconds */
+      duration_seconds?: number | null
       /** Is Active */
       is_active: boolean
       /**
@@ -1520,6 +1544,26 @@ export interface components {
       locale: "zh-hant" | "zh-hans" | "en"
       /** Version */
       version: number
+    }
+    /**
+     * PodcastChapter
+     * @description A navigation marker: the segment runs from `start_seconds` to the next
+     *     chapter's start (or the end of the audio).
+     */
+    PodcastChapter: {
+      /** Start Seconds */
+      start_seconds: number
+      /** Title */
+      title: string
+    }
+    /** PodcastChaptersUpdate */
+    PodcastChaptersUpdate: {
+      /** Chapters */
+      chapters: components["schemas"]["PodcastChapter"][]
+      /** Expected Version */
+      expected_version: number
+      /** Reason */
+      reason: string
     }
     /** PodcastEpisodeAdminResponse */
     PodcastEpisodeAdminResponse: {
@@ -1562,6 +1606,13 @@ export interface components {
     }
     /** PodcastEpisodeDetailResponse */
     PodcastEpisodeDetailResponse: {
+      /** Audio Created At */
+      audio_created_at?: string | null
+      /**
+       * Chapters
+       * @default []
+       */
+      chapters: components["schemas"]["PodcastChapter"][]
       /** Cover Asset Id */
       cover_asset_id: string | null
       /** Duration Seconds */
@@ -1593,6 +1644,13 @@ export interface components {
     }
     /** PodcastEpisodeSummaryResponse */
     PodcastEpisodeSummaryResponse: {
+      /** Audio Created At */
+      audio_created_at?: string | null
+      /**
+       * Chapters
+       * @default []
+       */
+      chapters: components["schemas"]["PodcastChapter"][]
       /** Cover Asset Id */
       cover_asset_id: string | null
       /** Duration Seconds */
@@ -2832,6 +2890,44 @@ export interface operations {
     requestBody: {
       content: {
         "application/json": components["schemas"]["PodcastAudioImportRequest"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["PodcastEpisodeAdminResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  admin_podcasts_update_chapters: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        episode_id: string
+        locale: "zh-hant" | "zh-hans" | "en"
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PodcastChaptersUpdate"]
       }
     }
     responses: {
