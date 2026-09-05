@@ -5,6 +5,7 @@ import {
   csrfTokenSchema,
   podcastAudioPlaybackSchema,
   type PodcastAudioImportInput,
+  type PodcastChaptersUpdateInput,
   type PodcastUploadInput,
   podcastEpisodeAdminListSchema,
   podcastEpisodeAdminSchema,
@@ -456,6 +457,24 @@ export function createPodcastAdminClient(transport: ApiTransport) {
           headers: mutationHeaders(csrfToken),
           body: JSON.stringify(input),
         }),
+        podcastEpisodeAdminSchema
+      )
+    },
+    async updateChapters(
+      episodeId: string,
+      locale: Locale,
+      input: PodcastChaptersUpdateInput,
+      csrfToken: string
+    ) {
+      return parseResponse(
+        await transport(
+          `/api/admin/podcasts/${episodeId}/audio/${locale}/chapters`,
+          {
+            method: "PUT",
+            headers: mutationHeaders(csrfToken),
+            body: JSON.stringify(input),
+          }
+        ),
         podcastEpisodeAdminSchema
       )
     },

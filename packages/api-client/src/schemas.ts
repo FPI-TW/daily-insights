@@ -413,6 +413,14 @@ export type MemberUpdateInput = {
   reason: string
 }
 
+// A chapter marks where a segment of the audio starts; the segment runs to
+// the next chapter's start (or the episode's end).
+export const podcastChapterSchema = z.object({
+  start_seconds: z.number().int().nonnegative(),
+  title: z.string().min(1),
+})
+export type PodcastChapter = z.infer<typeof podcastChapterSchema>
+
 export const podcastEpisodeSummarySchema = z.object({
   id: z.uuid(),
   trading_date: z.iso.date(),
@@ -421,6 +429,11 @@ export const podcastEpisodeSummarySchema = z.object({
   locale: localeSchema,
   cover_asset_id: z.uuid().nullable(),
   duration_seconds: z.number().int().positive().nullable().default(null),
+  // When the resolved audio file was registered; shown as the release time.
+  audio_created_at: z.iso.datetime({ offset: true }).nullable().default(null),
+  // Optional until the API publishes chapter markers; the player hides its
+  // chapter list for an episode without any.
+  chapters: z.array(podcastChapterSchema).default([]),
 })
 export type PodcastEpisodeSummary = z.infer<typeof podcastEpisodeSummarySchema>
 
@@ -453,7 +466,12 @@ export const podcastAudioVariantResponseSchema = z.object({
   locale: localeSchema,
   version: z.number().int().positive(),
   is_active: z.boolean(),
+  duration_seconds: z.number().int().positive().nullable().default(null),
+  chapters: z.array(podcastChapterSchema).default([]),
 })
+export type PodcastAudioVariantResponse = z.infer<
+  typeof podcastAudioVariantResponseSchema
+>
 
 export const podcastEpisodeAdminSchema = z.object({
   id: z.uuid(),
@@ -487,6 +505,12 @@ export type PodcastEpisodeUpdateInput = {
 
 export type PodcastPublicationInput = {
   expected_version: number
+}
+
+export type PodcastChaptersUpdateInput = {
+  expected_version: number
+  chapters: PodcastChapter[]
+  reason: string
 }
 
 export type PodcastAudioImportInput = {

@@ -37,6 +37,7 @@ from daily_insights_api.modules.podcasts.api import (
     Locale,
     PodcastAudioImportRequest,
     PodcastAudioPlaybackResponse,
+    PodcastChaptersUpdate,
     PodcastEpisodeAdminResponse,
     PodcastEpisodeCreate,
     PodcastEpisodeDetailResponse,
@@ -48,6 +49,7 @@ from daily_insights_api.modules.podcasts.api import (
 from daily_insights_api.modules.podcasts.models import PodcastEpisode
 from daily_insights_api.modules.podcasts.service import (
     PodcastAudioUpload,
+    PodcastChaptersError,
     PodcastConflictError,
     PodcastMediaUnavailableError,
     PodcastNotFoundError,
@@ -58,6 +60,7 @@ from daily_insights_api.modules.podcasts.service import (
     import_audio,
     list_published_episodes,
     published_episode_detail,
+    replace_audio_chapters,
     replace_metadata,
     sign_episode_audio,
     upload_audio_batch,
@@ -349,6 +352,56 @@ async def admin_update(
         target_id=str(episode.id),
         before={"version": before_version},
         after={"version": episode.version},
+        reason=payload.reason,
+        request_id=request.state.request_id,
+    )
+    await database.commit()
+    return await episode_admin_response(database, episode)
+
+
+@router.put(
+    "/api/admin/podcasts/{episode_id}/audio/{locale}/chapters",
+    response_model=PodcastEpisodeAdminResponse,
+    operation_id="admin_podcasts_update_chapters",
+)
+async def admin_update_chapters(
+    episode_id: uuid.UUID,
+    locale: Locale,
+    payload: PodcastChaptersUpdate,
+    request: Request,
+    actor: AssetWrite,
+    database: Database,
+) -> PodcastEpisodeAdminResponse:
+    try:
+        episode = await get_episode(database, episode_id, for_update=True)
+    except PodcastNotFoundError as error:
+        raise _not_found() from error
+    _require_expected_version(episode, payload.expected_version)
+    before_version = episode.version
+    try:
+        variant = await replace_audio_chapters(database, episode, locale, payload.chapters)
+    except PodcastNotFoundError as error:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "audio_variant_does_not_exist"},
+        ) from error
+    except PodcastChaptersError as error:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "invalid_chapters", "message": str(error)},
+        ) from error
+    record_audit_event(
+        database,
+        actor_user_id=actor.user.id,
+        action="podcast.audio_chapters_updated",
+        target_type="podcast_episode_audio_variant",
+        target_id=str(variant.id),
+        before={"version": before_version},
+        after={
+            "version": episode.version,
+            "locale": locale,
+            "chapters": [chapter.model_dump() for chapter in payload.chapters],
+        },
         reason=payload.reason,
         request_id=request.state.request_id,
     )

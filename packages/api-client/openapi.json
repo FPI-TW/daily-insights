@@ -2101,6 +2101,25 @@
             "title": "Asset Id",
             "type": "string"
           },
+          "chapters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PodcastChapter"
+            },
+            "title": "Chapters",
+            "type": "array"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
           "is_active": {
             "title": "Is Active",
             "type": "boolean"
@@ -2117,6 +2136,52 @@
         },
         "required": ["asset_id", "locale", "version", "is_active"],
         "title": "PodcastAudioVariantResponse",
+        "type": "object"
+      },
+      "PodcastChapter": {
+        "additionalProperties": false,
+        "description": "A navigation marker: the segment runs from `start_seconds` to the next\nchapter's start (or the end of the audio).",
+        "properties": {
+          "start_seconds": {
+            "minimum": 0.0,
+            "title": "Start Seconds",
+            "type": "integer"
+          },
+          "title": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": ["start_seconds", "title"],
+        "title": "PodcastChapter",
+        "type": "object"
+      },
+      "PodcastChaptersUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "chapters": {
+            "items": {
+              "$ref": "#/components/schemas/PodcastChapter"
+            },
+            "title": "Chapters",
+            "type": "array"
+          },
+          "expected_version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": ["expected_version", "chapters", "reason"],
+        "title": "PodcastChaptersUpdate",
         "type": "object"
       },
       "PodcastEpisodeAdminResponse": {
@@ -2218,6 +2283,26 @@
       "PodcastEpisodeDetailResponse": {
         "additionalProperties": false,
         "properties": {
+          "audio_created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Created At"
+          },
+          "chapters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PodcastChapter"
+            },
+            "title": "Chapters",
+            "type": "array"
+          },
           "cover_asset_id": {
             "anyOf": [
               {
@@ -2285,6 +2370,26 @@
       "PodcastEpisodeSummaryResponse": {
         "additionalProperties": false,
         "properties": {
+          "audio_created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Created At"
+          },
+          "chapters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PodcastChapter"
+            },
+            "title": "Chapters",
+            "type": "array"
+          },
           "cover_asset_id": {
             "anyOf": [
               {
@@ -4698,6 +4803,83 @@
           }
         },
         "summary": "Admin Import Audio",
+        "tags": ["podcasts"]
+      }
+    },
+    "/api/admin/podcasts/{episode_id}/audio/{locale}/chapters": {
+      "put": {
+        "operationId": "admin_podcasts_update_chapters",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "episode_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Episode Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "locale",
+            "required": true,
+            "schema": {
+              "enum": ["zh-hant", "zh-hans", "en"],
+              "title": "Locale",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PodcastChaptersUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PodcastEpisodeAdminResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Update Chapters",
         "tags": ["podcasts"]
       }
     },

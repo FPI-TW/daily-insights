@@ -364,6 +364,8 @@ async def test_podcast_publish_play_replace_and_unpublish(
     assert catalog.json()[0]["title"] == "Podcast | 2026-07-24"
     # Fixture bytes are not real audio, so no length could be measured.
     assert catalog.json()[0]["duration_seconds"] is None
+    # The release time comes from when the active audio file was registered.
+    assert catalog.json()[0]["audio_created_at"] is not None
     detail = await podcast_harness.customer.get(f"/api/podcasts/{episode_id}?locale=zh-hans")
     assert detail.status_code == 200
     assert detail.json()["summary"] == "2026-07-24"
@@ -553,6 +555,78 @@ async def test_browser_upload_uses_fixed_filename_and_any_locale_fallback(
     )
     assert playback.status_code == 200, playback.text
     assert playback.json()["resolved_locale"] == "zh-hans"
+
+    # Fixture bytes carry no chapter tags, so the catalog starts without any;
+    # an asset manager can then add markers to the active audio.
+    assert catalog.json()[0]["chapters"] == []
+    chapters_url = f"/api/admin/podcasts/{episode['id']}/audio/zh-hans/chapters"
+    disordered = await podcast_harness.asset_manager.put(
+        chapters_url,
+        headers={"X-CSRF-Token": asset_csrf},
+        json={
+            "expected_version": episode["version"],
+            "chapters": [
+                {"start_seconds": 130, "title": "外資動向"},
+                {"start_seconds": 0, "title": "FOMC 決議"},
+            ],
+            "reason": "chapters",
+        },
+    )
+    assert disordered.status_code == 422, disordered.text
+    stale_version = await podcast_harness.asset_manager.put(
+        chapters_url,
+        headers={"X-CSRF-Token": asset_csrf},
+        json={
+            "expected_version": episode["version"] + 5,
+            "chapters": [{"start_seconds": 0, "title": "FOMC 決議"}],
+            "reason": "chapters",
+        },
+    )
+    assert stale_version.status_code == 409, stale_version.text
+    missing_locale = await podcast_harness.asset_manager.put(
+        f"/api/admin/podcasts/{episode['id']}/audio/en/chapters",
+        headers={"X-CSRF-Token": asset_csrf},
+        json={
+            "expected_version": episode["version"],
+            "chapters": [{"start_seconds": 0, "title": "FOMC 決議"}],
+            "reason": "chapters",
+        },
+    )
+    assert missing_locale.status_code == 404, missing_locale.text
+    chaptered = await podcast_harness.asset_manager.put(
+        chapters_url,
+        headers={"X-CSRF-Token": asset_csrf},
+        json={
+            "expected_version": episode["version"],
+            "chapters": [
+                {"start_seconds": 0, "title": "FOMC 決議"},
+                {"start_seconds": 130, "title": "外資動向"},
+            ],
+            "reason": "chapters",
+        },
+    )
+    assert chaptered.status_code == 200, chaptered.text
+    assert chaptered.json()["version"] == episode["version"] + 1
+    assert chaptered.json()["audio_variants"][0]["chapters"] == [
+        {"start_seconds": 0, "title": "FOMC 決議"},
+        {"start_seconds": 130, "title": "外資動向"},
+    ]
+    episode = chaptered.json()
+    chaptered_catalog = await podcast_harness.customer.get(
+        "/api/podcasts",
+        params={"locale": "en"},
+    )
+    assert chaptered_catalog.json()[0]["chapters"] == [
+        {"start_seconds": 0, "title": "FOMC 決議"},
+        {"start_seconds": 130, "title": "外資動向"},
+    ]
+    async with podcast_harness.session_factory() as database:
+        chapters_audit = await database.scalar(
+            select(AuditEvent).where(AuditEvent.action == "podcast.audio_chapters_updated")
+        )
+        assert chapters_audit is not None
+        assert chapters_audit.after is not None
+        assert chapters_audit.after["locale"] == "zh-hans"
 
     replacement_warning = await podcast_harness.admin.post(
         "/api/admin/podcasts/uploads",
