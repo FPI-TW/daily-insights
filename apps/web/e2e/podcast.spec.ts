@@ -360,12 +360,12 @@ test.describe("Podcast administration", () => {
   })
 })
 
-test.describe("Customer inline Podcast experience", () => {
+test.describe("Customer Podcast page", () => {
   test.beforeEach(async ({ context }) => {
     await authenticateAs(context, "org_member")
   })
 
-  test("plays inline with locale fallback at mobile width", async ({
+  test("plays the latest episode with locale fallback at mobile width", async ({
     page,
     request,
   }) => {
@@ -380,18 +380,20 @@ test.describe("Customer inline Podcast experience", () => {
       page.getByRole("heading", { name: "Market Morning Brief" })
     ).toBeVisible()
     await expect(page).toHaveURL("/en/podcasts")
-    await expect(
-      page.getByRole("link", { name: /Market Morning Brief/ })
-    ).toHaveCount(0)
+    await expect(page.getByText("Today", { exact: true })).toBeVisible()
+    await expect(page.getByText("2026.07.24", { exact: true })).toBeVisible()
     const player = page.getByRole("region", {
       name: "Market Morning Brief player",
     })
+    await expect(
+      player.getByRole("button", { name: "Fed decision" })
+    ).toBeVisible()
     expect(
       (await getMockApiState(request)).requests.filter(item =>
         item.path.endsWith("/audio-url")
       )
     ).toHaveLength(0)
-    await player.getByRole("button", { name: "Listen now" }).click()
+    await player.getByRole("button", { name: "Play", exact: true }).click()
     await expect(player).toContainText(
       "Audio is not yet available in this language. Playing another available edition."
     )
@@ -411,7 +413,7 @@ test.describe("Customer inline Podcast experience", () => {
     expect(layout.content).toBeLessThanOrEqual(layout.viewport)
   })
 
-  test("shows loading and unavailable inline player states", async ({
+  test("shows loading and unavailable player states", async ({
     page,
     request,
   }) => {
@@ -421,14 +423,18 @@ test.describe("Customer inline Podcast experience", () => {
       "/en/podcasts",
       '[data-testid="podcast-player"] button'
     )
-    await page.getByRole("button", { name: "Listen now" }).click()
+    await page.getByRole("button", { name: "Play", exact: true }).click()
     await expect(page.getByRole("status")).toHaveText("Preparing audio…")
-    await expect(page.locator("audio")).toBeVisible()
+    await expect(page.locator("audio")).toHaveCount(1)
 
     await resetMockApi(request, { audio: "error" })
-    await page.reload()
-    await page.getByRole("button", { name: "Listen now" }).click()
-    await expect(page.getByRole("alert")).toHaveText(
+    await openHydrated(
+      page,
+      "/en/podcasts",
+      '[data-testid="podcast-player"] button'
+    )
+    await page.getByRole("button", { name: "Play", exact: true }).click()
+    await expect(page.getByRole("alert")).toContainText(
       "This audio is currently unavailable. Please try again later."
     )
     await expect(
@@ -442,7 +448,44 @@ test.describe("Customer inline Podcast experience", () => {
 
     await resetMockApi(request)
     await page.getByRole("button", { name: "Retry audio" }).click()
-    await expect(page.locator("audio")).toBeVisible()
+    await expect(page.locator("audio")).toHaveCount(1)
+    expect(
+      (await getMockApiState(request)).requests.filter(item =>
+        item.path.endsWith("/audio-url")
+      )
+    ).toHaveLength(1)
+  })
+
+  test("lists past episodes, filters them and switches the current one", async ({
+    page,
+    request,
+  }) => {
+    await resetMockApi(request, { podcastList: "multiple" })
+    await openHydrated(
+      page,
+      "/en/podcasts",
+      '[data-testid="podcast-player"] button'
+    )
+
+    const aside = page.getByRole("complementary", { name: "Past episodes" })
+    await expect(aside.getByText("7 episodes")).toBeVisible()
+    await expect(aside.getByRole("listitem")).toHaveCount(4)
+    await aside.getByRole("button", { name: "Show all 6 episodes →" }).click()
+    await expect(aside.getByRole("listitem")).toHaveCount(6)
+    await aside.getByRole("button", { name: "Heard", exact: true }).click()
+    await expect(aside.getByText("No matching episodes")).toBeVisible()
+    await aside.getByRole("button", { name: "All", exact: true }).click()
+
+    await aside
+      .getByRole("button", { name: "Play Morning brief 2026-07-23" })
+      .click()
+    await expect(
+      page.getByRole("heading", { name: "Morning brief 2026-07-23" })
+    ).toBeVisible()
+    await expect(page.getByText("Today", { exact: true })).toHaveCount(0)
+    await expect(
+      aside.getByRole("button", { name: "Play Market Morning Brief" })
+    ).toBeVisible()
     expect(
       (await getMockApiState(request)).requests.filter(item =>
         item.path.endsWith("/audio-url")
@@ -466,9 +509,11 @@ test.describe("Customer inline Podcast experience", () => {
     await expect(alert.getByRole("button", { name: "Retry" })).toBeVisible()
   })
 
-  test("redirects a legacy detail URL to the inline list", async ({ page }) => {
+  test("redirects a legacy detail URL to the list with that episode", async ({
+    page,
+  }) => {
     await page.goto(`/en/podcasts/${episodeId}`)
-    await expect(page).toHaveURL("/en/podcasts")
+    await expect(page).toHaveURL(`/en/podcasts?episode=${episodeId}`)
     await expect(
       page.getByRole("heading", { name: "Market Morning Brief" })
     ).toBeVisible()
@@ -556,7 +601,7 @@ test.describe("Mounted session expiry", () => {
     )
     await resetMockApi(request, { sessionExpired: true })
 
-    await page.getByRole("button", { name: "Listen now" }).click()
+    await page.getByRole("button", { name: "Play", exact: true }).click()
 
     await expect(page).toHaveURL("/en/login")
     await expect(

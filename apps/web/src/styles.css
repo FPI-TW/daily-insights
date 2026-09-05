@@ -22,6 +22,13 @@
   --chip-bg: #f7faf9;
   --chip-line: #dbe4e1;
   --link-bg-hover: #edf5f2;
+  /* Podcast page: two extra text tiers and the player's idle greys. */
+  --sea-ink-muted: #7a8280;
+  --sea-ink-faint: #9aa3a0;
+  --lagoon-tint: #e3f3ee;
+  --line-soft: #eef1f0;
+  --wave-idle: #d9dfdc;
+  --ring-idle: #cfd6d3;
   --market-up: #d6453f;
   --market-down: #2f9e69;
   --market-caution: #c98a2b;
@@ -76,6 +83,12 @@
   --chip-bg: #1a2321;
   --chip-line: #34403d;
   --link-bg-hover: #1d2926;
+  --sea-ink-muted: #95a19d;
+  --sea-ink-faint: #7d8a87;
+  --lagoon-tint: #16312a;
+  --line-soft: #1f2927;
+  --wave-idle: #2c3735;
+  --ring-idle: #3a4643;
   --market-up: #f16c63;
   --market-down: #53bd84;
   --market-caution: #dfad58;
@@ -145,6 +158,22 @@ html[lang="en"].dark {
   --color-chip: var(--chip-bg);
   --color-chip-line: var(--chip-line);
   --color-link-hover: var(--link-bg-hover);
+  --color-sea-ink-muted: var(--sea-ink-muted);
+  --color-sea-ink-faint: var(--sea-ink-faint);
+  --color-lagoon-tint: var(--lagoon-tint);
+  --color-line-soft: var(--line-soft);
+  --color-wave-idle: var(--wave-idle);
+  --color-ring-idle: var(--ring-idle);
+  --animate-podcast-pulse: podcast-pulse 1s ease-in-out infinite;
+  @keyframes podcast-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
   --color-kicker: var(--kicker);
   --color-market-up: var(--market-up);
   --color-market-down: var(--market-down);

@@ -15,7 +15,7 @@ export const assetManagerCredentials = {
 }
 
 type MockState = {
-  podcastList?: "normal" | "empty" | "error"
+  podcastList?: "normal" | "empty" | "error" | "multiple"
   audio?: "normal" | "error" | "delayed"
   passwordChange?: "normal" | "error"
   sessionExpired?: boolean
