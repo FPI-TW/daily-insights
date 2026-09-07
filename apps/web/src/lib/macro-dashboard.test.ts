@@ -128,7 +128,12 @@ describe("macro dashboard calculations", () => {
       macroDashboardSchema.safeParse({
         fetched_at: "2026-09-04T00:00:00Z",
         histories: [history([["2026-09-04", "Infinity"]])],
-        calendar: { date: "2026-09-04", status: "ok", events: [] },
+        calendar: {
+          date: "2026-09-04",
+          source: "Nasdaq",
+          status: "ok",
+          events: [],
+        },
       }).success
     ).toBe(false)
   })

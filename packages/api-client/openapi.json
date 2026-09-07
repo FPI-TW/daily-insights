@@ -368,13 +368,17 @@
             "title": "Events",
             "type": "array"
           },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
           "status": {
             "enum": ["ok", "unavailable", "disabled"],
             "title": "Status",
             "type": "string"
           }
         },
-        "required": ["status", "date"],
+        "required": ["status", "date", "source"],
         "title": "Calendar",
         "type": "object"
       },

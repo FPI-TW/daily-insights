@@ -517,6 +517,7 @@ const server = createServer(async (request, response) => {
       })),
       calendar: {
         date: "2026-09-04",
+        source: "Nasdaq",
         status: "ok",
         events: [
           {

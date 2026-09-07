@@ -17,6 +17,7 @@ export const macroDashboardSchema = z.object({
   histories: z.array(macroHistorySchema),
   calendar: z.object({
     date: z.iso.date(),
+    source: z.string(),
     status: z.enum(["ok", "unavailable", "disabled"]),
     events: z.array(
       z.object({

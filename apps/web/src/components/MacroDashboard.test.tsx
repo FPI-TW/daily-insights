@@ -22,7 +22,12 @@ vi.mock("echarts-for-react", () => ({
 afterEach(cleanup)
 const data: MacroDashboardData = {
   fetched_at: "2026-09-04T00:00:00Z",
-  calendar: { date: "2026-09-04", status: "disabled", events: [] },
+  calendar: {
+    date: "2026-09-04",
+    source: "Nasdaq",
+    status: "disabled",
+    events: [],
+  },
   histories: ["eur_usd", "usd_jpy"].map((id, index) => ({
     id,
     symbol: id,
@@ -93,6 +98,7 @@ describe("integrated macro dashboard", () => {
           ...data,
           calendar: {
             date: "2026-09-04",
+            source: "Nasdaq",
             status: "ok",
             events: [
               {
@@ -112,8 +118,8 @@ describe("integrated macro dashboard", () => {
         locale="en"
       />
     )
-    expect(
-      screen.getByText("Test release (%)").closest("tr")
-    ).toHaveTextContent("High120")
+    expect(screen.getByText("Test release").closest("tr")).toHaveTextContent(
+      "High1%2%0%"
+    )
   })
 })

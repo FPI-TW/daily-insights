@@ -5,7 +5,6 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
-from pydantic import SecretStr
 
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.reports import macro_dashboard as macro
@@ -54,34 +53,56 @@ async def test_sofr_validates_type_and_sorts_observations() -> None:
 
 
 async def test_calendar_filters_taipei_day_and_preserves_actual_zero() -> None:
+    requested_dates: list[str] = []
+
     def respond(request: httpx.Request) -> httpx.Response:
-        assert request.url.params["from"] == "2026-09-03"
+        requested_dates.append(request.url.params["date"])
+        day = request.url.params["date"]
         return httpx.Response(
             200,
-            json=[
-                {"date": "2026-09-03 17:00:00", "country": "US", "event": "Released", "actual": 0},
-                {"date": "2026-09-04 12:00:00", "country": "US", "event": "Future", "actual": 99},
-                {
-                    "date": "2026-09-04 17:00:00",
-                    "country": "US",
-                    "event": "Tomorrow",
-                    "actual": None,
-                },
-            ],
+            json={
+                "data": {
+                    "rows": [
+                        {
+                            "gmt": "17:00" if day == "2026-09-03" else "12:00",
+                            "country": "United States",
+                            "eventName": "Released" if day == "2026-09-03" else "Future",
+                            "actual": "0%" if day == "2026-09-03" else "99%",
+                            "consensus": "1.2%",
+                            "previous": "1.0%",
+                        },
+                        *(
+                            [
+                                {
+                                    "gmt": "17:00",
+                                    "country": "United States",
+                                    "eventName": "Tomorrow",
+                                    "actual": "",
+                                }
+                            ]
+                            if day == "2026-09-04"
+                            else []
+                        ),
+                    ]
+                }
+            },
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-        result = await macro.load_calendar(
-            client, Settings(fmp_api_key=SecretStr("test")), datetime(2026, 9, 4, tzinfo=UTC)
-        )
+        result = await macro.load_calendar(client, datetime(2026, 9, 4, tzinfo=UTC))
     assert result.status == "ok"
+    assert result.source == "Nasdaq"
+    assert requested_dates == ["2026-09-03", "2026-09-04"]
     assert [event.event for event in result.events] == ["Released", "Future"]
     assert result.events[0].actual == 0
     assert result.events[1].actual is None
+    assert result.events[0].unit == "%"
+    assert result.events[0].country == "US"
+    assert result.events[0].currency == "USD"
     assert result.events[0].date.tzinfo is not None
 
 
-async def test_disabled_and_denied_calendar_are_not_a_successful_empty_day() -> None:
+async def test_denied_calendar_is_not_a_successful_empty_day() -> None:
     calls = 0
 
     def respond(request: httpx.Request) -> httpx.Response:
@@ -90,14 +111,44 @@ async def test_disabled_and_denied_calendar_are_not_a_successful_empty_day() -> 
         return httpx.Response(403)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-        disabled = await macro.load_calendar(client, Settings(fmp_api_key=None), datetime.now(UTC))
-        assert disabled.status == "disabled"
-        assert calls == 0
-        denied = await macro.load_calendar(
-            client, Settings(fmp_api_key=SecretStr("test")), datetime.now(UTC)
-        )
+        denied = await macro.load_calendar(client, datetime.now(UTC))
         assert denied.status == "unavailable"
-        assert calls == 1
+        assert denied.source == "Nasdaq"
+        assert calls == 2
+
+
+async def test_calendar_keeps_a_successful_day_when_the_other_request_fails() -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.params["date"] == "2026-09-03":
+            return httpx.Response(503)
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "rows": [
+                        {
+                            "gmt": "01:00",
+                            "country": "Japan",
+                            "eventName": "Leading Index",
+                            "actual": "118.1",
+                        }
+                    ]
+                }
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        result = await macro.load_calendar(client, datetime(2026, 9, 4, tzinfo=UTC))
+
+    assert result.status == "ok"
+    assert [(event.country, event.event) for event in result.events] == [("JP", "Leading Index")]
+
+
+def test_calendar_value_parser_preserves_scale_and_rejects_placeholders() -> None:
+    assert macro.parse_calendar_value("357,050.0M") == (Decimal("357050.0"), "M")
+    assert macro.parse_calendar_value("$1.2B") == (Decimal("1.2"), "USD B")
+    assert macro.parse_calendar_value("&nbsp;") == (None, None)
+    assert macro.parse_calendar_value("N/A") == (None, None)
 
 
 async def test_disabled_yahoo_makes_no_provider_calls(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -122,7 +173,9 @@ async def test_cache_coalesces_concurrent_requests(monkeypatch: pytest.MonkeyPat
     )
     calendar = AsyncMock(
         return_value=macro.Calendar(
-            status="disabled", date=datetime.now(ZoneInfo("Asia/Taipei")).date()
+            status="disabled",
+            date=datetime.now(ZoneInfo("Asia/Taipei")).date(),
+            source="Nasdaq",
         )
     )
     monkeypatch.setattr(macro, "load_market_histories", markets)

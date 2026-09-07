@@ -8,7 +8,7 @@
 - 油金比／銅金比：相同日期的期貨收盤相除，以左右雙軸呈現；缺日期不跨日配對，不補值。
 - 殖利率變動表：3M、2Y、5Y、10Y、30Y 及 SOFR；殖利率以百分比顯示、變動以 bp 顯示。
 - 殖利率曲線：五個公債天期最後共同日期的觀察值，SOFR 不加入期限曲線。
-- 經濟日曆：台北當日的 FMP 經濟數據與來源涵蓋的央行事件；時區轉換後篩選日期。未到事件時間不顯示來源提前提供的實際值。實際值 0 仍顯示為 0。
+- 經濟日曆：台北當日的 Nasdaq 公開經濟數據與來源涵蓋的央行事件；以來源提供的 GMT 時間轉換並篩選日期。未到事件時間不顯示來源提前提供的實際值。實際值 0 仍顯示為 0。
 - 美元指數：DXY（DX-Y.NYB）最近 90 個日曆日的已完成收盤。
 - 外匯：EUR/USD、GBP/USD、AUD/USD、NZD/USD、USD/JPY、USD/CHF、USD/CAD、USD/TWD，可選擇 30／90／365 日與貨幣對，切換不重送請求。
 
@@ -21,7 +21,7 @@
 - `DAILY_INSIGHTS_YFINANCE_ENABLED=true`：沿用既有 Yahoo Finance 開關與 adapter，讀取期貨、DXY、外匯歷史。來源為延遲日資料，排除尚未完成的當日交易。DXY 的週末隔夜列沒有正式日收盤，排除該列並保留工作日收盤；工作日缺收盤仍視為資料錯誤。
 - 美國財政部：[Daily Treasury XML](https://home.treasury.gov/treasury-daily-interest-rate-xml-feed)，不需金鑰。讀取當年及前兩年，單一年度失敗不丟棄其他成功年度。
 - 紐約聯準銀行：[SOFR](https://www.newyorkfed.org/markets/reference-rates/sofr)，不需金鑰。
-- `DAILY_INSIGHTS_FMP_API_KEY`：選填。需具有 [Economic Calendar API](https://site.financialmodelingprep.com/developer/docs/stable/economics-calendar) 存取權限。未設定或來源拒絕時顯示不可用，不將它當成「當日沒有事件」。不宣稱免費方案一定支援此 endpoint。
+- Nasdaq：[Economic Calendar](https://www.nasdaq.com/market-activity/economic-calendar)，不需金鑰。API 讀取台北今日與前一日的來源資料，再以 GMT 時間轉換後保留台北當日事件；來源失敗時顯示不可用，不將它當成「當日沒有事件」。Nasdaq 未提供事件重要性時，介面不顯示空白的重要性欄位。
 
 伺服器按程序共用五分鐘快取，並合併同時進入的請求；台北跨日後日曆快取失效。Yahoo 請求最多四個並行，各商品失敗獨立處理。初次請求顯示 skeleton，缺資料顯示 `—` 或不可用訊息。來源失敗不以示範資料補上。
 

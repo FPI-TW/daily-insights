@@ -50,7 +50,6 @@ class Settings(BaseSettings):
     # client, so the back-office fetch endpoint is opt-in.
     yfinance_enabled: bool = False
     yfinance_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
-    fmp_api_key: SecretStr | None = None
     morning_reports_enabled: bool = False
     analyst_viewpoints_enabled: bool = False
     analyst_viewpoints_base_url: str = "https://analyst-viewpoints.invalid"

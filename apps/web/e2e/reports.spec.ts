@@ -32,6 +32,27 @@ test("customer login opens reports, then a market detail without mobile overflow
       name: "Global foreign exchange price trends",
     })
   ).toBeVisible()
+  const calendarPanel = page
+    .getByRole("heading", {
+      name: "Today’s economic calendar + central bank events",
+    })
+    .locator("..")
+  await expect(calendarPanel).toContainText(
+    "Nasdaq · Sep 4, 2026 · Taipei time"
+  )
+  const fxPanel = page
+    .getByRole("heading", { name: "Global foreign exchange price trends" })
+    .locator("..")
+  await page.getByLabel("Currency pair").selectOption("usd_jpy")
+  await expect(page.getByLabel("Currency pair")).toHaveValue("usd_jpy")
+  await expect(
+    fxPanel.getByLabel("Latest observations and dates")
+  ).toContainText("JPY")
+  await page.getByRole("button", { name: "365 days" }).click()
+  await expect(page.getByRole("button", { name: "365 days" })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  )
   await page.setViewportSize({ width: 375, height: 720 })
   await expect
     .poll(() =>

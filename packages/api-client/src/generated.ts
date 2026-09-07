@@ -903,6 +903,8 @@ export interface components {
       date: string
       /** Events */
       events?: components["schemas"]["EconomicEvent"][]
+      /** Source */
+      source: string
       /**
        * Status
        * @enum {string}
