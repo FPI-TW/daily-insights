@@ -123,6 +123,8 @@ export function createMarketClient(transport: ApiTransport) {
         indexMovingAveragesSchema
       )
     },
+    // Naming neither bound gets the last year; naming either one turns that
+    // default off and returns exactly the window asked for.
     async institutionalMarketFlows(
       range: { startDate?: string; endDate?: string } = {}
     ) {

@@ -2,7 +2,7 @@ import asyncio
 import os
 import uuid
 from collections.abc import AsyncIterator
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -184,8 +184,13 @@ async def test_market_flows_endpoint_folds_five_categories_into_three(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     fetched_at = datetime(2026, 9, 4, 8, tzinfo=UTC)
+    # Dated relative to today so the default window keeps containing them; fixed
+    # dates would leave the assertions passing until they silently aged out.
+    today = datetime.now(UTC).date()
+    recent, earlier = today - timedelta(days=1), today - timedelta(days=2)
+    ancient = today - timedelta(days=400)
     async with session_factory.begin() as database:
-        for day, offset in ((date(2026, 9, 3), 0), (date(2026, 9, 4), 1)):
+        for day, offset in ((earlier, 0), (recent, 1), (ancient, -100)):
             await store_institutional_market_flows(
                 database,
                 market_code="tw_equity",
@@ -206,25 +211,36 @@ async def test_market_flows_endpoint_folds_five_categories_into_three(
         response = await client.get("/api/markets/institutional/market-flows")
         windowed = await client.get(
             "/api/markets/institutional/market-flows",
-            params={"start_date": "2026-09-04", "end_date": "2026-09-04"},
+            params={"start_date": recent.isoformat(), "end_date": recent.isoformat()},
         )
         open_ended = await client.get(
-            "/api/markets/institutional/market-flows", params={"end_date": "2026-09-03"}
+            "/api/markets/institutional/market-flows",
+            params={"end_date": earlier.isoformat()},
+        )
+        whole_history = await client.get(
+            "/api/markets/institutional/market-flows",
+            params={"start_date": ancient.isoformat()},
         )
         inverted = await client.get(
             "/api/markets/institutional/market-flows",
-            params={"start_date": "2026-09-04", "end_date": "2026-09-03"},
+            params={"start_date": recent.isoformat(), "end_date": earlier.isoformat()},
         )
 
     assert response.status_code == 200, response.text
-    # Newest first, and the two dealer books and the two foreign books are summed.
+    # Newest first, the two dealer books and the two foreign books are summed,
+    # and an unqualified request gets the last year, so `ancient` is left out.
     assert response.json() == [
-        {"trade_date": "2026-09-04", "foreign": 121, "trust": -30, "dealer": 4},
-        {"trade_date": "2026-09-03", "foreign": 120, "trust": -30, "dealer": 4},
+        {"trade_date": recent.isoformat(), "foreign": 121, "trust": -30, "dealer": 4},
+        {"trade_date": earlier.isoformat(), "foreign": 120, "trust": -30, "dealer": 4},
     ]
-    # Both bounds are inclusive, and either one alone is enough.
-    assert [row["trade_date"] for row in windowed.json()] == ["2026-09-04"]
-    assert [row["trade_date"] for row in open_ended.json()] == ["2026-09-03"]
+    # Both bounds are inclusive, and naming either one turns the default off:
+    # asking only for an end date reaches all the way back.
+    assert [row["trade_date"] for row in windowed.json()] == [recent.isoformat()]
+    assert [row["trade_date"] for row in open_ended.json()] == [
+        earlier.isoformat(),
+        ancient.isoformat(),
+    ]
+    assert len(whole_history.json()) == 3
     assert inverted.status_code == 422
     assert inverted.json()["detail"] == "start_date must not be after end_date"
 

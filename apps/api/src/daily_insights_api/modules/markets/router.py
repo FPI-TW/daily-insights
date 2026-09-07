@@ -35,6 +35,9 @@ router = APIRouter(prefix="/api/markets", tags=["markets"])
 # Taipei day.
 TAIPEI = ZoneInfo("Asia/Taipei")
 DEFAULT_BARS_WINDOW = timedelta(days=365)
+# Applied only when a caller names neither bound, so a request that does name
+# one still gets exactly what it asked for.
+DEFAULT_INSTITUTIONAL_WINDOW = timedelta(days=365)
 # ~2,500 rows at most per call; a full ^GSPC history would be ~24k.
 MAX_BARS_RANGE_YEARS = 10
 # Path parameters arrive as str; the Literal-keyed mapping is widened for lookup.
@@ -180,12 +183,17 @@ async def list_institutional_market_flows(
     end_date: Annotated[date | None, Query()] = None,
 ) -> list[InstitutionalMarketFlowResponse]:
     market_code = await _readable_institutional_market(database, context)
-    # Both bounds inclusive; neither is required, and the window is not capped
-    # the way the index history is, because a row here is one trading day.
+    # Both bounds are inclusive and neither is required, but an unqualified
+    # request gets the last year rather than the whole history, which grows by
+    # one row per trading day forever. There is no maximum range: a caller that
+    # names its own window is asking for something it can size.
     if start_date is not None and end_date is not None and start_date > end_date:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "start_date must not be after end_date"
         )
+    if start_date is None and end_date is None:
+        end_date = datetime.now(TAIPEI).date()
+        start_date = end_date - DEFAULT_INSTITUTIONAL_WINDOW
     return await institutional_market_flows(
         database, market_code=market_code, start_date=start_date, end_date=end_date
     )
