@@ -130,6 +130,34 @@ async def test_enqueue_partial_indexes_allow_index_but_reject_second_morning(
     assert index.operation == "index_yahoo"
 
 
+async def test_a_scheduled_run_is_stored_without_a_requester_and_still_locks_its_class(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(data_management_database)
+    async with data_management_database() as database:
+        scheduled = await enqueue_run(
+            database,
+            operation="institutional_twse",
+            market_code=None,
+            requester_id=None,
+            request_id=None,
+        )
+    assert scheduled.requested_by_user_id is None
+    # The lock is on the operation class, not on who asked, so an administrator
+    # pressing the button while the scheduled run is queued gets refused rather
+    # than a second walk against a source that allows one request per six
+    # seconds.
+    async with data_management_database() as database:
+        with pytest.raises(RunAlreadyActiveError):
+            await enqueue_run(
+                database,
+                operation="institutional_twse",
+                market_code=None,
+                requester_id=user.id,
+                request_id="d",
+            )
+
+
 async def test_claim_recovers_expired_lease_heartbeats_and_owner_guards_completion(
     data_management_database: async_sessionmaker[AsyncSession],
 ) -> None:

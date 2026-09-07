@@ -197,7 +197,8 @@ const dataManagementRunBaseSchema = z.object({
   id: z.uuid(),
   edition_date: z.iso.date(),
   status: dataManagementRunStatusSchema,
-  requested_by_user_id: z.uuid(),
+  // Null when the scheduler queued the run rather than an administrator.
+  requested_by_user_id: z.uuid().nullable(),
   created_at: z.iso.datetime({ offset: true }),
   started_at: z.iso.datetime({ offset: true }).nullable(),
   completed_at: z.iso.datetime({ offset: true }).nullable(),

@@ -86,13 +86,19 @@ async def run_scheduler(
     now: Callable[[], datetime],
     sleep: Sleeper = asyncio.sleep,
     retry: SameDayRetry | None = None,
+    run_at: time = DEFAULT_RUN_AT,
 ) -> None:
+    """Run `runner` once per Taipei day, from `run_at` onwards.
+
+    `run_at` is a parameter because not every daily job belongs at 08:00: TWSE
+    publishes its institutional figures in the late afternoon.
+    """
     last_requested: date | None = None
     retry_edition: date | None = None
     retry_due: datetime | None = None
     while True:
         current = now()
-        edition = due_edition(current)
+        edition = due_edition(current, run_at=run_at)
         if retry_due is not None and edition != retry_edition:
             retry_edition = retry_due = None
         if edition is not None and (edition != last_requested or retry_due is not None):
@@ -116,7 +122,7 @@ async def run_scheduler(
                         outcome=outcome,
                         retry_at=retry_due.isoformat(),
                     )
-        target = retry_due if retry_due is not None else next_run(current)
+        target = retry_due if retry_due is not None else next_run(current, run_at=run_at)
         await sleep(max(1.0, (target - current.astimezone(TAIPEI)).total_seconds()))
 
 
