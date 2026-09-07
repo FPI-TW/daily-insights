@@ -2,17 +2,24 @@ import asyncio
 from datetime import date, datetime
 
 from anyio import Path
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api import models as registered_models  # noqa: F401
 from daily_insights_api.core.config import get_settings, is_placeholder_value
 from daily_insights_api.core.database import create_engine, create_session_factory
 from daily_insights_api.core.logging import configure_logging
+from daily_insights_api.core.observability import emit_event
 from daily_insights_api.modules.data_sources.api import (
     RetryPolicy,
     TwelveDataAdapter,
     TwelveDataTransport,
 )
-from daily_insights_api.modules.reports.morning_report import run_morning_report_edition
+from daily_insights_api.modules.reports.launch_manifest import ACTIVE_LAUNCH_MANIFEST
+from daily_insights_api.modules.reports.morning_report import (
+    run_morning_report_edition,
+    run_scheduled_morning_report_markets,
+    unpublished_morning_report_markets,
+)
 from daily_insights_api.modules.reports.scheduler import (
     TAIPEI,
     SameDayRetry,
@@ -23,12 +30,75 @@ from daily_insights_api.modules.reports.scheduler import (
     run_with_heartbeat,
 )
 
-__all__ = ["main", "maintain_disabled_heartbeat", "run_with_heartbeat"]
+__all__ = [
+    "main",
+    "maintain_disabled_heartbeat",
+    "run_manual_morning_report_edition",
+    "run_scheduled_morning_report_edition",
+    "run_with_heartbeat",
+]
 
 # A morning-report run that raises is retried within the morning window instead
 # of crashing the container into an immediate restart loop. Non-exception
 # outcomes are final for the day.
 RETRY_POLICY = SameDayRetry()
+
+
+async def run_manual_morning_report_edition(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: TwelveDataAdapter,
+    edition_date: date,
+    heartbeat: Path,
+) -> str:
+    """Run a manual edition without the scheduled publication guard."""
+    await run_with_heartbeat(
+        lambda target_date: run_morning_report_edition(
+            session_factory,
+            adapter,
+            target_date,
+        ),
+        edition_date,
+        heartbeat,
+    )
+    return "complete"
+
+
+async def run_scheduled_morning_report_edition(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: TwelveDataAdapter,
+    edition_date: date,
+    heartbeat: Path,
+) -> str:
+    """Run only launch markets without an immutable publication for this date."""
+    market_codes = await unpublished_morning_report_markets(session_factory, edition_date)
+    skipped = [
+        market.market_code
+        for market in ACTIVE_LAUNCH_MANIFEST.markets
+        if market.market_code not in market_codes
+    ]
+    if not market_codes:
+        if skipped:
+            emit_event(
+                "scheduler.edition.already_published",
+                edition_date=edition_date.isoformat(),
+                skipped_market_codes=skipped,
+            )
+        await heartbeat.touch()
+        return "complete"
+    try:
+        locked_skips = await run_scheduled_morning_report_markets(
+            session_factory, adapter, edition_date, market_codes
+        )
+    finally:
+        await heartbeat.touch()
+    skipped.extend(locked_skips)
+    if skipped:
+        emit_event(
+            "scheduler.edition.already_published",
+            edition_date=edition_date.isoformat(),
+            skipped_market_codes=skipped,
+        )
+    return "complete"
 
 
 async def main() -> None:
@@ -61,14 +131,15 @@ async def main() -> None:
         adapter = TwelveDataAdapter(transport)
 
         async def runner(run_date: date) -> str | None:
-            return await run_with_heartbeat(
-                lambda target_date: run_morning_report_edition(
-                    session_factory,
-                    adapter,
-                    target_date,
-                ),
-                run_date,
-                heartbeat,
+            # A scheduled restart must not touch a provider once an immutable
+            # publication exists, including partial and unavailable editions.
+            # --once is deliberately a manual rerun and bypasses this guard.
+            if not args.once:
+                return await run_scheduled_morning_report_edition(
+                    session_factory, adapter, run_date, heartbeat
+                )
+            return await run_manual_morning_report_edition(
+                session_factory, adapter, run_date, heartbeat
             )
 
         try:

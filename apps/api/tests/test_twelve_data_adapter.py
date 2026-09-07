@@ -320,6 +320,7 @@ async def test_daily_bars_accept_provider_crypto_shape_without_volume_or_timezon
 
 
 async def test_daily_bars_enforce_expected_provider_asset_type() -> None:
+    requests: list[dict[str, str]] = []
     payload = {
         "meta": {
             "symbol": "XBR/USD",
@@ -338,20 +339,25 @@ async def test_daily_bars_enforce_expected_provider_asset_type() -> None:
         ],
         "status": "ok",
     }
-    adapter = TwelveDataAdapter(
-        transport(
-            httpx.MockTransport(lambda request: httpx.Response(200, json=payload, request=request))
-        )
-    )
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(dict(request.url.params))
+        return httpx.Response(200, json=payload, request=request)
+
+    adapter = TwelveDataAdapter(transport(httpx.MockTransport(respond)))
 
     accepted = await adapter.get_daily_bars(
         market="global_macro_bonds",
         symbol="XBR/USD",
         expected_currency="USD",
         expected_asset_type="Energy Resource",
+        symbol_type="commodity",
+        dp=11,
         outputsize=1,
     )
     assert accepted.items[0].symbol == "XBR/USD"
+    assert requests[0]["type"] == "commodity"
+    assert requests[0]["dp"] == "11"
 
     with pytest.raises(DataSourceContractError, match="asset type"):
         await adapter.get_daily_bars(
@@ -632,3 +638,115 @@ async def test_non_commodity_quote_without_currency_is_still_rejected() -> None:
 
     with pytest.raises(DataSourceContractError, match="currency unit"):
         await adapter.get_quote(market="us_equity", symbol="AAPL", expected_currency="USD")
+
+
+def _eod_payload(symbol: str, close: str = "100.12345678901") -> dict[str, object]:
+    return {
+        "symbol": symbol,
+        "exchange": "COMMODITY",
+        "datetime": "2026-09-02",
+        "close": close,
+    }
+
+
+async def test_commodity_eod_uses_one_high_precision_batch_in_requested_order() -> None:
+    requests: list[dict[str, str]] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(dict(request.url.params))
+        return httpx.Response(
+            200,
+            json={
+                "HG1": _eod_payload("HG1", "4.12345678901"),
+                "XAU/USD": _eod_payload("XAU/USD", "2400.12345678901"),
+                "XBR/USD": _eod_payload("XBR/USD", "80.12345678901"),
+            },
+        )
+
+    result = await TwelveDataAdapter(transport(httpx.MockTransport(respond))).get_eods(
+        market="global_macro_bonds",
+        symbols=("XBR/USD", "XAU/USD", "HG1"),
+        expected_currencies={"XBR/USD": "USD", "XAU/USD": "USD", "HG1": "USD"},
+    )
+
+    assert [item.symbol for item in result.items] == ["XBR/USD", "XAU/USD", "HG1"]
+    assert result.items[2].close == Decimal("4.12345678901")
+    assert result.provenance.endpoint == "/eod"
+    assert result.provenance.record_count == 3
+    assert requests == [{"symbol": "XBR/USD,XAU/USD,HG1", "type": "commodity", "dp": "11"}]
+
+
+@pytest.mark.parametrize(
+    ("currency", "raises"),
+    [(None, False), ("USD", False), ("EUR", True)],
+)
+async def test_commodity_eod_uses_manifest_currency_when_absent_and_rejects_drift(
+    currency: str | None, raises: bool
+) -> None:
+    brent = _eod_payload("XBR/USD")
+    gold = _eod_payload("XAU/USD")
+    if currency is not None:
+        brent["currency"] = currency
+        gold["currency"] = currency
+    adapter = TwelveDataAdapter(
+        transport(
+            httpx.MockTransport(
+                lambda request: httpx.Response(200, json={"XBR/USD": brent, "XAU/USD": gold})
+            )
+        )
+    )
+    if raises:
+        with pytest.raises(DataSourceContractError, match="currency did not match"):
+            await adapter.get_eods(
+                market="global_macro_bonds",
+                symbols=("XBR/USD", "XAU/USD"),
+                expected_currencies={"XBR/USD": "USD", "XAU/USD": "USD"},
+            )
+    else:
+        result = await adapter.get_eods(
+            market="global_macro_bonds",
+            symbols=("XBR/USD", "XAU/USD"),
+            expected_currencies={"XBR/USD": "USD", "XAU/USD": "USD"},
+        )
+        assert [item.currency for item in result.items] == ["USD", "USD"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "error"),
+    [
+        ({"XBR/USD": _eod_payload("XBR/USD")}, "cover every symbol"),
+        (
+            {
+                "XBR/USD": _eod_payload("XBR/USD"),
+                "XAU/USD": {"code": 404, "message": "invalid", "status": "error"},
+            },
+            "reviewed contract",
+        ),
+        (
+            {
+                "XBR/USD": _eod_payload("XBR/USD", close="0"),
+                "XAU/USD": _eod_payload("XAU/USD"),
+            },
+            "positive",
+        ),
+        (
+            {
+                "XBR/USD": {**_eod_payload("XBR/USD"), "datetime": "not-a-date"},
+                "XAU/USD": _eod_payload("XAU/USD"),
+            },
+            "reviewed contract",
+        ),
+    ],
+)
+async def test_commodity_eod_rejects_incomplete_or_invalid_batch_contract(
+    payload: dict[str, object], error: str
+) -> None:
+    adapter = TwelveDataAdapter(
+        transport(httpx.MockTransport(lambda request: httpx.Response(200, json=payload)))
+    )
+    with pytest.raises(DataSourceContractError, match=error):
+        await adapter.get_eods(
+            market="global_macro_bonds",
+            symbols=("XBR/USD", "XAU/USD"),
+            expected_currencies={"XBR/USD": "USD", "XAU/USD": "USD"},
+        )

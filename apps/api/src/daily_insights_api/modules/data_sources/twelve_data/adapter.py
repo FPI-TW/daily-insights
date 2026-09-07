@@ -11,6 +11,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from daily_insights_api.modules.data_sources.dto import DailyBar, MarketCode, Provenance
 from daily_insights_api.modules.data_sources.errors import DataSourceContractError
 from daily_insights_api.modules.data_sources.twelve_data.schemas import (
+    TwelveDataEod,
     TwelveDataQuote,
     TwelveDataTimeSeries,
 )
@@ -20,9 +21,9 @@ from daily_insights_api.modules.data_sources.twelve_data.transport import (
     TwelveDataTransportResponse,
 )
 
-TWELVE_DATA_CONTRACT_VERSION = "2026-08-31.v3"
+TWELVE_DATA_CONTRACT_VERSION = "2026-09-04.v4"
 TWELVE_DATA_CONTRACT_HASH = hashlib.sha256(
-    b"twelve-data:quote,time_series,market_movers/stocks,asset-type:2026-08-31.v3"
+    b"twelve-data:quote,eod,time_series,market_movers/stocks,commodity-eod:2026-09-04.v4"
 ).hexdigest()
 TWELVE_DATA_CURRENCY_NAMES = {"USD": "US Dollar"}
 
@@ -60,7 +61,25 @@ class DailyBarsResult:
     provenance: Provenance
 
 
+@dataclass(frozen=True, slots=True)
+class EodResult:
+    symbol: str
+    currency: str
+    as_of: date
+    close: Decimal
+    provenance: Provenance
+
+
+@dataclass(frozen=True, slots=True)
+class EodsResult:
+    """EOD values in the requested symbol order from one provider batch."""
+
+    items: tuple[EodResult, ...]
+    provenance: Provenance
+
+
 _BATCH_QUOTES = TypeAdapter(dict[str, TwelveDataQuote])
+_BATCH_EODS = TypeAdapter(dict[str, TwelveDataEod])
 
 
 class TwelveDataAdapter:
@@ -148,15 +167,23 @@ class TwelveDataAdapter:
         expected_currency: str,
         outputsize: int,
         expected_asset_type: str | None = None,
+        symbol_type: str | None = None,
+        dp: int | None = None,
     ) -> DailyBarsResult:
         if not 1 <= outputsize <= 5_000:
             raise ValueError("outputsize must be between 1 and 5000")
+        if dp is not None and not 0 <= dp <= 11:
+            raise ValueError("dp must be between 0 and 11")
         params: dict[str, QueryValue] = {
             "symbol": symbol,
             "interval": "1day",
             "outputsize": outputsize,
             "order": "ASC",
         }
+        if symbol_type is not None:
+            params["type"] = symbol_type
+        if dp is not None:
+            params["dp"] = dp
         response = await self._transport.get("/time_series", params=params)
         payload = _parse(response, TwelveDataTimeSeries, "/time_series")
         if payload.status != "ok" or payload.meta.symbol != symbol:
@@ -209,6 +236,53 @@ class TwelveDataAdapter:
             provenance=_provenance(response, "/time_series", params, as_of, len(items)),
         )
 
+    async def get_eods(
+        self,
+        *,
+        market: MarketCode,
+        symbols: tuple[str, ...],
+        expected_currencies: dict[str, str],
+    ) -> EodsResult:
+        """Fetch commodity EOD closes in one exact-coverage request.
+
+        Twelve Data omits commodity currencies in this response. The immutable
+        launch manifest is therefore the authority for the displayed unit.
+        """
+        del market
+        if not symbols or len(set(symbols)) != len(symbols):
+            raise ValueError("symbols must be a non-empty tuple of distinct symbols")
+        if set(expected_currencies) != set(symbols):
+            raise ValueError("expected_currencies must cover every requested symbol")
+        if any(currency != "USD" for currency in expected_currencies.values()):
+            raise ValueError("commodity EOD currency must be pinned to USD")
+        params: dict[str, QueryValue] = {
+            "symbol": ",".join(symbols),
+            "type": "commodity",
+            "dp": 11,
+        }
+        response = await self._transport.get("/eod", params=params)
+        payloads = _parse_eods(response, symbols)
+        items = tuple(
+            _eod_result(
+                payloads[symbol],
+                symbol,
+                expected_currencies[symbol],
+                response,
+                params,
+            )
+            for symbol in symbols
+        )
+        return EodsResult(
+            items=items,
+            provenance=_provenance(
+                response,
+                "/eod",
+                params,
+                min(item.as_of for item in items),
+                len(items),
+            ),
+        )
+
 
 def _quote_currency(symbol: str) -> str | None:
     parts = symbol.split("/", maxsplit=1)
@@ -231,6 +305,22 @@ def _parse_quotes(
         ) from error
     if set(payloads) != set(symbols):
         raise DataSourceContractError("Twelve Data batch quote did not cover every symbol")
+    return payloads
+
+
+def _parse_eods(
+    response: TwelveDataTransportResponse, symbols: tuple[str, ...]
+) -> dict[str, TwelveDataEod]:
+    if len(symbols) == 1:
+        return {symbols[0]: _parse(response, TwelveDataEod, "/eod")}
+    try:
+        payloads = _BATCH_EODS.validate_json(response.content)
+    except ValidationError as error:
+        raise DataSourceContractError(
+            "Twelve Data response no longer matches the reviewed contract for /eod"
+        ) from error
+    if set(payloads) != set(symbols):
+        raise DataSourceContractError("Twelve Data batch EOD did not cover every symbol")
     return payloads
 
 
@@ -272,6 +362,28 @@ def _quote_result(
         change=payload.change,
         percent_change=payload.percent_change,
         provenance=_provenance(response, "/quote", params, as_of, 1),
+    )
+
+
+def _eod_result(
+    payload: TwelveDataEod,
+    symbol: str,
+    expected_currency: str,
+    response: TwelveDataTransportResponse,
+    params: dict[str, QueryValue],
+) -> EodResult:
+    if payload.symbol != symbol:
+        raise DataSourceContractError("Twelve Data EOD symbol did not match the request")
+    if payload.currency is not None and payload.currency != expected_currency:
+        raise DataSourceContractError("Twelve Data EOD currency did not match the launch manifest")
+    if payload.close <= 0:
+        raise DataSourceContractError("Twelve Data EOD close must be positive")
+    return EodResult(
+        symbol=symbol,
+        currency=expected_currency,
+        as_of=payload.datetime,
+        close=payload.close,
+        provenance=_provenance(response, "/eod", params, payload.datetime, 1),
     )
 
 

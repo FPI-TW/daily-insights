@@ -1,9 +1,14 @@
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_UP, Decimal, localcontext
 
 import pytest
 
-from daily_insights_api.modules.data_sources.api import DailyBar, DataSourceContractError
+from daily_insights_api.modules.data_sources.api import (
+    DailyBar,
+    DataSourceContractError,
+    EodResult,
+    Provenance,
+)
 from daily_insights_api.modules.reports.contracts import MetricBlock, TableCell, TableColumn
 from daily_insights_api.modules.reports.launch_manifest import (
     ACTIVE_LAUNCH_MANIFEST,
@@ -14,6 +19,8 @@ from daily_insights_api.modules.reports.morning_report import (
     MORNING_REPORT_DERIVATION_VERSION,
     DatasetBuild,
     _bundle,
+    _commodity_metric_item,
+    _completed_history_for_eod,
     _error_blocks,
     _error_blocks_for_dataset,
     _input_digest,
@@ -24,6 +31,7 @@ from daily_insights_api.modules.reports.morning_report import (
     _normalized_points,
     _quantize,
     _revision_lock_key,
+    _scheduled_edition_lock_key,
     _validate_dataset_contract,
     _validate_manifest_output,
     block_precision,
@@ -32,8 +40,8 @@ from daily_insights_api.modules.reports.morning_report import (
 
 
 def test_manifest_freezes_three_markets_and_block_order() -> None:
-    assert MORNING_REPORT_DERIVATION_VERSION == "twelve-data.three-market.v6"
-    assert ACTIVE_LAUNCH_MANIFEST.version == "three-market.v6"
+    assert MORNING_REPORT_DERIVATION_VERSION == "twelve-data.three-market.v7"
+    assert ACTIVE_LAUNCH_MANIFEST.version == "three-market.v7"
     assert tuple(market.market_code for market in ACTIVE_LAUNCH_MANIFEST.markets) == (
         "global_macro_bonds",
         "crypto",
@@ -62,7 +70,7 @@ def test_manifest_freezes_three_markets_and_block_order() -> None:
 def test_manifest_hash_is_stable_and_changes_with_content() -> None:
     round_trip = LaunchManifest.model_validate(ACTIVE_LAUNCH_MANIFEST.model_dump(mode="json"))
     assert round_trip.sha256 == ACTIVE_LAUNCH_MANIFEST.sha256
-    changed = round_trip.model_copy(update={"version": "three-market.v7"})
+    changed = round_trip.model_copy(update={"version": "three-market.v8"})
     assert changed.sha256 != round_trip.sha256
 
 
@@ -71,32 +79,29 @@ def test_manifest_keeps_atomic_dataset_contracts() -> None:
     assert next(
         dataset.symbol_units
         for dataset in ACTIVE_LAUNCH_MANIFEST.datasets
-        if dataset.key == "macro.commodity_quotes"
+        if dataset.key == "macro.commodity_eod"
     ) == {"XBR/USD": "USD", "XAU/USD": "USD", "HG1": "USD"}
     quotes = next(
         dataset
         for dataset in ACTIVE_LAUNCH_MANIFEST.datasets
-        if dataset.key == "macro.commodity_quotes"
+        if dataset.key == "macro.commodity_eod"
     )
     # HG1 without a type resolves to a German stock; the manifest pins copper.
-    assert quotes.symbol_types == {"HG1": "commodity"}
-    assert "previous_close" in quotes.required_fields
-    history = next(
-        dataset
-        for dataset in ACTIVE_LAUNCH_MANIFEST.datasets
-        if dataset.key == "macro.commodity_daily_bars"
-    )
-    assert history.endpoint == "/time_series"
-    assert history.symbols == ("XBR/USD", "XAU/USD")
-    assert history.minimum_history == 500
-    assert history.expected_asset_types == {
+    assert quotes.endpoint == "/eod"
+    assert quotes.symbol_types == {
+        "XBR/USD": "commodity",
+        "XAU/USD": "commodity",
+        "HG1": "commodity",
+    }
+    assert quotes.minimum_history == 500
+    assert quotes.expected_asset_types == {
         "XBR/USD": "Energy Resource",
         "XAU/USD": "Precious Metal",
+        "HG1": "Industrial Metal",
     }
     assert tuple(dataset.key for dataset in _market_datasets("global_macro_bonds")) == (
-        "macro.commodity_quotes",
+        "macro.commodity_eod",
         "macro.rates_fx_quotes",
-        "macro.commodity_daily_bars",
     )
     rates = next(
         dataset
@@ -131,7 +136,7 @@ def test_us_equity_uses_fixed_usd_baskets_instead_of_provider_movers() -> None:
 
 def test_manifest_rejects_symbol_types_outside_the_dataset() -> None:
     payload = ACTIVE_LAUNCH_MANIFEST.model_dump(mode="json")
-    next(dataset for dataset in payload["datasets"] if dataset["key"] == "macro.commodity_quotes")[
+    next(dataset for dataset in payload["datasets"] if dataset["key"] == "macro.commodity_eod")[
         "symbol_types"
     ] = {"ZZZ": "commodity"}
 
@@ -146,8 +151,8 @@ def test_manifest_allows_multiple_datasets_for_one_market() -> None:
 def test_manifest_rejects_blocks_with_multiple_dataset_references() -> None:
     payload = ACTIVE_LAUNCH_MANIFEST.model_dump(mode="json")
     payload["markets"][0]["blocks"][0]["datasets"] = (
-        "macro.commodity_quotes",
-        "macro.commodity_daily_bars",
+        "macro.commodity_eod",
+        "macro.rates_fx_quotes",
     )
 
     with pytest.raises(ValueError, match="every block must reference exactly one dataset"):
@@ -156,7 +161,7 @@ def test_manifest_rejects_blocks_with_multiple_dataset_references() -> None:
 
 def test_manifest_rejects_dataset_reused_by_another_market() -> None:
     payload = ACTIVE_LAUNCH_MANIFEST.model_dump(mode="json")
-    payload["markets"][1]["blocks"][0]["datasets"] = ("macro.commodity_quotes",)
+    payload["markets"][1]["blocks"][0]["datasets"] = ("macro.commodity_eod",)
 
     with pytest.raises(ValueError, match="every dataset must be referenced by exactly one market"):
         LaunchManifest.model_validate(payload)
@@ -169,45 +174,41 @@ def test_manifest_rejects_duplicate_and_unreferenced_datasets() -> None:
         LaunchManifest.model_validate(duplicate)
 
     unreferenced = ACTIVE_LAUNCH_MANIFEST.model_dump(mode="json")
-    unreferenced["markets"][0]["blocks"][1]["datasets"] = ("macro.commodity_quotes",)
+    unreferenced["markets"][0]["blocks"][1]["datasets"] = ("macro.commodity_eod",)
     with pytest.raises(ValueError, match="exactly cover declared datasets"):
         LaunchManifest.model_validate(unreferenced)
 
 
 def test_manifest_rejects_partial_asset_type_contract() -> None:
     payload = ACTIVE_LAUNCH_MANIFEST.model_dump(mode="json")
-    next(
-        dataset for dataset in payload["datasets"] if dataset["key"] == "macro.commodity_daily_bars"
-    )["expected_asset_types"] = {"XBR/USD": "Energy Resource"}
+    next(dataset for dataset in payload["datasets"] if dataset["key"] == "macro.commodity_eod")[
+        "expected_asset_types"
+    ] = {"XBR/USD": "Energy Resource"}
 
     with pytest.raises(ValueError, match="asset-type contracts"):
         LaunchManifest.model_validate(payload)
 
 
 def test_dataset_input_digest_is_stable_across_dataset_order() -> None:
-    quotes, _rates, history = _market_datasets("global_macro_bonds")
-    quote_failure = DatasetBuild(quotes, (), None, ValueError("quote failed"))
-    history_failure = DatasetBuild(history, (), None, ValueError("history failed"))
+    commodity, rates = _market_datasets("global_macro_bonds")
+    commodity_failure = DatasetBuild(commodity, (), None, ValueError("commodity failed"))
+    rates_failure = DatasetBuild(rates, (), None, ValueError("rates failed"))
 
     assert _input_digest(
-        MORNING_REPORT_DERIVATION_VERSION, (quote_failure, history_failure)
-    ) == _input_digest(MORNING_REPORT_DERIVATION_VERSION, (history_failure, quote_failure))
+        MORNING_REPORT_DERIVATION_VERSION, (commodity_failure, rates_failure)
+    ) == _input_digest(MORNING_REPORT_DERIVATION_VERSION, (rates_failure, commodity_failure))
 
 
 def test_macro_dataset_failure_preserves_the_other_block_and_status() -> None:
     as_of = date(2026, 8, 30)
-    quote_block = MetricBlock(
-        id="macro.commodities",
+    rates_block = MetricBlock(
+        id="macro.rates_fx",
         status="ok",
         source_as_of=as_of,
         metrics=(),
     )
-    rates_block = quote_block.model_copy(update={"id": "macro.rates_fx"})
-    partial_blocks = (
-        quote_block,
-        rates_block,
-        *_error_blocks_for_dataset("global_macro_bonds", "macro.commodity_daily_bars"),
-    )
+    commodity_errors = _error_blocks_for_dataset("global_macro_bonds", "macro.commodity_eod")
+    partial_blocks = (commodity_errors[0], rates_block, commodity_errors[1])
     _validate_manifest_output("global_macro_bonds", partial_blocks)
 
     partial = _bundle("global_macro_bonds", partial_blocks)
@@ -313,6 +314,59 @@ def test_macro_normalization_uses_latest_thirty_exact_common_provider_dates() ->
         _latest_common_provider_dates((brent[:29], gold[:29]))
 
 
+def test_commodity_history_uses_eod_as_mutable_bar_cutoff_and_requires_reconciliation() -> None:
+    eod_date = date(2026, 9, 4)
+    provenance = Provenance(
+        provider="twelve_data",
+        contract_version="test.v1",
+        contract_hash="a" * 64,
+        endpoint="/eod",
+        query_fingerprint="b" * 64,
+        fetched_at=datetime(2026, 9, 5, tzinfo=UTC),
+        as_of=eod_date,
+        response_digest="c" * 64,
+        record_count=1,
+    )
+    eod = EodResult(
+        symbol="XBR/USD",
+        currency="USD",
+        as_of=eod_date,
+        close=Decimal("94.60791741912"),
+        provenance=provenance,
+    )
+    bars = tuple(
+        DailyBar(
+            instrument_source_id="XBR/USD",
+            market="global_macro_bonds",
+            symbol="XBR/USD",
+            trade_date=item_date,
+            close=close,
+        )
+        for item_date, close in (
+            (date(2026, 9, 3), Decimal("90")),
+            (eod_date, Decimal("94.60791741912")),
+            (date(2026, 9, 5), Decimal("120")),
+        )
+    )
+
+    completed = _completed_history_for_eod(bars, eod)
+
+    assert [bar.trade_date for bar in completed] == [date(2026, 9, 3), eod_date]
+    metric = _commodity_metric_item("brent", eod, completed[-2].close)
+    assert metric.value == Decimal("94.6079")
+    assert metric.change == Decimal("5.1199")
+    rounded_default_precision = (
+        *bars[:1],
+        bars[1].model_copy(update={"close": Decimal("94.60792")}),
+    )
+    with pytest.raises(DataSourceContractError, match="date or close"):
+        _completed_history_for_eod(rounded_default_precision, eod)
+    with pytest.raises(DataSourceContractError, match="date or close"):
+        _completed_history_for_eod(bars[:-2], eod)
+    with pytest.raises(DataSourceContractError, match="previous completed"):
+        _completed_history_for_eod((bars[1],), eod)
+
+
 def test_manifest_rounding_does_not_depend_on_decimal_context() -> None:
     with localcontext() as context:
         context.rounding = ROUND_UP
@@ -344,7 +398,10 @@ def test_revision_is_noop_only_for_same_input_and_manifest() -> None:
 
 def test_revision_lock_is_stable_and_scoped_to_market_and_edition() -> None:
     first = _revision_lock_key("daily-market", "crypto", date(2026, 8, 30))
+    scheduled = _scheduled_edition_lock_key("daily-market", "crypto", date(2026, 8, 30))
     assert first == _revision_lock_key("daily-market", "crypto", date(2026, 8, 30))
+    assert scheduled == _scheduled_edition_lock_key("daily-market", "crypto", date(2026, 8, 30))
+    assert scheduled != first
     assert first != _revision_lock_key("daily-market", "us_equity", date(2026, 8, 30))
     assert first != _revision_lock_key("daily-market", "crypto", date(2026, 8, 31))
     assert -(2**63) <= first < 2**63

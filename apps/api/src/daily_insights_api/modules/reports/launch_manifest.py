@@ -19,7 +19,7 @@ class ManifestModel(BaseModel):
 
 class DatasetManifest(ManifestModel):
     key: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,99}$")
-    endpoint: Literal["/quote", "/time_series", "/market_movers/stocks"]
+    endpoint: Literal["/quote", "/eod", "/time_series", "/market_movers/stocks"]
     symbols: tuple[str, ...]
     symbol_units: dict[str, str]
     # Provider "type" query parameter per symbol. Twelve Data reuses tickers
@@ -122,7 +122,7 @@ class LaunchManifest(ManifestModel):
 
 
 ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
-    version="three-market.v6",
+    version="three-market.v7",
     provider="twelve_data",
     markets=(
         MarketManifest(
@@ -131,17 +131,17 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
                 BlockManifest(
                     id="macro.commodities",
                     kind="metric",
-                    datasets=("macro.commodity_quotes",),
+                    datasets=("macro.commodity_eod",),
                     formula=(
-                        "provider quote close; percent change="
-                        "(close-previous_close)/previous_close*100; no substitution"
+                        "commodity /eod close; percent change=(latest EOD close-previous "
+                        "completed EOD close)/previous completed EOD close*100; no substitution"
                     ),
                     unit_code="provider_quote_currency",
                     precision=4,
                     labels={
-                        "zh-hant": "商品快照",
-                        "zh-hans": "商品快照",
-                        "en": "Commodity snapshot",
+                        "zh-hant": "商品收盤",
+                        "zh-hans": "商品收盘",
+                        "en": "Commodity EOD",
                     },
                 ),
                 BlockManifest(
@@ -164,7 +164,7 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
                 BlockManifest(
                     id="macro.commodity_normalized_performance",
                     kind="series",
-                    datasets=("macro.commodity_daily_bars",),
+                    datasets=("macro.commodity_eod",),
                     formula=(
                         "normalized close=close/first_close*100 independently over the latest "
                         "30 exact common provider calendar dates; null/zero protected"
@@ -254,17 +254,26 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
     ),
     datasets=(
         DatasetManifest(
-            key="macro.commodity_quotes",
-            endpoint="/quote",
+            key="macro.commodity_eod",
+            endpoint="/eod",
             symbols=("XBR/USD", "XAU/USD", "HG1"),
             symbol_units={"XBR/USD": "USD", "XAU/USD": "USD", "HG1": "USD"},
             # Without type=commodity the provider resolves HG1 to Homag Group AG
             # (Frankfurt, EUR); the commodity class is copper spot quoted in USD.
-            symbol_types={"HG1": "commodity"},
-            required_fields=("close", "previous_close", "timestamp"),
-            timezone="UTC derived from provider Unix timestamp",
-            day_boundary="UTC calendar date of provider timestamp",
-            freshness="latest completed provider quote",
+            symbol_types={"XBR/USD": "commodity", "XAU/USD": "commodity", "HG1": "commodity"},
+            expected_asset_types={
+                "XBR/USD": "Energy Resource",
+                "XAU/USD": "Precious Metal",
+                "HG1": "Industrial Metal",
+            },
+            required_fields=("symbol", "exchange", "datetime", "close"),
+            # EOD validates a full provider history for all three symbols. Brent
+            # and gold alone form the published normalized chart; copper supplies
+            # the prior completed close used by its metric.
+            minimum_history=500,
+            timezone="provider date-only EOD and 1day calendar date",
+            day_boundary="provider EOD date; discard later mutable 1day bars",
+            freshness="one commodity /eod batch reconciled to completed 1day history",
         ),
         # Treasury ETFs stand in for yields (the provider has no exact curve
         # symbols) and UUP for the dollar index; FX pairs quote in the second
@@ -302,24 +311,6 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
             timezone="UTC per provider crypto time-series contract",
             day_boundary="provider 1day bar calendar date",
             freshness="latest completed 1day bar",
-        ),
-        DatasetManifest(
-            key="macro.commodity_daily_bars",
-            endpoint="/time_series",
-            symbols=("XBR/USD", "XAU/USD"),
-            symbol_units={"XBR/USD": "USD", "XAU/USD": "USD"},
-            expected_asset_types={
-                "XBR/USD": "Energy Resource",
-                "XAU/USD": "Precious Metal",
-            },
-            required_fields=("datetime", "open", "high", "low", "close"),
-            # The credentialed probe returned 500 rows per symbol. Retaining the full
-            # reviewed window leaves ample calendar-overlap headroom above the 30 dates
-            # required by the derived series.
-            minimum_history=500,
-            timezone="provider date-only 1day calendar date",
-            day_boundary="provider calendar date; no UTC or exchange timezone inferred",
-            freshness="latest completed provider 1day bar; fail if fewer than 30 common dates",
         ),
         DatasetManifest(
             key="us.index_proxy_quotes",

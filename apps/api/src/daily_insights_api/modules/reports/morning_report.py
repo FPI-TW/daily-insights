@@ -14,6 +14,7 @@ from daily_insights_api.modules.data_sources.api import (
     TWELVE_DATA_CONTRACT_VERSION,
     DailyBar,
     DataSourceContractError,
+    EodResult,
     Provenance,
     QuoteResult,
     QuotesResult,
@@ -73,7 +74,7 @@ _TITLES = {
     },
 }
 
-MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v6"
+MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v7"
 
 
 @dataclass(frozen=True)
@@ -102,13 +103,102 @@ async def run_morning_report_edition(
     session_factory: async_sessionmaker[AsyncSession],
     adapter: TwelveDataAdapter,
     edition_date: date,
+    *,
+    market_codes: tuple[LaunchMarketCode, ...] | None = None,
 ) -> None:
+    requested_markets = market_codes or tuple(
+        market.market_code for market in ACTIVE_LAUNCH_MANIFEST.markets
+    )
     await asyncio.gather(
         *(
-            _run_market(session_factory, adapter, market.market_code, edition_date)
-            for market in ACTIVE_LAUNCH_MANIFEST.markets
+            _run_market(session_factory, adapter, market_code, edition_date)
+            for market_code in requested_markets
         )
     )
+
+
+async def unpublished_morning_report_markets(
+    session_factory: async_sessionmaker[AsyncSession], edition_date: date
+) -> tuple[LaunchMarketCode, ...]:
+    """Return launch markets without any published revision for this edition.
+
+    Scheduler restarts must treat complete, partial, and unavailable
+    publications alike: each is an immutable terminal publication and must not
+    trigger another provider request. Manual runs intentionally bypass this
+    guard so they retain the existing revision/no-op behavior.
+    """
+    market_order = tuple(market.market_code for market in ACTIVE_LAUNCH_MANIFEST.markets)
+    async with session_factory() as database:
+        existing = set(
+            (
+                await database.scalars(
+                    select(ReportPublication.market_code)
+                    .where(
+                        ReportPublication.report_key == "daily-market",
+                        ReportPublication.edition_date == edition_date,
+                        ReportPublication.market_code.in_(market_order),
+                    )
+                    .distinct()
+                )
+            ).all()
+        )
+    return tuple(market for market in market_order if market not in existing)
+
+
+async def run_scheduled_morning_report_markets(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: TwelveDataAdapter,
+    edition_date: date,
+    market_codes: tuple[LaunchMarketCode, ...],
+) -> tuple[LaunchMarketCode, ...]:
+    """Run missing scheduled markets under per-edition advisory locks.
+
+    The earlier startup preflight is only an optimization. This definitive
+    check occurs while a transaction-scoped scheduler lock is held, before any
+    provider call, so a second scheduler instance waits and then observes the
+    first publication instead of rebuilding it.
+    """
+    outcomes = await asyncio.gather(
+        *(
+            _run_scheduled_market(session_factory, adapter, market_code, edition_date)
+            for market_code in market_codes
+        )
+    )
+    return tuple(
+        market_code
+        for market_code, was_already_published in zip(market_codes, outcomes, strict=True)
+        if was_already_published
+    )
+
+
+async def _run_scheduled_market(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: TwelveDataAdapter,
+    market_code: LaunchMarketCode,
+    edition_date: date,
+) -> bool:
+    """Return whether a concurrent scheduler had already published the market."""
+    async with session_factory.begin() as database:
+        await database.execute(
+            select(
+                func.pg_advisory_xact_lock(
+                    _scheduled_edition_lock_key("daily-market", market_code, edition_date)
+                )
+            )
+        )
+        publication_id = await database.scalar(
+            select(ReportPublication.id)
+            .where(
+                ReportPublication.report_key == "daily-market",
+                ReportPublication.market_code == market_code,
+                ReportPublication.edition_date == edition_date,
+            )
+            .limit(1)
+        )
+        if publication_id is not None:
+            return True
+        await _run_market(session_factory, adapter, market_code, edition_date)
+        return False
 
 
 async def _run_market(
@@ -120,7 +210,7 @@ async def _run_market(
     owner = f"morning-report-{uuid.uuid4()}"
     datasets = _market_datasets(market_code)
     builds = await _build_blocks(adapter, market_code, datasets)
-    blocks = tuple(block for build in builds for block in build.blocks)
+    blocks = _manifest_ordered_blocks(market_code, builds)
     _validate_manifest_output(market_code, blocks)
     derivation_version = MORNING_REPORT_DERIVATION_VERSION
     input_digest = _input_digest(derivation_version, builds)
@@ -275,6 +365,21 @@ def _market_datasets(market_code: LaunchMarketCode) -> tuple[DatasetManifest, ..
     return tuple(datasets_by_key[key] for key in keys)
 
 
+def _manifest_ordered_blocks(
+    market_code: LaunchMarketCode, builds: tuple[DatasetBuild, ...]
+) -> tuple[ReportBlock, ...]:
+    blocks = {block.id: block for build in builds for block in build.blocks}
+    expected_ids = tuple(
+        block.id
+        for market in ACTIVE_LAUNCH_MANIFEST.markets
+        if market.market_code == market_code
+        for block in market.blocks
+    )
+    if set(blocks) != set(expected_ids):
+        raise DataSourceContractError("dataset blocks did not exactly cover the launch manifest")
+    return tuple(blocks[identifier] for identifier in expected_ids)
+
+
 def _input_digest(derivation_version: str, builds: tuple[DatasetBuild, ...]) -> str:
     material = "|".join(
         sorted(f"twelve_data:{build.dataset.key}:{build.status}:{build.marker}" for build in builds)
@@ -319,18 +424,74 @@ async def _build_dataset_blocks(
     market_code: LaunchMarketCode,
     dataset: DatasetManifest,
 ) -> tuple[tuple[ReportBlock, ...], Provenance]:
-    if dataset.key == "macro.commodity_quotes":
-        quotes = await _dataset_quotes(adapter, market_code, dataset)
+    if dataset.key == "macro.commodity_eod":
+        eods = await adapter.get_eods(
+            market=market_code,
+            symbols=dataset.symbols,
+            expected_currencies=dict(dataset.symbol_units),
+        )
+        histories = await asyncio.gather(
+            *(
+                adapter.get_daily_bars(
+                    market=market_code,
+                    symbol=symbol,
+                    expected_currency=dataset.symbol_units[symbol],
+                    expected_asset_type=dataset.expected_asset_types[symbol],
+                    symbol_type=dataset.symbol_types[symbol],
+                    # The daily close is compared exactly with /eod, so both
+                    # endpoints must use the same reviewed provider precision.
+                    dp=11,
+                    outputsize=dataset.minimum_history,
+                )
+                for symbol in dataset.symbols
+            )
+        )
+        completed_histories = tuple(
+            _completed_history_for_eod(result.items, eod)
+            for result, eod in zip(histories, eods.items, strict=True)
+        )
         macro_block = MetricBlock(
             id="macro.commodities",
             status="ok",
-            source_as_of=min(item.as_of for item in quotes.items),
+            source_as_of=min(item.as_of for item in eods.items),
             metrics=tuple(
-                _metric_item(identifier, item, "macro.commodities")
-                for identifier, item in zip(("brent", "gold", "copper"), quotes.items, strict=True)
+                _commodity_metric_item(identifier, eod, history[-2].close)
+                for identifier, eod, history in zip(
+                    ("brent", "gold", "copper"),
+                    eods.items,
+                    completed_histories,
+                    strict=True,
+                )
             ),
         )
-        return (macro_block,), _aggregate_provenance(quotes.provenances)
+        window_dates = _latest_common_provider_dates(completed_histories[:2])
+        normalized = SeriesBlock(
+            id="macro.commodity_normalized_performance",
+            status="ok",
+            source_as_of=window_dates[-1],
+            unit_code="index",
+            series=tuple(
+                ChartSeries(
+                    id=identifier,
+                    points=_normalized_common_date_points(
+                        history,
+                        window_dates,
+                        precision=block_precision("macro.commodity_normalized_performance"),
+                        rounding=block_rounding("macro.commodity_normalized_performance"),
+                    ),
+                )
+                for identifier, history in zip(
+                    ("brent", "gold"), completed_histories[:2], strict=True
+                )
+            ),
+        )
+        return (
+            (macro_block, normalized),
+            _aggregate_provenance(
+                (eods.provenance, *(result.provenance for result in histories)),
+                as_of=min(item.as_of for item in eods.items),
+            ),
+        )
     if dataset.key == "macro.rates_fx_quotes":
         quotes = await _dataset_quotes(adapter, market_code, dataset)
         rates_block = MetricBlock(
@@ -394,44 +555,6 @@ async def _build_dataset_blocks(
             ),
         )
         return (mega_caps_block,), _aggregate_provenance(quotes.provenances)
-    if dataset.key == "macro.commodity_daily_bars":
-        results = await asyncio.gather(
-            *(
-                adapter.get_daily_bars(
-                    market=market_code,
-                    symbol=symbol,
-                    expected_currency=dataset.symbol_units[symbol],
-                    expected_asset_type=dataset.expected_asset_types[symbol],
-                    outputsize=dataset.minimum_history,
-                )
-                for symbol in dataset.symbols
-            )
-        )
-        window_dates = _latest_common_provider_dates(tuple(result.items for result in results))
-        normalized = SeriesBlock(
-            id="macro.commodity_normalized_performance",
-            status="ok",
-            source_as_of=window_dates[-1],
-            unit_code="index",
-            series=tuple(
-                ChartSeries(
-                    id=identifier,
-                    points=_normalized_common_date_points(
-                        result.items,
-                        window_dates,
-                        precision=block_precision("macro.commodity_normalized_performance"),
-                        rounding=block_rounding("macro.commodity_normalized_performance"),
-                    ),
-                )
-                for identifier, result in zip(("brent", "gold"), results, strict=True)
-            ),
-        )
-        return (
-            (normalized,),
-            _aggregate_provenance(
-                tuple(result.provenance for result in results), as_of=window_dates[-1]
-            ),
-        )
     if dataset.key == "crypto.daily_bars":
         symbols = dataset.symbols
         results = await asyncio.gather(
@@ -528,6 +651,41 @@ def _metric_item(identifier: str, item: QuoteResult, block_id: str) -> MetricIte
         ),
         unit_code=item.currency.lower(),
     )
+
+
+def _commodity_metric_item(
+    identifier: str, item: EodResult, previous_close: Decimal | None
+) -> MetricItem:
+    return MetricItem(
+        id=identifier,
+        value=_quantize(
+            item.close,
+            block_precision("macro.commodities"),
+            block_rounding("macro.commodities"),
+        ),
+        change=_quantize(
+            _previous_close_change(item.close, previous_close),
+            block_precision("macro.commodities"),
+            block_rounding("macro.commodities"),
+        ),
+        unit_code=item.currency.lower(),
+    )
+
+
+def _completed_history_for_eod(bars: tuple[DailyBar, ...], eod: EodResult) -> tuple[DailyBar, ...]:
+    """Cut mutable daily bars at the EOD date and reconcile the EOD close."""
+    if any(bar.symbol != eod.symbol for bar in bars):
+        raise DataSourceContractError("commodity history symbol did not match EOD symbol")
+    completed = tuple(bar for bar in bars if bar.trade_date <= eod.as_of)
+    latest = completed[-1] if completed else None
+    if latest is None or latest.trade_date != eod.as_of or latest.close != eod.close:
+        raise DataSourceContractError("commodity EOD date or close did not match daily history")
+    if len(completed) < 2:
+        raise DataSourceContractError("commodity history omitted the previous completed EOD date")
+    previous = completed[-2]
+    if previous.close is None or previous.close <= 0:
+        raise DataSourceContractError("commodity history omitted a usable previous completed close")
+    return completed
 
 
 def _previous_close_change(close: Decimal, previous_close: Decimal | None) -> Decimal:
@@ -782,6 +940,7 @@ _ENDPOINT_FIELDS: dict[str, frozenset[str]] = {
         }
     ),
     "/time_series": frozenset({"datetime", "open", "high", "low", "close", "volume"}),
+    "/eod": frozenset({"symbol", "exchange", "datetime", "close"}),
     "/market_movers/stocks": frozenset(
         {"symbol", "name", "datetime", "last", "high", "low", "volume", "change", "percent_change"}
     ),
@@ -887,6 +1046,13 @@ def _next_revision(
 
 def _revision_lock_key(report_key: str, market_code: str, edition_date: date) -> int:
     material = f"{report_key}|{market_code}|{edition_date.isoformat()}".encode()
+    value = int(hashlib.sha256(material).hexdigest()[:16], 16)
+    return value - 2**64 if value >= 2**63 else value
+
+
+def _scheduled_edition_lock_key(report_key: str, market_code: str, edition_date: date) -> int:
+    """A namespace distinct from revision publishing's advisory lock."""
+    material = f"scheduled-edition|{report_key}|{market_code}|{edition_date.isoformat()}".encode()
     value = int(hashlib.sha256(material).hexdigest()[:16], 16)
     return value - 2**64 if value >= 2**63 else value
 
