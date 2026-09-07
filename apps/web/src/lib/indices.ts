@@ -27,11 +27,29 @@ export type MarketIndexHistory = {
   failedSymbols: string[]
 }
 
+export const VIX_SYMBOL = "^VIX" as const
+
+export type VixHistory = {
+  symbol: typeof VIX_SYMBOL
+  start: string
+  end: string
+  bars: IndexDailyBar[]
+}
+
 export type IndexMovingAverageMap = Record<string, IndexMovingAverages>
+
+const historyRangeSchema = z.object({
+  start: z.iso.date(),
+  end: z.iso.date(),
+})
 
 const marketIndexRequestSchema = z.object({
   marketCode: marketCodeSchema,
-  range: z.object({ start: z.iso.date(), end: z.iso.date() }).optional(),
+  range: historyRangeSchema.optional(),
+})
+
+const vixHistoryRequestSchema = z.object({
+  range: historyRangeSchema.optional(),
 })
 
 export const chartMarketCodes = ["us_equity", "tw_equity"] as const
@@ -40,6 +58,12 @@ export function trackedSymbolsForMarket(marketCode: MarketCode) {
   return trackedIndexCatalog
     .filter(item => item.marketCode === marketCode)
     .map(item => item.symbol)
+}
+
+export function indexChartSymbolsForMarket(marketCode: MarketCode) {
+  return trackedSymbolsForMarket(marketCode).filter(
+    symbol => symbol !== VIX_SYMBOL
+  )
 }
 
 export function indexHistoryOutcomes(
@@ -133,7 +157,7 @@ export const getMarketIndexHistory = createServerFn({ method: "GET" })
     }
 
     const client = serverMarketClient()
-    const symbols = trackedSymbolsForMarket(data.marketCode)
+    const symbols = indexChartSymbolsForMarket(data.marketCode)
     const outcomes = await Promise.allSettled(
       symbols.map(symbol => client.indexDailyBars(symbol, range))
     )
@@ -156,11 +180,24 @@ export const getMarketIndexMovingAverages = createServerFn({ method: "GET" })
     }
     const range = data.range ?? twoYearTaipeiRange()
     const client = serverMarketClient()
-    const symbols = trackedSymbolsForMarket(data.marketCode)
+    const symbols = indexChartSymbolsForMarket(data.marketCode)
     const outcomes = await Promise.allSettled(
       symbols.map(symbol => client.indexMovingAverages(symbol, range))
     )
     return indexMovingAverageOutcomes(symbols, outcomes)
+  })
+
+export const getVixHistory = createServerFn({ method: "GET" })
+  .validator(vixHistoryRequestSchema)
+  .handler(async ({ data }): Promise<VixHistory> => {
+    setResponseHeader("Cache-Control", "no-store")
+    const range = data.range ?? twoYearTaipeiRange()
+    const client = serverMarketClient()
+    return {
+      symbol: VIX_SYMBOL,
+      ...range,
+      bars: await client.indexDailyBars(VIX_SYMBOL, range),
+    }
   })
 
 export function indexNameKey(symbol: string) {

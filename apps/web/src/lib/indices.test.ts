@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest"
 import {
   indexHistoryOutcomes,
+  indexChartSymbolsForMarket,
   indexMovingAverageOutcomes,
   trackedSymbolsForMarket,
   twoYearTaipeiRange,
 } from "./indices"
-import type { IndexMovingAverages } from "@daily-insights/api-client"
+import {
+  indexSymbolSchema,
+  type IndexMovingAverages,
+} from "@daily-insights/api-client"
 
 describe("twoYearTaipeiRange", () => {
   it("uses an explicit two-calendar-year range", () => {
@@ -74,12 +78,24 @@ describe("trackedSymbolsForMarket", () => {
       "^NDX",
       "^RUT",
       "^SOX",
+      "^VIX",
     ])
     expect(trackedSymbolsForMarket("tw_equity")).toEqual(["^TWII"])
   })
 
   it("fans out without requiring an organization-backed market list", () => {
-    expect(trackedSymbolsForMarket("us_equity")).toHaveLength(5)
+    expect(trackedSymbolsForMarket("us_equity")).toHaveLength(6)
+  })
+
+  it("keeps VIX in the contract but out of the general index chart", () => {
+    expect(indexSymbolSchema.parse("^VIX")).toBe("^VIX")
+    expect(indexChartSymbolsForMarket("us_equity")).toEqual([
+      "^DJI",
+      "^GSPC",
+      "^NDX",
+      "^RUT",
+      "^SOX",
+    ])
   })
 })
 

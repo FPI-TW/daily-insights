@@ -15,6 +15,10 @@ import {
   UsIndexPerformanceTableLoading,
 } from "#/components/UsIndexPerformanceTable"
 import {
+  VixHistoryChart,
+  VixHistoryLoading,
+} from "#/components/VixHistoryChart"
+import {
   MarketViewpoint,
   ReportDetail,
   ReportErrorScreen,
@@ -33,9 +37,11 @@ import {
   chartMarketCodes,
   getMarketIndexHistory,
   getMarketIndexMovingAverages,
+  getVixHistory,
   twoYearTaipeiRange,
   type IndexMovingAverageMap,
   type MarketIndexHistory,
+  type VixHistory,
 } from "#/lib/indices"
 import { useChatPageContext } from "#/components/PageContextChat"
 
@@ -46,10 +52,12 @@ type MarketPage = {
   viewpoint: AnalystViewpoint | null
   indexHistory: Promise<MarketIndexHistory | null> | null
   indexMovingAverages: Promise<IndexMovingAverageMap> | null
+  vixHistory: Promise<VixHistory | null> | null
 }
 
 export const INDEX_HISTORY_DEADLINE_MS = 10_000
 export const INDEX_MOVING_AVERAGES_DEADLINE_MS = 10_000
+export const VIX_HISTORY_DEADLINE_MS = 10_000
 
 export function withIndexHistoryDeadline(
   history: Promise<MarketIndexHistory>,
@@ -84,6 +92,25 @@ export function withMovingAverageDeadline(
       () => {
         clearTimeout(deadline)
         resolve({})
+      }
+    )
+  })
+}
+
+export function withVixHistoryDeadline(
+  history: Promise<VixHistory>,
+  deadlineMs = VIX_HISTORY_DEADLINE_MS
+): Promise<VixHistory | null> {
+  return new Promise(resolve => {
+    const deadline = setTimeout(() => resolve(null), deadlineMs)
+    void history.then(
+      value => {
+        clearTimeout(deadline)
+        resolve(value)
+      },
+      () => {
+        clearTimeout(deadline)
+        resolve(null)
       }
     )
   })
@@ -125,6 +152,10 @@ export async function loadMarketPage({
         })
       )
     : null
+  const vixHistory =
+    params.marketCode === "us_equity"
+      ? withVixHistoryDeadline(getVixHistory({ data: { range: indexRange! } }))
+      : null
   const [report, news, viewpoints] = await Promise.allSettled([
     getReportDetail({
       data: { marketCode: params.marketCode, locale: context.locale },
@@ -156,6 +187,7 @@ export async function loadMarketPage({
     viewpoint,
     indexHistory,
     indexMovingAverages,
+    vixHistory,
   }
 }
 
@@ -169,8 +201,14 @@ export const Route = createFileRoute(
 })
 
 function ReportPage() {
-  const { report, news, viewpoint, indexHistory, indexMovingAverages } =
-    Route.useLoaderData()
+  const {
+    report,
+    news,
+    viewpoint,
+    indexHistory,
+    indexMovingAverages,
+    vixHistory,
+  } = Route.useLoaderData()
   const { marketCode } = Route.useParams()
   const { locale } = Route.useRouteContext()
   useChatPageContext(
@@ -232,6 +270,13 @@ function ReportPage() {
           </Await>
         </Suspense>
       ) : null}
+      {marketCode === "us_equity" && vixHistory ? (
+        <Suspense fallback={<VixHistoryLoading />}>
+          <Await promise={vixHistory}>
+            {history => <VixHistoryChart history={history} locale={locale} />}
+          </Await>
+        </Suspense>
+      ) : null}
       {news ? (
         <DailyNews
           news={news.latest}
@@ -251,6 +296,7 @@ function MarketPageLoading() {
       <ReportLoadingScreen />
       {marketCode === "us_equity" ? <UsIndexPerformanceTableLoading /> : null}
       <IndexHistoryLoading />
+      {marketCode === "us_equity" ? <VixHistoryLoading /> : null}
     </>
   )
 }

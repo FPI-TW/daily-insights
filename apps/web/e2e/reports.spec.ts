@@ -73,3 +73,30 @@ test("visible market without a publication shows a non-error state", async ({
     page.getByRole("navigation", { name: "Market category navigation" })
   ).toBeVisible()
 })
+
+test("US market renders a dedicated responsive VIX chart", async ({
+  context,
+  page,
+}) => {
+  await authenticateAs(context, "org_member")
+  await page.goto("/en/reports/us_equity")
+
+  await expect(
+    page.getByRole("heading", { name: "VIX volatility trend" })
+  ).toBeVisible()
+  await expect(
+    page.getByText(/20 and 30 are reference risk bands/)
+  ).toBeVisible()
+  await expect(page.getByText("Latest VIX:").locator("..")).toContainText(
+    "32.70"
+  )
+
+  await page.setViewportSize({ width: 375, height: 720 })
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth
+      )
+    )
+    .toBe(true)
+})

@@ -41,6 +41,7 @@ export const indexSymbolSchema = z.enum([
   "^NDX",
   "^RUT",
   "^SOX",
+  "^VIX",
   "^HSI",
   "^TWII",
   "000001.SS",
