@@ -237,7 +237,9 @@ async def test_stock_flow_leaders_rank_on_the_sum_of_all_five_investors(
     day = date(2026, 9, 4)
     # Seven securities, each with all five investor rows, so the fives have
     # something to exclude. 2306 only tops the list once the five are summed:
-    # no single investor of its own puts it above 2305.
+    # no single investor of its own puts it above 2305. The five categories are
+    # disjoint, so summing all of them is TWSE's own 三大法人買賣超股數; the test
+    # above pins that identity to a real published row.
     nets: dict[tuple[str, str], int] = {}
     for index in range(7):
         symbol = f"{2300 + index}"
@@ -287,6 +289,37 @@ async def test_stock_flow_leaders_rank_on_the_sum_of_all_five_investors(
 
     assert earlier.status_code == 200, earlier.text
     assert [row["symbol"] for row in earlier.json()["top_buys"]] == ["9999"]
+
+
+@pytest.mark.asyncio
+async def test_stock_flow_total_matches_the_three_institution_column_twse_publishes(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The five stored categories are disjoint, so their sum is TWSE's own
+    三大法人買賣超股數. These are 2324 仁寶's real 2026-09-04 numbers, and the
+    identity holds on all 1,340 rows of that day's T86 response."""
+    async with session_factory.begin() as database:
+        await store_institutional_stock_flows(
+            database,
+            market_code="tw_equity",
+            flows=_stock_day(
+                date(2026, 9, 4),
+                {
+                    ("2324", "foreign"): 69_366_284,
+                    ("2324", "foreign_dealer"): 0,
+                    ("2324", "trust"): -21_000,
+                    ("2324", "dealer_self"): 200_115,
+                    ("2324", "dealer_hedge"): 1_470_932,
+                },
+                datetime(2026, 9, 4, 8, tzinfo=UTC),
+            ),
+        )
+
+    async with _signed_in_client(session_factory) as client:
+        response = await client.get("/api/markets/institutional/stock-flows")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["top_buys"][0]["net_shares"] == 71_016_331
 
 
 @pytest.mark.asyncio
