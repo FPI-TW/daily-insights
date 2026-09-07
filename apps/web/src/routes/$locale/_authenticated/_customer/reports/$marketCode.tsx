@@ -48,6 +48,10 @@ import {
 } from "#/lib/indices"
 import { useChatPageContext } from "#/components/PageContextChat"
 import {
+  TaiwanInstitutionalFlows,
+  TaiwanInstitutionalFlowsLoading,
+} from "#/components/TaiwanInstitutionalFlows"
+import {
   getTaiwanInstitutionalFlows,
   getTaiwanInstitutionalStocks,
   institutionalFlowRange,
@@ -257,6 +261,7 @@ function ReportPage() {
     macroDashboard,
     indexHistory,
     indexMovingAverages,
+    institutionalData,
   } = Route.useLoaderData()
   const { marketCode } = Route.useParams()
   const { locale } = Route.useRouteContext()
@@ -318,11 +323,26 @@ function ReportPage() {
         <Suspense fallback={<IndexHistoryLoading />}>
           <Await promise={indexHistory}>
             {history => (
-              <IndexHistoryChart
-                history={history}
-                locale={locale}
-                movingAverages={indexMovingAverages}
-              />
+              <>
+                <IndexHistoryChart
+                  history={history}
+                  locale={locale}
+                  movingAverages={indexMovingAverages}
+                />
+                {marketCode === "tw_equity" && institutionalData ? (
+                  <Suspense fallback={<TaiwanInstitutionalFlowsLoading />}>
+                    <Await promise={institutionalData}>
+                      {data => (
+                        <TaiwanInstitutionalFlows
+                          data={data}
+                          history={history}
+                          locale={locale}
+                        />
+                      )}
+                    </Await>
+                  </Suspense>
+                ) : null}
+              </>
             )}
           </Await>
         </Suspense>
