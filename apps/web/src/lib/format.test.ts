@@ -24,6 +24,10 @@ describe("formatNumber", () => {
     expect(formatNumber("98.6301", "percent", "en")).toBe("98.63%")
   })
 
+  it("keeps six decimals for raw commodity ratios", () => {
+    expect(formatNumber("0.03", "ratio", "en")).toBe("0.030000")
+  })
+
   it("falls back to two decimals for unknown units and dashes for nulls", () => {
     expect(formatNumber("1234.5678", "widgets", "en")).toBe("1,234.57")
     expect(formatNumber(null, "usd", "en")).toBe("—")

@@ -40,14 +40,17 @@ const blockTitleKeys: Record<string, string> = {
   "macro.rates_fx": "reportBlockMacroRatesFx",
   "macro.commodity_normalized_performance":
     "reportBlockMacroCommodityNormalizedPerformance",
+  "macro.commodity_ratios": "reportBlockMacroCommodityRatios",
   "crypto.overview": "reportBlockCryptoOverview",
   "crypto.normalized_performance": "reportBlockNormalizedPerformance",
   "us.index_proxies": "reportBlockUsIndices",
   "us.mega_caps": "reportBlockUsMegaCaps",
 }
 const metricLabelKeys: Record<string, string> = {
+  wti: "reportLabelWti",
   brent: "reportLabelBrent",
   gold: "reportLabelGold",
+  silver: "reportLabelSilver",
   copper: "reportLabelCopper",
   tlt: "reportLabelTlt",
   ief: "reportLabelIef",

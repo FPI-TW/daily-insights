@@ -306,31 +306,33 @@ function reportDetail(marketCode, locale) {
     source_as_of: "2026-08-29",
     caveat: null,
     metrics: [
+      { id: "wti", value: "68.4", change: "0.7", unit_code: "usd" },
       { id: "brent", value: "72.4", change: "0.8", unit_code: "price" },
       { id: "gold", value: "2418", change: "0.3", unit_code: "price" },
+      { id: "silver", value: "28.4", change: "0.1", unit_code: "usd" },
       { id: "copper", value: "4.18", change: "-0.2", unit_code: "price" },
     ],
   }
   const commodityPerformance = {
-    id: "macro.commodity_normalized_performance",
+    id: "macro.commodity_ratios",
     kind: "series",
     status: "ok",
     source_as_of: "2026-08-29",
     caveat: null,
-    unit_code: "index",
+    unit_code: "ratio",
     series: [
       {
-        id: "brent",
+        id: "oil_gold_ratio",
         points: [
-          { x: "2026-08-28", value: "100" },
-          { x: "2026-08-29", value: "101.2" },
+          { x: "2026-08-28", value: "0.029934" },
+          { x: "2026-08-29", value: "0.029868" },
         ],
       },
       {
-        id: "gold",
+        id: "copper_gold_ratio",
         points: [
-          { x: "2026-08-28", value: "100" },
-          { x: "2026-08-29", value: "100.5" },
+          { x: "2026-08-28", value: "0.001728" },
+          { x: "2026-08-29", value: "0.001729" },
         ],
       },
     ],
@@ -364,11 +366,14 @@ function reportDetail(marketCode, locale) {
           unit_label: null,
           series_labels: {},
         },
-        "macro.commodity_normalized_performance": {
-          title: "Brent and gold normalized performance",
+        "macro.commodity_ratios": {
+          title: "Commodity ratios",
           description: null,
-          unit_label: null,
-          series_labels: {},
+          unit_label: "Ratio",
+          series_labels: {
+            oil_gold_ratio: "Oil-Gold Ratio",
+            copper_gold_ratio: "Copper-Gold Ratio",
+          },
         },
       },
     },

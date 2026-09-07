@@ -44,6 +44,9 @@ class BlockManifest(ManifestModel):
     precision: int = Field(ge=0, le=12)
     rounding: Literal["ROUND_HALF_EVEN"] = "ROUND_HALF_EVEN"
     labels: dict[Literal["zh-hant", "zh-hans", "en"], str]
+    series_labels: dict[Literal["zh-hant", "zh-hans", "en"], dict[str, str]] = Field(
+        default_factory=dict
+    )
 
 
 class MarketManifest(ManifestModel):
@@ -122,7 +125,7 @@ class LaunchManifest(ManifestModel):
 
 
 ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
-    version="three-market.v7",
+    version="three-market.v8",
     provider="twelve_data",
     markets=(
         MarketManifest(
@@ -162,19 +165,31 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
                     },
                 ),
                 BlockManifest(
-                    id="macro.commodity_normalized_performance",
+                    id="macro.commodity_ratios",
                     kind="series",
                     datasets=("macro.commodity_eod",),
                     formula=(
-                        "normalized close=close/first_close*100 independently over the latest "
-                        "30 exact common provider calendar dates; null/zero protected"
+                        "oil-gold ratio=WTI/USD close/XAU/USD close; copper-gold ratio=HG1 "
+                        "close/XAU/USD close; exact common completed provider dates in the "
+                        "inclusive two-calendar-year window ending on the latest common date; "
+                        "each WTI/USD, XAU/USD, and HG1 completed history must reach on or before "
+                        "the exact two-calendar-year start boundary; "
+                        "first common date must be within seven calendar days of the window start"
                     ),
-                    unit_code="index",
-                    precision=4,
+                    unit_code="ratio",
+                    precision=6,
                     labels={
-                        "zh-hant": "布蘭特原油與黃金標準化表現",
-                        "zh-hans": "布兰特原油与黄金标准化表现",
-                        "en": "Brent and gold normalized performance",
+                        "zh-hant": "商品比率走勢",
+                        "zh-hans": "商品比率走势",
+                        "en": "Commodity ratios",
+                    },
+                    series_labels={
+                        "zh-hant": {"oil_gold_ratio": "油金比", "copper_gold_ratio": "銅金比"},
+                        "zh-hans": {"oil_gold_ratio": "油金比", "copper_gold_ratio": "铜金比"},
+                        "en": {
+                            "oil_gold_ratio": "Oil-Gold Ratio",
+                            "copper_gold_ratio": "Copper-Gold Ratio",
+                        },
                     },
                 ),
             ),
@@ -256,24 +271,39 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
         DatasetManifest(
             key="macro.commodity_eod",
             endpoint="/eod",
-            symbols=("XBR/USD", "XAU/USD", "HG1"),
-            symbol_units={"XBR/USD": "USD", "XAU/USD": "USD", "HG1": "USD"},
+            symbols=("WTI/USD", "XBR/USD", "XAU/USD", "XAG/USD", "HG1"),
+            symbol_units={
+                "WTI/USD": "USD",
+                "XBR/USD": "USD",
+                "XAU/USD": "USD",
+                "XAG/USD": "USD",
+                "HG1": "USD",
+            },
             # Without type=commodity the provider resolves HG1 to Homag Group AG
             # (Frankfurt, EUR); the commodity class is copper spot quoted in USD.
-            symbol_types={"XBR/USD": "commodity", "XAU/USD": "commodity", "HG1": "commodity"},
+            symbol_types={
+                "WTI/USD": "commodity",
+                "XBR/USD": "commodity",
+                "XAU/USD": "commodity",
+                "XAG/USD": "commodity",
+                "HG1": "commodity",
+            },
             expected_asset_types={
+                "WTI/USD": "Energy Resource",
                 "XBR/USD": "Energy Resource",
                 "XAU/USD": "Precious Metal",
+                "XAG/USD": "Precious Metal",
                 "HG1": "Industrial Metal",
             },
             required_fields=("symbol", "exchange", "datetime", "close"),
-            # EOD validates a full provider history for all three symbols. Brent
-            # and gold alone form the published normalized chart; copper supplies
-            # the prior completed close used by its metric.
-            minimum_history=500,
+            minimum_history=800,
             timezone="provider date-only EOD and 1day calendar date",
             day_boundary="provider EOD date; discard later mutable 1day bars",
-            freshness="one commodity /eod batch reconciled to completed 1day history",
+            freshness=(
+                "one commodity /eod batch reconciled to completed 1day history; ratio common "
+                "date coverage begins within seven calendar days of the two-year boundary after "
+                "each WTI/USD, XAU/USD, and HG1 history reaches that exact boundary"
+            ),
         ),
         # Treasury ETFs stand in for yields (the provider has no exact curve
         # symbols) and UUP for the dollar index; FX pairs quote in the second

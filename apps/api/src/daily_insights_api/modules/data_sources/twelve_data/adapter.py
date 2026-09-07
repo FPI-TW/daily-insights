@@ -21,11 +21,15 @@ from daily_insights_api.modules.data_sources.twelve_data.transport import (
     TwelveDataTransportResponse,
 )
 
-TWELVE_DATA_CONTRACT_VERSION = "2026-09-04.v4"
+TWELVE_DATA_CONTRACT_VERSION = "2026-09-07.v5"
 TWELVE_DATA_CONTRACT_HASH = hashlib.sha256(
-    b"twelve-data:quote,eod,time_series,market_movers/stocks,commodity-eod:2026-09-04.v4"
+    b"twelve-data:quote,eod,time_series,market_movers/stocks,commodity-eod:2026-09-07.v5"
 ).hexdigest()
-TWELVE_DATA_CURRENCY_NAMES = {"USD": "US Dollar"}
+# Commodity 1day metadata is inconsistent: most USD commodities spell out
+# "US Dollar", while HG1 (with type=commodity) returns the ISO code. Both
+# are reviewed representations of the same manifest currency; no other alias
+# is accepted at this trust boundary.
+TWELVE_DATA_CURRENCY_NAMES = {"USD": frozenset(("US Dollar", "USD"))}
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,10 +196,10 @@ class TwelveDataAdapter:
             )
         if payload.meta.interval != "1day":
             raise DataSourceContractError("Twelve Data returned an unexpected interval")
-        expected_currency_name = TWELVE_DATA_CURRENCY_NAMES.get(expected_currency)
-        if expected_currency_name is None:
+        expected_currency_names = TWELVE_DATA_CURRENCY_NAMES.get(expected_currency)
+        if expected_currency_names is None:
             raise ValueError("expected_currency is not supported by the Twelve Data contract")
-        if payload.meta.currency_quote != expected_currency_name:
+        if payload.meta.currency_quote not in expected_currency_names:
             raise DataSourceContractError(
                 "Twelve Data time-series quote currency did not match the launch manifest"
             )

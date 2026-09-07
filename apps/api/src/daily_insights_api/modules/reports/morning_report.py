@@ -74,7 +74,7 @@ _TITLES = {
     },
 }
 
-MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v7"
+MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v8"
 
 
 @dataclass(frozen=True)
@@ -457,36 +457,41 @@ async def _build_dataset_blocks(
             metrics=tuple(
                 _commodity_metric_item(identifier, eod, history[-2].close)
                 for identifier, eod, history in zip(
-                    ("brent", "gold", "copper"),
+                    ("wti", "brent", "gold", "silver", "copper"),
                     eods.items,
                     completed_histories,
                     strict=True,
                 )
             ),
         )
-        window_dates = _latest_common_provider_dates(completed_histories[:2])
-        normalized = SeriesBlock(
-            id="macro.commodity_normalized_performance",
+        window_dates = _commodity_ratio_window_dates(
+            (completed_histories[0], completed_histories[2], completed_histories[4])
+        )
+        ratios = SeriesBlock(
+            id="macro.commodity_ratios",
             status="ok",
             source_as_of=window_dates[-1],
-            unit_code="index",
+            unit_code="ratio",
             series=tuple(
                 ChartSeries(
                     id=identifier,
-                    points=_normalized_common_date_points(
-                        history,
+                    points=_ratio_common_date_points(
+                        numerator,
+                        completed_histories[2],
                         window_dates,
-                        precision=block_precision("macro.commodity_normalized_performance"),
-                        rounding=block_rounding("macro.commodity_normalized_performance"),
+                        precision=block_precision("macro.commodity_ratios"),
+                        rounding=block_rounding("macro.commodity_ratios"),
                     ),
                 )
-                for identifier, history in zip(
-                    ("brent", "gold"), completed_histories[:2], strict=True
+                for identifier, numerator in zip(
+                    ("oil_gold_ratio", "copper_gold_ratio"),
+                    (completed_histories[0], completed_histories[4]),
+                    strict=True,
                 )
             ),
         )
         return (
-            (macro_block, normalized),
+            (macro_block, ratios),
             _aggregate_provenance(
                 (eods.provenance, *(result.provenance for result in histories)),
                 as_of=min(item.as_of for item in eods.items),
@@ -749,6 +754,58 @@ def _latest_common_provider_dates(
     return tuple(common_dates[-30:])
 
 
+def _two_calendar_years_before(item: date) -> date:
+    """Subtract calendar years while retaining February 29 when possible."""
+    try:
+        return item.replace(year=item.year - 2)
+    except ValueError:
+        return item.replace(year=item.year - 2, day=28)
+
+
+def _commodity_ratio_window_dates(
+    histories: tuple[tuple[DailyBar, ...], tuple[DailyBar, ...], tuple[DailyBar, ...]],
+) -> tuple[date, ...]:
+    common_dates = tuple(
+        sorted(set.intersection(*(set(bar.trade_date for bar in history) for history in histories)))
+    )
+    if not common_dates:
+        raise DataSourceContractError("commodity ratio histories have no common completed dates")
+    latest = common_dates[-1]
+    start = _two_calendar_years_before(latest)
+    if any(history[0].trade_date > start for history in histories):
+        raise DataSourceContractError(
+            "commodity ratio histories do not reach the two-calendar-year start boundary"
+        )
+    window = tuple(item for item in common_dates if start <= item <= latest)
+    if not window:
+        raise DataSourceContractError("commodity ratio window has no common completed dates")
+    if window[0] > start + timedelta(days=7):
+        raise DataSourceContractError(
+            "commodity ratio common completed dates begin more than seven days after the "
+            "two-calendar-year start boundary"
+        )
+    return window
+
+
+def _ratio_common_date_points(
+    numerator: tuple[DailyBar, ...],
+    denominator: tuple[DailyBar, ...],
+    dates: tuple[date, ...],
+    *,
+    precision: int,
+    rounding: str,
+) -> tuple[ChartPoint, ...]:
+    numerators = {bar.trade_date: bar.close for bar in numerator}
+    denominators = {bar.trade_date: bar.close for bar in denominator}
+    points: list[ChartPoint] = []
+    for item in dates:
+        top, bottom = numerators[item], denominators[item]
+        if top is None or top <= 0 or bottom is None or bottom <= 0:
+            raise DataSourceContractError("commodity ratio has no usable completed close")
+        points.append(ChartPoint(x=str(item), value=_quantize(top / bottom, precision, rounding)))
+    return tuple(points)
+
+
 def _normalize_close(close: Decimal | None, base: Decimal) -> Decimal | None:
     return close / base * Decimal(100) if close is not None else None
 
@@ -845,7 +902,7 @@ def _error_blocks_for_keys(
                     status=status,
                     source_as_of=None,
                     caveat="provider request failed",
-                    unit_code="index",
+                    unit_code=block.unit_code,
                     series=(),
                 )
             )
@@ -881,19 +938,36 @@ def _bundle(market_code: LaunchMarketCode, blocks: tuple[ReportBlock, ...]) -> P
             locale=locale,
             title=title,
             summary=title,
-            labels={
-                block.id: LocalizedElementText(
-                    title=next(
-                        manifest_block.labels[locale]
-                        for market in ACTIVE_LAUNCH_MANIFEST.markets
-                        for manifest_block in market.blocks
-                        if manifest_block.id == block.id
-                    )
-                )
-                for block in blocks
-            },
+            labels={block.id: _localized_block_text(block, locale) for block in blocks},
         )
     return PublicationBundle(content=content, presentations=presentations)
+
+
+def _localized_block_text(block: ReportBlock, locale: Locale) -> LocalizedElementText:
+    manifest_block = next(
+        manifest_block
+        for market in ACTIVE_LAUNCH_MANIFEST.markets
+        for manifest_block in market.blocks
+        if manifest_block.id == block.id
+    )
+    series_labels = (
+        {
+            series.id: manifest_block.series_labels.get(locale, {}).get(series.id, series.id)
+            for series in block.series
+        }
+        if isinstance(block, SeriesBlock)
+        else {}
+    )
+    ratio_unit_labels = {"zh-hant": "比率", "zh-hans": "比率", "en": "Ratio"}
+    return LocalizedElementText(
+        title=manifest_block.labels[locale],
+        unit_label=(
+            ratio_unit_labels[locale]
+            if isinstance(block, SeriesBlock) and block.unit_code == "ratio"
+            else None
+        ),
+        series_labels=series_labels,
+    )
 
 
 def _aggregate_provenance(

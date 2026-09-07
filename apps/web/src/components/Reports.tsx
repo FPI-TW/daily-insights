@@ -572,6 +572,12 @@ function isBase100Series(
   )
 }
 
+function isCommodityRatioSeries(
+  block: Pick<Extract<ReportBlock, { kind: "series" }>, "id">
+) {
+  return block.id === "macro.commodity_ratios"
+}
+
 function columnHeading(column: TableColumn, t: Translate) {
   const label = t(column.labelKey)
   const unit = unitLabel(column.unitCode, t)
@@ -755,7 +761,12 @@ function ReportBlockView({
                     description: `${blockTitle}. ${t("reportChartSummary")}`,
                   },
                   color: chartColors.series,
-                  grid: { left: 58, right: 18, top: 42, bottom: 72 },
+                  grid: {
+                    left: 58,
+                    right: isCommodityRatioSeries(block) ? 76 : 18,
+                    top: 42,
+                    bottom: 72,
+                  },
                   legend: {
                     type: "scroll",
                     top: 6,
@@ -774,20 +785,56 @@ function ReportBlockView({
                     axisLabel: { color: chartColors.text },
                     axisLine: { lineStyle: { color: chartColors.grid } },
                   },
-                  yAxis: {
-                    type: "value",
-                    scale: true,
-                    name: isBase100Series(block)
-                      ? t("reportChartBase100")
-                      : block.unitLabel
-                        ? valueText(block.unitLabel, t)
-                        : (unitLabel(block.unitCode, t) ?? ""),
-                    nameTextStyle: { color: chartColors.text },
-                    axisLabel: { color: chartColors.text },
-                    splitLine: {
-                      lineStyle: { color: chartColors.grid, type: "dashed" },
-                    },
-                  },
+                  yAxis: isCommodityRatioSeries(block)
+                    ? [
+                        {
+                          type: "value",
+                          scale: true,
+                          name: valueText(block.series[0]?.label ?? null, t),
+                          nameTextStyle: { color: chartColors.text },
+                          axisLabel: {
+                            color: chartColors.text,
+                            formatter: (value: number) =>
+                              formatNumber(value, "ratio", locale),
+                          },
+                          splitLine: {
+                            lineStyle: {
+                              color: chartColors.grid,
+                              type: "dashed",
+                            },
+                          },
+                        },
+                        {
+                          type: "value",
+                          scale: true,
+                          position: "right",
+                          name: valueText(block.series[1]?.label ?? null, t),
+                          nameTextStyle: { color: chartColors.text },
+                          axisLabel: {
+                            color: chartColors.text,
+                            formatter: (value: number) =>
+                              formatNumber(value, "ratio", locale),
+                          },
+                          splitLine: { show: false },
+                        },
+                      ]
+                    : {
+                        type: "value",
+                        scale: true,
+                        name: isBase100Series(block)
+                          ? t("reportChartBase100")
+                          : block.unitLabel
+                            ? valueText(block.unitLabel, t)
+                            : (unitLabel(block.unitCode, t) ?? ""),
+                        nameTextStyle: { color: chartColors.text },
+                        axisLabel: { color: chartColors.text },
+                        splitLine: {
+                          lineStyle: {
+                            color: chartColors.grid,
+                            type: "dashed",
+                          },
+                        },
+                      },
                   dataZoom: [
                     { type: "inside", start: 0, end: 100 },
                     {
@@ -811,6 +858,9 @@ function ReportBlockView({
                     smooth: 0.18,
                     lineStyle: { width: 2 },
                     areaStyle: { color: "transparent" },
+                    ...(isCommodityRatioSeries(block)
+                      ? { yAxisIndex: index }
+                      : {}),
                     ...(isBase100Series(block) && index === 0
                       ? {
                           markLine: {
