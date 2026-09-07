@@ -74,7 +74,7 @@ _TITLES = {
     },
 }
 
-MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v8"
+MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v9"
 
 
 @dataclass(frozen=True)
@@ -582,17 +582,6 @@ async def _build_dataset_blocks(
             ),
         )
         return (rates_block,), _aggregate_provenance(quotes.provenances)
-    if dataset.key == "us.index_proxy_quotes":
-        quotes = await _dataset_quotes(adapter, market_code, dataset)
-        proxies_block = MetricBlock(
-            id="us.index_proxies",
-            status="ok",
-            source_as_of=min(item.as_of for item in quotes.items),
-            metrics=tuple(
-                _metric_item(item.symbol.lower(), item, "us.index_proxies") for item in quotes.items
-            ),
-        )
-        return (proxies_block,), _aggregate_provenance(quotes.provenances)
     if dataset.key == "us.mega_cap_quotes":
         quotes = await _dataset_quotes(adapter, market_code, dataset)
         # The basket is fixed, so ranking by move only orders the rows; it

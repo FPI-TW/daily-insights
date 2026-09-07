@@ -236,23 +236,19 @@ function ReportPage() {
           locale={locale}
           report={report.report}
           viewpoint={viewpoint}
-          blockReplacements={
-            marketCode === "us_equity" && indexHistory
-              ? {
-                  "us.index_proxies": () => (
-                    <Suspense fallback={<UsIndexPerformanceTableLoading />}>
-                      <Await promise={indexHistory}>
-                        {history => (
-                          <UsIndexPerformanceTable
-                            history={history}
-                            locale={locale}
-                          />
-                        )}
-                      </Await>
-                    </Suspense>
-                  ),
-                }
-              : {}
+          leadingBlock={
+            marketCode === "us_equity" && indexHistory ? (
+              <Suspense fallback={<UsIndexPerformanceTableLoading />}>
+                <Await promise={indexHistory}>
+                  {history => (
+                    <UsIndexPerformanceTable
+                      history={history}
+                      locale={locale}
+                    />
+                  )}
+                </Await>
+              </Suspense>
+            ) : null
           }
         />
       )}
