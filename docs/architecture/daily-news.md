@@ -67,7 +67,7 @@ flowchart LR
 | 台股重點新聞 | `tw_equity`   | 8        | 台灣媒體 15 支 feed（鉅亨台股、經濟日報、中央社、工商時報等） | 單一來源與市場皆可，至少 2 個主題                        |
 | 美股重點新聞 | `us_equity`   | 8        | 英文綜合與新聞稿、Guardian 商業、鉅亨國際股市、SEC 8-K        | 每網域至多 4 則，至少 2 個主題，選滿 8 則時至少 3 個網域 |
 
-選題 prompt 由三層組成：固定的 `task`（去重、交叉比對、來源分散、填滿名額與輸出格式等不可被覆寫的規則）、`OUTPUT_CONTRACT`（依各版本 `SelectionPolicy` 產生的封閉詞彙與數量限制），以及部署時可調整的 `CUSTOM_SELECTION_CRITERIA`（`modules/news/prompts/selection_criteria.txt`，中文撰寫的排序準則與來源可信度判斷標準）。準則檔只影響排序與取捨，所有則數、每網域上限與多樣性門檻都寫在 `OUTPUT_CONTRACT`，因此同一份準則可服務三個版本；同一核心事件不論幾家媒體報導都只能選一則並共用 `event_key`，多家報導只用於交叉驗證。固定指令或準則檔任一變動都會改變 `prompt_version`（`selection-v4:<準則摘要>`）。
+選題 prompt 由三層組成：固定的 `task`（去重、交叉比對、來源分散、填滿名額與輸出格式等不可被覆寫的規則）、`OUTPUT_CONTRACT`（依各版本 `SelectionPolicy` 產生的封閉詞彙與數量限制），以及部署時可調整的 `CUSTOM_SELECTION_CRITERIA`（`modules/news/prompts/selection_criteria.txt`，中文撰寫的排序準則與來源可信度判斷標準）。準則檔只影響排序與取捨，所有則數、每網域上限與多樣性門檻都寫在 `OUTPUT_CONTRACT`，因此同一份準則可服務三個版本；同一核心事件不論幾家媒體報導都只能選一則並共用 `event_key`，多家報導只用於交叉驗證。固定指令或準則檔任一變動都會改變 `prompt_version`（`selection-v5:<準則摘要>`）。
 
 各版本只讀取標記給該市場的 feed，選題 prompt 附帶該版本的 `MARKET_FOCUS` 提示：全球版以總經（央行、利率、匯率、商品、跨市場風險）為主且只接受 `market` 為 `global` 的選項，避免偏向任一區域；台股與美股版只接受 `taiwan`／`us`，模型標成其他市場的稿件會在限制檢查前被剔除並記錄 `news.selection.dropped_market`。市場頁的新聞不依市場分組，只有首頁的全球版分組顯示。排程器依序執行三個版本，任一版本例外不影響其他版本，最差
 結果決定是否同日重試。`make generate-daily-news MARKET=tw_equity` 可單獨產生一
@@ -224,3 +224,20 @@ Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主�
 - `langdetect` 對短標題的判斷不穩定，因此只在新聞稿 feed 啟用語言過濾。
 - 沒有人工覆核流程；若模型選題或摘要品質不佳，只能調整
   `modules/news/prompts` 中的選題準則後重新產生。
+
+## 新聞可用性與失敗處理
+
+新聞 API 依市場與語系，回傳今天或更早「實際有該語系新聞」的最新 complete／partial
+版本。新的 unavailable 或空版本不會取代已發布內容；跨日、週末或持續產生失敗時，
+沿用最近可用版本並顯示原始日期。從未產生過內容的市場仍回 unavailable，不編造新聞。
+此保留策略需要 API 與資料庫可正常存取，不代表基礎設施故障時仍能提供新頁面。
+
+選題若違反來源上限或多樣性規則，從模型原有排名中選出符合全部規則的最大子集；
+相同則數優先保留排名較前者。未知 ID、重複事件與結構錯誤仍拒絕。最多十個候選，
+搜尋不超過 1024 個子集，不增加模型呼叫。選題範例的 market 必須符合該版本允許值。
+
+摘要數字與 JSON 驗證失敗時，既有一次重試加入固定的修正指引；不放寬數字檢查。
+Audit 與事件記錄區分 selection_invalid_json、selection_invalid_candidate、
+summary_invalid_json、summary_ungrounded_number、provider_http_<status>、
+provider_invalid_json、provider_request_failed，不記錄 prompt、正文或原始例外內容。
+選題修復事件 news.selection.repaired 僅記錄原始與保留則數。

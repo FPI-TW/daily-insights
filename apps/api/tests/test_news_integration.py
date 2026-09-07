@@ -51,7 +51,7 @@ class _DeterministicNewsClient:
 
     def __init__(self, prompt_marker: str) -> None:
         self.selection_prompt_digest = prompt_marker * 64
-        self.selection_prompt_version = f"selection-v4:{prompt_marker * 12}"
+        self.selection_prompt_version = f"selection-v5:{prompt_marker * 12}"
 
     async def select(self, candidates: list[FetchedCandidate], **kwargs: object) -> ModelCall:
         del kwargs
@@ -83,7 +83,14 @@ class _DeterministicNewsClient:
             self.selection_prompt_digest,
         )
 
-    async def summarize(self, candidate: Candidate, article_text: str, locale: str) -> ModelCall:
+    async def summarize(
+        self,
+        candidate: Candidate,
+        article_text: str,
+        locale: str,
+        *,
+        retry_feedback: str | None = None,
+    ) -> ModelCall:
         del article_text
         if candidate.id == "b" * 64 and locale == "en":
             raise ModelCallError(
@@ -180,8 +187,8 @@ async def test_partial_editions_regenerate_and_revisions_are_prompt_sensitive(
         # A partial edition is not final: identical inputs produce a new revision.
         assert editions[0].input_digest == editions[1].input_digest
         assert editions[1].input_digest != editions[2].input_digest
-        assert editions[0].prompt_version.startswith("selection-v4:aaaaaaaaaaaa+")
-        assert editions[2].prompt_version.startswith("selection-v4:bbbbbbbbbbbb+")
+        assert editions[0].prompt_version.startswith("selection-v5:aaaaaaaaaaaa+")
+        assert editions[2].prompt_version.startswith("selection-v5:bbbbbbbbbbbb+")
         for edition in editions:
             items = list(
                 await database.scalars(select(NewsItem).where(NewsItem.edition_id == edition.id))
@@ -210,9 +217,9 @@ async def test_partial_editions_regenerate_and_revisions_are_prompt_sensitive(
             == 0
         )
         audit_versions = set(await database.scalars(select(NewsGenerationAudit.prompt_version)))
-        assert "summary-v2" in audit_versions
-        assert "selection-v4:aaaaaaaaaaaa" in audit_versions
-        assert "selection-v4:bbbbbbbbbbbb" in audit_versions
+        assert "summary-v3" in audit_versions
+        assert "selection-v5:aaaaaaaaaaaa" in audit_versions
+        assert "selection-v5:bbbbbbbbbbbb" in audit_versions
 
 
 class _CompleteNewsClient(_DeterministicNewsClient):
@@ -240,7 +247,14 @@ class _CompleteNewsClient(_DeterministicNewsClient):
             self.selection_prompt_digest,
         )
 
-    async def summarize(self, candidate: Candidate, article_text: str, locale: str) -> ModelCall:
+    async def summarize(
+        self,
+        candidate: Candidate,
+        article_text: str,
+        locale: str,
+        *,
+        retry_feedback: str | None = None,
+    ) -> ModelCall:
         del article_text
         return ModelCall(
             LocalizedSummary(headline=f"{locale} {candidate.id[:4]}", summary=f"{locale} summary"),
@@ -452,3 +466,98 @@ async def test_thin_discovery_reports_the_candidate_floor(
     assert status == "partial"
     floor = [fields for name, fields in events if name == "news.candidates.below_floor"]
     assert floor == [{"market": "global", "count": 2, "floor": 10}]
+
+
+@pytest.mark.parametrize("market_code", ["global", "tw_equity", "us_equity"])
+@pytest.mark.parametrize("age_days", [0, 1, 7])
+@pytest.mark.parametrize("locale", ["zh-hant", "zh-hans", "en"])
+async def test_latest_news_preserves_last_publishable_edition(
+    news_database: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    age_days: int,
+    locale: str,
+    market_code: str,
+) -> None:
+    from datetime import timedelta
+
+    from fastapi import Response
+
+    from daily_insights_api.modules.news.contracts import Locale
+    from daily_insights_api.modules.news.editions import edition_spec
+    from daily_insights_api.modules.news.router import _latest_response
+
+    candidates = _fetched_candidates()
+
+    async def feeds(*args: object, **kwargs: object) -> list[Candidate]:
+        return [item.candidate for item in candidates]
+
+    async def fetch(*args: object, **kwargs: object) -> list[FetchedCandidate]:
+        return candidates
+
+    monkeypatch.setattr("daily_insights_api.modules.news.service.discover_feed_candidates", feeds)
+    monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
+    today = datetime.now(TAIPEI).date()
+    await run_news_edition(
+        news_database,
+        cast(DeepSeekClient, _DeterministicNewsClient("a")),
+        today,
+        allowed_hostnames=configured_hostnames("www.reuters.com,news.cnyes.com"),
+    )
+    async with news_database() as database:
+        good = (await database.scalars(select(NewsEdition))).one()
+        good.market_code = market_code
+        good.edition_date = today - timedelta(days=age_days)
+        good_id = good.id
+        # Newest attempt fails; an empty partial and a future edition must not
+        # displace the last actually published, localized stories either.
+        for revision, status, day in [
+            (2, "unavailable", today),
+            (3, "partial", today),
+            (4, "complete", today + timedelta(days=1)),
+        ]:
+            database.add(
+                NewsEdition(
+                    edition_date=day,
+                    market_code=market_code,
+                    revision=revision,
+                    input_digest="f" * 64,
+                    derivation_version="test",
+                    prompt_version="test",
+                    status=status,
+                )
+            )
+        await database.flush()
+        future = (
+            await database.scalars(select(NewsEdition).where(NewsEdition.edition_date > today))
+        ).one()
+        original = (
+            await database.scalars(select(NewsItem).where(NewsItem.edition_id == good_id))
+        ).one()
+        future_item = NewsItem(
+            **{
+                column.name: getattr(original, column.name)
+                for column in NewsItem.__table__.columns
+                if column.name not in {"id", "edition_id"}
+            },
+            edition_id=future.id,
+        )
+        database.add(future_item)
+        await database.flush()
+        for language in ("zh-hant", "zh-hans", "en"):
+            database.add(
+                NewsPresentation(
+                    item_id=future_item.id,
+                    locale=language,
+                    headline="Future news",
+                    summary="Future news",
+                )
+            )
+        await database.commit()
+        result = await _latest_response(
+            database, Response(), cast(Locale, locale), edition_spec(market_code)
+        )
+        assert result.edition_id == good_id
+        assert result.items
+        assert result.edition_date == today - timedelta(days=age_days)
+        if age_days:
+            assert result.caveat and str(result.edition_date) in result.caveat
