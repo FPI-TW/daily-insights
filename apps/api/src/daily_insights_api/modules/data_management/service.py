@@ -81,7 +81,7 @@ async def enqueue_run(
     *,
     operation: str,
     market_code: str | None,
-    requester_id: uuid.UUID,
+    requester_id: uuid.UUID | None,
     request_id: str | None,
 ) -> DataManagementRun:
     if operation == "morning_market" and market_code not in {

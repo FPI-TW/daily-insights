@@ -13,6 +13,7 @@ import {
 import { createServerTransport } from "../src/server"
 import {
   indexMovingAveragesSchema,
+  institutionalStocksSchema,
   yfinanceDailyBarsResponseSchema,
 } from "../src/schemas"
 
@@ -171,6 +172,36 @@ describe("API client trust boundary", () => {
     expect(transport).toHaveBeenCalledWith(
       "/api/markets/indices/%5ETWII/daily-bars"
     )
+  })
+
+  it("accepts an institutional stock row whose name TWSE left blank", async () => {
+    const rows = {
+      as_of: "2026-09-04",
+      contract_version: "twse-institutional-v1",
+      contract_hash: "a".repeat(64),
+      endpoint: "/rwd/zh/fund/T86",
+      rows: [
+        {
+          symbol: "2330",
+          name: "",
+          foreign_lots: "1000",
+          trust_lots: "0",
+          dealer_lots: "0",
+          total_lots: "1000",
+        },
+      ],
+    }
+    // Nothing on the way in requires a name: the adapter only rejects a blank
+    // symbol, and one blank name here would cost the caller the whole panel.
+    await expect(
+      createMarketClient(async () => Response.json(rows)).institutionalStocks()
+    ).resolves.toEqual(rows)
+    expect(
+      institutionalStocksSchema.safeParse({
+        ...rows,
+        rows: [{ ...rows.rows[0], symbol: "" }],
+      }).success
+    ).toBe(false)
   })
 
   it("fetches and strictly validates index moving averages", async () => {

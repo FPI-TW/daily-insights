@@ -1502,9 +1502,16 @@
             "type": "string"
           },
           "requested_by_user_id": {
-            "format": "uuid",
-            "title": "Requested By User Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By User Id"
           },
           "result": {
             "anyOf": [
@@ -1782,9 +1789,16 @@
             "type": "string"
           },
           "requested_by_user_id": {
-            "format": "uuid",
-            "title": "Requested By User Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By User Id"
           },
           "result": {
             "anyOf": [
@@ -2439,9 +2453,16 @@
             "type": "string"
           },
           "requested_by_user_id": {
-            "format": "uuid",
-            "title": "Requested By User Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By User Id"
           },
           "result": {
             "anyOf": [
@@ -2558,9 +2579,16 @@
             "type": "string"
           },
           "requested_by_user_id": {
-            "format": "uuid",
-            "title": "Requested By User Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By User Id"
           },
           "result": {
             "anyOf": [

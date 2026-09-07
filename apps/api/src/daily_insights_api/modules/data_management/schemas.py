@@ -55,7 +55,7 @@ class _DataManagementRunResponse(BaseModel):
     id: uuid.UUID
     edition_date: date
     status: RunStatus
-    requested_by_user_id: uuid.UUID
+    requested_by_user_id: uuid.UUID | None
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None

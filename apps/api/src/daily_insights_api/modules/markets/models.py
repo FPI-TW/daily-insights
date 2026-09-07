@@ -114,9 +114,14 @@ class IndexDailyBar(TimestampMixin, Base):
 
 
 # TWSE investor categories shared by the market-level (BFI82U) and per-stock (T86)
-# reports. Totals ("合計", "自營商", "三大法人") are derivable and deliberately not stored;
-# note TWSE excludes foreign_dealer from the three-institution total because it is
-# already counted inside the dealer figures.
+# reports. The five are disjoint, and the totals TWSE also publishes ("合計",
+# "自營商", "三大法人") are their sums, so none of those is stored:
+#   自營商   = dealer_self + dealer_hedge      (holds on all 1,340 T86 rows)
+#   三大法人 = foreign + foreign_dealer + trust + 自營商
+# foreign_dealer is a slice of the foreign side, not of the dealer books: BFI82U
+# labels its sibling row 外資及陸資(不含外資自營商) precisely because the two add back
+# up to 外資及陸資, which is the single row the report carries when it is not asked
+# to split it (自營商 自行/避險, 投信, 外資及陸資, 合計).
 INVESTOR_TYPES: tuple[str, ...] = (
     "foreign",  # 外資及陸資(不含外資自營商)
     "foreign_dealer",  # 外資自營商

@@ -122,7 +122,10 @@ export const institutionalFlowsSchema = z.object({
 export type InstitutionalFlows = z.infer<typeof institutionalFlowsSchema>
 export const institutionalStockFlowSchema = z.object({
   symbol: z.string().min(1),
-  name: z.string().min(1),
+  // Copied verbatim from TWSE and never validated on the way in, unlike the
+  // symbol. Requiring it here would turn one blank name into a rejected
+  // response and an empty panel, which is worse than a row showing its code.
+  name: z.string(),
   foreign_lots: decimalSchema,
   trust_lots: decimalSchema,
   dealer_lots: decimalSchema,
@@ -194,7 +197,8 @@ const dataManagementRunBaseSchema = z.object({
   id: z.uuid(),
   edition_date: z.iso.date(),
   status: dataManagementRunStatusSchema,
-  requested_by_user_id: z.uuid(),
+  // Null when the scheduler queued the run rather than an administrator.
+  requested_by_user_id: z.uuid().nullable(),
   created_at: z.iso.datetime({ offset: true }),
   started_at: z.iso.datetime({ offset: true }).nullable(),
   completed_at: z.iso.datetime({ offset: true }).nullable(),
