@@ -45,7 +45,7 @@ export function MacroDashboardLoading() {
       {[0, 1, 2].map(i => (
         <div
           key={i}
-          className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] gap-6"
+          className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,560px),1fr))] gap-6"
         >
           {[0, 1].map(j => (
             <div
@@ -526,7 +526,7 @@ export function MacroDashboard({
         ) : null}
       </div>
       <section className="min-w-0">
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-6">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,560px),1fr))] items-start gap-6">
           <DashboardPanel title={t("macroCommodities")}>
             <HistoryTable
               ids={commodityIds}
@@ -563,7 +563,7 @@ export function MacroDashboard({
         </div>
       </section>
       <section className="min-w-0">
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-6">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,560px),1fr))] items-start gap-6">
           <DashboardPanel title={t("macroYieldChanges")}>
             <HistoryTable
               ids={[...tenorIds, "sofr"]}
@@ -624,7 +624,7 @@ export function MacroDashboard({
         </div>
       </section>
       <section className="min-w-0">
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-6">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,560px),1fr))] items-start gap-6">
           <DashboardPanel
             title={t("macroDollarIndex")}
             controls={<Range value={dxyDays} onChange={setDxyDays} />}
@@ -671,7 +671,7 @@ export function MacroDashboard({
               </span>
             }
           >
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] gap-6">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,560px),1fr))] gap-6">
               {[fxIds.slice(0, 4), fxIds.slice(4)].map(ids => (
                 <HistoryTable
                   key={ids[0]}
