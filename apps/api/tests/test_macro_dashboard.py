@@ -168,37 +168,74 @@ async def test_disabled_providers_make_no_provider_calls(monkeypatch: pytest.Mon
     )
 
 
-async def test_commodities_use_twelve_data_spot_symbols(monkeypatch: pytest.MonkeyPatch) -> None:
+def _eod(symbol: str, as_of: date, close: Decimal) -> object:
     from types import SimpleNamespace
 
-    calls: list[dict[str, object]] = []
+    return SimpleNamespace(symbol=symbol, currency="USD", as_of=as_of, close=close)
 
-    class FakeTransport:
-        def __init__(self, **kwargs: object) -> None:
-            assert kwargs["api_key"].get_secret_value() == "key"  # type: ignore[attr-defined]
 
-        async def __aenter__(self) -> "FakeTransport":
-            return self
+def _bar(symbol: str, trade_date: date, close: Decimal) -> object:
+    from types import SimpleNamespace
 
-        async def __aexit__(self, *args: object) -> None:
-            return None
+    return SimpleNamespace(symbol=symbol, trade_date=trade_date, close=close)
+
+
+class _FakeTransport:
+    def __init__(self, **kwargs: object) -> None:
+        assert kwargs["api_key"].get_secret_value() == "key"  # type: ignore[attr-defined]
+
+    async def __aenter__(self) -> "_FakeTransport":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+
+async def test_commodities_cut_twelve_data_spot_history_at_eod(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    eod_date = date(2026, 9, 4)
+    eod_calls: list[dict[str, object]] = []
+    bar_calls: list[dict[str, object]] = []
 
     class FakeAdapter:
         def __init__(self, transport: object) -> None:
-            assert isinstance(transport, FakeTransport)
+            assert isinstance(transport, _FakeTransport)
+
+        async def get_eods(self, **kwargs: object) -> object:
+            eod_calls.append(kwargs)
+            symbols = kwargs["symbols"]
+            assert isinstance(symbols, tuple)
+            return SimpleNamespace(
+                items=tuple(_eod(symbol, eod_date, Decimal("101")) for symbol in symbols)
+            )
 
         async def get_daily_bars(self, **kwargs: object) -> object:
-            calls.append(kwargs)
-            if kwargs["symbol"] == "HG1":
+            bar_calls.append(kwargs)
+            symbol = kwargs["symbol"]
+            assert isinstance(symbol, str)
+            if symbol == "HG1":
                 raise RuntimeError("provider down")
+            if symbol == "XAG/USD":
+                # The provider settled a different close than the 1day series.
+                return SimpleNamespace(
+                    items=(
+                        _bar(symbol, date(2026, 9, 3), Decimal("100")),
+                        _bar(symbol, eod_date, Decimal("101.5")),
+                    )
+                )
             return SimpleNamespace(
                 items=(
-                    SimpleNamespace(trade_date=date(2026, 9, 3), close=Decimal("100")),
-                    SimpleNamespace(trade_date=date(2026, 9, 4), close=Decimal("101")),
+                    _bar(symbol, date(2026, 9, 3), Decimal("100")),
+                    _bar(symbol, eod_date, Decimal("101")),
+                    # Session in progress: its close drifts with the live price.
+                    _bar(symbol, date(2026, 9, 7), Decimal("120")),
                 )
             )
 
-    monkeypatch.setattr(macro, "TwelveDataTransport", FakeTransport)
+    monkeypatch.setattr(macro, "TwelveDataTransport", _FakeTransport)
     monkeypatch.setattr(macro, "TwelveDataAdapter", FakeAdapter)
     histories = await macro.load_commodity_histories(Settings(twelve_data_api_key=SecretStr("key")))
     assert [item.symbol for item in histories] == [
@@ -208,12 +245,38 @@ async def test_commodities_use_twelve_data_spot_symbols(monkeypatch: pytest.Monk
         "XAG/USD",
         "HG1",
     ]
-    assert all(call["symbol_type"] == "commodity" for call in calls)
-    assert all(call["expected_currency"] == "USD" for call in calls)
-    assert all(call["outputsize"] == macro.COMMODITY_HISTORY for call in calls)
-    assert [item.status for item in histories] == ["ok", "ok", "ok", "ok", "unavailable"]
+    assert len(eod_calls) == 1
+    assert eod_calls[0]["symbols"] == ("XBR/USD", "WTI/USD", "XAU/USD", "XAG/USD", "HG1")
+    assert eod_calls[0]["expected_currencies"] == dict.fromkeys(eod_calls[0]["symbols"], "USD")
+    assert all(call["symbol_type"] == "commodity" for call in bar_calls)
+    assert all(call["expected_currency"] == "USD" for call in bar_calls)
+    assert all(call["dp"] == 11 for call in bar_calls)
+    assert all(call["outputsize"] == macro.COMMODITY_HISTORY for call in bar_calls)
+    assert [item.status for item in histories] == ["ok", "ok", "ok", "unavailable", "unavailable"]
     assert all(item.source == "Twelve Data" for item in histories)
+    # The mutable 2026-09-07 bar is dropped; the last point is the settled EOD.
+    assert [point.date for point in histories[0].points] == [date(2026, 9, 3), eod_date]
     assert histories[0].points[-1].value == Decimal("101")
+
+
+async def test_commodities_degrade_together_when_eod_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeAdapter:
+        def __init__(self, transport: object) -> None:
+            pass
+
+        async def get_eods(self, **kwargs: object) -> object:
+            raise RuntimeError("provider down")
+
+        async def get_daily_bars(self, **kwargs: object) -> object:
+            raise AssertionError("no history should be requested without an EOD date")
+
+    monkeypatch.setattr(macro, "TwelveDataTransport", _FakeTransport)
+    monkeypatch.setattr(macro, "TwelveDataAdapter", FakeAdapter)
+    histories = await macro.load_commodity_histories(Settings(twelve_data_api_key=SecretStr("key")))
+    assert [item.status for item in histories] == ["unavailable"] * len(macro.COMMODITIES)
+    assert all(item.points == [] for item in histories)
 
 
 async def test_cache_coalesces_concurrent_requests(monkeypatch: pytest.MonkeyPatch) -> None:

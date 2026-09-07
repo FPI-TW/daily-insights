@@ -21,7 +21,6 @@ from daily_insights_api.modules.reports.morning_report import (
     _bundle,
     _commodity_metric_item,
     _commodity_ratio_window_dates,
-    _completed_history_for_eod,
     _error_blocks,
     _error_blocks_for_dataset,
     _input_digest,
@@ -38,6 +37,7 @@ from daily_insights_api.modules.reports.morning_report import (
     _validate_manifest_output,
     block_precision,
     block_rounding,
+    completed_history_for_eod,
 )
 
 
@@ -393,7 +393,7 @@ def test_commodity_history_uses_eod_as_mutable_bar_cutoff_and_requires_reconcili
         )
     )
 
-    completed = _completed_history_for_eod(bars, eod)
+    completed = completed_history_for_eod(bars, eod)
 
     assert [bar.trade_date for bar in completed] == [date(2026, 9, 3), eod_date]
     metric = _commodity_metric_item("brent", eod, completed[-2].close)
@@ -404,11 +404,11 @@ def test_commodity_history_uses_eod_as_mutable_bar_cutoff_and_requires_reconcili
         bars[1].model_copy(update={"close": Decimal("94.60792")}),
     )
     with pytest.raises(DataSourceContractError, match="date or close"):
-        _completed_history_for_eod(rounded_default_precision, eod)
+        completed_history_for_eod(rounded_default_precision, eod)
     with pytest.raises(DataSourceContractError, match="date or close"):
-        _completed_history_for_eod(bars[:-2], eod)
+        completed_history_for_eod(bars[:-2], eod)
     with pytest.raises(DataSourceContractError, match="previous completed"):
-        _completed_history_for_eod((bars[1],), eod)
+        completed_history_for_eod((bars[1],), eod)
 
 
 def test_commodity_ratio_window_uses_exact_common_completed_dates_for_two_calendar_years() -> None:
