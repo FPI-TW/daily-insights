@@ -733,11 +733,16 @@ async def institutional_stock_flow_leaders(
         .group_by(InstitutionalStockFlow.symbol, InstitutionalStockFlow.security_name)
     )
 
-    async def leaders(order: Any) -> list[InstitutionalStockFlowLeaderResponse]:
+    async def leaders(direction: Any, order: Any) -> list[InstitutionalStockFlowLeaderResponse]:
+        # Each list is filtered to its own sign: a quiet day returns fewer than
+        # five rather than filling the sell list with net buyers, and a total of
+        # zero is neither, so it appears in neither list.
         # The symbol tie-break keeps the order stable across identical sums,
         # which a day of untraded securities has plenty of.
         rows = await database.execute(
-            totals.order_by(order, InstitutionalStockFlow.symbol).limit(INSTITUTIONAL_STOCK_LEADERS)
+            totals.having(direction)
+            .order_by(order, InstitutionalStockFlow.symbol)
+            .limit(INSTITUTIONAL_STOCK_LEADERS)
         )
         return [
             InstitutionalStockFlowLeaderResponse(
@@ -751,6 +756,6 @@ async def institutional_stock_flow_leaders(
 
     return InstitutionalStockFlowLeadersResponse(
         trade_date=day,
-        top_buys=await leaders(net_shares.desc()),
-        top_sells=await leaders(net_shares.asc()),
+        top_buys=await leaders(net_shares > 0, net_shares.desc()),
+        top_sells=await leaders(net_shares < 0, net_shares.asc()),
     )

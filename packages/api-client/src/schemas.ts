@@ -122,7 +122,8 @@ export const institutionalStockFlowLeaderSchema = z.object({
 export type InstitutionalStockFlowLeader = z.infer<
   typeof institutionalStockFlowLeaderSchema
 >
-// Five rows in each direction.
+// At most five rows in each direction: a security is only listed on the side
+// its total falls on, so a quiet day returns fewer.
 export const institutionalStockFlowLeadersSchema = z.object({
   trade_date: z.iso.date().nullable(),
   top_buys: z.array(institutionalStockFlowLeaderSchema),

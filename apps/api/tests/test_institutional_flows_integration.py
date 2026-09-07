@@ -275,7 +275,7 @@ async def test_stock_flow_leaders_rank_on_the_sum_of_all_five_investors(
     assert body["trade_date"] == "2026-09-04"
     # 2306 sums to 15,000 and 2305 to 17,000: the single large foreign row wins,
     # which a per-investor ranking would have ordered the other way.
-    assert [row["symbol"] for row in body["top_buys"]] == ["2305", "2306", "2304", "2303", "2302"]
+    assert [row["symbol"] for row in body["top_buys"]] == ["2305", "2306", "2304"]
     assert body["top_buys"][0] == {
         "trade_date": "2026-09-04",
         "symbol": "2305",
@@ -283,9 +283,13 @@ async def test_stock_flow_leaders_rank_on_the_sum_of_all_five_investors(
         "net_shares": 17_000,
     }
     assert body["top_buys"][1]["net_shares"] == 15_000
-    assert [row["symbol"] for row in body["top_sells"]] == ["2300", "2301", "2302", "2303", "2304"]
+    # Only three securities sold on this day, so the list is short rather than
+    # padded with net buyers, and 2303 nets to zero so it is on neither list.
+    assert [row["symbol"] for row in body["top_sells"]] == ["2300", "2301", "2302"]
     assert body["top_sells"][0]["net_shares"] == -15_000
-    assert len(body["top_buys"]) == len(body["top_sells"]) == 5
+    listed = {row["symbol"] for row in body["top_buys"]}
+    assert listed.isdisjoint(row["symbol"] for row in body["top_sells"])
+    assert "2303" not in listed
 
     assert earlier.status_code == 200, earlier.text
     assert [row["symbol"] for row in earlier.json()["top_buys"]] == ["9999"]

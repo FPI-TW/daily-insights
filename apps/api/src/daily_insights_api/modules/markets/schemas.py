@@ -111,7 +111,8 @@ class InstitutionalStockFlowLeaderResponse(BaseModel):
 
 
 class InstitutionalStockFlowLeadersResponse(BaseModel):
-    """The five largest net buys and net sells of one trading day."""
+    """The largest net buys and net sells of one trading day, at most five of
+    each: a security is only listed on the side its total actually falls on."""
 
     trade_date: date | None
     top_buys: list[InstitutionalStockFlowLeaderResponse]
