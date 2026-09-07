@@ -25,10 +25,10 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Daily Insights" },
+      { title: "廷豐金融晨報智能體 (GEAI Daily insights)" },
     ],
     links: [
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/tf-icon.png", type: "image/png" },
       // Noto Sans TC is the design's primary face; the local CJK fonts in the
       // stack cover the page until it arrives (display=swap).
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
