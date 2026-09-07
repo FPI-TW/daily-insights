@@ -87,36 +87,34 @@ class IndexMovingAveragesResponse(BaseModel):
     ]
 
 
-class InstitutionalMarketFlowResponse(BaseModel):
-    """One trading day of whole-market net amounts (TWD).
-
-    The five stored investor categories are folded into the three the product
-    talks about: the two dealer books are one desk, and the foreign dealer is
-    still foreign money.
-    """
-
+class InstitutionalFlowPointResponse(BaseModel):
     trade_date: date
-    foreign: int
-    trust: int
-    dealer: int
+    foreign: PriceDecimal
+    trust: PriceDecimal
+    dealer: PriceDecimal
+    total: PriceDecimal
 
 
-class InstitutionalStockFlowLeaderResponse(BaseModel):
-    """One security's net shares for one day, summed over all five investors.
+class InstitutionalFlowsResponse(BaseModel):
+    as_of: date | None
+    contract_version: str
+    contract_hash: str
+    endpoint: str
+    series: list[InstitutionalFlowPointResponse]
 
-    The day is on the envelope, which is also where it lives when both lists
-    are empty, so a row does not repeat it.
-    """
 
+class InstitutionalStockFlowResponse(BaseModel):
     symbol: str
-    security_name: str
-    net_shares: int
+    name: str
+    foreign_lots: PriceDecimal
+    trust_lots: PriceDecimal
+    dealer_lots: PriceDecimal
+    total_lots: PriceDecimal
 
 
-class InstitutionalStockFlowLeadersResponse(BaseModel):
-    """The largest net buys and net sells of one trading day, at most five of
-    each: a security is only listed on the side its total actually falls on."""
-
-    trade_date: date | None
-    top_buys: list[InstitutionalStockFlowLeaderResponse]
-    top_sells: list[InstitutionalStockFlowLeaderResponse]
+class InstitutionalStocksResponse(BaseModel):
+    as_of: date | None
+    contract_version: str
+    contract_hash: str
+    endpoint: str
+    rows: list[InstitutionalStockFlowResponse]

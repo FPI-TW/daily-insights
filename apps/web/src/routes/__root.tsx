@@ -16,6 +16,7 @@ import {
   NotFoundScreen,
 } from "#/components/StateScreen"
 import { createI18n } from "#/lib/i18n"
+import { defaultBrandTitle } from "#/lib/brand"
 import "../styles.css"
 
 const THEME_INIT_SCRIPT = `(function(){try{var stored=window.localStorage.getItem('theme');var mode=(stored==='light'||stored==='dark'||stored==='auto')?stored:'light';var prefersDark=window.matchMedia('(prefers-color-scheme: dark)').matches;var resolved=mode==='auto'?(prefersDark?'dark':'light'):mode;var root=document.documentElement;root.classList.remove('light','dark');root.classList.add(resolved);if(mode==='auto'){root.removeAttribute('data-theme')}else{root.setAttribute('data-theme',mode)}root.style.colorScheme=resolved;}catch(e){}})();`
@@ -25,10 +26,10 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Daily Insights" },
+      { title: defaultBrandTitle },
     ],
     links: [
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/tf-icon.png", type: "image/png" },
       // Noto Sans TC is the design's primary face; the local CJK fonts in the
       // stack cover the page until it arrives (display=swap).
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -39,7 +40,7 @@ export const Route = createRootRoute({
       },
       {
         rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap",
+        href: "https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&display=swap",
       },
     ],
   }),

@@ -8,7 +8,7 @@ import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { browserAdministrationClient } from "#/lib/admin-members"
 import { getAuthSessionEpoch, requireCsrfToken } from "#/lib/auth"
-import { formatIsoDate } from "#/lib/format"
+import { formatDateStamp } from "#/lib/format"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
 
 const COOLDOWN_MS = 1_000
@@ -297,14 +297,11 @@ export function IndexDataManagementPage({ locale }: { locale: Locale }) {
                         {item.stored_count}
                       </td>
                       <td className="px-3 py-2.5">
-                        {formatIsoDate(item.as_of, locale)}
+                        {formatDateStamp(item.as_of)}
                       </td>
                       <td className="px-3 py-2.5">
                         {item.dropped_unsettled_trade_date
-                          ? formatIsoDate(
-                              item.dropped_unsettled_trade_date,
-                              locale
-                            )
+                          ? formatDateStamp(item.dropped_unsettled_trade_date)
                           : "—"}
                       </td>
                     </tr>

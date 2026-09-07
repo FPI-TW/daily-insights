@@ -4,8 +4,16 @@ export function useChartColors() {
   const [colors, setColors] = useState({
     series: [] as string[],
     indexSeries: [] as string[],
+    vixRisk: { calm: "", elevated: "", high: "" },
     text: "",
     grid: "",
+    gridSoft: "",
+    faint: "",
+    surface: "",
+    chipLine: "",
+    up: "",
+    down: "",
+    font: "",
   })
 
   useEffect(() => {
@@ -26,15 +34,27 @@ export function useChartColors() {
           styles.getPropertyValue("--chart-index-sma-120").trim(),
           styles.getPropertyValue("--chart-index-sma-240").trim(),
         ],
+        vixRisk: {
+          calm: styles.getPropertyValue("--lagoon").trim(),
+          elevated: styles.getPropertyValue("--market-caution").trim(),
+          high: styles.getPropertyValue("--destructive").trim(),
+        },
         text: styles.getPropertyValue("--sea-ink-soft").trim(),
         grid: styles.getPropertyValue("--line").trim(),
+        gridSoft: styles.getPropertyValue("--line-soft").trim(),
+        faint: styles.getPropertyValue("--sea-ink-faint").trim(),
+        surface: styles.getPropertyValue("--surface").trim(),
+        chipLine: styles.getPropertyValue("--chip-line").trim(),
+        up: styles.getPropertyValue("--market-up").trim(),
+        down: styles.getPropertyValue("--market-down").trim(),
+        font: getComputedStyle(document.body).fontFamily,
       })
     }
     updateColors()
     const observer = new MutationObserver(updateColors)
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["class", "data-theme"],
+      attributeFilter: ["class", "data-theme", "lang"],
     })
     return () => observer.disconnect()
   }, [])

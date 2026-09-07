@@ -629,7 +629,7 @@ async def test_batch_quotes_reject_a_per_symbol_error_object_and_missing_symbols
         return httpx.Response(
             200,
             json={
-                "SPY": _quote_payload("SPY", "765.16", "761.78"),
+                "AAPL": _quote_payload("AAPL", "324.96", "325.13"),
                 "VIX": {"code": 404, "message": "symbol invalid", "status": "error"},
             },
         )
@@ -638,19 +638,19 @@ async def test_batch_quotes_reject_a_per_symbol_error_object_and_missing_symbols
     with pytest.raises(DataSourceContractError, match="reviewed contract"):
         await adapter.get_quotes(
             market="us_equity",
-            symbols=("SPY", "VIX"),
-            expected_currencies={"SPY": "USD", "VIX": "USD"},
+            symbols=("AAPL", "VIX"),
+            expected_currencies={"AAPL": "USD", "VIX": "USD"},
         )
 
     def respond_short(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"SPY": _quote_payload("SPY", "765.16", "761.78")})
+        return httpx.Response(200, json={"AAPL": _quote_payload("AAPL", "324.96", "325.13")})
 
     adapter = TwelveDataAdapter(transport(httpx.MockTransport(respond_short)))
     with pytest.raises(DataSourceContractError, match="every symbol"):
         await adapter.get_quotes(
             market="us_equity",
-            symbols=("SPY", "QQQ"),
-            expected_currencies={"SPY": "USD", "QQQ": "USD"},
+            symbols=("AAPL", "MSFT"),
+            expected_currencies={"AAPL": "USD", "MSFT": "USD"},
         )
 
 

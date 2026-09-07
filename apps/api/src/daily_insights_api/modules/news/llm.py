@@ -7,6 +7,7 @@ import time
 import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from itertools import combinations
 from typing import Any
 
 import httpx
@@ -37,11 +38,13 @@ class ModelCallError(ModelOutputError):
         *,
         input_digest: str,
         latency_ms: int,
+        error_code: str = "model_output_invalid",
         request_id: str | None = None,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
     ) -> None:
         super().__init__(message)
+        self.error_code = error_code
         self.input_digest = input_digest
         self.latency_ms = latency_ms
         self.request_id = request_id
@@ -93,7 +96,9 @@ def selection_output_contract(policy: SelectionPolicy) -> dict[str, Any]:
                     "id": "<candidate id>",
                     "topic": "policy",
                     "event_key": "fed-september-rate-decision",
-                    "market": "us",
+                    "market": sorted(policy.allowed_markets)[0]
+                    if policy.allowed_markets
+                    else "global",
                     "importance": 4,
                 }
             ]
@@ -254,7 +259,9 @@ class DeepSeekClient:
         try:
             value = Selection.model_validate(call[0])
         except ValidationError as error:
-            raise _failure_from_call("invalid selection JSON", call) from error
+            raise _failure_from_call(
+                "invalid selection JSON", call, error_code="selection_invalid_json"
+            ) from error
         value, dropped = filter_selection_markets(value, policy)
         if dropped:
             emit_event(
@@ -263,12 +270,21 @@ class DeepSeekClient:
                 markets=sorted({item.market for item in dropped}),
             )
         try:
-            enforce_selection_policy(value, candidates, policy)
+            value = repair_selection_policy(value, candidates, policy)
         except ValueError as error:
-            raise _failure_from_call(str(error), call) from error
+            raise _failure_from_call(
+                str(error), call, error_code="selection_invalid_candidate"
+            ) from error
         return ModelCall(value, *call[1:])
 
-    async def summarize(self, candidate: Candidate, article_text: str, locale: str) -> ModelCall:
+    async def summarize(
+        self,
+        candidate: Candidate,
+        article_text: str,
+        locale: str,
+        *,
+        retry_feedback: str | None = None,
+    ) -> ModelCall:
         # Delimiters make retrieved text data, never executable instructions.
         prompt = {
             "task": (
@@ -284,13 +300,27 @@ class DeepSeekClient:
             "SOURCE_BEGIN": article_text,
             "SOURCE_END": "END",
         }
+        if retry_feedback is not None:
+            # Only fixed instructions reach the model; never echo an exception
+            # or provider response as trusted retry guidance.
+            prompt["RETRY_GUIDANCE"] = (
+                "The previous summary failed validation. Re-read SOURCE and return the "
+                "exact OUTPUT_CONTRACT. Use only numbers explicitly present in SOURCE; "
+                "omit a numerical detail if uncertain, without changing the facts."
+            )
         call = await self._complete(prompt)
         try:
             value = LocalizedSummary.model_validate(call[0])
         except ValidationError as error:
-            raise _failure_from_call("invalid summary JSON", call) from error
+            raise _failure_from_call(
+                "invalid summary JSON", call, error_code="summary_invalid_json"
+            ) from error
         if not numeric_facts_grounded(f"{value.headline} {value.summary}", article_text):
-            raise _failure_from_call("summary contains ungrounded numeric fact", call)
+            raise _failure_from_call(
+                "summary contains ungrounded numeric fact",
+                call,
+                error_code="summary_ungrounded_number",
+            )
         return ModelCall(value, *call[1:])
 
     async def _complete(
@@ -372,6 +402,35 @@ def filter_selection_markets(
     return value.model_copy(update={"selections": kept}), dropped
 
 
+def repair_selection_policy(
+    value: Selection, candidates: list[FetchedCandidate], policy: SelectionPolicy
+) -> Selection:
+    """Keep the largest compliant ranked subset; never invent or reclassify a story.
+
+    Structural validation limits this search to ten selections (1024 subsets).
+    Combinations preserve rank and prefer earlier picks on equal-sized results.
+    Unknown IDs remain errors rather than being silently accepted or discarded.
+    """
+    known_ids = {fetched.candidate.id for fetched in candidates}
+    if any(item.id not in known_ids for item in value.selections):
+        raise ValueError("selection has unknown candidate ID")
+    for count in range(min(len(value.selections), policy.selection_limit), -1, -1):
+        for items in combinations(value.selections, count):
+            subset = Selection(selections=items)
+            try:
+                enforce_selection_policy(subset, candidates, policy)
+            except ValueError:
+                continue
+            if subset != value:
+                emit_event(
+                    "news.selection.repaired",
+                    original_count=len(value.selections),
+                    retained_count=len(subset.selections),
+                )
+            return subset
+    raise AssertionError("empty selection must satisfy selection policy")
+
+
 def enforce_selection_policy(
     value: Selection, candidates: list[FetchedCandidate], policy: SelectionPolicy
 ) -> None:
@@ -410,9 +469,12 @@ def enforce_selection_policy(
 def _failure_from_call(
     message: str,
     call: tuple[dict[str, Any], str | None, int | None, int | None, int, str],
+    *,
+    error_code: str,
 ) -> ModelCallError:
     return ModelCallError(
         message,
+        error_code=error_code,
         input_digest=call[5],
         latency_ms=call[4],
         request_id=call[1],
@@ -440,6 +502,13 @@ def _provider_failure(
     usage = usage_value if isinstance(usage_value, dict) else {}
     return ModelCallError(
         message,
+        error_code=(
+            f"provider_http_{response.status_code}"
+            if response is not None and response.is_error
+            else "provider_invalid_json"
+            if response is not None
+            else "provider_request_failed"
+        ),
         input_digest=input_digest,
         latency_ms=_elapsed_ms(started),
         request_id=response.headers.get("x-request-id") if response is not None else None,

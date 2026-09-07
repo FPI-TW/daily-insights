@@ -20,6 +20,15 @@ const credentials = {
     role: "asset_manager",
   },
 }
+const indexSymbols = new Set([
+  "^DJI",
+  "^GSPC",
+  "^NDX",
+  "^RUT",
+  "^SOX",
+  "^VIX",
+  "^TWII",
+])
 const port = Number(process.argv[process.argv.indexOf("--port") + 1] || 3311)
 
 let state
@@ -295,10 +304,31 @@ function pastEpisodes(locale) {
 }
 
 const reportMarkets = ["global_macro_bonds", "crypto", "us_equity"]
+const marketCatalog = [
+  ["global_macro_bonds", "Macro analysis", "全球宏觀", "全球宏观"],
+  ["forex", "Foreign exchange", "外匯市場", "外汇市场"],
+  ["crypto", "Crypto", "加密資產", "加密资产"],
+  ["us_equity", "US equities", "美國股市", "美国股市"],
+  ["hk_equity", "Hong Kong equities", "香港股市", "香港股市"],
+  ["cn_equity", "China equities", "中國股市", "中国股市"],
+  ["tw_equity", "Taiwan equities", "台灣股市", "台湾股市"],
+  [
+    "tw_index_derivatives",
+    "Taiwan index derivatives",
+    "台指衍生品",
+    "台指衍生品",
+  ],
+].map(([code, nameEn, nameZhHant, nameZhHans]) => ({
+  code,
+  name_en: nameEn,
+  name_zh_hant: nameZhHant,
+  name_zh_hans: nameZhHans,
+  is_visible: true,
+}))
 
 function reportSummary(marketCode, locale) {
   return {
-    publication_id: `${reportMarkets.indexOf(marketCode) + 7}0000000-0000-4000-8000-000000000001`,
+    publication_id: `${String(reportMarkets.indexOf(marketCode) + 7).padEnd(8, "0")}-0000-4000-8000-000000000001`,
     report_key: "daily-market",
     market_code: marketCode,
     edition_date: "2026-08-30",
@@ -316,6 +346,26 @@ function reportSummary(marketCode, locale) {
 
 function reportDetail(marketCode, locale) {
   const summary = reportSummary(marketCode, locale)
+  const chartPresentation = {
+    "zh-hant": {
+      title: "油金比 / 銅金比",
+      unit: "比率",
+      oilGold: "油金比",
+      copperGold: "銅金比",
+    },
+    "zh-hans": {
+      title: "油金比 / 铜金比",
+      unit: "比率",
+      oilGold: "油金比",
+      copperGold: "铜金比",
+    },
+    en: {
+      title: "Oil-Gold / Copper-Gold Ratios",
+      unit: "Ratio",
+      oilGold: "Oil-Gold Ratio",
+      copperGold: "Copper-Gold Ratio",
+    },
+  }[locale]
   const block = {
     id: "macro.commodities",
     kind: "metric",
@@ -324,10 +374,10 @@ function reportDetail(marketCode, locale) {
     caveat: null,
     metrics: [
       { id: "wti", value: "68.4", change: "0.7", unit_code: "usd" },
-      { id: "brent", value: "72.4", change: "0.8", unit_code: "price" },
-      { id: "gold", value: "2418", change: "0.3", unit_code: "price" },
+      { id: "brent", value: "72.4", change: "0.8", unit_code: "usd" },
+      { id: "gold", value: "2418", change: "0.3", unit_code: "usd" },
       { id: "silver", value: "28.4", change: "0.1", unit_code: "usd" },
-      { id: "copper", value: "4.18", change: "-0.2", unit_code: "price" },
+      { id: "copper", value: "4.18", change: "-0.2", unit_code: "usd" },
     ],
   }
   const commodityPerformance = {
@@ -384,17 +434,33 @@ function reportDetail(marketCode, locale) {
           series_labels: {},
         },
         "macro.commodity_ratios": {
-          title: "Oil-Gold / Copper-Gold Ratios",
+          title: chartPresentation.title,
           description: null,
-          unit_label: "Ratio",
+          unit_label: chartPresentation.unit,
           series_labels: {
-            oil_gold_ratio: "Oil-Gold Ratio",
-            copper_gold_ratio: "Copper-Gold Ratio",
+            oil_gold_ratio: chartPresentation.oilGold,
+            copper_gold_ratio: chartPresentation.copperGold,
           },
         },
       },
     },
   }
+}
+
+function indexBars(symbol) {
+  const closes =
+    symbol === "^VIX" ? ["18.10", "24.40", "32.70"] : ["100.00", "102.00"]
+  const tradeDates = ["2026-08-27", "2026-08-28", "2026-08-31"]
+  return closes.map((close, index) => ({
+    symbol,
+    market_code: symbol === "^TWII" ? "tw_equity" : "us_equity",
+    trade_date: tradeDates[index],
+    open: close,
+    high: close,
+    low: close,
+    close,
+    volume: 0,
+  }))
 }
 
 const server = createServer(async (request, response) => {
@@ -427,6 +493,23 @@ const server = createServer(async (request, response) => {
     return
   }
 
+  if (url.pathname === "/api/markets" && request.method === "GET") {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    recordRequest(request, url, role)
+    sendJson(response, 200, marketCatalog)
+    return
+  }
+  if (
+    url.pathname === "/api/analyst-viewpoints/today" &&
+    request.method === "GET"
+  ) {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    sendJson(response, 200, [])
+    return
+  }
+
   if (url.pathname === "/api/reports" && request.method === "GET") {
     const role = requireRole(request, response, ["org_member"])
     if (!role) return
@@ -436,6 +519,245 @@ const server = createServer(async (request, response) => {
       response,
       200,
       reportMarkets.map(market => reportSummary(market, locale))
+    )
+    return
+  }
+
+  if (
+    url.pathname === "/api/reports/global_macro_bonds/dashboard" &&
+    request.method === "GET"
+  ) {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    // Deterministic test-only histories; production always calls provider adapters.
+    const assets = [
+      ["brent", "USD/bbl", 72],
+      ["wti", "USD/bbl", 69],
+      ["gold", "USD/oz", 2648],
+      ["silver", "USD/oz", 31],
+      ["copper", "USD/lb", 4.28],
+      ["dxy", "index", 101],
+      ["eur_usd", "USD", 1.17],
+      ["gbp_usd", "USD", 1.35],
+      ["aud_usd", "USD", 0.67],
+      ["nzd_usd", "USD", 0.59],
+      ["usd_jpy", "JPY", 145],
+      ["usd_chf", "CHF", 0.81],
+      ["usd_cad", "CAD", 1.38],
+      ["usd_twd", "TWD", 30.5],
+      ["3m", "percent", 4.42],
+      ["2y", "percent", 3.98],
+      ["5y", "percent", 4.08],
+      ["10y", "percent", 4.28],
+      ["30y", "percent", 4.55],
+      ["sofr", "percent", 4.58],
+    ]
+    sendJson(response, 200, {
+      fetched_at: "2026-09-04T00:00:00Z",
+      histories: assets.map(([id, unit, value], index) => ({
+        id,
+        symbol: id,
+        unit,
+        source: "E2E fixture",
+        status: "ok",
+        points: Array.from({ length: 400 }, (_, day) => ({
+          date: new Date(Date.UTC(2026, 8, 4) - (399 - day) * 86400000)
+            .toISOString()
+            .slice(0, 10),
+          value: (
+            value *
+            (1 + Math.sin(day / 12 + index) * 0.02 + day / 15000)
+          ).toFixed(6),
+        })),
+      })),
+      calendar: {
+        date: "2026-09-04",
+        source: "Nasdaq",
+        status: "ok",
+        events: [
+          {
+            date: "2026-09-04T12:30:00Z",
+            country: "US",
+            event: "Nonfarm payrolls",
+            currency: "USD",
+            impact: "High",
+            estimate: "185000",
+            previous: "272000",
+            actual: null,
+            unit: null,
+          },
+          {
+            date: "2026-09-04T12:30:00Z",
+            country: "US",
+            event: "Unemployment rate",
+            currency: "USD",
+            impact: "High",
+            estimate: "4.1",
+            previous: "4.0",
+            actual: null,
+            unit: "%",
+          },
+        ],
+      },
+    })
+    return
+  }
+
+  if (
+    url.pathname === "/api/markets/tw/institutional-flows" &&
+    request.method === "GET"
+  ) {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    recordRequest(request, url, role)
+    const dates = Array.from(
+      { length: 86 },
+      (_, index) => new Date(Date.UTC(2026, 8, 4) - (85 - index) * 86400000)
+    ).filter(date => date.getUTCDay() !== 0 && date.getUTCDay() !== 6)
+    sendJson(response, 200, {
+      as_of: "2026-09-04",
+      contract_version: "twse-institutional-v1",
+      contract_hash: "a".repeat(64),
+      endpoint: "/rwd/zh/fund/BFI82U",
+      series: dates.map((date, index) => {
+        const foreign = Math.sin(index / 3) * 75 + index - 25
+        const trust = Math.cos(index / 5) * 12
+        const dealer = Math.sin(index / 7) * 8
+        return {
+          trade_date: date.toISOString().slice(0, 10),
+          foreign: foreign.toFixed(4),
+          trust: trust.toFixed(4),
+          dealer: dealer.toFixed(4),
+          total: (foreign + trust + dealer).toFixed(4),
+        }
+      }),
+    })
+    return
+  }
+
+  if (
+    url.pathname === "/api/markets/tw/institutional-stocks" &&
+    request.method === "GET"
+  ) {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    recordRequest(request, url, role)
+    const locale = url.searchParams.get("locale") || "zh-hant"
+    const names =
+      locale === "en"
+        ? [
+            "TSMC",
+            "Hon Hai",
+            "Quanta",
+            "MediaTek",
+            "Evergreen",
+            "ASUS",
+            "Accton",
+            "Formosa Plastics",
+            "Yuanta",
+            "Innolux",
+          ]
+        : [
+            "台積電",
+            "鴻海",
+            "廣達",
+            "聯發科",
+            "長榮",
+            "華碩",
+            "智邦",
+            "台塑",
+            "元大金",
+            "群創",
+          ]
+    const totals = [
+      12840, 8420, 6150, 3920, 2510, -4310, -2880, -1940, -1510, -990,
+    ]
+    sendJson(response, 200, {
+      as_of: "2026-09-04",
+      contract_version: "twse-institutional-v1",
+      contract_hash: "a".repeat(64),
+      endpoint: locale === "en" ? "/rwd/en/fund/T86" : "/rwd/zh/fund/T86",
+      rows: totals.map((total, index) => ({
+        symbol: String(2300 + index),
+        name: names[index],
+        foreign_lots: String(total - 200),
+        trust_lots: "150",
+        dealer_lots: "50",
+        total_lots: String(total),
+      })),
+    })
+    return
+  }
+
+  const indexMatch =
+    /^\/api\/markets\/indices\/([^/]+)\/(daily-bars|moving-averages)$/.exec(
+      url.pathname
+    )
+  if (indexMatch && request.method === "GET") {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    const symbol = decodeURIComponent(indexMatch[1])
+    if (!indexSymbols.has(symbol)) {
+      sendJson(response, 404, { detail: "index not found" })
+      return
+    }
+    if (symbol === "^VIX" && indexMatch[2] === "daily-bars") {
+      recordRequest(request, url, role, { symbol })
+      sendJson(response, 200, indexBars(symbol))
+      return
+    }
+    const market = symbol === "^TWII" ? "tw_equity" : "us_equity"
+    // API fixtures only: no generated data or local SMA enters production code.
+    const dates = Array.from(
+      { length: 730 },
+      (_, i) => new Date(Date.UTC(2026, 8, 4) - (729 - i) * 86400000)
+    ).filter(date => date.getUTCDay() !== 0 && date.getUTCDay() !== 6)
+    const bars = dates.map((date, i) => {
+      const close =
+        21000 + i * 10 + Math.sin(i / 20) * 1700 + Math.cos(i / 43) * 900
+      const open = close + Math.sin(i * 1.7) * 130
+      return {
+        symbol,
+        market_code: market,
+        trade_date: date.toISOString().slice(0, 10),
+        open: open.toFixed(2),
+        high: (Math.max(open, close) + 100).toFixed(2),
+        low: (Math.min(open, close) - 100).toFixed(2),
+        close: close.toFixed(2),
+        volume: Math.round(3500000000 + Math.sin(i / 4) * 1600000000),
+      }
+    })
+    recordRequest(request, url, role)
+    sendJson(
+      response,
+      200,
+      indexMatch[2] === "daily-bars"
+        ? bars
+        : {
+            symbol,
+            market_code: market,
+            method: "sma",
+            price_field: "close",
+            formula_version: "sma-close-v1",
+            as_of: bars.at(-1).trade_date,
+            series: [20, 60, 120, 240].map(period => ({
+              period,
+              points: bars.map((bar, i) => ({
+                trade_date: bar.trade_date,
+                value:
+                  i < period - 1
+                    ? null
+                    : (
+                        bars
+                          .slice(i - period + 1, i + 1)
+                          .reduce(
+                            (sum, point) => sum + Number(point.close),
+                            0
+                          ) / period
+                      ).toFixed(10),
+              })),
+            })),
+          }
     )
     return
   }

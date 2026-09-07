@@ -640,15 +640,22 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  "/api/markets/institutional/market-flows": {
+  "/api/markets/tw/institutional-flows": {
     parameters: {
       query?: never
       header?: never
       path?: never
       cookie?: never
     }
-    /** List Institutional Market Flows */
-    get: operations["list_institutional_market_flows_api_markets_institutional_market_flows_get"]
+    /**
+     * Get Tw Institutional Flows
+     * @description Stored TWSE market flows, in 億元.
+     *
+     *     Read from the tables the `institutional_twse` data-management run fills, not
+     *     from TWSE: the source answers one date per request and spaces its callers,
+     *     which no page load can wait for.
+     */
+    get: operations["get_tw_institutional_flows_api_markets_tw_institutional_flows_get"]
     put?: never
     post?: never
     delete?: never
@@ -657,15 +664,22 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  "/api/markets/institutional/stock-flows": {
+  "/api/markets/tw/institutional-stocks": {
     parameters: {
       query?: never
       header?: never
       path?: never
       cookie?: never
     }
-    /** Get Institutional Stock Flow Leaders */
-    get: operations["get_institutional_stock_flow_leaders_api_markets_institutional_stock_flows_get"]
+    /**
+     * Get Tw Institutional Stocks
+     * @description The most recent stored trading day at or before `date`, in 張.
+     *
+     *     `locale` is accepted because the caller is localized, but the name is the
+     *     one TWSE publishes: its English T86 report carries no security names at all,
+     *     and it does not publish simplified ones.
+     */
+    get: operations["get_tw_institutional_stocks_api_markets_tw_institutional_stocks_get"]
     put?: never
     post?: never
     delete?: never
@@ -768,6 +782,23 @@ export interface paths {
     }
     /** List Latest Reports */
     get: operations["list_latest_reports_api_reports_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/reports/global_macro_bonds/dashboard": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Macro Dashboard */
+    get: operations["get_macro_dashboard_api_reports_global_macro_bonds_dashboard_get"]
     put?: never
     post?: never
     delete?: never
@@ -965,6 +996,23 @@ export interface components {
       zh_hans?: string | null
       /** Zh Hant */
       zh_hant?: string | null
+    }
+    /** Calendar */
+    Calendar: {
+      /**
+       * Date
+       * Format: date
+       */
+      date: string
+      /** Events */
+      events?: components["schemas"]["EconomicEvent"][]
+      /** Source */
+      source: string
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "ok" | "unavailable" | "disabled"
     }
     /** ChangePasswordRequest */
     ChangePasswordRequest: {
@@ -1170,6 +1218,30 @@ export interface components {
         | components["schemas"]["InstitutionalTwseRunResponse"]
       )[]
     }
+    /** EconomicEvent */
+    EconomicEvent: {
+      /** Actual */
+      actual?: string | null
+      /** Country */
+      country: string
+      /** Currency */
+      currency?: string | null
+      /**
+       * Date
+       * Format: date-time
+       */
+      date: string
+      /** Estimate */
+      estimate?: string | null
+      /** Event */
+      event: string
+      /** Impact */
+      impact?: string | null
+      /** Previous */
+      previous?: string | null
+      /** Unit */
+      unit?: string | null
+    }
     /**
      * GenerationStatus
      * @enum {string}
@@ -1192,6 +1264,24 @@ export interface components {
     HealthResponse: {
       /** Status */
       status: string
+    }
+    /** History */
+    History: {
+      /** Id */
+      id: string
+      /** Points */
+      points?: components["schemas"]["Point"][]
+      /** Source */
+      source: string
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "ok" | "unavailable" | "disabled"
+      /** Symbol */
+      symbol: string
+      /** Unit */
+      unit: string
     }
     /** IndexDailyBarResponse */
     IndexDailyBarResponse: {
@@ -1381,54 +1471,62 @@ export interface components {
        */
       status: "pending" | "running" | "succeeded" | "partial" | "failed"
     }
-    /**
-     * InstitutionalMarketFlowResponse
-     * @description One trading day of whole-market net amounts (TWD).
-     *
-     *     The five stored investor categories are folded into the three the product
-     *     talks about: the two dealer books are one desk, and the foreign dealer is
-     *     still foreign money.
-     */
-    InstitutionalMarketFlowResponse: {
+    /** InstitutionalFlowPointResponse */
+    InstitutionalFlowPointResponse: {
       /** Dealer */
-      dealer: number
+      dealer: string
       /** Foreign */
-      foreign: number
+      foreign: string
+      /** Total */
+      total: string
       /**
        * Trade Date
        * Format: date
        */
       trade_date: string
       /** Trust */
-      trust: number
+      trust: string
     }
-    /**
-     * InstitutionalStockFlowLeaderResponse
-     * @description One security's net shares for one day, summed over all five investors.
-     *
-     *     The day is on the envelope, which is also where it lives when both lists
-     *     are empty, so a row does not repeat it.
-     */
-    InstitutionalStockFlowLeaderResponse: {
-      /** Net Shares */
-      net_shares: number
-      /** Security Name */
-      security_name: string
+    /** InstitutionalFlowsResponse */
+    InstitutionalFlowsResponse: {
+      /** As Of */
+      as_of: string | null
+      /** Contract Hash */
+      contract_hash: string
+      /** Contract Version */
+      contract_version: string
+      /** Endpoint */
+      endpoint: string
+      /** Series */
+      series: components["schemas"]["InstitutionalFlowPointResponse"][]
+    }
+    /** InstitutionalStockFlowResponse */
+    InstitutionalStockFlowResponse: {
+      /** Dealer Lots */
+      dealer_lots: string
+      /** Foreign Lots */
+      foreign_lots: string
+      /** Name */
+      name: string
       /** Symbol */
       symbol: string
+      /** Total Lots */
+      total_lots: string
+      /** Trust Lots */
+      trust_lots: string
     }
-    /**
-     * InstitutionalStockFlowLeadersResponse
-     * @description The largest net buys and net sells of one trading day, at most five of
-     *     each: a security is only listed on the side its total actually falls on.
-     */
-    InstitutionalStockFlowLeadersResponse: {
-      /** Top Buys */
-      top_buys: components["schemas"]["InstitutionalStockFlowLeaderResponse"][]
-      /** Top Sells */
-      top_sells: components["schemas"]["InstitutionalStockFlowLeaderResponse"][]
-      /** Trade Date */
-      trade_date: string | null
+    /** InstitutionalStocksResponse */
+    InstitutionalStocksResponse: {
+      /** As Of */
+      as_of: string | null
+      /** Contract Hash */
+      contract_hash: string
+      /** Contract Version */
+      contract_version: string
+      /** Endpoint */
+      endpoint: string
+      /** Rows */
+      rows: components["schemas"]["InstitutionalStockFlowResponse"][]
     }
     /**
      * InstitutionalTwseRunCreate
@@ -1563,6 +1661,17 @@ export interface components {
       email: string
       /** Password */
       password: string
+    }
+    /** MacroDashboard */
+    MacroDashboard: {
+      calendar: components["schemas"]["Calendar"]
+      /**
+       * Fetched At
+       * Format: date-time
+       */
+      fetched_at: string
+      /** Histories */
+      histories: components["schemas"]["History"][]
     }
     /** MarketPolicyUpdate */
     MarketPolicyUpdate: {
@@ -2140,6 +2249,16 @@ export interface components {
     PodcastPublicationRequest: {
       /** Expected Version */
       expected_version: number
+    }
+    /** Point */
+    Point: {
+      /**
+       * Date
+       * Format: date
+       */
+      date: string
+      /** Value */
+      value: string
     }
     /** PresentationContract */
     PresentationContract: {
@@ -3952,11 +4071,11 @@ export interface operations {
       }
     }
   }
-  list_institutional_market_flows_api_markets_institutional_market_flows_get: {
+  get_tw_institutional_flows_api_markets_tw_institutional_flows_get: {
     parameters: {
       query?: {
-        start_date?: string | null
-        end_date?: string | null
+        start?: string | null
+        end?: string | null
       }
       header?: never
       path?: never
@@ -3970,7 +4089,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          "application/json": components["schemas"]["InstitutionalMarketFlowResponse"][]
+          "application/json": components["schemas"]["InstitutionalFlowsResponse"]
         }
       }
       /** @description Validation Error */
@@ -3984,10 +4103,11 @@ export interface operations {
       }
     }
   }
-  get_institutional_stock_flow_leaders_api_markets_institutional_stock_flows_get: {
+  get_tw_institutional_stocks_api_markets_tw_institutional_stocks_get: {
     parameters: {
       query?: {
-        trade_date?: string | null
+        date?: string | null
+        locale?: "zh-hant" | "zh-hans" | "en"
       }
       header?: never
       path?: never
@@ -4001,7 +4121,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          "application/json": components["schemas"]["InstitutionalStockFlowLeadersResponse"]
+          "application/json": components["schemas"]["InstitutionalStocksResponse"]
         }
       }
       /** @description Validation Error */
@@ -4204,6 +4324,26 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  get_macro_dashboard_api_reports_global_macro_bonds_dashboard_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["MacroDashboard"]
         }
       }
     }

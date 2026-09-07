@@ -1,3 +1,4 @@
+import { formatTimestamp } from "#/lib/format"
 import type {
   AnalystViewpointSyncStatus,
   Locale,
@@ -101,14 +102,9 @@ export function AnalystViewpointManagementPage({
             </dt>
             <dd className="mt-1 text-sm font-semibold text-sea-ink">
               {status.latest_sync
-                ? new Intl.DateTimeFormat(locale, {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  }).format(
-                    new Date(
-                      status.latest_sync.fetched_at ??
-                        status.latest_sync.completed_at
-                    )
+                ? formatTimestamp(
+                    status.latest_sync.fetched_at ??
+                      status.latest_sync.completed_at
                   )
                 : t("analystViewpointsNeverSynced")}
             </dd>

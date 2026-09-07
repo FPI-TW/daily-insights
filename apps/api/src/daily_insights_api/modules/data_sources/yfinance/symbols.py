@@ -20,9 +20,10 @@ from daily_insights_api.modules.data_sources.dto import MarketCode
 IndexSymbol = Literal[
     "^DJI",
     "^GSPC",
-    "^IXIC",
+    "^NDX",
     "^RUT",
     "^SOX",
+    "^VIX",
     "^HSI",
     "^TWII",
     "000001.SS",
@@ -31,9 +32,10 @@ IndexSymbol = Literal[
 TRACKED_INDICES: dict[IndexSymbol, MarketCode] = {
     "^DJI": "us_equity",
     "^GSPC": "us_equity",
-    "^IXIC": "us_equity",
+    "^NDX": "us_equity",
     "^RUT": "us_equity",
     "^SOX": "us_equity",
+    "^VIX": "us_equity",
     "^HSI": "hk_equity",
     "^TWII": "tw_equity",
     "000001.SS": "cn_equity",

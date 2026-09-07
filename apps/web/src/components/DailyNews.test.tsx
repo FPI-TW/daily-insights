@@ -31,7 +31,7 @@ describe("DailyNews", () => {
             status: "complete",
             locale: "en",
             generated_at: "2026-09-01T00:00:00+00:00",
-            caveat: null,
+            caveat: "Showing the latest available news from 2026-09-01.",
             items: [
               {
                 id: "00000000-0000-4000-8000-000000000001",
@@ -53,6 +53,9 @@ describe("DailyNews", () => {
         />
       </I18nextProvider>
     )
+    expect(
+      screen.getByText("Showing the latest available news from 2026-09-01.")
+    ).toBeInTheDocument()
     const link = screen.getByRole("link", { name: "Read source" })
     expect(link).toHaveAttribute("rel", "noopener noreferrer")
     expect(screen.getByLabelText("Importance 4 stars")).toHaveTextContent(

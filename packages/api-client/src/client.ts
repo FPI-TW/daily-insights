@@ -34,8 +34,8 @@ import {
   indexDailyBarListSchema,
   indexMovingAveragesSchema,
   indexLatestBarListSchema,
-  institutionalMarketFlowListSchema,
-  institutionalStockFlowLeadersSchema,
+  institutionalFlowsSchema,
+  institutionalStocksSchema,
   marketListSchema,
   yfinanceDailyBarsResponseSchema,
   dataManagementCatalogSchema,
@@ -123,29 +123,30 @@ export function createMarketClient(transport: ApiTransport) {
         indexMovingAveragesSchema
       )
     },
-    // Naming neither bound gets the last year; naming either one turns that
-    // default off and returns exactly the window asked for.
-    async institutionalMarketFlows(
-      range: { startDate?: string; endDate?: string } = {}
-    ) {
+    async institutionalFlows(range: { start?: string; end?: string } = {}) {
       const query = new URLSearchParams()
-      if (range.startDate) query.set("start_date", range.startDate)
-      if (range.endDate) query.set("end_date", range.endDate)
+      if (range.start) query.set("start", range.start)
+      if (range.end) query.set("end", range.end)
       const search = query.toString()
       return parseResponse(
         await transport(
-          `/api/markets/institutional/market-flows${search ? `?${search}` : ""}`
+          `/api/markets/tw/institutional-flows${search ? `?${search}` : ""}`
         ),
-        institutionalMarketFlowListSchema
+        institutionalFlowsSchema
       )
     },
-    async institutionalStockFlowLeaders(tradeDate?: string) {
-      const suffix = tradeDate
-        ? `?${new URLSearchParams({ trade_date: tradeDate }).toString()}`
-        : ""
+    async institutionalStocks(
+      options: { date?: string; locale?: Locale } = {}
+    ) {
+      const query = new URLSearchParams()
+      if (options.date) query.set("date", options.date)
+      if (options.locale) query.set("locale", options.locale)
+      const search = query.toString()
       return parseResponse(
-        await transport(`/api/markets/institutional/stock-flows${suffix}`),
-        institutionalStockFlowLeadersSchema
+        await transport(
+          `/api/markets/tw/institutional-stocks${search ? `?${search}` : ""}`
+        ),
+        institutionalStocksSchema
       )
     },
   }

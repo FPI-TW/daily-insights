@@ -42,9 +42,8 @@ from daily_insights_api.modules.markets.schemas import (
     IndexMovingAverage240SeriesResponse,
     IndexMovingAveragePointResponse,
     IndexMovingAveragesResponse,
-    InstitutionalMarketFlowResponse,
-    InstitutionalStockFlowLeaderResponse,
-    InstitutionalStockFlowLeadersResponse,
+    InstitutionalFlowPointResponse,
+    InstitutionalStockFlowResponse,
     MarketResponse,
 )
 
@@ -52,6 +51,8 @@ MAX_BIND_PARAMETERS = 65535
 # Yahoo publishes no rate limit and is reached through a scraping client, so
 # this stays conservative; it matches TwelveDataTransport's default.
 MAX_FETCH_CONCURRENCY = 4
+INITIAL_SERIES_BACKFILL_PERIOD = "2y"
+AUTOMATIC_SHORT_REFRESH_PERIOD = "7d"
 YAHOO_REFRESH_LOCK_KEY = 4_741_901_938_764_211_037
 MOVING_AVERAGE_PERIODS = (20, 60, 120, 240)
 MOVING_AVERAGE_WARMUP_SESSIONS = max(MOVING_AVERAGE_PERIODS) - 1
@@ -60,6 +61,18 @@ MOVING_AVERAGE_QUANTUM = Decimal("0.0000000001")
 
 class IndexProviderConflictError(ValueError):
     """A symbol already has durable bars owned by another provider."""
+
+
+def select_index_refresh_period(*, period: str, has_stored_bars: bool) -> str:
+    """Choose the fetch window without changing explicit long-period requests.
+
+    The automatic/admin short refresh uses ``7d``.  A missing series needs the
+    normal two-year bootstrap for YTD calculations, while every other request
+    remains exactly as requested.
+    """
+    if not has_stored_bars and period == AUTOMATIC_SHORT_REFRESH_PERIOD:
+        return INITIAL_SERIES_BACKFILL_PERIOD
+    return period
 
 
 async def visible_market_codes(
@@ -494,6 +507,24 @@ async def _refresh_index_daily_bars_unlocked(
     if untracked:
         raise ValueError(f"untracked symbols: {', '.join(untracked)}")
 
+    # A newly added tracked symbol has no rows in an existing deployment. A
+    # short scheduled refresh alone cannot provide the prior-year close needed
+    # for YTD calculations, so give only missing series the normal two-year
+    # bootstrap. This is deliberately one bounded request per symbol: explicit
+    # long-window operator requests remain unchanged and later refreshes return
+    # to their requested short window.
+    stored_symbols = set(
+        (
+            await database.scalars(
+                select(IndexDailyBar.symbol).where(IndexDailyBar.symbol.in_(symbols)).distinct()
+            )
+        ).all()
+    )
+    fetch_periods = {
+        symbol: select_index_refresh_period(period=period, has_stored_bars=symbol in stored_symbols)
+        for symbol in symbols
+    }
+
     # Fetching is the slow part: yfinance issues several HTTP requests per symbol
     # (timezone, cookie/crumb, then the bars), so ten symbols in series can
     # outlast the 60s proxy budget in infra/nginx/conf.d/default.conf whenever
@@ -504,7 +535,9 @@ async def _refresh_index_daily_bars_unlocked(
         async with semaphore:
             try:
                 return await adapter.get_daily_bars(
-                    market=TRACKED_INDICES[symbol], symbol=symbol, period=period
+                    market=TRACKED_INDICES[symbol],
+                    symbol=symbol,
+                    period=fetch_periods[symbol],
                 )
             except DataSourceError as error:
                 return error
@@ -655,125 +688,115 @@ INSTITUTIONAL_MARKET_CODE = "tw_equity"
 INSTITUTIONAL_FOREIGN_TYPES = ("foreign", "foreign_dealer")
 INSTITUTIONAL_TRUST_TYPES = ("trust",)
 INSTITUTIONAL_DEALER_TYPES = ("dealer_self", "dealer_hedge")
-# A sixth category would otherwise be dropped from the market totals in silence.
-# Import fails instead, before anything can serve a number that is short one
-# investor. Sorted rather than set-compared so a category in two folds, which
-# would double count it, is caught too.
+# A sixth category would otherwise be dropped from the totals in silence. Import
+# fails instead, before anything can serve a number that is short one investor.
+# Sorted rather than set-compared so a category in two folds, which would double
+# count it, is caught too.
 if sorted(
     INSTITUTIONAL_FOREIGN_TYPES + INSTITUTIONAL_TRUST_TYPES + INSTITUTIONAL_DEALER_TYPES
 ) != sorted(INVESTOR_TYPES):
     raise RuntimeError("the institutional folds must cover every investor type exactly once")
-INSTITUTIONAL_STOCK_LEADERS = 5
+# TWSE reports market flows in TWD and stock flows in shares; the dashboards
+# read 億元 and 張.
+HUNDRED_MILLION = Decimal(100_000_000)
+SHARES_PER_LOT = Decimal(1_000)
 
 
-async def institutional_market_flows(
-    database: AsyncSession,
-    *,
-    market_code: str,
-    start_date: date | None = None,
-    end_date: date | None = None,
-) -> list[InstitutionalMarketFlowResponse]:
-    """Stored trading days, newest first, as three net amounts.
+def _net_of(column: Any, investor_types: Sequence[str]) -> Any:
+    return func.coalesce(
+        func.sum(column).filter(InstitutionalMarketFlow.investor_type.in_(investor_types)), 0
+    )
 
-    Both bounds are inclusive, and omitting them returns everything stored: the
-    table gains one date per trading day and the run only ever backfills 40, so
-    that is hundreds of rows a year, not thousands.
+
+def _stock_net_of(column: Any, investor_types: Sequence[str]) -> Any:
+    return func.coalesce(
+        func.sum(column).filter(InstitutionalStockFlow.investor_type.in_(investor_types)), 0
+    )
+
+
+async def institutional_flow_series(
+    database: AsyncSession, *, market_code: str, start: date, end: date
+) -> list[InstitutionalFlowPointResponse]:
+    """One point per stored trading day in the window, oldest first, in 億元.
+
+    The five stored categories are folded into the three the dashboard shows,
+    and `total` is all five added up, which is TWSE's own 合計 row.
     """
-
-    def net_of(*investor_types: str) -> Any:
-        return func.coalesce(
-            func.sum(InstitutionalMarketFlow.net_amount).filter(
-                InstitutionalMarketFlow.investor_type.in_(investor_types)
-            ),
-            0,
-        )
-
-    statement = select(
-        InstitutionalMarketFlow.trade_date,
-        net_of(*INSTITUTIONAL_FOREIGN_TYPES).label("foreign_net"),
-        net_of(*INSTITUTIONAL_TRUST_TYPES).label("trust_net"),
-        net_of(*INSTITUTIONAL_DEALER_TYPES).label("dealer_net"),
-    ).where(InstitutionalMarketFlow.market_code == market_code)
-    if start_date is not None:
-        statement = statement.where(InstitutionalMarketFlow.trade_date >= start_date)
-    if end_date is not None:
-        statement = statement.where(InstitutionalMarketFlow.trade_date <= end_date)
+    net = InstitutionalMarketFlow.net_amount
     rows = await database.execute(
-        statement.group_by(InstitutionalMarketFlow.trade_date).order_by(
-            InstitutionalMarketFlow.trade_date.desc()
+        select(
+            InstitutionalMarketFlow.trade_date,
+            _net_of(net, INSTITUTIONAL_FOREIGN_TYPES).label("foreign_net"),
+            _net_of(net, INSTITUTIONAL_TRUST_TYPES).label("trust_net"),
+            _net_of(net, INSTITUTIONAL_DEALER_TYPES).label("dealer_net"),
+            func.coalesce(func.sum(net), 0).label("total_net"),
         )
+        .where(
+            InstitutionalMarketFlow.market_code == market_code,
+            InstitutionalMarketFlow.trade_date >= start,
+            InstitutionalMarketFlow.trade_date <= end,
+        )
+        .group_by(InstitutionalMarketFlow.trade_date)
+        .order_by(InstitutionalMarketFlow.trade_date)
     )
     return [
-        InstitutionalMarketFlowResponse(
+        InstitutionalFlowPointResponse(
             trade_date=row.trade_date,
-            foreign=row.foreign_net,
-            trust=row.trust_net,
-            dealer=row.dealer_net,
+            foreign=Decimal(row.foreign_net) / HUNDRED_MILLION,
+            trust=Decimal(row.trust_net) / HUNDRED_MILLION,
+            dealer=Decimal(row.dealer_net) / HUNDRED_MILLION,
+            total=Decimal(row.total_net) / HUNDRED_MILLION,
         )
         for row in rows
     ]
 
 
-async def institutional_stock_flow_leaders(
-    database: AsyncSession, *, market_code: str, trade_date: date | None = None
-) -> InstitutionalStockFlowLeadersResponse:
-    """The five largest net buys and net sells of one trading day.
+async def institutional_stock_rows(
+    database: AsyncSession, *, market_code: str, on_or_before: date
+) -> tuple[date | None, list[InstitutionalStockFlowResponse]]:
+    """The most recent stored day at or before `on_or_before`, in 張.
 
-    A security's five investor rows are summed first, so the ranking is on what
-    the institutions did to that security as a whole rather than on any one
-    investor's book.
-
-    One statement aggregates the day, and the two ends are taken here: a day is
-    about 1,300 securities, which is cheaper to carry back once than to make the
-    database group them a second time.
+    Every security of that day, largest net buy first, so the caller decides how
+    many of the two ends to show.
     """
     day = InstitutionalStockFlow.trade_date
-    on_day = (
-        day
-        == select(func.max(day))
-        .where(InstitutionalStockFlow.market_code == market_code)
+    shares = InstitutionalStockFlow.net_shares
+    latest = (
+        select(func.max(day))
+        .where(InstitutionalStockFlow.market_code == market_code, day <= on_or_before)
         .scalar_subquery()
-        if trade_date is None
-        else day == trade_date
     )
-    net_shares = func.sum(InstitutionalStockFlow.net_shares).label("net_shares")
+    total_shares = func.sum(shares).label("total_shares")
     rows = (
         await database.execute(
             select(
-                day, InstitutionalStockFlow.symbol, InstitutionalStockFlow.security_name, net_shares
+                day,
+                InstitutionalStockFlow.symbol,
+                InstitutionalStockFlow.security_name,
+                _stock_net_of(shares, INSTITUTIONAL_FOREIGN_TYPES).label("foreign_shares"),
+                _stock_net_of(shares, INSTITUTIONAL_TRUST_TYPES).label("trust_shares"),
+                _stock_net_of(shares, INSTITUTIONAL_DEALER_TYPES).label("dealer_shares"),
+                total_shares,
             )
-            .where(InstitutionalStockFlow.market_code == market_code, on_day)
+            .where(InstitutionalStockFlow.market_code == market_code, day == latest)
             # The name is functionally dependent on the symbol within a day, but
             # PostgreSQL only accepts that for a primary key, which this is not.
             .group_by(day, InstitutionalStockFlow.symbol, InstitutionalStockFlow.security_name)
+            # The symbol tie-break keeps the order stable across identical sums,
+            # which a day of untraded securities has plenty of.
+            .order_by(total_shares.desc(), InstitutionalStockFlow.symbol)
         )
     ).all()
     if not rows:
-        return InstitutionalStockFlowLeadersResponse(
-            trade_date=trade_date, top_buys=[], top_sells=[]
+        return None, []
+    return rows[0].trade_date, [
+        InstitutionalStockFlowResponse(
+            symbol=row.symbol,
+            name=row.security_name,
+            foreign_lots=Decimal(row.foreign_shares) / SHARES_PER_LOT,
+            trust_lots=Decimal(row.trust_shares) / SHARES_PER_LOT,
+            dealer_lots=Decimal(row.dealer_shares) / SHARES_PER_LOT,
+            total_lots=Decimal(row.total_shares) / SHARES_PER_LOT,
         )
-
-    def leaders(side: list[Any], key: Any) -> list[InstitutionalStockFlowLeaderResponse]:
-        # Each list holds its own sign only, so a quiet day returns fewer than
-        # five rather than filling the sell list with net buyers, and a total of
-        # zero is neither, so it is listed nowhere. The symbol tie-break keeps
-        # the order stable across identical sums, which a day of untraded
-        # securities has plenty of.
-        return [
-            InstitutionalStockFlowLeaderResponse(
-                symbol=row.symbol,
-                security_name=row.security_name,
-                net_shares=row.net_shares,
-            )
-            for row in sorted(side, key=key)[:INSTITUTIONAL_STOCK_LEADERS]
-        ]
-
-    return InstitutionalStockFlowLeadersResponse(
-        trade_date=rows[0].trade_date,
-        top_buys=leaders(
-            [row for row in rows if row.net_shares > 0], lambda row: (-row.net_shares, row.symbol)
-        ),
-        top_sells=leaders(
-            [row for row in rows if row.net_shares < 0], lambda row: (row.net_shares, row.symbol)
-        ),
-    )
+        for row in rows
+    ]

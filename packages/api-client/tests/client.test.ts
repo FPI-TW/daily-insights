@@ -13,7 +13,7 @@ import {
 import { createServerTransport } from "../src/server"
 import {
   indexMovingAveragesSchema,
-  institutionalStockFlowLeadersSchema,
+  institutionalStocksSchema,
   yfinanceDailyBarsResponseSchema,
 } from "../src/schemas"
 
@@ -174,62 +174,34 @@ describe("API client trust boundary", () => {
     )
   })
 
-  it("fetches institutional flows and rejects a malformed leader row", async () => {
-    const leaders = {
-      trade_date: "2026-09-04",
-      top_buys: [
+  it("accepts an institutional stock row whose name TWSE left blank", async () => {
+    const rows = {
+      as_of: "2026-09-04",
+      contract_version: "twse-institutional-v1",
+      contract_hash: "a".repeat(64),
+      endpoint: "/rwd/zh/fund/T86",
+      rows: [
         {
           symbol: "2330",
-          security_name: "台積電",
-          net_shares: 1000,
+          name: "",
+          foreign_lots: "1000",
+          trust_lots: "0",
+          dealer_lots: "0",
+          total_lots: "1000",
         },
       ],
-      top_sells: [],
     }
-    const transport = vi.fn(async (path: string) =>
-      Response.json(
-        path.includes("market-flows")
-          ? [{ trade_date: "2026-09-04", foreign: 1, trust: -2, dealer: 3 }]
-          : leaders
-      )
-    )
-    const client = createMarketClient(transport)
-    await expect(client.institutionalMarketFlows()).resolves.toEqual([
-      { trade_date: "2026-09-04", foreign: 1, trust: -2, dealer: 3 },
-    ])
-    expect(transport).toHaveBeenCalledWith(
-      "/api/markets/institutional/market-flows"
-    )
-    await client.institutionalMarketFlows({
-      startDate: "2026-09-01",
-      endDate: "2026-09-04",
-    })
-    expect(transport).toHaveBeenCalledWith(
-      "/api/markets/institutional/market-flows?start_date=2026-09-01&end_date=2026-09-04"
-    )
-    await expect(client.institutionalStockFlowLeaders()).resolves.toEqual(
-      leaders
-    )
-    expect(transport).toHaveBeenCalledWith(
-      "/api/markets/institutional/stock-flows"
-    )
-    await client.institutionalStockFlowLeaders("2026-09-03")
-    expect(transport).toHaveBeenCalledWith(
-      "/api/markets/institutional/stock-flows?trade_date=2026-09-03"
-    )
+    // Nothing on the way in requires a name: the adapter only rejects a blank
+    // symbol, and one blank name here would cost the caller the whole panel.
+    await expect(
+      createMarketClient(async () => Response.json(rows)).institutionalStocks()
+    ).resolves.toEqual(rows)
     expect(
-      institutionalStockFlowLeadersSchema.safeParse({
-        ...leaders,
-        top_buys: [{ ...leaders.top_buys[0], net_shares: "1000" }],
+      institutionalStocksSchema.safeParse({
+        ...rows,
+        rows: [{ ...rows.rows[0], symbol: "" }],
       }).success
     ).toBe(false)
-    // A blank security name must not cost the caller the whole response.
-    expect(
-      institutionalStockFlowLeadersSchema.safeParse({
-        ...leaders,
-        top_buys: [{ ...leaders.top_buys[0], security_name: "" }],
-      }).success
-    ).toBe(true)
   })
 
   it("fetches and strictly validates index moving averages", async () => {
@@ -289,6 +261,54 @@ describe("API client trust boundary", () => {
         },
       },
     })
+  })
+
+  it("fetches and validates TWSE institutional flow contracts", async () => {
+    const contract = {
+      as_of: "2026-09-04",
+      contract_version: "twse-institutional-v1",
+      contract_hash: "a".repeat(64),
+      endpoint: "/rwd/zh/fund/BFI82U",
+    }
+    const transport = vi.fn(async (path: string) =>
+      path.includes("institutional-flows")
+        ? Response.json({
+            ...contract,
+            series: [
+              {
+                trade_date: "2026-09-04",
+                foreign: "12.5",
+                trust: "-1",
+                dealer: "0.5",
+                total: "12",
+              },
+            ],
+          })
+        : Response.json({
+            ...contract,
+            endpoint: "/rwd/en/fund/T86",
+            rows: [
+              {
+                symbol: "2330",
+                name: "TSMC",
+                foreign_lots: "12.345",
+                trust_lots: "2",
+                dealer_lots: "-0.5",
+                total_lots: "13.845",
+              },
+            ],
+          })
+    )
+    const client = createMarketClient(transport)
+    await expect(
+      client.institutionalFlows({ start: "2026-07-01", end: "2026-09-04" })
+    ).resolves.toMatchObject({ series: [{ total: "12" }] })
+    await expect(
+      client.institutionalStocks({ date: "2026-09-04", locale: "en" })
+    ).resolves.toMatchObject({ rows: [{ total_lots: "13.845" }] })
+    expect(transport).toHaveBeenCalledWith(
+      "/api/markets/tw/institutional-stocks?date=2026-09-04&locale=en"
+    )
   })
 
   it("refreshes the seven-day index window with CSRF protection", async () => {

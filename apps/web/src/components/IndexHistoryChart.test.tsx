@@ -71,6 +71,15 @@ describe("IndexHistoryChart", () => {
   it("switches close series locally and exposes partial failures", async () => {
     await renderLocalized(<IndexHistoryChart history={history} locale="en" />)
 
+    expect(
+      screen.getByRole("heading", { name: "Index performance" })
+    ).toBeVisible()
+    expect(
+      screen.queryByRole("heading", { name: "Index technicals" })
+    ).toBeNull()
+    expect(screen.getByTestId("index-chart")).not.toHaveTextContent(
+      '"type":"candlestick"'
+    )
     expect(screen.getByTestId("index-chart")).toHaveTextContent("45050.5")
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
       '"lineStyle":{"width":3}'

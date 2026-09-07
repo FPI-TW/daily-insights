@@ -15,7 +15,7 @@ export function IndexHistoryLoading() {
   const { t } = useTranslation()
   return (
     <section
-      className="surface-panel mt-6 animate-pulse p-5"
+      className="rounded-2xl border border-line bg-surface mt-6 animate-pulse p-5"
       role="status"
       aria-live="polite"
       aria-label={t("indexChartLoading")}
@@ -84,7 +84,10 @@ export function IndexHistoryChart({
 
   if (history === null) {
     return (
-      <section className="surface-panel mt-6 p-5" role="status">
+      <section
+        className="rounded-2xl border border-line bg-surface mt-6 p-5"
+        role="status"
+      >
         <h2 className="m-0 text-base font-extrabold">{t("indexChartTitle")}</h2>
         <p className="mt-3 mb-0 text-sm text-sea-ink-soft">
           {t("indexChartUnavailable")}
@@ -96,9 +99,12 @@ export function IndexHistoryChart({
   const selected =
     history.series.find(item => item.symbol === selectedSymbol) ??
     history.series[0]
-  if (!selected) {
+  if (!selected?.bars.length) {
     return (
-      <section className="surface-panel mt-6 p-5" role="status">
+      <section
+        className="rounded-2xl border border-line bg-surface mt-6 p-5"
+        role="status"
+      >
         <h2 className="m-0 text-base font-extrabold">{t("indexChartTitle")}</h2>
         <p className="mt-3 mb-0 text-sm text-sea-ink-soft">
           {history.failedSymbols.length > 0
@@ -147,7 +153,7 @@ export function IndexHistoryChart({
   ]
   return (
     <section
-      className="surface-panel mt-6 min-w-0 p-5"
+      className="rounded-2xl border border-line bg-surface mt-6 min-w-0 p-5"
       aria-labelledby="index-history-title"
     >
       <div className="mb-4 flex flex-wrap items-end justify-between gap-4">

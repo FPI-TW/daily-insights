@@ -170,9 +170,7 @@ def _signed_in_client(
 
     async def auth() -> AuthContext:
         return AuthContext(
-            user=User(system_role=role),
-            session=Session(),
-            organization_id=organization_id,
+            user=User(system_role=role), session=Session(), organization_id=organization_id
         )
 
     app.dependency_overrides[require_password_changed] = auth
@@ -180,145 +178,85 @@ def _signed_in_client(
 
 
 @pytest.mark.asyncio
-async def test_market_flows_endpoint_folds_five_categories_into_three(
+async def test_market_flow_series_folds_five_categories_and_reports_in_hundred_millions(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     fetched_at = datetime(2026, 9, 4, 8, tzinfo=UTC)
-    # Dated relative to today so the default window keeps containing them; fixed
-    # dates would leave the assertions passing until they silently aged out.
+    # Dated relative to today so the default 100-day window keeps containing
+    # them; fixed dates would age out and leave the assertions meaningless.
     today = datetime.now(UTC).date()
-    recent, earlier = today - timedelta(days=1), today - timedelta(days=2)
-    ancient = today - timedelta(days=400)
+    recent, earlier, ancient = (
+        today - timedelta(days=1),
+        today - timedelta(days=2),
+        today - timedelta(days=400),
+    )
     async with session_factory.begin() as database:
-        for day, offset in ((earlier, 0), (recent, 1), (ancient, -100)):
+        for day in (earlier, recent, ancient):
             await store_institutional_market_flows(
                 database,
                 market_code="tw_equity",
                 flows=_market_day(
                     day,
                     {
-                        "foreign": 100 + offset,
-                        "foreign_dealer": 20,
-                        "trust": -30,
-                        "dealer_self": 7,
-                        "dealer_hedge": -3,
+                        # The real BFI82U row for 2026-09-04, so `total` lands on
+                        # the 合計 TWSE published that day.
+                        "foreign": 56_212_953_803,
+                        "foreign_dealer": 0,
+                        "trust": -910_866_463,
+                        "dealer_self": 1_506_303_813,
+                        "dealer_hedge": 4_863_757_431,
                     },
                     fetched_at,
                 ),
             )
 
     async with _signed_in_client(session_factory) as client:
-        response = await client.get("/api/markets/institutional/market-flows")
+        response = await client.get("/api/markets/tw/institutional-flows")
         windowed = await client.get(
-            "/api/markets/institutional/market-flows",
-            params={"start_date": recent.isoformat(), "end_date": recent.isoformat()},
-        )
-        open_ended = await client.get(
-            "/api/markets/institutional/market-flows",
-            params={"end_date": earlier.isoformat()},
-        )
-        whole_history = await client.get(
-            "/api/markets/institutional/market-flows",
-            params={"start_date": ancient.isoformat()},
+            "/api/markets/tw/institutional-flows",
+            params={"start": recent.isoformat(), "end": recent.isoformat()},
         )
         inverted = await client.get(
-            "/api/markets/institutional/market-flows",
-            params={"start_date": recent.isoformat(), "end_date": earlier.isoformat()},
+            "/api/markets/tw/institutional-flows",
+            params={"start": recent.isoformat(), "end": earlier.isoformat()},
+        )
+        too_wide = await client.get(
+            "/api/markets/tw/institutional-flows",
+            params={"start": ancient.isoformat(), "end": recent.isoformat()},
         )
 
     assert response.status_code == 200, response.text
-    # Newest first, the two dealer books and the two foreign books are summed,
-    # and an unqualified request gets the last year, so `ancient` is left out.
-    assert response.json() == [
-        {"trade_date": recent.isoformat(), "foreign": 121, "trust": -30, "dealer": 4},
-        {"trade_date": earlier.isoformat(), "foreign": 120, "trust": -30, "dealer": 4},
-    ]
-    # Both bounds are inclusive, and naming either one turns the default off:
-    # asking only for an end date reaches all the way back.
-    assert [row["trade_date"] for row in windowed.json()] == [recent.isoformat()]
-    assert [row["trade_date"] for row in open_ended.json()] == [
+    body = response.json()
+    # Oldest first, in 億元, with the day outside the default window left out.
+    assert [point["trade_date"] for point in body["series"]] == [
         earlier.isoformat(),
-        ancient.isoformat(),
+        recent.isoformat(),
     ]
-    assert len(whole_history.json()) == 3
+    assert body["as_of"] == recent.isoformat()
+    assert len(body["contract_hash"]) == 64
+    assert body["endpoint"] == "/rwd/zh/fund/BFI82U"
+    assert body["series"][0] == {
+        "trade_date": earlier.isoformat(),
+        "foreign": "562.12953803",
+        "trust": "-9.10866463",
+        "dealer": "63.70061244",
+        # TWSE's own 合計 row for that day, to the cent.
+        "total": "616.72148584",
+    }
+    assert [point["trade_date"] for point in windowed.json()["series"]] == [recent.isoformat()]
     assert inverted.status_code == 422
-    assert inverted.json()["detail"] == "start_date must not be after end_date"
+    assert too_wide.status_code == 422
+    assert too_wide.json()["detail"] == "date range must not exceed 180 days"
 
 
 @pytest.mark.asyncio
-async def test_stock_flow_leaders_rank_on_the_sum_of_all_five_investors(
+async def test_stock_rows_report_lots_for_the_latest_stored_day(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     fetched_at = datetime(2026, 9, 4, 8, tzinfo=UTC)
-    day = date(2026, 9, 4)
-    # Seven securities, each with all five investor rows, so the fives have
-    # something to exclude. 2306 only tops the list once the five are summed:
-    # no single investor of its own puts it above 2305. The five categories are
-    # disjoint, so summing all of them is TWSE's own 三大法人買賣超股數; the test
-    # above pins that identity to a real published row.
-    nets: dict[tuple[str, str], int] = {}
-    for index in range(7):
-        symbol = f"{2300 + index}"
-        base = (index - 3) * 1_000
-        for investor_type in (
-            "foreign",
-            "foreign_dealer",
-            "trust",
-            "dealer_self",
-            "dealer_hedge",
-        ):
-            nets[(symbol, investor_type)] = base
-    nets[("2305", "foreign")] = 9_000
     async with session_factory.begin() as database:
-        await store_institutional_stock_flows(
-            database, market_code="tw_equity", flows=_stock_day(day, nets, fetched_at)
-        )
-        # A second day the request must not mix in.
-        await store_institutional_stock_flows(
-            database,
-            market_code="tw_equity",
-            flows=_stock_day(date(2026, 9, 3), {("9999", "foreign"): 99_000}, fetched_at),
-        )
-
-    async with _signed_in_client(session_factory) as client:
-        latest = await client.get("/api/markets/institutional/stock-flows")
-        earlier = await client.get(
-            "/api/markets/institutional/stock-flows", params={"trade_date": "2026-09-03"}
-        )
-
-    assert latest.status_code == 200, latest.text
-    body = latest.json()
-    assert body["trade_date"] == "2026-09-04"
-    # 2306 sums to 15,000 and 2305 to 17,000: the single large foreign row wins,
-    # which a per-investor ranking would have ordered the other way.
-    assert [row["symbol"] for row in body["top_buys"]] == ["2305", "2306", "2304"]
-    # The day is on the envelope only; a row does not repeat it.
-    assert body["top_buys"][0] == {
-        "symbol": "2305",
-        "security_name": "公司2305",
-        "net_shares": 17_000,
-    }
-    assert body["top_buys"][1]["net_shares"] == 15_000
-    # Only three securities sold on this day, so the list is short rather than
-    # padded with net buyers, and 2303 nets to zero so it is on neither list.
-    assert [row["symbol"] for row in body["top_sells"]] == ["2300", "2301", "2302"]
-    assert body["top_sells"][0]["net_shares"] == -15_000
-    listed = {row["symbol"] for row in body["top_buys"]}
-    assert listed.isdisjoint(row["symbol"] for row in body["top_sells"])
-    assert "2303" not in listed
-
-    assert earlier.status_code == 200, earlier.text
-    assert [row["symbol"] for row in earlier.json()["top_buys"]] == ["9999"]
-
-
-@pytest.mark.asyncio
-async def test_stock_flow_total_matches_the_three_institution_column_twse_publishes(
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    """The five stored categories are disjoint, so their sum is TWSE's own
-    三大法人買賣超股數. These are 2324 仁寶's real 2026-09-04 numbers, and the
-    identity holds on all 1,340 rows of that day's T86 response."""
-    async with session_factory.begin() as database:
+        # 2324 仁寶's real 2026-09-04 numbers, so the fold is pinned to a row
+        # whose 三大法人買賣超股數 TWSE publishes: 71,016,331 shares.
         await store_institutional_stock_flows(
             database,
             market_code="tw_equity",
@@ -330,33 +268,70 @@ async def test_stock_flow_total_matches_the_three_institution_column_twse_publis
                     ("2324", "trust"): -21_000,
                     ("2324", "dealer_self"): 200_115,
                     ("2324", "dealer_hedge"): 1_470_932,
+                    ("1101", "foreign"): -5_000,
+                    ("1101", "foreign_dealer"): 0,
+                    ("1101", "trust"): 0,
+                    ("1101", "dealer_self"): 0,
+                    ("1101", "dealer_hedge"): 0,
                 },
-                datetime(2026, 9, 4, 8, tzinfo=UTC),
+                fetched_at,
             ),
+        )
+        # An older day the request must not reach for once a newer one exists.
+        await store_institutional_stock_flows(
+            database,
+            market_code="tw_equity",
+            flows=_stock_day(date(2026, 9, 3), {("9999", "foreign"): 1_000}, fetched_at),
         )
 
     async with _signed_in_client(session_factory) as client:
-        response = await client.get("/api/markets/institutional/stock-flows")
+        latest = await client.get(
+            "/api/markets/tw/institutional-stocks", params={"date": "2026-09-05"}
+        )
+        earlier = await client.get(
+            "/api/markets/tw/institutional-stocks", params={"date": "2026-09-03", "locale": "en"}
+        )
+        before_any = await client.get(
+            "/api/markets/tw/institutional-stocks", params={"date": "2026-01-01"}
+        )
 
-    assert response.status_code == 200, response.text
-    assert response.json()["top_buys"][0]["net_shares"] == 71_016_331
+    assert latest.status_code == 200, latest.text
+    body = latest.json()
+    assert body["as_of"] == "2026-09-04"
+    assert body["endpoint"] == "/rwd/zh/fund/T86"
+    # Largest net buy first, and shares divided into lots.
+    assert body["rows"] == [
+        {
+            "symbol": "2324",
+            "name": "公司2324",
+            "foreign_lots": "69366.284",
+            "trust_lots": "-21",
+            "dealer_lots": "1671.047",
+            "total_lots": "71016.331",
+        },
+        {
+            "symbol": "1101",
+            "name": "公司1101",
+            "foreign_lots": "-5",
+            "trust_lots": "0",
+            "dealer_lots": "0",
+            "total_lots": "-5",
+        },
+    ]
+    # A date before the newest one reads that older day instead, and the locale
+    # is accepted even though TWSE publishes no English security names.
+    assert [row["symbol"] for row in earlier.json()["rows"]] == ["9999"]
+    assert before_any.json() == {
+        "as_of": None,
+        "contract_version": body["contract_version"],
+        "contract_hash": body["contract_hash"],
+        "endpoint": "/rwd/zh/fund/T86",
+        "rows": [],
+    }
 
 
 @pytest.mark.asyncio
-async def test_institutional_endpoints_report_an_empty_store_without_failing(
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    async with _signed_in_client(session_factory) as client:
-        market = await client.get("/api/markets/institutional/market-flows")
-        stock = await client.get("/api/markets/institutional/stock-flows")
-
-    assert market.status_code == 200 and market.json() == []
-    assert stock.status_code == 200
-    assert stock.json() == {"trade_date": None, "top_buys": [], "top_sells": []}
-
-
-@pytest.mark.asyncio
-async def test_institutional_flows_are_hidden_when_the_contract_excludes_the_market(
+async def test_institutional_endpoints_are_hidden_when_the_contract_excludes_taiwan(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     hidden_from = uuid.uuid4()
@@ -387,24 +362,16 @@ async def test_institutional_flows_are_hidden_when_the_contract_excludes_the_mar
                 changed_at=datetime.now(UTC),
             )
         )
-        await store_institutional_market_flows(
-            database,
-            market_code="tw_equity",
-            flows=_market_day(
-                date(2026, 9, 4), {"foreign": 1}, datetime(2026, 9, 4, 8, tzinfo=UTC)
-            ),
-        )
 
     async with _signed_in_client(session_factory, organization_id=hidden_from) as blocked:
-        market = await blocked.get("/api/markets/institutional/market-flows")
-        stock = await blocked.get("/api/markets/institutional/stock-flows")
+        flows = await blocked.get("/api/markets/tw/institutional-flows")
+        stocks = await blocked.get("/api/markets/tw/institutional-stocks")
     # Internal staff belong to no organization and still get their own preview.
     async with _signed_in_client(
         session_factory, role=SystemRole.ADMIN, organization_id=None
     ) as staff:
-        allowed = await staff.get("/api/markets/institutional/market-flows")
+        allowed = await staff.get("/api/markets/tw/institutional-flows")
 
-    assert market.status_code == 404 and stock.status_code == 404
-    assert market.json()["detail"] == "market not found"
+    assert flows.status_code == 404 and stocks.status_code == 404
     assert allowed.status_code == 200, allowed.text
-    assert [row["foreign"] for row in allowed.json()] == [1]
+    assert allowed.json()["series"] == []

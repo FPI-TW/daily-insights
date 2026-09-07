@@ -38,9 +38,10 @@ const decimalSchema = z.string().regex(/^-?\d+(?:\.\d+)?$/)
 export const indexSymbolSchema = z.enum([
   "^DJI",
   "^GSPC",
-  "^IXIC",
+  "^NDX",
   "^RUT",
   "^SOX",
+  "^VIX",
   "^HSI",
   "^TWII",
   "000001.SS",
@@ -99,47 +100,45 @@ export const indexMovingAveragesSchema = z.object({
   ]),
 })
 export type IndexMovingAverages = z.infer<typeof indexMovingAveragesSchema>
-// Net amounts in TWD, with the five stored categories folded into three.
-export const institutionalMarketFlowSchema = z.object({
-  trade_date: z.iso.date(),
-  foreign: z.number().int(),
-  trust: z.number().int(),
-  dealer: z.number().int(),
-})
-export type InstitutionalMarketFlow = z.infer<
-  typeof institutionalMarketFlowSchema
->
-export const institutionalMarketFlowListSchema = z.array(
-  institutionalMarketFlowSchema
-)
-// net_shares is the security's total across all five investor categories. The
-// day is on the envelope, not repeated on every row.
-export const institutionalStockFlowLeaderSchema = z.object({
-  symbol: z.string().min(1),
-  // Copied verbatim from TWSE and never validated on the way in, unlike the
-  // symbol. Requiring it here would turn one blank name into a rejected
-  // response and an empty panel, which is worse than a row showing its code.
-  security_name: z.string(),
-  net_shares: z.number().int(),
-})
-export type InstitutionalStockFlowLeader = z.infer<
-  typeof institutionalStockFlowLeaderSchema
->
-// At most five rows in each direction: a security is only listed on the side
-// its total falls on, so a quiet day returns fewer.
-export const institutionalStockFlowLeadersSchema = z.object({
-  trade_date: z.iso.date().nullable(),
-  top_buys: z.array(institutionalStockFlowLeaderSchema),
-  top_sells: z.array(institutionalStockFlowLeaderSchema),
-})
-export type InstitutionalStockFlowLeaders = z.infer<
-  typeof institutionalStockFlowLeadersSchema
->
 export const indexLatestBarSchema = indexDailyBarSchema.extend({
   previous_close: decimalSchema.nullable(),
 })
 export type IndexLatestBar = z.infer<typeof indexLatestBarSchema>
 export const indexLatestBarListSchema = z.array(indexLatestBarSchema)
+export const institutionalFlowPointSchema = z.object({
+  trade_date: z.iso.date(),
+  foreign: decimalSchema,
+  trust: decimalSchema,
+  dealer: decimalSchema,
+  total: decimalSchema,
+})
+export const institutionalFlowsSchema = z.object({
+  as_of: z.iso.date().nullable(),
+  contract_version: z.string().min(1),
+  contract_hash: z.string().length(64),
+  endpoint: z.string().min(1),
+  series: z.array(institutionalFlowPointSchema),
+})
+export type InstitutionalFlows = z.infer<typeof institutionalFlowsSchema>
+export const institutionalStockFlowSchema = z.object({
+  symbol: z.string().min(1),
+  // Copied verbatim from TWSE and never validated on the way in, unlike the
+  // symbol. Requiring it here would turn one blank name into a rejected
+  // response and an empty panel, which is worse than a row showing its code.
+  name: z.string(),
+  foreign_lots: decimalSchema,
+  trust_lots: decimalSchema,
+  dealer_lots: decimalSchema,
+  total_lots: decimalSchema,
+})
+export const institutionalStocksSchema = z.object({
+  as_of: z.iso.date().nullable(),
+  contract_version: z.string().min(1),
+  contract_hash: z.string().length(64),
+  endpoint: z.string().min(1),
+  rows: z.array(institutionalStockFlowSchema),
+})
+export type InstitutionalStocks = z.infer<typeof institutionalStocksSchema>
 export const yfinanceSymbolBarsSchema = z.object({
   symbol: indexSymbolSchema,
   market: marketCodeSchema,

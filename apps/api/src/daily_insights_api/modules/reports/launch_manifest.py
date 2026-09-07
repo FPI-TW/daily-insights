@@ -125,7 +125,7 @@ class LaunchManifest(ManifestModel):
 
 
 ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
-    version="three-market.v8",
+    version="three-market.v9",
     provider="twelve_data",
     markets=(
         MarketManifest(
@@ -232,22 +232,6 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
             market_code="us_equity",
             blocks=(
                 BlockManifest(
-                    id="us.index_proxies",
-                    kind="metric",
-                    datasets=("us.index_proxy_quotes",),
-                    formula=(
-                        "fixed basket of four index-proxy ETFs and VIXY; latest provider quote "
-                        "close; percent change=(close-previous_close)/previous_close*100"
-                    ),
-                    unit_code="usd",
-                    precision=2,
-                    labels={
-                        "zh-hant": "美股指數快照",
-                        "zh-hans": "美股指数快照",
-                        "en": "US index snapshot",
-                    },
-                ),
-                BlockManifest(
                     id="us.mega_caps",
                     kind="table",
                     datasets=("us.mega_cap_quotes",),
@@ -341,16 +325,6 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
             timezone="UTC per provider crypto time-series contract",
             day_boundary="provider 1day bar calendar date",
             freshness="latest completed 1day bar",
-        ),
-        DatasetManifest(
-            key="us.index_proxy_quotes",
-            endpoint="/quote",
-            symbols=("SPY", "QQQ", "DIA", "IWM", "VIXY"),
-            symbol_units={"SPY": "USD", "QQQ": "USD", "DIA": "USD", "IWM": "USD", "VIXY": "USD"},
-            required_fields=("close", "previous_close", "timestamp"),
-            timezone="UTC derived from provider Unix timestamp",
-            day_boundary="UTC calendar date of provider timestamp",
-            freshness="latest completed provider quote",
         ),
         DatasetManifest(
             key="us.mega_cap_quotes",

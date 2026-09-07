@@ -94,3 +94,12 @@ describe("unitLabel and dates", () => {
     expect(formatIsoDate("2026-09-02", "zh-hant")).toBe("2026年9月2日")
   })
 })
+
+it("keeps calendar dates stable and formats instants in the explicit product zone", async () => {
+  const { formatDateStamp, formatTimestamp } = await import("./format")
+  expect(formatDateStamp("2024-02-29")).toBe("2024-02-29")
+  expect(formatDateStamp("2026-09-04T20:30:00Z")).toBe("2026-09-05")
+  expect(formatDateStamp("2026-09-04T20:30:00Z", "UTC")).toBe("2026-09-04")
+  expect(formatTimestamp("2026-09-04T20:30:00Z")).toBe("2026-09-05 04:30")
+  expect(formatDateStamp("invalid")).toBe("—")
+})
