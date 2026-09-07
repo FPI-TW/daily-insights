@@ -448,11 +448,7 @@ export function TaiwanInstitutionalFlows({
   const asOf = data.flows?.as_of ?? data.stocks?.as_of ?? "—"
   return (
     <div className="mt-6 min-w-0">
-      <DashboardSection
-        number="02"
-        title={t("sectionFlows")}
-        meta={t("flowsMeta", { date: asOf })}
-      >
+      <DashboardSection meta={t("flowsMeta", { date: asOf })}>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-6">
           <FlowPanel flows={data.flows} history={history} locale={locale} />
           <StocksPanel stocks={data.stocks} locale={locale} />

@@ -89,7 +89,7 @@ describe("TaiwanInstitutionalFlows", () => {
   it("renders real rows, top-five rankings and one selected chip per control", () => {
     show()
     expect(
-      screen.getByRole("heading", { name: "Institutional flows" })
+      screen.getByRole("heading", { name: "Daily institutional net buying" })
     ).toBeInTheDocument()
     expect(screen.getAllByRole("button", { pressed: true })).toHaveLength(3)
     expect(screen.getByText("Stock 0")).toBeInTheDocument()
@@ -124,8 +124,12 @@ describe("TaiwanInstitutionalFlows", () => {
     ["zh-hant", "三大法人"],
     ["zh-hans", "三大法人"],
     ["en", "Institutional flows"],
-  ] as const)("has localized section text for %s", (locale, heading) => {
-    show(locale)
-    expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument()
-  })
+  ] as const)(
+    "omits the category heading but preserves localized controls for %s",
+    (locale, heading) => {
+      show(locale)
+      expect(screen.queryByRole("heading", { name: heading })).toBeNull()
+      expect(screen.getByRole("group", { name: heading })).toBeInTheDocument()
+    }
+  )
 })
