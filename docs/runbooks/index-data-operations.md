@@ -58,8 +58,7 @@ holidays before declaring a failure. A rerun should leave the same date/symbol
 keys in place (corrected close values may legitimately update).
 
 For the VIX chart rollout, explicitly verify that `^VIX` meets both checks
-before deploying the web image. `^VIX` is the Cboe Volatility Index itself, not
-the `VIXY` exchange-traded product used as a proxy in the morning report.
+before deploying the web image. `^VIX` is the Cboe Volatility Index itself.
 
 ## Routine and manual refresh
 

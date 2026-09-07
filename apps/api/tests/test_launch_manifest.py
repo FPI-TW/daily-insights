@@ -42,8 +42,8 @@ from daily_insights_api.modules.reports.morning_report import (
 
 
 def test_manifest_freezes_three_markets_and_block_order() -> None:
-    assert MORNING_REPORT_DERIVATION_VERSION == "twelve-data.three-market.v8"
-    assert ACTIVE_LAUNCH_MANIFEST.version == "three-market.v8"
+    assert MORNING_REPORT_DERIVATION_VERSION == "twelve-data.three-market.v9"
+    assert ACTIVE_LAUNCH_MANIFEST.version == "three-market.v9"
     assert tuple(market.market_code for market in ACTIVE_LAUNCH_MANIFEST.markets) == (
         "global_macro_bonds",
         "crypto",
@@ -58,7 +58,6 @@ def test_manifest_freezes_three_markets_and_block_order() -> None:
         "macro.commodity_ratios",
         "crypto.overview",
         "crypto.normalized_performance",
-        "us.index_proxies",
         "us.mega_caps",
     ]
     assert {
@@ -72,7 +71,7 @@ def test_manifest_freezes_three_markets_and_block_order() -> None:
 def test_manifest_hash_is_stable_and_changes_with_content() -> None:
     round_trip = LaunchManifest.model_validate(ACTIVE_LAUNCH_MANIFEST.model_dump(mode="json"))
     assert round_trip.sha256 == ACTIVE_LAUNCH_MANIFEST.sha256
-    changed = round_trip.model_copy(update={"version": "three-market.v9"})
+    changed = round_trip.model_copy(update={"version": "three-market.v10"})
     assert changed.sha256 != round_trip.sha256
 
 
@@ -159,17 +158,14 @@ def test_manifest_freezes_commodity_ratio_labels_and_precision() -> None:
     }
 
 
-def test_us_equity_uses_fixed_usd_baskets_instead_of_provider_movers() -> None:
+def test_us_equity_uses_fixed_mega_cap_basket_instead_of_provider_movers() -> None:
     keys = {dataset.key: dataset for dataset in ACTIVE_LAUNCH_MANIFEST.datasets}
     assert "us.market_movers" not in keys
-    proxies = keys["us.index_proxy_quotes"]
     mega_caps = keys["us.mega_cap_quotes"]
-    assert proxies.endpoint == mega_caps.endpoint == "/quote"
-    assert proxies.symbols == ("SPY", "QQQ", "DIA", "IWM", "VIXY")
+    assert mega_caps.endpoint == "/quote"
     assert len(mega_caps.symbols) == 8 and "NVDA" in mega_caps.symbols
-    assert set(proxies.symbol_units.values()) == set(mega_caps.symbol_units.values()) == {"USD"}
+    assert set(mega_caps.symbol_units.values()) == {"USD"}
     assert tuple(dataset.key for dataset in _market_datasets("us_equity")) == (
-        "us.index_proxy_quotes",
         "us.mega_cap_quotes",
     )
     formulas = [

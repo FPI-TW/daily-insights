@@ -43,7 +43,6 @@ const blockTitleKeys: Record<string, string> = {
   "macro.commodity_ratios": "reportBlockMacroCommodityRatios",
   "crypto.overview": "reportBlockCryptoOverview",
   "crypto.normalized_performance": "reportBlockNormalizedPerformance",
-  "us.index_proxies": "reportBlockUsIndices",
   "us.mega_caps": "reportBlockUsMegaCaps",
 }
 const metricLabelKeys: Record<string, string> = {
@@ -58,11 +57,6 @@ const metricLabelKeys: Record<string, string> = {
   usd_twd: "reportLabelUsdTwd",
   usd_jpy: "reportLabelUsdJpy",
   eur_usd: "reportLabelEurUsd",
-  spy: "reportLabelSpy",
-  qqq: "reportLabelQqq",
-  dia: "reportLabelDia",
-  iwm: "reportLabelIwm",
-  vixy: "reportLabelVixy",
 }
 const columnLabelKeys: Record<string, string> = {
   asset: "reportColumnAsset",
@@ -169,8 +163,10 @@ export function mapReportDetail(report: ApiReportDetail): ProvisionalReport {
   return {
     ...summary(report),
     caveat: report.content.caveat,
-    blocks: report.content.blocks.map(block =>
-      mapBlock(block, report.presentation.labels[block.id])
+    blocks: report.content.blocks.flatMap(block =>
+      blockTitleKeys[block.id] === undefined
+        ? []
+        : [mapBlock(block, report.presentation.labels[block.id])]
     ),
   }
 }
