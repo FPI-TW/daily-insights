@@ -161,6 +161,7 @@ export const dataManagementOperationSchema = z.enum([
   "morning_all",
   "morning_market",
   "index_yahoo",
+  "institutional_twse",
 ])
 export const dataManagementRunStatusSchema = z.enum([
   "pending",
@@ -176,6 +177,7 @@ export const dataManagementRunCreateSchema = z.discriminatedUnion("operation", [
     market_code: launchMarketCodeSchema,
   }),
   z.object({ operation: z.literal("index_yahoo") }),
+  z.object({ operation: z.literal("institutional_twse") }),
 ])
 export type DataManagementRunCreateInput = z.infer<
   typeof dataManagementRunCreateSchema
@@ -184,6 +186,7 @@ export const dataManagementCatalogSchema = z.object({
   taipei_date: z.iso.date(),
   morning_reports_enabled: z.boolean(),
   yfinance_enabled: z.boolean(),
+  twse_enabled: z.boolean(),
   markets: z.array(launchMarketCodeSchema),
 })
 export type DataManagementCatalog = z.infer<typeof dataManagementCatalogSchema>
@@ -209,6 +212,10 @@ export const dataManagementRunSchema = z.discriminatedUnion("operation", [
   }),
   dataManagementRunBaseSchema.extend({
     operation: z.literal("index_yahoo"),
+    market_code: z.null(),
+  }),
+  dataManagementRunBaseSchema.extend({
+    operation: z.literal("institutional_twse"),
     market_code: z.null(),
   }),
 ])

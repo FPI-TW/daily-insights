@@ -23,6 +23,8 @@ EXPECTED_TABLES = {
     "generation_records",
     "index_daily_bars",
     "index_daily_bar_series",
+    "institutional_market_flows",
+    "institutional_stock_flows",
     "login_throttles",
     "markets",
     "memberships",

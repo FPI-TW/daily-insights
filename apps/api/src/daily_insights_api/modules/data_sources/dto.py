@@ -98,24 +98,6 @@ class PageInfo(ImmutableDTO):
     next_cursor: str | None = None
 
 
-class InstitutionalFlowDay(ImmutableDTO):
-    trade_date: date
-    foreign: Decimal
-    trust: Decimal
-    dealer: Decimal
-    total: Decimal
-
-
-class InstitutionalStockFlow(ImmutableDTO):
-    trade_date: date
-    symbol: str
-    name: str
-    foreign_lots: Decimal
-    trust_lots: Decimal
-    dealer_lots: Decimal
-    total_lots: Decimal
-
-
 class Provenance(ImmutableDTO):
     provider: Literal["findb", "twelve_data", "yfinance", "twse"] = "findb"
     contract_version: str
@@ -139,14 +121,4 @@ class Provenance(ImmutableDTO):
 class ProviderPage[ItemT](ImmutableDTO):
     items: tuple[ItemT, ...]
     pagination: PageInfo
-    provenance: Provenance
-
-
-class InstitutionalFlowResult(ImmutableDTO):
-    item: InstitutionalFlowDay | None
-    provenance: Provenance
-
-
-class InstitutionalStockFlowResult(ImmutableDTO):
-    items: tuple[InstitutionalStockFlow, ...]
     provenance: Provenance

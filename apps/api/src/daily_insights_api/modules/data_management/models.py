@@ -23,7 +23,7 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "data_management_runs"
     __table_args__ = (
         CheckConstraint(
-            "operation IN ('morning_all', 'morning_market', 'index_yahoo')",
+            "operation IN ('morning_all', 'morning_market', 'index_yahoo', 'institutional_twse')",
             name="operation_valid",
         ),
         CheckConstraint(
@@ -48,6 +48,14 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
             text("(1)"),
             unique=True,
             postgresql_where=text("status IN ('pending', 'running') AND operation = 'index_yahoo'"),
+        ),
+        Index(
+            "uq_data_management_runs_active_institutional",
+            text("(1)"),
+            unique=True,
+            postgresql_where=text(
+                "status IN ('pending', 'running') AND operation = 'institutional_twse'"
+            ),
         ),
         Index("ix_data_management_runs_created_at", "created_at"),
     )

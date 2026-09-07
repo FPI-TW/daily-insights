@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from daily_insights_api.modules.reports.api import LaunchMarketCode
 
-RunOperation = Literal["morning_all", "morning_market", "index_yahoo"]
+RunOperation = Literal["morning_all", "morning_market", "index_yahoo", "institutional_twse"]
 RunStatus = Literal["pending", "running", "succeeded", "partial", "failed"]
 
 
@@ -29,8 +29,16 @@ class IndexYahooRunCreate(_DataManagementRunCreate):
     market_code: None = None
 
 
+class InstitutionalTwseRunCreate(_DataManagementRunCreate):
+    """Fetch TWSE institutional flows: per-stock for the edition date, market
+    totals back to a rolling window of trading days."""
+
+    operation: Literal["institutional_twse"]
+    market_code: None = None
+
+
 DataManagementRunCreate = Annotated[
-    MorningAllRunCreate | MorningMarketRunCreate | IndexYahooRunCreate,
+    MorningAllRunCreate | MorningMarketRunCreate | IndexYahooRunCreate | InstitutionalTwseRunCreate,
     Field(discriminator="operation"),
 ]
 
@@ -39,6 +47,7 @@ class DataManagementCatalog(BaseModel):
     taipei_date: date
     morning_reports_enabled: bool
     yfinance_enabled: bool
+    twse_enabled: bool
     markets: list[LaunchMarketCode]
 
 
@@ -69,8 +78,16 @@ class IndexYahooRunResponse(_DataManagementRunResponse):
     market_code: None
 
 
+class InstitutionalTwseRunResponse(_DataManagementRunResponse):
+    operation: Literal["institutional_twse"]
+    market_code: None
+
+
 DataManagementRunResponse = Annotated[
-    MorningAllRunResponse | MorningMarketRunResponse | IndexYahooRunResponse,
+    MorningAllRunResponse
+    | MorningMarketRunResponse
+    | IndexYahooRunResponse
+    | InstitutionalTwseRunResponse,
     Field(discriminator="operation"),
 ]
 

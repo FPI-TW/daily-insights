@@ -18,13 +18,18 @@ from daily_insights_api.modules.data_sources.api import (
     DataSourceError,
     IndexSymbol,
     MarketCode,
+    TwseMarketFlows,
+    TwseStockFlows,
     YfinanceAdapter,
     YfinanceDailyBars,
 )
 from daily_insights_api.modules.markets.catalog import MARKETS
 from daily_insights_api.modules.markets.models import (
+    INVESTOR_TYPES,
     IndexDailyBar,
     IndexDailyBarSeries,
+    InstitutionalMarketFlow,
+    InstitutionalStockFlow,
     Market,
     OrganizationMarketPolicy,
 )
@@ -37,6 +42,8 @@ from daily_insights_api.modules.markets.schemas import (
     IndexMovingAverage240SeriesResponse,
     IndexMovingAveragePointResponse,
     IndexMovingAveragesResponse,
+    InstitutionalFlowPointResponse,
+    InstitutionalStockFlowResponse,
     MarketResponse,
 )
 
@@ -572,3 +579,224 @@ async def _refresh_index_daily_bars_unlocked(
             continue
         refreshed.append(IndexRefresh(result=result, stored_count=stored_count))
     return refreshed, failures
+
+
+async def stored_flow_dates(
+    database: AsyncSession,
+    *,
+    flows: type[InstitutionalMarketFlow] | type[InstitutionalStockFlow],
+    market_code: str,
+    on_or_before: date,
+    limit: int,
+) -> set[date]:
+    """The `limit` most recent trading dates that already hold rows in `flows`."""
+    rows = await database.scalars(
+        select(flows.trade_date)
+        .where(flows.market_code == market_code, flows.trade_date <= on_or_before)
+        .distinct()
+        .order_by(flows.trade_date.desc())
+        .limit(limit)
+    )
+    return set(rows.all())
+
+
+async def store_institutional_market_flows(
+    database: AsyncSession, *, market_code: str, flows: TwseMarketFlows
+) -> int:
+    """Upsert one day's market-level flows, keyed on (trade_date, investor_type)."""
+    if not flows.items:
+        return 0
+    statement = insert(InstitutionalMarketFlow).values(
+        [
+            {
+                "trade_date": flows.trade_date,
+                "investor_type": item.investor_type,
+                "market_code": market_code,
+                "buy_amount": item.buy_amount,
+                "sell_amount": item.sell_amount,
+                "net_amount": item.net_amount,
+                "source_fetched_at": flows.fetched_at,
+            }
+            for item in flows.items
+        ]
+    )
+    await database.execute(
+        statement.on_conflict_do_update(
+            index_elements=["trade_date", "investor_type"],
+            set_={
+                "market_code": statement.excluded.market_code,
+                "buy_amount": statement.excluded.buy_amount,
+                "sell_amount": statement.excluded.sell_amount,
+                "net_amount": statement.excluded.net_amount,
+                "source_fetched_at": statement.excluded.source_fetched_at,
+                "updated_at": func.now(),
+            },
+        )
+    )
+    return len(flows.items)
+
+
+async def store_institutional_stock_flows(
+    database: AsyncSession, *, market_code: str, flows: TwseStockFlows
+) -> int:
+    """Upsert one day's per-stock flows, keyed on (trade_date, symbol, investor_type)."""
+    if not flows.items:
+        return 0
+    rows = [
+        {
+            "trade_date": flows.trade_date,
+            "symbol": item.symbol,
+            "investor_type": item.investor_type,
+            "market_code": market_code,
+            "security_name": item.security_name,
+            "buy_shares": item.buy_shares,
+            "sell_shares": item.sell_shares,
+            "net_shares": item.net_shares,
+            "source_fetched_at": flows.fetched_at,
+        }
+        for item in flows.items
+    ]
+    # ~1,340 securities x 5 investors x 9 columns is close to the wire-protocol
+    # bind-parameter cap, so the write is chunked like the index bars.
+    chunk_size = MAX_BIND_PARAMETERS // len(rows[0])
+    for start in range(0, len(rows), chunk_size):
+        statement = insert(InstitutionalStockFlow).values(rows[start : start + chunk_size])
+        await database.execute(
+            statement.on_conflict_do_update(
+                index_elements=["trade_date", "symbol", "investor_type"],
+                set_={
+                    "market_code": statement.excluded.market_code,
+                    "security_name": statement.excluded.security_name,
+                    "buy_shares": statement.excluded.buy_shares,
+                    "sell_shares": statement.excluded.sell_shares,
+                    "net_shares": statement.excluded.net_shares,
+                    "source_fetched_at": statement.excluded.source_fetched_at,
+                    "updated_at": func.now(),
+                },
+            )
+        )
+    return len(rows)
+
+
+# The one market these flows are collected for. data_management passes it back
+# in when it stores a run's rows, so it lives with the tables it belongs to.
+INSTITUTIONAL_MARKET_CODE = "tw_equity"
+# The five stored categories folded into the three the product reports on.
+# foreign_dealer goes with foreign, never with the dealer books; see the note on
+# INVESTOR_TYPES in models.py. TWSE has reported it as 0 on every day observed so
+# far, so nothing in the stored data pins this down numerically.
+INSTITUTIONAL_FOREIGN_TYPES = ("foreign", "foreign_dealer")
+INSTITUTIONAL_TRUST_TYPES = ("trust",)
+INSTITUTIONAL_DEALER_TYPES = ("dealer_self", "dealer_hedge")
+# A sixth category would otherwise be dropped from the totals in silence. Import
+# fails instead, before anything can serve a number that is short one investor.
+# Sorted rather than set-compared so a category in two folds, which would double
+# count it, is caught too.
+if sorted(
+    INSTITUTIONAL_FOREIGN_TYPES + INSTITUTIONAL_TRUST_TYPES + INSTITUTIONAL_DEALER_TYPES
+) != sorted(INVESTOR_TYPES):
+    raise RuntimeError("the institutional folds must cover every investor type exactly once")
+# TWSE reports market flows in TWD and stock flows in shares; the dashboards
+# read 億元 and 張.
+HUNDRED_MILLION = Decimal(100_000_000)
+SHARES_PER_LOT = Decimal(1_000)
+
+
+def _net_of(column: Any, investor_types: Sequence[str]) -> Any:
+    return func.coalesce(
+        func.sum(column).filter(InstitutionalMarketFlow.investor_type.in_(investor_types)), 0
+    )
+
+
+def _stock_net_of(column: Any, investor_types: Sequence[str]) -> Any:
+    return func.coalesce(
+        func.sum(column).filter(InstitutionalStockFlow.investor_type.in_(investor_types)), 0
+    )
+
+
+async def institutional_flow_series(
+    database: AsyncSession, *, market_code: str, start: date, end: date
+) -> list[InstitutionalFlowPointResponse]:
+    """One point per stored trading day in the window, oldest first, in 億元.
+
+    The five stored categories are folded into the three the dashboard shows,
+    and `total` is all five added up, which is TWSE's own 合計 row.
+    """
+    net = InstitutionalMarketFlow.net_amount
+    rows = await database.execute(
+        select(
+            InstitutionalMarketFlow.trade_date,
+            _net_of(net, INSTITUTIONAL_FOREIGN_TYPES).label("foreign_net"),
+            _net_of(net, INSTITUTIONAL_TRUST_TYPES).label("trust_net"),
+            _net_of(net, INSTITUTIONAL_DEALER_TYPES).label("dealer_net"),
+            func.coalesce(func.sum(net), 0).label("total_net"),
+        )
+        .where(
+            InstitutionalMarketFlow.market_code == market_code,
+            InstitutionalMarketFlow.trade_date >= start,
+            InstitutionalMarketFlow.trade_date <= end,
+        )
+        .group_by(InstitutionalMarketFlow.trade_date)
+        .order_by(InstitutionalMarketFlow.trade_date)
+    )
+    return [
+        InstitutionalFlowPointResponse(
+            trade_date=row.trade_date,
+            foreign=Decimal(row.foreign_net) / HUNDRED_MILLION,
+            trust=Decimal(row.trust_net) / HUNDRED_MILLION,
+            dealer=Decimal(row.dealer_net) / HUNDRED_MILLION,
+            total=Decimal(row.total_net) / HUNDRED_MILLION,
+        )
+        for row in rows
+    ]
+
+
+async def institutional_stock_rows(
+    database: AsyncSession, *, market_code: str, on_or_before: date
+) -> tuple[date | None, list[InstitutionalStockFlowResponse]]:
+    """The most recent stored day at or before `on_or_before`, in 張.
+
+    Every security of that day, largest net buy first, so the caller decides how
+    many of the two ends to show.
+    """
+    day = InstitutionalStockFlow.trade_date
+    shares = InstitutionalStockFlow.net_shares
+    latest = (
+        select(func.max(day))
+        .where(InstitutionalStockFlow.market_code == market_code, day <= on_or_before)
+        .scalar_subquery()
+    )
+    total_shares = func.sum(shares).label("total_shares")
+    rows = (
+        await database.execute(
+            select(
+                day,
+                InstitutionalStockFlow.symbol,
+                InstitutionalStockFlow.security_name,
+                _stock_net_of(shares, INSTITUTIONAL_FOREIGN_TYPES).label("foreign_shares"),
+                _stock_net_of(shares, INSTITUTIONAL_TRUST_TYPES).label("trust_shares"),
+                _stock_net_of(shares, INSTITUTIONAL_DEALER_TYPES).label("dealer_shares"),
+                total_shares,
+            )
+            .where(InstitutionalStockFlow.market_code == market_code, day == latest)
+            # The name is functionally dependent on the symbol within a day, but
+            # PostgreSQL only accepts that for a primary key, which this is not.
+            .group_by(day, InstitutionalStockFlow.symbol, InstitutionalStockFlow.security_name)
+            # The symbol tie-break keeps the order stable across identical sums,
+            # which a day of untraded securities has plenty of.
+            .order_by(total_shares.desc(), InstitutionalStockFlow.symbol)
+        )
+    ).all()
+    if not rows:
+        return None, []
+    return rows[0].trade_date, [
+        InstitutionalStockFlowResponse(
+            symbol=row.symbol,
+            name=row.security_name,
+            foreign_lots=Decimal(row.foreign_shares) / SHARES_PER_LOT,
+            trust_lots=Decimal(row.trust_shares) / SHARES_PER_LOT,
+            dealer_lots=Decimal(row.dealer_shares) / SHARES_PER_LOT,
+            total_lots=Decimal(row.total_shares) / SHARES_PER_LOT,
+        )
+        for row in rows
+    ]

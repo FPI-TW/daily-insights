@@ -2,8 +2,10 @@
 
 import asyncio
 import uuid
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
-from typing import cast
+from typing import Protocol, cast
 from zoneinfo import ZoneInfo
 
 from anyio import Path
@@ -16,12 +18,22 @@ from daily_insights_api.modules.audit.api import record_audit_event
 from daily_insights_api.modules.data_management.models import DataManagementRun
 from daily_insights_api.modules.data_sources.api import (
     TRACKED_INDICES,
+    DataSourceError,
     RetryPolicy,
     TwelveDataAdapter,
     TwelveDataTransport,
+    TwseAdapter,
     YfinanceAdapter,
 )
-from daily_insights_api.modules.markets.api import refresh_index_daily_bars
+from daily_insights_api.modules.markets.api import (
+    INSTITUTIONAL_MARKET_CODE,
+    InstitutionalMarketFlow,
+    InstitutionalStockFlow,
+    refresh_index_daily_bars,
+    store_institutional_market_flows,
+    store_institutional_stock_flows,
+    stored_flow_dates,
+)
 from daily_insights_api.modules.operations.api import sanitize_error_code
 from daily_insights_api.modules.reports.api import (
     ACTIVE_LAUNCH_MANIFEST,
@@ -33,6 +45,16 @@ from daily_insights_api.modules.reports.api import (
 TAIPEI = ZoneInfo("Asia/Taipei")
 LEASE_FOR = timedelta(minutes=10)
 HEARTBEAT_SECONDS = 30.0
+# Both TWSE reports cover the listed market only; TPEx has its own endpoints.
+# Rolling windows in trading days. The calendar ceilings are what ends a walk
+# when TWSE answers "no data" for every date (blocked IP, outage); 40 trading
+# days span ~56 calendar days and 7 span ~11.
+MARKET_FLOW_LOOKBACK_TRADING_DAYS = 40
+MARKET_FLOW_LOOKBACK_CALENDAR_DAYS = 80
+STOCK_FLOW_LOOKBACK_TRADING_DAYS = 7
+STOCK_FLOW_LOOKBACK_CALENDAR_DAYS = 20
+# TWSE being down looks the same on every date, so stop asking after three.
+MAX_CONSECUTIVE_FAILURES = 3
 
 
 class RunAlreadyActiveError(Exception):
@@ -309,11 +331,174 @@ async def _execute_yahoo(
     )
 
 
+class _TwseFlows(Protocol):
+    @property
+    def items(self) -> tuple[object, ...]: ...
+    @property
+    def fetched_at(self) -> datetime: ...
+
+
+@dataclass(slots=True)
+class _FlowWalk:
+    lookback_trading_days: int
+    covered_trading_days: int = 0
+    stored_rows: int = 0
+    failures: int = 0
+    aborted: bool = False
+    days: list[dict[str, object]] = field(default_factory=list)
+
+    def summary(self) -> dict[str, object]:
+        return {
+            "lookback_trading_days": self.lookback_trading_days,
+            "covered_trading_days": self.covered_trading_days,
+            "aborted": self.aborted,
+            "days": self.days,
+        }
+
+
+async def _fetch_flows_back[Flows: _TwseFlows](
+    *,
+    edition_date: date,
+    existing: set[date],
+    lookback_trading_days: int,
+    lookback_calendar_days: int,
+    fetch: Callable[[date], Awaitable[Flows]],
+    store: Callable[[AsyncSession, Flows], Awaitable[int]],
+    session_factory: async_sessionmaker[AsyncSession],
+) -> _FlowWalk:
+    """Walk back from `edition_date` one calendar day at a time until
+    `lookback_trading_days` trading days are covered.
+
+    Each date is its own fetch and its own transaction: a failure on one date is
+    recorded and the walk continues, so a re-run only has to fill the holes.
+    `MAX_CONSECUTIVE_FAILURES` in a row means the source itself is down and the
+    walk stops rather than spending minutes asking the remaining dates.
+    Dates already stored count toward the window without a fetch; non-trading
+    dates are re-asked every run because a make-up trading day cannot be told
+    from a holiday without asking.
+    """
+    walk = _FlowWalk(lookback_trading_days=lookback_trading_days)
+    consecutive_failures = 0
+    for offset in range(lookback_calendar_days):
+        if walk.covered_trading_days >= lookback_trading_days:
+            break
+        day = edition_date - timedelta(days=offset)
+        entry: dict[str, object] = {"trade_date": day.isoformat()}
+        walk.days.append(entry)
+        if day in existing:
+            walk.covered_trading_days += 1
+            entry["status"] = "existing"
+            continue
+        try:
+            flows = await fetch(day)
+        except DataSourceError as error:
+            walk.failures += 1
+            consecutive_failures += 1
+            entry.update(status="failed", error=sanitize_error(error))
+            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                # The source is down, not this one date. Asking the remaining
+                # dates would cost minutes and tell us nothing; the next run
+                # walks from today again and fills whatever is still missing.
+                walk.aborted = True
+                break
+            continue
+        consecutive_failures = 0
+        if not flows.items:
+            entry["status"] = "no_data"
+            continue
+        async with session_factory.begin() as database:
+            count = await store(database, flows)
+        walk.covered_trading_days += 1
+        walk.stored_rows += count
+        entry.update(status="stored", record_count=count, fetched_at=flows.fetched_at.isoformat())
+    return walk
+
+
+async def _execute_institutional_twse(
+    run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
+) -> tuple[str, dict[str, object], str | None]:
+    """Per-stock flows back to 7 trading days; market flows back to 40."""
+    if not settings.twse_enabled:
+        return "failed", {}, "twse_unavailable"
+
+    async with session_factory.begin() as database:
+        existing_stock = await stored_flow_dates(
+            database,
+            flows=InstitutionalStockFlow,
+            market_code=INSTITUTIONAL_MARKET_CODE,
+            on_or_before=run.edition_date,
+            limit=STOCK_FLOW_LOOKBACK_TRADING_DAYS,
+        )
+        existing_market = await stored_flow_dates(
+            database,
+            flows=InstitutionalMarketFlow,
+            market_code=INSTITUTIONAL_MARKET_CODE,
+            on_or_before=run.edition_date,
+            limit=MARKET_FLOW_LOOKBACK_TRADING_DAYS,
+        )
+
+    async with TwseAdapter(
+        base_url=settings.twse_base_url,
+        timeout_seconds=settings.twse_timeout_seconds,
+        request_interval_seconds=settings.twse_request_interval_seconds,
+        max_attempts=settings.twse_retry_attempts,
+    ) as adapter:
+        stock = await _fetch_flows_back(
+            edition_date=run.edition_date,
+            existing=existing_stock,
+            lookback_trading_days=STOCK_FLOW_LOOKBACK_TRADING_DAYS,
+            lookback_calendar_days=STOCK_FLOW_LOOKBACK_CALENDAR_DAYS,
+            fetch=adapter.get_stock_flows,
+            store=lambda database, flows: store_institutional_stock_flows(
+                database, market_code=INSTITUTIONAL_MARKET_CODE, flows=flows
+            ),
+            session_factory=session_factory,
+        )
+        market = await _fetch_flows_back(
+            edition_date=run.edition_date,
+            existing=existing_market,
+            lookback_trading_days=MARKET_FLOW_LOOKBACK_TRADING_DAYS,
+            lookback_calendar_days=MARKET_FLOW_LOOKBACK_CALENDAR_DAYS,
+            fetch=adapter.get_market_flows,
+            store=lambda database, flows: store_institutional_market_flows(
+                database, market_code=INSTITUTIONAL_MARKET_CODE, flows=flows
+            ),
+            session_factory=session_factory,
+        )
+
+    # Status follows coverage, not just failures: TWSE answers a date it cannot
+    # serve with HTTP 200 and a no-data stat, so a run that reached nothing can
+    # look clean while covering zero trading days.
+    failures = stock.failures + market.failures
+    covered = stock.covered_trading_days + market.covered_trading_days
+    wanted = stock.lookback_trading_days + market.lookback_trading_days
+    if not covered:
+        status, error_code = "failed", "twse_fetch_failures" if failures else "twse_no_coverage"
+    elif failures:
+        status, error_code = "partial", "twse_fetch_failures"
+    elif covered < wanted:
+        status, error_code = "partial", "twse_partial_coverage"
+    else:
+        status, error_code = "succeeded", None
+    return (
+        status,
+        {
+            "market_code": INSTITUTIONAL_MARKET_CODE,
+            "request_interval_seconds": settings.twse_request_interval_seconds,
+            "stock_flows": stock.summary(),
+            "market_flows": market.summary(),
+        },
+        error_code,
+    )
+
+
 async def execute_run(
     run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
 ) -> tuple[str, dict[str, object], str | None]:
     if run.operation == "index_yahoo":
         return await _execute_yahoo(run, session_factory, settings)
+    if run.operation == "institutional_twse":
+        return await _execute_institutional_twse(run, session_factory, settings)
     return await _execute_morning(run, session_factory, settings)
 
 

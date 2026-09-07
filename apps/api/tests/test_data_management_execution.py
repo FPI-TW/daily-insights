@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path as FileSystemPath
 from types import SimpleNamespace
 from typing import Any, cast
@@ -11,6 +11,8 @@ from anyio import Path
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.data_management.models import DataManagementRun
 from daily_insights_api.modules.data_management.service import execute_run, worker_loop
+from daily_insights_api.modules.data_sources.api import DataSourceError
+from daily_insights_api.modules.markets.api import InstitutionalMarketFlow
 from daily_insights_api.modules.reports.api import (
     LaunchMarketCode,
     MorningDatasetExecution,
@@ -27,6 +29,19 @@ def _run(operation: str, market_code: str | None = None) -> DataManagementRun:
         status="running",
         requested_by_user_id=None,
     )
+
+
+class _StubSessionFactory:
+    """Stands in for `async_sessionmaker`: `begin()` yields a throwaway session."""
+
+    def begin(self) -> "_StubSessionFactory":
+        return self
+
+    async def __aenter__(self) -> object:
+        return object()
+
+    async def __aexit__(self, *_: object) -> None:
+        return None
 
 
 class _NoopTransport:
@@ -154,16 +169,6 @@ async def test_yahoo_execution_uses_seven_day_period_and_serializes_symbols(
 
     calls: dict[str, object] = {}
 
-    class Factory:
-        def begin(self) -> "Factory":
-            return self
-
-        async def __aenter__(self) -> object:
-            return object()
-
-        async def __aexit__(self, *_: object) -> None:
-            return None
-
     async def refresh(*_: object, **kwargs: object) -> tuple[list[object], list[object]]:
         calls.update(kwargs)
         return (
@@ -186,7 +191,7 @@ async def test_yahoo_execution_uses_seven_day_period_and_serializes_symbols(
     monkeypatch.setattr(service, "refresh_index_daily_bars", refresh)
     status, result, error = await execute_run(
         _run("index_yahoo"),
-        cast(Any, Factory()),
+        cast(Any, _StubSessionFactory()),
         Settings(environment="test", yfinance_enabled=True),
     )
     assert status == "partial" and error == "yfinance_symbol_failures"
@@ -254,3 +259,251 @@ async def test_active_worker_refreshes_database_lease_and_health_heartbeat(
     )
     assert heartbeats == ["lease"]
     assert await heartbeat_path.exists()
+
+
+def _weekdays_before(day: date, count: int) -> set[date]:
+    days: set[date] = set()
+    cursor = day
+    while len(days) < count:
+        cursor -= timedelta(days=1)
+        if cursor.weekday() < 5:
+            days.add(cursor)
+    return days
+
+
+@pytest.mark.asyncio
+async def test_institutional_twse_rerun_whose_only_fetch_fails_is_partial_not_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A re-run stores nothing because every older date is already covered, so
+    `stored_rows` cannot tell a healthy window from an empty one."""
+    from daily_insights_api.modules.data_management import service
+
+    edition = date(2026, 9, 7)
+    stored_market = _weekdays_before(edition, 40)
+    stored_stock = _weekdays_before(edition, 7)
+
+    class Adapter:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "Adapter":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def get_stock_flows(self, trade_date: date) -> SimpleNamespace:
+            if trade_date == edition:
+                raise DataSourceError("boom")
+            return SimpleNamespace(
+                trade_date=trade_date, items=(), fetched_at=datetime(2026, 9, 7, 9, tzinfo=UTC)
+            )
+
+        get_market_flows = get_stock_flows
+
+    async def existing(*_: object, **kwargs: object) -> set[date]:
+        return stored_market if kwargs["flows"] is InstitutionalMarketFlow else stored_stock
+
+    monkeypatch.setattr(service, "TwseAdapter", Adapter)
+    monkeypatch.setattr(service, "stored_flow_dates", existing)
+
+    run = _run("institutional_twse")
+    run.edition_date = edition
+    status, result, error = await execute_run(
+        run, cast(Any, _StubSessionFactory()), Settings(environment="test", twse_enabled=True)
+    )
+
+    assert (status, error) == ("partial", "twse_fetch_failures")
+    assert cast(dict[str, Any], result["market_flows"])["covered_trading_days"] == 40
+    assert cast(dict[str, Any], result["stock_flows"])["covered_trading_days"] == 7
+
+
+@pytest.mark.asyncio
+async def test_institutional_twse_stops_walking_once_the_source_is_clearly_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An outage would otherwise cost 100 requests: 20 stock dates plus 80
+    market dates, each spaced by the adapter's interval."""
+    from daily_insights_api.modules.data_management import service
+
+    asked: list[date] = []
+
+    class Adapter:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "Adapter":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def get_stock_flows(self, trade_date: date) -> SimpleNamespace:
+            asked.append(trade_date)
+            raise DataSourceError("boom")
+
+        get_market_flows = get_stock_flows
+
+    async def existing(*_: object, **__: object) -> set[date]:
+        return set()
+
+    monkeypatch.setattr(service, "TwseAdapter", Adapter)
+    monkeypatch.setattr(service, "stored_flow_dates", existing)
+
+    run = _run("institutional_twse")
+    status, result, error = await execute_run(
+        run, cast(Any, _StubSessionFactory()), Settings(environment="test", twse_enabled=True)
+    )
+
+    assert (status, error) == ("failed", "twse_fetch_failures")
+    assert len(asked) == 2 * service.MAX_CONSECUTIVE_FAILURES
+    for walk in ("stock_flows", "market_flows"):
+        summary = cast(dict[str, Any], result[walk])
+        assert summary["aborted"] is True
+        assert len(cast(list[Any], summary["days"])) == service.MAX_CONSECUTIVE_FAILURES
+
+
+@pytest.mark.asyncio
+async def test_institutional_twse_reaching_no_trading_day_is_failed_not_succeeded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TWSE answers a date it cannot serve with HTTP 200 and a no-data stat, so
+    an upstream outage raises nothing and stores nothing."""
+    from daily_insights_api.modules.data_management import service
+
+    class Adapter:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "Adapter":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def get_stock_flows(self, trade_date: date) -> SimpleNamespace:
+            return SimpleNamespace(
+                trade_date=trade_date, items=(), fetched_at=datetime(2026, 9, 7, 9, tzinfo=UTC)
+            )
+
+        get_market_flows = get_stock_flows
+
+    async def existing(*_: object, **__: object) -> set[date]:
+        return set()
+
+    monkeypatch.setattr(service, "TwseAdapter", Adapter)
+    monkeypatch.setattr(service, "stored_flow_dates", existing)
+
+    run = _run("institutional_twse")
+    status, result, error = await execute_run(
+        run, cast(Any, _StubSessionFactory()), Settings(environment="test", twse_enabled=True)
+    )
+
+    assert (status, error) == ("failed", "twse_no_coverage")
+    assert cast(dict[str, Any], result["market_flows"])["covered_trading_days"] == 0
+
+
+@pytest.mark.asyncio
+async def test_institutional_twse_walks_back_to_forty_trading_days_without_refetching(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.modules.data_management import service
+
+    edition = date(2026, 9, 7)  # Monday
+    # The five most recent weekdays are already stored: they must count toward
+    # the window without a request.
+    already_stored = {date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 3), date(2026, 9, 4)}
+    fetched_market: list[date] = []
+    fetched_stock: list[date] = []
+    stored: list[tuple[str, date, int]] = []
+
+    def flows(trade_date: date, items: int) -> SimpleNamespace:
+        return SimpleNamespace(
+            trade_date=trade_date,
+            items=tuple(range(items)),
+            fetched_at=datetime(2026, 9, 7, 9, tzinfo=UTC),
+        )
+
+    class Adapter:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "Adapter":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def get_stock_flows(self, trade_date: date) -> SimpleNamespace:
+            fetched_stock.append(trade_date)
+            return flows(trade_date, 0 if trade_date.weekday() >= 5 else 10)
+
+        async def get_market_flows(self, trade_date: date) -> SimpleNamespace:
+            fetched_market.append(trade_date)
+            if trade_date == date(2026, 8, 3):
+                raise DataSourceError("boom")
+            # Weekends have no trading.
+            return flows(trade_date, 0 if trade_date.weekday() >= 5 else 5)
+
+    async def existing(*_: object, **kwargs: object) -> set[date]:
+        # Only the market table has history; the stock table starts empty.
+        return already_stored if kwargs["flows"] is InstitutionalMarketFlow else set()
+
+    async def store_market(_: object, *, market_code: str, flows: SimpleNamespace) -> int:
+        stored.append((market_code, flows.trade_date, len(flows.items)))
+        return len(flows.items)
+
+    async def store_stock(_: object, *, market_code: str, flows: SimpleNamespace) -> int:
+        stored.append((market_code, flows.trade_date, len(flows.items)))
+        return len(flows.items)
+
+    monkeypatch.setattr(service, "TwseAdapter", Adapter)
+    monkeypatch.setattr(service, "stored_flow_dates", existing)
+    monkeypatch.setattr(service, "store_institutional_market_flows", store_market)
+    monkeypatch.setattr(service, "store_institutional_stock_flows", store_stock)
+
+    run = _run("institutional_twse")
+    run.edition_date = edition
+    status, result, error = await execute_run(
+        run, cast(Any, _StubSessionFactory()), Settings(environment="test", twse_enabled=True)
+    )
+
+    assert status == "partial" and error == "twse_fetch_failures"
+    # Stock flows: 7 trading days back from Monday 09-07 reach Friday 08-28,
+    # crossing two weekends, so 11 calendar days are asked and 7 are stored.
+    assert fetched_stock == [edition - timedelta(days=offset) for offset in range(11)]
+    stock = cast(dict[str, Any], result["stock_flows"])
+    assert stock["covered_trading_days"] == 7
+    stock_statuses = [day["status"] for day in stock["days"]]
+    assert stock_statuses.count("stored") == 7 and stock_statuses.count("no_data") == 4
+    assert already_stored.isdisjoint(fetched_market)
+    market = cast(dict[str, Any], result["market_flows"])
+    assert market["covered_trading_days"] == 40
+    statuses = [day["status"] for day in market["days"]]
+    assert statuses.count("existing") == 4
+    assert statuses.count("stored") == 36
+    assert statuses.count("failed") == 1
+    assert all(
+        status == "no_data"
+        for status, day in zip(statuses, market["days"], strict=True)
+        if date.fromisoformat(day["trade_date"]).weekday() >= 5
+    )
+    # The walk stops at exactly 40 trading days; nothing older is asked for.
+    assert min(fetched_market) == date.fromisoformat(market["days"][-1]["trade_date"])
+    assert all(code == "tw_equity" for code, _, _ in stored)
+    assert sum(count for _, day, count in stored if day == edition) == 15  # 10 stock + 5 market
+
+
+@pytest.mark.asyncio
+async def test_institutional_twse_is_refused_when_disabled() -> None:
+    class Factory:
+        pass
+
+    # Explicit: the local apps/api/.env may switch the flag on for development.
+    status, result, error = await execute_run(
+        _run("institutional_twse"),
+        cast(Any, _StubSessionFactory()),
+        Settings(environment="test", twse_enabled=False),
+    )
+    assert (status, result, error) == ("failed", {}, "twse_unavailable")

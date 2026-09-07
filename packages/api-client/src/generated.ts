@@ -647,7 +647,14 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** Get Tw Institutional Flows */
+    /**
+     * Get Tw Institutional Flows
+     * @description Stored TWSE market flows, in 億元.
+     *
+     *     Read from the tables the `institutional_twse` data-management run fills, not
+     *     from TWSE: the source answers one date per request and spaces its callers,
+     *     which no page load can wait for.
+     */
     get: operations["get_tw_institutional_flows_api_markets_tw_institutional_flows_get"]
     put?: never
     post?: never
@@ -664,7 +671,14 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** Get Tw Institutional Stocks */
+    /**
+     * Get Tw Institutional Stocks
+     * @description The most recent stored trading day at or before `date`, in 張.
+     *
+     *     `locale` is accepted because the caller is localized, but the name is the
+     *     one TWSE publishes: its English T86 report carries no security names at all,
+     *     and it does not publish simplified ones.
+     */
     get: operations["get_tw_institutional_stocks_api_markets_tw_institutional_stocks_get"]
     put?: never
     post?: never
@@ -1189,6 +1203,8 @@ export interface components {
        * Format: date
        */
       taipei_date: string
+      /** Twse Enabled */
+      twse_enabled: boolean
       /** Yfinance Enabled */
       yfinance_enabled: boolean
     }
@@ -1199,6 +1215,7 @@ export interface components {
         | components["schemas"]["MorningAllRunResponse"]
         | components["schemas"]["MorningMarketRunResponse"]
         | components["schemas"]["IndexYahooRunResponse"]
+        | components["schemas"]["InstitutionalTwseRunResponse"]
       )[]
     }
     /** EconomicEvent */
@@ -1510,6 +1527,65 @@ export interface components {
       endpoint: string
       /** Rows */
       rows: components["schemas"]["InstitutionalStockFlowResponse"][]
+    }
+    /**
+     * InstitutionalTwseRunCreate
+     * @description Fetch TWSE institutional flows: per-stock for the edition date, market
+     *     totals back to a rolling window of trading days.
+     */
+    InstitutionalTwseRunCreate: {
+      /** Market Code */
+      market_code?: null
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      operation: "institutional_twse"
+    }
+    /** InstitutionalTwseRunResponse */
+    InstitutionalTwseRunResponse: {
+      /** Completed At */
+      completed_at: string | null
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /** Error */
+      error: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Market Code */
+      market_code: null
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      operation: "institutional_twse"
+      /**
+       * Requested By User Id
+       * Format: uuid
+       */
+      requested_by_user_id: string
+      /** Result */
+      result: {
+        [key: string]: unknown
+      } | null
+      /** Started At */
+      started_at: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "pending" | "running" | "succeeded" | "partial" | "failed"
     }
     /** InternalUserCreate */
     InternalUserCreate: {
@@ -2838,6 +2914,7 @@ export interface operations {
           | components["schemas"]["MorningAllRunCreate"]
           | components["schemas"]["MorningMarketRunCreate"]
           | components["schemas"]["IndexYahooRunCreate"]
+          | components["schemas"]["InstitutionalTwseRunCreate"]
       }
     }
     responses: {
@@ -2851,6 +2928,7 @@ export interface operations {
             | components["schemas"]["MorningAllRunResponse"]
             | components["schemas"]["MorningMarketRunResponse"]
             | components["schemas"]["IndexYahooRunResponse"]
+            | components["schemas"]["InstitutionalTwseRunResponse"]
         }
       }
       /** @description An operation class is already active. */
@@ -2899,6 +2977,7 @@ export interface operations {
             | components["schemas"]["MorningAllRunResponse"]
             | components["schemas"]["MorningMarketRunResponse"]
             | components["schemas"]["IndexYahooRunResponse"]
+            | components["schemas"]["InstitutionalTwseRunResponse"]
         }
       }
       /** @description Validation Error */

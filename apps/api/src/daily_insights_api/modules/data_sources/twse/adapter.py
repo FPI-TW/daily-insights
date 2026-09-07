@@ -1,196 +1,345 @@
+"""TWSE rwd institutional-investor adapter: BFI82U (market, TWD) and T86 (per stock, shares).
+
+Both endpoints take exactly one trading date; there is no range form. A date
+with no trading returns HTTP 200 and a Chinese `stat` message instead of a 4xx,
+so "has data" is `stat == "OK"` together with a non-empty `data` list. Row order
+and row count in BFI82U changed across the years, so every value is looked up
+by field name, never by position.
+"""
+
+import asyncio
 import hashlib
 import json
-from datetime import date
-from decimal import Decimal, InvalidOperation
+import logging
+import time
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
+from typing import Any
 
-from pydantic import ValidationError
+import httpx
 
-from daily_insights_api.modules.data_sources.dto import (
-    InstitutionalFlowDay,
-    InstitutionalFlowResult,
-    InstitutionalStockFlow,
-    InstitutionalStockFlowResult,
-    Provenance,
+from daily_insights_api.modules.data_sources.errors import (
+    DataSourceContractError,
+    DataSourceTransientError,
 )
-from daily_insights_api.modules.data_sources.errors import DataSourceContractError
-from daily_insights_api.modules.data_sources.twse.schemas import TwseResponse
-from daily_insights_api.modules.data_sources.twse.transport import TwseTransport
 
-TWSE_CONTRACT_VERSION = "twse-institutional-v1"
-BFI82U_ENDPOINT = "/rwd/zh/fund/BFI82U"
-T86_ENDPOINTS = {
-    "zh-hant": "/rwd/zh/fund/T86",
-    "zh-hans": "/rwd/zh/fund/T86",
-    "en": "/rwd/en/fund/T86",
+logger = logging.getLogger(__name__)
+
+MARKET_FLOWS_PATH = "/rwd/zh/fund/BFI82U"
+STOCK_FLOWS_PATH = "/rwd/zh/fund/T86"
+# `ALL` also returns ~15k warrant rows; this keeps the ~1.3k securities.
+STOCK_FLOWS_SELECT_TYPE = "ALLBUT0999"
+# TWSE answers both "that date had no trading" and "that date is not published
+# yet" with HTTP 200 and a Chinese `stat`; neither is contract drift. A morning
+# run asks for today before the ~16:00 publication and gets the second one.
+NO_DATA_STAT_MARKERS = ("沒有符合條件", "大於可查詢最大日期")
+# Each transient failure waits one more interval; six intervals is the ceiling.
+MAX_BACKOFF_INTERVALS = 5
+
+# BFI82U row label -> investor_type. The 合計 row is derivable and skipped.
+MARKET_FLOW_INVESTORS: Mapping[str, str] = {
+    "自營商(自行買賣)": "dealer_self",
+    "自營商(避險)": "dealer_hedge",
+    "投信": "trust",
+    "外資及陸資(不含外資自營商)": "foreign",
+    "外資自營商": "foreign_dealer",
 }
-BFI82U_FIELDS = ("單位名稱", "買進金額", "賣出金額", "買賣差額")
-T86_FIELDS = (
-    "證券代號",
-    "證券名稱",
-    "外陸資買賣超股數(不含外資自營商)",
-    "投信買賣超股數",
-    "自營商買賣超股數",
-    "三大法人買賣超股數",
-)
+MARKET_FLOW_TOTAL_LABEL = "合計"
+MARKET_FLOW_FIELDS = ("單位名稱", "買進金額", "賣出金額", "買賣差額")
+
+# T86 (buy, sell, net) column names per investor_type. The 自營商 and 三大法人
+# aggregate columns are derivable and skipped.
+STOCK_FLOW_COLUMNS: Mapping[str, tuple[str, str, str]] = {
+    "foreign": (
+        "外陸資買進股數(不含外資自營商)",
+        "外陸資賣出股數(不含外資自營商)",
+        "外陸資買賣超股數(不含外資自營商)",
+    ),
+    "foreign_dealer": ("外資自營商買進股數", "外資自營商賣出股數", "外資自營商買賣超股數"),
+    "trust": ("投信買進股數", "投信賣出股數", "投信買賣超股數"),
+    "dealer_self": (
+        "自營商買進股數(自行買賣)",
+        "自營商賣出股數(自行買賣)",
+        "自營商買賣超股數(自行買賣)",
+    ),
+    "dealer_hedge": ("自營商買進股數(避險)", "自營商賣出股數(避險)", "自營商買賣超股數(避險)"),
+}
+STOCK_SYMBOL_FIELD = "證券代號"
+STOCK_NAME_FIELD = "證券名稱"
+
+# Reported alongside the numbers so a reader can tell which shape of the source
+# they came from. The hash covers every field this module reads by name, so a
+# renamed or dropped column changes it.
+TWSE_CONTRACT_VERSION = "twse-institutional-v1"
+BFI82U_ENDPOINT = MARKET_FLOWS_PATH
+T86_ENDPOINT = STOCK_FLOWS_PATH
 TWSE_CONTRACT_HASH = hashlib.sha256(
     json.dumps(
-        {"BFI82U": BFI82U_FIELDS, "T86": T86_FIELDS},
+        {
+            "BFI82U": [MARKET_FLOW_FIELDS, sorted(MARKET_FLOW_INVESTORS)],
+            "T86": [STOCK_SYMBOL_FIELD, STOCK_NAME_FIELD, sorted(STOCK_FLOW_COLUMNS.values())],
+        },
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode()
 ).hexdigest()
-HUNDRED_MILLION = Decimal("100000000")
-SHARES_PER_LOT = Decimal("1000")
+
+Sleep = Callable[[float], Awaitable[None]]
+Monotonic = Callable[[], float]
+
+
+@dataclass(frozen=True, slots=True)
+class TwseMarketFlow:
+    investor_type: str
+    buy_amount: int
+    sell_amount: int
+    net_amount: int
+
+
+@dataclass(frozen=True, slots=True)
+class TwseMarketFlows:
+    trade_date: date
+    # Empty means TWSE reported no trading for that date.
+    items: tuple[TwseMarketFlow, ...]
+    fetched_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class TwseStockFlow:
+    symbol: str
+    security_name: str
+    investor_type: str
+    buy_shares: int
+    sell_shares: int
+    net_shares: int
+
+
+@dataclass(frozen=True, slots=True)
+class TwseStockFlows:
+    trade_date: date
+    items: tuple[TwseStockFlow, ...]
+    fetched_at: datetime
+
+
+def _parse_int(value: object, field: str) -> int:
+    if not isinstance(value, str):
+        raise DataSourceContractError(f"{field} is not a string")
+    try:
+        return int(value.replace(",", "").strip())
+    except ValueError as error:
+        raise DataSourceContractError(f"{field} is not an integer") from error
+
+
+def _rows(payload: Mapping[str, Any], trade_date: date) -> list[list[Any]] | None:
+    """Return the data rows, or None when TWSE has no rows for that date."""
+    stat = payload.get("stat")
+    if stat != "OK":
+        if isinstance(stat, str) and any(marker in stat for marker in NO_DATA_STAT_MARKERS):
+            return None
+        logger.warning("twse returned unexpected stat %r for %s", stat, trade_date)
+        raise DataSourceContractError("unexpected stat")
+    reported_date = payload.get("date")
+    if reported_date is not None and reported_date != trade_date.strftime("%Y%m%d"):
+        raise DataSourceContractError("response date does not match request")
+    rows = payload.get("data")
+    if not isinstance(rows, list):
+        raise DataSourceContractError("data is not a list")
+    return rows or None
+
+
+def _field_indexes(payload: Mapping[str, Any], required: Sequence[str]) -> dict[str, int]:
+    fields = payload.get("fields")
+    if not isinstance(fields, list):
+        raise DataSourceContractError("fields is not a list")
+    indexes = {name: index for index, name in enumerate(fields) if isinstance(name, str)}
+    missing = [name for name in required if name not in indexes]
+    if missing:
+        raise DataSourceContractError(f"missing fields: {', '.join(missing)}")
+    return indexes
+
+
+def _cell(row: list[Any], index: int, field: str) -> Any:
+    if index >= len(row):
+        raise DataSourceContractError(f"row is missing {field}")
+    return row[index]
+
+
+def _check_net(buy: int, sell: int, net: int, label: str) -> None:
+    if net != buy - sell:
+        raise DataSourceContractError(f"{label} net does not equal buy minus sell")
+
+
+def parse_market_flows(
+    payload: Mapping[str, Any], *, trade_date: date, fetched_at: datetime
+) -> TwseMarketFlows:
+    rows = _rows(payload, trade_date)
+    if rows is None:
+        return TwseMarketFlows(trade_date=trade_date, items=(), fetched_at=fetched_at)
+    index = _field_indexes(payload, MARKET_FLOW_FIELDS)
+    items: list[TwseMarketFlow] = []
+    for row in rows:
+        label = _cell(row, index["單位名稱"], "單位名稱")
+        if label == MARKET_FLOW_TOTAL_LABEL:
+            continue
+        investor_type = MARKET_FLOW_INVESTORS.get(label)
+        if investor_type is None:
+            # A renamed or new category must surface, not be dropped silently.
+            raise DataSourceContractError(f"unknown investor label {label!r}")
+        buy = _parse_int(_cell(row, index["買進金額"], "買進金額"), "買進金額")
+        sell = _parse_int(_cell(row, index["賣出金額"], "賣出金額"), "賣出金額")
+        net = _parse_int(_cell(row, index["買賣差額"], "買賣差額"), "買賣差額")
+        _check_net(buy, sell, net, label)
+        items.append(TwseMarketFlow(investor_type, buy, sell, net))
+    # Every investor must be present exactly once: a short day would still be
+    # stored, and `stored_flow_dates` only asks whether a date has any rows, so
+    # nothing would ever come back to fill the gap.
+    if sorted(item.investor_type for item in items) != sorted(MARKET_FLOW_INVESTORS.values()):
+        raise DataSourceContractError("investor rows are missing or duplicated")
+    return TwseMarketFlows(trade_date=trade_date, items=tuple(items), fetched_at=fetched_at)
+
+
+def parse_stock_flows(
+    payload: Mapping[str, Any], *, trade_date: date, fetched_at: datetime
+) -> TwseStockFlows:
+    rows = _rows(payload, trade_date)
+    if rows is None:
+        return TwseStockFlows(trade_date=trade_date, items=(), fetched_at=fetched_at)
+    required = [STOCK_SYMBOL_FIELD, STOCK_NAME_FIELD]
+    for columns in STOCK_FLOW_COLUMNS.values():
+        required.extend(columns)
+    index = _field_indexes(payload, required)
+    items: list[TwseStockFlow] = []
+    seen: set[str] = set()
+    for row in rows:
+        symbol = _cell(row, index[STOCK_SYMBOL_FIELD], STOCK_SYMBOL_FIELD)
+        name = _cell(row, index[STOCK_NAME_FIELD], STOCK_NAME_FIELD)
+        if not isinstance(symbol, str) or not isinstance(name, str):
+            raise DataSourceContractError("symbol or name is not a string")
+        symbol = symbol.strip()
+        name = name.strip()
+        if not symbol or symbol in seen:
+            raise DataSourceContractError(f"blank or duplicate symbol {symbol!r}")
+        seen.add(symbol)
+        for investor_type, (buy_field, sell_field, net_field) in STOCK_FLOW_COLUMNS.items():
+            buy = _parse_int(_cell(row, index[buy_field], buy_field), buy_field)
+            sell = _parse_int(_cell(row, index[sell_field], sell_field), sell_field)
+            net = _parse_int(_cell(row, index[net_field], net_field), net_field)
+            _check_net(buy, sell, net, f"{symbol} {investor_type}")
+            items.append(TwseStockFlow(symbol, name, investor_type, buy, sell, net))
+    return TwseStockFlows(trade_date=trade_date, items=tuple(items), fetched_at=fetched_at)
 
 
 class TwseAdapter:
-    def __init__(self, transport: TwseTransport) -> None:
-        self._transport = transport
+    """One-date-per-request client that spaces its own requests.
+
+    The spacing lives here rather than in the caller's loop so every path that
+    talks to TWSE is throttled the same way. Requests are issued sequentially;
+    the run queue already guarantees one institutional run at a time.
+
+    The interval is measured from when a request finishes, not from when it
+    starts, so a slow or timed-out request cannot consume the gap that follows
+    it. Each transient failure adds another interval on top, so a walk that
+    runs into a 429 or an outage keeps backing further off instead of asking
+    the same rate for its next 80 dates.
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        timeout_seconds: float = 10.0,
+        request_interval_seconds: float = 6.0,
+        max_attempts: int = 3,
+        client: httpx.AsyncClient | None = None,
+        sleep: Sleep = asyncio.sleep,
+        monotonic: Monotonic = time.monotonic,
+    ) -> None:
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        if request_interval_seconds < 0:
+            raise ValueError("request_interval_seconds must not be negative")
+        if not 1 <= max_attempts <= 5:
+            raise ValueError("max_attempts must be between 1 and 5")
+        self._interval = request_interval_seconds
+        self._max_attempts = max_attempts
+        self._sleep = sleep
+        self._monotonic = monotonic
+        self._last_request_at: float | None = None
+        self._backoff_intervals = 0
+        self._owns_client = client is None
+        self._client = client or httpx.AsyncClient(
+            base_url=base_url.rstrip("/"), timeout=httpx.Timeout(timeout_seconds)
+        )
+
+    async def __aenter__(self) -> "TwseAdapter":
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        await self.close()
 
     async def close(self) -> None:
-        await self._transport.close()
+        if self._owns_client:
+            await self._client.aclose()
 
-    async def get_daily_flow(self, trade_date: date) -> InstitutionalFlowResult:
-        response = await self._transport.get(
-            BFI82U_ENDPOINT,
-            params={"date": trade_date.strftime("%Y%m%d"), "response": "json"},
+    async def get_market_flows(self, trade_date: date) -> TwseMarketFlows:
+        payload, fetched_at = await self._get(
+            MARKET_FLOWS_PATH,
+            {"response": "json", "type": "day", "dayDate": trade_date.strftime("%Y%m%d")},
         )
-        payload = _payload(response.content, "BFI82U")
-        provenance = _provenance(
-            endpoint=BFI82U_ENDPOINT,
-            trade_date=trade_date,
-            query={"date": trade_date.isoformat()},
-            fetched_at=response.fetched_at,
-            digest=response.response_digest,
-            request_id=response.request_id,
-            record_count=len(payload.data),
-        )
-        if payload.stat != "OK" or not payload.data:
-            return InstitutionalFlowResult(item=None, provenance=provenance)
-        _require_fields(payload.fields, BFI82U_FIELDS, "BFI82U")
-        difference = payload.fields.index("買賣差額")
-        rows = {row[0].strip(): row for row in payload.data if len(row) == len(payload.fields)}
-        required_rows = (
-            "自營商(自行買賣)",
-            "自營商(避險)",
-            "投信",
-            "外資及陸資(不含外資自營商)",
-            "合計",
-        )
-        if any(label not in rows for label in required_rows):
-            raise DataSourceContractError("TWSE BFI82U required institution row is missing")
-        dealer = _number(rows[required_rows[0]][difference]) + _number(
-            rows[required_rows[1]][difference]
-        )
-        item = InstitutionalFlowDay(
-            trade_date=trade_date,
-            foreign=_number(rows[required_rows[3]][difference]) / HUNDRED_MILLION,
-            trust=_number(rows[required_rows[2]][difference]) / HUNDRED_MILLION,
-            dealer=dealer / HUNDRED_MILLION,
-            total=_number(rows[required_rows[4]][difference]) / HUNDRED_MILLION,
-        )
-        return InstitutionalFlowResult(item=item, provenance=provenance)
+        return parse_market_flows(payload, trade_date=trade_date, fetched_at=fetched_at)
 
-    async def get_stock_flows(
-        self, trade_date: date, *, locale: str
-    ) -> InstitutionalStockFlowResult:
-        endpoint = T86_ENDPOINTS.get(locale)
-        if endpoint is None:
-            raise DataSourceContractError(f"unsupported TWSE locale: {locale}")
-        response = await self._transport.get(
-            endpoint,
-            params={
-                "date": trade_date.strftime("%Y%m%d"),
-                "selectType": "ALLBUT0999",
+    async def get_stock_flows(self, trade_date: date) -> TwseStockFlows:
+        payload, fetched_at = await self._get(
+            STOCK_FLOWS_PATH,
+            {
                 "response": "json",
+                "date": trade_date.strftime("%Y%m%d"),
+                "selectType": STOCK_FLOWS_SELECT_TYPE,
             },
         )
-        payload = _payload(response.content, "T86")
-        if payload.stat != "OK":
-            items: tuple[InstitutionalStockFlow, ...] = ()
-        else:
-            if locale == "en":
-                if len(payload.fields) < 19:
-                    raise DataSourceContractError("TWSE T86 required fields are missing")
-                indices = (0, 1, 4, 10, 11, 18)
-            else:
-                _require_fields(payload.fields, T86_FIELDS, "T86")
-                indices = tuple(payload.fields.index(field) for field in T86_FIELDS)  # type: ignore[assignment]
-            normalized: list[InstitutionalStockFlow] = []
-            for row in payload.data:
-                if len(row) != len(payload.fields):
-                    raise DataSourceContractError("TWSE T86 row length does not match fields")
-                symbol, name, foreign, trust, dealer, total = (row[index] for index in indices)
-                normalized.append(
-                    InstitutionalStockFlow(
-                        trade_date=trade_date,
-                        symbol=symbol.strip(),
-                        name=name.strip(),
-                        foreign_lots=_number(foreign) / SHARES_PER_LOT,
-                        trust_lots=_number(trust) / SHARES_PER_LOT,
-                        dealer_lots=_number(dealer) / SHARES_PER_LOT,
-                        total_lots=_number(total) / SHARES_PER_LOT,
-                    )
-                )
-            items = tuple(normalized)
-        return InstitutionalStockFlowResult(
-            items=items,
-            provenance=_provenance(
-                endpoint=endpoint,
-                trade_date=trade_date,
-                query={"date": trade_date.isoformat(), "selectType": "ALLBUT0999"},
-                fetched_at=response.fetched_at,
-                digest=response.response_digest,
-                request_id=response.request_id,
-                record_count=len(items),
-            ),
-        )
+        return parse_stock_flows(payload, trade_date=trade_date, fetched_at=fetched_at)
 
+    async def _get(self, path: str, params: Mapping[str, str]) -> tuple[dict[str, Any], datetime]:
+        """Retry transient failures in place; a lost date is only refetched on
+        the next run, and runs are triggered by hand."""
+        for attempt in range(1, self._max_attempts + 1):
+            try:
+                return await self._request(path, params)
+            except DataSourceTransientError:
+                if attempt == self._max_attempts:
+                    raise
+        raise AssertionError("bounded twse request loop exited unexpectedly")
 
-def _payload(content: bytes, report: str) -> TwseResponse:
-    try:
-        return TwseResponse.model_validate_json(content)
-    except ValidationError as error:
-        raise DataSourceContractError(f"TWSE {report} response failed validation") from error
-
-
-def _require_fields(actual: list[str], required: tuple[str, ...], report: str) -> None:
-    if any(field not in actual for field in required):
-        raise DataSourceContractError(f"TWSE {report} required fields are missing")
-
-
-def _number(value: str) -> Decimal:
-    try:
-        return Decimal(value.replace(",", "").strip())
-    except InvalidOperation as error:
-        raise DataSourceContractError(f"TWSE numeric value is invalid: {value!r}") from error
-
-
-def _provenance(
-    *,
-    endpoint: str,
-    trade_date: date,
-    query: dict[str, str],
-    fetched_at: object,
-    digest: str,
-    request_id: str | None,
-    record_count: int,
-) -> Provenance:
-    from datetime import datetime
-
-    assert isinstance(fetched_at, datetime)
-    fingerprint = hashlib.sha256(
-        json.dumps(query, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-    return Provenance(
-        provider="twse",
-        contract_version=TWSE_CONTRACT_VERSION,
-        contract_hash=TWSE_CONTRACT_HASH,
-        endpoint=endpoint,
-        query_fingerprint=fingerprint,
-        fetched_at=fetched_at,
-        as_of=trade_date,
-        response_digest=digest,
-        record_count=record_count,
-        request_id=request_id,
-    )
+    async def _request(
+        self, path: str, params: Mapping[str, str]
+    ) -> tuple[dict[str, Any], datetime]:
+        if self._last_request_at is not None:
+            elapsed = self._monotonic() - self._last_request_at
+            wait = self._interval * (1 + self._backoff_intervals) - elapsed
+            if wait > 0:
+                await self._sleep(wait)
+        try:
+            response = await self._client.get(
+                path, params=params, headers={"Accept": "application/json"}
+            )
+        except httpx.HTTPError as error:
+            self._backoff_intervals = min(self._backoff_intervals + 1, MAX_BACKOFF_INTERVALS)
+            raise DataSourceTransientError("twse request failed") from error
+        finally:
+            self._last_request_at = self._monotonic()
+        fetched_at = datetime.now(UTC)
+        if response.status_code >= 500 or response.status_code == 429:
+            self._backoff_intervals = min(self._backoff_intervals + 1, MAX_BACKOFF_INTERVALS)
+            raise DataSourceTransientError(f"twse responded {response.status_code}")
+        # The server answered, so whatever it was backing off from is over.
+        self._backoff_intervals = 0
+        if response.status_code != 200:
+            raise DataSourceContractError(f"twse responded {response.status_code}")
+        try:
+            payload = response.json()
+        except ValueError as error:
+            raise DataSourceContractError("twse response is not JSON") from error
+        if not isinstance(payload, dict):
+            raise DataSourceContractError("twse response is not an object")
+        return payload, fetched_at

@@ -7,10 +7,6 @@ from daily_insights_api.modules.data_sources import (
     DataSourceContractError,
     DataSourceError,
     DataSourceTransientError,
-    InstitutionalFlowDay,
-    InstitutionalFlowResult,
-    InstitutionalStockFlow,
-    InstitutionalStockFlowResult,
     Instrument,
     InstrumentQuery,
     PageInfo,
@@ -20,7 +16,6 @@ from daily_insights_api.modules.data_sources import (
 )
 from daily_insights_api.modules.data_sources.dto import MarketCode
 from daily_insights_api.modules.data_sources.provider import (
-    InstitutionalFlowProvider,
     MarketDataProvider,
 )
 from daily_insights_api.modules.data_sources.twelve_data import (
@@ -36,11 +31,14 @@ from daily_insights_api.modules.data_sources.twelve_data import (
 )
 from daily_insights_api.modules.data_sources.twse import (
     BFI82U_ENDPOINT,
-    T86_ENDPOINTS,
+    T86_ENDPOINT,
     TWSE_CONTRACT_HASH,
     TWSE_CONTRACT_VERSION,
     TwseAdapter,
-    TwseTransport,
+    TwseMarketFlow,
+    TwseMarketFlows,
+    TwseStockFlow,
+    TwseStockFlows,
 )
 from daily_insights_api.modules.data_sources.yfinance import (
     TRACKED_INDICES,
@@ -51,7 +49,7 @@ from daily_insights_api.modules.data_sources.yfinance import (
 
 __all__ = [
     "BFI82U_ENDPOINT",
-    "T86_ENDPOINTS",
+    "T86_ENDPOINT",
     "TRACKED_INDICES",
     "TWELVE_DATA_CONTRACT_HASH",
     "TWELVE_DATA_CONTRACT_VERSION",
@@ -66,11 +64,6 @@ __all__ = [
     "EodResult",
     "EodsResult",
     "IndexSymbol",
-    "InstitutionalFlowDay",
-    "InstitutionalFlowProvider",
-    "InstitutionalFlowResult",
-    "InstitutionalStockFlow",
-    "InstitutionalStockFlowResult",
     "Instrument",
     "InstrumentQuery",
     "MarketCode",
@@ -84,7 +77,10 @@ __all__ = [
     "TwelveDataAdapter",
     "TwelveDataTransport",
     "TwseAdapter",
-    "TwseTransport",
+    "TwseMarketFlow",
+    "TwseMarketFlows",
+    "TwseStockFlow",
+    "TwseStockFlows",
     "UnsupportedMarketError",
     "YfinanceAdapter",
     "YfinanceDailyBars",
