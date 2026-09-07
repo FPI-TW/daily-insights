@@ -116,3 +116,60 @@ export function formatTaipeiTimestamp(value: string) {
     parts.find(item => item.type === type)?.value ?? ""
   return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`
 }
+
+/** Both axes get identical grid divisions, with explicit bounds and intervals. */
+export function alignedRatioAxes(left: number[], right: number[]) {
+  function bounds(values: number[], divisions?: number) {
+    const min = values.length ? Math.min(...values) : 0
+    const max = values.length ? Math.max(...values) : 1
+    const span = max - min || Math.abs(max) * 0.1 || 1
+    const raw = span / (divisions ?? 4)
+    const magnitude = 10 ** Math.floor(Math.log10(raw))
+    const step = [1, 2, 2.5, 5, 10].find(n => n * magnitude >= raw)! * magnitude
+    const low = Math.floor((min - span * 0.05) / step) * step
+    const count = divisions ?? Math.ceil((max + span * 0.05 - low) / step)
+    // A fixed count needs an interval large enough to contain the entire series.
+    const interval = divisions
+      ? Math.max(step, (max + span * 0.05 - low) / count)
+      : step
+    return {
+      min: low,
+      max: low + count * interval,
+      interval,
+      splitNumber: count,
+    }
+  }
+  const first = bounds(left)
+  return [first, bounds(right, first.splitNumber)]
+}
+
+/** Anchor every tenor to one observation date before deriving comparison yields. */
+export function yieldCurve(histories: MacroHistory[], period: Period) {
+  const ids = ["3m", "2y", "5y", "10y", "30y"]
+  const rows = ids.map(id => histories.find(history => history.id === id))
+  const date = rows[0]?.points
+    .map(point => point.date)
+    .filter(day =>
+      rows.every(row => row?.points.some(point => point.date === day))
+    )
+    .at(-1)
+  return {
+    date,
+    points: ids.map((id, index) => {
+      const row = rows[index]
+      const points = date
+        ? row?.points.filter(point => point.date <= date)
+        : undefined
+      const latest = points?.at(-1)
+      const value = latest ? Number(latest.value) : null
+      const change =
+        row && points ? periodChange({ ...row, points }, period, true) : null
+      return {
+        id,
+        value,
+        reference:
+          value !== null && change !== null ? value - change / 100 : null,
+      }
+    }),
+  }
+}

@@ -6,6 +6,13 @@ export function useChartColors() {
     indexSeries: [] as string[],
     text: "",
     grid: "",
+    gridSoft: "",
+    faint: "",
+    surface: "",
+    chipLine: "",
+    up: "",
+    down: "",
+    font: "",
   })
 
   useEffect(() => {
@@ -28,13 +35,20 @@ export function useChartColors() {
         ],
         text: styles.getPropertyValue("--sea-ink-soft").trim(),
         grid: styles.getPropertyValue("--line").trim(),
+        gridSoft: styles.getPropertyValue("--line-soft").trim(),
+        faint: styles.getPropertyValue("--sea-ink-faint").trim(),
+        surface: styles.getPropertyValue("--surface").trim(),
+        chipLine: styles.getPropertyValue("--chip-line").trim(),
+        up: styles.getPropertyValue("--market-up").trim(),
+        down: styles.getPropertyValue("--market-down").trim(),
+        font: getComputedStyle(document.body).fontFamily,
       })
     }
     updateColors()
     const observer = new MutationObserver(updateColors)
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["class", "data-theme"],
+      attributeFilter: ["class", "data-theme", "lang"],
     })
     return () => observer.disconnect()
   }, [])

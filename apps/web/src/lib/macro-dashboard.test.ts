@@ -142,3 +142,34 @@ describe("macro dashboard calculations", () => {
 it("formats Taipei timestamps consistently across server and browser Intl separators", () => {
   expect(formatTaipeiTimestamp("2026-09-04T00:00:00Z")).toBe("2026-09-04 08:00")
 })
+
+it("aligns ratio axes to identical divisions while covering both ranges", async () => {
+  const { alignedRatioAxes } = await import("./macro-dashboard")
+  const axes = alignedRatioAxes([0.015, 0.02, 0.045], [0.00081, 0.0014])
+  expect(axes[0]!.splitNumber).toBe(axes[1]!.splitNumber)
+  expect((axes[0]!.max - axes[0]!.min) / axes[0]!.interval).toBeCloseTo(
+    axes[1]!.splitNumber
+  )
+  expect(axes[1]!.min).toBeLessThanOrEqual(0.00081)
+  expect(axes[1]!.max).toBeGreaterThanOrEqual(0.0014)
+})
+it("derives curve comparisons from a shared date and leaves absent references null", async () => {
+  const { yieldCurve } = await import("./macro-dashboard")
+  const rows = ["3m", "2y", "5y", "10y", "30y"].map(id => ({
+    ...history([
+      ["2026-08-28", "4"],
+      ["2026-09-04", "4.25"],
+    ]),
+    id,
+  }))
+  rows[0]!.points.push({ date: "2026-09-05", value: "5" })
+  const curve = yieldCurve(rows, "week")
+  expect(curve.date).toBe("2026-09-04")
+  expect(curve.points[0]).toEqual({ id: "3m", value: 4.25, reference: 4 })
+  expect(yieldCurve(rows, "year").points.every(p => p.reference === null)).toBe(
+    true
+  )
+  expect(
+    yieldCurve(rows.slice(1), "week").points.every(p => p.value === null)
+  ).toBe(true)
+})

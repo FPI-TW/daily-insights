@@ -58,20 +58,25 @@ describe("integrated macro dashboard", () => {
     })
     expect(chart).toHaveTextContent("1.17")
     expect(chart).not.toHaveTextContent("2026-01-02")
-    fireEvent.change(screen.getByRole("combobox"), {
-      target: { value: "usd_jpy" },
-    })
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Currency pair" })).getByRole(
+        "button",
+        { name: "USD/JPY" }
+      )
+    )
     expect(
       screen.getByRole("img", { name: /trends · USD\/JPY/ })
     ).toHaveTextContent("145")
-    fireEvent.click(screen.getByRole("button", { name: "365 days" }))
+    const fxPanel = screen
+      .getByRole("heading", { name: "Global foreign exchange price trends" })
+      .closest("section")!
+    fireEvent.click(within(fxPanel).getByRole("button", { name: "365 days" }))
     expect(
       screen.getByRole("img", { name: /trends · USD\/JPY/ })
     ).toHaveTextContent("2026-01-02")
-    expect(screen.getByRole("button", { name: "365 days" })).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    )
+    expect(
+      within(fxPanel).getByRole("button", { name: "365 days" })
+    ).toHaveAttribute("aria-pressed", "true")
   })
   it("distinguishes a disabled calendar from a successfully loaded empty calendar", () => {
     show(<MacroDashboard data={data} locale="en" />)

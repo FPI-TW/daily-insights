@@ -1,18 +1,27 @@
 import { ClientOnly } from "@tanstack/react-router"
 import ReactECharts from "echarts-for-react"
-import { useMemo, useState, type ReactNode } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { Locale } from "@daily-insights/api-client"
 import { useChartColors } from "#/lib/chart"
-import { formatIsoDate, numberLocales, unitLabel } from "#/lib/format"
+import { numberLocales, unitLabel } from "#/lib/format"
 import {
+  alignedRatioAxes,
   formatTaipeiTimestamp,
   periodChange,
   ratioPoints,
   recentPoints,
+  yieldCurve,
   type MacroDashboardData,
   type MacroHistory,
+  type Period,
 } from "#/lib/macro-dashboard"
+import {
+  DashboardChoices,
+  DashboardPanel,
+  DashboardSection,
+  Methodology,
+} from "./DashboardPrimitives"
 
 const commodityIds = ["brent", "wti", "gold", "silver", "copper"]
 const fxIds = [
@@ -26,50 +35,40 @@ const fxIds = [
   "usd_twd",
 ]
 const tenorIds = ["3m", "2y", "5y", "10y", "30y"]
-const emptyHistories: MacroHistory[] = []
-
-function Panel({
-  title,
-  note,
-  children,
-  wide = false,
-}: {
-  title: string
-  note?: string
-  children: ReactNode
-  wide?: boolean
-}) {
-  return (
-    <section
-      className={`min-w-0 rounded-2xl border border-line bg-surface p-5 ${wide ? "xl:col-span-2" : ""}`}
-    >
-      <h2 className="m-0 text-base font-extrabold text-sea-ink">{title}</h2>
-      {note ? (
-        <p className="mt-1 mb-4 text-xs leading-5 text-sea-ink-soft">{note}</p>
-      ) : null}
-      {children}
-    </section>
-  )
-}
+const periods = ["day", "week", "month", "year"] as const
 
 export function MacroDashboardLoading() {
   const { t } = useTranslation()
   return (
-    <div role="status" aria-live="polite" className="grid gap-4 xl:grid-cols-2">
+    <div role="status" aria-live="polite" className="space-y-9">
       <span className="sr-only">{t("macroLoading")}</span>
-      {[0, 1, 2, 3, 4, 5].map(key => (
+      <div className="grid grid-cols-6 gap-px rounded-2xl border border-line bg-line p-5">
+        {Array.from({ length: 6 }, (_, i) => (
+          <div
+            key={i}
+            className="h-24 animate-pulse bg-surface motion-reduce:animate-none"
+          />
+        ))}
+      </div>
+      {[0, 1, 2, 3].map(i => (
         <div
-          key={key}
-          className="h-72 animate-pulse rounded-2xl border border-line bg-surface p-5 motion-reduce:animate-none"
+          key={i}
+          className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] gap-4"
         >
-          <div className="mb-8 h-5 w-48 rounded bg-line" />
-          <div className="h-44 rounded bg-line/60" />
+          {[0, 1].map(j => (
+            <div
+              key={j}
+              className="h-72 animate-pulse rounded-2xl border border-line bg-surface p-5 motion-reduce:animate-none"
+            >
+              <div className="mb-8 h-5 w-48 rounded bg-line" />
+              <div className="h-44 rounded bg-line/60" />
+            </div>
+          ))}
         </div>
       ))}
     </div>
   )
 }
-
 function Unavailable() {
   const { t } = useTranslation()
   return (
@@ -81,147 +80,193 @@ function Unavailable() {
     </p>
   )
 }
-
-type ChartLine = {
-  name: string
-  unit: string | undefined
-  points: { date: string; value: number }[]
-}
-
-function fractionDigits(unit: string | undefined, value: number) {
-  if (unit === "ratio") return 6
-  if (unit === "percent" || unit === "index" || unit?.includes("/")) return 2
-  if (unit && /^[A-Z]{3}$/.test(unit)) return Math.abs(value) < 10 ? 4 : 2
-  return Math.abs(value) < 10 ? 4 : 2
-}
-
-function formatMacroNumber(
-  value: number,
+function formatValue(
+  value: number | null | undefined,
   unit: string | undefined,
   locale: Locale
 ) {
+  if (value == null) return "—"
   return new Intl.NumberFormat(numberLocales[locale], {
     minimumFractionDigits: unit === "percent" ? 2 : 0,
-    maximumFractionDigits: fractionDigits(unit, value),
+    maximumFractionDigits:
+      unit === "ratio"
+        ? 6
+        : unit === "percent" || Math.abs(value) >= 10
+          ? 2
+          : 4,
   }).format(value)
 }
-
-function formatCalendarValue(
-  value: string,
-  unit: string | null,
+function Change({
+  value,
+  locale,
+  rates = false,
+  compact = false,
+}: {
+  value: number | null
   locale: Locale
-) {
-  const formatted = new Intl.NumberFormat(numberLocales[locale], {
-    maximumFractionDigits: 4,
-  }).format(Number(value))
-  if (!unit) return formatted
-  return unit === "%" ? `${formatted}%` : `${formatted} ${unit}`
-}
-
-function formatCountry(country: string, locale: Locale) {
-  if (!/^[A-Z]{2}$/.test(country)) return country
+  rates?: boolean
+  compact?: boolean
+}) {
+  const flat = value !== null && Math.abs(value) < 0.005
   return (
-    new Intl.DisplayNames(numberLocales[locale], { type: "region" }).of(
-      country
-    ) ?? country
+    <span
+      className={`whitespace-nowrap font-mono font-bold tabular-nums ${compact ? "text-[11px] @min-[520px]:text-xs" : "text-xs"} ${value === null || flat ? "text-sea-ink-soft" : value > 0 ? "text-market-up" : "text-market-down"}`}
+    >
+      {value === null
+        ? "—"
+        : `${flat ? "" : value > 0 ? "▲" : "▼"}${new Intl.NumberFormat(numberLocales[locale], { maximumFractionDigits: 2 }).format(flat ? 0 : Math.abs(value))}${rates ? "" : "%"}`}
+      {value !== null && rates ? (
+        <span className="font-sans text-[10px]"> bp</span>
+      ) : null}
+    </span>
   )
+}
+function Range({
+  value,
+  onChange,
+}: {
+  value: number
+  onChange: (value: number) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <DashboardChoices
+      label={t("macroRange")}
+      value={value}
+      onChange={onChange}
+      options={[30, 90, 365].map(value => ({
+        value,
+        label: t("macroDays", { count: value }),
+      }))}
+    />
+  )
+}
+type ChartLine = {
+  name: string
+  unit: string | undefined
+  points: { date: string; value: number | null }[]
+  change?: number | null
 }
 function Chart({
   lines,
   label,
-  dual = false,
-  categories,
   locale,
+  dual = false,
+  curve = false,
+  days = 90,
+  height = 252,
 }: {
   lines: ChartLine[]
   label: string
-  dual?: boolean
-  categories?: string[]
   locale: Locale
+  dual?: boolean
+  curve?: boolean
+  days?: number
+  height?: number
 }) {
   const colors = useChartColors()
   const { t } = useTranslation()
-  if (!lines.some(line => line.points.length > 0)) return <Unavailable />
-  const dates =
-    categories ??
-    [
-      ...new Set(lines.flatMap(line => line.points.map(point => point.date))),
-    ].sort()
-  const valuesByLine = new Map(
-    lines.map(line => [
-      line.name,
-      new Map(line.points.map(point => [point.date, point.value])),
-    ])
+  if (!lines.some(line => line.points.some(point => point.value !== null)))
+    return <Unavailable />
+  const dates = curve
+    ? lines[0]!.points.map(point => point.date)
+    : [
+        ...new Set(lines.flatMap(line => line.points.map(point => point.date))),
+      ].sort()
+  const maps = lines.map(
+    line => new Map(line.points.map(point => [point.date, point.value]))
   )
-  const axes = lines.map((line, index) => ({
+  const bounds = dual
+    ? alignedRatioAxes(
+        ...([0, 1].map(i =>
+          lines[i]!.points.flatMap(p => (p.value === null ? [] : [p.value]))
+        ) as [number[], number[]])
+      )
+    : []
+  const axis = (index: number) => ({
     type: "value",
     scale: true,
-    name: dual
-      ? `${line.name}${line.unit ? ` (${unitLabel(line.unit, t) ?? line.unit})` : ""}`
-      : line.unit
-        ? (unitLabel(line.unit, t) ?? line.unit)
-        : "",
+    ...bounds[index],
     position: index === 0 ? "left" : "right",
-    nameTextStyle: { color: colors.text },
-    axisLabel: { color: colors.text },
+    axisLabel: {
+      color: colors.text,
+      fontFamily: "monospace",
+      fontSize: 11,
+      formatter: (value: number) =>
+        formatValue(value, lines[index]?.unit, locale),
+    },
     splitLine: {
       show: index === 0,
-      lineStyle: { color: colors.grid, type: "dashed" },
+      lineStyle: { color: colors.gridSoft, type: "dashed" },
     },
-  }))
+  })
   return (
     <>
       <div
-        className="mt-4 flex flex-wrap gap-2"
+        className="mt-3 flex flex-wrap items-baseline gap-x-4.5 gap-y-2"
         aria-label={t("macroLatestObservations")}
       >
-        {lines.map(line => {
-          const latest = line.points.at(-1)
-          return latest ? (
+        {lines.map((line, i) => {
+          const latest = curve
+            ? line.points.find(point => point.date === "10Y")
+            : line.points.at(-1)
+          return (
             <div
               key={line.name}
-              className="min-w-36 rounded-xl border border-line bg-line-soft/50 px-3 py-2"
+              className="flex flex-wrap items-baseline gap-1.5 text-xs text-sea-ink-soft"
             >
-              <div className="text-[11px] text-sea-ink-soft">{line.name}</div>
-              <div className="mt-0.5 flex items-baseline gap-1 tabular-nums">
-                <strong className="font-mono text-sm text-sea-ink">
-                  {formatMacroNumber(latest.value, line.unit, locale)}
-                </strong>
-                {line.unit ? (
-                  <span className="text-[10px] text-sea-ink-soft">
-                    {unitLabel(line.unit, t) ?? line.unit}
-                  </span>
-                ) : null}
-              </div>
-              <div className="mt-0.5 text-[10px] text-sea-ink-soft">
-                {categories ? latest.date : formatIsoDate(latest.date, locale)}
-              </div>
+              <span
+                className="inline-block size-2.5 rounded-full"
+                style={{
+                  backgroundColor:
+                    curve && i === 1 ? colors.faint : colors.series[i],
+                }}
+              />
+              <span>
+                {line.name}
+                {curve ? " · 10Y" : ""}
+              </span>
+              <strong className="font-mono text-[15px] text-sea-ink tabular-nums">
+                {formatValue(latest?.value, line.unit, locale)}
+              </strong>
+              <span>
+                {line.unit ? (unitLabel(line.unit, t) ?? line.unit) : ""}
+              </span>
+              {line.change !== undefined ? (
+                <Change value={line.change} locale={locale} />
+              ) : null}
             </div>
-          ) : null
+          )
         })}
       </div>
-      <div className="mt-4" role="img" aria-label={label}>
+      <div className="mt-3 min-w-0" role="img" aria-label={label}>
         <ClientOnly
-          fallback={<div className="h-64 animate-pulse rounded bg-line/40" />}
+          fallback={
+            <div
+              className="h-64 animate-pulse rounded bg-line/40"
+              role="status"
+              aria-label={t("macroLoading")}
+            />
+          }
         >
           <ReactECharts
-            style={{ height: 280 }}
+            style={{ height }}
             notMerge
             option={{
               animation: false,
-              color: colors.series,
+              textStyle: { fontFamily: colors.font },
+              color: curve ? [colors.series[0], colors.faint] : colors.series,
+              aria: { enabled: true, description: label },
               tooltip: {
                 trigger: "axis",
                 renderMode: "richText",
                 axisPointer: { type: "line" },
               },
-              legend: { bottom: 0, textStyle: { color: colors.text } },
               grid: {
-                left: 12,
-                right: 12,
-                top: 32,
-                bottom: 40,
-                containLabel: true,
+                top: 8,
+                bottom: 36,
+                left: dual ? 58 : curve ? 44 : 48,
+                right: dual ? 62 : 20,
               },
               xAxis: {
                 type: "category",
@@ -229,82 +274,65 @@ function Chart({
                 boundaryGap: false,
                 axisLabel: {
                   color: colors.text,
+                  fontFamily: "monospace",
+                  fontSize: 11,
                   hideOverlap: true,
-                  formatter: categories
-                    ? undefined
-                    : (day: string) =>
-                        new Intl.DateTimeFormat(numberLocales[locale], {
-                          month: "short",
-                          day: "numeric",
-                          timeZone: "UTC",
-                        }).format(new Date(`${day}T00:00:00Z`)),
+                  showMinLabel: true,
+                  showMaxLabel: true,
+                  interval: Math.max(0, Math.ceil((dates.length - 1) / 6) - 1),
+                  formatter: (day: string) =>
+                    curve ? day : days <= 200 ? day.slice(5) : day.slice(0, 7),
                 },
                 axisLine: { lineStyle: { color: colors.grid } },
               },
-              yAxis: dual ? axes : axes[0],
-              series: lines.map((line, index) => {
-                const values = valuesByLine.get(line.name)!
-                return {
-                  name: line.name,
-                  type: "line",
-                  showSymbol: Boolean(categories),
-                  connectNulls: false,
-                  data: dates.map(day => values.get(day) ?? null),
-                  lineStyle: { width: 2 },
-                  emphasis: { focus: "series" },
-                  tooltip: {
-                    valueFormatter: (value: number) => {
-                      const formatted = formatMacroNumber(
-                        value,
-                        line.unit,
-                        locale
-                      )
-                      const unit = line.unit
-                        ? (unitLabel(line.unit, t) ?? line.unit)
-                        : ""
-                      return unit ? `${formatted} ${unit}` : formatted
-                    },
-                  },
-                  ...(dual ? { yAxisIndex: index } : {}),
-                }
-              }),
+              yAxis: dual ? [axis(0), axis(1)] : axis(0),
+              series: lines.map((line, i) => ({
+                name: line.name,
+                type: "line",
+                showSymbol: curve && i === 0,
+                symbol: "emptyCircle",
+                symbolSize: 9,
+                connectNulls: false,
+                data: dates.map(date => maps[i]!.get(date) ?? null),
+                lineStyle: {
+                  width: 2,
+                  type: curve && i === 1 ? [5, 4] : "solid",
+                },
+                itemStyle: { borderWidth: 2 },
+                emphasis: { focus: "series" },
+                ...(dual ? { yAxisIndex: i } : {}),
+                tooltip: {
+                  valueFormatter: (value: number | null) =>
+                    `${formatValue(value, line.unit, locale)} ${line.unit ? (unitLabel(line.unit, t) ?? line.unit) : ""}`,
+                },
+              })),
             }}
           />
         </ClientOnly>
       </div>
       <details className="mt-2 text-xs text-sea-ink-soft">
-        <summary className="cursor-pointer">{t("macroChartData")}</summary>
+        <summary className="cursor-pointer hover:text-palm">
+          {t("macroChartData")}
+        </summary>
         <div className="mt-2 max-h-56 overflow-auto">
-          <table className="w-full text-right">
+          <table className="w-full table-fixed text-right font-mono tabular-nums">
             <thead>
               <tr>
                 <th className="text-left">{t("macroDate")}</th>
                 {lines.map(line => (
-                  <th key={line.name}>
-                    {line.name}
-                    {line.unit
-                      ? ` (${unitLabel(line.unit, t) ?? line.unit})`
-                      : ""}
-                  </th>
+                  <th key={line.name}>{line.name}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {dates.map(day => (
-                <tr key={day}>
-                  <th className="text-left font-normal">
-                    {categories ? day : formatIsoDate(day, locale)}
-                  </th>
-                  {lines.map(line => {
-                    const value = valuesByLine.get(line.name)?.get(day)
-                    return (
-                      <td key={line.name}>
-                        {value === undefined
-                          ? "—"
-                          : formatMacroNumber(value, line.unit, locale)}
-                      </td>
-                    )
-                  })}
+              {dates.map(date => (
+                <tr key={date}>
+                  <th className="text-left font-normal">{date}</th>
+                  {lines.map((line, i) => (
+                    <td key={line.name}>
+                      {formatValue(maps[i]!.get(date), line.unit, locale)}
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>
@@ -314,7 +342,6 @@ function Chart({
     </>
   )
 }
-
 function HistoryTable({
   ids,
   histories,
@@ -324,33 +351,62 @@ function HistoryTable({
   onSelect,
   fetchedAt,
 }: {
-  fetchedAt: string | undefined
   ids: string[]
   histories: MacroHistory[]
   locale: Locale
   rates?: boolean
   selected?: string
   onSelect?: (id: string) => void
+  fetchedAt: string | undefined
 }) {
   const { t } = useTranslation()
-  const format = (value: number, digits = 4) =>
-    new Intl.NumberFormat(numberLocales[locale], {
-      maximumFractionDigits: digits,
-    }).format(value)
+  const fx = Boolean(onSelect)
+  if (
+    !ids.some(id =>
+      histories.some(history => history.id === id && history.points.length)
+    )
+  )
+    return <Unavailable />
   return (
     <div className="mt-4 overflow-x-auto">
-      <table className="w-full min-w-[34rem] whitespace-nowrap text-right text-xs tabular-nums">
-        <thead className="text-sea-ink-soft">
+      <table className="w-full table-fixed text-right text-xs tabular-nums">
+        <colgroup>
+          <col
+            className={
+              fx
+                ? "w-[24%]"
+                : rates
+                  ? "w-[12%] @min-[520px]:w-[22%]"
+                  : "w-[23%] @min-[520px]:w-[28%]"
+            }
+          />
+          <col
+            className={
+              fx
+                ? "w-[18%]"
+                : rates
+                  ? "w-[12%] @min-[520px]:w-[16%]"
+                  : "w-[15%] @min-[520px]:w-[17%]"
+            }
+          />
+          {!fx ? <col className="w-[18%] @min-[520px]:w-[15%]" /> : null}
+          {periods.map(period => (
+            <col key={period} />
+          ))}
+        </colgroup>
+        <thead className="border-b border-line text-sea-ink-soft">
           <tr>
-            <th className="py-3 text-left font-normal">
+            <th className="pb-2 text-left font-semibold">
               {t(rates ? "macroTenor" : "macroInstrument")}
             </th>
-            <th className="px-3 font-normal">
+            <th className="pb-2 font-semibold">
               {t(rates ? "macroYield" : "macroClose")}
             </th>
-            <th className="px-3 font-normal">{t("macroDate")}</th>
-            {["day", "week", "month", "year"].map(period => (
-              <th key={period} className="px-3 font-normal">
+            {!fx ? (
+              <th className="pb-2 font-semibold">{t("macroDate")}</th>
+            ) : null}
+            {periods.map(period => (
+              <th key={period} className="pb-2 font-semibold">
                 {t(`macroPeriod_${period}`)}
               </th>
             ))}
@@ -367,58 +423,57 @@ function HistoryTable({
             return (
               <tr
                 key={id}
-                className={`border-t border-line ${selected === id ? "bg-lagoon/10" : ""}`}
+                className={`border-t border-line-soft ${selected === id ? "bg-lagoon/8" : ""}`}
               >
-                <th className="py-3 text-left font-semibold text-sea-ink">
+                <th className="py-2.5 pr-1 text-left font-semibold text-pretty text-sea-ink">
                   {onSelect ? (
                     <button
                       type="button"
                       aria-pressed={selected === id}
                       onClick={() => onSelect(id)}
-                      className="cursor-pointer rounded px-2 py-1 text-left hover:bg-lagoon/10 focus-visible:outline-2 focus-visible:outline-lagoon"
+                      className={`border-0 bg-transparent p-0 text-left font-mono text-xs font-bold underline-offset-3 hover:underline hover:decoration-lagoon ${selected === id ? "text-palm" : "text-sea-ink"}`}
                     >
                       {t(`macroAsset_${id}`)}
                     </button>
                   ) : (
                     t(`macroAsset_${id}`)
                   )}
-                  {history ? (
+                  {history && !fx ? (
                     <span className="mt-0.5 block font-mono text-[10px] font-normal text-sea-ink-soft">
                       {history.symbol} ·{" "}
                       {unitLabel(history.unit, t) ?? history.unit}
                     </span>
                   ) : null}
-                </th>
-                <td className="px-3 font-mono font-bold text-sea-ink">
-                  {latest
-                    ? `${formatMacroNumber(Number(latest.value), history?.unit, locale)}${rates ? "%" : ""}`
-                    : "—"}
-                </td>
-                <td className="px-3 text-sea-ink-soft">
-                  {latest
-                    ? formatIsoDate(latest.date, locale)
-                    : t("macroUnavailableShort")}
                   {stale ? (
-                    <span className="ml-1 text-market-caution">
+                    <span className="block text-[10px] font-normal text-sea-ink-soft">
                       {t("reportStale")}
                     </span>
                   ) : null}
+                </th>
+                <td className="font-mono text-[13px] font-bold text-sea-ink">
+                  {formatValue(
+                    latest ? Number(latest.value) : null,
+                    history?.unit,
+                    locale
+                  )}
                 </td>
-                {(["day", "week", "month", "year"] as const).map(period => {
-                  const value = history
-                    ? periodChange(history, period, rates)
-                    : null
-                  return (
-                    <td
-                      key={period}
-                      className={`px-3 font-mono ${value === null || Math.abs(value) < 0.005 ? "text-sea-ink-soft" : value > 0 ? "text-market-up" : "text-market-down"}`}
-                    >
-                      {value === null
-                        ? "—"
-                        : `${value > 0 ? "+" : ""}${format(value, 2)}${rates ? " bp" : "%"}`}
-                    </td>
-                  )
-                })}
+                {!fx ? (
+                  <td className="font-mono text-[11px] text-sea-ink-soft">
+                    {latest?.date ?? "—"}
+                  </td>
+                ) : null}
+                {periods.map(period => (
+                  <td key={period}>
+                    <Change
+                      value={
+                        history ? periodChange(history, period, rates) : null
+                      }
+                      locale={locale}
+                      rates={rates}
+                      compact
+                    />
+                  </td>
+                ))}
               </tr>
             )
           })}
@@ -427,7 +482,143 @@ function HistoryTable({
     </div>
   )
 }
-
+function Calendar({
+  calendar,
+  locale,
+}: {
+  calendar: MacroDashboardData["calendar"] | undefined
+  locale: Locale
+}) {
+  const { t } = useTranslation()
+  const impact = calendar?.events.some(event => event.impact)
+  function calendarValue(value: string, unit: string | null) {
+    return `${new Intl.NumberFormat(numberLocales[locale], { maximumFractionDigits: 4 }).format(Number(value))}${unit === "%" ? "%" : unit ? ` ${unit}` : ""}`
+  }
+  return (
+    <DashboardPanel
+      title={t("macroCalendar")}
+      controls={
+        <span className="font-mono text-xs text-sea-ink-soft tabular-nums">
+          {t("metaCalendar", {
+            source: calendar?.source ?? "Nasdaq",
+            date: calendar?.date ?? "—",
+          })}
+        </span>
+      }
+    >
+      {calendar?.status !== "ok" ? (
+        <Unavailable />
+      ) : calendar.events.length === 0 ? (
+        <p className="py-10 text-sm text-sea-ink-soft">
+          {t("macroNoEvents", { date: calendar.date })}
+        </p>
+      ) : (
+        <div className="mt-4 max-h-96 overflow-auto rounded-xl border border-line">
+          <table className="w-full table-fixed text-right text-xs tabular-nums">
+            <colgroup>
+              <col className="w-19" />
+              <col className="w-[34%]" />
+              {impact ? <col className="w-18" /> : null}
+              <col />
+              <col />
+              <col />
+            </colgroup>
+            <thead className="bg-chip text-sea-ink-soft">
+              <tr>
+                {[
+                  "Time",
+                  "Event",
+                  ...(impact ? ["Impact"] : []),
+                  "Estimate",
+                  "Previous",
+                  "Actual",
+                ].map((key, i) => (
+                  <th
+                    key={key}
+                    className={`px-3 py-2.5 font-semibold ${i < (impact ? 3 : 2) ? "text-left" : "text-right"}`}
+                  >
+                    {t(`macro${key}`)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {calendar.events.map((event, i) => (
+                <tr
+                  key={`${event.date}-${event.event}-${i}`}
+                  className="border-t border-line"
+                >
+                  <td className="px-3 py-3 text-left font-mono font-bold text-palm">
+                    {new Intl.DateTimeFormat(numberLocales[locale], {
+                      timeZone: "Asia/Taipei",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hourCycle: "h23",
+                    }).format(new Date(event.date))}
+                  </td>
+                  <th className="px-3 py-3 text-left font-semibold">
+                    <span className="inline-flex flex-wrap items-center gap-1.5">
+                      <span className="font-normal text-sea-ink-soft">
+                        {/^[A-Z]{2}$/.test(event.country)
+                          ? new Intl.DisplayNames(numberLocales[locale], {
+                              type: "region",
+                            }).of(event.country)
+                          : event.country}
+                      </span>
+                      {event.currency ? (
+                        <span className="rounded bg-lagoon/10 px-1.5 py-px font-mono text-[10px] font-bold text-palm">
+                          {event.currency}
+                        </span>
+                      ) : null}
+                      <span>{event.event}</span>
+                    </span>
+                  </th>
+                  {impact ? (
+                    <td className="px-2 text-left">
+                      {event.impact ? (
+                        <span className="rounded-full border border-market-caution/40 bg-market-caution/10 px-2 py-0.5 text-[11px] font-bold text-sea-ink">
+                          {t(`macroImpact_${event.impact.toLowerCase()}`, {
+                            defaultValue: event.impact,
+                          })}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  ) : null}
+                  {[event.estimate, event.previous, event.actual].map(
+                    (value, cell) => (
+                      <td
+                        key={cell}
+                        className={`px-3 py-3 ${cell === 1 ? "text-sea-ink-soft" : ""}`}
+                      >
+                        {value === null ? (
+                          <span className="text-sea-ink-soft">
+                            {cell === 2 ? t("macroUnreleased") : "—"}
+                          </span>
+                        ) : (
+                          <span className="font-mono">
+                            {calendarValue(value, event.unit)}
+                          </span>
+                        )}
+                      </td>
+                    )
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <Methodology>
+        {t("macroCalendarNote", {
+          source: calendar?.source ?? "Nasdaq",
+          date: calendar?.date ?? "—",
+        })}
+      </Methodology>
+    </DashboardPanel>
+  )
+}
 export function MacroDashboard({
   data,
   locale,
@@ -437,266 +628,303 @@ export function MacroDashboard({
 }) {
   const { t } = useTranslation()
   const [selectedFx, setSelectedFx] = useState("eur_usd")
-  const [days, setDays] = useState(90)
-  const histories = data?.histories ?? emptyHistories
-  const historyById = useMemo(
-    () => new Map(histories.map(item => [item.id, item])),
-    [histories]
-  )
-  const history = (id: string) => historyById.get(id)
-  const line = (id: string, range = 90): ChartLine => {
-    const selected = history(id)
-    return {
-      name: t(`macroAsset_${id}`),
-      unit: selected?.unit,
-      points: recentPoints(selected, range).map(point => ({
-        ...point,
-        value: Number(point.value),
-      })),
-    }
+  const [ratioDays, setRatioDays] = useState(365)
+  const [dxyDays, setDxyDays] = useState(90)
+  const [fxDays, setFxDays] = useState(90)
+  const [compare, setCompare] = useState<Period>("week")
+  const histories = data?.histories ?? []
+  const byId = new Map(histories.map(item => [item.id, item]))
+  const oilGold = ratioPoints(byId.get("wti"), byId.get("gold"))
+  const copperGold = ratioPoints(byId.get("copper"), byId.get("gold"))
+  const ratioHistory = {
+    id: "oil_gold",
+    symbol: "WTI/Gold",
+    source: "Yahoo Finance",
+    status: "ok" as const,
+    unit: "ratio",
+    points: oilGold.map(p => ({ ...p, value: String(p.value) })),
   }
-  const curveHistories = tenorIds
-    .map(history)
-    .filter((item): item is MacroHistory => Boolean(item?.points.length))
-  const commonDates =
-    curveHistories.length === tenorIds.length
-      ? curveHistories[0]!.points
-          .map(point => point.date)
-          .filter(day =>
-            curveHistories.every(item =>
-              item.points.some(point => point.date === day)
-            )
-          )
+  const curve = yieldCurve(histories, compare)
+  const dates = [
+    ...new Set(histories.flatMap(h => h.points.at(-1)?.date ?? [])),
+  ].sort()
+  const dateLabel = dates.length ? dates.join(" / ") : "—"
+  const fxDates = [
+    ...new Set(fxIds.flatMap(id => byId.get(id)?.points.at(-1)?.date ?? [])),
+  ].sort()
+  const allFxSameDate =
+    fxDates.length === 1 && fxIds.every(id => byId.get(id)?.points.length)
+  const line = (id: string, days: number): ChartLine => ({
+    name: t(`macroAsset_${id}`),
+    unit: byId.get(id)?.unit,
+    points: recentPoints(byId.get(id), days).map(p => ({
+      date: p.date,
+      value: Number(p.value),
+    })),
+    change: byId.has(id) ? periodChange(byId.get(id)!, "day") : null,
+  })
+  function slicedRatio(points: { date: string; value: number }[]) {
+    const latest = points.at(-1)
+    return latest
+      ? points.filter(
+          p =>
+            Date.parse(p.date) >=
+            Date.parse(latest.date) - (ratioDays - 1) * 86_400_000
+        )
       : []
-  const curveDate = commonDates.at(-1)
-  const curve: ChartLine = {
-    name: t("macroYield"),
-    unit: "percent",
-    points: curveDate
-      ? curveHistories.map(item => ({
-          date: t(`macroAsset_${item.id}`),
-          value: Number(
-            item.points.find(point => point.date === curveDate)!.value
-          ),
-        }))
-      : [],
   }
-  const calendar = data?.calendar
-  const showCalendarImpact = Boolean(
-    calendar?.events.some(event => event.impact)
-  )
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-sea-ink-soft">
-        <p className="m-0">{t("macroIntro")}</p>
+    <div className="min-w-0 pb-6 [&>section+section]:mt-9">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 text-xs text-sea-ink-soft">
+        <p className="m-0 max-w-[52ch] text-pretty">{t("macroIntro")}</p>
+        <span className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-2.5 py-0.5 font-bold">
+          <span className="text-market-up">▲ {t("convUp")}</span>
+          <span className="h-2.5 w-px bg-line" />
+          <span className="text-market-down">▼ {t("convDown")}</span>
+        </span>
         {data ? (
-          <span>
+          <span className="whitespace-nowrap font-mono tabular-nums">
             {t("macroFetched", {
               date: formatTaipeiTimestamp(data.fetched_at),
             })}
           </span>
         ) : null}
       </div>
-      <div className="grid min-w-0 gap-4 xl:grid-cols-2">
-        <Panel title={t("macroCommodities")} note={t("macroCommodityNote")}>
-          <HistoryTable
-            fetchedAt={data?.fetched_at}
-            ids={commodityIds}
-            histories={histories}
-            locale={locale}
-          />
-        </Panel>
-        <Panel
-          title={t("reportBlockMacroCommodityRatios")}
-          note={t("macroRatioNote")}
-        >
-          <Chart
-            locale={locale}
-            label={t("reportBlockMacroCommodityRatios")}
-            dual
-            lines={[
-              {
-                name: t("macroOilGold"),
-                unit: "ratio",
-                points: ratioPoints(history("wti"), history("gold")),
-              },
-              {
-                name: t("macroCopperGold"),
-                unit: "ratio",
-                points: ratioPoints(history("copper"), history("gold")),
-              },
-            ]}
-          />
-        </Panel>
-        <Panel title={t("macroYieldChanges")} note={t("macroYieldNote")}>
-          <HistoryTable
-            fetchedAt={data?.fetched_at}
-            ids={[...tenorIds, "sofr"]}
-            histories={histories}
-            locale={locale}
-            rates
-          />
-        </Panel>
-        <Panel
-          title={t("macroYieldCurve")}
-          note={
-            curveDate
-              ? `${t("macroSourceTreasury")} · ${formatIsoDate(curveDate, locale)}`
-              : t("macroSourceTreasury")
-          }
-        >
-          <Chart
-            locale={locale}
-            label={t("macroYieldCurve")}
-            lines={[curve]}
-            categories={tenorIds.map(id => t(`macroAsset_${id}`))}
-          />
-        </Panel>
-        <Panel
-          title={t("macroCalendar")}
-          note={t("macroCalendarNote", {
-            source: calendar?.source ?? "Nasdaq",
-            date: calendar ? formatIsoDate(calendar.date, locale) : "—",
-          })}
-        >
-          {calendar?.status !== "ok" ? (
-            <Unavailable />
-          ) : calendar.events.length === 0 ? (
-            <p className="py-10 text-sm text-sea-ink-soft">
-              {t("macroNoEvents", { date: calendar.date })}
-            </p>
-          ) : (
-            <div className="mt-4 max-h-96 overflow-auto rounded-xl border border-line">
-              <table className="w-full min-w-[34rem] text-right text-xs tabular-nums">
-                <thead className="text-sea-ink-soft">
-                  <tr>
-                    {[
-                      "Time",
-                      "Event",
-                      ...(showCalendarImpact ? ["Impact"] : []),
-                      "Estimate",
-                      "Previous",
-                      "Actual",
-                    ].map(key => (
-                      <th key={key} className="px-2 py-3 text-left font-normal">
-                        {t(`macro${key}`)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {calendar.events.map((event, index) => (
-                    <tr
-                      key={`${event.date}-${event.event}-${index}`}
-                      className="border-t border-line"
-                    >
-                      <td className="px-2 py-3 font-mono text-lagoon">
-                        {new Date(event.date).toLocaleTimeString(
-                          numberLocales[locale],
-                          {
-                            timeZone: "Asia/Taipei",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            hour12: false,
-                          }
+      <DashboardSection
+        number="01"
+        title={t("sectionToday")}
+        meta={
+          <span className="font-mono tabular-nums">
+            {t("metaToday", { date: dateLabel })}
+          </span>
+        }
+      >
+        <div className="space-y-4">
+          <DashboardPanel
+            title={t("ovTitle")}
+            controls={
+              <span className="text-xs text-sea-ink-soft">{t("ovNote")}</span>
+            }
+          >
+            <div className="mt-3 grid grid-cols-6 gap-px overflow-x-auto border-y border-line bg-line">
+              {["brent", "gold", "oil_gold", "10y", "dxy", "eur_usd"].map(
+                id => {
+                  const h = id === "oil_gold" ? ratioHistory : byId.get(id)
+                  const latest = h?.points.at(-1)
+                  return (
+                    <div key={id} className="min-w-0 bg-surface px-4 py-3.5">
+                      <div className="min-h-8 text-xs leading-4 text-sea-ink-soft">
+                        {t(
+                          id === "oil_gold"
+                            ? "macroOilGold"
+                            : id === "10y"
+                              ? "ovTenor10y"
+                              : `macroAsset_${id}`
+                        )}{" "}
+                        · {h?.unit ? (unitLabel(h.unit, t) ?? h.unit) : "—"}
+                      </div>
+                      <div className="mt-1 overflow-x-auto font-mono text-[21px] font-bold tracking-tight tabular-nums">
+                        {formatValue(
+                          latest ? Number(latest.value) : null,
+                          h?.unit,
+                          locale
                         )}
-                      </td>
-                      <th className="min-w-40 px-2 py-3 text-left font-normal">
-                        <span className="mr-1 text-sea-ink-soft">
-                          {formatCountry(event.country, locale)}
-                        </span>
-                        {event.currency ? (
-                          <span className="mr-1 rounded bg-lagoon/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-lagoon">
-                            {event.currency}
-                          </span>
-                        ) : null}
-                        {event.event}
-                      </th>
-                      {showCalendarImpact ? (
-                        <td className="px-2 text-market-caution">
-                          {event.impact
-                            ? t(`macroImpact_${event.impact.toLowerCase()}`, {
-                                defaultValue: event.impact,
-                              })
-                            : "—"}
-                        </td>
-                      ) : null}
-                      {[event.estimate, event.previous, event.actual].map(
-                        (value, cell) => (
-                          <td
-                            key={cell}
-                            className="whitespace-nowrap px-2 font-mono"
-                          >
-                            {value === null
-                              ? cell === 2
-                                ? t("macroUnreleased")
-                                : "—"
-                              : formatCalendarValue(value, event.unit, locale)}
-                          </td>
-                        )
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </div>
+                      <Change
+                        value={h ? periodChange(h, "day", id === "10y") : null}
+                        locale={locale}
+                        rates={id === "10y"}
+                      />
+                    </div>
+                  )
+                }
+              )}
             </div>
-          )}
-        </Panel>
-        <Panel title={t("macroDollarIndex")} note={t("macroDxyNote")}>
-          <Chart
-            locale={locale}
-            label={t("macroDollarIndex")}
-            lines={[line("dxy")]}
-          />
-        </Panel>
-        <Panel title={t("macroFxTitle")} note={t("macroFxNote")} wide>
-          <div className="mt-4 flex flex-wrap items-end justify-between gap-3">
-            <label className="flex items-center gap-2 text-sm text-sea-ink-soft">
-              <span className="whitespace-nowrap">
-                {t("macroCurrencyPair")}
-              </span>
-              <select
+          </DashboardPanel>
+          <Calendar calendar={data?.calendar} locale={locale} />
+        </div>
+      </DashboardSection>
+      <DashboardSection
+        number="02"
+        title={t("sectionCommodities")}
+        meta={t("metaCommodities")}
+      >
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-4">
+          <DashboardPanel title={t("macroCommodities")}>
+            <HistoryTable
+              ids={commodityIds}
+              histories={histories}
+              locale={locale}
+              fetchedAt={data?.fetched_at}
+            />
+            <Methodology>{t("macroCommodityNote")}</Methodology>
+          </DashboardPanel>
+          <DashboardPanel
+            title={t("reportBlockMacroCommodityRatios")}
+            controls={<Range value={ratioDays} onChange={setRatioDays} />}
+          >
+            <Chart
+              locale={locale}
+              label={t("reportBlockMacroCommodityRatios")}
+              dual
+              days={ratioDays}
+              lines={[
+                {
+                  name: t("macroOilGold"),
+                  unit: "ratio",
+                  points: slicedRatio(oilGold),
+                },
+                {
+                  name: t("macroCopperGold"),
+                  unit: "ratio",
+                  points: slicedRatio(copperGold),
+                },
+              ]}
+            />
+            <Methodology>{t("macroRatioNote")}</Methodology>
+          </DashboardPanel>
+        </div>
+      </DashboardSection>
+      <DashboardSection
+        number="03"
+        title={t("sectionRates")}
+        meta={t("metaRates")}
+      >
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-4">
+          <DashboardPanel title={t("macroYieldChanges")}>
+            <HistoryTable
+              ids={[...tenorIds, "sofr"]}
+              histories={histories}
+              locale={locale}
+              rates
+              fetchedAt={data?.fetched_at}
+            />
+            <Methodology>{t("macroYieldNote")}</Methodology>
+          </DashboardPanel>
+          <DashboardPanel
+            title={t("macroYieldCurve")}
+            controls={
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] text-sea-ink-soft">
+                  {t("compareLabel")}
+                </span>
+                <DashboardChoices
+                  label={t("compareLabel")}
+                  value={compare}
+                  onChange={setCompare}
+                  options={periods.map(value => ({
+                    value,
+                    label: t(`macroPeriod_${value}`),
+                  }))}
+                />
+              </div>
+            }
+          >
+            <p className="mt-2 mb-0 font-mono text-xs text-sea-ink-soft">
+              {curve.date ?? "—"}
+            </p>
+            <Chart
+              locale={locale}
+              label={t("macroYieldCurve")}
+              curve
+              lines={[
+                {
+                  name: t("curveNow"),
+                  unit: "percent",
+                  points: curve.points.map(p => ({
+                    date: t(`macroAsset_${p.id}`),
+                    value: p.value,
+                  })),
+                },
+                {
+                  name: t(`curveRef_${compare}`),
+                  unit: "percent",
+                  points: curve.points.map(p => ({
+                    date: t(`macroAsset_${p.id}`),
+                    value: p.reference,
+                  })),
+                },
+              ]}
+            />
+            <Methodology>{t("curveNote")}</Methodology>
+          </DashboardPanel>
+        </div>
+      </DashboardSection>
+      <DashboardSection number="04" title={t("sectionFx")} meta={t("metaFx")}>
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-4">
+          <DashboardPanel
+            title={t("macroDollarIndex")}
+            controls={<Range value={dxyDays} onChange={setDxyDays} />}
+          >
+            <Chart
+              locale={locale}
+              label={t("macroDollarIndex")}
+              lines={[line("dxy", dxyDays)]}
+              days={dxyDays}
+            />
+            <Methodology>{t("macroDxyNote")}</Methodology>
+          </DashboardPanel>
+          <DashboardPanel
+            title={t("macroFxTitle")}
+            controls={<Range value={fxDays} onChange={setFxDays} />}
+          >
+            <div className="mt-3 font-mono">
+              <DashboardChoices
+                label={t("macroCurrencyPair")}
                 value={selectedFx}
-                onChange={event => setSelectedFx(event.target.value)}
-                className="rounded-lg border border-line bg-surface px-3 py-2 text-sea-ink"
-              >
-                {fxIds.map(id => (
-                  <option value={id} key={id}>
-                    {t(`macroAsset_${id}`)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="flex gap-1" aria-label={t("macroRange")}>
-              {[30, 90, 365].map(range => (
-                <button
-                  type="button"
-                  key={range}
-                  aria-pressed={days === range}
-                  onClick={() => setDays(range)}
-                  className={`rounded-lg px-3 py-2 text-xs font-bold ${days === range ? "bg-lagoon/15 text-lagoon" : "text-sea-ink-soft hover:bg-lagoon/10"}`}
-                >
-                  {t("macroDays", { count: range })}
-                </button>
+                onChange={setSelectedFx}
+                options={fxIds.map(value => ({
+                  value,
+                  label: t(`macroAsset_${value}`),
+                }))}
+              />
+            </div>
+            <Chart
+              locale={locale}
+              label={`${t("macroFxTitle")} · ${t(`macroAsset_${selectedFx}`)}`}
+              lines={[line(selectedFx, fxDays)]}
+              days={fxDays}
+              height={224}
+            />
+            <Methodology>{t("macroFxNote")}</Methodology>
+          </DashboardPanel>
+        </div>
+        <div className="mt-4">
+          <DashboardPanel
+            title={t("fxTableTitle")}
+            controls={
+              <span className="text-xs text-sea-ink-soft">
+                {t("fxTableNote")}
+              </span>
+            }
+          >
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,360px),1fr))] gap-x-8">
+              {[fxIds.slice(0, 4), fxIds.slice(4)].map((ids, i) => (
+                <HistoryTable
+                  key={i}
+                  ids={ids}
+                  histories={histories}
+                  locale={locale}
+                  selected={selectedFx}
+                  onSelect={setSelectedFx}
+                  fetchedAt={data?.fetched_at}
+                />
               ))}
             </div>
-          </div>
-          <Chart
-            locale={locale}
-            label={`${t("macroFxTitle")} · ${t(`macroAsset_${selectedFx}`)}`}
-            lines={[line(selectedFx, days)]}
-          />
-          <HistoryTable
-            fetchedAt={data?.fetched_at}
-            ids={fxIds}
-            histories={histories}
-            locale={locale}
-            selected={selectedFx}
-            onSelect={setSelectedFx}
-          />
-        </Panel>
-      </div>
-      <p className="text-xs leading-5 text-sea-ink-soft">
+            <p className="mt-3 mb-0 font-mono text-xs text-sea-ink-soft tabular-nums">
+              {allFxSameDate
+                ? t("fxAsOf", { date: fxDates[0] })
+                : fxIds
+                    .map(
+                      id =>
+                        `${t(`macroAsset_${id}`)} ${byId.get(id)?.points.at(-1)?.date ?? "—"}`
+                    )
+                    .join(" · ")}
+            </p>
+          </DashboardPanel>
+        </div>
+      </DashboardSection>
+      <p className="mt-5 max-w-[100ch] text-xs leading-5 text-pretty text-sea-ink-soft">
         {t("macroPeriodNote")}
       </p>
     </div>
