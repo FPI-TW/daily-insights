@@ -79,6 +79,78 @@ async function renderLocalized(
 }
 
 describe("three-market report presentation", () => {
+  it("replaces only the US proxy block at its original full-width slot", async () => {
+    const usReport = {
+      marketCode: "us_equity",
+      status: "complete",
+      editionDate: "2026-09-03",
+      sourceDate: "2026-09-02",
+      caveatKey: "reportCaveatLive",
+      summaryKey: "reportSummary_us_equity",
+      blocks: [
+        {
+          id: "us.opening",
+          kind: "metric",
+          status: "ok",
+          titleKey: "reportBlockUsLeaders",
+          metrics: [],
+        },
+        {
+          id: "us.index_proxies",
+          kind: "metric",
+          status: "ok",
+          titleKey: "reportBlockUsIndices",
+          metrics: [],
+        },
+        {
+          id: "us.closing",
+          kind: "metric",
+          status: "ok",
+          titleKey: "reportBlockUsMegaCaps",
+          metrics: [],
+        },
+      ],
+    } satisfies ProvisionalReport
+    const nonUsReport = { ...usReport, marketCode: "tw_equity" } as const
+
+    await renderLocalized(
+      <>
+        <ReportDetail
+          locale="en"
+          report={usReport}
+          blockReplacements={{
+            "us.index_proxies": () => (
+              <section data-testid="us-index-replacement">
+                Five-index performance
+              </section>
+            ),
+          }}
+        />
+        <ReportDetail locale="en" report={nonUsReport} />
+      </>,
+      "en"
+    )
+
+    const replacement = screen.getByTestId("us-index-replacement")
+    const opening = screen.getAllByRole("heading", {
+      name: "Leaders & laggards",
+    })[0]
+    const closing = screen.getAllByRole("heading", { name: "Mega caps" })[0]
+    if (opening === undefined || closing === undefined) {
+      throw new Error("Expected report section headings to be rendered")
+    }
+    expect(opening.compareDocumentPosition(replacement)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
+    expect(replacement.compareDocumentPosition(closing)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
+    expect(replacement.parentElement).toHaveClass("xl:col-span-2")
+    expect(
+      screen.getAllByRole("heading", { name: "US index snapshot" })
+    ).toHaveLength(1)
+  })
+
   it("lists every market the API marks visible, in API order", async () => {
     await renderLocalized(
       <ReportShell

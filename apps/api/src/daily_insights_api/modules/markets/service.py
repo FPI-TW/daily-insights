@@ -44,6 +44,8 @@ MAX_BIND_PARAMETERS = 65535
 # Yahoo publishes no rate limit and is reached through a scraping client, so
 # this stays conservative; it matches TwelveDataTransport's default.
 MAX_FETCH_CONCURRENCY = 4
+INITIAL_SERIES_BACKFILL_PERIOD = "2y"
+AUTOMATIC_SHORT_REFRESH_PERIOD = "7d"
 YAHOO_REFRESH_LOCK_KEY = 4_741_901_938_764_211_037
 MOVING_AVERAGE_PERIODS = (20, 60, 120, 240)
 MOVING_AVERAGE_WARMUP_SESSIONS = max(MOVING_AVERAGE_PERIODS) - 1
@@ -52,6 +54,18 @@ MOVING_AVERAGE_QUANTUM = Decimal("0.0000000001")
 
 class IndexProviderConflictError(ValueError):
     """A symbol already has durable bars owned by another provider."""
+
+
+def select_index_refresh_period(*, period: str, has_stored_bars: bool) -> str:
+    """Choose the fetch window without changing explicit long-period requests.
+
+    The automatic/admin short refresh uses ``7d``.  A missing series needs the
+    normal two-year bootstrap for YTD calculations, while every other request
+    remains exactly as requested.
+    """
+    if not has_stored_bars and period == AUTOMATIC_SHORT_REFRESH_PERIOD:
+        return INITIAL_SERIES_BACKFILL_PERIOD
+    return period
 
 
 async def visible_market_codes(
@@ -486,6 +500,24 @@ async def _refresh_index_daily_bars_unlocked(
     if untracked:
         raise ValueError(f"untracked symbols: {', '.join(untracked)}")
 
+    # A newly added tracked symbol has no rows in an existing deployment. A
+    # short scheduled refresh alone cannot provide the prior-year close needed
+    # for YTD calculations, so give only missing series the normal two-year
+    # bootstrap. This is deliberately one bounded request per symbol: explicit
+    # long-window operator requests remain unchanged and later refreshes return
+    # to their requested short window.
+    stored_symbols = set(
+        (
+            await database.scalars(
+                select(IndexDailyBar.symbol).where(IndexDailyBar.symbol.in_(symbols)).distinct()
+            )
+        ).all()
+    )
+    fetch_periods = {
+        symbol: select_index_refresh_period(period=period, has_stored_bars=symbol in stored_symbols)
+        for symbol in symbols
+    }
+
     # Fetching is the slow part: yfinance issues several HTTP requests per symbol
     # (timezone, cookie/crumb, then the bars), so ten symbols in series can
     # outlast the 60s proxy budget in infra/nginx/conf.d/default.conf whenever
@@ -496,7 +528,9 @@ async def _refresh_index_daily_bars_unlocked(
         async with semaphore:
             try:
                 return await adapter.get_daily_bars(
-                    market=TRACKED_INDICES[symbol], symbol=symbol, period=period
+                    market=TRACKED_INDICES[symbol],
+                    symbol=symbol,
+                    period=fetch_periods[symbol],
                 )
             except DataSourceError as error:
                 return error

@@ -1,7 +1,7 @@
 [
   { "symbol": "^DJI", "marketCode": "us_equity" },
   { "symbol": "^GSPC", "marketCode": "us_equity" },
-  { "symbol": "^IXIC", "marketCode": "us_equity" },
+  { "symbol": "^NDX", "marketCode": "us_equity" },
   { "symbol": "^RUT", "marketCode": "us_equity" },
   { "symbol": "^SOX", "marketCode": "us_equity" },
   { "symbol": "^HSI", "marketCode": "hk_equity" },

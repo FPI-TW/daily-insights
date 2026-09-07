@@ -235,6 +235,24 @@ class _StubAdapter:
         return self._results[symbol]
 
 
+class _RecordingAdapter(_StubAdapter):
+    """Captures provider windows while returning deterministic settled bars."""
+
+    def __init__(self, results: dict[str, YfinanceDailyBars]) -> None:
+        super().__init__(results)
+        self.periods: list[tuple[str, str]] = []
+
+    async def get_daily_bars(
+        self,
+        *,
+        market: str,
+        symbol: str,
+        period: str = "2y",
+    ) -> YfinanceDailyBars:
+        self.periods.append((symbol, period))
+        return await super().get_daily_bars(market=market, symbol=symbol, period=period)
+
+
 def _result(symbol: str, market: str, bars: tuple[DailyBar, ...]) -> YfinanceDailyBars:
     return YfinanceDailyBars(
         symbol=symbol,
@@ -259,6 +277,28 @@ def _symbol_bar(symbol: str, market: str, close: str) -> DailyBar:
     return _bar(date(2026, 9, 1), close).model_copy(
         update={"symbol": symbol, "instrument_source_id": symbol, "market": market}
     )
+
+
+async def test_first_short_refresh_backfills_a_new_symbol_then_returns_to_short_window(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    adapter = cast(
+        YfinanceAdapter,
+        _RecordingAdapter(
+            {"^NDX": _result("^NDX", "us_equity", (_symbol_bar("^NDX", "us_equity", "100.0"),))}
+        ),
+    )
+
+    async with session_factory.begin() as database:
+        await refresh_index_daily_bars(database, adapter=adapter, symbols=["^NDX"], period="7d")
+    assert cast(_RecordingAdapter, adapter).periods == [("^NDX", "2y")]
+
+    async with session_factory.begin() as database:
+        await refresh_index_daily_bars(database, adapter=adapter, symbols=["^NDX"], period="7d")
+    assert cast(_RecordingAdapter, adapter).periods == [
+        ("^NDX", "2y"),
+        ("^NDX", "7d"),
+    ]
 
 
 async def test_a_failing_symbol_does_not_roll_back_the_others(

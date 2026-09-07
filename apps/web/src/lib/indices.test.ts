@@ -26,7 +26,7 @@ describe("twoYearTaipeiRange", () => {
 describe("indexHistoryOutcomes", () => {
   it("keeps catalog ordering while exposing empty and failed symbols", () => {
     const result = indexHistoryOutcomes(
-      ["^DJI", "^GSPC", "^IXIC"],
+      ["^DJI", "^GSPC", "^NDX"],
       [
         { status: "fulfilled", value: [] },
         { status: "rejected", reason: new Error("unavailable") },
@@ -34,7 +34,7 @@ describe("indexHistoryOutcomes", () => {
           status: "fulfilled",
           value: [
             {
-              symbol: "^IXIC",
+              symbol: "^NDX",
               market_code: "us_equity",
               trade_date: "2026-09-03",
               open: "1",
@@ -48,7 +48,7 @@ describe("indexHistoryOutcomes", () => {
       ]
     )
 
-    expect(result.series.map(item => item.symbol)).toEqual(["^IXIC"])
+    expect(result.series.map(item => item.symbol)).toEqual(["^NDX"])
     expect(result.failedSymbols).toEqual(["^DJI", "^GSPC"])
   })
 
@@ -71,7 +71,7 @@ describe("trackedSymbolsForMarket", () => {
     expect(trackedSymbolsForMarket("us_equity")).toEqual([
       "^DJI",
       "^GSPC",
-      "^IXIC",
+      "^NDX",
       "^RUT",
       "^SOX",
     ])

@@ -168,7 +168,7 @@ export function indexNameKey(symbol: string) {
     {
       "^DJI": "indexNameDji",
       "^GSPC": "indexNameGspc",
-      "^IXIC": "indexNameIxic",
+      "^NDX": "indexNameNdx",
       "^RUT": "indexNameRut",
       "^SOX": "indexNameSox",
       "^TWII": "indexNameTwii",

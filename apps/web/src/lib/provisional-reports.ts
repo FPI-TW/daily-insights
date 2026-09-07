@@ -32,6 +32,8 @@ type Metric = {
   unitCode?: string | null
 }
 type BlockMeta = {
+  /** Source block identity. Optional only for legacy/UI fixtures. */
+  id?: string
   status: BlockStatus
   titleKey: string
   captionKey?: string

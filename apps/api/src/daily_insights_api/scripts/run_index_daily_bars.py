@@ -2,8 +2,13 @@
 
 Two uses, one code path, because the store upserts on (symbol, trade_date):
 
-    --once --period 2y   one-time backfill of an empty database
+    --once --period 2y   explicit two-year backfill for all tracked symbols
     (no arguments)       the scheduled container, 7d every morning
+
+When a newly tracked symbol has no durable bars, its first normal short-window
+refresh automatically fetches two years for that symbol only. Later scheduled
+refreshes return to seven days, so a catalog rollout needs no separate manual
+empty-database backfill.
 
 The nightly window is 7d rather than 1d on purpose. At 08:00 Taipei the US
 session that closed a few hours earlier is still "today" in its own exchange

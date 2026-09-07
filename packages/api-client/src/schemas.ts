@@ -38,7 +38,7 @@ const decimalSchema = z.string().regex(/^-?\d+(?:\.\d+)?$/)
 export const indexSymbolSchema = z.enum([
   "^DJI",
   "^GSPC",
-  "^IXIC",
+  "^NDX",
   "^RUT",
   "^SOX",
   "^HSI",
