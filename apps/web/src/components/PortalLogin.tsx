@@ -47,17 +47,10 @@ export function PortalLogin({
         return
       }
       rememberCsrfToken(result.csrf_token)
-      await router.invalidate()
-      await router.navigate({
-        to: result.user.must_change_password
-          ? portal === "customer"
-            ? "/$locale/change-password"
-            : "/$locale/admin/change-password"
-          : portal === "customer"
-            ? "/$locale/reports"
-            : "/$locale/admin/audio",
-        params: { locale },
-      })
+      // Refreshing auth reruns the login route's guard, which owns the
+      // customer/admin/password-change destination. A second navigation here
+      // can arrive late and undo the user's first click on the destination.
+      await router.invalidate({ sync: true })
     } catch (cause) {
       setError(
         cause instanceof ApiError && cause.status === 401
