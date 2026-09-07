@@ -1,3 +1,4 @@
+import { formatDateStamp } from "#/lib/format"
 import type { Locale, User } from "@daily-insights/api-client"
 import { Link, useLocation, useRouter } from "@tanstack/react-router"
 import { Settings, X } from "lucide-react"
@@ -65,11 +66,7 @@ export function AppShell({
   const reportMarketCode = marketCodes.find(code =>
     location.pathname.endsWith(`/reports/${code}`)
   )
-  const displayDate = new Intl.DateTimeFormat(locale, {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(new Date())
+  const displayDate = formatDateStamp(new Date())
 
   const closeSettings = useCallback(() => {
     setSettingsOpen(false)

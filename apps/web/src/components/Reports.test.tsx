@@ -893,7 +893,7 @@ describe("three-market report presentation", () => {
     })
     expect(macroCard).toHaveTextContent("Brent crude94.45-0.17%")
     expect(macroCard).toHaveTextContent("Gold4,477.29+0.08%")
-    expect(macroCard).toHaveTextContent("Sep 3, 2026")
+    expect(macroCard).toHaveTextContent("2026-09-03")
     expect(
       screen.getByRole("article", { name: "US equities" })
     ).toHaveTextContent("TSLA376.36+5.42%")

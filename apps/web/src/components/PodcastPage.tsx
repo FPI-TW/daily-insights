@@ -1,3 +1,4 @@
+import { formatDateStamp } from "#/lib/format"
 import type {
   Locale,
   PodcastAudioPlayback,
@@ -21,12 +22,10 @@ import {
   clockTime,
   collapsedListSize,
   currentChapterIndex,
-  dotDate,
   episodeFilters,
   formatSpeed,
   listeningStatus,
   matchesFilter,
-  monthDayLabel,
   nextPlaybackSpeed,
   releaseTimeLabel,
   skipSeconds,
@@ -441,7 +440,7 @@ export function PodcastPage({
             className="text-[15px] font-semibold text-sea-ink tabular-nums"
             dateTime={current.trading_date}
           >
-            {dotDate(current.trading_date)}
+            {formatDateStamp(current.trading_date)}
           </time>
           <span className="text-sea-ink-faint">
             {[
@@ -710,7 +709,9 @@ export function PodcastPage({
             params={{ locale }}
             className="inline-flex items-center gap-1.5 font-medium text-lagoon-deep no-underline hover:text-palm"
           >
-            {t("podcastReportLink", { date: dotDate(current.trading_date) })}
+            {t("podcastReportLink", {
+              date: formatDateStamp(current.trading_date),
+            })}
           </Link>
         </div>
       </section>
@@ -798,7 +799,7 @@ export function PodcastPage({
                     <span className="flex min-w-0 flex-1 flex-col gap-[5px]">
                       <span className="flex items-center justify-between text-xs text-sea-ink-faint tabular-nums">
                         <span className="font-semibold text-lagoon-deep">
-                          {monthDayLabel(episode.trading_date, locale)} ·{" "}
+                          {formatDateStamp(episode.trading_date)} ·{" "}
                           {weekdayLabel(episode.trading_date, locale)}
                         </span>
                         <span>

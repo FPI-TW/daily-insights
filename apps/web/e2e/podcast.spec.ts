@@ -515,7 +515,7 @@ test.describe("Customer Podcast page", () => {
     ).toBeVisible()
     await expect(page).toHaveURL("/en/podcasts")
     await expect(page.getByText("Today", { exact: true })).toBeVisible()
-    await expect(page.getByText("2026.07.24", { exact: true })).toBeVisible()
+    await expect(page.getByText("2026-07-24", { exact: true })).toBeVisible()
     const player = page.getByRole("region", {
       name: "Market Morning Brief player",
     })

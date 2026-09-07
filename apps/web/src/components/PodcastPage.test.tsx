@@ -145,14 +145,14 @@ describe("PodcastPage", () => {
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
       "Episode 0"
     )
-    expect(screen.getByText("2026.09.10")).toBeInTheDocument()
+    expect(screen.getByText("2026-09-10")).toBeInTheDocument()
     expect(screen.getByText("Opening")).toBeInTheDocument()
     expect(
       screen.getByText('podcastChapterCount:{"count":3}')
     ).toBeInTheDocument()
     expect(screen.getByText("2:10")).toBeInTheDocument()
     expect(
-      screen.getByText('podcastReportLink:{"date":"2026.09.10"}')
+      screen.getByText('podcastReportLink:{"date":"2026-09-10"}')
     ).toHaveAttribute("data-to", "/$locale/reports")
     expect(createAudioUrl).not.toHaveBeenCalled()
   })

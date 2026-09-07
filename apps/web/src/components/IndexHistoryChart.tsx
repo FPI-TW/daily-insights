@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { Locale } from "@daily-insights/api-client"
 import { useChartColors } from "#/lib/chart"
-import { formatIsoDate, formatNumber } from "#/lib/format"
+import { formatIsoDate, formatDateStamp, formatNumber } from "#/lib/format"
 import {
   indexNameKey,
   type IndexMovingAverageMap,
@@ -252,7 +252,7 @@ export function IndexHistoryChart({
         <div className="flex gap-1">
           <dt>{t("indexChartLatestDate")}</dt>
           <dd className="m-0 font-semibold text-sea-ink">
-            {formatIsoDate(latest.trade_date, locale)}
+            {formatDateStamp(latest.trade_date)}
           </dd>
         </div>
         <div className="flex gap-1">
@@ -279,7 +279,7 @@ export function IndexHistoryChart({
           <tbody>
             {selected.bars.map((bar, index) => (
               <tr key={bar.trade_date}>
-                <th>{formatIsoDate(bar.trade_date, locale)}</th>
+                <th>{formatDateStamp(bar.trade_date)}</th>
                 <td>{formatNumber(bar.close, null, locale)}</td>
                 {availableMovingAverages.map(item => (
                   <td key={item.period}>

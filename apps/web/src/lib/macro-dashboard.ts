@@ -1,3 +1,4 @@
+import { formatTimestamp } from "./format"
 import { z } from "zod"
 
 const decimal = z
@@ -103,18 +104,7 @@ export function recentPoints(history: MacroHistory | undefined, days: number) {
 }
 
 export function formatTaipeiTimestamp(value: string) {
-  const parts = new Intl.DateTimeFormat("en", {
-    timeZone: "Asia/Taipei",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(value))
-  const part = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find(item => item.type === type)?.value ?? ""
-  return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`
+  return formatTimestamp(value)
 }
 
 /** Both axes get identical grid divisions, with explicit bounds and intervals. */
