@@ -110,22 +110,21 @@ describe("TaiwanIndexHistoryChart", () => {
       "aria-valuenow",
       "100"
     )
-    fireEvent.click(screen.getByRole("button", { name: "Last 2 years" }))
+    // Two years is not offered: the stored history is still too short for it.
     expect(
-      Number(
-        screen
-          .getByRole("meter", { name: "20MA bias" })
-          .getAttribute("aria-valuenow")
-      )
-    ).toBeCloseTo(200 / 3)
+      screen.queryByRole("button", { name: "Last 2 years" })
+    ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Last 1.5 years" }))
+    expect(screen.getByRole("meter", { name: "20MA bias" })).toHaveAttribute(
+      "aria-valuenow",
+      expect.stringMatching(/^50/)
+    )
+    // The first half of the 1.5-year window ends on the 0% reading.
     fireEvent.click(screen.getByRole("button", { name: "Zoom TAIEX bias" }))
-    expect(
-      Number(
-        screen
-          .getByRole("meter", { name: "20MA bias" })
-          .getAttribute("aria-valuenow")
-      )
-    ).toBeCloseTo(100 / 3)
+    expect(screen.getByRole("meter", { name: "20MA bias" })).toHaveAttribute(
+      "aria-valuenow",
+      "0"
+    )
     expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
       '"type":"candlestick"'
     )
