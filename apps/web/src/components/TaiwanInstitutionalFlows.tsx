@@ -341,11 +341,9 @@ function FlowTable({
                   scope="row"
                   className="px-3 py-0.5 text-left font-semibold text-sea-ink"
                 >
-                  <span className="whitespace-nowrap">
-                    {row.name}
-                    <span className="ml-1.5 font-mono text-xs font-normal text-sea-ink-soft">
-                      {row.symbol}
-                    </span>
+                  <span className="block whitespace-nowrap">{row.name}</span>
+                  <span className="block font-mono text-xs leading-4 font-normal text-sea-ink-soft">
+                    {row.symbol}
                   </span>
                 </th>
                 {[
