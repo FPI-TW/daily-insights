@@ -151,7 +151,7 @@ describe("three-market report presentation", () => {
     const links = screen.getByRole("navigation").querySelectorAll("a")
     expect(Array.from(links).map(link => link.textContent)).toEqual([
       "All markets",
-      "US macro & bonds",
+      "Global macro & bonds",
       "Crypto",
       "US equities",
       "Taiwan equities",
@@ -200,22 +200,21 @@ describe("three-market report presentation", () => {
     expect(navigation.compareDocumentPosition(section)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     )
-    expect(section).toHaveTextContent("US macro & bonds")
+    expect(section).toHaveTextContent("Global macro & bonds")
     expect(section).toHaveTextContent("Taiwan equities")
     expect(section).not.toHaveTextContent("US equities")
     expect(section).not.toHaveTextContent("Crypto")
   })
 
-  it("renders the not-launched state inside the shared shell with a single nav", async () => {
+  it("omits the Taiwan not-launched notice while retaining its shared shell", async () => {
     await renderLocalized(
       <ReportShell locale="en" markets={markets} activeMarket="tw_equity">
         <ReportNotLaunchedScreen locale="en" marketCode="tw_equity" />
       </ReportShell>,
       "en"
     )
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Report not launched yet"
-    )
+    expect(screen.queryByRole("status")).toBeNull()
+    expect(screen.queryByText("Report not launched yet")).toBeNull()
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
       "Taiwan equities"
     )

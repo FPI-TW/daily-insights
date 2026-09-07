@@ -8,19 +8,14 @@ const technical = {
   en: "TAIEX bias",
 }
 const macro = {
-  "zh-hant": "商品",
-  "zh-hans": "商品",
-  en: "Commodities",
+  "zh-hant": "能源 / 貴金屬",
+  "zh-hans": "能源 / 贵金属",
+  en: "Energy / Precious metals",
 }
 const publishedReport = {
   "zh-hant": "查看晨間報告：現貨與 ETF 代理資料",
   "zh-hans": "查看晨间报告：现货与 ETF 代理数据",
   en: "View morning report: spot prices and ETF proxies",
-}
-const publishedChart = {
-  "zh-hant": "油金比 / 銅金比",
-  "zh-hans": "油金比 / 铜金比",
-  en: "Oil-Gold / Copper-Gold Ratios",
 }
 for (const locale of locales) {
   for (const market of ["global_macro_bonds", "tw_equity"] as const) {
@@ -73,7 +68,7 @@ for (const locale of locales) {
       if (locale === "en" && market === "global_macro_bonds") {
         await expect(
           page.getByRole("heading", {
-            name: "Commodities",
+            name: "Energy / Precious metals",
             exact: true,
           })
         ).toBeVisible()
@@ -135,15 +130,10 @@ for (const locale of locales) {
         })
       }
       if (market === "global_macro_bonds") {
-        await page.getByText(publishedReport[locale], { exact: true }).click()
         await expect(
-          page.getByRole("heading", {
-            name: publishedChart[locale],
-            exact: true,
-            level: 2,
-          })
-        ).toBeVisible()
-        await expect(page.locator("canvas")).toHaveCount(5)
+          page.getByText(publishedReport[locale], { exact: true })
+        ).toHaveCount(0)
+        await expect(page.locator("canvas")).toHaveCount(4)
       }
       expect(errors).toEqual([])
     })

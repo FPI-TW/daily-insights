@@ -93,6 +93,11 @@ describe("integrated macro dashboard", () => {
     expect(
       screen.queryByRole("heading", { name: /Today’s economic calendar/ })
     ).toBeNull()
-    expect(screen.getByRole("heading", { name: "Commodities" })).toBeVisible()
+    for (const name of ["Commodities", "Rates", "Foreign exchange"]) {
+      expect(screen.queryByRole("heading", { name })).toBeNull()
+    }
+    expect(
+      screen.getByRole("heading", { name: "Energy / Precious metals" })
+    ).toBeVisible()
   })
 })

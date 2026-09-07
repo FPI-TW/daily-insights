@@ -302,8 +302,8 @@ function FlowTable({
 }) {
   const { t } = useTranslation()
   return (
-    <div className={direction === "down" ? "mt-[22px]" : ""}>
-      <h4 className="mb-2 flex items-center gap-1.5 text-xs font-bold">
+    <div className={direction === "down" ? "mt-6" : ""}>
+      <h4 className="mb-3 flex items-center gap-2 text-sm font-bold">
         <span
           className={
             direction === "up"
@@ -313,14 +313,14 @@ function FlowTable({
         />
         {title}
       </h4>
-      <div className="overflow-hidden rounded-lg border border-line">
-        <table className="w-full table-fixed text-xs">
+      <div className="overflow-x-auto rounded-lg border border-line">
+        <table className="w-full min-w-160 table-auto text-sm leading-6">
           <colgroup>
-            <col className="w-[32%]" />
+            <col className="w-44" />
             <col />
             <col />
             <col />
-            <col className="w-[19%]" />
+            <col className="w-32" />
           </colgroup>
           <thead className="text-sea-ink-soft">
             <tr>
@@ -333,7 +333,7 @@ function FlowTable({
               ].map((key, index) => (
                 <th
                   key={key}
-                  className={`border-b border-line px-2 py-2 font-semibold ${index === 0 ? "text-left" : "text-right"}`}
+                  className={`border-b border-line whitespace-nowrap px-4 py-3 font-semibold ${index === 0 ? "text-left" : "text-right"}`}
                 >
                   {t(key)}
                 </th>
@@ -346,9 +346,9 @@ function FlowTable({
                 key={row.symbol}
                 className="border-t border-line-soft first:border-t-0"
               >
-                <td className="px-2 py-[11px] font-semibold text-sea-ink">
-                  <span className="block truncate">{row.name}</span>
-                  <span className="block font-mono text-[10px] text-sea-ink-soft">
+                <td className="px-4 py-4 font-semibold text-sea-ink">
+                  <span className="block whitespace-nowrap">{row.name}</span>
+                  <span className="mt-1 block font-mono text-xs text-sea-ink-soft">
                     {row.symbol}
                   </span>
                 </td>
@@ -362,7 +362,7 @@ function FlowTable({
                   return (
                     <td
                       key={index}
-                      className={`whitespace-nowrap px-2 py-[11px] text-right font-mono tabular-nums ${index === 3 ? "text-[13px] font-bold" : "text-xs"} ${directionClass(value)}`}
+                      className={`whitespace-nowrap px-4 py-4 text-right font-mono tabular-nums ${index === 3 ? "font-bold" : ""} ${directionClass(value)}`}
                     >
                       {signed(value, locale, value % 1 === 0 ? 0 : 1)}
                     </td>
@@ -453,7 +453,7 @@ export function TaiwanInstitutionalFlows({
         title={t("sectionFlows")}
         meta={t("flowsMeta", { date: asOf })}
       >
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-4">
+        <div className="grid grid-cols-1 items-start gap-6">
           <FlowPanel flows={data.flows} history={history} locale={locale} />
           <StocksPanel stocks={data.stocks} locale={locale} />
         </div>
@@ -472,7 +472,7 @@ export function TaiwanInstitutionalFlowsLoading() {
       className="mt-6 min-w-0"
     >
       <div className="mb-3 h-5 w-32 animate-pulse rounded bg-line" />
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] gap-4">
+      <div className="grid grid-cols-1 gap-6">
         {[0, 1].map(panel => (
           <div
             key={panel}
