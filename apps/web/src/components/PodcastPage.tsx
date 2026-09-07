@@ -5,7 +5,6 @@ import type {
   PodcastEpisodeSummary,
   User,
 } from "@daily-insights/api-client"
-import { Link } from "@tanstack/react-router"
 import {
   type MouseEvent,
   useCallback,
@@ -701,19 +700,6 @@ export function PodcastPage({
             })}
           </div>
         ) : null}
-
-        <div className="flex max-w-[620px] items-center gap-3 border-t border-line pt-[18px] text-[13px] text-sea-ink-muted">
-          <span>{t("podcastRelatedReport")}</span>
-          <Link
-            to="/$locale/reports"
-            params={{ locale }}
-            className="inline-flex items-center gap-1.5 font-medium text-lagoon-deep no-underline hover:text-palm"
-          >
-            {t("podcastReportLink", {
-              date: formatDateStamp(current.trading_date),
-            })}
-          </Link>
-        </div>
       </section>
 
       <aside

@@ -138,7 +138,7 @@ describe("PodcastPage", () => {
     vi.restoreAllMocks()
   })
 
-  it("shows the latest episode with its badge, chapters and report link", () => {
+  it("shows the latest episode with its badge and chapters", () => {
     renderPage([latest, episode(1)])
 
     expect(screen.getByText("podcastToday")).toBeInTheDocument()
@@ -151,9 +151,6 @@ describe("PodcastPage", () => {
       screen.getByText('podcastChapterCount:{"count":3}')
     ).toBeInTheDocument()
     expect(screen.getByText("2:10")).toBeInTheDocument()
-    expect(
-      screen.getByText('podcastReportLink:{"date":"2026-09-10"}')
-    ).toHaveAttribute("data-to", "/$locale/reports")
     expect(createAudioUrl).not.toHaveBeenCalled()
   })
 

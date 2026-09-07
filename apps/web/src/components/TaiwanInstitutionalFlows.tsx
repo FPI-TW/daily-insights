@@ -453,7 +453,7 @@ export function TaiwanInstitutionalFlows({
         title={t("sectionFlows")}
         meta={t("flowsMeta", { date: asOf })}
       >
-        <div className="grid grid-cols-1 items-start gap-6">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-6">
           <FlowPanel flows={data.flows} history={history} locale={locale} />
           <StocksPanel stocks={data.stocks} locale={locale} />
         </div>
@@ -472,7 +472,7 @@ export function TaiwanInstitutionalFlowsLoading() {
       className="mt-6 min-w-0"
     >
       <div className="mb-3 h-5 w-32 animate-pulse rounded bg-line" />
-      <div className="grid grid-cols-1 gap-6">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] gap-6">
         {[0, 1].map(panel => (
           <div
             key={panel}

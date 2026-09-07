@@ -465,11 +465,16 @@ function CandlesPanel({
             {formatNumber(latest.close, null, locale)}
           </strong>
           <span
-            className={`font-mono font-bold ${change === null || Math.abs(change) < 0.005 ? "text-sea-ink-soft" : change > 0 ? "text-market-up" : "text-market-down"}`}
+            className={`inline-flex items-baseline gap-2 whitespace-nowrap font-mono font-bold ${change === null || Math.abs(change) < 0.005 ? "text-sea-ink-soft" : change > 0 ? "text-market-up" : "text-market-down"}`}
           >
-            {change === null
-              ? "—"
-              : `${Math.abs(change) < 0.005 ? "" : change > 0 ? "▲ " : "▼ "}${signed(Math.abs(change), locale).replace("+", "")}`}
+            {change !== null && Math.abs(change) >= 0.005 ? (
+              <span>{change > 0 ? "▲" : "▼"}</span>
+            ) : null}
+            <span>
+              {change === null
+                ? "—"
+                : signed(Math.abs(change), locale).replace("+", "")}
+            </span>
           </span>
           <span>{t("volumeLabel")}</span>
           <strong className="font-mono text-[13px] text-sea-ink tabular-nums">
