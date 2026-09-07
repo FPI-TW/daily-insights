@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     # A selection prompt carries up to ~100k characters of source text; the
     # provider regularly needs 30-45 seconds to answer it.
     model_timeout_seconds: float = Field(default=120, gt=0, le=300)
+    chat_user_max_pending: int = Field(default=2, gt=0)
+    chat_org_max_pending: int = Field(default=8, gt=0)
+    chat_user_daily_turns: int = Field(default=100, gt=0)
+    chat_org_daily_turns: int = Field(default=1000, gt=0)
+    chat_max_output_tokens: int = Field(default=4096, gt=0, le=16384)
     chat_enabled: bool = False
     chat_model_provider: str = "deepseek"
     chat_model_name: str = "deepseek-chat"

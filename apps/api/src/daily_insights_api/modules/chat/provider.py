@@ -43,12 +43,14 @@ class OpenAICompatibleStream:
         model: str,
         messages: list[dict[str, str]],
         timeout_seconds: float,
+        max_output_tokens: int = 4096,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._model = model
         self._messages = messages
         self._timeout = timeout_seconds
+        self._max_output_tokens = max_output_tokens
         self.metadata = ProviderMetadata()
 
     async def __aiter__(self) -> AsyncIterator[str]:
@@ -68,6 +70,7 @@ class OpenAICompatibleStream:
                         "stream": True,
                         "stream_options": {"include_usage": True},
                         "messages": self._messages,
+                        "max_tokens": self._max_output_tokens,
                     },
                     timeout=httpx.Timeout(self._timeout),
                 ) as response:
@@ -105,9 +108,10 @@ class OpenAICompatibleStream:
 
 
 class OpenAICompatibleChatProvider:
-    def __init__(self, *, base_url: str, api_key: str) -> None:
+    def __init__(self, *, base_url: str, api_key: str, max_output_tokens: int = 4096) -> None:
         self._base_url = base_url
         self._api_key = api_key
+        self._max_output_tokens = max_output_tokens
 
     async def stream(
         self, *, model: str, messages: list[dict[str, str]], timeout_seconds: float
@@ -118,6 +122,7 @@ class OpenAICompatibleChatProvider:
             model=model,
             messages=messages,
             timeout_seconds=timeout_seconds,
+            max_output_tokens=self._max_output_tokens,
         )
 
 

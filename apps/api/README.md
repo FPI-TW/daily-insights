@@ -129,3 +129,9 @@ uv run alembic upgrade head --sql
 ### 登入資源限制
 
 登入沿用每組 IP/email 的五分鐘 5 次限制，另以資料庫原子計數限制每來源 IP 五分鐘 30 次、全站五分鐘 300 次。成功登入只清除 IP/email 計數，不重置共用額度。對應設定為 `DAILY_INSIGHTS_LOGIN_IP_RATE_LIMIT_ATTEMPTS`、`DAILY_INSIGHTS_LOGIN_GLOBAL_RATE_LIMIT_ATTEMPTS`，時間窗口沿用 `DAILY_INSIGHTS_LOGIN_RATE_LIMIT_WINDOW_SECONDS`。每個 API worker 最多同時執行 2 個登入密碼工作，沒有等待佇列；取消 HTTP 請求後，名額仍保留至實際密碼運算結束。工作數由 `DAILY_INSIGHTS_LOGIN_PASSWORD_WORKERS` 控制，超額回覆 429。
+
+### 聊天用量限制
+
+聊天在資料庫交易內跨 worker 檢查使用者與組織額度，預設每位使用者最多 2 個進行中回覆、每組織 8 個；滾動 24 小時最多分別 100／1000 次生成。失敗與取消仍計入每日額度，完成請求的冪等重播不重複計費或扣額度。設定分別為 `DAILY_INSIGHTS_CHAT_USER_MAX_PENDING`、`DAILY_INSIGHTS_CHAT_ORG_MAX_PENDING`、`DAILY_INSIGHTS_CHAT_USER_DAILY_TURNS`、`DAILY_INSIGHTS_CHAT_ORG_DAILY_TURNS`；超額回覆 429。每次模型輸出預設最多 4096 tokens，可用 `DAILY_INSIGHTS_CHAT_MAX_OUTPUT_TOKENS` 調整。這些是請求與輸出用量上限，並非依供應商價格計算的金額預算。
+
+回覆的總生命週期（包含歷史讀取、模型連線與串流）受聊天 timeout 限制。worker 意外終止所留下的 pending 紀錄，會在下一次額度檢查時回收；回收門檻為允許的最大 timeout 600 秒加 30 秒緩衝，不會重置每日用量。上述設定需由部署環境實際注入 API 程序，未注入時使用安全預設值。

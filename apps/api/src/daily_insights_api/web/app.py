@@ -142,6 +142,7 @@ def create_app(
         app.state.chat_provider = OpenAICompatibleChatProvider(
             base_url=resolved_settings.chat_model_api_base_url,
             api_key=resolved_settings.chat_model_api_key.get_secret_value(),
+            max_output_tokens=resolved_settings.chat_max_output_tokens,
         )
 
     @app.middleware("http")
