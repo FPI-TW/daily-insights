@@ -2,11 +2,11 @@ import asyncio
 from datetime import date, timedelta
 from time import monotonic
 
-from daily_insights_api.modules.data_sources.dto import (
+from daily_insights_api.modules.data_sources.api import (
+    InstitutionalFlowProvider,
     InstitutionalFlowResult,
     InstitutionalStockFlowResult,
 )
-from daily_insights_api.modules.data_sources.provider import InstitutionalFlowProvider
 
 
 class TwseInstitutionalFlowService:

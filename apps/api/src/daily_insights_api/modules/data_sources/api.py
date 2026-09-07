@@ -19,7 +19,10 @@ from daily_insights_api.modules.data_sources import (
     UnsupportedMarketError,
 )
 from daily_insights_api.modules.data_sources.dto import MarketCode
-from daily_insights_api.modules.data_sources.provider import MarketDataProvider
+from daily_insights_api.modules.data_sources.provider import (
+    InstitutionalFlowProvider,
+    MarketDataProvider,
+)
 from daily_insights_api.modules.data_sources.twelve_data import (
     TWELVE_DATA_CONTRACT_HASH,
     TWELVE_DATA_CONTRACT_VERSION,
@@ -32,6 +35,8 @@ from daily_insights_api.modules.data_sources.twelve_data import (
     TwelveDataTransport,
 )
 from daily_insights_api.modules.data_sources.twse import (
+    BFI82U_ENDPOINT,
+    T86_ENDPOINTS,
     TWSE_CONTRACT_HASH,
     TWSE_CONTRACT_VERSION,
     TwseAdapter,
@@ -45,6 +50,8 @@ from daily_insights_api.modules.data_sources.yfinance import (
 )
 
 __all__ = [
+    "BFI82U_ENDPOINT",
+    "T86_ENDPOINTS",
     "TRACKED_INDICES",
     "TWELVE_DATA_CONTRACT_HASH",
     "TWELVE_DATA_CONTRACT_VERSION",
@@ -60,6 +67,7 @@ __all__ = [
     "EodsResult",
     "IndexSymbol",
     "InstitutionalFlowDay",
+    "InstitutionalFlowProvider",
     "InstitutionalFlowResult",
     "InstitutionalStockFlow",
     "InstitutionalStockFlowResult",
