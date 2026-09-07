@@ -170,7 +170,7 @@ async def test_market_news_is_policy_gated_and_unknown_markets_are_not_found(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from daily_insights_api.core.enums import SystemRole
-    from daily_insights_api.modules.news import router as news_router
+    from daily_insights_api.modules.news import access as news_access
 
     app = create_app(Settings(environment="test"), readiness_checker=lambda: _ready())
     organization = uuid.uuid4()
@@ -187,7 +187,7 @@ async def test_market_news_is_policy_gated_and_unknown_markets_are_not_found(
         assert organization_id == organization
         return {"us_equity", "crypto"}
 
-    monkeypatch.setattr(news_router, "visible_market_codes", visible)
+    monkeypatch.setattr(news_access, "visible_market_codes", visible)
     app.dependency_overrides[require_password_changed] = auth
     app.dependency_overrides[get_database_session] = database
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

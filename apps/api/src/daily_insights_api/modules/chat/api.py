@@ -43,7 +43,13 @@ from daily_insights_api.modules.model_runtime.api import (
     GenerationRecord,
     ModelConfiguration,
 )
-from daily_insights_api.modules.news.api import NewsEdition, NewsItem, NewsPresentation
+from daily_insights_api.modules.news.api import (
+    GLOBAL_MARKET,
+    NewsEdition,
+    NewsItem,
+    NewsPresentation,
+    visible_news_market_codes,
+)
 from daily_insights_api.modules.reports.api import (
     LAUNCH_MARKET_ORDER,
     ReportPublication,
@@ -484,7 +490,10 @@ async def _page_snapshot(
         news: list[dict[str, object]] = []
         if page.news_edition_id is not None:
             edition = await database.get(NewsEdition, page.news_edition_id)
-            if edition is None:
+            if edition is None or (
+                edition.market_code != GLOBAL_MARKET
+                and edition.market_code not in await visible_news_market_codes(database, context)
+            ):
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "news context unavailable")
             result = await database.execute(
                 select(NewsItem, NewsPresentation)
