@@ -780,8 +780,7 @@ export function TaiwanIndexHistoryChart({
         className="mt-6 rounded-2xl border border-line bg-surface p-5"
         role="status"
       >
-        <h2 className="m-0 text-lg font-extrabold">{t("sectionTechnical")}</h2>
-        <p className="mt-3 mb-0 text-sm text-sea-ink-soft">
+        <p className="m-0 text-sm text-sea-ink-soft">
           {history && !history.failedSymbols.length
             ? t("indexChartEmpty")
             : t("indexChartUnavailable")}
@@ -795,8 +794,6 @@ export function TaiwanIndexHistoryChart({
   return (
     <div className="mt-6 min-w-0">
       <DashboardSection
-        number="01"
-        title={t("sectionTechnical")}
         meta={t("techMeta", { index: name, symbol: selected.symbol })}
       >
         {history.series.length > 1 ? (

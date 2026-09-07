@@ -22,27 +22,15 @@ export function DashboardPanel({
 }
 
 export function DashboardSection({
-  number,
-  title,
   meta,
   children,
 }: {
-  number: string
-  title: string
   meta: ReactNode
   children: ReactNode
 }) {
   return (
     <section className="min-w-0">
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-        <div className="flex items-baseline gap-2.5">
-          <span className="text-[11px] font-extrabold tracking-[0.14em] text-kicker">
-            {number}
-          </span>
-          <h2 className="m-0 text-lg font-extrabold tracking-tight">{title}</h2>
-        </div>
-        <div className="text-xs text-sea-ink-soft">{meta}</div>
-      </div>
+      <div className="mb-3 text-xs text-sea-ink-soft">{meta}</div>
       {children}
     </section>
   )

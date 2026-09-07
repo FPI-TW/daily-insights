@@ -134,9 +134,9 @@ test("US market renders a dedicated responsive VIX chart", async ({
 })
 
 for (const [locale, heading, cumulative, foreign, days60] of [
-  ["zh-hant", "三大法人", "累積", "外資", "近 60 日"],
-  ["zh-hans", "三大法人", "累积", "外资", "近 60 日"],
-  ["en", "Institutional flows", "Cumulative", "Foreign", "Last 60d"],
+  ["zh-hant", "三大法人每日買賣超", "累積", "外資", "近 60 日"],
+  ["zh-hans", "三大法人每日买卖超", "累积", "外资", "近 60 日"],
+  ["en", "Daily institutional net buying", "Cumulative", "Foreign", "Last 60d"],
 ] as const) {
   test(`Taiwan institutional flows render correctly in ${locale}`, async ({
     context,
@@ -160,8 +160,8 @@ for (const [locale, heading, cumulative, foreign, days60] of [
       "org_member",
     ])
     const section = page
-      .getByRole("heading", { name: heading, level: 2 })
-      .locator("xpath=ancestor::section[1]")
+      .getByRole("heading", { name: heading, level: 3 })
+      .locator("xpath=ancestor::section[2]")
     await expect(section).toBeVisible()
     await expect(section.getByText("2026-09-04").first()).toBeVisible()
     await expect(section.getByRole("button", { pressed: true })).toHaveCount(3)
