@@ -31,8 +31,8 @@ from daily_insights_api.modules.news.models import (
     NewsPresentation,
 )
 
-DERIVATION_VERSION = "feeds-deepseek-news.v4"
-SUMMARY_PROMPT_VERSION = "summary-v2"
+DERIVATION_VERSION = "feeds-deepseek-news.v5"
+SUMMARY_PROMPT_VERSION = "summary-v3"
 LOCALES = ("zh-hant", "zh-hans", "en")
 TAIPEI = ZoneInfo("Asia/Taipei")
 # Only a complete edition is final; partial and unavailable editions may be
@@ -58,6 +58,28 @@ async def _retry[T](
             if attempt:
                 raise
     raise AssertionError("unreachable")
+
+
+async def _summarize_with_retry(
+    client: DeepSeekClient,
+    fetched: FetchedCandidate,
+    locale: str,
+    on_failure: Callable[[Exception], None],
+) -> ModelCall:
+    feedback: str | None = None
+
+    async def attempt() -> ModelCall:
+        return await client.summarize(
+            fetched.candidate, fetched.body, locale, retry_feedback=feedback
+        )
+
+    def failed(error: Exception) -> None:
+        nonlocal feedback
+        if isinstance(error, ModelCallError) and error.error_code.startswith("summary_"):
+            feedback = error.error_code
+        on_failure(error)
+
+    return await _retry(attempt, failed)
 
 
 def _digest(
@@ -142,7 +164,7 @@ def _failed_audit(
         input_tokens=metadata.input_tokens if metadata is not None else None,
         output_tokens=metadata.output_tokens if metadata is not None else None,
         latency_ms=metadata.latency_ms if metadata is not None else 0,
-        error_code=type(error).__name__,
+        error_code=error.error_code if isinstance(error, ModelCallError) else type(error).__name__,
     )
 
 
@@ -430,7 +452,13 @@ async def run_news_edition(
             )
         except Exception as error:
             await database.commit()
-            emit_event("news.selection.failed", market=market_code, error_code=type(error).__name__)
+            emit_event(
+                "news.selection.failed",
+                market=market_code,
+                error_code=error.error_code
+                if isinstance(error, ModelCallError)
+                else type(error).__name__,
+            )
             return edition.status
         selected = {fetched.candidate.id: fetched for fetched in usable}
         complete_count = 0
@@ -443,13 +471,6 @@ async def run_news_edition(
             summaries: dict[str, LocalizedSummary] = {}
             try:
                 for locale in LOCALES:
-
-                    async def summarize_once(
-                        candidate: Candidate = fetched.candidate,
-                        body: str = fetched.body,
-                        locale: str = locale,
-                    ) -> ModelCall:
-                        return await client.summarize(candidate, body, locale)
 
                     def audit_attempt_failure(
                         error: Exception,
@@ -468,7 +489,9 @@ async def run_news_edition(
                             )
                         )
 
-                    call = await _retry(summarize_once, audit_attempt_failure)
+                    call = await _summarize_with_retry(
+                        client, fetched, locale, audit_attempt_failure
+                    )
                     assert isinstance(call.value, LocalizedSummary)
                     summaries[locale] = call.value
                     database.add(
@@ -513,7 +536,9 @@ async def run_news_edition(
                 emit_event(
                     "news.summary.failed",
                     hostname=fetched.candidate.hostname,
-                    error_code=type(error).__name__,
+                    error_code=error.error_code
+                    if isinstance(error, ModelCallError)
+                    else type(error).__name__,
                 )
         edition.status, edition.caveat = _edition_status(complete_count, spec.target_items)
         await database.commit()

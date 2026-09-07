@@ -45,7 +45,12 @@ async def _latest_response(
         await database.scalars(
             select(NewsEdition)
             .where(
-                NewsEdition.edition_date == today,
+                NewsEdition.edition_date <= today,
+                NewsEdition.status.in_(("complete", "partial")),
+                select(NewsItem.id)
+                .join(NewsPresentation, NewsPresentation.item_id == NewsItem.id)
+                .where(NewsItem.edition_id == NewsEdition.id, NewsPresentation.locale == locale)
+                .exists(),
                 NewsEdition.market_code == spec.market_code,
             )
             .order_by(NewsEdition.edition_date.desc(), NewsEdition.revision.desc())
@@ -101,7 +106,15 @@ async def _latest_response(
         generated_at=edition.generated_at,
         status=edition.status,
         locale=locale,
-        caveat=_localized_caveat(edition.status, len(items), locale, spec.target_items),
+        caveat=(
+            {
+                "zh-hant": f"顯示 {edition.edition_date} 最近可用的新聞；尚無較新的新聞。",  # noqa: RUF001
+                "zh-hans": f"显示 {edition.edition_date} 最近可用的新闻；暂无更新的新闻。",  # noqa: RUF001
+                "en": f"Showing the latest available news from {edition.edition_date}.",
+            }[locale]
+            if edition.edition_date < today
+            else _localized_caveat(edition.status, len(items), locale, spec.target_items)
+        ),
         items=items,
     )
 

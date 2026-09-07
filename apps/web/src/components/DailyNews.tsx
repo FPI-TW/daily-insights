@@ -65,7 +65,9 @@ export function DailyNews({
           {t(`dailyNewsStatus_${status}`)}
         </span>
       </div>
-      {news !== null && news.status === "partial" ? (
+      {news !== null &&
+      (news.status === "partial" ||
+        (news.status === "complete" && news.caveat)) ? (
         // A partial badge must explain itself: the caveat from the pipeline,
         // or at least how many stories made it against the target.
         <p className="mt-0 mb-4 text-xs text-sea-ink-soft">

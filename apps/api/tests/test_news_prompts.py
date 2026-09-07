@@ -22,7 +22,7 @@ def test_packaged_selection_criteria_loads_with_version_and_digest() -> None:
     assert "OUTPUT_CONTRACT" in criteria.text
     assert "5 則" not in criteria.text
     assert len(criteria.digest) == 64
-    assert criteria.version == f"selection-v4:{criteria.digest[:12]}"
+    assert criteria.version == f"selection-v5:{criteria.digest[:12]}"
 
 
 @pytest.mark.parametrize("content", ["", "   \n\t"])

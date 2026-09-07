@@ -86,7 +86,7 @@ async def test_latest_news_requires_authentication() -> None:
     assert response.status_code == 401
 
 
-async def test_latest_news_is_no_store_today_only_unavailable_and_validates_locale() -> None:
+async def test_latest_news_is_no_store_unavailable_without_history_and_validates_locale() -> None:
     app = create_app(Settings(environment="test"), readiness_checker=lambda: _ready())
 
     async def auth() -> AuthContext:
