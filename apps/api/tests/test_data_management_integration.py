@@ -274,6 +274,47 @@ async def test_admin_api_enqueues_lists_gets_conflicts_and_audits(
     assert actions == ["data_management.run_enqueued"]
 
 
+async def test_admin_api_filters_news_runs_before_applying_limit(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(data_management_database)
+    newest = datetime.now(UTC)
+    async with data_management_database.begin() as database:
+        database.add_all(
+            [
+                DataManagementRun(
+                    operation="morning_all",
+                    market_code=None,
+                    edition_date=newest.date(),
+                    status="succeeded",
+                    requested_by_user_id=user.id,
+                    created_at=newest - timedelta(minutes=index),
+                )
+                for index in range(20)
+            ]
+            + [
+                DataManagementRun(
+                    operation="news_all",
+                    market_code=None,
+                    edition_date=newest.date(),
+                    status="pending",
+                    requested_by_user_id=user.id,
+                    created_at=newest - timedelta(minutes=21),
+                )
+            ]
+        )
+
+    async with _admin_client(data_management_database, user, enabled=True) as client:
+        all_runs = await client.get("/api/admin/data-management/runs?limit=20")
+        news_runs = await client.get("/api/admin/data-management/runs?limit=1&operation_group=news")
+        invalid_filter = await client.get("/api/admin/data-management/runs?operation_group=morning")
+
+    assert all(run["operation"] != "news_all" for run in all_runs.json()["items"])
+    assert news_runs.status_code == 200
+    assert [run["operation"] for run in news_runs.json()["items"]] == ["news_all"]
+    assert invalid_filter.status_code == 422
+
+
 async def test_admin_api_rejects_unauthenticated_writes_and_disabled_providers(
     data_management_database: async_sessionmaker[AsyncSession],
 ) -> None:

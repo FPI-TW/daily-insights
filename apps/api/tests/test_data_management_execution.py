@@ -4,13 +4,20 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path as FileSystemPath
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from anyio import Path
+from sqlalchemy.exc import IntegrityError
 
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.data_management.models import DataManagementRun
-from daily_insights_api.modules.data_management.service import execute_run, worker_loop
+from daily_insights_api.modules.data_management.service import (
+    RunAlreadyActiveError,
+    enqueue_run,
+    execute_run,
+    worker_loop,
+)
 from daily_insights_api.modules.data_sources.api import DataSourceError
 from daily_insights_api.modules.markets.api import InstitutionalMarketFlow
 from daily_insights_api.modules.reports.api import (
@@ -58,6 +65,53 @@ class _NoopTransport:
 class _NoopAdapter:
     def __init__(self, _: object) -> None:
         pass
+
+
+class _DatabaseWithFlushFailure:
+    def __init__(self, error: IntegrityError) -> None:
+        self.error = error
+        self.flush = AsyncMock(side_effect=error)
+        self.rollback = AsyncMock()
+
+    def add(self, _: object) -> None:
+        pass
+
+
+class _PostgresError(Exception):
+    sqlstate = "23505"
+
+    def __init__(self, constraint_name: str) -> None:
+        self.diag = SimpleNamespace(constraint_name=constraint_name)
+
+
+@pytest.mark.asyncio
+async def test_enqueue_only_maps_named_active_run_unique_conflicts_to_409_error() -> None:
+    active_error = IntegrityError(
+        "INSERT", {}, _PostgresError("uq_data_management_runs_active_news")
+    )
+    active_database = _DatabaseWithFlushFailure(active_error)
+    with pytest.raises(RunAlreadyActiveError):
+        await enqueue_run(
+            cast(Any, active_database),
+            operation="news_market",
+            market_code="global",
+            requester_id=uuid.uuid4(),
+            request_id=None,
+        )
+    active_database.rollback.assert_awaited_once()
+
+    other_error = IntegrityError("INSERT", {}, _PostgresError("some_other_constraint"))
+    other_database = _DatabaseWithFlushFailure(other_error)
+    with pytest.raises(IntegrityError) as raised:
+        await enqueue_run(
+            cast(Any, other_database),
+            operation="news_market",
+            market_code="global",
+            requester_id=uuid.uuid4(),
+            request_id=None,
+        )
+    assert raised.value is other_error
+    other_database.rollback.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -199,6 +253,56 @@ async def test_yahoo_execution_uses_seven_day_period_and_serializes_symbols(
     symbols = cast(list[dict[str, object]], result["symbols"])
     assert symbols[0]["record_count"] == 7 and symbols[0]["source_as_of"] == "2026-09-06"
     assert symbols[1]["error"] == "runtimeerror"
+
+
+@pytest.mark.asyncio
+async def test_news_execution_routes_market_and_all_runs_and_closes_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.modules.data_management import service
+
+    calls: list[str] = []
+
+    class Client:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def aclose(self) -> None:
+            calls.append("closed")
+
+    async def market(*_: object, **kwargs: object) -> str:
+        calls.append(f"market:{cast(Any, kwargs['spec']).market_code}")
+        return "complete"
+
+    async def all_editions(*_: object, **__: object) -> str:
+        calls.append("all")
+        return "partial"
+
+    monkeypatch.setattr(service, "create_news_client", lambda **_: Client())
+    monkeypatch.setattr(service, "run_news_edition", market)
+    monkeypatch.setattr(service, "run_all_editions", all_editions)
+    settings = Settings(environment="test", daily_news_enabled=True, model_api_key="key")
+    market_status, _, market_error = await execute_run(
+        _run("news_market", "tw_equity"), cast(Any, None), settings
+    )
+    all_status, _, all_error = await execute_run(_run("news_all"), cast(Any, None), settings)
+    assert (market_status, market_error) == ("succeeded", None)
+    assert (all_status, all_error) == ("partial", "news_partial")
+    assert calls == ["market:tw_equity", "closed", "all", "closed"]
+
+
+@pytest.mark.asyncio
+async def test_news_execution_rejects_disabled_or_missing_model_key() -> None:
+    status, result, error = await execute_run(
+        _run("news_all"),
+        cast(Any, None),
+        Settings(environment="test", daily_news_enabled=False),
+    )
+    assert (status, result, error) == (
+        "failed",
+        {"outcome": "unavailable"},
+        "daily_news_unavailable",
+    )
 
 
 @pytest.mark.asyncio

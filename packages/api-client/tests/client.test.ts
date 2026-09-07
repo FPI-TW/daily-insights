@@ -33,6 +33,16 @@ describe("API client trust boundary", () => {
     })
   })
 
+  it("requests the server-filtered news run history", async () => {
+    const transport = vi.fn().mockResolvedValue(Response.json({ items: [] }))
+
+    await createAdministrationClient(transport).listNewsDataManagementRuns()
+
+    expect(transport).toHaveBeenCalledWith(
+      "/api/admin/data-management/runs?limit=20&operation_group=news"
+    )
+  })
+
   it("uses same-origin credentials in the browser", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")

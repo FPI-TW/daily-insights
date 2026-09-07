@@ -1194,10 +1194,14 @@ export interface components {
     }
     /** DataManagementCatalog */
     DataManagementCatalog: {
+      /** Daily News Enabled */
+      daily_news_enabled: boolean
       /** Markets */
       markets: ("global_macro_bonds" | "crypto" | "us_equity")[]
       /** Morning Reports Enabled */
       morning_reports_enabled: boolean
+      /** News Markets */
+      news_markets: ("global" | "tw_equity" | "us_equity")[]
       /**
        * Taipei Date
        * Format: date
@@ -1216,6 +1220,8 @@ export interface components {
         | components["schemas"]["MorningMarketRunResponse"]
         | components["schemas"]["IndexYahooRunResponse"]
         | components["schemas"]["InstitutionalTwseRunResponse"]
+        | components["schemas"]["NewsAllRunResponse"]
+        | components["schemas"]["NewsMarketRunResponse"]
       )[]
     }
     /** EconomicEvent */
@@ -1887,6 +1893,58 @@ export interface components {
        */
       status: "pending" | "running" | "succeeded" | "partial" | "failed"
     }
+    /** NewsAllRunCreate */
+    NewsAllRunCreate: {
+      /** Market Code */
+      market_code?: null
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      operation: "news_all"
+    }
+    /** NewsAllRunResponse */
+    NewsAllRunResponse: {
+      /** Completed At */
+      completed_at: string | null
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /** Error */
+      error: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Market Code */
+      market_code: null
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      operation: "news_all"
+      /** Requested By User Id */
+      requested_by_user_id: string | null
+      /** Result */
+      result: {
+        [key: string]: unknown
+      } | null
+      /** Started At */
+      started_at: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "pending" | "running" | "succeeded" | "partial" | "failed"
+    }
     /** NewsItemResponse */
     NewsItemResponse: {
       /** Event Key */
@@ -1921,6 +1979,64 @@ export interface components {
       summary: string
       /** Topic */
       topic: string
+    }
+    /** NewsMarketRunCreate */
+    NewsMarketRunCreate: {
+      /**
+       * Market Code
+       * @enum {string}
+       */
+      market_code: "global" | "tw_equity" | "us_equity"
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      operation: "news_market"
+    }
+    /** NewsMarketRunResponse */
+    NewsMarketRunResponse: {
+      /** Completed At */
+      completed_at: string | null
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /** Error */
+      error: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /**
+       * Market Code
+       * @enum {string}
+       */
+      market_code: "global" | "tw_equity" | "us_equity"
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      operation: "news_market"
+      /** Requested By User Id */
+      requested_by_user_id: string | null
+      /** Result */
+      result: {
+        [key: string]: unknown
+      } | null
+      /** Started At */
+      started_at: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "pending" | "running" | "succeeded" | "partial" | "failed"
     }
     /** OrganizationCreate */
     OrganizationCreate: {
@@ -2860,6 +2976,7 @@ export interface operations {
     parameters: {
       query?: {
         limit?: number
+        operation_group?: "news" | null
       }
       header?: never
       path?: never
@@ -2903,6 +3020,8 @@ export interface operations {
           | components["schemas"]["MorningMarketRunCreate"]
           | components["schemas"]["IndexYahooRunCreate"]
           | components["schemas"]["InstitutionalTwseRunCreate"]
+          | components["schemas"]["NewsAllRunCreate"]
+          | components["schemas"]["NewsMarketRunCreate"]
       }
     }
     responses: {
@@ -2917,6 +3036,8 @@ export interface operations {
             | components["schemas"]["MorningMarketRunResponse"]
             | components["schemas"]["IndexYahooRunResponse"]
             | components["schemas"]["InstitutionalTwseRunResponse"]
+            | components["schemas"]["NewsAllRunResponse"]
+            | components["schemas"]["NewsMarketRunResponse"]
         }
       }
       /** @description An operation class is already active. */
@@ -2966,6 +3087,8 @@ export interface operations {
             | components["schemas"]["MorningMarketRunResponse"]
             | components["schemas"]["IndexYahooRunResponse"]
             | components["schemas"]["InstitutionalTwseRunResponse"]
+            | components["schemas"]["NewsAllRunResponse"]
+            | components["schemas"]["NewsMarketRunResponse"]
         }
       }
       /** @description Validation Error */

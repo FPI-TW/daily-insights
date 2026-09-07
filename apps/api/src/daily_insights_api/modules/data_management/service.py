@@ -13,7 +13,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from daily_insights_api.core.config import Settings
+from daily_insights_api.core.config import Settings, is_placeholder_value
 from daily_insights_api.modules.audit.api import record_audit_event
 from daily_insights_api.modules.data_management.models import DataManagementRun
 from daily_insights_api.modules.data_sources.api import (
@@ -33,6 +33,14 @@ from daily_insights_api.modules.markets.api import (
     store_institutional_market_flows,
     store_institutional_stock_flows,
     stored_flow_dates,
+)
+from daily_insights_api.modules.news.api import (
+    EDITION_ORDER,
+    create_news_client,
+    edition_spec,
+    effective_hostnames,
+    run_all_editions,
+    run_news_edition,
 )
 from daily_insights_api.modules.operations.api import sanitize_error_code
 from daily_insights_api.modules.reports.api import (
@@ -80,6 +88,25 @@ def execution_lock_key(run_id: uuid.UUID) -> int:
     return int.from_bytes(run_id.bytes[:8], byteorder="big", signed=True)
 
 
+ACTIVE_RUN_UNIQUE_CONSTRAINTS = frozenset(
+    {
+        "uq_data_management_runs_active_morning",
+        "uq_data_management_runs_active_index",
+        "uq_data_management_runs_active_institutional",
+        "uq_data_management_runs_active_news",
+    }
+)
+
+
+def is_active_run_conflict(error: IntegrityError) -> bool:
+    """Whether PostgreSQL rejected precisely one active-run unique index."""
+    diagnostic = getattr(error.orig, "diag", None)
+    return (
+        getattr(error.orig, "sqlstate", None) == "23505"
+        and getattr(diagnostic, "constraint_name", None) in ACTIVE_RUN_UNIQUE_CONSTRAINTS
+    )
+
+
 async def enqueue_run(
     database: AsyncSession,
     *,
@@ -92,8 +119,10 @@ async def enqueue_run(
         market.market_code for market in ACTIVE_LAUNCH_MANIFEST.markets
     }:
         raise ValueError("market_code is not in the active launch manifest")
-    if operation != "morning_market" and market_code is not None:
-        raise ValueError("market_code is only allowed for morning_market")
+    if operation == "news_market" and market_code not in EDITION_ORDER:
+        raise ValueError("market_code is not a configured news edition")
+    if operation not in {"morning_market", "news_market"} and market_code is not None:
+        raise ValueError("market_code is only allowed for market operations")
     run = DataManagementRun(
         operation=operation,
         market_code=market_code,
@@ -106,7 +135,9 @@ async def enqueue_run(
         await database.flush()
     except IntegrityError as error:
         await database.rollback()
-        raise RunAlreadyActiveError from error
+        if is_active_run_conflict(error):
+            raise RunAlreadyActiveError from error
+        raise
     record_audit_event(
         database,
         actor_user_id=requester_id,
@@ -496,6 +527,60 @@ async def _execute_institutional_twse(
     )
 
 
+async def _execute_news(
+    run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
+) -> tuple[str, dict[str, object], str | None]:
+    api_key = settings.model_api_key
+    if (
+        not settings.daily_news_enabled
+        or api_key is None
+        or not api_key.get_secret_value().strip()
+        or is_placeholder_value(api_key.get_secret_value())
+    ):
+        return "failed", {"outcome": "unavailable"}, "daily_news_unavailable"
+    client = create_news_client(
+        base_url=settings.model_api_base_url,
+        api_key=api_key.get_secret_value(),
+        model=settings.model_name,
+        timeout_seconds=settings.model_timeout_seconds,
+    )
+    try:
+        allowed = effective_hostnames(
+            settings.news_extra_hostnames, settings.news_blocked_hostnames
+        )
+        if run.operation == "news_market":
+            outcome = await run_news_edition(
+                session_factory,
+                client,
+                run.edition_date,
+                allowed_hostnames=allowed,
+                fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
+                discovery_timeout_seconds=settings.news_discovery_timeout_seconds,
+                spec=edition_spec(cast(str, run.market_code)),
+            )
+        else:
+            outcome = await run_all_editions(
+                session_factory,
+                client,
+                run.edition_date,
+                allowed_hostnames=allowed,
+                fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
+                discovery_timeout_seconds=settings.news_discovery_timeout_seconds,
+            )
+    except Exception as error:
+        return "failed", {}, sanitize_error(error)
+    finally:
+        await client.aclose()
+    status = (
+        "succeeded"
+        if outcome in {"complete", "idempotent"}
+        else "partial"
+        if outcome == "partial"
+        else "failed"
+    )
+    return status, {"outcome": outcome}, None if status == "succeeded" else f"news_{outcome}"
+
+
 async def execute_run(
     run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
 ) -> tuple[str, dict[str, object], str | None]:
@@ -503,6 +588,8 @@ async def execute_run(
         return await _execute_yahoo(run, session_factory, settings)
     if run.operation == "institutional_twse":
         return await _execute_institutional_twse(run, session_factory, settings)
+    if run.operation.startswith("news"):
+        return await _execute_news(run, session_factory, settings)
     return await _execute_morning(run, session_factory, settings)
 
 

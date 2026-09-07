@@ -23,7 +23,10 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "data_management_runs"
     __table_args__ = (
         CheckConstraint(
-            "operation IN ('morning_all', 'morning_market', 'index_yahoo', 'institutional_twse')",
+            (
+                "operation IN ('morning_all', 'morning_market', 'index_yahoo', "
+                "'institutional_twse', 'news_all', 'news_market')"
+            ),
             name="operation_valid",
         ),
         CheckConstraint(
@@ -31,8 +34,15 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
             name="status_valid",
         ),
         CheckConstraint(
-            "(operation = 'morning_market') = (market_code IS NOT NULL)",
-            name="market_scope_matches_operation",
+            "("
+            "(operation = 'morning_market' AND market_code IN "
+            "('global_macro_bonds', 'crypto', 'us_equity')) OR "
+            "(operation = 'news_market' AND market_code IN "
+            "('global', 'tw_equity', 'us_equity')) OR "
+            "(operation IN ('morning_all', 'index_yahoo', 'institutional_twse', 'news_all') "
+            "AND market_code IS NULL)"
+            ")",
+            name="market_code_valid_for_operation",
         ),
         Index(
             "uq_data_management_runs_active_morning",
@@ -57,13 +67,22 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
                 "status IN ('pending', 'running') AND operation = 'institutional_twse'"
             ),
         ),
+        Index(
+            "uq_data_management_runs_active_news",
+            text("(1)"),
+            unique=True,
+            postgresql_where=text(
+                "status IN ('pending', 'running') AND operation IN ('news_all', 'news_market')"
+            ),
+        ),
         Index("ix_data_management_runs_created_at", "created_at"),
     )
 
     operation: Mapped[str] = mapped_column(String(32), nullable=False)
-    market_code: Mapped[str | None] = mapped_column(
-        String(50), ForeignKey("markets.code", ondelete="RESTRICT")
-    )
+    # This is an operation scope, not always a row in the market catalog:
+    # news has a valid cross-market ``global`` edition.  The operation-specific
+    # check constraint above keeps each operation's scope finite and valid.
+    market_code: Mapped[str | None] = mapped_column(String(50))
     edition_date: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
     # Null when the scheduler queued it: nobody asked, it was due.

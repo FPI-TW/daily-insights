@@ -6,7 +6,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from daily_insights_api.modules.reports.api import LaunchMarketCode
 
-RunOperation = Literal["morning_all", "morning_market", "index_yahoo", "institutional_twse"]
+NewsMarketCode = Literal["global", "tw_equity", "us_equity"]
+RunOperation = Literal[
+    "morning_all",
+    "morning_market",
+    "index_yahoo",
+    "institutional_twse",
+    "news_all",
+    "news_market",
+]
+RunOperationGroup = Literal["news"]
 RunStatus = Literal["pending", "running", "succeeded", "partial", "failed"]
 
 
@@ -37,8 +46,23 @@ class InstitutionalTwseRunCreate(_DataManagementRunCreate):
     market_code: None = None
 
 
+class NewsAllRunCreate(_DataManagementRunCreate):
+    operation: Literal["news_all"]
+    market_code: None = None
+
+
+class NewsMarketRunCreate(_DataManagementRunCreate):
+    operation: Literal["news_market"]
+    market_code: NewsMarketCode
+
+
 DataManagementRunCreate = Annotated[
-    MorningAllRunCreate | MorningMarketRunCreate | IndexYahooRunCreate | InstitutionalTwseRunCreate,
+    MorningAllRunCreate
+    | MorningMarketRunCreate
+    | IndexYahooRunCreate
+    | InstitutionalTwseRunCreate
+    | NewsAllRunCreate
+    | NewsMarketRunCreate,
     Field(discriminator="operation"),
 ]
 
@@ -49,6 +73,8 @@ class DataManagementCatalog(BaseModel):
     yfinance_enabled: bool
     twse_enabled: bool
     markets: list[LaunchMarketCode]
+    daily_news_enabled: bool
+    news_markets: list[NewsMarketCode]
 
 
 class _DataManagementRunResponse(BaseModel):
@@ -83,11 +109,23 @@ class InstitutionalTwseRunResponse(_DataManagementRunResponse):
     market_code: None
 
 
+class NewsAllRunResponse(_DataManagementRunResponse):
+    operation: Literal["news_all"]
+    market_code: None
+
+
+class NewsMarketRunResponse(_DataManagementRunResponse):
+    operation: Literal["news_market"]
+    market_code: NewsMarketCode
+
+
 DataManagementRunResponse = Annotated[
     MorningAllRunResponse
     | MorningMarketRunResponse
     | IndexYahooRunResponse
-    | InstitutionalTwseRunResponse,
+    | InstitutionalTwseRunResponse
+    | NewsAllRunResponse
+    | NewsMarketRunResponse,
     Field(discriminator="operation"),
 ]
 

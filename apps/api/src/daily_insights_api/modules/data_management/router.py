@@ -15,6 +15,9 @@ from daily_insights_api.modules.data_management.schemas import (
     InstitutionalTwseRunResponse,
     MorningAllRunResponse,
     MorningMarketRunResponse,
+    NewsAllRunResponse,
+    NewsMarketRunResponse,
+    RunOperationGroup,
 )
 from daily_insights_api.modules.data_management.service import (
     RunAlreadyActiveError,
@@ -22,6 +25,7 @@ from daily_insights_api.modules.data_management.service import (
     taipei_today,
 )
 from daily_insights_api.modules.identity.api import AuthContext, require_csrf_roles, require_roles
+from daily_insights_api.modules.news.api import EDITION_ORDER
 from daily_insights_api.modules.reports.api import ACTIVE_LAUNCH_MANIFEST
 from daily_insights_api.web.dependencies import get_database_session
 
@@ -54,6 +58,12 @@ def response(run: DataManagementRun) -> DataManagementRunResponse:
         return InstitutionalTwseRunResponse(
             operation="institutional_twse", market_code=None, **values
         )
+    if run.operation == "news_all":
+        return NewsAllRunResponse(operation="news_all", market_code=None, **values)
+    if run.operation == "news_market":
+        return NewsMarketRunResponse(
+            operation="news_market", market_code=cast(str, run.market_code), **values
+        )
     return IndexYahooRunResponse(operation="index_yahoo", market_code=None, **values)
 
 
@@ -66,6 +76,8 @@ async def catalog(request: Request, _: AdminRead) -> DataManagementCatalog:
         yfinance_enabled=settings.yfinance_enabled,
         twse_enabled=settings.twse_enabled,
         markets=[item.market_code for item in ACTIVE_LAUNCH_MANIFEST.markets],
+        daily_news_enabled=settings.daily_news_enabled,
+        news_markets=list(EDITION_ORDER),
     )
 
 
@@ -91,6 +103,8 @@ async def create_run(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "yfinance is unavailable")
     if payload.operation == "institutional_twse" and not settings.twse_enabled:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "twse is unavailable")
+    if payload.operation.startswith("news") and not settings.daily_news_enabled:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "daily news is unavailable")
     try:
         run = await enqueue_run(
             database,
@@ -113,11 +127,13 @@ async def list_runs(
     _: AdminRead,
     database: Annotated[AsyncSession, Depends(get_database_session)],
     limit: int = Query(default=20, ge=1, le=20),
+    operation_group: Annotated[RunOperationGroup | None, Query()] = None,
 ) -> DataManagementRunList:
+    statement = select(DataManagementRun)
+    if operation_group == "news":
+        statement = statement.where(DataManagementRun.operation.in_(("news_all", "news_market")))
     runs = (
-        await database.scalars(
-            select(DataManagementRun).order_by(DataManagementRun.created_at.desc()).limit(limit)
-        )
+        await database.scalars(statement.order_by(DataManagementRun.created_at.desc()).limit(limit))
     ).all()
     return DataManagementRunList(items=[response(run) for run in runs])
 

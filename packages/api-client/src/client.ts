@@ -331,6 +331,14 @@ export function createAdministrationClient(transport: ApiTransport) {
         dataManagementRunListSchema
       )
     },
+    async listNewsDataManagementRuns() {
+      return parseResponse(
+        await transport(
+          "/api/admin/data-management/runs?limit=20&operation_group=news"
+        ),
+        dataManagementRunListSchema
+      )
+    },
     async createDataManagementRun(
       input: DataManagementRunCreateInput,
       csrfToken: string
