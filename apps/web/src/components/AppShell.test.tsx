@@ -58,9 +58,7 @@ describe("AppShell customer navigation", () => {
       </I18nextProvider>
     )
 
-    expect(
-      screen.getByText("廷豐金融晨報智能體 (GEAI Daily insights)")
-    ).toBeInTheDocument()
+    expect(screen.getByText("廷豐金融晨報智能體")).toBeInTheDocument()
     expect(container.querySelector('img[src="/tf-icon.png"]')).toHaveAttribute(
       "aria-hidden",
       "true"

@@ -1,6 +1,7 @@
 import { createInstance, type Resource } from "i18next"
 import { initReactI18next } from "react-i18next"
 import type { Locale } from "@daily-insights/api-client"
+import { brandTitles } from "./brand"
 
 const resources: Resource = {
   "zh-hant": {
@@ -103,7 +104,7 @@ const resources: Resource = {
       fxTableNote: "點貨幣對可切換上方圖表",
       fxAsOf: "全部資料日期 {{date}}",
 
-      brand: "廷豐金融晨報智能體 (GEAI Daily insights)",
+      brand: brandTitles["zh-hant"],
       chatTitle: "AI智慧問答",
       chatEmpty: "針對目前報告提出問題。",
       chatThinking: "正在整理回答…",
@@ -855,7 +856,7 @@ const resources: Resource = {
       fxTableNote: "点货币对可切换上方图表",
       fxAsOf: "全部数据日期 {{date}}",
 
-      brand: "廷豐金融晨報智能體 (GEAI Daily insights)",
+      brand: brandTitles["zh-hans"],
       chatTitle: "AI智能问答",
       chatEmpty: "针对当前报告提问。",
       chatThinking: "正在整理回答…",
@@ -1608,7 +1609,7 @@ const resources: Resource = {
       fxTableNote: "Pick a pair to drive the chart above",
       fxAsOf: "All observations as of {{date}}",
 
-      brand: "廷豐金融晨報智能體 (GEAI Daily insights)",
+      brand: brandTitles.en,
       chatTitle: "AI Q&A",
       chatEmpty: "Ask about the report currently on this page.",
       chatThinking: "Preparing an answer…",

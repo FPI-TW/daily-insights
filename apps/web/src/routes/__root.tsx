@@ -16,6 +16,7 @@ import {
   NotFoundScreen,
 } from "#/components/StateScreen"
 import { createI18n } from "#/lib/i18n"
+import { defaultBrandTitle } from "#/lib/brand"
 import "../styles.css"
 
 const THEME_INIT_SCRIPT = `(function(){try{var stored=window.localStorage.getItem('theme');var mode=(stored==='light'||stored==='dark'||stored==='auto')?stored:'light';var prefersDark=window.matchMedia('(prefers-color-scheme: dark)').matches;var resolved=mode==='auto'?(prefersDark?'dark':'light'):mode;var root=document.documentElement;root.classList.remove('light','dark');root.classList.add(resolved);if(mode==='auto'){root.removeAttribute('data-theme')}else{root.setAttribute('data-theme',mode)}root.style.colorScheme=resolved;}catch(e){}})();`
@@ -25,7 +26,7 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "廷豐金融晨報智能體 (GEAI Daily insights)" },
+      { title: defaultBrandTitle },
     ],
     links: [
       { rel: "icon", href: "/tf-icon.png", type: "image/png" },
