@@ -47,6 +47,12 @@ import {
   type MarketIndexHistory,
 } from "#/lib/indices"
 import { useChatPageContext } from "#/components/PageContextChat"
+import {
+  getTaiwanInstitutionalFlows,
+  getTaiwanInstitutionalStocks,
+  institutionalFlowRange,
+  type TaiwanInstitutionalData,
+} from "#/lib/institutional-flows"
 
 type ReportResult = Awaited<ReturnType<typeof getReportDetail>>
 type MarketPage = {
@@ -57,10 +63,12 @@ type MarketPage = {
   macroDashboard: Promise<MacroDashboardData | null> | null
   indexHistory: Promise<MarketIndexHistory | null> | null
   indexMovingAverages: Promise<IndexMovingAverageMap> | null
+  institutionalData: Promise<TaiwanInstitutionalData> | null
 }
 
 export const INDEX_HISTORY_DEADLINE_MS = 10_000
 export const INDEX_MOVING_AVERAGES_DEADLINE_MS = 10_000
+export const INSTITUTIONAL_DATA_DEADLINE_MS = 10_000
 
 export function withIndexHistoryDeadline(
   history: Promise<MarketIndexHistory>,
@@ -95,6 +103,28 @@ export function withMovingAverageDeadline(
       () => {
         clearTimeout(deadline)
         resolve({})
+      }
+    )
+  })
+}
+
+export function withInstitutionalDataDeadline(
+  data: Promise<TaiwanInstitutionalData>,
+  deadlineMs = INSTITUTIONAL_DATA_DEADLINE_MS
+): Promise<TaiwanInstitutionalData> {
+  return new Promise(resolve => {
+    const deadline = setTimeout(
+      () => resolve({ flows: null, stocks: null }),
+      deadlineMs
+    )
+    void data.then(
+      value => {
+        clearTimeout(deadline)
+        resolve(value)
+      },
+      () => {
+        clearTimeout(deadline)
+        resolve({ flows: null, stocks: null })
       }
     )
   })
@@ -150,6 +180,22 @@ export async function loadMarketPage({
         })
       )
     : null
+  const institutionalData =
+    params.marketCode === "tw_equity" && indexRange
+      ? withInstitutionalDataDeadline(
+          Promise.allSettled([
+            getTaiwanInstitutionalFlows({
+              data: institutionalFlowRange(indexRange.end),
+            }),
+            getTaiwanInstitutionalStocks({
+              data: { date: indexRange.end, locale: context.locale },
+            }),
+          ]).then(([flows, stocks]) => ({
+            flows: flows.status === "fulfilled" ? flows.value : null,
+            stocks: stocks.status === "fulfilled" ? stocks.value : null,
+          }))
+        )
+      : null
   const [report, news, viewpoints] = await Promise.allSettled([
     getReportDetail({
       data: { marketCode: params.marketCode, locale: context.locale },
@@ -187,6 +233,7 @@ export async function loadMarketPage({
     macroDashboard,
     indexHistory,
     indexMovingAverages,
+    institutionalData,
   }
 }
 

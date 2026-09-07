@@ -7,6 +7,8 @@ const getMarketNews = vi.fn()
 const getTodayAnalystViewpoints = vi.fn()
 const getMarketIndexHistory = vi.fn()
 const getMarketIndexMovingAverages = vi.fn()
+const getTaiwanInstitutionalFlows = vi.fn()
+const getTaiwanInstitutionalStocks = vi.fn()
 const indexRange = { start: "2024-09-02", end: "2026-09-02" }
 
 vi.mock("#/lib/macro-dashboard.functions", () => ({
@@ -24,6 +26,14 @@ vi.mock("#/lib/indices", () => ({
   getMarketIndexHistory,
   getMarketIndexMovingAverages,
   twoYearTaipeiRange: () => indexRange,
+}))
+vi.mock("#/lib/institutional-flows", () => ({
+  getTaiwanInstitutionalFlows,
+  getTaiwanInstitutionalStocks,
+  institutionalFlowRange: (end: string) => ({
+    start: "2026-05-25",
+    end,
+  }),
 }))
 
 const {
@@ -64,6 +74,8 @@ describe("market report loader", () => {
   beforeEach(() => {
     getTodayAnalystViewpoints.mockResolvedValue([])
     getMarketIndexMovingAverages.mockResolvedValue({})
+    getTaiwanInstitutionalFlows.mockResolvedValue({ as_of: null, series: [] })
+    getTaiwanInstitutionalStocks.mockResolvedValue({ as_of: null, rows: [] })
   })
 
   afterEach(() => {
@@ -130,14 +142,21 @@ describe("market report loader", () => {
       ...indexHistory,
       marketCode: "tw_equity",
     })
-    await expect(
-      loadMarketPage({
-        params: { marketCode: "tw_equity" },
-        context: { locale: "zh-hant" },
-      })
-    ).resolves.toMatchObject({
+    const taiwanPage = await loadMarketPage({
+      params: { marketCode: "tw_equity" },
+      context: { locale: "zh-hant" },
+    })
+    expect(taiwanPage).toMatchObject({
       report: { kind: "not-launched", marketCode: "tw_equity" },
       news: { marketCode: "tw_equity", latest: { market_code: "tw_equity" } },
+    })
+
+    if (!taiwanPage.institutionalData) {
+      throw new Error("expected deferred institutional data")
+    }
+    await expect(taiwanPage.institutionalData).resolves.toMatchObject({
+      flows: { series: [] },
+      stocks: { rows: [] },
     })
 
     getMarketNews.mockClear()
@@ -158,6 +177,7 @@ describe("market report loader", () => {
       macroDashboard: null,
       indexHistory: null,
       indexMovingAverages: null,
+      institutionalData: null,
     })
     expect(getMarketNews).not.toHaveBeenCalled()
   })
