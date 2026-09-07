@@ -25,11 +25,13 @@ from daily_insights_api.modules.assets.object_store import ObjectStore
 from daily_insights_api.modules.assets.r2.store import R2ObjectStore
 from daily_insights_api.modules.chat.api import router as chat_router
 from daily_insights_api.modules.chat.provider import OpenAICompatibleChatProvider
+from daily_insights_api.modules.identity.password_work import PasswordWork
 from daily_insights_api.modules.identity.router import router as identity_router
 from daily_insights_api.modules.markets.router import router as markets_router
 from daily_insights_api.modules.model_runtime.service import sync_chat_model_configuration
 from daily_insights_api.modules.news.router import router as news_router
 from daily_insights_api.modules.operations.health import ReadinessReport, evaluate_readiness
+from daily_insights_api.modules.podcasts.analysis import PodcastAnalyzer, build_podcast_analyzer
 from daily_insights_api.modules.podcasts.router import router as podcasts_router
 from daily_insights_api.modules.reports.router import router as reports_router
 
@@ -45,6 +47,7 @@ def create_app(
     readiness_checker: ReadinessChecker | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     object_store: ObjectStore | None = None,
+    podcast_analyzer: PodcastAnalyzer | None = None,
 ) -> FastAPI:
     configure_logging()
     resolved_settings = settings or get_settings()
@@ -94,6 +97,13 @@ def create_app(
             or resolved_settings.analyst_viewpoints_api_key is not None
         )
 
+    async def podcast_analysis_runtime_is_ready() -> bool:
+        return not resolved_settings.podcast_analysis_enabled or (
+            resolved_settings.openai_api_key is not None
+            and resolved_settings.model_api_key is not None
+            and object_store is not None
+        )
+
     async def chat_runtime_is_ready() -> bool:
         return not resolved_settings.chat_enabled or (
             resolved_settings.chat_model_api_key is not None
@@ -108,17 +118,31 @@ def create_app(
                     await sync_chat_model_configuration(database, resolved_settings)
             yield
         finally:
+            app.state.password_work.close()
             if engine is not None:
                 await engine.dispose()
 
     app = FastAPI(title=resolved_settings.app_name, lifespan=lifespan)
+    app.state.password_work = PasswordWork(resolved_settings.login_password_workers)
     app.state.settings = resolved_settings
     app.state.session_factory = session_factory
     app.state.object_store = object_store
+    if (
+        podcast_analyzer is None
+        and resolved_settings.podcast_analysis_enabled
+        and object_store is not None
+        and resolved_settings.openai_api_key is not None
+        and resolved_settings.model_api_key is not None
+    ):
+        podcast_analyzer = build_podcast_analyzer(
+            resolved_settings, session_factory=session_factory, store=object_store
+        )
+    app.state.podcast_analyzer = podcast_analyzer
     if resolved_settings.chat_enabled and resolved_settings.chat_model_api_key is not None:
         app.state.chat_provider = OpenAICompatibleChatProvider(
             base_url=resolved_settings.chat_model_api_base_url,
             api_key=resolved_settings.chat_model_api_key.get_secret_value(),
+            max_output_tokens=resolved_settings.chat_max_output_tokens,
         )
 
     @app.middleware("http")
@@ -196,6 +220,7 @@ def create_app(
                 "daily_news_configuration": news_runtime_is_ready,
                 "analyst_viewpoints_configuration": analyst_viewpoints_runtime_is_ready,
                 "chat_configuration": chat_runtime_is_ready,
+                "podcast_analysis_configuration": podcast_analysis_runtime_is_ready,
                 "r2_runtime": r2_runtime_is_ready,
             }
         )

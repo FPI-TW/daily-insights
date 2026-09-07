@@ -6,9 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from daily_insights_api.core.enums import SystemRole
 from daily_insights_api.modules.identity.api import AuthContext, require_password_changed
-from daily_insights_api.modules.markets.api import visible_market_codes
+from daily_insights_api.modules.news.access import visible_news_market_codes
 from daily_insights_api.modules.news.contracts import Locale
 from daily_insights_api.modules.news.editions import (
     GLOBAL_SPEC,
@@ -22,7 +21,6 @@ from daily_insights_api.web.dependencies import get_database_session
 
 router = APIRouter(prefix="/api/news", tags=["news"])
 Member = Annotated[AuthContext, Depends(require_password_changed)]
-_INTERNAL_PREVIEW_ROLES = frozenset({SystemRole.ADMIN, SystemRole.ASSET_MANAGER})
 
 
 def _localized_caveat(status: str, count: int, locale: Locale, target: int = 5) -> str | None:
@@ -36,16 +34,6 @@ def _localized_caveat(status: str, count: int, locale: Locale, target: int = 5) 
         "zh-hans": "本日重大新闻尚未生成。",
         "en": "Today's major news has not been generated.",
     }[locale]
-
-
-async def visible_news_market_codes(database: AsyncSession, context: AuthContext) -> frozenset[str]:
-    """Market news editions the viewer may read; the global digest is always visible."""
-    if context.user.system_role in _INTERNAL_PREVIEW_ROLES:
-        return frozenset(MARKET_NEWS_CODES)
-    if context.organization_id is None:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "organization membership required")
-    visible = await visible_market_codes(database, context.organization_id)
-    return frozenset(code for code in MARKET_NEWS_CODES if code in visible)
 
 
 async def _latest_response(

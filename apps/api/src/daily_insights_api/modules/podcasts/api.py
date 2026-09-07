@@ -7,6 +7,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Locale = Literal["zh-hant", "zh-hans", "en"]
 PodcastUploadReason = Literal["initial_upload", "update_file", "other"]
+MetadataSource = Literal["derived", "ai", "manual"]
+ChaptersSource = Literal["none", "file", "ai", "manual"]
+AnalysisStatus = Literal["none", "pending", "succeeded", "failed"]
 SUPPORTED_LOCALES = frozenset(("zh-hant", "zh-hans", "en"))
 DEFAULT_AUDIO_LOCALE: Locale = "zh-hant"
 PODCAST_AUDIO_FALLBACK_ORDER: tuple[Locale, ...] = ("zh-hant", "zh-hans", "en")
@@ -134,6 +137,11 @@ class PodcastAudioVariantResponse(PodcastContract):
     is_active: bool
     duration_seconds: int | None = None
     chapters: tuple[PodcastChapter, ...] = ()
+    chapters_source: ChaptersSource = "none"
+    # Podcast analysis (transcription + language model) state for this file.
+    analysis_status: AnalysisStatus = "none"
+    analysis_error: str | None = None
+    analyzed_at: datetime | None = None
 
 
 class PodcastEpisodeAdminResponse(PodcastContract):
@@ -142,6 +150,7 @@ class PodcastEpisodeAdminResponse(PodcastContract):
     status: Literal["draft", "published"]
     version: int
     metadata: tuple[PodcastMetadata, ...]
+    metadata_source: MetadataSource = "derived"
     audio_variants: tuple[PodcastAudioVariantResponse, ...]
     cover_asset_id: uuid.UUID | None
     published_at: datetime | None

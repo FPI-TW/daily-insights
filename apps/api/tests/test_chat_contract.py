@@ -445,3 +445,53 @@ def test_enabled_chat_requires_a_non_placeholder_key_in_production() -> None:
             chat_enabled=True,
             chat_model_api_key="CHANGE_ME_CHAT_MODEL_API_KEY",
         )
+
+
+@pytest.mark.parametrize(
+    "market,allowed",
+    [("global", True), ("us_equity", True), ("tw_equity", False), ("unknown", False)],
+)
+async def test_news_snapshot_enforces_market_policy_before_reading_content(
+    monkeypatch: pytest.MonkeyPatch,
+    market: str,
+    allowed: bool,
+) -> None:
+    from fastapi import HTTPException
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    publication = _publication("us_equity")
+    edition = SimpleNamespace(id=uuid.uuid4(), market_code=market)
+    database = AsyncMock(spec=AsyncSession)
+    database.scalars.return_value = _ScalarRows([publication])
+    database.get.return_value = edition
+    database.execute.return_value = [
+        (object(), SimpleNamespace(headline="Headline", summary="Summary"))
+    ]
+    monkeypatch.setattr(
+        chat_api, "visible_report_market_codes", AsyncMock(return_value=frozenset({"us_equity"}))
+    )
+    monkeypatch.setattr(chat_api, "_latest_cross_page_reports", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        chat_api, "visible_news_market_codes", AsyncMock(return_value=frozenset({"us_equity"}))
+    )
+    payload = ChatStreamRequest.model_validate(
+        {
+            "client_request_id": str(uuid.uuid4()),
+            "locale": "en",
+            "message": "Summarize",
+            "page_context": {
+                "kind": "reports_index",
+                "publication_ids": [str(publication.id)],
+                "news_edition_id": str(edition.id),
+            },
+        }
+    )
+    if allowed:
+        snapshot, _ = await _page_snapshot(database, context=_customer_context(), payload=payload)
+        assert "Headline" in json.dumps(snapshot)
+        database.execute.assert_awaited_once()
+    else:
+        with pytest.raises(HTTPException) as error:
+            await _page_snapshot(database, context=_customer_context(), payload=payload)
+        assert error.value.status_code == 404
+        database.execute.assert_not_awaited()

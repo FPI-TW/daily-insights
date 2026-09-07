@@ -21,6 +21,7 @@ function AdminAudioPage() {
       canPublish={
         user.system_role === "admin" || user.system_role === "asset_manager"
       }
+      canEditMetadata={user.system_role === "admin"}
       locale={locale}
     />
   )

@@ -3,12 +3,13 @@ import {
   type Locale,
   type PodcastAudioVariantResponse,
   type PodcastEpisodeAdmin,
+  type PodcastMetadata,
   type PodcastUploadReason,
 } from "@daily-insights/api-client"
 import { useForm } from "@tanstack/react-form"
 import { useRouter } from "@tanstack/react-router"
 import { motion } from "motion/react"
-import { useState, type DragEvent } from "react"
+import { useEffect, useState, type DragEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { browserPodcastAdminClient } from "#/lib/admin-podcasts"
 import { requireCsrfToken } from "#/lib/auth"
@@ -56,10 +57,12 @@ function formatEpisodeMonth(month: string, locale: Locale) {
 export function AudioManagementPage({
   episodes,
   canPublish,
+  canEditMetadata = false,
   locale,
 }: {
   episodes: PodcastEpisodeAdmin[]
   canPublish: boolean
+  canEditMetadata?: boolean
   locale: Locale
 }) {
   const { t } = useTranslation()
@@ -115,6 +118,7 @@ export function AudioManagementPage({
                     key={episode.id}
                     episode={episode}
                     canPublish={canPublish}
+                    canEditMetadata={canEditMetadata}
                     locale={locale}
                   />
                 ))}
@@ -379,10 +383,12 @@ function PodcastFileSlot({
 function EpisodeManager({
   episode,
   canPublish,
+  canEditMetadata,
   locale,
 }: {
   episode: PodcastEpisodeAdmin
   canPublish: boolean
+  canEditMetadata: boolean
   locale: Locale
 }) {
   const router = useRouter()
@@ -390,6 +396,18 @@ function EpisodeManager({
   const redirectExpiredSession = useSessionExpiryRedirect(locale, "admin")
   const [error, setError] = useState("")
   const [pending, setPending] = useState(false)
+  const analysisRunning = episode.audio_variants.some(
+    item => item.is_active && item.analysis_status === "pending"
+  )
+  // A background analysis finishes on its own; refresh until it does so the
+  // AI title and chapters appear without a manual reload.
+  useEffect(() => {
+    if (!analysisRunning) return
+    const timer = window.setInterval(() => {
+      void router.invalidate({ sync: true })
+    }, 4000)
+    return () => window.clearInterval(timer)
+  }, [analysisRunning, router])
   const available = new Set(
     episode.audio_variants
       .filter(item => item.is_active)
@@ -451,8 +469,21 @@ function EpisodeManager({
       </header>
       <p className="m-0 font-mono text-xs text-sea-ink-soft">
         {t("podcastVersion", { version: episode.version })} ·{" "}
-        {t("podcastAudioCount", { count: available.size })}
+        {t("podcastAudioCount", { count: available.size })} ·{" "}
+        {t(`podcastMetadataSource_${episode.metadata_source}`)}
       </p>
+      <p className="m-0 text-base font-bold text-sea-ink">
+        {episode.metadata.find(item => item.locale === locale)?.title ??
+          episode.metadata[0]?.title}
+      </p>
+      {canEditMetadata && (
+        <MetadataEditor
+          // Remount when analysis or a save replaces the stored text.
+          key={`${episode.metadata_source}:${episode.metadata.map(item => item.title).join("|")}`}
+          episode={episode}
+          locale={locale}
+        />
+      )}
       {missing.length > 0 && (
         <p
           className="m-0 rounded-lg border border-market-caution/30 bg-market-caution/10 px-3 py-2 text-sm font-bold text-market-caution"
@@ -466,7 +497,9 @@ function EpisodeManager({
           .filter(item => item.is_active)
           .map(variant => (
             <ChapterEditor
-              key={`${variant.locale}:${variant.version}`}
+              // Remount when a new file or a finished analysis replaces the
+              // markers so the editor shows the current list.
+              key={`${variant.locale}:${variant.version}:${variant.chapters_source}:${variant.analyzed_at ?? ""}`}
               episode={episode}
               variant={variant}
               locale={locale}
@@ -514,9 +547,40 @@ function ChapterEditor({
   const [reason, setReason] = useState("")
   const [error, setError] = useState("")
   const [pending, setPending] = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
   const fieldId = `podcast-chapters-${episode.id}-${variant.locale}`
   const reasonId = `${fieldId}-reason`
   const dirty = text.trim() !== formatChapterText(variant.chapters).trim()
+
+  async function analyze() {
+    setAnalyzing(true)
+    setError("")
+    try {
+      await browserPodcastAdminClient().analyzeAudio(
+        episode.id,
+        variant.locale,
+        await requireCsrfToken()
+      )
+      await router.invalidate({ sync: true })
+    } catch (caught) {
+      if (await redirectExpiredSession(caught)) return
+      if (
+        caught instanceof ApiError &&
+        typeof caught.detail === "object" &&
+        caught.detail !== null &&
+        "code" in caught.detail &&
+        caught.detail.code === "podcast_analysis_disabled"
+      ) {
+        setError(t("podcastAnalysisDisabled"))
+      } else {
+        setError(
+          caught instanceof Error ? caught.message : t("unexpectedError")
+        )
+      }
+    } finally {
+      setAnalyzing(false)
+    }
+  }
 
   async function save() {
     const parsed = parseChapterText(text, variant.duration_seconds)
@@ -575,6 +639,22 @@ function ChapterEditor({
       <p className="m-0 text-xs leading-5 text-sea-ink-soft">
         {t("podcastChaptersHint")}
       </p>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-sea-ink-soft">
+        <span data-analysis-status={variant.analysis_status}>
+          {t(`podcastChaptersSource_${variant.chapters_source}`)} ·{" "}
+          <AnalysisStatus variant={variant} locale={locale} />
+        </span>
+        <button
+          className="px-3 py-1.5 text-xs font-bold"
+          type="button"
+          disabled={analyzing || variant.analysis_status === "pending"}
+          onClick={() => void analyze()}
+        >
+          {variant.analysis_status === "pending"
+            ? t("podcastAnalyzing")
+            : t("podcastAnalyze")}
+        </button>
+      </div>
       <div className="flex flex-wrap items-end gap-3">
         <label className="min-w-48 flex-1" htmlFor={reasonId}>
           {t("podcastAuditReason")}
@@ -599,5 +679,187 @@ function ChapterEditor({
         </p>
       )}
     </form>
+  )
+}
+
+function AnalysisStatus({
+  variant,
+  locale,
+}: {
+  variant: PodcastAudioVariantResponse
+  locale: Locale
+}) {
+  const { t } = useTranslation()
+  if (variant.analysis_status === "succeeded") {
+    return t("podcastAnalysisStatus_succeeded", {
+      // Pinned to Taiwan time so the server-rendered label matches the
+      // client's (a viewer-zone label would mismatch at hydration).
+      time: variant.analyzed_at
+        ? new Intl.DateTimeFormat(locale, {
+            dateStyle: "short",
+            timeStyle: "short",
+            timeZone: "Asia/Taipei",
+          }).format(new Date(variant.analyzed_at))
+        : "",
+    })
+  }
+  if (variant.analysis_status === "failed") {
+    return t("podcastAnalysisStatus_failed", {
+      error: variant.analysis_error ?? "",
+    })
+  }
+  return t(`podcastAnalysisStatus_${variant.analysis_status}`)
+}
+
+// Localized title and summary for all three languages; saving marks the
+// episode as manually titled so AI analysis leaves it alone.
+function MetadataEditor({
+  episode,
+  locale,
+}: {
+  episode: PodcastEpisodeAdmin
+  locale: Locale
+}) {
+  const router = useRouter()
+  const { t } = useTranslation()
+  const redirectExpiredSession = useSessionExpiryRedirect(locale, "admin")
+  const initial = () =>
+    Object.fromEntries(
+      podcastLocales.map(code => {
+        const item = episode.metadata.find(entry => entry.locale === code)
+        return [
+          code,
+          { title: item?.title ?? "", summary: item?.summary ?? "" },
+        ]
+      })
+    ) as Record<Locale, { title: string; summary: string }>
+  const [values, setValues] = useState(initial)
+  const [reason, setReason] = useState("")
+  const [error, setError] = useState("")
+  const [pending, setPending] = useState(false)
+  const [open, setOpen] = useState(false)
+  const dirty = JSON.stringify(values) !== JSON.stringify(initial())
+  const complete = podcastLocales.every(
+    code => values[code].title.trim() && values[code].summary.trim()
+  )
+
+  async function save() {
+    setPending(true)
+    setError("")
+    try {
+      const metadata: PodcastMetadata[] = podcastLocales.map(code => ({
+        locale: code,
+        title: values[code].title.trim(),
+        summary: values[code].summary.trim(),
+      }))
+      await browserPodcastAdminClient().update(
+        episode.id,
+        {
+          expected_version: episode.version,
+          metadata: { values: metadata },
+          reason: reason.trim() || "metadata",
+        },
+        await requireCsrfToken()
+      )
+      setReason("")
+      await router.invalidate({ sync: true })
+    } catch (caught) {
+      if (await redirectExpiredSession(caught)) return
+      setError(caught instanceof Error ? caught.message : t("unexpectedError"))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <div className="col-span-full grid gap-2 border-t border-line pt-3">
+      <button
+        className="w-fit px-3 py-1.5 text-xs font-bold"
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(value => !value)}
+      >
+        {t("podcastEditMetadata")}
+      </button>
+      {open && (
+        <form
+          className="grid gap-3"
+          data-metadata-editor={episode.id}
+          onSubmit={event => {
+            event.preventDefault()
+            void save()
+          }}
+        >
+          <p className="m-0 text-xs leading-5 text-sea-ink-soft">
+            {t("podcastMetadataHint")}
+          </p>
+          {podcastLocales.map(code => (
+            <fieldset
+              key={code}
+              className="m-0 grid gap-2 rounded-lg border border-line p-3"
+            >
+              <legend className="px-1 text-xs font-extrabold text-kicker">
+                {code}
+              </legend>
+              <label htmlFor={`podcast-title-${episode.id}-${code}`}>
+                {t("podcastMetadataTitle")}
+                <input
+                  id={`podcast-title-${episode.id}-${code}`}
+                  value={values[code].title}
+                  maxLength={300}
+                  onChange={event =>
+                    setValues(current => ({
+                      ...current,
+                      [code]: { ...current[code], title: event.target.value },
+                    }))
+                  }
+                />
+              </label>
+              <label htmlFor={`podcast-summary-${episode.id}-${code}`}>
+                {t("podcastMetadataSummary")}
+                <textarea
+                  className="min-h-20"
+                  id={`podcast-summary-${episode.id}-${code}`}
+                  value={values[code].summary}
+                  maxLength={10000}
+                  onChange={event =>
+                    setValues(current => ({
+                      ...current,
+                      [code]: { ...current[code], summary: event.target.value },
+                    }))
+                  }
+                />
+              </label>
+            </fieldset>
+          ))}
+          <div className="flex flex-wrap items-end gap-3">
+            <label
+              className="min-w-48 flex-1"
+              htmlFor={`podcast-metadata-reason-${episode.id}`}
+            >
+              {t("podcastAuditReason")}
+              <input
+                id={`podcast-metadata-reason-${episode.id}`}
+                value={reason}
+                maxLength={2000}
+                onChange={event => setReason(event.target.value)}
+              />
+            </label>
+            <button
+              className="primary-action"
+              type="submit"
+              disabled={pending || !dirty || !complete}
+            >
+              {t("podcastSaveMetadata")}
+            </button>
+          </div>
+          {error && (
+            <p className="m-0 text-sm font-bold text-red-700" role="alert">
+              {error}
+            </p>
+          )}
+        </form>
+      )}
+    </div>
   )
 }

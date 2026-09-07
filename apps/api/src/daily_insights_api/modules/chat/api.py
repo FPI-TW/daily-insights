@@ -6,7 +6,7 @@ import hashlib
 import json
 import uuid
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import UTC, datetime
 from time import perf_counter
 from typing import Annotated
 
@@ -16,8 +16,10 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from daily_insights_api.core.config import Settings
 from daily_insights_api.core.enums import GenerationStatus, MessageRole, SystemRole
 from daily_insights_api.modules.audit.api import record_audit_event
+from daily_insights_api.modules.chat.admission import enforce_limits, lock_admission
 from daily_insights_api.modules.chat.models import Conversation, Message
 from daily_insights_api.modules.chat.prompt import (
     CHAT_CONTEXT_VERSION,
@@ -43,7 +45,13 @@ from daily_insights_api.modules.model_runtime.api import (
     GenerationRecord,
     ModelConfiguration,
 )
-from daily_insights_api.modules.news.api import NewsEdition, NewsItem, NewsPresentation
+from daily_insights_api.modules.news.api import (
+    GLOBAL_MARKET,
+    NewsEdition,
+    NewsItem,
+    NewsPresentation,
+    visible_news_market_codes,
+)
 from daily_insights_api.modules.reports.api import (
     LAUNCH_MARKET_ORDER,
     ReportPublication,
@@ -484,7 +492,10 @@ async def _page_snapshot(
         news: list[dict[str, object]] = []
         if page.news_edition_id is not None:
             edition = await database.get(NewsEdition, page.news_edition_id)
-            if edition is None:
+            if edition is None or (
+                edition.market_code != GLOBAL_MARKET
+                and edition.market_code not in await visible_news_market_codes(database, context)
+            ):
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "news context unavailable")
             result = await database.execute(
                 select(NewsItem, NewsPresentation)
@@ -586,8 +597,10 @@ async def _create_pending_turn(
     payload: ChatStreamRequest,
     snapshot: dict[str, object],
     report_version: str | None,
+    settings: Settings,
 ) -> tuple[Conversation, Message, Message, GenerationRecord, bool]:
     organization_id = _require_customer(context)
+    await lock_admission(database, user_id=context.user.id, organization_id=organization_id)
     existing = await database.scalar(
         select(Message).where(Message.client_request_id == payload.client_request_id)
     )
@@ -615,6 +628,9 @@ async def _create_pending_turn(
             raise HTTPException(
                 status.HTTP_409_CONFLICT, "conversation already has a pending reply"
             )
+        # A replay has no new provider work; release admission locks before
+        # streaming stored content to a potentially slow client.
+        await database.commit()
         return conversation, existing, assistant, generation, True
     if payload.conversation_id is None:
         conversation = Conversation(organization_id=organization_id, user_id=context.user.id)
@@ -655,6 +671,12 @@ async def _create_pending_turn(
             )
             + 1
         )
+    await enforce_limits(
+        database,
+        user_id=context.user.id,
+        organization_id=organization_id,
+        settings=settings,
+    )
     config = await _active_config(database)
     user = Message(
         conversation_id=conversation.id,
@@ -779,6 +801,7 @@ async def stream_chat(
             payload=payload,
             snapshot=snapshot,
             report_version=report_version,
+            settings=request.app.state.settings,
         )
     except IntegrityError as error:
         await database.rollback()
@@ -916,10 +939,22 @@ async def stream_chat(
             )
             yield _event("error", {"code": "provider_error", "partial": bool(chunks)})
 
+    # Include provider acquisition, history reads, and slow-client backpressure in
+    # the lifetime bound used by stale admission recovery. A delayed response must
+    # never begin provider work after its reservation lifetime.
+    remaining = (
+        request.app.state.settings.chat_timeout_seconds
+        - (datetime.now(UTC) - generation.created_at).total_seconds()
+    )
+    deadline = asyncio.get_running_loop().time() + max(0.0, remaining)
+
     async def response() -> AsyncIterator[bytes]:
         try:
-            async for event in lifecycle():
-                yield event
+            if not replay and asyncio.get_running_loop().time() >= deadline:
+                raise TimeoutError
+            async with asyncio.timeout_at(None if replay else deadline):
+                async for event in lifecycle():
+                    yield event
         except asyncio.CancelledError:
             # Covers meta delivery, history loading, and provider acquisition,
             # all of which happen after the pending turn was committed.
@@ -934,6 +969,19 @@ async def stream_chat(
                 metadata=metadata,
             )
             raise
+        except Exception as error:
+            # Also covers failures before lifecycle's provider try block.
+            code = "timeout" if isinstance(error, TimeoutError) else "provider_error"
+            await _terminalize(
+                session_factory,
+                assistant_id=assistant.id,
+                generation_id=generation.id,
+                content="".join(chunks),
+                terminal=GenerationStatus.PARTIAL if chunks else GenerationStatus.ERROR,
+                metadata=stream.metadata if stream is not None else ProviderMetadata(),
+                error_code=code,
+            )
+            yield _event("error", {"code": code, "partial": bool(chunks)})
 
     return StreamingResponse(
         response(),

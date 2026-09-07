@@ -42,6 +42,12 @@ class PodcastEpisode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="draft", server_default="draft"
     )
+    # Where the localized title/summary came from: "derived" (fixed filename
+    # plus trading date), "ai" (podcast analysis) or "manual" (back office).
+    # Analysis never overwrites manual text.
+    metadata_source: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="derived", server_default="derived"
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     cover_asset_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("assets.id", ondelete="RESTRICT")
@@ -80,6 +86,13 @@ class PodcastEpisodeAudioVariant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint("version > 0", name="version_positive"),
         CheckConstraint(
             "duration_seconds IS NULL OR duration_seconds > 0", name="duration_positive"
+        ),
+        CheckConstraint(
+            "chapters_source IN ('none', 'file', 'ai', 'manual')", name="chapters_source_valid"
+        ),
+        CheckConstraint(
+            "analysis_status IN ('none', 'pending', 'succeeded', 'failed')",
+            name="analysis_status_valid",
         ),
         UniqueConstraint(
             "episode_id",
@@ -123,3 +136,15 @@ class PodcastEpisodeAudioVariant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     chapters: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
+    chapters_source: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="none", server_default="none"
+    )
+    # Podcast analysis (transcription + language model) bookkeeping. The
+    # transcript keeps the timed segments so chapters can be re-derived
+    # without paying for transcription again.
+    analysis_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="none", server_default="none"
+    )
+    analysis_error: Mapped[str | None] = mapped_column(Text)
+    analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    transcript: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
