@@ -4,6 +4,7 @@ export function useChartColors() {
   const [colors, setColors] = useState({
     series: [] as string[],
     indexSeries: [] as string[],
+    vixRisk: { calm: "", elevated: "", high: "" },
     text: "",
     grid: "",
     gridSoft: "",
@@ -33,6 +34,11 @@ export function useChartColors() {
           styles.getPropertyValue("--chart-index-sma-120").trim(),
           styles.getPropertyValue("--chart-index-sma-240").trim(),
         ],
+        vixRisk: {
+          calm: styles.getPropertyValue("--lagoon").trim(),
+          elevated: styles.getPropertyValue("--market-caution").trim(),
+          high: styles.getPropertyValue("--destructive").trim(),
+        },
         text: styles.getPropertyValue("--sea-ink-soft").trim(),
         grid: styles.getPropertyValue("--line").trim(),
         gridSoft: styles.getPropertyValue("--line-soft").trim(),

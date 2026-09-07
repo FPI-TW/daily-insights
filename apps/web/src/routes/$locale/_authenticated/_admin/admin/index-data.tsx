@@ -1,5 +1,4 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
-import { IndexDataManagementPage } from "#/components/IndexDataManagementPage"
 
 export const Route = createFileRoute(
   "/$locale/_authenticated/_admin/admin/index-data"
@@ -11,11 +10,10 @@ export const Route = createFileRoute(
         params: { locale: context.locale },
       })
     }
+    throw redirect({
+      to: "/$locale/admin/data-management",
+      params: { locale: context.locale },
+    })
   },
-  component: AdminIndexDataPage,
+  component: () => null,
 })
-
-function AdminIndexDataPage() {
-  const { locale } = Route.useRouteContext()
-  return <IndexDataManagementPage locale={locale} />
-}

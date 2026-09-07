@@ -15,7 +15,6 @@ import {
   ReportLoadingScreen,
   ReportNotGeneratedScreen,
   ReportNotLaunchedScreen,
-  ReportOverview,
   ReportShell,
 } from "./Reports"
 import { LocaleSwitcher } from "./LocaleSwitcher"
@@ -79,6 +78,66 @@ async function renderLocalized(
 }
 
 describe("three-market report presentation", () => {
+  it("renders an independent leading block before report pipeline blocks", async () => {
+    const usReport = {
+      marketCode: "us_equity",
+      status: "complete",
+      editionDate: "2026-09-03",
+      sourceDate: "2026-09-02",
+      caveatKey: "reportCaveatLive",
+      summaryKey: "reportSummary_us_equity",
+      blocks: [
+        {
+          id: "us.opening",
+          kind: "metric",
+          status: "ok",
+          titleKey: "reportBlockUsLeaders",
+          metrics: [],
+        },
+        {
+          id: "us.closing",
+          kind: "metric",
+          status: "ok",
+          titleKey: "reportBlockUsMegaCaps",
+          metrics: [],
+        },
+      ],
+    } satisfies ProvisionalReport
+    const nonUsReport = { ...usReport, marketCode: "tw_equity" } as const
+
+    await renderLocalized(
+      <>
+        <ReportDetail
+          locale="en"
+          report={usReport}
+          leadingBlock={
+            <section data-testid="us-index-performance">
+              Five-index performance
+            </section>
+          }
+        />
+        <ReportDetail locale="en" report={nonUsReport} />
+      </>,
+      "en"
+    )
+
+    const performance = screen.getByTestId("us-index-performance")
+    const opening = screen.getAllByRole("heading", {
+      name: "Leaders & laggards",
+    })[0]
+    const closing = screen.getAllByRole("heading", { name: "Mega caps" })[0]
+    if (opening === undefined || closing === undefined) {
+      throw new Error("Expected report section headings to be rendered")
+    }
+    expect(performance.compareDocumentPosition(opening)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
+    expect(opening.compareDocumentPosition(closing)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
+    expect(performance.parentElement).toHaveClass("xl:col-span-2")
+  })
+
   it("lists every market the API marks visible, in API order", async () => {
     await renderLocalized(
       <ReportShell
@@ -817,96 +876,6 @@ describe("three-market report presentation", () => {
       expect(screen.getByRole("navigation")).toBeVisible()
     }
   )
-
-  it("summarises each report on the index with headline figures and a link", async () => {
-    const macro = {
-      marketCode: "global_macro_bonds",
-      status: "complete",
-      editionDate: "2026-09-04",
-      sourceDate: "2026-09-03",
-      caveatKey: "reportCaveatLive",
-      summaryKey: "reportSummary_global_macro_bonds",
-      blocks: [
-        {
-          kind: "metric",
-          status: "ok",
-          titleKey: "reportBlockMacroSnapshot",
-          metrics: [
-            {
-              labelKey: "reportLabelBrent",
-              value: { kind: "number", value: "94.4500" },
-              change: { kind: "number", value: "-0.1700" },
-              unitCode: "usd",
-            },
-            {
-              labelKey: "reportLabelGold",
-              value: { kind: "number", value: "4477.2900" },
-              change: { kind: "number", value: "0.0800" },
-              unitCode: "usd",
-            },
-          ],
-        },
-      ],
-    } satisfies ProvisionalReport
-    const usEquity = {
-      marketCode: "us_equity",
-      status: "complete",
-      editionDate: "2026-09-04",
-      sourceDate: "2026-09-03",
-      caveatKey: "reportCaveatLive",
-      summaryKey: "reportSummary_us_equity",
-      blocks: [
-        {
-          kind: "table",
-          status: "ok",
-          titleKey: "reportBlockUsMegaCaps",
-          columns: [
-            { labelKey: "reportColumnInstrument", unitCode: null },
-            { labelKey: "reportColumnPrice", unitCode: "usd" },
-            { labelKey: "reportColumnChange", unitCode: "percent" },
-          ],
-          rows: [
-            [
-              { kind: "literal", value: "TSLA" },
-              { kind: "number", value: "376.36" },
-              { kind: "number", value: "5.42" },
-            ],
-          ],
-        },
-      ],
-    } satisfies ProvisionalReport
-
-    await renderLocalized(
-      <ReportOverview
-        locale="en"
-        entries={[
-          { summary: macro, detail: macro },
-          { summary: usEquity, detail: usEquity },
-          { summary: { ...usEquity, marketCode: "crypto" }, detail: null },
-        ]}
-      />,
-      "en"
-    )
-
-    const macroCard = screen.getByRole("article", {
-      name: "Global macro, bonds & FX",
-    })
-    expect(macroCard).toHaveTextContent("Brent crude94.45-0.17%")
-    expect(macroCard).toHaveTextContent("Gold4,477.29+0.08%")
-    expect(macroCard).toHaveTextContent("2026-09-03")
-    expect(
-      screen.getByRole("article", { name: "US equities" })
-    ).toHaveTextContent("TSLA376.36+5.42%")
-    expect(screen.getByRole("article", { name: "Crypto" })).toHaveTextContent(
-      "Not generated yet today"
-    )
-    const links = screen.getAllByRole("link", { name: "Open report" })
-    expect(links).toHaveLength(3)
-    expect(links[0]).toHaveAttribute(
-      "data-params",
-      JSON.stringify({ locale: "en", marketCode: "global_macro_bonds" })
-    )
-  })
 
   it("opens a market page with the analyst viewpoint and widens a lone block", async () => {
     const report = {

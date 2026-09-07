@@ -34,13 +34,15 @@ Before enabling the feature in production, confirm all of the following:
    ticket; do not infer a license from a successful request.
 2. The scheduler and its 08:00 Asia/Taipei run are deployed, and the admin-only
    **Index data** page is reachable by an administrator.
-3. The initial historical backfill has completed and its validation below has
-   passed. Do not enable the chart for customers first and backfill later.
+3. When a release adds a tracked symbol, deploy the API and scheduler image
+   first, complete the historical backfill and validation below, and only then
+   deploy the web image that exposes its chart. Do not enable the chart for
+   customers first and backfill later.
 
 ## One-time two-year backfill
 
-Run this once in the API scheduler environment, using the configured production
-database and provider credentials:
+Run this once in the API scheduler environment after deploying a catalog
+change, using the configured production database and provider credentials:
 
 ```sh
 python -m daily_insights_api.scripts.run_index_daily_bars --once --period 2y
@@ -54,6 +56,9 @@ least 450 bars per symbol, and the newest stored `trade_date` must be within
 seven calendar days of the validation date in Asia/Taipei. Investigate market
 holidays before declaring a failure. A rerun should leave the same date/symbol
 keys in place (corrected close values may legitimately update).
+
+For the VIX chart rollout, explicitly verify that `^VIX` meets both checks
+before deploying the web image. `^VIX` is the Cboe Volatility Index itself.
 
 ## Routine and manual refresh
 

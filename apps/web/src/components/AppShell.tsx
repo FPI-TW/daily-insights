@@ -56,8 +56,9 @@ export function AppShell({
     ? "audio"
     : pathname.includes("/admin/members")
       ? "members"
-      : pathname.includes("/admin/index-data")
-        ? "index-data"
+      : pathname.includes("/admin/data-management") ||
+          pathname.includes("/admin/index-data")
+        ? "data-management"
         : pathname.includes("/admin/analyst-viewpoints")
           ? "analyst-viewpoints"
           : pathname.includes("/admin/conversations")
@@ -101,8 +102,9 @@ export function AppShell({
           : "customer-podcasts"
       : location.pathname.endsWith("/admin/members")
         ? "admin-members"
-        : location.pathname.endsWith("/admin/index-data")
-          ? "admin-index-data"
+        : location.pathname.endsWith("/admin/data-management") ||
+            location.pathname.endsWith("/admin/index-data")
+          ? "admin-data-management"
           : location.pathname.endsWith("/admin/analyst-viewpoints")
             ? "admin-analyst-viewpoints"
             : "admin-audio"
@@ -216,11 +218,11 @@ export function AppShell({
                     {t("memberManagementNav")}
                   </Link>
                   <Link
-                    to="/$locale/admin/index-data"
+                    to="/$locale/admin/data-management"
                     params={{ locale }}
                     className={adminNavLinkClass}
                   >
-                    {t("indexDataAdminNav")}
+                    {t("dataManagementNav")}
                   </Link>
                   <Link
                     to="/$locale/admin/analyst-viewpoints"

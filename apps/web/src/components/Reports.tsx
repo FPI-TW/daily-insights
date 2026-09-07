@@ -8,7 +8,6 @@ import {
   directionClass,
   formatChange,
   formatIsoDate,
-  formatDateStamp,
   formatTimestamp,
   formatNumber,
   literalDirection,
@@ -312,10 +311,12 @@ export function ReportDetail({
   locale = "zh-hant",
   report,
   viewpoint = null,
+  leadingBlock = null,
 }: {
   locale?: Locale
   report: ProvisionalReport
   viewpoint?: AnalystViewpoint | null
+  leadingBlock?: ReactNode
 }) {
   // A lone metric or table block spans the full width; half-width panels
   // only make sense when there is a second one to sit beside.
@@ -325,6 +326,9 @@ export function ReportDetail({
       <ReportFreshness report={report} locale={locale} />
       {viewpoint ? <MarketViewpoint viewpoint={viewpoint} /> : null}
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+        {leadingBlock ? (
+          <div className="min-w-0 xl:col-span-2">{leadingBlock}</div>
+        ) : null}
         {report.blocks.map((block, index) => (
           <ReportBlockView
             block={block}
@@ -370,144 +374,6 @@ export function MarketViewpoint({
           <li key={point}>{point}</li>
         ))}
       </ul>
-    </section>
-  )
-}
-
-export type OverviewEntry = {
-  summary: ProvisionalReport
-  detail: ProvisionalReport | null
-}
-
-type OverviewFigure = {
-  label: string
-  value: string
-  change: { text: string; direction: Direction } | null
-}
-
-/** Up to three headline figures from a report: its first metric block, or
- * the first rows of its first table. */
-function overviewFigures(
-  report: ProvisionalReport,
-  locale: Locale,
-  t: Translate
-): OverviewFigure[] {
-  for (const block of report.blocks) {
-    if (block.status !== "ok") continue
-    if (block.kind === "metric") {
-      return block.metrics.slice(0, 3).map(item => ({
-        label: t(item.labelKey),
-        value: formatValue(item.value, item.unitCode, locale, t),
-        change: "change" in item ? changeOf(item.change, locale, t) : null,
-      }))
-    }
-    if (block.kind === "table") {
-      // Column 0 is the row label; the price is the first later column that
-      // is not a percentage.
-      const price = block.columns.findIndex(
-        (column, index) => index > 0 && column.unitCode !== "percent"
-      )
-      const change = block.columns.findIndex(
-        column => column.unitCode === "percent"
-      )
-      return block.rows.slice(0, 3).map(row => {
-        const priceCell = price > 0 ? (row[price] ?? null) : null
-        const changeCell = change > 0 ? (row[change] ?? null) : null
-        return {
-          label: valueText(row[0] ?? null, t),
-          value: formatValue(
-            priceCell,
-            block.columns[price]?.unitCode,
-            locale,
-            t
-          ),
-          change: change > 0 ? changeOf(changeCell, locale, t) : null,
-        }
-      })
-    }
-  }
-  return []
-}
-
-/** Entry cards for every launched report so the index page carries the
- * numbers, not only links to them. */
-export function ReportOverview({
-  locale,
-  entries,
-}: {
-  locale: Locale
-  entries: ReadonlyArray<OverviewEntry>
-}) {
-  const { t } = useTranslation()
-  if (entries.length === 0) return null
-  return (
-    <section className="mb-6" aria-labelledby="report-overview-title">
-      <h2
-        id="report-overview-title"
-        className="mt-0 mb-3 text-lg font-extrabold tracking-[-0.02em] text-sea-ink"
-      >
-        {t("reportOverviewTitle")}
-      </h2>
-      <div className="grid gap-3 md:grid-cols-3">
-        {entries.map(({ summary, detail }) => {
-          const figures = detail ? overviewFigures(detail, locale, t) : []
-          return (
-            <article
-              key={summary.marketCode}
-              className="surface-panel flex flex-col gap-3 p-4"
-              aria-label={t(`reportMarket_${summary.marketCode}`)}
-            >
-              <div className="flex items-baseline justify-between gap-2">
-                <h3 className="m-0 text-sm font-extrabold text-sea-ink">
-                  {t(`reportMarket_${summary.marketCode}`)}
-                </h3>
-                <span className="text-xs text-sea-ink-soft">
-                  {summary.sourceDate
-                    ? formatDateStamp(summary.sourceDate)
-                    : ""}
-                </span>
-              </div>
-              {figures.length > 0 ? (
-                <dl className="m-0 grid gap-2">
-                  {figures.map(figure => (
-                    <div
-                      key={figure.label}
-                      className="flex items-baseline justify-between gap-3 text-sm"
-                    >
-                      <dt className="min-w-0 truncate text-sea-ink-soft">
-                        {figure.label}
-                      </dt>
-                      <dd className="m-0 flex shrink-0 items-baseline gap-2 font-mono tabular-nums">
-                        <span className="font-bold text-sea-ink">
-                          {figure.value}
-                        </span>
-                        {figure.change ? (
-                          <span
-                            className={`text-xs font-bold ${directionClass(figure.change.direction)}`}
-                          >
-                            {figure.change.text}
-                          </span>
-                        ) : null}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              ) : (
-                <p className="m-0 text-sm text-sea-ink-soft">
-                  {t("reportOverviewUnavailable")}
-                </p>
-              )}
-              <Link
-                to="/$locale/reports/$marketCode"
-                params={{ locale, marketCode: summary.marketCode }}
-                className="mt-auto text-sm font-bold text-lagoon no-underline"
-              >
-                {t("reportOverviewOpen")}
-              </Link>
-            </article>
-          )
-        })}
-      </div>
     </section>
   )
 }

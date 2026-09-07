@@ -9,6 +9,7 @@ const getMarketIndexHistory = vi.fn()
 const getMarketIndexMovingAverages = vi.fn()
 const getTaiwanInstitutionalFlows = vi.fn()
 const getTaiwanInstitutionalStocks = vi.fn()
+const getVixHistory = vi.fn()
 const indexRange = { start: "2024-09-02", end: "2026-09-02" }
 
 vi.mock("#/lib/macro-dashboard.functions", () => ({
@@ -25,6 +26,7 @@ vi.mock("#/lib/indices", () => ({
   chartMarketCodes: ["us_equity", "tw_equity"],
   getMarketIndexHistory,
   getMarketIndexMovingAverages,
+  getVixHistory,
   twoYearTaipeiRange: () => indexRange,
 }))
 vi.mock("#/lib/institutional-flows", () => ({
@@ -39,6 +41,7 @@ vi.mock("#/lib/institutional-flows", () => ({
 const {
   INDEX_HISTORY_DEADLINE_MS,
   INDEX_MOVING_AVERAGES_DEADLINE_MS,
+  VIX_HISTORY_DEADLINE_MS,
   loadMarketPage,
 } = await import("./$marketCode")
 
@@ -61,6 +64,12 @@ const indexHistory = {
   series: [],
   failedSymbols: [],
 }
+const vixHistory = {
+  symbol: "^VIX",
+  start: "2024-09-02",
+  end: "2026-09-02",
+  bars: [],
+}
 
 const viewpoint = {
   viewpoint_date: "2026-09-02",
@@ -76,6 +85,7 @@ describe("market report loader", () => {
     getMarketIndexMovingAverages.mockResolvedValue({})
     getTaiwanInstitutionalFlows.mockResolvedValue({ as_of: null, series: [] })
     getTaiwanInstitutionalStocks.mockResolvedValue({ as_of: null, rows: [] })
+    getVixHistory.mockResolvedValue(vixHistory)
   })
 
   afterEach(() => {
@@ -103,6 +113,8 @@ describe("market report loader", () => {
     })
     if (!page.indexHistory) throw new Error("expected a deferred index chart")
     await expect(page.indexHistory).resolves.toEqual(indexHistory)
+    if (!page.vixHistory) throw new Error("expected deferred VIX history")
+    await expect(page.vixHistory).resolves.toEqual(vixHistory)
     expect(getMarketNews).toHaveBeenCalledWith({
       data: { locale: "en", marketCode: "us_equity" },
     })
@@ -112,12 +124,14 @@ describe("market report loader", () => {
     expect(getMarketIndexMovingAverages).toHaveBeenCalledWith({
       data: { marketCode: "us_equity", range: indexRange },
     })
+    expect(getVixHistory).toHaveBeenCalledWith({ data: { range: indexRange } })
   })
 
   it("keeps the report when market news fails", async () => {
     getReportDetail.mockResolvedValueOnce(report)
     getMarketNews.mockRejectedValueOnce(new Error("news down"))
     getMarketIndexHistory.mockRejectedValueOnce(new Error("indices down"))
+    getVixHistory.mockRejectedValueOnce(new Error("VIX down"))
 
     const page = await loadMarketPage({
       params: { marketCode: "us_equity" },
@@ -130,6 +144,8 @@ describe("market report loader", () => {
     })
     if (!page.indexHistory) throw new Error("expected a deferred index chart")
     await expect(page.indexHistory).resolves.toBeNull()
+    if (!page.vixHistory) throw new Error("expected deferred VIX history")
+    await expect(page.vixHistory).resolves.toBeNull()
   })
 
   it("shows the not-launched Taiwan page with Taiwan news and skips news elsewhere", async () => {
@@ -178,8 +194,10 @@ describe("market report loader", () => {
       indexHistory: null,
       indexMovingAverages: null,
       institutionalData: null,
+      vixHistory: null,
     })
     expect(getMarketNews).not.toHaveBeenCalled()
+    expect(getVixHistory).not.toHaveBeenCalled()
   })
 
   it("throws notFound for unknown markets", async () => {
@@ -225,6 +243,25 @@ describe("market report loader", () => {
     await vi.advanceTimersByTimeAsync(INDEX_HISTORY_DEADLINE_MS)
 
     await expect(page.indexHistory).resolves.toBeNull()
+  })
+
+  it("turns a stalled VIX request into local unavailable data", async () => {
+    vi.useFakeTimers()
+    getReportDetail.mockResolvedValueOnce(report)
+    getMarketNews.mockResolvedValueOnce(news)
+    getMarketIndexHistory.mockResolvedValueOnce(indexHistory)
+    getVixHistory.mockImplementationOnce(() => new Promise<never>(() => {}))
+
+    const page = await loadMarketPage({
+      params: { marketCode: "us_equity" },
+      context: { locale: "en" },
+    })
+    if (!page.vixHistory) throw new Error("expected deferred VIX history")
+    await vi.advanceTimersByTimeAsync(VIX_HISTORY_DEADLINE_MS)
+
+    await expect(page.vixHistory).resolves.toBeNull()
+    expect(page.report).toEqual(report)
+    expect(page.news).toEqual({ marketCode: "us_equity", latest: news })
   })
 
   it("keeps close history when moving averages reject", async () => {

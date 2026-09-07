@@ -20,6 +20,15 @@ const credentials = {
     role: "asset_manager",
   },
 }
+const indexSymbols = new Set([
+  "^DJI",
+  "^GSPC",
+  "^NDX",
+  "^RUT",
+  "^SOX",
+  "^VIX",
+  "^TWII",
+])
 const port = Number(process.argv[process.argv.indexOf("--port") + 1] || 3311)
 
 let state
@@ -295,6 +304,27 @@ function pastEpisodes(locale) {
 }
 
 const reportMarkets = ["global_macro_bonds", "crypto", "us_equity", "tw_equity"]
+const marketCatalog = [
+  ["global_macro_bonds", "Macro analysis", "全球宏觀", "全球宏观"],
+  ["forex", "Foreign exchange", "外匯市場", "外汇市场"],
+  ["crypto", "Crypto", "加密資產", "加密资产"],
+  ["us_equity", "US equities", "美國股市", "美国股市"],
+  ["hk_equity", "Hong Kong equities", "香港股市", "香港股市"],
+  ["cn_equity", "China equities", "中國股市", "中国股市"],
+  ["tw_equity", "Taiwan equities", "台灣股市", "台湾股市"],
+  [
+    "tw_index_derivatives",
+    "Taiwan index derivatives",
+    "台指衍生品",
+    "台指衍生品",
+  ],
+].map(([code, nameEn, nameZhHant, nameZhHans]) => ({
+  code,
+  name_en: nameEn,
+  name_zh_hant: nameZhHant,
+  name_zh_hans: nameZhHans,
+  is_visible: true,
+}))
 
 function reportSummary(marketCode, locale) {
   return {
@@ -417,6 +447,22 @@ function reportDetail(marketCode, locale) {
   }
 }
 
+function indexBars(symbol) {
+  const closes =
+    symbol === "^VIX" ? ["18.10", "24.40", "32.70"] : ["100.00", "102.00"]
+  const tradeDates = ["2026-08-27", "2026-08-28", "2026-08-31"]
+  return closes.map((close, index) => ({
+    symbol,
+    market_code: symbol === "^TWII" ? "tw_equity" : "us_equity",
+    trade_date: tradeDates[index],
+    open: close,
+    high: close,
+    low: close,
+    close,
+    volume: 0,
+  }))
+}
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url || "/", `http://127.0.0.1:${port}`)
 
@@ -450,17 +496,8 @@ const server = createServer(async (request, response) => {
   if (url.pathname === "/api/markets" && request.method === "GET") {
     const role = requireRole(request, response, ["org_member"])
     if (!role) return
-    sendJson(
-      response,
-      200,
-      [...reportMarkets, "forex", "tw_index_derivatives"].map(code => ({
-        code,
-        is_visible: true,
-        name_en: code,
-        name_zh_hant: code,
-        name_zh_hans: code,
-      }))
-    )
+    recordRequest(request, url, role)
+    sendJson(response, 200, marketCatalog)
     return
   }
   if (
@@ -651,6 +688,45 @@ const server = createServer(async (request, response) => {
     const locale = url.searchParams.get("locale") || "zh-hant"
     recordRequest(request, url, role)
     sendJson(response, 200, reportDetail(marketCode, locale))
+    return
+  }
+
+  const dailyBarsMatch = /^\/api\/markets\/indices\/([^/]+)\/daily-bars$/.exec(
+    url.pathname
+  )
+  if (dailyBarsMatch && request.method === "GET") {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    const symbol = decodeURIComponent(dailyBarsMatch[1])
+    if (!indexSymbols.has(symbol)) {
+      sendJson(response, 404, { detail: "index not found" })
+      return
+    }
+    recordRequest(request, url, role, { symbol })
+    sendJson(response, 200, indexBars(symbol))
+    return
+  }
+
+  const movingAveragesMatch =
+    /^\/api\/markets\/indices\/([^/]+)\/moving-averages$/.exec(url.pathname)
+  if (movingAveragesMatch && request.method === "GET") {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    const symbol = decodeURIComponent(movingAveragesMatch[1])
+    if (!indexSymbols.has(symbol)) {
+      sendJson(response, 404, { detail: "index not found" })
+      return
+    }
+    recordRequest(request, url, role, { symbol })
+    sendJson(response, 200, {
+      symbol,
+      market_code: symbol === "^TWII" ? "tw_equity" : "us_equity",
+      method: "sma",
+      price_field: "close",
+      formula_version: "sma-close-v1",
+      as_of: "2026-08-29",
+      series: [20, 60, 120, 240].map(period => ({ period, points: [] })),
+    })
     return
   }
 

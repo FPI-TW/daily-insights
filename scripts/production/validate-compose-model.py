@@ -16,6 +16,7 @@ SERVICES = (
     "daily-news-scheduler",
     "analyst-viewpoints-scheduler",
     "index-daily-bars-scheduler",
+    "data-management-worker",
 )
 API_ENVIRONMENT_KEYS = {
     "DAILY_INSIGHTS_DAILY_NEWS_ENABLED",
@@ -118,6 +119,11 @@ def main() -> None:
         # Yahoo publishes no API, so this scheduler has no provider credential.
         (
             "index-daily-bars-scheduler",
+            "DAILY_INSIGHTS_YFINANCE_ENABLED",
+            None,
+        ),
+        (
+            "data-management-worker",
             "DAILY_INSIGHTS_YFINANCE_ENABLED",
             None,
         ),

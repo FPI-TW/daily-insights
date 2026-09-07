@@ -20,6 +20,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
+      - app
       - data
 
   api:
@@ -55,6 +56,36 @@ services:
       start_period: 20s
     expose:
       - "8000"
+    networks:
+      - app
+      - data
+
+  data-management-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: apps/api/.env
+        required: false
+    environment:
+      DAILY_INSIGHTS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-daily_insights}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-daily_insights}
+    command:
+      ["python", "-m", "daily_insights_api.scripts.run_data_management_worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import time; from pathlib import Path; p = Path('/tmp/data-management-worker-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 90",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     networks:
       - app
       - data

@@ -14,6 +14,7 @@ export function Dialog({
   onClose,
   labelledBy,
   initialFocusRef,
+  role = "dialog",
   children,
 }: {
   open: boolean
@@ -21,6 +22,7 @@ export function Dialog({
   labelledBy: string
   // Element to focus on open; defaults to the first focusable element.
   initialFocusRef?: RefObject<HTMLElement | null>
+  role?: "dialog" | "alertdialog"
   children: ReactNode
 }) {
   const panelRef = useRef<HTMLElement>(null)
@@ -74,7 +76,7 @@ export function Dialog({
         >
           <motion.section
             className="w-full max-w-sm rounded-[13px] border border-line bg-surface p-5 shadow-xl"
-            role="dialog"
+            role={role}
             aria-modal="true"
             aria-labelledby={labelledBy}
             ref={panelRef}
