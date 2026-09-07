@@ -63,7 +63,7 @@ describe("DailyNews", () => {
     )
   })
 
-  it("explains a partial edition and hides missing publish times", async () => {
+  it("shows a partial edition as a plain list and hides missing publish times", async () => {
     const i18n = createI18n("en")
     await i18n.changeLanguage("en")
     const { container } = render(
@@ -101,10 +101,8 @@ describe("DailyNews", () => {
       </I18nextProvider>
     )
     const panel = within(container)
-    expect(panel.getByText("Partial")).toBeInTheDocument()
-    expect(
-      panel.getByText("Only 1 of 5 stories were produced today.")
-    ).toBeInTheDocument()
+    expect(panel.queryByText("Partial")).not.toBeInTheDocument()
+    expect(panel.queryByText(/of 5 stories/)).not.toBeInTheDocument()
     expect(panel.queryByText(/Time unavailable/)).not.toBeInTheDocument()
     expect(container.querySelector("time")).toBeNull()
   })

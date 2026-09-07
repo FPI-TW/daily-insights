@@ -729,7 +729,6 @@ const resources: Resource = {
       dailyNewsEyebrow: "每日精選",
       dailyNewsTitle: "本日重大新聞",
       dailyNewsStatus_complete: "完整",
-      dailyNewsStatus_partial: "部分可用",
       dailyNewsStatus_unavailable: "暫不可用",
       dailyNewsUnavailable: "本日重大新聞尚未產生，請稍後再試。",
       dailyNewsLoadFailed: "本日重大新聞暫時無法載入，報告內容不受影響。",
@@ -740,8 +739,6 @@ const resources: Resource = {
       reportNotLaunchedDescription:
         "此市場的正式晨間報告仍在準備中，目前先提供分析師觀點與市場新聞。",
       dailyNewsImportance: "重要性 {{count}} 星",
-      dailyNewsPartialExplanation:
-        "本日僅產生 {{count}} 則，目標 {{target}} 則。",
       newsMarket_global: "全球",
       newsMarket_us: "美國",
       newsMarket_asia: "亞洲",
@@ -1479,7 +1476,6 @@ const resources: Resource = {
       dailyNewsEyebrow: "每日精选",
       dailyNewsTitle: "本日重大新闻",
       dailyNewsStatus_complete: "完整",
-      dailyNewsStatus_partial: "部分可用",
       dailyNewsStatus_unavailable: "暂不可用",
       dailyNewsUnavailable: "本日重大新闻尚未生成，请稍后再试。",
       dailyNewsLoadFailed: "本日重大新闻暂时无法加载，报告内容不受影响。",
@@ -1490,8 +1486,6 @@ const resources: Resource = {
       reportNotLaunchedDescription:
         "该市场的正式晨间报告仍在准备中，目前先提供分析师观点与市场新闻。",
       dailyNewsImportance: "重要性 {{count}} 星",
-      dailyNewsPartialExplanation:
-        "本日仅生成 {{count}} 则，目标 {{target}} 则。",
       newsMarket_global: "全球",
       newsMarket_us: "美国",
       newsMarket_asia: "亚洲",
@@ -2261,7 +2255,6 @@ const resources: Resource = {
       dailyNewsEyebrow: "DAILY SELECTION",
       dailyNewsTitle: "Today’s major news",
       dailyNewsStatus_complete: "Complete",
-      dailyNewsStatus_partial: "Partial",
       dailyNewsStatus_unavailable: "Unavailable",
       dailyNewsUnavailable:
         "Today’s major news has not been generated yet. Please try again later.",
@@ -2274,8 +2267,6 @@ const resources: Resource = {
       reportNotLaunchedDescription:
         "The formal morning report for this market is still in preparation; the analyst viewpoint and market news are available now.",
       dailyNewsImportance: "Importance {{count}} stars",
-      dailyNewsPartialExplanation:
-        "Only {{count}} of {{target}} stories were produced today.",
       newsMarket_global: "Global",
       newsMarket_us: "United States",
       newsMarket_asia: "Asia",
