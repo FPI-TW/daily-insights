@@ -160,6 +160,23 @@ describe("UsIndexPerformanceTable", () => {
     }
   )
 
+  it("adds the English index name under a localized name only", async () => {
+    await renderLocalized(
+      <UsIndexPerformanceTable locale="zh-hant" history={history} />,
+      "zh-hant"
+    )
+    const row = screen.getByRole("rowheader", { name: /標普 500 指數/ })
+    expect(row).toHaveTextContent("S&P 500 Index")
+    cleanup()
+    await renderLocalized(
+      <UsIndexPerformanceTable locale="en" history={history} />,
+      "en"
+    )
+    expect(
+      screen.getByRole("rowheader", { name: "S&P 500 Index" })
+    ).toBeInTheDocument()
+  })
+
   it("renders loading and unavailable states without failing the report", async () => {
     await renderLocalized(<UsIndexPerformanceTableLoading />)
     expect(screen.getByRole("status")).toHaveAccessibleName()
