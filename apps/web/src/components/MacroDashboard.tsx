@@ -440,7 +440,8 @@ export function MacroDashboard({
 }) {
   const { t } = useTranslation()
   const [selectedFx, setSelectedFx] = useState("eur_usd")
-  const [ratioDays, setRatioDays] = useState(365)
+  const [oilGoldDays, setOilGoldDays] = useState(365)
+  const [copperGoldDays, setCopperGoldDays] = useState(365)
   const [dxyDays, setDxyDays] = useState(90)
   const [fxDays, setFxDays] = useState(90)
   const [compare, setCompare] = useState<Period>("week")
@@ -458,13 +459,16 @@ export function MacroDashboard({
     })),
     change: byId.has(id) ? periodChange(byId.get(id)!, "day") : null,
   })
-  function slicedRatio(points: { date: string; value: number }[]) {
+  function slicedRatio(
+    points: { date: string; value: number }[],
+    days: number
+  ) {
     const latest = points.at(-1)
     return latest
       ? points.filter(
           p =>
             Date.parse(p.date) >=
-            Date.parse(latest.date) - (ratioDays - 1) * 86_400_000
+            Date.parse(latest.date) - (days - 1) * 86_400_000
         )
       : []
   }
@@ -472,33 +476,49 @@ export function MacroDashboard({
     <div className="min-w-0 pb-6 [&>section+section]:mt-9">
       <section className="min-w-0">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,560px),1fr))] items-start gap-6">
-          <DashboardPanel title={t("macroCommodities")}>
-            <HistoryTable
-              ids={commodityIds}
-              histories={histories}
-              locale={locale}
-              fetchedAt={data?.fetched_at}
-            />
-          </DashboardPanel>
+          <div className="col-span-full min-w-0">
+            <DashboardPanel title={t("macroCommodities")}>
+              <HistoryTable
+                ids={commodityIds}
+                histories={histories}
+                locale={locale}
+                fetchedAt={data?.fetched_at}
+              />
+            </DashboardPanel>
+          </div>
+          {/* One ratio per chart: a date missing from one pair must not break the other's line. */}
           <DashboardPanel
-            title={t("reportBlockMacroCommodityRatios")}
-            controls={<Range value={ratioDays} onChange={setRatioDays} />}
+            title={t("macroOilGold")}
+            controls={<Range value={oilGoldDays} onChange={setOilGoldDays} />}
           >
             <Chart
               locale={locale}
-              label={t("reportBlockMacroCommodityRatios")}
-              dual
-              days={ratioDays}
+              label={t("macroOilGold")}
+              days={oilGoldDays}
               lines={[
                 {
                   name: t("macroOilGold"),
                   unit: "ratio",
-                  points: slicedRatio(oilGold),
+                  points: slicedRatio(oilGold, oilGoldDays),
                 },
+              ]}
+            />
+          </DashboardPanel>
+          <DashboardPanel
+            title={t("macroCopperGold")}
+            controls={
+              <Range value={copperGoldDays} onChange={setCopperGoldDays} />
+            }
+          >
+            <Chart
+              locale={locale}
+              label={t("macroCopperGold")}
+              days={copperGoldDays}
+              lines={[
                 {
                   name: t("macroCopperGold"),
                   unit: "ratio",
-                  points: slicedRatio(copperGold),
+                  points: slicedRatio(copperGold, copperGoldDays),
                 },
               ]}
             />
