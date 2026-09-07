@@ -25,6 +25,7 @@ from daily_insights_api.modules.assets.object_store import ObjectStore
 from daily_insights_api.modules.assets.r2.store import R2ObjectStore
 from daily_insights_api.modules.chat.api import router as chat_router
 from daily_insights_api.modules.chat.provider import OpenAICompatibleChatProvider
+from daily_insights_api.modules.identity.password_work import PasswordWork
 from daily_insights_api.modules.identity.router import router as identity_router
 from daily_insights_api.modules.markets.router import router as markets_router
 from daily_insights_api.modules.model_runtime.service import sync_chat_model_configuration
@@ -117,10 +118,12 @@ def create_app(
                     await sync_chat_model_configuration(database, resolved_settings)
             yield
         finally:
+            app.state.password_work.close()
             if engine is not None:
                 await engine.dispose()
 
     app = FastAPI(title=resolved_settings.app_name, lifespan=lifespan)
+    app.state.password_work = PasswordWork(resolved_settings.login_password_workers)
     app.state.settings = resolved_settings
     app.state.session_factory = session_factory
     app.state.object_store = object_store

@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     session_cookie_name: str = "daily_insights_session"
     session_ttl_seconds: int = Field(default=60 * 60 * 12, gt=0)
     login_rate_limit_attempts: int = Field(default=5, gt=0)
+    login_ip_rate_limit_attempts: int = Field(default=30, gt=0)
+    login_global_rate_limit_attempts: int = Field(default=300, gt=0)
+    login_password_workers: int = Field(default=2, gt=0, le=8)
     login_rate_limit_window_seconds: int = Field(default=5 * 60, gt=0)
     trusted_proxy_cidrs: str = "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
     findb_base_url: str = "https://findb.tingfong.com"

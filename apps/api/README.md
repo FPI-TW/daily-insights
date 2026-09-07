@@ -125,3 +125,7 @@ Admin 端點位於 `/api/admin`。客戶可見市場位於 `GET /api/markets`；
 ```bash
 uv run alembic upgrade head --sql
 ```
+
+### 登入資源限制
+
+登入沿用每組 IP/email 的五分鐘 5 次限制，另以資料庫原子計數限制每來源 IP 五分鐘 30 次、全站五分鐘 300 次。成功登入只清除 IP/email 計數，不重置共用額度。對應設定為 `DAILY_INSIGHTS_LOGIN_IP_RATE_LIMIT_ATTEMPTS`、`DAILY_INSIGHTS_LOGIN_GLOBAL_RATE_LIMIT_ATTEMPTS`，時間窗口沿用 `DAILY_INSIGHTS_LOGIN_RATE_LIMIT_WINDOW_SECONDS`。每個 API worker 最多同時執行 2 個登入密碼工作，沒有等待佇列；取消 HTTP 請求後，名額仍保留至實際密碼運算結束。工作數由 `DAILY_INSIGHTS_LOGIN_PASSWORD_WORKERS` 控制，超額回覆 429。
