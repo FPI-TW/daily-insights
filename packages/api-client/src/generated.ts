@@ -640,6 +640,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/markets/institutional/market-flows": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Institutional Market Flows */
+    get: operations["list_institutional_market_flows_api_markets_institutional_market_flows_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/markets/institutional/stock-flows": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Institutional Stock Flow Leaders */
+    get: operations["get_institutional_stock_flow_leaders_api_markets_institutional_stock_flows_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/news/latest": {
     parameters: {
       query?: never
@@ -1346,6 +1380,55 @@ export interface components {
        * @enum {string}
        */
       status: "pending" | "running" | "succeeded" | "partial" | "failed"
+    }
+    /**
+     * InstitutionalMarketFlowResponse
+     * @description One trading day of whole-market net amounts (TWD).
+     *
+     *     The five stored investor categories are folded into the three the product
+     *     talks about: the two dealer books are one desk, and the foreign dealer is
+     *     still foreign money.
+     */
+    InstitutionalMarketFlowResponse: {
+      /** Dealer */
+      dealer: number
+      /** Foreign */
+      foreign: number
+      /**
+       * Trade Date
+       * Format: date
+       */
+      trade_date: string
+      /** Trust */
+      trust: number
+    }
+    /** InstitutionalStockFlowLeaderResponse */
+    InstitutionalStockFlowLeaderResponse: {
+      /** Investor Type */
+      investor_type: string
+      /** Net Shares */
+      net_shares: number
+      /** Security Name */
+      security_name: string
+      /** Symbol */
+      symbol: string
+      /**
+       * Trade Date
+       * Format: date
+       */
+      trade_date: string
+    }
+    /**
+     * InstitutionalStockFlowLeadersResponse
+     * @description The five largest net buys and net sells per investor type for one day.
+     */
+    InstitutionalStockFlowLeadersResponse: {
+      /** Top Buys */
+      top_buys: components["schemas"]["InstitutionalStockFlowLeaderResponse"][]
+      /** Top Sells */
+      top_sells: components["schemas"]["InstitutionalStockFlowLeaderResponse"][]
+      /** Trade Date */
+      trade_date: string | null
     }
     /**
      * InstitutionalTwseRunCreate
@@ -3856,6 +3939,57 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["IndexMovingAveragesResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  list_institutional_market_flows_api_markets_institutional_market_flows_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["InstitutionalMarketFlowResponse"][]
+        }
+      }
+    }
+  }
+  get_institutional_stock_flow_leaders_api_markets_institutional_stock_flows_get: {
+    parameters: {
+      query?: {
+        trade_date?: string | null
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["InstitutionalStockFlowLeadersResponse"]
         }
       }
       /** @description Validation Error */

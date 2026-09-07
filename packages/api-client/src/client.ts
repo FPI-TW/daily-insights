@@ -34,6 +34,8 @@ import {
   indexDailyBarListSchema,
   indexMovingAveragesSchema,
   indexLatestBarListSchema,
+  institutionalMarketFlowListSchema,
+  institutionalStockFlowLeadersSchema,
   marketListSchema,
   yfinanceDailyBarsResponseSchema,
   dataManagementCatalogSchema,
@@ -119,6 +121,21 @@ export function createMarketClient(transport: ApiTransport) {
           `/api/markets/indices/${encodeURIComponent(symbol)}/moving-averages${suffix}`
         ),
         indexMovingAveragesSchema
+      )
+    },
+    async institutionalMarketFlows() {
+      return parseResponse(
+        await transport("/api/markets/institutional/market-flows"),
+        institutionalMarketFlowListSchema
+      )
+    },
+    async institutionalStockFlowLeaders(tradeDate?: string) {
+      const suffix = tradeDate
+        ? `?${new URLSearchParams({ trade_date: tradeDate }).toString()}`
+        : ""
+      return parseResponse(
+        await transport(`/api/markets/institutional/stock-flows${suffix}`),
+        institutionalStockFlowLeadersSchema
       )
     },
   }

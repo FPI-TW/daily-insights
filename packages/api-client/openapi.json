@@ -1397,6 +1397,99 @@
         "title": "IndexYahooRunResponse",
         "type": "object"
       },
+      "InstitutionalMarketFlowResponse": {
+        "description": "One trading day of whole-market net amounts (TWD).\n\nThe five stored investor categories are folded into the three the product\ntalks about: the two dealer books are one desk, and the foreign dealer is\nstill foreign money.",
+        "properties": {
+          "dealer": {
+            "title": "Dealer",
+            "type": "integer"
+          },
+          "foreign": {
+            "title": "Foreign",
+            "type": "integer"
+          },
+          "trade_date": {
+            "format": "date",
+            "title": "Trade Date",
+            "type": "string"
+          },
+          "trust": {
+            "title": "Trust",
+            "type": "integer"
+          }
+        },
+        "required": ["trade_date", "foreign", "trust", "dealer"],
+        "title": "InstitutionalMarketFlowResponse",
+        "type": "object"
+      },
+      "InstitutionalStockFlowLeaderResponse": {
+        "properties": {
+          "investor_type": {
+            "title": "Investor Type",
+            "type": "string"
+          },
+          "net_shares": {
+            "title": "Net Shares",
+            "type": "integer"
+          },
+          "security_name": {
+            "title": "Security Name",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "trade_date": {
+            "format": "date",
+            "title": "Trade Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trade_date",
+          "symbol",
+          "security_name",
+          "investor_type",
+          "net_shares"
+        ],
+        "title": "InstitutionalStockFlowLeaderResponse",
+        "type": "object"
+      },
+      "InstitutionalStockFlowLeadersResponse": {
+        "description": "The five largest net buys and net sells per investor type for one day.",
+        "properties": {
+          "top_buys": {
+            "items": {
+              "$ref": "#/components/schemas/InstitutionalStockFlowLeaderResponse"
+            },
+            "title": "Top Buys",
+            "type": "array"
+          },
+          "top_sells": {
+            "items": {
+              "$ref": "#/components/schemas/InstitutionalStockFlowLeaderResponse"
+            },
+            "title": "Top Sells",
+            "type": "array"
+          },
+          "trade_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trade Date"
+          }
+        },
+        "required": ["trade_date", "top_buys", "top_sells"],
+        "title": "InstitutionalStockFlowLeadersResponse",
+        "type": "object"
+      },
       "InstitutionalTwseRunCreate": {
         "additionalProperties": false,
         "description": "Fetch TWSE institutional flows: per-stock for the edition date, market\ntotals back to a rolling window of trading days.",
@@ -6344,6 +6437,77 @@
           }
         },
         "summary": "Get Index Moving Averages",
+        "tags": ["markets"]
+      }
+    },
+    "/api/markets/institutional/market-flows": {
+      "get": {
+        "operationId": "list_institutional_market_flows_api_markets_institutional_market_flows_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InstitutionalMarketFlowResponse"
+                  },
+                  "title": "Response List Institutional Market Flows Api Markets Institutional Market Flows Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Institutional Market Flows",
+        "tags": ["markets"]
+      }
+    },
+    "/api/markets/institutional/stock-flows": {
+      "get": {
+        "operationId": "get_institutional_stock_flow_leaders_api_markets_institutional_stock_flows_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "trade_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Trade Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstitutionalStockFlowLeadersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Institutional Stock Flow Leaders",
         "tags": ["markets"]
       }
     },

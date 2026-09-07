@@ -6,7 +6,18 @@ from datetime import date, datetime
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
 
-from sqlalchemy import Result, String, column, func, literal_column, select, true, update, values
+from sqlalchemy import (
+    Result,
+    String,
+    column,
+    func,
+    literal_column,
+    or_,
+    select,
+    true,
+    update,
+    values,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +52,9 @@ from daily_insights_api.modules.markets.schemas import (
     IndexMovingAverage240SeriesResponse,
     IndexMovingAveragePointResponse,
     IndexMovingAveragesResponse,
+    InstitutionalMarketFlowResponse,
+    InstitutionalStockFlowLeaderResponse,
+    InstitutionalStockFlowLeadersResponse,
     MarketResponse,
 )
 
@@ -639,3 +653,125 @@ async def store_institutional_stock_flows(
             )
         )
     return len(rows)
+
+
+# The one market these flows are collected for. data_management passes it back
+# in when it stores a run's rows, so it lives with the tables it belongs to.
+INSTITUTIONAL_MARKET_CODE = "tw_equity"
+# The five stored categories folded into the three the product reports on.
+INSTITUTIONAL_FOREIGN_TYPES = ("foreign", "foreign_dealer")
+INSTITUTIONAL_TRUST_TYPES = ("trust",)
+INSTITUTIONAL_DEALER_TYPES = ("dealer_self", "dealer_hedge")
+INSTITUTIONAL_STOCK_LEADERS = 5
+
+
+async def institutional_market_flows(
+    database: AsyncSession, *, market_code: str
+) -> list[InstitutionalMarketFlowResponse]:
+    """Every stored trading day, newest first, as three net amounts.
+
+    Unbounded on purpose: the table gains one date per trading day and the run
+    only ever backfills 40, so this is hundreds of rows a year, not thousands.
+    """
+
+    def net_of(*investor_types: str) -> Any:
+        return func.coalesce(
+            func.sum(InstitutionalMarketFlow.net_amount).filter(
+                InstitutionalMarketFlow.investor_type.in_(investor_types)
+            ),
+            0,
+        )
+
+    rows = await database.execute(
+        select(
+            InstitutionalMarketFlow.trade_date,
+            net_of(*INSTITUTIONAL_FOREIGN_TYPES).label("foreign_net"),
+            net_of(*INSTITUTIONAL_TRUST_TYPES).label("trust_net"),
+            net_of(*INSTITUTIONAL_DEALER_TYPES).label("dealer_net"),
+        )
+        .where(InstitutionalMarketFlow.market_code == market_code)
+        .group_by(InstitutionalMarketFlow.trade_date)
+        .order_by(InstitutionalMarketFlow.trade_date.desc())
+    )
+    return [
+        InstitutionalMarketFlowResponse(
+            trade_date=row.trade_date,
+            foreign=row.foreign_net,
+            trust=row.trust_net,
+            dealer=row.dealer_net,
+        )
+        for row in rows
+    ]
+
+
+async def institutional_stock_flow_leaders(
+    database: AsyncSession, *, market_code: str, trade_date: date | None = None
+) -> InstitutionalStockFlowLeadersResponse:
+    """The largest net buys and net sells of one trading day, per investor type.
+
+    Ranked within each investor type rather than across all five: foreign flows
+    are an order of magnitude larger than the rest, so one pooled ranking would
+    be the foreign list with the other four investors' rows pushed out.
+    """
+    day = trade_date or await database.scalar(
+        select(func.max(InstitutionalStockFlow.trade_date)).where(
+            InstitutionalStockFlow.market_code == market_code
+        )
+    )
+    if day is None:
+        return InstitutionalStockFlowLeadersResponse(trade_date=None, top_buys=[], top_sells=[])
+    ranked = (
+        select(
+            InstitutionalStockFlow.trade_date,
+            InstitutionalStockFlow.symbol,
+            InstitutionalStockFlow.security_name,
+            InstitutionalStockFlow.investor_type,
+            InstitutionalStockFlow.net_shares,
+            # The symbol tie-break keeps the order stable across identical nets,
+            # which a day of untraded securities has plenty of.
+            func.row_number()
+            .over(
+                partition_by=InstitutionalStockFlow.investor_type,
+                order_by=(InstitutionalStockFlow.net_shares.desc(), InstitutionalStockFlow.symbol),
+            )
+            .label("buy_rank"),
+            func.row_number()
+            .over(
+                partition_by=InstitutionalStockFlow.investor_type,
+                order_by=(InstitutionalStockFlow.net_shares.asc(), InstitutionalStockFlow.symbol),
+            )
+            .label("sell_rank"),
+        )
+        .where(
+            InstitutionalStockFlow.market_code == market_code,
+            InstitutionalStockFlow.trade_date == day,
+        )
+        .subquery()
+    )
+    result = await database.execute(
+        select(ranked).where(
+            or_(
+                ranked.c.buy_rank <= INSTITUTIONAL_STOCK_LEADERS,
+                ranked.c.sell_rank <= INSTITUTIONAL_STOCK_LEADERS,
+            )
+        )
+    )
+    rows = result.all()
+
+    def leaders(rank: str) -> list[InstitutionalStockFlowLeaderResponse]:
+        chosen = [row for row in rows if getattr(row, rank) <= INSTITUTIONAL_STOCK_LEADERS]
+        chosen.sort(key=lambda row: (row.investor_type, getattr(row, rank)))
+        return [
+            InstitutionalStockFlowLeaderResponse(
+                trade_date=row.trade_date,
+                symbol=row.symbol,
+                security_name=row.security_name,
+                investor_type=row.investor_type,
+                net_shares=row.net_shares,
+            )
+            for row in chosen
+        ]
+
+    return InstitutionalStockFlowLeadersResponse(
+        trade_date=day, top_buys=leaders("buy_rank"), top_sells=leaders("sell_rank")
+    )

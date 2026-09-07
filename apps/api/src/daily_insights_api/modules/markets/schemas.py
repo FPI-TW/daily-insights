@@ -85,3 +85,33 @@ class IndexMovingAveragesResponse(BaseModel):
         IndexMovingAverage120SeriesResponse,
         IndexMovingAverage240SeriesResponse,
     ]
+
+
+class InstitutionalMarketFlowResponse(BaseModel):
+    """One trading day of whole-market net amounts (TWD).
+
+    The five stored investor categories are folded into the three the product
+    talks about: the two dealer books are one desk, and the foreign dealer is
+    still foreign money.
+    """
+
+    trade_date: date
+    foreign: int
+    trust: int
+    dealer: int
+
+
+class InstitutionalStockFlowLeaderResponse(BaseModel):
+    trade_date: date
+    symbol: str
+    security_name: str
+    investor_type: str
+    net_shares: int
+
+
+class InstitutionalStockFlowLeadersResponse(BaseModel):
+    """The five largest net buys and net sells per investor type for one day."""
+
+    trade_date: date | None
+    top_buys: list[InstitutionalStockFlowLeaderResponse]
+    top_sells: list[InstitutionalStockFlowLeaderResponse]

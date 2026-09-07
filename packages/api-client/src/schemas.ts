@@ -99,6 +99,49 @@ export const indexMovingAveragesSchema = z.object({
   ]),
 })
 export type IndexMovingAverages = z.infer<typeof indexMovingAveragesSchema>
+// The five categories TWSE reports; the database CHECK holds them to this set.
+export const institutionalInvestorTypeSchema = z.enum([
+  "foreign",
+  "foreign_dealer",
+  "trust",
+  "dealer_self",
+  "dealer_hedge",
+])
+export type InstitutionalInvestorType = z.infer<
+  typeof institutionalInvestorTypeSchema
+>
+// Net amounts in TWD, with the five stored categories folded into three.
+export const institutionalMarketFlowSchema = z.object({
+  trade_date: z.iso.date(),
+  foreign: z.number().int(),
+  trust: z.number().int(),
+  dealer: z.number().int(),
+})
+export type InstitutionalMarketFlow = z.infer<
+  typeof institutionalMarketFlowSchema
+>
+export const institutionalMarketFlowListSchema = z.array(
+  institutionalMarketFlowSchema
+)
+export const institutionalStockFlowLeaderSchema = z.object({
+  trade_date: z.iso.date(),
+  symbol: z.string().min(1),
+  security_name: z.string().min(1),
+  investor_type: institutionalInvestorTypeSchema,
+  net_shares: z.number().int(),
+})
+export type InstitutionalStockFlowLeader = z.infer<
+  typeof institutionalStockFlowLeaderSchema
+>
+// Five per investor type per direction, so up to 25 rows in each list.
+export const institutionalStockFlowLeadersSchema = z.object({
+  trade_date: z.iso.date().nullable(),
+  top_buys: z.array(institutionalStockFlowLeaderSchema),
+  top_sells: z.array(institutionalStockFlowLeaderSchema),
+})
+export type InstitutionalStockFlowLeaders = z.infer<
+  typeof institutionalStockFlowLeadersSchema
+>
 export const indexLatestBarSchema = indexDailyBarSchema.extend({
   previous_close: decimalSchema.nullable(),
 })

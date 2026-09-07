@@ -13,6 +13,7 @@ import {
 import { createServerTransport } from "../src/server"
 import {
   indexMovingAveragesSchema,
+  institutionalStockFlowLeadersSchema,
   yfinanceDailyBarsResponseSchema,
 } from "../src/schemas"
 
@@ -171,6 +172,52 @@ describe("API client trust boundary", () => {
     expect(transport).toHaveBeenCalledWith(
       "/api/markets/indices/%5ETWII/daily-bars"
     )
+  })
+
+  it("fetches institutional flows and rejects an unknown investor type", async () => {
+    const leaders = {
+      trade_date: "2026-09-04",
+      top_buys: [
+        {
+          trade_date: "2026-09-04",
+          symbol: "2330",
+          security_name: "台積電",
+          investor_type: "foreign",
+          net_shares: 1000,
+        },
+      ],
+      top_sells: [],
+    }
+    const transport = vi.fn(async (path: string) =>
+      Response.json(
+        path.includes("market-flows")
+          ? [{ trade_date: "2026-09-04", foreign: 1, trust: -2, dealer: 3 }]
+          : leaders
+      )
+    )
+    const client = createMarketClient(transport)
+    await expect(client.institutionalMarketFlows()).resolves.toEqual([
+      { trade_date: "2026-09-04", foreign: 1, trust: -2, dealer: 3 },
+    ])
+    expect(transport).toHaveBeenCalledWith(
+      "/api/markets/institutional/market-flows"
+    )
+    await expect(client.institutionalStockFlowLeaders()).resolves.toEqual(
+      leaders
+    )
+    expect(transport).toHaveBeenCalledWith(
+      "/api/markets/institutional/stock-flows"
+    )
+    await client.institutionalStockFlowLeaders("2026-09-03")
+    expect(transport).toHaveBeenCalledWith(
+      "/api/markets/institutional/stock-flows?trade_date=2026-09-03"
+    )
+    expect(
+      institutionalStockFlowLeadersSchema.safeParse({
+        ...leaders,
+        top_buys: [{ ...leaders.top_buys[0], investor_type: "retail" }],
+      }).success
+    ).toBe(false)
   })
 
   it("fetches and strictly validates index moving averages", async () => {

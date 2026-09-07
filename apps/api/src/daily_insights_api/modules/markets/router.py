@@ -10,12 +10,17 @@ from daily_insights_api.core.enums import SystemRole
 from daily_insights_api.modules.data_sources.api import TRACKED_INDICES
 from daily_insights_api.modules.identity.api import AuthContext, require_password_changed
 from daily_insights_api.modules.markets.api import (
+    INSTITUTIONAL_MARKET_CODE,
     IndexDailyBarResponse,
     IndexLatestBarResponse,
     IndexMovingAveragesResponse,
+    InstitutionalMarketFlowResponse,
+    InstitutionalStockFlowLeadersResponse,
     MarketResponse,
     index_daily_bars,
     index_moving_averages,
+    institutional_market_flows,
+    institutional_stock_flow_leaders,
     latest_index_bars,
     market_responses,
     visible_market_codes,
@@ -153,4 +158,36 @@ async def get_index_moving_averages(
         market_code=expected_market,
         start=start,
         end=end,
+    )
+
+
+async def _readable_institutional_market(database: AsyncSession, context: AuthContext) -> str:
+    """Same rule as the index routes: internal staff preview, everyone else
+    reads what their organization's contract makes visible, and a market they
+    cannot see is indistinguishable from one that does not exist."""
+    if context.user.system_role not in INTERNAL_PREVIEW_ROLES:
+        visible = await visible_market_codes(database, _organization_id(context))
+        if INSTITUTIONAL_MARKET_CODE not in visible:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "market not found")
+    return INSTITUTIONAL_MARKET_CODE
+
+
+@router.get("/institutional/market-flows", response_model=list[InstitutionalMarketFlowResponse])
+async def list_institutional_market_flows(
+    context: Annotated[AuthContext, Depends(require_password_changed)],
+    database: Annotated[AsyncSession, Depends(get_database_session)],
+) -> list[InstitutionalMarketFlowResponse]:
+    market_code = await _readable_institutional_market(database, context)
+    return await institutional_market_flows(database, market_code=market_code)
+
+
+@router.get("/institutional/stock-flows", response_model=InstitutionalStockFlowLeadersResponse)
+async def get_institutional_stock_flow_leaders(
+    context: Annotated[AuthContext, Depends(require_password_changed)],
+    database: Annotated[AsyncSession, Depends(get_database_session)],
+    trade_date: Annotated[date | None, Query()] = None,
+) -> InstitutionalStockFlowLeadersResponse:
+    market_code = await _readable_institutional_market(database, context)
+    return await institutional_stock_flow_leaders(
+        database, market_code=market_code, trade_date=trade_date
     )
