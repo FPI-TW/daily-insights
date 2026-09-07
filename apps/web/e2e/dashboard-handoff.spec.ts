@@ -12,6 +12,16 @@ const macro = {
   "zh-hans": "重点指标",
   en: "Key figures",
 }
+const publishedReport = {
+  "zh-hant": "查看晨間報告：現貨與 ETF 代理資料",
+  "zh-hans": "查看晨间报告：现货与 ETF 代理数据",
+  en: "View morning report: spot prices and ETF proxies",
+}
+const publishedChart = {
+  "zh-hant": "油金比 / 銅金比",
+  "zh-hans": "油金比 / 铜金比",
+  en: "Oil-Gold / Copper-Gold Ratios",
+}
 for (const locale of locales) {
   for (const market of ["global_macro_bonds", "tw_equity"] as const) {
     test(`${locale} ${market}: desktop layout, locale tokens and screenshot`, async ({
@@ -75,6 +85,23 @@ for (const locale of locales) {
         })
         expect(apostropheWidth).toBeLessThan(8)
       }
+      if (market === "global_macro_bonds") {
+        const introduction = page.getByText(
+          locale === "en"
+            ? "Macro, bonds and global currencies in one view."
+            : locale === "zh-hans"
+              ? "宏观、债券与全球外汇，一站掌握市场脉动。"
+              : "宏觀、債券與全球外匯，一站掌握市場脈動。"
+        )
+        const up = page.getByText(
+          locale === "en" ? "▲ Up" : locale === "zh-hans" ? "▲ 涨" : "▲ 漲"
+        )
+        const introBox = await introduction.boundingBox()
+        const upBox = await up.boundingBox()
+        expect(introBox).not.toBeNull()
+        expect(upBox).not.toBeNull()
+        expect(upBox!.x - (introBox!.x + introBox!.width)).toBeLessThan(24)
+      }
       await page.screenshot({
         path: info.outputPath(`${locale}-${market}.png`),
         fullPage: true,
@@ -105,6 +132,17 @@ for (const locale of locales) {
           path: info.outputPath(`${locale}-${market}-${width}.png`),
           fullPage: true,
         })
+      }
+      if (market === "global_macro_bonds") {
+        await page.getByText(publishedReport[locale], { exact: true }).click()
+        await expect(
+          page.getByRole("heading", {
+            name: publishedChart[locale],
+            exact: true,
+            level: 2,
+          })
+        ).toBeVisible()
+        await expect(page.locator("canvas")).toHaveCount(5)
       }
       expect(errors).toEqual([])
     })

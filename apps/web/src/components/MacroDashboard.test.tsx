@@ -78,6 +78,15 @@ describe("integrated macro dashboard", () => {
       within(fxPanel).getByRole("button", { name: "365 days" })
     ).toHaveAttribute("aria-pressed", "true")
   })
+  it("keeps the change legend grouped with the left-side introduction", () => {
+    show(<MacroDashboard data={data} locale="en" />)
+    const legend = screen.getByText("▲ Up").parentElement!
+    const introduction = screen.getByText(
+      "Macro, bonds and global currencies in one view."
+    )
+    expect(legend.parentElement).toBe(introduction.parentElement)
+    expect(legend.parentElement).toHaveClass("flex")
+  })
   it("distinguishes a disabled calendar from a successfully loaded empty calendar", () => {
     show(<MacroDashboard data={data} locale="en" />)
     const panel = screen

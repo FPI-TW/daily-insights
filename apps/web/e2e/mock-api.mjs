@@ -316,6 +316,26 @@ function reportSummary(marketCode, locale) {
 
 function reportDetail(marketCode, locale) {
   const summary = reportSummary(marketCode, locale)
+  const chartPresentation = {
+    "zh-hant": {
+      title: "油金比 / 銅金比",
+      unit: "比率",
+      oilGold: "油金比",
+      copperGold: "銅金比",
+    },
+    "zh-hans": {
+      title: "油金比 / 铜金比",
+      unit: "比率",
+      oilGold: "油金比",
+      copperGold: "铜金比",
+    },
+    en: {
+      title: "Oil-Gold / Copper-Gold Ratios",
+      unit: "Ratio",
+      oilGold: "Oil-Gold Ratio",
+      copperGold: "Copper-Gold Ratio",
+    },
+  }[locale]
   const block = {
     id: "macro.commodities",
     kind: "metric",
@@ -384,12 +404,12 @@ function reportDetail(marketCode, locale) {
           series_labels: {},
         },
         "macro.commodity_ratios": {
-          title: "Oil-Gold / Copper-Gold Ratios",
+          title: chartPresentation.title,
           description: null,
-          unit_label: "Ratio",
+          unit_label: chartPresentation.unit,
           series_labels: {
-            oil_gold_ratio: "Oil-Gold Ratio",
-            copper_gold_ratio: "Copper-Gold Ratio",
+            oil_gold_ratio: chartPresentation.oilGold,
+            copper_gold_ratio: chartPresentation.copperGold,
           },
         },
       },

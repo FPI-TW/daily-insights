@@ -676,12 +676,14 @@ export function MacroDashboard({
   return (
     <div className="min-w-0 pb-6 [&>section+section]:mt-9">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3 text-xs text-sea-ink-soft">
-        <p className="m-0 max-w-[52ch] text-pretty">{t("macroIntro")}</p>
-        <span className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-2.5 py-0.5 font-bold">
-          <span className="text-market-up">▲ {t("convUp")}</span>
-          <span className="h-2.5 w-px bg-line" />
-          <span className="text-market-down">▼ {t("convDown")}</span>
-        </span>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="m-0 max-w-[52ch] text-pretty">{t("macroIntro")}</p>
+          <span className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-2.5 py-0.5 font-bold">
+            <span className="text-market-up">▲ {t("convUp")}</span>
+            <span className="h-2.5 w-px bg-line" />
+            <span className="text-market-down">▼ {t("convDown")}</span>
+          </span>
+        </div>
         {data ? (
           <span className="whitespace-nowrap font-mono tabular-nums">
             {t("macroFetched", {
