@@ -187,6 +187,32 @@ test("technical controls and chart zoom only slice the already loaded data", asy
   await expect
     .poll(() => meter.getAttribute("aria-valuenow"))
     .not.toBe(valueBeforeZoom)
+  const visibleRange = page
+    .getByText("Visible date range", { exact: true })
+    .locator("..")
+    .locator("span.font-mono")
+  const rangeBeforeZoom = await visibleRange.textContent()
+  const candleCharts = page.getByRole("img", {
+    name: "TAIEX — daily candles + MA + volume",
+    exact: true,
+  })
+  expect(await candleCharts.count()).toBeGreaterThan(0)
+  const candleChart = candleCharts.first()
+  await candleChart.scrollIntoViewIfNeeded()
+  const candleBox = await candleChart.boundingBox()
+  if (!candleBox) throw new Error("Candlestick chart has no bounds")
+  await page.mouse.move(
+    candleBox.x + candleBox.width - 21,
+    candleBox.y + candleBox.height - 19
+  )
+  await page.mouse.down()
+  await page.mouse.move(
+    candleBox.x + candleBox.width * 0.7,
+    candleBox.y + candleBox.height - 19,
+    { steps: 12 }
+  )
+  await page.mouse.up()
+  await expect.poll(() => visibleRange.textContent()).not.toBe(rangeBeforeZoom)
   const requestsAfter = (await getMockApiState(request)).requests.filter(r =>
     r.path.includes("/indices/")
   ).length

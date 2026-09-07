@@ -20,7 +20,7 @@ vi.mock("echarts-for-react", () => ({
     option,
     onEvents,
   }: {
-    option: unknown
+    option: { aria?: { description?: string } }
     onEvents?: { datazoom: (event: unknown) => void }
   }) => (
     <div data-testid="index-chart">
@@ -29,7 +29,7 @@ vi.mock("echarts-for-react", () => ({
         <button
           onClick={() => onEvents.datazoom({ batch: [{ start: 0, end: 50 }] })}
         >
-          Zoom first half
+          Zoom {option.aria?.description}
         </button>
       ) : null}
     </div>
@@ -115,7 +115,7 @@ describe("IndexHistoryChart", () => {
           .getAttribute("aria-valuenow")
       )
     ).toBeCloseTo(200 / 3)
-    fireEvent.click(screen.getByRole("button", { name: "Zoom first half" }))
+    fireEvent.click(screen.getByRole("button", { name: "Zoom TAIEX bias" }))
     expect(screen.getByText("Last visible session 2026-01-01")).toBeVisible()
     expect(
       Number(
@@ -129,6 +129,16 @@ describe("IndexHistoryChart", () => {
     )
     expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
       '"xAxisIndex":[0,1]'
+    )
+    expect(within(candles()).getByText("2025-02-01 – 2026-09-04")).toBeVisible()
+    fireEvent.click(
+      within(candles()).getByRole("button", {
+        name: "Zoom TAIEX — daily candles + MA + volume",
+      })
+    )
+    expect(within(candles()).getByText("2025-02-01 – 2026-01-01")).toBeVisible()
+    expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
+      '"height":26'
     )
   })
   it("keeps the initial averages request pending while showing available candles", async () => {

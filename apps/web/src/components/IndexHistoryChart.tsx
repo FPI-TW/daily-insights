@@ -395,6 +395,7 @@ function CandlesPanel({
 }) {
   const { t } = useTranslation()
   const colors = useChartColors()
+  const [zoom, setZoom] = useState({ start: 0, end: 100 })
   const bars = selected.bars
   const latest = bars.at(-1)!
   const previous = bars.at(-2)
@@ -402,6 +403,9 @@ function CandlesPanel({
     ? (Number(latest.close) / Number(previous.close) - 1) * 100
     : null
   const dates = bars.map(bar => bar.trade_date)
+  const lastDateIndex = dates.length - 1
+  const visibleStart = dates[Math.round((lastDateIndex * zoom.start) / 100)]
+  const visibleEnd = dates[Math.round((lastDateIndex * zoom.end) / 100)]
   const missing = bars.filter(
     bar => bar.open === null || bar.high === null || bar.low === null
   ).length
@@ -498,10 +502,27 @@ function CandlesPanel({
         <Unavailable />
       ) : (
         <div className="mt-3" role="img" aria-label={title}>
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-[11px] text-sea-ink-soft">
+            <span>{t("kVisibleRange")}</span>
+            <span className="font-mono tabular-nums">
+              {visibleStart && visibleEnd
+                ? `${formatDateStamp(visibleStart)} – ${formatDateStamp(visibleEnd)}`
+                : "—"}
+            </span>
+          </div>
           <ClientOnly fallback={<ChartSkeleton candles />}>
             <ReactECharts
               notMerge
-              style={{ height: 498 }}
+              style={{ height: 522 }}
+              onEvents={{
+                datazoom: (event: unknown) => {
+                  const parsed = zoomEventSchema.safeParse(event)
+                  if (!parsed.success) return
+                  const range =
+                    "batch" in parsed.data ? parsed.data.batch[0]! : parsed.data
+                  if (range.start <= range.end) setZoom(range)
+                },
+              }}
               option={{
                 animation: false,
                 textStyle: { fontFamily: colors.font },
@@ -536,7 +557,7 @@ function CandlesPanel({
                   },
                 },
                 legend: {
-                  bottom: 36,
+                  bottom: 52,
                   data: [...maLines.map(line => line.name), t("volumeLegend")],
                   itemWidth: 10,
                   itemHeight: 10,
@@ -611,15 +632,29 @@ function CandlesPanel({
                   },
                 ],
                 dataZoom: [
-                  { type: "inside", xAxisIndex: [0, 1], start: 0, end: 100 },
+                  { type: "inside", xAxisIndex: [0, 1], ...zoom },
                   {
                     type: "slider",
                     xAxisIndex: [0, 1],
-                    start: 0,
-                    end: 100,
-                    height: 18,
-                    bottom: 0,
+                    ...zoom,
+                    height: 26,
+                    bottom: 6,
                     borderColor: colors.grid,
+                    backgroundColor: colors.surface,
+                    fillerColor: colors.gridSoft,
+                    showDataShadow: false,
+                    brushSelect: false,
+                    handleSize: "115%",
+                    handleStyle: {
+                      color: colors.surface,
+                      borderColor: colors.indexSeries[0],
+                      borderWidth: 2,
+                    },
+                    moveHandleSize: 7,
+                    moveHandleStyle: {
+                      color: colors.indexSeries[0],
+                      opacity: 0.45,
+                    },
                     textStyle: { color: colors.text },
                   },
                 ],
