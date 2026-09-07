@@ -287,8 +287,9 @@ async def _run_market_unlocked(
                 candidate_manifest_hash=ACTIVE_LAUNCH_MANIFEST.sha256,
             )
             if revision is None:
+                execution = _market_execution(builds, market_code, latest, "no_change")
                 await database.rollback()
-                return _market_execution(builds, market_code, latest, "no_change")
+                return execution
             latest_run = (
                 await database.scalars(
                     select(ReportPipelineRun)
