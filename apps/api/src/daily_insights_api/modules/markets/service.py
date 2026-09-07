@@ -25,6 +25,7 @@ from daily_insights_api.modules.data_sources.api import (
 )
 from daily_insights_api.modules.markets.catalog import MARKETS
 from daily_insights_api.modules.markets.models import (
+    INVESTOR_TYPES,
     IndexDailyBar,
     IndexDailyBarSeries,
     InstitutionalMarketFlow,
@@ -654,6 +655,14 @@ INSTITUTIONAL_MARKET_CODE = "tw_equity"
 INSTITUTIONAL_FOREIGN_TYPES = ("foreign", "foreign_dealer")
 INSTITUTIONAL_TRUST_TYPES = ("trust",)
 INSTITUTIONAL_DEALER_TYPES = ("dealer_self", "dealer_hedge")
+# A sixth category would otherwise be dropped from the market totals in silence.
+# Import fails instead, before anything can serve a number that is short one
+# investor. Sorted rather than set-compared so a category in two folds, which
+# would double count it, is caught too.
+if sorted(
+    INSTITUTIONAL_FOREIGN_TYPES + INSTITUTIONAL_TRUST_TYPES + INSTITUTIONAL_DEALER_TYPES
+) != sorted(INVESTOR_TYPES):
+    raise RuntimeError("the institutional folds must cover every investor type exactly once")
 INSTITUTIONAL_STOCK_LEADERS = 5
 
 
