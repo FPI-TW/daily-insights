@@ -189,7 +189,6 @@ describe("market report loader", () => {
       report: { kind: "not-generated", marketCode: "crypto" },
       news: null,
       viewpoint: null,
-      forexViewpoint: null,
       macroDashboard: null,
       indexHistory: null,
       indexMovingAverages: null,

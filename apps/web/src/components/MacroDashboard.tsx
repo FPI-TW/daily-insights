@@ -42,15 +42,7 @@ export function MacroDashboardLoading() {
   return (
     <div role="status" aria-live="polite" className="space-y-9">
       <span className="sr-only">{t("macroLoading")}</span>
-      <div className="grid grid-cols-6 gap-px rounded-2xl border border-line bg-line p-5">
-        {Array.from({ length: 6 }, (_, i) => (
-          <div
-            key={i}
-            className="h-24 animate-pulse bg-surface motion-reduce:animate-none"
-          />
-        ))}
-      </div>
-      {[0, 1, 2, 3].map(i => (
+      {[0, 1, 2].map(i => (
         <div
           key={i}
           className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] gap-4"
@@ -482,143 +474,6 @@ function HistoryTable({
     </div>
   )
 }
-function Calendar({
-  calendar,
-  locale,
-}: {
-  calendar: MacroDashboardData["calendar"] | undefined
-  locale: Locale
-}) {
-  const { t } = useTranslation()
-  const impact = calendar?.events.some(event => event.impact)
-  function calendarValue(value: string, unit: string | null) {
-    return `${new Intl.NumberFormat(numberLocales[locale], { maximumFractionDigits: 4 }).format(Number(value))}${unit === "%" ? "%" : unit ? ` ${unit}` : ""}`
-  }
-  return (
-    <DashboardPanel
-      title={t("macroCalendar")}
-      controls={
-        <span className="font-mono text-xs text-sea-ink-soft tabular-nums">
-          {t("metaCalendar", {
-            source: calendar?.source ?? "Nasdaq",
-            date: calendar?.date ?? "—",
-          })}
-        </span>
-      }
-    >
-      {calendar?.status !== "ok" ? (
-        <Unavailable />
-      ) : calendar.events.length === 0 ? (
-        <p className="py-10 text-sm text-sea-ink-soft">
-          {t("macroNoEvents", { date: calendar.date })}
-        </p>
-      ) : (
-        <div className="mt-4 max-h-96 overflow-auto rounded-xl border border-line">
-          <table className="w-full table-fixed text-right text-xs tabular-nums">
-            <colgroup>
-              <col className="w-19" />
-              <col className="w-[34%]" />
-              {impact ? <col className="w-18" /> : null}
-              <col />
-              <col />
-              <col />
-            </colgroup>
-            <thead className="bg-chip text-sea-ink-soft">
-              <tr>
-                {[
-                  "Time",
-                  "Event",
-                  ...(impact ? ["Impact"] : []),
-                  "Estimate",
-                  "Previous",
-                  "Actual",
-                ].map((key, i) => (
-                  <th
-                    key={key}
-                    className={`px-3 py-2.5 font-semibold ${i < (impact ? 3 : 2) ? "text-left" : "text-right"}`}
-                  >
-                    {t(`macro${key}`)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {calendar.events.map((event, i) => (
-                <tr
-                  key={`${event.date}-${event.event}-${i}`}
-                  className="border-t border-line"
-                >
-                  <td className="px-3 py-3 text-left font-mono font-bold text-palm">
-                    {new Intl.DateTimeFormat(numberLocales[locale], {
-                      timeZone: "Asia/Taipei",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      hourCycle: "h23",
-                    }).format(new Date(event.date))}
-                  </td>
-                  <th className="px-3 py-3 text-left font-semibold">
-                    <span className="inline-flex flex-wrap items-center gap-1.5">
-                      <span className="font-normal text-sea-ink-soft">
-                        {/^[A-Z]{2}$/.test(event.country)
-                          ? new Intl.DisplayNames(numberLocales[locale], {
-                              type: "region",
-                            }).of(event.country)
-                          : event.country}
-                      </span>
-                      {event.currency ? (
-                        <span className="rounded bg-lagoon/10 px-1.5 py-px font-mono text-[10px] font-bold text-palm">
-                          {event.currency}
-                        </span>
-                      ) : null}
-                      <span>{event.event}</span>
-                    </span>
-                  </th>
-                  {impact ? (
-                    <td className="px-2 text-left">
-                      {event.impact ? (
-                        <span className="rounded-full border border-market-caution/40 bg-market-caution/10 px-2 py-0.5 text-[11px] font-bold text-sea-ink">
-                          {t(`macroImpact_${event.impact.toLowerCase()}`, {
-                            defaultValue: event.impact,
-                          })}
-                        </span>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                  ) : null}
-                  {[event.estimate, event.previous, event.actual].map(
-                    (value, cell) => (
-                      <td
-                        key={cell}
-                        className={`px-3 py-3 ${cell === 1 ? "text-sea-ink-soft" : ""}`}
-                      >
-                        {value === null ? (
-                          <span className="text-sea-ink-soft">
-                            {cell === 2 ? t("macroUnreleased") : "—"}
-                          </span>
-                        ) : (
-                          <span className="font-mono">
-                            {calendarValue(value, event.unit)}
-                          </span>
-                        )}
-                      </td>
-                    )
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      <Methodology>
-        {t("macroCalendarNote", {
-          source: calendar?.source ?? "Nasdaq",
-          date: calendar?.date ?? "—",
-        })}
-      </Methodology>
-    </DashboardPanel>
-  )
-}
 export function MacroDashboard({
   data,
   locale,
@@ -636,19 +491,7 @@ export function MacroDashboard({
   const byId = new Map(histories.map(item => [item.id, item]))
   const oilGold = ratioPoints(byId.get("wti"), byId.get("gold"))
   const copperGold = ratioPoints(byId.get("copper"), byId.get("gold"))
-  const ratioHistory = {
-    id: "oil_gold",
-    symbol: "WTI/Gold",
-    source: "Yahoo Finance",
-    status: "ok" as const,
-    unit: "ratio",
-    points: oilGold.map(p => ({ ...p, value: String(p.value) })),
-  }
   const curve = yieldCurve(histories, compare)
-  const dates = [
-    ...new Set(histories.flatMap(h => h.points.at(-1)?.date ?? [])),
-  ].sort()
-  const dateLabel = dates.length ? dates.join(" / ") : "—"
   const fxDates = [
     ...new Set(fxIds.flatMap(id => byId.get(id)?.points.at(-1)?.date ?? [])),
   ].sort()
@@ -694,60 +537,6 @@ export function MacroDashboard({
       </div>
       <DashboardSection
         number="01"
-        title={t("sectionToday")}
-        meta={
-          <span className="font-mono tabular-nums">
-            {t("metaToday", { date: dateLabel })}
-          </span>
-        }
-      >
-        <div className="space-y-4">
-          <DashboardPanel
-            title={t("ovTitle")}
-            controls={
-              <span className="text-xs text-sea-ink-soft">{t("ovNote")}</span>
-            }
-          >
-            <div className="mt-3 grid grid-cols-6 gap-px overflow-x-auto border-y border-line bg-line">
-              {["brent", "gold", "oil_gold", "10y", "dxy", "eur_usd"].map(
-                id => {
-                  const h = id === "oil_gold" ? ratioHistory : byId.get(id)
-                  const latest = h?.points.at(-1)
-                  return (
-                    <div key={id} className="min-w-0 bg-surface px-4 py-3.5">
-                      <div className="min-h-8 text-xs leading-4 text-sea-ink-soft">
-                        {t(
-                          id === "oil_gold"
-                            ? "macroOilGold"
-                            : id === "10y"
-                              ? "ovTenor10y"
-                              : `macroAsset_${id}`
-                        )}{" "}
-                        · {h?.unit ? (unitLabel(h.unit, t) ?? h.unit) : "—"}
-                      </div>
-                      <div className="mt-1 overflow-x-auto font-mono text-[21px] font-bold tracking-tight tabular-nums">
-                        {formatValue(
-                          latest ? Number(latest.value) : null,
-                          h?.unit,
-                          locale
-                        )}
-                      </div>
-                      <Change
-                        value={h ? periodChange(h, "day", id === "10y") : null}
-                        locale={locale}
-                        rates={id === "10y"}
-                      />
-                    </div>
-                  )
-                }
-              )}
-            </div>
-          </DashboardPanel>
-          <Calendar calendar={data?.calendar} locale={locale} />
-        </div>
-      </DashboardSection>
-      <DashboardSection
-        number="02"
         title={t("sectionCommodities")}
         meta={t("metaCommodities")}
       >
@@ -788,7 +577,7 @@ export function MacroDashboard({
         </div>
       </DashboardSection>
       <DashboardSection
-        number="03"
+        number="02"
         title={t("sectionRates")}
         meta={t("metaRates")}
       >
@@ -852,7 +641,7 @@ export function MacroDashboard({
           </DashboardPanel>
         </div>
       </DashboardSection>
-      <DashboardSection number="04" title={t("sectionFx")} meta={t("metaFx")}>
+      <DashboardSection number="03" title={t("sectionFx")} meta={t("metaFx")}>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-4">
           <DashboardPanel
             title={t("macroDollarIndex")}

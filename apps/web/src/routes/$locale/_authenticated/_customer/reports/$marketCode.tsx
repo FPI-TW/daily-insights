@@ -73,7 +73,6 @@ type MarketPage = {
   report: Exclude<ReportResult, { kind: "not-found" }>
   news: { marketCode: NewsMarketCode; latest: LatestNews | null } | null
   viewpoint: AnalystViewpoint | null
-  forexViewpoint: AnalystViewpoint | null
   macroDashboard: Promise<MacroDashboardData | null> | null
   indexHistory: Promise<MarketIndexHistory | null> | null
   indexMovingAverages: Promise<IndexMovingAverageMap> | null
@@ -264,11 +263,6 @@ export async function loadMarketPage({
         }
       : null,
     viewpoint,
-    forexViewpoint:
-      params.marketCode === "global_macro_bonds" &&
-      viewpoints.status === "fulfilled"
-        ? (viewpoints.value.find(item => item.market_code === "forex") ?? null)
-        : null,
     macroDashboard,
     indexHistory,
     indexMovingAverages,
@@ -293,7 +287,6 @@ function ReportPage() {
     report,
     news,
     viewpoint,
-    forexViewpoint,
     macroDashboard,
     indexHistory,
     indexMovingAverages,
@@ -314,9 +307,6 @@ function ReportPage() {
       ) : null}
       {macroDashboard ? (
         <>
-          {forexViewpoint ? (
-            <MarketViewpoint viewpoint={forexViewpoint} />
-          ) : null}
           <Suspense fallback={<MacroDashboardLoading />}>
             <Await promise={macroDashboard}>
               {data => <MacroDashboard data={data} locale={locale} />}

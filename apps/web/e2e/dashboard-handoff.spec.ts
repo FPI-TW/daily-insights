@@ -8,9 +8,9 @@ const technical = {
   en: "TAIEX bias",
 }
 const macro = {
-  "zh-hant": "重點指標",
-  "zh-hans": "重点指标",
-  en: "Key figures",
+  "zh-hant": "商品",
+  "zh-hans": "商品",
+  en: "Commodities",
 }
 const publishedReport = {
   "zh-hant": "查看晨間報告：現貨與 ETF 代理資料",
@@ -73,7 +73,8 @@ for (const locale of locales) {
       if (locale === "en" && market === "global_macro_bonds") {
         await expect(
           page.getByRole("heading", {
-            name: "Today’s economic calendar + central bank events",
+            name: "Commodities",
+            exact: true,
           })
         ).toBeVisible()
         expect(await page.locator("body").innerText()).not.toContain("Today’ s")

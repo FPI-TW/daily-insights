@@ -87,53 +87,12 @@ describe("integrated macro dashboard", () => {
     expect(legend.parentElement).toBe(introduction.parentElement)
     expect(legend.parentElement).toHaveClass("flex")
   })
-  it("distinguishes a disabled calendar from a successfully loaded empty calendar", () => {
+  it("omits today's overview and economic calendar", () => {
     show(<MacroDashboard data={data} locale="en" />)
-    const panel = screen
-      .getByRole("heading", { name: /Today’s economic calendar/ })
-      .closest("section")!
-    expect(within(panel).getByRole("status")).toHaveTextContent(
-      "temporarily unavailable"
-    )
-    expect(screen.queryByText(/no scheduled events/)).toBeNull()
-    cleanup()
-    show(
-      <MacroDashboard
-        data={{ ...data, calendar: { ...data.calendar, status: "ok" } }}
-        locale="en"
-      />
-    )
-    expect(screen.getByText(/no scheduled events/)).toBeVisible()
-  })
-  it("shows actual zero as zero and keeps missing actual values distinct", () => {
-    show(
-      <MacroDashboard
-        data={{
-          ...data,
-          calendar: {
-            date: "2026-09-04",
-            source: "Nasdaq",
-            status: "ok",
-            events: [
-              {
-                date: "2026-09-04T00:00:00Z",
-                country: "US",
-                event: "Test release",
-                currency: "USD",
-                impact: "High",
-                estimate: "1",
-                previous: "2",
-                actual: "0",
-                unit: "%",
-              },
-            ],
-          },
-        }}
-        locale="en"
-      />
-    )
-    expect(screen.getByText("Test release").closest("tr")).toHaveTextContent(
-      "High1%2%0%"
-    )
+    expect(screen.queryByRole("heading", { name: "Today" })).toBeNull()
+    expect(
+      screen.queryByRole("heading", { name: /Today’s economic calendar/ })
+    ).toBeNull()
+    expect(screen.getByRole("heading", { name: "Commodities" })).toBeVisible()
   })
 })

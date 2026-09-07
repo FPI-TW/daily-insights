@@ -22,23 +22,25 @@ test("customer login opens reports, then a market detail without mobile overflow
   await expect(page).toHaveURL("/en/reports")
   await page
     .getByRole("navigation", { name: "Market category navigation" })
-    .getByRole("link", { name: "Macro, bonds & FX" })
+    .getByRole("link", { name: "US macro & bonds" })
     .click()
   await expect(page).toHaveURL("/en/reports/global_macro_bonds")
   await expect(
-    page.getByRole("heading", { name: "Global macro, bonds & FX", level: 1 })
+    page.getByRole("heading", { name: "US macro & bonds", level: 1 })
   ).toBeVisible()
   await expect(
     page.getByRole("heading", {
       name: "Global foreign exchange price trends",
     })
   ).toBeVisible()
-  const calendarPanel = page
-    .getByRole("heading", {
+  await expect(
+    page.getByRole("heading", { name: "Today", exact: true })
+  ).toHaveCount(0)
+  await expect(
+    page.getByRole("heading", {
       name: "Today’s economic calendar + central bank events",
     })
-    .locator("xpath=ancestor::section[1]")
-  await expect(calendarPanel).toContainText("Nasdaq · 2026-09-04 · Taipei time")
+  ).toHaveCount(0)
   const fxPanel = page
     .getByRole("heading", { name: "Global foreign exchange price trends" })
     .locator("xpath=ancestor::section[1]")
