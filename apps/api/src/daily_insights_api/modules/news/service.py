@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import uuid
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -10,7 +11,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api.core.observability import emit_event
-from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary, Selection
+from daily_insights_api.modules.news.contracts import (
+    Candidate,
+    LocalizedSummary,
+    SelectedCandidate,
+    Selection,
+)
 from daily_insights_api.modules.news.editions import (
     EDITION_ORDER,
     GLOBAL_SPEC,
@@ -23,7 +29,13 @@ from daily_insights_api.modules.news.extraction import (
     safe_article_client,
 )
 from daily_insights_api.modules.news.feeds import discover_feed_candidates, feed_client
-from daily_insights_api.modules.news.llm import DeepSeekClient, ModelCall, ModelCallError
+from daily_insights_api.modules.news.llm import (
+    CoveredEvent,
+    DeepSeekClient,
+    ModelCall,
+    ModelCallError,
+    publishable_selection,
+)
 from daily_insights_api.modules.news.models import (
     NewsEdition,
     NewsGenerationAudit,
@@ -31,7 +43,7 @@ from daily_insights_api.modules.news.models import (
     NewsPresentation,
 )
 
-DERIVATION_VERSION = "feeds-deepseek-news.v5"
+DERIVATION_VERSION = "feeds-deepseek-news.v6"
 SUMMARY_PROMPT_VERSION = "summary-v3"
 LOCALES = ("zh-hant", "zh-hans", "en")
 TAIPEI = ZoneInfo("Asia/Taipei")
@@ -39,6 +51,7 @@ TAIPEI = ZoneInfo("Asia/Taipei")
 # regenerated from identical inputs so a transient provider failure cannot
 # freeze the day's news.
 IDEMPOTENT_STATUS = "complete"
+MAX_SELECTION_ROUNDS = 3
 MAX_CANDIDATES = 20
 MAX_CANDIDATES_PER_SOURCE = 5
 # Extraction is the expensive stage, so discovery is capped per source before
@@ -373,7 +386,7 @@ async def run_news_edition(
     )
     usable = _limit_candidates(
         usable,
-        total=spec.max_candidates,
+        total=spec.max_candidates * 2,
         per_source=spec.max_per_source,
         interleave=spec.interleave_sources,
     )
@@ -424,121 +437,175 @@ async def run_news_edition(
             await database.commit()
             emit_event("news.shortfall", market=market_code, status="unavailable", count=0)
             return edition.status
-        try:
-            selection_call = await _retry(
-                lambda: client.select(usable, policy=spec.selection),
-                lambda error: database.add(
-                    _failed_audit(
+        selected = {fetched.candidate.id: fetched for fetched in usable}
+        attempted: set[str] = set()
+        reviewed: set[str] = set()
+        event_keys: set[str] = set()
+        successful: list[SelectedCandidate] = []
+        localized: dict[str, dict[str, LocalizedSummary]] = {}
+        publication = Selection(selections=())
+        for round_index in range(MAX_SELECTION_ROUNDS):
+            covered_sources = Counter(selected[item.id].candidate.hostname for item in successful)
+            remaining = [fetched for fetched in usable if fetched.candidate.id not in attempted]
+            # Explore the expanded pool before recycling unselected articles;
+            # within each group prefer underrepresented sources, then freshness.
+            remaining.sort(
+                key=lambda fetched: (
+                    fetched.candidate.id in reviewed,
+                    covered_sources[fetched.candidate.hostname],
+                )
+            )
+            batch = remaining[: spec.max_candidates]
+            if not batch or len(publication.selections) >= spec.target_items:
+                break
+            reviewed.update(fetched.candidate.id for fetched in batch)
+            previous_events = tuple(
+                CoveredEvent(
+                    item.event_key,
+                    selected[item.id].candidate.headline,
+                    selected[item.id].candidate.hostname,
+                    item.topic,
+                )
+                for item in successful
+            )
+
+            async def select_batch(
+                batch: list[FetchedCandidate] = batch,
+                previous_events: tuple[CoveredEvent, ...] = previous_events,
+            ) -> ModelCall:
+                return await client.select(
+                    batch, policy=spec.selection, previous_events=previous_events
+                )
+
+            try:
+                selection_call = await _retry(
+                    select_batch,
+                    lambda error: database.add(
+                        _failed_audit(
+                            edition.id,
+                            "selection",
+                            None,
+                            input_digest,
+                            model_name,
+                            error,
+                            prompt_version=selection_prompt_version,
+                        )
+                    ),
+                )
+                assert isinstance(selection_call.value, Selection)
+                database.add(
+                    _audit(
                         edition.id,
                         "selection",
                         None,
-                        input_digest,
+                        selection_call,
                         model_name,
-                        error,
-                        prompt_version=selection_prompt_version,
+                        selection_prompt_version,
                     )
-                ),
-            )
-            assert isinstance(selection_call.value, Selection)
-            database.add(
-                _audit(
-                    edition.id,
-                    "selection",
-                    None,
-                    selection_call,
-                    model_name,
-                    selection_prompt_version,
                 )
-            )
-        except Exception as error:
-            await database.commit()
-            emit_event(
-                "news.selection.failed",
-                market=market_code,
-                error_code=error.error_code
-                if isinstance(error, ModelCallError)
-                else type(error).__name__,
-            )
-            return edition.status
-        selected = {fetched.candidate.id: fetched for fetched in usable}
-        complete_count = 0
-        # Selections are ranked; reserves past target_items are summarised only
-        # while earlier stories keep failing verification.
-        for selected_item in selection_call.value.selections:
-            if complete_count >= spec.target_items:
-                break
-            fetched = selected[selected_item.id]
-            summaries: dict[str, LocalizedSummary] = {}
-            try:
-                for locale in LOCALES:
-
-                    def audit_attempt_failure(
-                        error: Exception,
-                        locale: str = locale,
-                        content_digest: str = fetched.content_digest,
-                    ) -> None:
-                        database.add(
-                            _failed_audit(
-                                edition.id,
-                                "summary",
-                                locale,
-                                hashlib.sha256(content_digest.encode()).hexdigest(),
-                                model_name,
-                                error,
-                                prompt_version=SUMMARY_PROMPT_VERSION,
-                            )
-                        )
-
-                    call = await _summarize_with_retry(
-                        client, fetched, locale, audit_attempt_failure
-                    )
-                    assert isinstance(call.value, LocalizedSummary)
-                    summaries[locale] = call.value
-                    database.add(
-                        _audit(
-                            edition.id,
-                            "summary",
-                            locale,
-                            call,
-                            model_name,
-                            SUMMARY_PROMPT_VERSION,
-                        )
-                    )
-                item = NewsItem(
-                    edition_id=edition.id,
-                    rank=complete_count + 1,
-                    topic=selected_item.topic,
-                    source_name=fetched.candidate.source_name,
-                    source_hostname=fetched.candidate.hostname,
-                    source_url=fetched.source_url,
-                    source_headline=fetched.candidate.headline,
-                    source_published_at=fetched.source_published_at,
-                    importance=selected_item.importance,
-                    content_digest=fetched.content_digest,
-                    numeric_facts=list(summaries["en"].numeric_facts),
-                    market=selected_item.market,
-                    event_key=selected_item.event_key,
-                )
-                database.add(item)
-                await database.flush()
-                for locale, summary in summaries.items():
-                    database.add(
-                        NewsPresentation(
-                            item_id=item.id,
-                            locale=locale,
-                            headline=summary.headline,
-                            summary=summary.summary,
-                        )
-                    )
-                complete_count += 1
-                emit_event("news.summary.succeeded", locale_count=3, rank=complete_count)
             except Exception as error:
                 emit_event(
-                    "news.summary.failed",
-                    hostname=fetched.candidate.hostname,
+                    "news.selection.failed",
+                    market=market_code,
                     error_code=error.error_code
                     if isinstance(error, ModelCallError)
                     else type(error).__name__,
+                )
+                break
+            if not selection_call.value.selections:
+                attempted.update(fetched.candidate.id for fetched in batch)
+            for selected_item in selection_call.value.selections:
+                if len(publication.selections) >= spec.target_items:
+                    break
+                attempted.add(selected_item.id)
+                if selected_item.event_key in event_keys:
+                    continue
+                fetched = selected[selected_item.id]
+                summaries: dict[str, LocalizedSummary] = {}
+                try:
+                    for locale in LOCALES:
+
+                        def audit_attempt_failure(
+                            error: Exception,
+                            locale: str = locale,
+                            content_digest: str = fetched.content_digest,
+                        ) -> None:
+                            database.add(
+                                _failed_audit(
+                                    edition.id,
+                                    "summary",
+                                    locale,
+                                    hashlib.sha256(content_digest.encode()).hexdigest(),
+                                    model_name,
+                                    error,
+                                    prompt_version=SUMMARY_PROMPT_VERSION,
+                                )
+                            )
+
+                        call = await _summarize_with_retry(
+                            client, fetched, locale, audit_attempt_failure
+                        )
+                        assert isinstance(call.value, LocalizedSummary)
+                        summaries[locale] = call.value
+                        database.add(
+                            _audit(
+                                edition.id,
+                                "summary",
+                                locale,
+                                call,
+                                model_name,
+                                SUMMARY_PROMPT_VERSION,
+                            )
+                        )
+                    successful.append(selected_item)
+                    localized[selected_item.id] = summaries
+                    event_keys.add(selected_item.event_key)
+                    publication = publishable_selection(successful, usable, spec.selection)
+                    emit_event("news.summary.succeeded", locale_count=3, rank=len(successful))
+                except Exception as error:
+                    emit_event(
+                        "news.summary.failed",
+                        hostname=fetched.candidate.hostname,
+                        error_code=error.error_code
+                        if isinstance(error, ModelCallError)
+                        else type(error).__name__,
+                    )
+            emit_event(
+                "news.refill.round",
+                market=market_code,
+                round=round_index + 1,
+                published_count=len(publication.selections),
+                attempted_count=len(attempted),
+            )
+        complete_count = len(publication.selections)
+        for rank, selected_item in enumerate(publication.selections, start=1):
+            fetched = selected[selected_item.id]
+            summaries = localized[selected_item.id]
+            item = NewsItem(
+                edition_id=edition.id,
+                rank=rank,
+                topic=selected_item.topic,
+                source_name=fetched.candidate.source_name,
+                source_hostname=fetched.candidate.hostname,
+                source_url=fetched.source_url,
+                source_headline=fetched.candidate.headline,
+                source_published_at=fetched.source_published_at,
+                importance=selected_item.importance,
+                content_digest=fetched.content_digest,
+                numeric_facts=list(summaries["en"].numeric_facts),
+                market=selected_item.market,
+                event_key=selected_item.event_key,
+            )
+            database.add(item)
+            await database.flush()
+            for locale, summary in summaries.items():
+                database.add(
+                    NewsPresentation(
+                        item_id=item.id,
+                        locale=locale,
+                        headline=summary.headline,
+                        summary=summary.summary,
+                    )
                 )
         edition.status, edition.caveat = _edition_status(complete_count, spec.target_items)
         await database.commit()

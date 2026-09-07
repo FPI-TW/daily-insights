@@ -39,7 +39,7 @@ def test_daily_news_cli_shares_the_scheduler_argument_contract() -> None:
         parse_args(["--market", "fx"], configure=run_daily_news.configure_arguments)
     assert run_daily_news.RETRY_POLICY.retries("unavailable")
     assert run_daily_news.RETRY_POLICY.retries("failed")
-    assert not run_daily_news.RETRY_POLICY.retries("partial")
+    assert run_daily_news.RETRY_POLICY.retries("partial")
 
 
 @pytest.mark.parametrize("key", ["CHANGE_ME_MODEL_API_KEY", "   \t", None])
