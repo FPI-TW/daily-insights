@@ -232,6 +232,54 @@ describe("API client trust boundary", () => {
     })
   })
 
+  it("fetches and validates TWSE institutional flow contracts", async () => {
+    const contract = {
+      as_of: "2026-09-04",
+      contract_version: "twse-institutional-v1",
+      contract_hash: "a".repeat(64),
+      endpoint: "/rwd/zh/fund/BFI82U",
+    }
+    const transport = vi.fn(async (path: string) =>
+      path.includes("institutional-flows")
+        ? Response.json({
+            ...contract,
+            series: [
+              {
+                trade_date: "2026-09-04",
+                foreign: "12.5",
+                trust: "-1",
+                dealer: "0.5",
+                total: "12",
+              },
+            ],
+          })
+        : Response.json({
+            ...contract,
+            endpoint: "/rwd/en/fund/T86",
+            rows: [
+              {
+                symbol: "2330",
+                name: "TSMC",
+                foreign_lots: "12.345",
+                trust_lots: "2",
+                dealer_lots: "-0.5",
+                total_lots: "13.845",
+              },
+            ],
+          })
+    )
+    const client = createMarketClient(transport)
+    await expect(
+      client.institutionalFlows({ start: "2026-07-01", end: "2026-09-04" })
+    ).resolves.toMatchObject({ series: [{ total: "12" }] })
+    await expect(
+      client.institutionalStocks({ date: "2026-09-04", locale: "en" })
+    ).resolves.toMatchObject({ rows: [{ total_lots: "13.845" }] })
+    expect(transport).toHaveBeenCalledWith(
+      "/api/markets/tw/institutional-stocks?date=2026-09-04&locale=en"
+    )
+  })
+
   it("refreshes the seven-day index window with CSRF protection", async () => {
     const transport = vi.fn(async () =>
       Response.json({

@@ -1,0 +1,139 @@
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react"
+import { I18nextProvider } from "react-i18next"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { createI18n } from "#/lib/i18n"
+import type { MacroDashboardData } from "#/lib/macro-dashboard"
+import { MacroDashboard, MacroDashboardLoading } from "./MacroDashboard"
+
+vi.mock("@tanstack/react-router", () => ({
+  ClientOnly: ({ children }: { children: React.ReactNode }) => children,
+}))
+vi.mock("echarts-for-react", () => ({
+  default: ({ option }: { option: unknown }) => (
+    <div data-testid="chart">{JSON.stringify(option)}</div>
+  ),
+}))
+afterEach(cleanup)
+const data: MacroDashboardData = {
+  fetched_at: "2026-09-04T00:00:00Z",
+  calendar: {
+    date: "2026-09-04",
+    source: "Nasdaq",
+    status: "disabled",
+    events: [],
+  },
+  histories: ["eur_usd", "usd_jpy"].map((id, index) => ({
+    id,
+    symbol: id,
+    unit: "USD",
+    source: "Yahoo Finance",
+    status: "ok",
+    points: [
+      { date: "2026-01-02", value: "100" },
+      { date: "2026-09-04", value: index ? "145" : "1.17" },
+    ],
+  })),
+}
+function show(ui: React.ReactNode) {
+  render(<I18nextProvider i18n={createI18n("en")}>{ui}</I18nextProvider>)
+}
+describe("integrated macro dashboard", () => {
+  it("has an explicit initial loading state", () => {
+    show(<MacroDashboardLoading />)
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Loading macro, bonds and foreign exchange"
+    )
+    expect(screen.queryByText(/temporarily unavailable/)).toBeNull()
+  })
+  it("switches currency pair and range without fetching another dataset", () => {
+    show(<MacroDashboard data={data} locale="en" />)
+    const chart = screen.getByRole("img", {
+      name: "Global foreign exchange price trends · EUR/USD",
+    })
+    expect(chart).toHaveTextContent("1.17")
+    expect(chart).not.toHaveTextContent("2026-01-02")
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Currency pair" })).getByRole(
+        "button",
+        { name: "USD/JPY" }
+      )
+    )
+    expect(
+      screen.getByRole("img", { name: /trends · USD\/JPY/ })
+    ).toHaveTextContent("145")
+    const fxPanel = screen
+      .getByRole("heading", { name: "Global foreign exchange price trends" })
+      .closest("section")!
+    fireEvent.click(within(fxPanel).getByRole("button", { name: "365 days" }))
+    expect(
+      screen.getByRole("img", { name: /trends · USD\/JPY/ })
+    ).toHaveTextContent("2026-01-02")
+    expect(
+      within(fxPanel).getByRole("button", { name: "365 days" })
+    ).toHaveAttribute("aria-pressed", "true")
+  })
+  it("keeps the change legend grouped with the left-side introduction", () => {
+    show(<MacroDashboard data={data} locale="en" />)
+    const legend = screen.getByText("▲ Up").parentElement!
+    const introduction = screen.getByText(
+      "Macro, bonds and global currencies in one view."
+    )
+    expect(legend.parentElement).toBe(introduction.parentElement)
+    expect(legend.parentElement).toHaveClass("flex")
+  })
+  it("distinguishes a disabled calendar from a successfully loaded empty calendar", () => {
+    show(<MacroDashboard data={data} locale="en" />)
+    const panel = screen
+      .getByRole("heading", { name: /Today’s economic calendar/ })
+      .closest("section")!
+    expect(within(panel).getByRole("status")).toHaveTextContent(
+      "temporarily unavailable"
+    )
+    expect(screen.queryByText(/no scheduled events/)).toBeNull()
+    cleanup()
+    show(
+      <MacroDashboard
+        data={{ ...data, calendar: { ...data.calendar, status: "ok" } }}
+        locale="en"
+      />
+    )
+    expect(screen.getByText(/no scheduled events/)).toBeVisible()
+  })
+  it("shows actual zero as zero and keeps missing actual values distinct", () => {
+    show(
+      <MacroDashboard
+        data={{
+          ...data,
+          calendar: {
+            date: "2026-09-04",
+            source: "Nasdaq",
+            status: "ok",
+            events: [
+              {
+                date: "2026-09-04T00:00:00Z",
+                country: "US",
+                event: "Test release",
+                currency: "USD",
+                impact: "High",
+                estimate: "1",
+                previous: "2",
+                actual: "0",
+                unit: "%",
+              },
+            ],
+          },
+        }}
+        locale="en"
+      />
+    )
+    expect(screen.getByText("Test release").closest("tr")).toHaveTextContent(
+      "High1%2%0%"
+    )
+  })
+})

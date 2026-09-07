@@ -354,6 +354,34 @@
         "title": "Body_admin_podcasts_upload",
         "type": "object"
       },
+      "Calendar": {
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/EconomicEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": ["ok", "unavailable", "disabled"],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": ["status", "date", "source"],
+        "title": "Calendar",
+        "type": "object"
+      },
       "ChangePasswordRequest": {
         "properties": {
           "current_password": {
@@ -883,6 +911,98 @@
         "title": "DataManagementRunList",
         "type": "object"
       },
+      "EconomicEvent": {
+        "properties": {
+          "actual": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual"
+          },
+          "country": {
+            "maxLength": 100,
+            "title": "Country",
+            "type": "string"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "date": {
+            "format": "date-time",
+            "title": "Date",
+            "type": "string"
+          },
+          "estimate": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimate"
+          },
+          "event": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Event",
+            "type": "string"
+          },
+          "impact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact"
+          },
+          "previous": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": ["date", "country", "event"],
+        "title": "EconomicEvent",
+        "type": "object"
+      },
       "GenerationStatus": {
         "enum": ["pending", "complete", "partial", "error"],
         "title": "GenerationStatus",
@@ -922,6 +1042,41 @@
         },
         "required": ["status"],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "History": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": ["ok", "unavailable", "disabled"],
+            "title": "Status",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": ["id", "symbol", "unit", "source", "status"],
+        "title": "History",
         "type": "object"
       },
       "IndexDailyBarResponse": {
@@ -1388,6 +1543,168 @@
         "title": "IndexYahooRunResponse",
         "type": "object"
       },
+      "InstitutionalFlowPointResponse": {
+        "properties": {
+          "dealer": {
+            "pattern": "^-?\\d+(?:\\.\\d+)?$",
+            "title": "Dealer",
+            "type": "string"
+          },
+          "foreign": {
+            "pattern": "^-?\\d+(?:\\.\\d+)?$",
+            "title": "Foreign",
+            "type": "string"
+          },
+          "total": {
+            "pattern": "^-?\\d+(?:\\.\\d+)?$",
+            "title": "Total",
+            "type": "string"
+          },
+          "trade_date": {
+            "format": "date",
+            "title": "Trade Date",
+            "type": "string"
+          },
+          "trust": {
+            "pattern": "^-?\\d+(?:\\.\\d+)?$",
+            "title": "Trust",
+            "type": "string"
+          }
+        },
+        "required": ["trade_date", "foreign", "trust", "dealer", "total"],
+        "title": "InstitutionalFlowPointResponse",
+        "type": "object"
+      },
+      "InstitutionalFlowsResponse": {
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "contract_hash": {
+            "title": "Contract Hash",
+            "type": "string"
+          },
+          "contract_version": {
+            "title": "Contract Version",
+            "type": "string"
+          },
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/InstitutionalFlowPointResponse"
+            },
+            "title": "Series",
+            "type": "array"
+          }
+        },
+        "required": [
+          "as_of",
+          "contract_version",
+          "contract_hash",
+          "endpoint",
+          "series"
+        ],
+        "title": "InstitutionalFlowsResponse",
+        "type": "object"
+      },
+      "InstitutionalStockFlowResponse": {
+        "properties": {
+          "dealer_lots": {
+            "pattern": "^-?\\d+(?:\\.\\d+)?$",
+            "title": "Dealer Lots",
+            "type": "string"
+          },
+          "foreign_lots": {
+            "pattern": "^-?\\d+(?:\\.\\d+)?$",
+            "title": "Foreign Lots",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "total_lots": {
+            "pattern": "^-?\\d+(?:\\.\\d+)?$",
+            "title": "Total Lots",
+            "type": "string"
+          },
+          "trust_lots": {
+            "pattern": "^-?\\d+(?:\\.\\d+)?$",
+            "title": "Trust Lots",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol",
+          "name",
+          "foreign_lots",
+          "trust_lots",
+          "dealer_lots",
+          "total_lots"
+        ],
+        "title": "InstitutionalStockFlowResponse",
+        "type": "object"
+      },
+      "InstitutionalStocksResponse": {
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "contract_hash": {
+            "title": "Contract Hash",
+            "type": "string"
+          },
+          "contract_version": {
+            "title": "Contract Version",
+            "type": "string"
+          },
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/InstitutionalStockFlowResponse"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "as_of",
+          "contract_version",
+          "contract_hash",
+          "endpoint",
+          "rows"
+        ],
+        "title": "InstitutionalStocksResponse",
+        "type": "object"
+      },
       "InternalUserCreate": {
         "properties": {
           "display_name": {
@@ -1617,6 +1934,28 @@
         },
         "required": ["email", "password"],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "MacroDashboard": {
+        "properties": {
+          "calendar": {
+            "$ref": "#/components/schemas/Calendar"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "histories": {
+            "items": {
+              "$ref": "#/components/schemas/History"
+            },
+            "title": "Histories",
+            "type": "array"
+          }
+        },
+        "required": ["fetched_at", "histories", "calendar"],
+        "title": "MacroDashboard",
         "type": "object"
       },
       "MarketPolicyUpdate": {
@@ -2980,6 +3319,23 @@
         },
         "required": ["expected_version"],
         "title": "PodcastPublicationRequest",
+        "type": "object"
+      },
+      "Point": {
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "value": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": ["date", "value"],
+        "title": "Point",
         "type": "object"
       },
       "PresentationContract": {
@@ -6208,6 +6564,130 @@
         "tags": ["markets"]
       }
     },
+    "/api/markets/tw/institutional-flows": {
+      "get": {
+        "operationId": "get_tw_institutional_flows_api_markets_tw_institutional_flows_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstitutionalFlowsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Tw Institutional Flows",
+        "tags": ["markets"]
+      }
+    },
+    "/api/markets/tw/institutional-stocks": {
+      "get": {
+        "operationId": "get_tw_institutional_stocks_api_markets_tw_institutional_stocks_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date"
+            }
+          },
+          {
+            "in": "query",
+            "name": "locale",
+            "required": false,
+            "schema": {
+              "default": "zh-hant",
+              "enum": ["zh-hant", "zh-hans", "en"],
+              "title": "Locale",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstitutionalStocksResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Tw Institutional Stocks",
+        "tags": ["markets"]
+      }
+    },
     "/api/news/latest": {
       "get": {
         "operationId": "latest_news_api_news_latest_get",
@@ -6507,6 +6987,25 @@
           }
         },
         "summary": "List Latest Reports",
+        "tags": ["reports"]
+      }
+    },
+    "/api/reports/global_macro_bonds/dashboard": {
+      "get": {
+        "operationId": "get_macro_dashboard_api_reports_global_macro_bonds_dashboard_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MacroDashboard"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Macro Dashboard",
         "tags": ["reports"]
       }
     },

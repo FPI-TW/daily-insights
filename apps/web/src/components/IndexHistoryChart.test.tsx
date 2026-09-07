@@ -4,172 +4,224 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react"
 import { I18nextProvider } from "react-i18next"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createI18n } from "#/lib/i18n"
-import type { MarketIndexHistory } from "#/lib/indices"
+import type { IndexMovingAverageMap, MarketIndexHistory } from "#/lib/indices"
 import { IndexHistoryChart, IndexHistoryLoading } from "./IndexHistoryChart"
 
 vi.mock("@tanstack/react-router", () => ({
   ClientOnly: ({ children }: { children: React.ReactNode }) => children,
 }))
 vi.mock("echarts-for-react", () => ({
-  default: ({ option }: { option: unknown }) => (
-    <div data-testid="index-chart">{JSON.stringify(option)}</div>
+  default: ({
+    option,
+    onEvents,
+  }: {
+    option: { aria?: { description?: string } }
+    onEvents?: { datazoom: (event: unknown) => void }
+  }) => (
+    <div data-testid="index-chart">
+      {JSON.stringify(option)}
+      {onEvents ? (
+        <button
+          onClick={() => onEvents.datazoom({ batch: [{ start: 0, end: 50 }] })}
+        >
+          Zoom {option.aria?.description}
+        </button>
+      ) : null}
+    </div>
   ),
 }))
-
+afterEach(cleanup)
+const dates = ["2025-02-01", "2025-08-01", "2026-01-01", "2026-09-04"]
 const history: MarketIndexHistory = {
-  marketCode: "us_equity",
+  marketCode: "tw_equity",
   start: "2024-09-04",
   end: "2026-09-04",
-  failedSymbols: ["^SOX"],
+  failedSymbols: [],
   series: [
     {
-      symbol: "^DJI",
-      bars: [
-        {
-          symbol: "^DJI",
-          market_code: "us_equity",
-          trade_date: "2026-09-02",
-          open: "45000.0",
-          high: "45100.0",
-          low: "44900.0",
-          close: "45050.5",
-          volume: null,
-        },
-      ],
-    },
-    {
-      symbol: "^GSPC",
-      bars: [
-        {
-          symbol: "^GSPC",
-          market_code: "us_equity",
-          trade_date: "2026-09-03",
-          open: "6500.0",
-          high: "6550.0",
-          low: "6480.0",
-          close: "6525.25",
-          volume: null,
-        },
-      ],
+      symbol: "^TWII",
+      bars: dates.map((trade_date, i) => ({
+        symbol: "^TWII",
+        market_code: "tw_equity",
+        trade_date,
+        open: "100",
+        high: "130",
+        low: "80",
+        close: String([90, 120, 100, 110][i]),
+        volume: 100_000_000,
+      })),
     },
   ],
 }
-
-async function renderLocalized(ui: React.ReactNode) {
-  const i18n = createI18n("en")
-  await i18n.changeLanguage("en")
-  return render(<I18nextProvider i18n={i18n}>{ui}</I18nextProvider>)
+const averages: IndexMovingAverageMap = {
+  "^TWII": {
+    symbol: "^TWII",
+    market_code: "tw_equity",
+    method: "sma",
+    price_field: "close",
+    formula_version: "sma-close-v1",
+    as_of: "2026-09-04",
+    series: [
+      {
+        period: 20,
+        points: dates.map(trade_date => ({ trade_date, value: "100" })),
+      },
+      { period: 60, points: [] },
+      { period: 120, points: [] },
+      { period: 240, points: [] },
+    ],
+  },
+}
+function show(ui: React.ReactNode) {
+  return render(<I18nextProvider i18n={createI18n("en")}>{ui}</I18nextProvider>)
+}
+function candles() {
+  return screen
+    .getByRole("heading", { name: "TAIEX — daily candles + MA + volume" })
+    .closest("section")!
 }
 
-afterEach(cleanup)
-
 describe("IndexHistoryChart", () => {
-  it("switches close series locally and exposes partial failures", async () => {
-    await renderLocalized(<IndexHistoryChart history={history} locale="en" />)
-
-    expect(screen.getByTestId("index-chart")).toHaveTextContent("45050.5")
-    expect(screen.getByTestId("index-chart")).toHaveTextContent(
-      '"lineStyle":{"width":3}'
-    )
-    expect(screen.getByRole("status")).toHaveTextContent("^SOX")
-    expect(
-      screen.getByRole("option", { name: "Dow Jones Industrial Average" })
-    ).toHaveValue("^DJI")
-    expect(screen.getByRole("option", { name: "S&P 500 Index" })).toHaveValue(
-      "^GSPC"
-    )
-    expect(screen.getByRole("combobox")).not.toHaveTextContent("^DJI")
-    expect(screen.getByRole("combobox")).not.toHaveTextContent("^GSPC")
-
-    fireEvent.change(screen.getByRole("combobox"), {
-      target: { value: "^GSPC" },
-    })
-
-    expect(screen.getByTestId("index-chart")).toHaveTextContent("6525.25")
-    expect(screen.getByTestId("index-chart")).not.toHaveTextContent("45050.5")
-  })
-
-  it("has accessible loading and unavailable states", async () => {
-    await renderLocalized(<IndexHistoryLoading />)
-    expect(screen.getByRole("status")).toHaveAccessibleName()
-
-    cleanup()
-    await renderLocalized(<IndexHistoryChart history={null} locale="en" />)
-    expect(screen.getByRole("status")).toHaveTextContent("unavailable")
-
-    cleanup()
-    await renderLocalized(
+  it("updates scaled readings for window chips and ECharts dataZoom without refetching", async () => {
+    show(
       <IndexHistoryChart
+        history={history}
         locale="en"
-        history={{ ...history, failedSymbols: [], series: [] }}
+        movingAverages={Promise.resolve(averages)}
       />
     )
-    expect(screen.getByRole("status")).toHaveTextContent("no index daily bars")
-  })
-
-  it("adds aligned available SMA lines without treating absent averages as a bar failure", async () => {
-    document.documentElement.style.setProperty("--chart-index-close", "#2563eb")
-    document.documentElement.style.setProperty(
-      "--chart-index-sma-20",
-      "#d97706"
+    await waitFor(() =>
+      expect(screen.getByRole("meter", { name: "20MA bias" })).toHaveAttribute(
+        "aria-valuenow",
+        expect.stringMatching(/^50/)
+      )
     )
-    await renderLocalized(
+    expect(screen.queryByRole("combobox")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Last 1 year" }))
+    expect(screen.getByRole("meter", { name: "20MA bias" })).toHaveAttribute(
+      "aria-valuenow",
+      "100"
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Last 2 years" }))
+    expect(
+      Number(
+        screen
+          .getByRole("meter", { name: "20MA bias" })
+          .getAttribute("aria-valuenow")
+      )
+    ).toBeCloseTo(200 / 3)
+    fireEvent.click(screen.getByRole("button", { name: "Zoom TAIEX bias" }))
+    expect(screen.getByText("Last visible session 2026-01-01")).toBeVisible()
+    expect(
+      Number(
+        screen
+          .getByRole("meter", { name: "20MA bias" })
+          .getAttribute("aria-valuenow")
+      )
+    ).toBeCloseTo(100 / 3)
+    expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
+      '"type":"candlestick"'
+    )
+    expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
+      '"xAxisIndex":[0,1]'
+    )
+    expect(within(candles()).getByText("2025-02-01 – 2026-09-04")).toBeVisible()
+    fireEvent.click(
+      within(candles()).getByRole("button", {
+        name: "Zoom TAIEX — daily candles + MA + volume",
+      })
+    )
+    expect(within(candles()).getByText("2025-02-01 – 2026-01-01")).toBeVisible()
+    expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
+      '"height":26'
+    )
+  })
+  it("keeps the initial averages request pending while showing available candles", async () => {
+    let resolve!: (value: IndexMovingAverageMap) => void
+    const promise = new Promise<IndexMovingAverageMap>(done => {
+      resolve = done
+    })
+    show(
+      <IndexHistoryChart
+        history={history}
+        locale="en"
+        movingAverages={promise}
+      />
+    )
+    expect(screen.getByText("Loading moving averages…")).toBeVisible()
+    expect(screen.queryByText(/currently unavailable/)).toBeNull()
+    expect(within(candles()).getByTestId("index-chart")).toBeInTheDocument()
+    resolve(averages)
+    await waitFor(() =>
+      expect(
+        screen.getByRole("meter", { name: "20MA bias" })
+      ).toBeInTheDocument()
+    )
+    expect(
+      screen.getByRole("meter", { name: "120MA bias" })
+    ).not.toHaveAttribute("aria-valuenow")
+  })
+  it("omits missing OHLC rather than filling it with close and preserves null volume", () => {
+    const bars = history.series[0]!.bars.map((bar, i) =>
+      i === 0 ? { ...bar, open: null, volume: null } : bar
+    )
+    show(
+      <IndexHistoryChart
+        history={{ ...history, series: [{ symbol: "^TWII", bars }] }}
+        locale="en"
+      />
+    )
+    expect(screen.getByText(/1 sessions have incomplete OHLC/)).toBeVisible()
+    const chart = within(candles()).getByTestId("index-chart")
+    expect(chart).toHaveTextContent(
+      '"data":[[null,null,null,null],[100,120,80,130]'
+    )
+    expect(chart).toHaveTextContent('"value":null')
+    expect(chart).toHaveTextContent('"value":1')
+    expect(screen.getAllByText("Volume (100M shares)").length).toBeGreaterThan(
+      0
+    )
+  })
+  it("preserves the US symbol selector and partial failures", () => {
+    show(
       <IndexHistoryChart
         history={{
           ...history,
-          failedSymbols: [],
+          marketCode: "us_equity",
+          failedSymbols: ["^SOX"],
           series: [
-            {
-              ...history.series[0]!,
-              bars: [
-                history.series[0]!.bars[0]!,
-                {
-                  ...history.series[0]!.bars[0]!,
-                  trade_date: "2026-09-03",
-                  close: "45100.0",
-                },
-              ],
-            },
+            { symbol: "^DJI", bars: history.series[0]!.bars },
+            { symbol: "^GSPC", bars: history.series[0]!.bars },
           ],
         }}
         locale="en"
-        movingAverages={Promise.resolve({
-          "^DJI": {
-            symbol: "^DJI",
-            market_code: "us_equity",
-            method: "sma",
-            price_field: "close",
-            formula_version: "sma-close-v1",
-            as_of: "2026-09-03",
-            series: [
-              {
-                period: 20,
-                points: [
-                  { trade_date: "2026-09-02", value: "45000.0" },
-                  { trade_date: "2026-09-03", value: "45050.0" },
-                ],
-              },
-              { period: 60, points: [] },
-              { period: 120, points: [] },
-              { period: 240, points: [] },
-            ],
-          },
-        })}
       />
     )
-
-    await waitFor(() =>
-      expect(screen.getByTestId("index-chart")).toHaveTextContent("SMA 20")
-    )
-    expect(screen.getByTestId("index-chart")).toHaveTextContent("45050")
-    expect(screen.getByTestId("index-chart")).not.toHaveTextContent("SMA 60")
-    expect(screen.getByTestId("index-chart")).toHaveTextContent(
-      '"color":["#2563eb","#d97706"'
-    )
-    expect(screen.queryByRole("status")).toBeNull()
+    expect(
+      screen.getByText(/Some indices could not be loaded: \^SOX/)
+    ).toBeVisible()
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "^GSPC" },
+    })
+    expect(
+      screen.getByRole("heading", {
+        name: "S&P 500 Index — daily candles + MA + volume",
+      })
+    ).toBeVisible()
+  })
+  it("has explicit loading, failure and empty states", () => {
+    show(<IndexHistoryLoading />)
+    expect(screen.getByRole("status")).toHaveAccessibleName()
+    cleanup()
+    show(<IndexHistoryChart history={null} locale="en" />)
+    expect(screen.getByRole("status")).toHaveTextContent("unavailable")
+    cleanup()
+    show(<IndexHistoryChart history={{ ...history, series: [] }} locale="en" />)
+    expect(screen.getByRole("status")).toHaveTextContent("no index daily bars")
   })
 })

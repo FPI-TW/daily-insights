@@ -640,6 +640,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/markets/tw/institutional-flows": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Tw Institutional Flows */
+    get: operations["get_tw_institutional_flows_api_markets_tw_institutional_flows_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/markets/tw/institutional-stocks": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Tw Institutional Stocks */
+    get: operations["get_tw_institutional_stocks_api_markets_tw_institutional_stocks_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/news/latest": {
     parameters: {
       query?: never
@@ -734,6 +768,23 @@ export interface paths {
     }
     /** List Latest Reports */
     get: operations["list_latest_reports_api_reports_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/reports/global_macro_bonds/dashboard": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Macro Dashboard */
+    get: operations["get_macro_dashboard_api_reports_global_macro_bonds_dashboard_get"]
     put?: never
     post?: never
     delete?: never
@@ -931,6 +982,23 @@ export interface components {
       zh_hans?: string | null
       /** Zh Hant */
       zh_hant?: string | null
+    }
+    /** Calendar */
+    Calendar: {
+      /**
+       * Date
+       * Format: date
+       */
+      date: string
+      /** Events */
+      events?: components["schemas"]["EconomicEvent"][]
+      /** Source */
+      source: string
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "ok" | "unavailable" | "disabled"
     }
     /** ChangePasswordRequest */
     ChangePasswordRequest: {
@@ -1133,6 +1201,30 @@ export interface components {
         | components["schemas"]["IndexYahooRunResponse"]
       )[]
     }
+    /** EconomicEvent */
+    EconomicEvent: {
+      /** Actual */
+      actual?: string | null
+      /** Country */
+      country: string
+      /** Currency */
+      currency?: string | null
+      /**
+       * Date
+       * Format: date-time
+       */
+      date: string
+      /** Estimate */
+      estimate?: string | null
+      /** Event */
+      event: string
+      /** Impact */
+      impact?: string | null
+      /** Previous */
+      previous?: string | null
+      /** Unit */
+      unit?: string | null
+    }
     /**
      * GenerationStatus
      * @enum {string}
@@ -1155,6 +1247,24 @@ export interface components {
     HealthResponse: {
       /** Status */
       status: string
+    }
+    /** History */
+    History: {
+      /** Id */
+      id: string
+      /** Points */
+      points?: components["schemas"]["Point"][]
+      /** Source */
+      source: string
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "ok" | "unavailable" | "disabled"
+      /** Symbol */
+      symbol: string
+      /** Unit */
+      unit: string
     }
     /** IndexDailyBarResponse */
     IndexDailyBarResponse: {
@@ -1344,6 +1454,63 @@ export interface components {
        */
       status: "pending" | "running" | "succeeded" | "partial" | "failed"
     }
+    /** InstitutionalFlowPointResponse */
+    InstitutionalFlowPointResponse: {
+      /** Dealer */
+      dealer: string
+      /** Foreign */
+      foreign: string
+      /** Total */
+      total: string
+      /**
+       * Trade Date
+       * Format: date
+       */
+      trade_date: string
+      /** Trust */
+      trust: string
+    }
+    /** InstitutionalFlowsResponse */
+    InstitutionalFlowsResponse: {
+      /** As Of */
+      as_of: string | null
+      /** Contract Hash */
+      contract_hash: string
+      /** Contract Version */
+      contract_version: string
+      /** Endpoint */
+      endpoint: string
+      /** Series */
+      series: components["schemas"]["InstitutionalFlowPointResponse"][]
+    }
+    /** InstitutionalStockFlowResponse */
+    InstitutionalStockFlowResponse: {
+      /** Dealer Lots */
+      dealer_lots: string
+      /** Foreign Lots */
+      foreign_lots: string
+      /** Name */
+      name: string
+      /** Symbol */
+      symbol: string
+      /** Total Lots */
+      total_lots: string
+      /** Trust Lots */
+      trust_lots: string
+    }
+    /** InstitutionalStocksResponse */
+    InstitutionalStocksResponse: {
+      /** As Of */
+      as_of: string | null
+      /** Contract Hash */
+      contract_hash: string
+      /** Contract Version */
+      contract_version: string
+      /** Endpoint */
+      endpoint: string
+      /** Rows */
+      rows: components["schemas"]["InstitutionalStockFlowResponse"][]
+    }
     /** InternalUserCreate */
     InternalUserCreate: {
       /** Display Name */
@@ -1418,6 +1585,17 @@ export interface components {
       email: string
       /** Password */
       password: string
+    }
+    /** MacroDashboard */
+    MacroDashboard: {
+      calendar: components["schemas"]["Calendar"]
+      /**
+       * Fetched At
+       * Format: date-time
+       */
+      fetched_at: string
+      /** Histories */
+      histories: components["schemas"]["History"][]
     }
     /** MarketPolicyUpdate */
     MarketPolicyUpdate: {
@@ -1995,6 +2173,16 @@ export interface components {
     PodcastPublicationRequest: {
       /** Expected Version */
       expected_version: number
+    }
+    /** Point */
+    Point: {
+      /**
+       * Date
+       * Format: date
+       */
+      date: string
+      /** Value */
+      value: string
     }
     /** PresentationContract */
     PresentationContract: {
@@ -3804,6 +3992,70 @@ export interface operations {
       }
     }
   }
+  get_tw_institutional_flows_api_markets_tw_institutional_flows_get: {
+    parameters: {
+      query?: {
+        start?: string | null
+        end?: string | null
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["InstitutionalFlowsResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  get_tw_institutional_stocks_api_markets_tw_institutional_stocks_get: {
+    parameters: {
+      query?: {
+        date?: string | null
+        locale?: "zh-hant" | "zh-hans" | "en"
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["InstitutionalStocksResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
   latest_news_api_news_latest_get: {
     parameters: {
       query?: {
@@ -3993,6 +4245,26 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  get_macro_dashboard_api_reports_global_macro_bonds_dashboard_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["MacroDashboard"]
         }
       }
     }

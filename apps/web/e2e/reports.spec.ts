@@ -21,17 +21,42 @@ test("customer login opens reports, then a market detail without mobile overflow
   await expect(page).toHaveURL("/en/reports")
   await page
     .getByRole("navigation", { name: "Market category navigation" })
-    .getByRole("link", { name: "Macro analysis" })
+    .getByRole("link", { name: "Macro, bonds & FX" })
     .click()
   await expect(page).toHaveURL("/en/reports/global_macro_bonds")
   await expect(
-    page.getByRole("heading", { name: "Global macro" })
+    page.getByRole("heading", { name: "Global macro, bonds & FX", level: 1 })
   ).toBeVisible()
   await expect(
     page.getByRole("heading", {
-      name: "Brent and gold normalized performance",
+      name: "Global foreign exchange price trends",
     })
   ).toBeVisible()
+  const calendarPanel = page
+    .getByRole("heading", {
+      name: "Today’s economic calendar + central bank events",
+    })
+    .locator("xpath=ancestor::section[1]")
+  await expect(calendarPanel).toContainText("Nasdaq · 2026-09-04 · Taipei time")
+  const fxPanel = page
+    .getByRole("heading", { name: "Global foreign exchange price trends" })
+    .locator("xpath=ancestor::section[1]")
+  await page
+    .getByRole("group", { name: "Currency pair" })
+    .getByRole("button", { name: "USD/JPY" })
+    .click()
+  await expect(
+    page
+      .getByRole("group", { name: "Currency pair" })
+      .getByRole("button", { name: "USD/JPY" })
+  ).toHaveAttribute("aria-pressed", "true")
+  await expect(
+    fxPanel.getByLabel("Latest observations and dates")
+  ).toContainText("JPY")
+  await fxPanel.getByRole("button", { name: "365 days" }).click()
+  await expect(
+    fxPanel.getByRole("button", { name: "365 days" })
+  ).toHaveAttribute("aria-pressed", "true")
   await page.setViewportSize({ width: 375, height: 720 })
   await expect
     .poll(() =>
@@ -42,18 +67,16 @@ test("customer login opens reports, then a market detail without mobile overflow
     .toBe(true)
 })
 
-test("unavailable report preserves gap and block states", async ({
+test("unlaunched market has a clear non-error state", async ({
   context,
   page,
 }) => {
   await authenticateAs(context, "org_member")
   await page.goto("/en/reports/tw_index_derivatives")
   await expect(
-    page.getByText(/Not launched \/ illustrative data/)
+    page.getByRole("heading", { name: "Report not launched yet" })
   ).toBeVisible()
-  await expect(page.getByText("Unavailable", { exact: true })).toBeVisible()
-  await expect(page.getByText("Data missing", { exact: true })).toHaveCount(3)
-  await expect(page.getByText("Data error", { exact: true })).toHaveCount(1)
+  await expect(page.getByRole("alert")).toHaveCount(0)
 })
 
 test("visible market without a publication shows a non-error state", async ({
@@ -66,7 +89,7 @@ test("visible market without a publication shows a non-error state", async ({
   await page.goto("/en/reports/us_equity")
 
   await expect(
-    page.getByRole("heading", { name: "Morning report not generated yet" })
+    page.getByText("This section has not been generated yet.", { exact: true })
   ).toBeVisible()
   await expect(page.getByRole("alert")).toHaveCount(0)
   await expect(

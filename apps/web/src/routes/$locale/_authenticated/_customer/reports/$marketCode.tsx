@@ -3,8 +3,21 @@ import type {
   LatestNews,
   Locale,
 } from "@daily-insights/api-client"
-import { Await, createFileRoute, notFound } from "@tanstack/react-router"
-import { Suspense } from "react"
+import {
+  Await,
+  createFileRoute,
+  notFound,
+  redirect,
+} from "@tanstack/react-router"
+import { Suspense, useState } from "react"
+import { useTranslation } from "react-i18next"
+import {
+  MacroDashboard,
+  MacroDashboardLoading,
+} from "#/components/MacroDashboard"
+import { getMacroDashboard } from "#/lib/macro-dashboard.functions"
+import type { MacroDashboardData } from "#/lib/macro-dashboard"
+import { getVisibleMarkets } from "#/lib/markets"
 import { DailyNews } from "#/components/DailyNews"
 import {
   IndexHistoryChart,
@@ -44,19 +57,33 @@ import {
   type VixHistory,
 } from "#/lib/indices"
 import { useChatPageContext } from "#/components/PageContextChat"
+import {
+  TaiwanInstitutionalFlows,
+  TaiwanInstitutionalFlowsLoading,
+} from "#/components/TaiwanInstitutionalFlows"
+import {
+  getTaiwanInstitutionalFlows,
+  getTaiwanInstitutionalStocks,
+  institutionalFlowRange,
+  type TaiwanInstitutionalData,
+} from "#/lib/institutional-flows"
 
 type ReportResult = Awaited<ReturnType<typeof getReportDetail>>
 type MarketPage = {
   report: Exclude<ReportResult, { kind: "not-found" }>
   news: { marketCode: NewsMarketCode; latest: LatestNews | null } | null
   viewpoint: AnalystViewpoint | null
+  forexViewpoint: AnalystViewpoint | null
+  macroDashboard: Promise<MacroDashboardData | null> | null
   indexHistory: Promise<MarketIndexHistory | null> | null
   indexMovingAverages: Promise<IndexMovingAverageMap> | null
+  institutionalData: Promise<TaiwanInstitutionalData> | null
   vixHistory: Promise<VixHistory | null> | null
 }
 
 export const INDEX_HISTORY_DEADLINE_MS = 10_000
 export const INDEX_MOVING_AVERAGES_DEADLINE_MS = 10_000
+export const INSTITUTIONAL_DATA_DEADLINE_MS = 10_000
 export const VIX_HISTORY_DEADLINE_MS = 10_000
 
 export function withIndexHistoryDeadline(
@@ -97,6 +124,28 @@ export function withMovingAverageDeadline(
   })
 }
 
+export function withInstitutionalDataDeadline(
+  data: Promise<TaiwanInstitutionalData>,
+  deadlineMs = INSTITUTIONAL_DATA_DEADLINE_MS
+): Promise<TaiwanInstitutionalData> {
+  return new Promise(resolve => {
+    const deadline = setTimeout(
+      () => resolve({ flows: null, stocks: null }),
+      deadlineMs
+    )
+    void data.then(
+      value => {
+        clearTimeout(deadline)
+        resolve(value)
+      },
+      () => {
+        clearTimeout(deadline)
+        resolve({ flows: null, stocks: null })
+      }
+    )
+  })
+}
+
 export function withVixHistoryDeadline(
   history: Promise<VixHistory>,
   deadlineMs = VIX_HISTORY_DEADLINE_MS
@@ -125,6 +174,20 @@ export async function loadMarketPage({
   params: { marketCode: string }
   context: { locale: Locale }
 }): Promise<MarketPage> {
+  if (params.marketCode === "forex") {
+    const markets = await getVisibleMarkets({ data: context.locale })
+    if (markets.some(market => market.code === "global_macro_bonds")) {
+      throw redirect({
+        to: "/$locale/reports/$marketCode",
+        params: { locale: context.locale, marketCode: "global_macro_bonds" },
+        replace: true,
+      })
+    }
+  }
+  const macroDashboard =
+    params.marketCode === "global_macro_bonds"
+      ? getMacroDashboard().catch(() => null)
+      : null
   const newsMarket = isNewsMarketCode(params.marketCode)
     ? params.marketCode
     : null
@@ -152,9 +215,25 @@ export async function loadMarketPage({
         })
       )
     : null
+  const institutionalData =
+    params.marketCode === "tw_equity" && indexRange
+      ? withInstitutionalDataDeadline(
+          Promise.allSettled([
+            getTaiwanInstitutionalFlows({
+              data: institutionalFlowRange(indexRange.end),
+            }),
+            getTaiwanInstitutionalStocks({
+              data: { date: indexRange.end, locale: context.locale },
+            }),
+          ]).then(([flows, stocks]) => ({
+            flows: flows.status === "fulfilled" ? flows.value : null,
+            stocks: stocks.status === "fulfilled" ? stocks.value : null,
+          }))
+        )
+      : null
   const vixHistory =
-    params.marketCode === "us_equity"
-      ? withVixHistoryDeadline(getVixHistory({ data: { range: indexRange! } }))
+    params.marketCode === "us_equity" && indexRange
+      ? withVixHistoryDeadline(getVixHistory({ data: { range: indexRange } }))
       : null
   const [report, news, viewpoints] = await Promise.allSettled([
     getReportDetail({
@@ -185,8 +264,15 @@ export async function loadMarketPage({
         }
       : null,
     viewpoint,
+    forexViewpoint:
+      params.marketCode === "global_macro_bonds" &&
+      viewpoints.status === "fulfilled"
+        ? (viewpoints.value.find(item => item.market_code === "forex") ?? null)
+        : null,
+    macroDashboard,
     indexHistory,
     indexMovingAverages,
+    institutionalData,
     vixHistory,
   }
 }
@@ -201,12 +287,17 @@ export const Route = createFileRoute(
 })
 
 function ReportPage() {
+  const { t } = useTranslation()
+  const [reportExpanded, setReportExpanded] = useState(false)
   const {
     report,
     news,
     viewpoint,
+    forexViewpoint,
+    macroDashboard,
     indexHistory,
     indexMovingAverages,
+    institutionalData,
     vixHistory,
   } = Route.useLoaderData()
   const { marketCode } = Route.useParams()
@@ -218,10 +309,36 @@ function ReportPage() {
   )
   return (
     <>
-      {report.kind !== "report" && viewpoint ? (
+      {(report.kind !== "report" || macroDashboard) && viewpoint ? (
         <MarketViewpoint viewpoint={viewpoint} />
       ) : null}
-      {report.kind === "not-generated" ? (
+      {macroDashboard ? (
+        <>
+          {forexViewpoint ? (
+            <MarketViewpoint viewpoint={forexViewpoint} />
+          ) : null}
+          <Suspense fallback={<MacroDashboardLoading />}>
+            <Await promise={macroDashboard}>
+              {data => <MacroDashboard data={data} locale={locale} />}
+            </Await>
+          </Suspense>
+          {report.kind === "report" ? (
+            <details
+              className="mt-6 rounded-2xl border border-line p-5"
+              onToggle={event => setReportExpanded(event.currentTarget.open)}
+            >
+              <summary className="cursor-pointer text-sm font-bold text-sea-ink">
+                {t("macroPublishedReport")}
+              </summary>
+              <div className="mt-4">
+                {reportExpanded ? (
+                  <ReportDetail locale={locale} report={report.report} />
+                ) : null}
+              </div>
+            </details>
+          ) : null}
+        </>
+      ) : report.kind === "not-generated" ? (
         <ReportNotGeneratedScreen
           locale={locale}
           marketCode={report.marketCode}
@@ -257,11 +374,26 @@ function ReportPage() {
         <Suspense fallback={<IndexHistoryLoading />}>
           <Await promise={indexHistory}>
             {history => (
-              <IndexHistoryChart
-                history={history}
-                locale={locale}
-                movingAverages={indexMovingAverages}
-              />
+              <>
+                <IndexHistoryChart
+                  history={history}
+                  locale={locale}
+                  movingAverages={indexMovingAverages}
+                />
+                {marketCode === "tw_equity" && institutionalData ? (
+                  <Suspense fallback={<TaiwanInstitutionalFlowsLoading />}>
+                    <Await promise={institutionalData}>
+                      {data => (
+                        <TaiwanInstitutionalFlows
+                          data={data}
+                          history={history}
+                          locale={locale}
+                        />
+                      )}
+                    </Await>
+                  </Suspense>
+                ) : null}
+              </>
             )}
           </Await>
         </Suspense>

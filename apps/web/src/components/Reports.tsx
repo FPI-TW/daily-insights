@@ -8,9 +8,9 @@ import {
   directionClass,
   formatChange,
   formatIsoDate,
+  formatTimestamp,
   formatNumber,
   literalDirection,
-  numberLocales,
   unitLabel,
   type Direction,
 } from "#/lib/format"
@@ -118,18 +118,24 @@ function ReportMarketNav({
       >
         {t("reportAllMarkets")}
       </Link>
-      {markets.map(market => (
-        <Link
-          key={market.code}
-          to="/$locale/reports/$marketCode"
-          params={{ locale, marketCode: market.code }}
-          className={linkClass(activeMarket === market.code)}
-        >
-          {i18n.exists(`reportMarketShort_${market.code}`)
-            ? t(`reportMarketShort_${market.code}`)
-            : market.name}
-        </Link>
-      ))}
+      {markets
+        .filter(
+          market =>
+            market.code !== "forex" ||
+            !markets.some(item => item.code === "global_macro_bonds")
+        )
+        .map(market => (
+          <Link
+            key={market.code}
+            to="/$locale/reports/$marketCode"
+            params={{ locale, marketCode: market.code }}
+            className={linkClass(activeMarket === market.code)}
+          >
+            {i18n.exists(`reportMarketShort_${market.code}`)
+              ? t(`reportMarketShort_${market.code}`)
+              : market.name}
+          </Link>
+        ))}
     </nav>
   )
 }
@@ -207,20 +213,6 @@ export function AnalystViewpointsLoading() {
   )
 }
 
-// Rendered on the server and in the browser: the formatter is pinned to the
-// route locale and the Taipei zone so both produce the same text (a locale or
-// zone taken from the environment differs between them and breaks hydration).
-function viewpointTimestamp(language: string) {
-  const locale = (
-    language in numberLocales ? language : "zh-hant"
-  ) as keyof typeof numberLocales
-  return new Intl.DateTimeFormat(numberLocales[locale], {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "Asia/Taipei",
-  })
-}
-
 function AnalystViewpoints({
   viewpoints,
   markets,
@@ -228,7 +220,7 @@ function AnalystViewpoints({
   viewpoints: ReadonlyArray<AnalystViewpoint>
   markets?: ReadonlyArray<NavMarket> | undefined
 }) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   // Viewpoints follow navigation order and only cover navigable markets when
   // the market list is known; otherwise they are shown as delivered.
   const visibleViewpoints = markets
@@ -250,9 +242,7 @@ function AnalystViewpoints({
         </h2>
         <p className="m-0 text-xs text-sea-ink-soft">
           {t("analystViewpointsUpdated", {
-            timestamp: viewpointTimestamp(i18n.language).format(
-              new Date(latest.fetched_at)
-            ),
+            timestamp: formatTimestamp(latest.fetched_at),
           })}
         </p>
       </div>
@@ -360,7 +350,7 @@ export function MarketViewpoint({
 }: {
   viewpoint: AnalystViewpoint
 }) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   return (
     <section
       className="surface-panel mb-4 border-t-[3px] border-t-lagoon p-5"
@@ -375,9 +365,7 @@ export function MarketViewpoint({
         </h2>
         <p className="m-0 text-xs text-sea-ink-soft">
           {t("analystViewpointsUpdated", {
-            timestamp: viewpointTimestamp(i18n.language).format(
-              new Date(viewpoint.fetched_at)
-            ),
+            timestamp: formatTimestamp(viewpoint.fetched_at),
           })}
         </p>
       </div>

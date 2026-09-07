@@ -1,3 +1,4 @@
+import { formatDateStamp } from "#/lib/format"
 import {
   createFileRoute,
   Link,
@@ -128,11 +129,7 @@ function ConversationsPage() {
                   </Link>
                 </td>
                 <td className="p-3">{item.message_count}</td>
-                <td className="p-3">
-                  {new Intl.DateTimeFormat(locale).format(
-                    new Date(item.created_at)
-                  )}
-                </td>
+                <td className="p-3">{formatDateStamp(item.created_at)}</td>
               </tr>
             ))}
           </tbody>
