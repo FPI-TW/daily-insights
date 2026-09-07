@@ -160,8 +160,9 @@ test.describe("Portal authentication and boundaries", () => {
     await openHydrated(
       page,
       "/en/podcasts",
-      '[data-surface="customer"] button[type="button"]:last-of-type'
+      '[data-surface="customer"] button[aria-label="Settings"]'
     )
+    await page.getByRole("button", { name: "Settings" }).click()
     await page.getByRole("button", { name: "Sign out" }).click()
     await expect(page).toHaveURL("/en/login")
 
@@ -169,8 +170,9 @@ test.describe("Portal authentication and boundaries", () => {
     await openHydrated(
       page,
       "/en/admin/audio",
-      '[data-surface="admin"] button[type="button"]:last-of-type'
+      '[data-surface="admin"] button[aria-label="Settings"]'
     )
+    await page.getByRole("button", { name: "Settings" }).click()
     await page.getByRole("button", { name: "Sign out" }).click()
     await expect(page).toHaveURL("/en/admin/login")
   })
