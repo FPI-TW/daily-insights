@@ -233,3 +233,32 @@ def test_the_public_data_source_interface_does_not_import_yfinance() -> None:
     )
 
     assert result.stdout.strip() == "[]"
+
+
+def test_dxy_weekend_overnight_row_does_not_discard_settled_weekday_closes() -> None:
+    frame = _frame(
+        {
+            date(2026, 9, 4): (99.03, 99.39, 98.92, 99.16, 0.0),
+            date(2026, 9, 6): (99.17, 99.21, 99.08, float("nan"), 0.0),
+        }
+    )
+    result = normalize_daily_bars(
+        market="global_macro_bonds",
+        symbol="DX-Y.NYB",
+        period="2y",
+        frame=frame,
+        fetched_at=datetime(2026, 9, 7, 4, tzinfo=UTC),
+    )
+    assert [item.trade_date for item in result.items] == [date(2026, 9, 4)]
+    assert result.provenance.record_count == 1
+
+
+def test_dxy_missing_weekday_close_is_still_rejected() -> None:
+    with pytest.raises(DataSourceContractError, match="without a close"):
+        normalize_daily_bars(
+            market="global_macro_bonds",
+            symbol="DX-Y.NYB",
+            period="2y",
+            frame=_frame({date(2026, 9, 4): (99.03, 99.39, 98.92, float("nan"), 0.0)}),
+            fetched_at=datetime(2026, 9, 7, 4, tzinfo=UTC),
+        )
