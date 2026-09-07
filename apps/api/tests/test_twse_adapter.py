@@ -79,6 +79,8 @@ STOCK_PAYLOAD = {
 }
 # Verbatim TWSE message, fullwidth comma included.
 NO_DATA_PAYLOAD = {"stat": "很抱歉，沒有符合條件的資料!"}  # noqa: RUF001
+# What a morning run gets when it asks for today before TWSE publishes.
+UNPUBLISHED_PAYLOAD = {"stat": "查詢日期大於可查詢最大日期！"}  # noqa: RUF001
 
 
 def test_market_flows_parse_by_label_and_skip_the_total_row() -> None:
@@ -99,14 +101,10 @@ def test_stock_flows_unpivot_one_security_into_five_investors() -> None:
     assert by_type["dealer_hedge"].buy_shares == 2_071_402
 
 
-def test_no_data_stat_is_an_empty_day_not_an_error() -> None:
-    assert (
-        parse_market_flows(NO_DATA_PAYLOAD, trade_date=TRADE_DATE, fetched_at=FETCHED_AT).items
-        == ()
-    )
-    assert (
-        parse_stock_flows(NO_DATA_PAYLOAD, trade_date=TRADE_DATE, fetched_at=FETCHED_AT).items == ()
-    )
+@pytest.mark.parametrize("payload", [NO_DATA_PAYLOAD, UNPUBLISHED_PAYLOAD], ids=["closed", "early"])
+def test_no_data_stat_is_an_empty_day_not_an_error(payload: dict[str, object]) -> None:
+    assert parse_market_flows(payload, trade_date=TRADE_DATE, fetched_at=FETCHED_AT).items == ()
+    assert parse_stock_flows(payload, trade_date=TRADE_DATE, fetched_at=FETCHED_AT).items == ()
 
 
 @pytest.mark.parametrize(
@@ -117,8 +115,16 @@ def test_no_data_stat_is_an_empty_day_not_an_error() -> None:
         {**MARKET_PAYLOAD, "data": [["新分類", "1", "1", "0"]]},
         {**MARKET_PAYLOAD, "data": [["投信", "10", "4", "5"]]},
         {**MARKET_PAYLOAD, "fields": ["單位名稱", "買進金額"]},
+        {**MARKET_PAYLOAD, "data": MARKET_PAYLOAD["data"][1:]},
     ],
-    ids=["unknown_stat", "date_mismatch", "unknown_label", "net_mismatch", "missing_field"],
+    ids=[
+        "unknown_stat",
+        "date_mismatch",
+        "unknown_label",
+        "net_mismatch",
+        "missing_field",
+        "missing_investor",
+    ],
 )
 def test_contract_drift_raises(payload: dict[str, object]) -> None:
     with pytest.raises(DataSourceContractError):
@@ -158,10 +164,14 @@ async def test_adapter_spaces_requests_and_maps_transport_errors() -> None:
         market = await adapter.get_market_flows(TRADE_DATE)
         with pytest.raises(DataSourceTransientError):
             await adapter.get_market_flows(date(2026, 9, 5))
+        await adapter.get_stock_flows(TRADE_DATE)
 
     assert len(stock.items) == 5 and len(market.items) == 5
     # The first request is immediate; each later one waits out the remainder of
-    # the interval since the previous request was issued.
-    assert sleeps == [4.5, 6.0]
+    # the interval since the previous request finished. The 503 date is tried
+    # three times and each failure adds another interval, so the waits grow
+    # 6, 12, 18 and the request after it waits 24.
+    assert sleeps == [4.5, 6.0, 12.0, 18.0, 24.0]
+    assert sum(1 for request in requests if request.url.params.get("dayDate") == "20260905") == 3
     assert requests[0].url.params["selectType"] == "ALLBUT0999"
     assert requests[1].url.params["type"] == "day"

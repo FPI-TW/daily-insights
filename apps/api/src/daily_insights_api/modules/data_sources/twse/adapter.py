@@ -28,7 +28,12 @@ MARKET_FLOWS_PATH = "/rwd/zh/fund/BFI82U"
 STOCK_FLOWS_PATH = "/rwd/zh/fund/T86"
 # `ALL` also returns ~15k warrant rows; this keeps the ~1.3k securities.
 STOCK_FLOWS_SELECT_TYPE = "ALLBUT0999"
-NO_DATA_STAT_MARKER = "沒有符合條件"
+# TWSE answers both "that date had no trading" and "that date is not published
+# yet" with HTTP 200 and a Chinese `stat`; neither is contract drift. A morning
+# run asks for today before the ~16:00 publication and gets the second one.
+NO_DATA_STAT_MARKERS = ("沒有符合條件", "大於可查詢最大日期")
+# Each transient failure waits one more interval; six intervals is the ceiling.
+MAX_BACKOFF_INTERVALS = 5
 
 # BFI82U row label -> investor_type. The 合計 row is derivable and skipped.
 MARKET_FLOW_INVESTORS: Mapping[str, str] = {
@@ -108,10 +113,10 @@ def _parse_int(value: object, field: str) -> int:
 
 
 def _rows(payload: Mapping[str, Any], trade_date: date) -> list[list[Any]] | None:
-    """Return the data rows, or None when TWSE says the date had no trading."""
+    """Return the data rows, or None when TWSE has no rows for that date."""
     stat = payload.get("stat")
     if stat != "OK":
-        if isinstance(stat, str) and NO_DATA_STAT_MARKER in stat:
+        if isinstance(stat, str) and any(marker in stat for marker in NO_DATA_STAT_MARKERS):
             return None
         logger.warning("twse returned unexpected stat %r for %s", stat, trade_date)
         raise DataSourceContractError("unexpected stat")
@@ -167,8 +172,11 @@ def parse_market_flows(
         net = _parse_int(_cell(row, index["買賣差額"], "買賣差額"), "買賣差額")
         _check_net(buy, sell, net, label)
         items.append(TwseMarketFlow(investor_type, buy, sell, net))
-    if len({item.investor_type for item in items}) != len(items):
-        raise DataSourceContractError("duplicate investor rows")
+    # Every investor must be present exactly once: a short day would still be
+    # stored, and `stored_flow_dates` only asks whether a date has any rows, so
+    # nothing would ever come back to fill the gap.
+    if sorted(item.investor_type for item in items) != sorted(MARKET_FLOW_INVESTORS.values()):
+        raise DataSourceContractError("investor rows are missing or duplicated")
     return TwseMarketFlows(trade_date=trade_date, items=tuple(items), fetched_at=fetched_at)
 
 
@@ -209,6 +217,12 @@ class TwseAdapter:
     The spacing lives here rather than in the caller's loop so every path that
     talks to TWSE is throttled the same way. Requests are issued sequentially;
     the run queue already guarantees one institutional run at a time.
+
+    The interval is measured from when a request finishes, not from when it
+    starts, so a slow or timed-out request cannot consume the gap that follows
+    it. Each transient failure adds another interval on top, so a walk that
+    runs into a 429 or an outage keeps backing further off instead of asking
+    the same rate for its next 80 dates.
     """
 
     def __init__(
@@ -217,6 +231,7 @@ class TwseAdapter:
         base_url: str,
         timeout_seconds: float = 10.0,
         request_interval_seconds: float = 6.0,
+        max_attempts: int = 3,
         client: httpx.AsyncClient | None = None,
         sleep: Sleep = asyncio.sleep,
         monotonic: Monotonic = time.monotonic,
@@ -225,10 +240,14 @@ class TwseAdapter:
             raise ValueError("timeout_seconds must be positive")
         if request_interval_seconds < 0:
             raise ValueError("request_interval_seconds must not be negative")
+        if not 1 <= max_attempts <= 5:
+            raise ValueError("max_attempts must be between 1 and 5")
         self._interval = request_interval_seconds
+        self._max_attempts = max_attempts
         self._sleep = sleep
         self._monotonic = monotonic
         self._last_request_at: float | None = None
+        self._backoff_intervals = 0
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(
             base_url=base_url.rstrip("/"), timeout=httpx.Timeout(timeout_seconds)
@@ -263,20 +282,39 @@ class TwseAdapter:
         return parse_stock_flows(payload, trade_date=trade_date, fetched_at=fetched_at)
 
     async def _get(self, path: str, params: Mapping[str, str]) -> tuple[dict[str, Any], datetime]:
+        """Retry transient failures in place; a lost date is only refetched on
+        the next run, and runs are triggered by hand."""
+        for attempt in range(1, self._max_attempts + 1):
+            try:
+                return await self._request(path, params)
+            except DataSourceTransientError:
+                if attempt == self._max_attempts:
+                    raise
+        raise AssertionError("bounded twse request loop exited unexpectedly")
+
+    async def _request(
+        self, path: str, params: Mapping[str, str]
+    ) -> tuple[dict[str, Any], datetime]:
         if self._last_request_at is not None:
-            wait = self._interval - (self._monotonic() - self._last_request_at)
+            elapsed = self._monotonic() - self._last_request_at
+            wait = self._interval * (1 + self._backoff_intervals) - elapsed
             if wait > 0:
                 await self._sleep(wait)
-        self._last_request_at = self._monotonic()
         try:
             response = await self._client.get(
                 path, params=params, headers={"Accept": "application/json"}
             )
         except httpx.HTTPError as error:
+            self._backoff_intervals = min(self._backoff_intervals + 1, MAX_BACKOFF_INTERVALS)
             raise DataSourceTransientError("twse request failed") from error
+        finally:
+            self._last_request_at = self._monotonic()
         fetched_at = datetime.now(UTC)
         if response.status_code >= 500 or response.status_code == 429:
+            self._backoff_intervals = min(self._backoff_intervals + 1, MAX_BACKOFF_INTERVALS)
             raise DataSourceTransientError(f"twse responded {response.status_code}")
+        # The server answered, so whatever it was backing off from is over.
+        self._backoff_intervals = 0
         if response.status_code != 200:
             raise DataSourceContractError(f"twse responded {response.status_code}")
         try:

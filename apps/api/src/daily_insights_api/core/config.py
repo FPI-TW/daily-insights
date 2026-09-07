@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     twse_base_url: str = "https://www.twse.com.tw"
     twse_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     twse_request_interval_seconds: float = Field(default=6.0, ge=0, le=60)
+    twse_retry_attempts: int = Field(default=3, ge=1, le=5)
     morning_reports_enabled: bool = False
     analyst_viewpoints_enabled: bool = False
     analyst_viewpoints_base_url: str = "https://analyst-viewpoints.invalid"

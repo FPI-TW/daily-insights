@@ -53,6 +53,8 @@ MARKET_FLOW_LOOKBACK_TRADING_DAYS = 40
 MARKET_FLOW_LOOKBACK_CALENDAR_DAYS = 80
 STOCK_FLOW_LOOKBACK_TRADING_DAYS = 7
 STOCK_FLOW_LOOKBACK_CALENDAR_DAYS = 20
+# TWSE being down looks the same on every date, so stop asking after three.
+MAX_CONSECUTIVE_FAILURES = 3
 
 
 class RunAlreadyActiveError(Exception):
@@ -342,12 +344,14 @@ class _FlowWalk:
     covered_trading_days: int = 0
     stored_rows: int = 0
     failures: int = 0
+    aborted: bool = False
     days: list[dict[str, object]] = field(default_factory=list)
 
     def summary(self) -> dict[str, object]:
         return {
             "lookback_trading_days": self.lookback_trading_days,
             "covered_trading_days": self.covered_trading_days,
+            "aborted": self.aborted,
             "days": self.days,
         }
 
@@ -367,11 +371,14 @@ async def _fetch_flows_back[Flows: _TwseFlows](
 
     Each date is its own fetch and its own transaction: a failure on one date is
     recorded and the walk continues, so a re-run only has to fill the holes.
+    `MAX_CONSECUTIVE_FAILURES` in a row means the source itself is down and the
+    walk stops rather than spending minutes asking the remaining dates.
     Dates already stored count toward the window without a fetch; non-trading
     dates are re-asked every run because a make-up trading day cannot be told
     from a holiday without asking.
     """
     walk = _FlowWalk(lookback_trading_days=lookback_trading_days)
+    consecutive_failures = 0
     for offset in range(lookback_calendar_days):
         if walk.covered_trading_days >= lookback_trading_days:
             break
@@ -386,8 +393,16 @@ async def _fetch_flows_back[Flows: _TwseFlows](
             flows = await fetch(day)
         except DataSourceError as error:
             walk.failures += 1
+            consecutive_failures += 1
             entry.update(status="failed", error=sanitize_error(error))
+            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                # The source is down, not this one date. Asking the remaining
+                # dates would cost minutes and tell us nothing; the next run
+                # walks from today again and fills whatever is still missing.
+                walk.aborted = True
+                break
             continue
+        consecutive_failures = 0
         if not flows.items:
             entry["status"] = "no_data"
             continue
@@ -426,6 +441,7 @@ async def _execute_institutional_twse(
         base_url=settings.twse_base_url,
         timeout_seconds=settings.twse_timeout_seconds,
         request_interval_seconds=settings.twse_request_interval_seconds,
+        max_attempts=settings.twse_retry_attempts,
     ) as adapter:
         stock = await _fetch_flows_back(
             edition_date=run.edition_date,
@@ -450,17 +466,29 @@ async def _execute_institutional_twse(
             session_factory=session_factory,
         )
 
+    # Status follows coverage, not just failures: TWSE answers a date it cannot
+    # serve with HTTP 200 and a no-data stat, so a run that reached nothing can
+    # look clean while covering zero trading days.
     failures = stock.failures + market.failures
-    stored_rows = stock.stored_rows + market.stored_rows
+    covered = stock.covered_trading_days + market.covered_trading_days
+    wanted = stock.lookback_trading_days + market.lookback_trading_days
+    if not covered:
+        status, error_code = "failed", "twse_fetch_failures" if failures else "twse_no_coverage"
+    elif failures:
+        status, error_code = "partial", "twse_fetch_failures"
+    elif covered < wanted:
+        status, error_code = "partial", "twse_partial_coverage"
+    else:
+        status, error_code = "succeeded", None
     return (
-        "failed" if failures and not stored_rows else "partial" if failures else "succeeded",
+        status,
         {
             "market_code": INSTITUTIONAL_MARKET_CODE,
             "request_interval_seconds": settings.twse_request_interval_seconds,
             "stock_flows": stock.summary(),
             "market_flows": market.summary(),
         },
-        "twse_fetch_failures" if failures else None,
+        error_code,
     )
 
 

@@ -22,25 +22,33 @@ NEW_OPERATIONS = f"{OLD_OPERATIONS}, 'institutional_twse'"
 def _drop_operation_check() -> None:
     # 0016 named this constraint with the `ck_` prefix already applied, and the
     # metadata naming convention prefixed it again and truncated it with a hash,
-    # so the stored name is looked up instead of spelled out.
-    names = (
-        op.get_bind()
-        .execute(
-            sa.text(
-                "SELECT conname FROM pg_constraint "
-                "WHERE conrelid = CAST(:table AS regclass) AND contype = 'c' "
-                # PostgreSQL stores `operation IN (...)` as `(operation)::text = ANY (...)`.
-                "AND pg_get_constraintdef(oid) LIKE '%(operation)::text = ANY%'"
-            ),
-            {"table": TABLE},
+    # so the stored name has to be looked up rather than spelled out. The lookup
+    # runs inside the emitted SQL because `op.get_bind().execute()` returns None
+    # under `alembic upgrade --sql`, which the README documents as offline mode.
+    # No `%` anywhere in the statement: it reaches the driver as a parameterless
+    # query, and psycopg would read one as a placeholder.
+    op.execute(
+        sa.text(
+            "DO $$\n"
+            "DECLARE\n"
+            "    names text[];\n"
+            "BEGIN\n"
+            "    SELECT array_agg(conname) INTO names\n"
+            "    FROM pg_constraint\n"
+            f"    WHERE conrelid = CAST('{TABLE}' AS regclass)\n"
+            "      AND contype = 'c'\n"
+            # PostgreSQL stores `operation IN (...)` as `(operation)::text = ANY (...)`.
+            "      AND position('(operation)::text = ANY' "
+            "IN pg_get_constraintdef(oid)) > 0;\n"
+            "    IF coalesce(array_length(names, 1), 0) <> 1 THEN\n"
+            "        RAISE EXCEPTION USING MESSAGE = "
+            "'expected one operation check constraint, found: ' "
+            "|| coalesce(array_to_string(names, ', '), '<none>');\n"
+            "    END IF;\n"
+            f"    EXECUTE 'ALTER TABLE {TABLE} DROP CONSTRAINT ' || quote_ident(names[1]);\n"
+            "END $$"
         )
-        .scalars()
-        .all()
     )
-    if len(names) != 1:
-        raise RuntimeError(f"expected one operation check constraint, found {names}")
-    # op.f() marks the looked-up name as final so the convention is not applied again.
-    op.drop_constraint(op.f(names[0]), TABLE, type_="check")
 
 
 def upgrade() -> None:
