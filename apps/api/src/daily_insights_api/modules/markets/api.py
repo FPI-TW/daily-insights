@@ -1,5 +1,9 @@
 """Public market-policy application interface."""
 
+from daily_insights_api.modules.markets.models import (
+    InstitutionalMarketFlow,
+    InstitutionalStockFlow,
+)
 from daily_insights_api.modules.markets.schemas import (
     IndexDailyBarResponse,
     IndexLatestBarResponse,
@@ -14,6 +18,9 @@ from daily_insights_api.modules.markets.service import (
     market_responses,
     refresh_index_daily_bars,
     store_index_daily_bars,
+    store_institutional_market_flows,
+    store_institutional_stock_flows,
+    stored_flow_dates,
     visible_market_codes,
 )
 
@@ -21,6 +28,8 @@ __all__ = [
     "IndexDailyBarResponse",
     "IndexLatestBarResponse",
     "IndexMovingAveragesResponse",
+    "InstitutionalMarketFlow",
+    "InstitutionalStockFlow",
     "MarketResponse",
     "index_daily_bars",
     "index_moving_averages",
@@ -29,5 +38,8 @@ __all__ = [
     "market_responses",
     "refresh_index_daily_bars",
     "store_index_daily_bars",
+    "store_institutional_market_flows",
+    "store_institutional_stock_flows",
+    "stored_flow_dates",
     "visible_market_codes",
 ]

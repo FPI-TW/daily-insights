@@ -111,3 +111,70 @@ class IndexDailyBar(TimestampMixin, Base):
     provider: Mapped[str] = mapped_column(String(50), nullable=False)
     contract_version: Mapped[str] = mapped_column(String(100), nullable=False)
     source_fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+# TWSE investor categories shared by the market-level (BFI82U) and per-stock (T86)
+# reports. Totals ("合計", "自營商", "三大法人") are derivable and deliberately not stored;
+# note TWSE excludes foreign_dealer from the three-institution total because it is
+# already counted inside the dealer figures.
+INVESTOR_TYPES: tuple[str, ...] = (
+    "foreign",  # 外資及陸資(不含外資自營商)
+    "foreign_dealer",  # 外資自營商
+    "trust",  # 投信
+    "dealer_self",  # 自營商(自行買賣)
+    "dealer_hedge",  # 自營商(避險)
+)
+_INVESTOR_TYPE_SQL = ", ".join(f"'{code}'" for code in INVESTOR_TYPES)
+
+
+class InstitutionalMarketFlow(TimestampMixin, Base):
+    """One investor category's whole-market buy/sell amount (TWD) for one trading day."""
+
+    __tablename__ = "institutional_market_flows"
+    __table_args__ = (
+        CheckConstraint(f"investor_type IN ({_INVESTOR_TYPE_SQL})", name="investor_type"),
+        CheckConstraint("buy_amount >= 0 AND sell_amount >= 0", name="amounts_nonnegative"),
+        CheckConstraint("net_amount = buy_amount - sell_amount", name="net_is_buy_minus_sell"),
+        Index("ix_institutional_market_flows_market_date", "market_code", "trade_date"),
+    )
+
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    investor_type: Mapped[str] = mapped_column(String(30), primary_key=True)
+    market_code: Mapped[str] = mapped_column(
+        String(50), ForeignKey("markets.code", ondelete="RESTRICT"), nullable=False
+    )
+    buy_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sell_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    net_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class InstitutionalStockFlow(TimestampMixin, Base):
+    """One investor category's buy/sell share count for one security on one trading day."""
+
+    __tablename__ = "institutional_stock_flows"
+    __table_args__ = (
+        CheckConstraint(f"investor_type IN ({_INVESTOR_TYPE_SQL})", name="investor_type"),
+        CheckConstraint("buy_shares >= 0 AND sell_shares >= 0", name="shares_nonnegative"),
+        CheckConstraint("net_shares = buy_shares - sell_shares", name="net_is_buy_minus_sell"),
+        Index(
+            "ix_institutional_stock_flows_date_investor_net",
+            "trade_date",
+            "investor_type",
+            "net_shares",
+        ),
+        Index("ix_institutional_stock_flows_symbol_date", "symbol", "trade_date"),
+    )
+
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    investor_type: Mapped[str] = mapped_column(String(30), primary_key=True)
+    market_code: Mapped[str] = mapped_column(
+        String(50), ForeignKey("markets.code", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    # ponytail: no security master table yet, so the name rides along on every row.
+    security_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    buy_shares: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sell_shares: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    net_shares: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

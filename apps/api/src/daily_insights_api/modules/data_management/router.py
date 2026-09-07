@@ -12,6 +12,7 @@ from daily_insights_api.modules.data_management.schemas import (
     DataManagementRunList,
     DataManagementRunResponse,
     IndexYahooRunResponse,
+    InstitutionalTwseRunResponse,
     MorningAllRunResponse,
     MorningMarketRunResponse,
 )
@@ -49,6 +50,10 @@ def response(run: DataManagementRun) -> DataManagementRunResponse:
             market_code=cast(str, run.market_code),
             **values,
         )
+    if run.operation == "institutional_twse":
+        return InstitutionalTwseRunResponse(
+            operation="institutional_twse", market_code=None, **values
+        )
     return IndexYahooRunResponse(operation="index_yahoo", market_code=None, **values)
 
 
@@ -59,6 +64,7 @@ async def catalog(request: Request, _: AdminRead) -> DataManagementCatalog:
         taipei_date=taipei_today(),
         morning_reports_enabled=settings.morning_reports_enabled,
         yfinance_enabled=settings.yfinance_enabled,
+        twse_enabled=settings.twse_enabled,
         markets=[item.market_code for item in ACTIVE_LAUNCH_MANIFEST.markets],
     )
 
@@ -83,6 +89,8 @@ async def create_run(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "morning reports are unavailable")
     if payload.operation == "index_yahoo" and not settings.yfinance_enabled:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "yfinance is unavailable")
+    if payload.operation == "institutional_twse" and not settings.twse_enabled:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "twse is unavailable")
     try:
         run = await enqueue_run(
             database,

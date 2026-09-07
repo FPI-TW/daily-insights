@@ -18,6 +18,8 @@ from daily_insights_api.modules.data_sources.api import (
     DataSourceError,
     IndexSymbol,
     MarketCode,
+    TwseMarketFlows,
+    TwseStockFlows,
     YfinanceAdapter,
     YfinanceDailyBars,
 )
@@ -25,6 +27,8 @@ from daily_insights_api.modules.markets.catalog import MARKETS
 from daily_insights_api.modules.markets.models import (
     IndexDailyBar,
     IndexDailyBarSeries,
+    InstitutionalMarketFlow,
+    InstitutionalStockFlow,
     Market,
     OrganizationMarketPolicy,
 )
@@ -538,3 +542,100 @@ async def _refresh_index_daily_bars_unlocked(
             continue
         refreshed.append(IndexRefresh(result=result, stored_count=stored_count))
     return refreshed, failures
+
+
+async def stored_flow_dates(
+    database: AsyncSession,
+    *,
+    flows: type[InstitutionalMarketFlow] | type[InstitutionalStockFlow],
+    market_code: str,
+    on_or_before: date,
+    limit: int,
+) -> set[date]:
+    """The `limit` most recent trading dates that already hold rows in `flows`."""
+    rows = await database.scalars(
+        select(flows.trade_date)
+        .where(flows.market_code == market_code, flows.trade_date <= on_or_before)
+        .distinct()
+        .order_by(flows.trade_date.desc())
+        .limit(limit)
+    )
+    return set(rows.all())
+
+
+async def store_institutional_market_flows(
+    database: AsyncSession, *, market_code: str, flows: TwseMarketFlows
+) -> int:
+    """Upsert one day's market-level flows, keyed on (trade_date, investor_type)."""
+    if not flows.items:
+        return 0
+    statement = insert(InstitutionalMarketFlow).values(
+        [
+            {
+                "trade_date": flows.trade_date,
+                "investor_type": item.investor_type,
+                "market_code": market_code,
+                "buy_amount": item.buy_amount,
+                "sell_amount": item.sell_amount,
+                "net_amount": item.net_amount,
+                "source_fetched_at": flows.fetched_at,
+            }
+            for item in flows.items
+        ]
+    )
+    await database.execute(
+        statement.on_conflict_do_update(
+            index_elements=["trade_date", "investor_type"],
+            set_={
+                "market_code": statement.excluded.market_code,
+                "buy_amount": statement.excluded.buy_amount,
+                "sell_amount": statement.excluded.sell_amount,
+                "net_amount": statement.excluded.net_amount,
+                "source_fetched_at": statement.excluded.source_fetched_at,
+                "updated_at": func.now(),
+            },
+        )
+    )
+    return len(flows.items)
+
+
+async def store_institutional_stock_flows(
+    database: AsyncSession, *, market_code: str, flows: TwseStockFlows
+) -> int:
+    """Upsert one day's per-stock flows, keyed on (trade_date, symbol, investor_type)."""
+    if not flows.items:
+        return 0
+    rows = [
+        {
+            "trade_date": flows.trade_date,
+            "symbol": item.symbol,
+            "investor_type": item.investor_type,
+            "market_code": market_code,
+            "security_name": item.security_name,
+            "buy_shares": item.buy_shares,
+            "sell_shares": item.sell_shares,
+            "net_shares": item.net_shares,
+            "source_fetched_at": flows.fetched_at,
+        }
+        for item in flows.items
+    ]
+    # ~1,340 securities x 5 investors x 9 columns is close to the wire-protocol
+    # bind-parameter cap, so the write is chunked like the index bars.
+    chunk_size = MAX_BIND_PARAMETERS // len(rows[0])
+    for start in range(0, len(rows), chunk_size):
+        statement = insert(InstitutionalStockFlow).values(rows[start : start + chunk_size])
+        await database.execute(
+            statement.on_conflict_do_update(
+                index_elements=["trade_date", "symbol", "investor_type"],
+                set_={
+                    "market_code": statement.excluded.market_code,
+                    "security_name": statement.excluded.security_name,
+                    "buy_shares": statement.excluded.buy_shares,
+                    "sell_shares": statement.excluded.sell_shares,
+                    "net_shares": statement.excluded.net_shares,
+                    "source_fetched_at": statement.excluded.source_fetched_at,
+                    "updated_at": func.now(),
+                },
+            )
+        )
+    return len(rows)

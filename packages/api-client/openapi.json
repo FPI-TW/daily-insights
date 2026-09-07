@@ -837,6 +837,10 @@
             "title": "Taipei Date",
             "type": "string"
           },
+          "twse_enabled": {
+            "title": "Twse Enabled",
+            "type": "boolean"
+          },
           "yfinance_enabled": {
             "title": "Yfinance Enabled",
             "type": "boolean"
@@ -846,6 +850,7 @@
           "taipei_date",
           "morning_reports_enabled",
           "yfinance_enabled",
+          "twse_enabled",
           "markets"
         ],
         "title": "DataManagementCatalog",
@@ -858,6 +863,7 @@
               "discriminator": {
                 "mapping": {
                   "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
+                  "institutional_twse": "#/components/schemas/InstitutionalTwseRunResponse",
                   "morning_all": "#/components/schemas/MorningAllRunResponse",
                   "morning_market": "#/components/schemas/MorningMarketRunResponse"
                 },
@@ -872,6 +878,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/IndexYahooRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/InstitutionalTwseRunResponse"
                 }
               ]
             },
@@ -1386,6 +1395,124 @@
           "market_code"
         ],
         "title": "IndexYahooRunResponse",
+        "type": "object"
+      },
+      "InstitutionalTwseRunCreate": {
+        "additionalProperties": false,
+        "description": "Fetch TWSE institutional flows: per-stock for the edition date, market\ntotals back to a rolling window of trading days.",
+        "properties": {
+          "market_code": {
+            "title": "Market Code",
+            "type": "null"
+          },
+          "operation": {
+            "const": "institutional_twse",
+            "title": "Operation",
+            "type": "string"
+          }
+        },
+        "required": ["operation"],
+        "title": "InstitutionalTwseRunCreate",
+        "type": "object"
+      },
+      "InstitutionalTwseRunResponse": {
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "market_code": {
+            "title": "Market Code",
+            "type": "null"
+          },
+          "operation": {
+            "const": "institutional_twse",
+            "title": "Operation",
+            "type": "string"
+          },
+          "requested_by_user_id": {
+            "format": "uuid",
+            "title": "Requested By User Id",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "enum": ["pending", "running", "succeeded", "partial", "failed"],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "edition_date",
+          "status",
+          "requested_by_user_id",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "result",
+          "error",
+          "operation",
+          "market_code"
+        ],
+        "title": "InstitutionalTwseRunResponse",
         "type": "object"
       },
       "InternalUserCreate": {
@@ -4318,6 +4445,7 @@
                 "discriminator": {
                   "mapping": {
                     "index_yahoo": "#/components/schemas/IndexYahooRunCreate",
+                    "institutional_twse": "#/components/schemas/InstitutionalTwseRunCreate",
                     "morning_all": "#/components/schemas/MorningAllRunCreate",
                     "morning_market": "#/components/schemas/MorningMarketRunCreate"
                   },
@@ -4332,6 +4460,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/IndexYahooRunCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/InstitutionalTwseRunCreate"
                   }
                 ],
                 "title": "Payload"
@@ -4348,6 +4479,7 @@
                   "discriminator": {
                     "mapping": {
                       "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
+                      "institutional_twse": "#/components/schemas/InstitutionalTwseRunResponse",
                       "morning_all": "#/components/schemas/MorningAllRunResponse",
                       "morning_market": "#/components/schemas/MorningMarketRunResponse"
                     },
@@ -4362,6 +4494,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/IndexYahooRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InstitutionalTwseRunResponse"
                     }
                   ],
                   "title": "Response Create Run Api Admin Data Management Runs Post"
@@ -4413,6 +4548,7 @@
                   "discriminator": {
                     "mapping": {
                       "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
+                      "institutional_twse": "#/components/schemas/InstitutionalTwseRunResponse",
                       "morning_all": "#/components/schemas/MorningAllRunResponse",
                       "morning_market": "#/components/schemas/MorningMarketRunResponse"
                     },
@@ -4427,6 +4563,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/IndexYahooRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InstitutionalTwseRunResponse"
                     }
                   ],
                   "title": "Response Get Run Api Admin Data Management Runs  Run Id  Get"

@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     # client, so the back-office fetch endpoint is opt-in.
     yfinance_enabled: bool = False
     yfinance_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    # TWSE rwd is a public site with no API contract or key. Reachability from a
+    # datacenter IP is unverified, so the institutional-flow fetch is opt-in and
+    # the request spacing is a knob rather than a constant.
+    twse_enabled: bool = False
+    twse_base_url: str = "https://www.twse.com.tw"
+    twse_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    twse_request_interval_seconds: float = Field(default=6.0, ge=0, le=60)
     morning_reports_enabled: bool = False
     analyst_viewpoints_enabled: bool = False
     analyst_viewpoints_base_url: str = "https://analyst-viewpoints.invalid"
@@ -149,6 +156,10 @@ class Settings(BaseSettings):
                 or is_placeholder_value(self.twelve_data_api_key.get_secret_value())
             ):
                 raise ValueError("twelve_data_api_key is required and cannot be a placeholder")
+        if self.twse_enabled:
+            twse_url = urlparse(self.twse_base_url)
+            if twse_url.scheme != "https" or not twse_url.netloc:
+                raise ValueError("twse_base_url must be an absolute HTTPS URL")
         if self.analyst_viewpoints_enabled:
             viewpoints_url = urlparse(self.analyst_viewpoints_base_url)
             if viewpoints_url.scheme != "https" or not viewpoints_url.netloc:
