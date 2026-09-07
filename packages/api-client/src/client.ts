@@ -508,6 +508,15 @@ export function createPodcastAdminClient(transport: ApiTransport) {
         podcastEpisodeAdminSchema
       )
     },
+    async analyzeAudio(episodeId: string, locale: Locale, csrfToken: string) {
+      return parseResponse(
+        await transport(
+          `/api/admin/podcasts/${episodeId}/audio/${locale}/analyze`,
+          { method: "POST", headers: mutationHeaders(csrfToken) }
+        ),
+        podcastEpisodeAdminSchema
+      )
+    },
     async importAudio(
       episodeId: string,
       input: PodcastAudioImportInput,

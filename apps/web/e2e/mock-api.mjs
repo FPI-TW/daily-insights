@@ -34,6 +34,13 @@ function reset(overrides = {}) {
     episodeVersion: 2,
     audioVersion: 1,
     chapters: [],
+    chaptersSource: "none",
+    metadata: null,
+    metadataSource: "derived",
+    analysis: "normal",
+    analysisStatus: "none",
+    analysisError: null,
+    analyzedAt: null,
     podcastEpisodes: "single",
     reports: "normal",
     requests: [],
@@ -176,11 +183,16 @@ function adminEpisode({
     trading_date: tradingDate,
     status,
     version: state.episodeVersion,
-    metadata: [
+    metadata: state.metadata ?? [
       {
         locale: "zh-hant",
         title: "市場晨間簡報",
         summary: "測試用繁體中文摘要。",
+      },
+      {
+        locale: "zh-hans",
+        title: "市场晨间简报",
+        summary: "测试用简体中文摘要。",
       },
       {
         locale: "en",
@@ -188,6 +200,7 @@ function adminEpisode({
         summary: "An English summary for browser testing.",
       },
     ],
+    metadata_source: state.metadataSource,
     audio_variants: [
       {
         asset_id: assetId,
@@ -196,6 +209,10 @@ function adminEpisode({
         is_active: true,
         duration_seconds: 490,
         chapters: state.chapters,
+        chapters_source: state.chaptersSource,
+        analysis_status: state.analysisStatus,
+        analysis_error: state.analysisError,
+        analyzed_at: state.analyzedAt,
       },
     ],
     cover_asset_id: null,
@@ -620,6 +637,77 @@ const server = createServer(async (request, response) => {
       reason: input.reason,
     })
     state.chapters = input.chapters
+    state.chaptersSource = input.chapters.length > 0 ? "manual" : "none"
+    state.episodeVersion += 1
+    sendJson(response, 200, adminEpisode())
+    return
+  }
+
+  const analyzeMatch = new RegExp(
+    `^/api/admin/podcasts/${episodeId}/audio/([^/]+)/analyze$`
+  ).exec(url.pathname)
+  if (analyzeMatch && request.method === "POST") {
+    const role = requireRole(request, response, ["admin", "asset_manager"])
+    if (!role || !requireCsrf(request, response)) return
+    recordRequest(request, url, role, {
+      csrf: "valid",
+      locale: analyzeMatch[1],
+    })
+    if (state.analysis === "disabled") {
+      sendJson(response, 409, { detail: { code: "podcast_analysis_disabled" } })
+      return
+    }
+    state.analysisStatus = "pending"
+    state.analysisError = null
+    // The real analysis runs in the background; finish it shortly after.
+    setTimeout(() => {
+      if (state.analysisStatus !== "pending") return
+      state.analysisStatus = "succeeded"
+      state.analyzedAt = "2026-07-24T08:05:00+08:00"
+      if (state.chaptersSource !== "manual") {
+        state.chapters = [
+          { start_seconds: 0, title: "AI 開場" },
+          { start_seconds: 120, title: "AI 外資" },
+          { start_seconds: 300, title: "AI 清單" },
+        ]
+        state.chaptersSource = "ai"
+      }
+      if (state.metadataSource !== "manual") {
+        state.metadata = [
+          { locale: "zh-hant", title: "AI 標題", summary: "AI 摘要" },
+          { locale: "zh-hans", title: "AI 标题", summary: "AI 摘要" },
+          { locale: "en", title: "AI title", summary: "AI summary" },
+        ]
+        state.metadataSource = "ai"
+      }
+    }, 400)
+    sendJson(response, 202, adminEpisode())
+    return
+  }
+
+  if (
+    url.pathname === `/api/admin/podcasts/${episodeId}` &&
+    request.method === "PUT"
+  ) {
+    const role = requireRole(request, response, ["admin"])
+    if (!role || !requireCsrf(request, response)) return
+    const input = parseJsonBody(await readBody(request))
+    if (input === null || !Array.isArray(input.metadata?.values)) {
+      sendJson(response, 422, { detail: "Invalid metadata" })
+      return
+    }
+    if (input.expected_version !== state.episodeVersion) {
+      sendJson(response, 409, { detail: "Expected version mismatch" })
+      return
+    }
+    recordRequest(request, url, role, {
+      csrf: "valid",
+      expectedVersion: input.expected_version,
+      metadata: input.metadata.values,
+      reason: input.reason,
+    })
+    state.metadata = input.metadata.values
+    state.metadataSource = "manual"
     state.episodeVersion += 1
     sendJson(response, 200, adminEpisode())
     return

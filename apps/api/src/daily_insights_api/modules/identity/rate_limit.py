@@ -39,42 +39,48 @@ async def consume_login_attempt(
     ip_address: str,
     email: str,
 ) -> bool:
-    assert settings.session_secret is not None
-    key_hash = hash_token(
-        f"{ip_address}:{email}",
-        settings.session_secret.get_secret_value(),
+    # A fixed order avoids deadlocks; reject before allocating caller-controlled
+    # keys once a shared budget is exhausted. Successful login clears only the pair.
+    limits = (
+        ("global", settings.login_global_rate_limit_attempts),
+        (f"ip:{ip_address}", settings.login_ip_rate_limit_attempts),
+        (f"{ip_address}:{email}", settings.login_rate_limit_attempts),
     )
+    assert settings.session_secret is not None
+    secret = settings.session_secret.get_secret_value()
     now = datetime.now(UTC)
     cutoff = now - timedelta(seconds=settings.login_rate_limit_window_seconds)
     expired = LoginThrottle.window_started_at <= cutoff
-    statement = (
-        insert(LoginThrottle)
-        .values(
-            key_hash=key_hash,
-            attempt_count=1,
-            window_started_at=now,
-            updated_at=now,
-        )
-        .on_conflict_do_update(
-            index_elements=[LoginThrottle.key_hash],
-            set_={
-                "attempt_count": case(
-                    (expired, 1),
-                    else_=LoginThrottle.attempt_count + 1,
-                ),
-                "window_started_at": case(
-                    (expired, now),
-                    else_=LoginThrottle.window_started_at,
-                ),
-                "updated_at": now,
-            },
-        )
-        .returning(LoginThrottle.attempt_count)
-    )
     async with session_factory.begin() as database:
         await database.execute(delete(LoginThrottle).where(LoginThrottle.updated_at <= cutoff))
-        count = await database.scalar(statement)
-    return count is not None and count <= settings.login_rate_limit_attempts
+        for key, limit in limits:
+            statement = (
+                insert(LoginThrottle)
+                .values(
+                    key_hash=hash_token(key, secret),
+                    attempt_count=1,
+                    window_started_at=now,
+                    updated_at=now,
+                )
+                .on_conflict_do_update(
+                    index_elements=[LoginThrottle.key_hash],
+                    set_={
+                        "attempt_count": case(
+                            (expired, 1),
+                            else_=LoginThrottle.attempt_count + 1,
+                        ),
+                        "window_started_at": case(
+                            (expired, now), else_=LoginThrottle.window_started_at
+                        ),
+                        "updated_at": now,
+                    },
+                )
+                .returning(LoginThrottle.attempt_count)
+            )
+            count = await database.scalar(statement)
+            if count is None or count > limit:
+                return False
+    return True
 
 
 async def clear_login_attempts(

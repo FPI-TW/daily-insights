@@ -108,8 +108,11 @@ podcast_episode_audio_variants
   `mp3` 與 `mp4`。三個語系使用相同 basename 並透過 locale 路徑區分；同交易日
   同語系經明確確認後，格式相同時覆寫同一 stable key；格式改變時先寫入新格式
   的 stable-extension key，再刪除被取代的舊格式 object。
-- object key 與檔名只由後端產生，來源檔名不進入 R2 key。標題由固定檔名
-  `podcast` 與路徑中的 trading date 推導，上傳者不輸入標題或摘要。
+- object key 與檔名只由後端產生，來源檔名不進入 R2 key。上傳時不輸入標題或
+  摘要；標題與摘要有三個來源，優先序為人工 > AI > 推導：後台 `admin` 可輸入
+  三語標題與摘要（`metadata_source = manual`，之後 AI 不再覆寫）；啟用 AI
+  分析時由逐字稿產生（`ai`）；兩者皆無時顯示由固定檔名 `podcast` 與 trading
+  date 推導的 `Podcast | YYYY-MM-DD`（`derived`）。
 - 既有 object 透過受控 migration/import workflow 處理：內部人員提供來源
   key、`trading_date` 與 locale，後端不信任也不解析舊檔名，並將 object
   複製到不可變 target key
@@ -129,14 +132,43 @@ podcast_episode_audio_variants
 - 使用者明確選擇收聽後才請求短效 signed URL；單集載入或媒體失敗可獨立重試；
 - 原生 HTML `<audio>` 的播放、暫停、seek、載入與錯誤狀態；
 - 保存與恢復每位使用者的播放進度；
-- 顯示標題由 canonical 路徑與檔名推導，不接受人工 metadata。
+- 標題、摘要與章節依「人工 > AI > 推導／音檔標記」的優先序顯示；章節區在
+  沒有章節時隱藏。
 
 內部端：
 
 - `admin` 與 `asset_manager` 可透過三語 slot 建立 episode、上傳或替換 audio，
   成功上傳後 episode 預設發布，且兩種身份皆可發布及下架；
 - 檢查至少一個 audio variant、asset 狀態與 MIME type 後才允許發布；
+- 每個有效音檔可編輯章節（「分:秒 標題」每行一段），`admin` 可編輯三語
+  標題與摘要；
 - privileged mutation audit。
+
+## AI 分析（標題、摘要、章節）
+
+`DAILY_INSIGHTS_PODCAST_ANALYSIS_ENABLED=true` 時，每次上傳或登記音檔後在
+API 程序內以背景工作執行 `podcasts/analysis.py`：
+
+1. 從 R2 讀回音檔（上限 25 MB），呼叫 OpenAI `POST /audio/transcriptions`
+   （預設 `whisper-1`，`verbose_json` 取得每段起訖秒數；語言依音檔語系）。
+2. 把逐字稿合併成至少 20 秒的 blocks，交給每日新聞使用的 DeepSeek 端點
+   （`DAILY_INSIGHTS_MODEL_*`），要求輸出三語標題、摘要與 3 到 6 段章節；
+   章節只能指向 block 編號，程式端換算成起始秒數並套用章節驗證規則。
+3. 寫回音檔變體的 `chapters`（`chapters_source = ai`）與 `transcript`，以及
+   集數的三語 translations（`metadata_source = ai`）。人工填過的標題或章節
+   （`manual`）不會被覆寫；成功或失敗都記錄在 `analysis_status`、
+   `analysis_error`、`analyzed_at` 與 audit event `podcast.audio_analyzed`。
+   分析不會變動 episode `version`。
+
+後台每個音檔顯示分析狀態，並可按「AI 分析」重跑（`POST
+/api/admin/podcasts/{id}/audio/{locale}/analyze`，回 202）。既有集數可用
+`python -m daily_insights_api.scripts.run_podcast_analysis`（加 `--all` 重做全部、
+`--trading-date` 指定單日）補做。
+
+設定：`DAILY_INSIGHTS_OPENAI_API_KEY`（Secret）、`DAILY_INSIGHTS_OPENAI_API_BASE_URL`
+（預設 `https://api.openai.com/v1`）、`DAILY_INSIGHTS_TRANSCRIPTION_MODEL`、
+`DAILY_INSIGHTS_PODCAST_ANALYSIS_TIMEOUT_SECONDS`（預設 240）。啟用時
+readiness 會檢查兩把 key 與 R2 是否齊備。
 
 下列功能不納入先行版：RSS feed、公開匿名播放、離線下載、scheduled
 publication、show/series/season、episode number、收聽分析、留言、訂閱通知、

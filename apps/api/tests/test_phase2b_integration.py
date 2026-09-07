@@ -503,10 +503,10 @@ async def test_retained_history_triggers_enforce_lifecycle(
                 await database.execute(text(statement), {"id": record_id})
 
 
-@pytest.mark.asyncio
-async def test_chat_turn_commits_before_observation_and_enforces_tenant_pending_and_replay(
+@pytest_asyncio.fixture
+async def chat_setup(
     phase2b_database: Phase2BDatabase,
-) -> None:
+) -> tuple[AuthContext, ChatStreamRequest]:
     organization_id, other_organization_id, member_id, other_member_id = (
         uuid.uuid4(),
         uuid.uuid4(),
@@ -592,7 +592,21 @@ async def test_chat_turn_commits_before_observation_and_enforces_tenant_pending_
         message="Question",
         page_context=ReportsIndexContext(kind="reports_index", publication_ids=[uuid.uuid4()]),
     )
+    return context, payload
+
+
+@pytest.mark.asyncio
+async def test_chat_turn_commits_before_observation_and_enforces_tenant_pending_and_replay(
+    phase2b_database: Phase2BDatabase,
+    chat_setup: tuple[AuthContext, ChatStreamRequest],
+) -> None:
+    context, payload = chat_setup
+    member = context.user
     async with phase2b_database.session_factory() as database:
+        other_organization_id = await database.scalar(
+            select(Organization.id).where(Organization.id != context.organization_id)
+        )
+        assert other_organization_id is not None
         (
             conversation,
             user_message,
@@ -605,6 +619,7 @@ async def test_chat_turn_commits_before_observation_and_enforces_tenant_pending_
             payload=payload,
             snapshot={"version": CHAT_CONTEXT_VERSION, "kind": "test"},
             report_version=None,
+            settings=phase2b_database.settings,
         )
         assert replay is False
         assert generation.context_version == CHAT_CONTEXT_VERSION
@@ -634,6 +649,7 @@ async def test_chat_turn_commits_before_observation_and_enforces_tenant_pending_
                 ),
                 snapshot={"version": CHAT_CONTEXT_VERSION, "kind": "test"},
                 report_version=None,
+                settings=phase2b_database.settings,
             )
         await database.rollback()
     async with phase2b_database.session_factory.begin() as database:
@@ -652,8 +668,10 @@ async def test_chat_turn_commits_before_observation_and_enforces_tenant_pending_
             payload=payload,
             snapshot={"version": CHAT_CONTEXT_VERSION, "kind": "changed"},
             report_version=None,
+            settings=phase2b_database.settings,
         )
         assert replay is True
+        assert not database.in_transaction()
         with pytest.raises(HTTPException, match="not found"):
             await _create_pending_turn(
                 database,
@@ -665,4 +683,247 @@ async def test_chat_turn_commits_before_observation_and_enforces_tenant_pending_
                 ),
                 snapshot={"version": CHAT_CONTEXT_VERSION, "kind": "test"},
                 report_version=None,
+                settings=phase2b_database.settings,
             )
+
+
+async def _new_chat_turn(
+    fixture: Phase2BDatabase,
+    context: AuthContext,
+    payload: ChatStreamRequest,
+) -> tuple[Conversation, Message, Message, GenerationRecord, bool]:
+    async with fixture.session_factory() as database:
+        return await _create_pending_turn(
+            database,
+            context=context,
+            payload=payload,
+            snapshot={"version": CHAT_CONTEXT_VERSION, "kind": "test"},
+            report_version=None,
+            settings=fixture.settings,
+        )
+
+
+async def test_chat_parallel_new_conversations_share_user_limit(
+    phase2b_database: Phase2BDatabase,
+    chat_setup: tuple[AuthContext, ChatStreamRequest],
+) -> None:
+    context, payload = chat_setup
+    phase2b_database.settings.chat_user_max_pending = 2
+    results = await asyncio.gather(
+        *(
+            _new_chat_turn(
+                phase2b_database,
+                context,
+                payload.model_copy(update={"client_request_id": uuid.uuid4()}),
+            )
+            for _ in range(8)
+        ),
+        return_exceptions=True,
+    )
+    assert sum(isinstance(value, tuple) for value in results) == 2
+    errors = [value for value in results if isinstance(value, BaseException)]
+    assert all(isinstance(error, HTTPException) and error.status_code == 429 for error in errors)
+    async with phase2b_database.session_factory() as database:
+        assert await database.scalar(select(func.count()).select_from(Conversation)) == 2
+
+
+@pytest.mark.parametrize("scope", ["user", "org"])
+async def test_chat_daily_budget_counts_failed_turns_and_preserves_replay(
+    phase2b_database: Phase2BDatabase,
+    chat_setup: tuple[AuthContext, ChatStreamRequest],
+    scope: str,
+) -> None:
+    from daily_insights_api.modules.chat.api import _terminalize
+    from daily_insights_api.modules.chat.provider import ProviderMetadata
+
+    context, payload = chat_setup
+    setattr(phase2b_database.settings, f"chat_{scope}_daily_turns", 1)
+    _, _, assistant, generation, _ = await _new_chat_turn(phase2b_database, context, payload)
+    await _terminalize(
+        phase2b_database.session_factory,
+        assistant_id=assistant.id,
+        generation_id=generation.id,
+        content="",
+        terminal=GenerationStatus.ERROR,
+        metadata=ProviderMetadata(),
+        error_code="cancelled",
+    )
+    assert (await _new_chat_turn(phase2b_database, context, payload))[-1] is True
+    with pytest.raises(HTTPException) as error:
+        await _new_chat_turn(
+            phase2b_database,
+            context,
+            payload.model_copy(update={"client_request_id": uuid.uuid4()}),
+        )
+    assert error.value.status_code == 429
+    assert "daily" in str(error.value.detail)
+
+
+async def test_chat_organization_limit_covers_multiple_members_and_releases_on_terminal(
+    phase2b_database: Phase2BDatabase,
+    chat_setup: tuple[AuthContext, ChatStreamRequest],
+) -> None:
+    from daily_insights_api.modules.chat.api import _terminalize
+    from daily_insights_api.modules.chat.provider import ProviderMetadata
+
+    context, payload = chat_setup
+    phase2b_database.settings.chat_org_max_pending = 1
+    async with phase2b_database.session_factory.begin() as database:
+        second = User(
+            email="second-chat@example.com",
+            display_name="Second",
+            password_hash="x",
+            must_change_password=False,
+            system_role=SystemRole.ORG_MEMBER,
+            status=UserStatus.ACTIVE,
+        )
+        database.add(second)
+        await database.flush()
+        database.add(Membership(organization_id=context.organization_id, user_id=second.id))
+    other = AuthContext(
+        user=second, session=context.session, organization_id=context.organization_id
+    )
+    _, _, assistant, generation, _ = await _new_chat_turn(phase2b_database, context, payload)
+    other_payload = payload.model_copy(update={"client_request_id": uuid.uuid4()})
+    with pytest.raises(HTTPException) as error:
+        await _new_chat_turn(phase2b_database, other, other_payload)
+    assert error.value.status_code == 429
+    await _terminalize(
+        phase2b_database.session_factory,
+        assistant_id=assistant.id,
+        generation_id=generation.id,
+        content="Normal reply",
+        terminal=GenerationStatus.COMPLETE,
+        metadata=ProviderMetadata(),
+    )
+    assert (await _new_chat_turn(phase2b_database, other, other_payload))[-1] is False
+
+
+async def test_chat_recovers_crashed_pending_turn_without_resetting_daily_usage(
+    phase2b_database: Phase2BDatabase,
+    chat_setup: tuple[AuthContext, ChatStreamRequest],
+) -> None:
+    context, payload = chat_setup
+    phase2b_database.settings.chat_user_max_pending = 1
+    _, _, assistant, generation, _ = await _new_chat_turn(phase2b_database, context, payload)
+    async with phase2b_database.session_factory.begin() as database:
+        stale = await database.get(Message, assistant.id)
+        assert stale is not None
+        stale.created_at = datetime.now(UTC) - timedelta(seconds=700)
+    assert (
+        await _new_chat_turn(
+            phase2b_database,
+            context,
+            payload.model_copy(update={"client_request_id": uuid.uuid4()}),
+        )
+    )[-1] is False
+    async with phase2b_database.session_factory() as database:
+        recovered = await database.get(GenerationRecord, generation.id)
+        assert recovered is not None
+        assert recovered.status == GenerationStatus.ERROR
+        assert recovered.error_code == "expired"
+        assert (
+            await database.scalar(
+                select(func.count())
+                .select_from(Message)
+                .where(Message.role == MessageRole.ASSISTANT)
+            )
+            == 2
+        )
+
+
+@pytest.mark.parametrize("failure", ["history", "acquisition", "timeout", "cancel", "success"])
+async def test_chat_response_releases_admission_on_all_exit_paths(
+    phase2b_database: Phase2BDatabase,
+    chat_setup: tuple[AuthContext, ChatStreamRequest],
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    from types import SimpleNamespace
+    from typing import cast
+    from unittest.mock import AsyncMock
+
+    from starlette.requests import Request
+
+    from daily_insights_api.modules.chat import api as chat_api
+    from daily_insights_api.modules.chat.provider import ProviderMetadata
+
+    context, payload = chat_setup
+    phase2b_database.settings.chat_user_max_pending = 1
+    phase2b_database.settings.chat_timeout_seconds = 0.3
+    entered = asyncio.Event()
+
+    class Stream:
+        metadata = ProviderMetadata()
+
+        async def __aiter__(self) -> AsyncIterator[str]:
+            yield "Normal answer"
+
+    async def provider_stream(**_: object) -> Stream:
+        entered.set()
+        if failure == "acquisition":
+            raise ValueError("provider unavailable")
+        if failure in {"timeout", "cancel"}:
+            await asyncio.Event().wait()
+        return Stream()
+
+    monkeypatch.setattr(
+        chat_api,
+        "_page_snapshot",
+        AsyncMock(return_value=({"version": CHAT_CONTEXT_VERSION}, None)),
+    )
+    if failure == "history":
+        monkeypatch.setattr(
+            chat_api, "_previous_messages", AsyncMock(side_effect=ValueError("history unavailable"))
+        )
+    request = cast(
+        Request,
+        SimpleNamespace(
+            app=SimpleNamespace(
+                state=SimpleNamespace(
+                    settings=phase2b_database.settings,
+                    session_factory=phase2b_database.session_factory,
+                    chat_provider=SimpleNamespace(stream=provider_stream),
+                )
+            ),
+            is_disconnected=AsyncMock(return_value=False),
+        ),
+    )
+    # The direct route is already past authentication; exercise the actual DB
+    # admission, response iterator, provider acquisition, and terminal cleanup.
+    phase2b_database.settings.chat_enabled = True
+    async with phase2b_database.session_factory() as database:
+        response = await chat_api.stream_chat(payload, request, context, database)
+
+        async def consume() -> list[str | bytes]:
+            return [
+                event if isinstance(event, str) else bytes(event)
+                async for event in response.body_iterator
+            ]
+
+        if failure == "cancel":
+            task = asyncio.create_task(consume())
+            await asyncio.wait_for(entered.wait(), 2)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            events = await consume()
+            body = b"".join(event.encode() if isinstance(event, str) else event for event in events)
+            assert (b"event: done" if failure == "success" else b"event: error") in body
+    async with phase2b_database.session_factory() as database:
+        assistant = await database.scalar(
+            select(Message).where(Message.role == MessageRole.ASSISTANT)
+        )
+        assert assistant is not None
+        assert assistant.status == (
+            GenerationStatus.COMPLETE if failure == "success" else GenerationStatus.ERROR
+        )
+    # Same user can start a distinct conversation after cleanup.
+    assert (
+        await _new_chat_turn(
+            phase2b_database,
+            context,
+            payload.model_copy(update={"client_request_id": uuid.uuid4()}),
+        )
+    )[-1] is False

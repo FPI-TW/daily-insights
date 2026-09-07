@@ -360,6 +360,90 @@ test.describe("Podcast administration", () => {
     ])
   })
 
+  test("runs AI analysis and lets an admin overwrite the localized title", async ({
+    page,
+    request,
+  }) => {
+    await openHydrated(
+      page,
+      "/en/admin/audio",
+      'form[data-chapters-locale="zh-hant"] textarea'
+    )
+    const editor = page.locator('form[data-chapters-locale="zh-hant"]')
+    await expect(
+      editor.getByText("Chapters: none · Not analyzed")
+    ).toBeVisible()
+    await expect(page.getByText("Title source: derived")).toBeVisible()
+
+    await editor.getByRole("button", { name: "Analyze with AI" }).click()
+    await expect(editor.getByText("AI analysis running")).toBeVisible()
+    await expect(editor.getByText(/Chapters: AI · Analyzed by AI/)).toBeVisible(
+      {
+        timeout: 15_000,
+      }
+    )
+    await expect(editor.getByLabel("Chapters (zh-hant)")).toHaveValue(
+      "0:00 AI 開場\n2:00 AI 外資\n5:00 AI 清單"
+    )
+    await expect(page.getByText("Title source: AI")).toBeVisible()
+    await expect(page.getByText("AI title", { exact: true })).toBeVisible()
+
+    await page.getByRole("button", { name: "Edit localized content" }).click()
+    const metadata = page.locator("form[data-metadata-editor]")
+    await expect(
+      metadata.locator("input#podcast-title-" + episodeId + "-en")
+    ).toHaveValue("AI title")
+    await metadata
+      .locator("input#podcast-title-" + episodeId + "-en")
+      .fill("Editor title")
+    await metadata
+      .locator("input#podcast-metadata-reason-" + episodeId)
+      .fill("fix title")
+    await metadata.getByRole("button", { name: "Save content" }).click()
+    await expect(page.getByText("Title source: manual")).toBeVisible()
+    await expect(page.getByText("Editor title", { exact: true })).toBeVisible()
+
+    const requests = (await getMockApiState(request)).requests
+    expect(requests.filter(item => item.path.endsWith("/analyze"))).toEqual([
+      expect.objectContaining({
+        role: "admin",
+        facts: { csrf: "valid", locale: "zh-hant" },
+      }),
+    ])
+    const update = requests.find(
+      item =>
+        item.method === "PUT" &&
+        item.path === `/api/admin/podcasts/${episodeId}`
+    )
+    expect(update).toMatchObject({
+      role: "admin",
+      facts: expect.objectContaining({
+        csrf: "valid",
+        reason: "fix title",
+        metadata: expect.arrayContaining([
+          { locale: "en", title: "Editor title", summary: "AI summary" },
+        ]),
+      }),
+    })
+  })
+
+  test("explains when AI analysis is not enabled", async ({
+    page,
+    request,
+  }) => {
+    await resetMockApi(request, { analysis: "disabled" })
+    await openHydrated(
+      page,
+      "/en/admin/audio",
+      'form[data-chapters-locale="zh-hant"] textarea'
+    )
+    const editor = page.locator('form[data-chapters-locale="zh-hant"]')
+    await editor.getByRole("button", { name: "Analyze with AI" }).click()
+    await expect(editor.getByRole("alert")).toHaveText(
+      "AI analysis is not enabled in this environment."
+    )
+  })
+
   test("groups compact episode cards by localized descending month", async ({
     page,
     request,

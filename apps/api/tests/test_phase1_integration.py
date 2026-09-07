@@ -1170,3 +1170,59 @@ async def test_market_policy_is_tenant_scoped_and_spoofed_header_is_ignored(
         "reason": "customer restriction",
     }
     assert latest_policy_event["after"]["contract_reference"] == "contract-a-addendum"
+
+
+async def test_login_email_rotation_is_limited_across_app_instances(
+    harness: Harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness.settings.login_ip_rate_limit_attempts = 3
+    verified = 0
+    original = verify_password
+
+    def verify(password: str, encoded: str, pepper: str) -> bool:
+        nonlocal verified
+        verified += 1
+        return original(password, encoded, pepper)
+
+    monkeypatch.setattr(identity_router, "verify_password", verify)
+    # Successful requests must also consume the aggregate source budget.
+    response = await harness.client.post(
+        "/api/auth/login",
+        json={"email": "admin@example.com", "password": "AdminPassword123!"},
+    )
+    assert response.status_code == 200
+    for index in range(2):
+        response = await harness.client.post(
+            "/api/auth/login",
+            json={"email": f"missing-{index}@example.com", "password": "wrong"},
+        )
+        assert response.status_code == 401
+    second_app = create_app(harness.settings, ready, harness.session_factory)
+    async with AsyncClient(
+        transport=ASGITransport(app=second_app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/auth/login",
+            json={"email": "another@example.com", "password": "wrong"},
+        )
+    assert response.status_code == 429
+    assert verified == 3
+
+
+async def test_login_global_budget_is_atomic_for_rotating_ips_and_emails(harness: Harness) -> None:
+    from daily_insights_api.modules.identity.rate_limit import consume_login_attempt
+
+    harness.settings.login_global_rate_limit_attempts = 3
+    results = await asyncio.gather(
+        *(
+            consume_login_attempt(
+                harness.session_factory,
+                settings=harness.settings,
+                ip_address=f"192.0.2.{index}",
+                email=f"missing-{index}@example.com",
+            )
+            for index in range(12)
+        )
+    )
+    assert sum(results) == 3

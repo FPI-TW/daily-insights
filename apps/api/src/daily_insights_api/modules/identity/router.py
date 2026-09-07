@@ -19,6 +19,7 @@ from daily_insights_api.core.security import (
 from daily_insights_api.modules.audit.api import record_audit_event
 from daily_insights_api.modules.identity.auth import AuthContext, get_auth_context, require_csrf
 from daily_insights_api.modules.identity.models import User
+from daily_insights_api.modules.identity.password_work import PasswordWork
 from daily_insights_api.modules.identity.rate_limit import (
     clear_login_attempts,
     client_ip,
@@ -88,8 +89,15 @@ async def login(
     user = await database.scalar(select(User).where(User.email == email))
     assert settings.password_pepper is not None
     pepper = settings.password_pepper.get_secret_value()
-    candidate_hash = user.password_hash if user is not None else dummy_password_hash(pepper)
-    password_is_valid = verify_password(payload.password, candidate_hash, pepper)
+    password_work: PasswordWork = request.app.state.password_work
+    candidate_hash = (
+        user.password_hash
+        if user is not None
+        else await password_work.run(dummy_password_hash, pepper)
+    )
+    password_is_valid = await password_work.run(
+        verify_password, payload.password, candidate_hash, pepper
+    )
     organization_id = None
     organization_is_active = True
     if user is not None and user.system_role == SystemRole.ORG_MEMBER:
@@ -148,7 +156,9 @@ async def login(
             user.password_hash.encode("utf-8"),
         )
         if not hash_is_unchanged:
-            password_is_valid = verify_password(payload.password, user.password_hash, pepper)
+            password_is_valid = await password_work.run(
+                verify_password, payload.password, user.password_hash, pepper
+            )
     valid = (
         user is not None
         and user.status == UserStatus.ACTIVE
@@ -165,7 +175,7 @@ async def login(
         email=email,
     )
     if password_needs_rehash(user.password_hash):
-        user.password_hash = hash_password(payload.password, pepper)
+        user.password_hash = await password_work.run(hash_password, payload.password, pepper)
     session, token, csrf_token = create_session(database, user=user, settings=settings)
     await database.flush()
     context = AuthContext(user=user, session=session, organization_id=organization_id)

@@ -68,6 +68,12 @@ if [ "$DAILY_INSIGHTS_DAILY_NEWS_ENABLED" = true ] &&
   echo "enabled daily news requires deployment environment: DAILY_INSIGHTS_MODEL_API_KEY" >&2
   exit 1
 fi
+if [ "${DAILY_INSIGHTS_PODCAST_ANALYSIS_ENABLED:-false}" = true ] &&
+  { [ -z "$(printenv DAILY_INSIGHTS_OPENAI_API_KEY 2>/dev/null || true)" ] ||
+    [ -z "$(printenv DAILY_INSIGHTS_MODEL_API_KEY 2>/dev/null || true)" ]; }; then
+  echo "enabled podcast analysis requires deployment environment: DAILY_INSIGHTS_OPENAI_API_KEY and DAILY_INSIGHTS_MODEL_API_KEY" >&2
+  exit 1
+fi
 
 case "$DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED" in
   true | false) ;;

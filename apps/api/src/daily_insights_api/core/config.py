@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     session_cookie_name: str = "daily_insights_session"
     session_ttl_seconds: int = Field(default=60 * 60 * 12, gt=0)
     login_rate_limit_attempts: int = Field(default=5, gt=0)
+    login_ip_rate_limit_attempts: int = Field(default=30, gt=0)
+    login_global_rate_limit_attempts: int = Field(default=300, gt=0)
+    login_password_workers: int = Field(default=2, gt=0, le=8)
     login_rate_limit_window_seconds: int = Field(default=5 * 60, gt=0)
     trusted_proxy_cidrs: str = "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
     findb_base_url: str = "https://findb.tingfong.com"
@@ -64,12 +67,27 @@ class Settings(BaseSettings):
     # A selection prompt carries up to ~100k characters of source text; the
     # provider regularly needs 30-45 seconds to answer it.
     model_timeout_seconds: float = Field(default=120, gt=0, le=300)
+    chat_user_max_pending: int = Field(default=2, gt=0)
+    chat_org_max_pending: int = Field(default=8, gt=0)
+    chat_user_daily_turns: int = Field(default=100, gt=0)
+    chat_org_daily_turns: int = Field(default=1000, gt=0)
+    chat_max_output_tokens: int = Field(default=4096, gt=0, le=16384)
     chat_enabled: bool = False
     chat_model_provider: str = "deepseek"
     chat_model_name: str = "deepseek-chat"
     chat_model_api_base_url: str = "https://api.deepseek.com"
     chat_model_api_key: SecretStr | None = None
     chat_timeout_seconds: float = Field(default=90, gt=0, le=600)
+    # Podcast analysis: an uploaded recording is transcribed by OpenAI and the
+    # transcript is turned into a title, summary and chapters by the news
+    # model (model_* settings). Off by default; needs both keys when on.
+    podcast_analysis_enabled: bool = False
+    openai_api_base_url: str = "https://api.openai.com/v1"
+    openai_api_key: SecretStr | None = None
+    transcription_model: str = "whisper-1"
+    # One transcription request carries the whole audio file (up to ~25 MB),
+    # so the budget is generous.
+    podcast_analysis_timeout_seconds: float = Field(default=240, gt=0, le=900)
     news_fetch_timeout_seconds: float = Field(default=25, gt=0, le=120)
     # Per-feed budget for reading a publisher's RSS, JSON, or listing page.
     news_discovery_timeout_seconds: float = Field(default=30, gt=0, le=180)
@@ -170,6 +188,22 @@ class Settings(BaseSettings):
                 self.guardian_api_key.get_secret_value()
             ):
                 raise ValueError("guardian_api_key cannot be a placeholder")
+        if self.podcast_analysis_enabled:
+            openai_url = urlparse(self.openai_api_base_url)
+            if openai_url.scheme != "https" or not openai_url.netloc:
+                raise ValueError("openai_api_base_url must be an absolute HTTPS URL")
+            if (
+                self.openai_api_key is None
+                or not self.openai_api_key.get_secret_value().strip()
+                or is_placeholder_value(self.openai_api_key.get_secret_value())
+            ):
+                raise ValueError("openai_api_key is required and cannot be a placeholder")
+            if (
+                self.model_api_key is None
+                or not self.model_api_key.get_secret_value().strip()
+                or is_placeholder_value(self.model_api_key.get_secret_value())
+            ):
+                raise ValueError("podcast analysis requires model_api_key for the language model")
         if self.chat_enabled:
             chat_url = urlparse(self.chat_model_api_base_url)
             if self.chat_model_provider not in {"deepseek", "openai-compatible"}:
