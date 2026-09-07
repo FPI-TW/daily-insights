@@ -308,6 +308,10 @@ const resources: Resource = {
       dataManagementIndexDescription:
         "以 Yahoo Finance 更新全部已追蹤指數最近 7 日資料。",
       dataManagementIndexAction: "更新指數",
+      dataManagementInstitutional: "台股三大法人",
+      dataManagementInstitutionalDescription:
+        "以證交所資料回補個股 7 個交易日、大盤 40 個交易日；已存在的日期不重抓。",
+      dataManagementInstitutionalAction: "更新三大法人",
       dataManagementLatest: "最近執行結果",
       dataManagementAllMarkets: "全部市場",
       dataManagementConfirmTitle: "確認完整重跑",
@@ -1055,6 +1059,10 @@ const resources: Resource = {
       dataManagementIndexDescription:
         "以 Yahoo Finance 更新全部已追踪指数最近 7 日数据。",
       dataManagementIndexAction: "更新指数",
+      dataManagementInstitutional: "台股三大法人",
+      dataManagementInstitutionalDescription:
+        "以证交所数据回补个股 7 个交易日、大盘 40 个交易日；已存在的日期不重抓。",
+      dataManagementInstitutionalAction: "更新三大法人",
       dataManagementLatest: "最近执行结果",
       dataManagementAllMarkets: "全部市场",
       dataManagementConfirmTitle: "确认完整重跑",
@@ -1813,6 +1821,10 @@ const resources: Resource = {
       dataManagementIndexDescription:
         "Update seven days of all tracked Yahoo Finance indices.",
       dataManagementIndexAction: "Update indices",
+      dataManagementInstitutional: "Taiwan institutional flows",
+      dataManagementInstitutionalDescription:
+        "Backfill 7 trading days per security and 40 for the market from TWSE; dates already stored are not fetched again.",
+      dataManagementInstitutionalAction: "Update institutional flows",
       dataManagementLatest: "Latest runs",
       dataManagementAllMarkets: "All markets",
       dataManagementConfirmTitle: "Confirm full rerun",
