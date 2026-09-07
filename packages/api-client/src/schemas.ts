@@ -122,7 +122,10 @@ export const institutionalFlowsSchema = z.object({
 export type InstitutionalFlows = z.infer<typeof institutionalFlowsSchema>
 export const institutionalStockFlowSchema = z.object({
   symbol: z.string().min(1),
-  name: z.string().min(1),
+  // Copied verbatim from TWSE and never validated on the way in, unlike the
+  // symbol. Requiring it here would turn one blank name into a rejected
+  // response and an empty panel, which is worse than a row showing its code.
+  name: z.string(),
   foreign_lots: decimalSchema,
   trust_lots: decimalSchema,
   dealer_lots: decimalSchema,
