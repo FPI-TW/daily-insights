@@ -44,7 +44,11 @@ export function MacroDashboardLoading() {
       {[0, 1, 2].map(i => (
         <div
           key={i}
-          className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] gap-4"
+          className={
+            i < 2
+              ? "grid grid-cols-1 gap-6"
+              : "grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] gap-4"
+          }
         >
           {[0, 1].map(j => (
             <div
@@ -91,23 +95,21 @@ function Change({
   value,
   locale,
   rates = false,
-  compact = false,
 }: {
   value: number | null
   locale: Locale
   rates?: boolean
-  compact?: boolean
 }) {
   const flat = value !== null && Math.abs(value) < 0.005
   return (
     <span
-      className={`whitespace-nowrap font-mono font-bold tabular-nums ${compact ? "text-[11px] @min-[520px]:text-xs" : "text-xs"} ${value === null || flat ? "text-sea-ink-soft" : value > 0 ? "text-market-up" : "text-market-down"}`}
+      className={`whitespace-nowrap font-mono font-bold tabular-nums text-sm ${value === null || flat ? "text-sea-ink-soft" : value > 0 ? "text-market-up" : "text-market-down"}`}
     >
       {value === null
         ? "—"
         : `${flat ? "" : value > 0 ? "▲" : "▼"}${new Intl.NumberFormat(numberLocales[locale], { maximumFractionDigits: 2 }).format(flat ? 0 : Math.abs(value))}${rates ? "" : "%"}`}
       {value !== null && rates ? (
-        <span className="font-sans text-[10px]"> bp</span>
+        <span className="font-sans text-xs"> bp</span>
       ) : null}
     </span>
   )
@@ -360,44 +362,46 @@ function HistoryTable({
     return <Unavailable />
   return (
     <div className="mt-4 overflow-x-auto">
-      <table className="w-full table-fixed text-right text-xs tabular-nums">
+      <table
+        className={
+          fx
+            ? "w-full min-w-180 table-auto text-right text-sm leading-6 tabular-nums"
+            : "w-full min-w-216 table-auto text-right text-sm leading-6 tabular-nums"
+        }
+      >
         <colgroup>
-          <col
-            className={
-              fx
-                ? "w-[24%]"
-                : rates
-                  ? "w-[12%] @min-[520px]:w-[22%]"
-                  : "w-[23%] @min-[520px]:w-[28%]"
-            }
-          />
-          <col
-            className={
-              fx
-                ? "w-[18%]"
-                : rates
-                  ? "w-[12%] @min-[520px]:w-[16%]"
-                  : "w-[15%] @min-[520px]:w-[17%]"
-            }
-          />
-          {!fx ? <col className="w-[18%] @min-[520px]:w-[15%]" /> : null}
+          <col className="w-44" />
+          <col className="w-36" />
+          {!fx ? <col className="w-36" /> : null}
           {periods.map(period => (
-            <col key={period} />
+            <col key={period} className="w-24" />
           ))}
         </colgroup>
         <thead className="border-b border-line text-sea-ink-soft">
           <tr>
-            <th className="pb-2 text-left font-semibold">
+            <th scope="col" className="px-4 py-3 text-left font-semibold">
               {t(rates ? "macroTenor" : "macroInstrument")}
             </th>
-            <th className="pb-2 font-semibold">
+            <th
+              scope="col"
+              className="whitespace-nowrap px-4 py-3 font-semibold"
+            >
               {t(rates ? "macroYield" : "macroClose")}
             </th>
             {!fx ? (
-              <th className="pb-2 font-semibold">{t("macroDate")}</th>
+              <th
+                scope="col"
+                className="whitespace-nowrap px-4 py-3 font-semibold"
+              >
+                {t("macroDate")}
+              </th>
             ) : null}
             {periods.map(period => (
-              <th key={period} className="pb-2 font-semibold">
+              <th
+                key={period}
+                scope="col"
+                className="whitespace-nowrap px-4 py-3 font-semibold"
+              >
                 {t(`macroPeriod_${period}`)}
               </th>
             ))}
@@ -416,13 +420,16 @@ function HistoryTable({
                 key={id}
                 className={`border-t border-line-soft ${selected === id ? "bg-lagoon/8" : ""}`}
               >
-                <th className="py-2.5 pr-1 text-left font-semibold text-pretty text-sea-ink">
+                <th
+                  scope="row"
+                  className="px-4 py-4 text-left font-semibold text-pretty text-sea-ink"
+                >
                   {onSelect ? (
                     <button
                       type="button"
                       aria-pressed={selected === id}
                       onClick={() => onSelect(id)}
-                      className={`border-0 bg-transparent p-0 text-left font-mono text-xs font-bold underline-offset-3 hover:underline hover:decoration-lagoon ${selected === id ? "text-palm" : "text-sea-ink"}`}
+                      className={`border-0 bg-transparent p-0 text-left font-mono text-sm font-bold underline-offset-3 hover:underline hover:decoration-lagoon ${selected === id ? "text-palm" : "text-sea-ink"}`}
                     >
                       {t(`macroAsset_${id}`)}
                     </button>
@@ -430,18 +437,18 @@ function HistoryTable({
                     t(`macroAsset_${id}`)
                   )}
                   {history && !fx ? (
-                    <span className="mt-0.5 block font-mono text-[10px] font-normal text-sea-ink-soft">
+                    <span className="mt-1 block font-mono text-xs font-normal text-sea-ink-soft">
                       {history.symbol} ·{" "}
                       {unitLabel(history.unit, t) ?? history.unit}
                     </span>
                   ) : null}
                   {stale ? (
-                    <span className="block text-[10px] font-normal text-sea-ink-soft">
+                    <span className="block text-xs font-normal text-sea-ink-soft">
                       {t("reportStale")}
                     </span>
                   ) : null}
                 </th>
-                <td className="font-mono text-[13px] font-bold text-sea-ink">
+                <td className="whitespace-nowrap px-4 py-4 font-mono font-bold text-sea-ink">
                   {formatValue(
                     latest ? Number(latest.value) : null,
                     history?.unit,
@@ -449,19 +456,18 @@ function HistoryTable({
                   )}
                 </td>
                 {!fx ? (
-                  <td className="font-mono text-[11px] text-sea-ink-soft">
+                  <td className="whitespace-nowrap px-4 py-4 font-mono text-sm text-sea-ink-soft">
                     {latest?.date ?? "—"}
                   </td>
                 ) : null}
                 {periods.map(period => (
-                  <td key={period}>
+                  <td key={period} className="px-4 py-4">
                     <Change
                       value={
                         history ? periodChange(history, period, rates) : null
                       }
                       locale={locale}
                       rates={rates}
-                      compact
                     />
                   </td>
                 ))}
@@ -535,7 +541,7 @@ export function MacroDashboard({
         ) : null}
       </div>
       <section className="min-w-0">
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-4">
+        <div className="grid grid-cols-1 items-start gap-6">
           <DashboardPanel title={t("macroCommodities")}>
             <HistoryTable
               ids={commodityIds}
@@ -572,7 +578,7 @@ export function MacroDashboard({
         </div>
       </section>
       <section className="min-w-0">
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-4">
+        <div className="grid grid-cols-1 items-start gap-6">
           <DashboardPanel title={t("macroYieldChanges")}>
             <HistoryTable
               ids={[...tenorIds, "sofr"]}
@@ -680,19 +686,14 @@ export function MacroDashboard({
               </span>
             }
           >
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,360px),1fr))] gap-x-8">
-              {[fxIds.slice(0, 4), fxIds.slice(4)].map((ids, i) => (
-                <HistoryTable
-                  key={i}
-                  ids={ids}
-                  histories={histories}
-                  locale={locale}
-                  selected={selectedFx}
-                  onSelect={setSelectedFx}
-                  fetchedAt={data?.fetched_at}
-                />
-              ))}
-            </div>
+            <HistoryTable
+              ids={fxIds}
+              histories={histories}
+              locale={locale}
+              selected={selectedFx}
+              onSelect={setSelectedFx}
+              fetchedAt={data?.fetched_at}
+            />
             <p className="mt-3 mb-0 font-mono text-xs text-sea-ink-soft tabular-nums">
               {allFxSameDate
                 ? t("fxAsOf", { date: fxDates[0] })

@@ -542,12 +542,12 @@ function ReportBlockView({
       ) : null}
       {block.status === "ok" && block.kind === "table" ? (
         <div className="min-w-0 max-w-full overflow-x-auto border-y border-line">
-          <table className="w-full min-w-120 text-sm">
+          <table className="w-full min-w-120 text-sm leading-6">
             <thead className="bg-link-hover text-xs text-sea-ink-soft">
               <tr>
                 {block.columns.map((column, index) => (
                   <th
-                    className={`whitespace-nowrap px-3 py-2.5 font-bold ${index === 0 ? "text-left" : "text-right"}`}
+                    className={`whitespace-nowrap px-4 py-3 font-bold ${index === 0 ? "text-left" : "text-right"}`}
                     key={column.labelKey}
                   >
                     {columnHeading(column, t)}
@@ -562,7 +562,7 @@ function ReportBlockView({
                     if (cellIndex === 0) {
                       return (
                         <td
-                          className="whitespace-nowrap px-3 py-2.5 font-semibold text-sea-ink"
+                          className="whitespace-nowrap px-4 py-4 font-semibold text-sea-ink"
                           key={cellIndex}
                         >
                           {valueText(cell, t)}
@@ -582,7 +582,7 @@ function ReportBlockView({
                         }
                     return (
                       <td
-                        className={`whitespace-nowrap px-3 py-2.5 text-right font-mono tabular-nums ${shown.direction === "none" ? "text-sea-ink" : directionClass(shown.direction)}`}
+                        className={`whitespace-nowrap px-4 py-4 text-right font-mono tabular-nums ${shown.direction === "none" ? "text-sea-ink" : directionClass(shown.direction)}`}
                         key={cellIndex}
                       >
                         {shown.text}
