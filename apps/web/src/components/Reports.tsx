@@ -1,3 +1,4 @@
+import { ResponsiveTable } from "./ResponsiveTable"
 import { ClientOnly, Link, useRouter } from "@tanstack/react-router"
 import ReactECharts from "echarts-for-react"
 import { motion } from "motion/react"
@@ -541,8 +542,8 @@ function ReportBlockView({
         </div>
       ) : null}
       {block.status === "ok" && block.kind === "table" ? (
-        <div className="min-w-0 max-w-full overflow-x-auto border-y border-line">
-          <table className="w-full min-w-120 text-sm leading-6">
+        <div className="min-w-0 max-w-full border-y border-line">
+          <ResponsiveTable>
             <thead className="bg-link-hover text-xs text-sea-ink-soft">
               <tr>
                 {block.columns.map((column, index) => (
@@ -561,12 +562,13 @@ function ReportBlockView({
                   {row.map((cell, cellIndex) => {
                     if (cellIndex === 0) {
                       return (
-                        <td
-                          className="whitespace-nowrap px-4 py-4 font-semibold text-sea-ink"
+                        <th
+                          scope="row"
+                          className="px-4 py-4 text-left font-semibold text-sea-ink"
                           key={cellIndex}
                         >
                           {valueText(cell, t)}
-                        </td>
+                        </th>
                       )
                     }
                     const column = block.columns[cellIndex]
@@ -583,6 +585,7 @@ function ReportBlockView({
                     return (
                       <td
                         className={`whitespace-nowrap px-4 py-4 text-right font-mono tabular-nums ${shown.direction === "none" ? "text-sea-ink" : directionClass(shown.direction)}`}
+                        data-label={column ? columnHeading(column, t) : ""}
                         key={cellIndex}
                       >
                         {shown.text}
@@ -592,7 +595,7 @@ function ReportBlockView({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ResponsiveTable>
         </div>
       ) : null}
       {block.status === "ok" && block.kind === "series" ? (

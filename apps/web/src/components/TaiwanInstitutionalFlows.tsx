@@ -1,3 +1,4 @@
+import { ResponsiveTable } from "./ResponsiveTable"
 import type {
   InstitutionalFlows,
   InstitutionalStocks,
@@ -313,15 +314,8 @@ function FlowTable({
         />
         {title}
       </h4>
-      <div className="overflow-x-auto rounded-lg border border-line">
-        <table className="w-full min-w-160 table-auto text-sm leading-6">
-          <colgroup>
-            <col className="w-44" />
-            <col />
-            <col />
-            <col />
-            <col className="w-32" />
-          </colgroup>
+      <div className="min-w-0 rounded-lg border border-line">
+        <ResponsiveTable>
           <thead className="text-sea-ink-soft">
             <tr>
               {[
@@ -346,12 +340,15 @@ function FlowTable({
                 key={row.symbol}
                 className="border-t border-line-soft first:border-t-0"
               >
-                <td className="px-4 py-4 font-semibold text-sea-ink">
-                  <span className="block whitespace-nowrap">{row.name}</span>
+                <th
+                  scope="row"
+                  className="px-4 py-4 text-left font-semibold text-sea-ink"
+                >
+                  <span className="block">{row.name}</span>
                   <span className="mt-1 block font-mono text-xs text-sea-ink-soft">
                     {row.symbol}
                   </span>
-                </td>
+                </th>
                 {[
                   row.foreign_lots,
                   row.trust_lots,
@@ -362,6 +359,11 @@ function FlowTable({
                   return (
                     <td
                       key={index}
+                      data-label={t(
+                        ["colForeign", "colTrust", "colDealer", "colTotal"][
+                          index
+                        ]!
+                      )}
                       className={`whitespace-nowrap px-4 py-4 text-right font-mono tabular-nums ${index === 3 ? "font-bold" : ""} ${directionClass(value)}`}
                     >
                       {signed(value, locale, value % 1 === 0 ? 0 : 1)}
@@ -371,7 +373,7 @@ function FlowTable({
               </tr>
             ))}
           </tbody>
-        </table>
+        </ResponsiveTable>
       </div>
     </div>
   )
