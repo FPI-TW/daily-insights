@@ -21,3 +21,16 @@ remote.*.env
 key/*
 crt/*
 reference/*
+
+# Local-only compose overrides (e.g. publishing Postgres to the host)
+compose.override.yaml
+
+# Working notes and source samples that stay on the machine that made them
+PROJECT_HISTORY.md
+SECURITY_AUDIT.md
+TASK_TRACKER.md
+BUG_LOG.md
+.mcp.json
+資料源清單.md
+D72-三大法人（大盤·金額).json
+D73-三大法人（個股·股數).json
