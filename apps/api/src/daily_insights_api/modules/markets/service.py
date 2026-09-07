@@ -655,12 +655,17 @@ INSTITUTIONAL_STOCK_LEADERS = 5
 
 
 async def institutional_market_flows(
-    database: AsyncSession, *, market_code: str
+    database: AsyncSession,
+    *,
+    market_code: str,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> list[InstitutionalMarketFlowResponse]:
-    """Every stored trading day, newest first, as three net amounts.
+    """Stored trading days, newest first, as three net amounts.
 
-    Unbounded on purpose: the table gains one date per trading day and the run
-    only ever backfills 40, so this is hundreds of rows a year, not thousands.
+    Both bounds are inclusive, and omitting them returns everything stored: the
+    table gains one date per trading day and the run only ever backfills 40, so
+    that is hundreds of rows a year, not thousands.
     """
 
     def net_of(*investor_types: str) -> Any:
@@ -671,16 +676,20 @@ async def institutional_market_flows(
             0,
         )
 
+    statement = select(
+        InstitutionalMarketFlow.trade_date,
+        net_of(*INSTITUTIONAL_FOREIGN_TYPES).label("foreign_net"),
+        net_of(*INSTITUTIONAL_TRUST_TYPES).label("trust_net"),
+        net_of(*INSTITUTIONAL_DEALER_TYPES).label("dealer_net"),
+    ).where(InstitutionalMarketFlow.market_code == market_code)
+    if start_date is not None:
+        statement = statement.where(InstitutionalMarketFlow.trade_date >= start_date)
+    if end_date is not None:
+        statement = statement.where(InstitutionalMarketFlow.trade_date <= end_date)
     rows = await database.execute(
-        select(
-            InstitutionalMarketFlow.trade_date,
-            net_of(*INSTITUTIONAL_FOREIGN_TYPES).label("foreign_net"),
-            net_of(*INSTITUTIONAL_TRUST_TYPES).label("trust_net"),
-            net_of(*INSTITUTIONAL_DEALER_TYPES).label("dealer_net"),
+        statement.group_by(InstitutionalMarketFlow.trade_date).order_by(
+            InstitutionalMarketFlow.trade_date.desc()
         )
-        .where(InstitutionalMarketFlow.market_code == market_code)
-        .group_by(InstitutionalMarketFlow.trade_date)
-        .order_by(InstitutionalMarketFlow.trade_date.desc())
     )
     return [
         InstitutionalMarketFlowResponse(

@@ -123,9 +123,17 @@ export function createMarketClient(transport: ApiTransport) {
         indexMovingAveragesSchema
       )
     },
-    async institutionalMarketFlows() {
+    async institutionalMarketFlows(
+      range: { startDate?: string; endDate?: string } = {}
+    ) {
+      const query = new URLSearchParams()
+      if (range.startDate) query.set("start_date", range.startDate)
+      if (range.endDate) query.set("end_date", range.endDate)
+      const search = query.toString()
       return parseResponse(
-        await transport("/api/markets/institutional/market-flows"),
+        await transport(
+          `/api/markets/institutional/market-flows${search ? `?${search}` : ""}`
+        ),
         institutionalMarketFlowListSchema
       )
     },

@@ -176,9 +176,19 @@ async def _readable_institutional_market(database: AsyncSession, context: AuthCo
 async def list_institutional_market_flows(
     context: Annotated[AuthContext, Depends(require_password_changed)],
     database: Annotated[AsyncSession, Depends(get_database_session)],
+    start_date: Annotated[date | None, Query()] = None,
+    end_date: Annotated[date | None, Query()] = None,
 ) -> list[InstitutionalMarketFlowResponse]:
     market_code = await _readable_institutional_market(database, context)
-    return await institutional_market_flows(database, market_code=market_code)
+    # Both bounds inclusive; neither is required, and the window is not capped
+    # the way the index history is, because a row here is one trading day.
+    if start_date is not None and end_date is not None and start_date > end_date:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "start_date must not be after end_date"
+        )
+    return await institutional_market_flows(
+        database, market_code=market_code, start_date=start_date, end_date=end_date
+    )
 
 
 @router.get("/institutional/stock-flows", response_model=InstitutionalStockFlowLeadersResponse)

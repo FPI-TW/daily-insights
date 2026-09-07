@@ -201,6 +201,13 @@ describe("API client trust boundary", () => {
     expect(transport).toHaveBeenCalledWith(
       "/api/markets/institutional/market-flows"
     )
+    await client.institutionalMarketFlows({
+      startDate: "2026-09-01",
+      endDate: "2026-09-04",
+    })
+    expect(transport).toHaveBeenCalledWith(
+      "/api/markets/institutional/market-flows?start_date=2026-09-01&end_date=2026-09-04"
+    )
     await expect(client.institutionalStockFlowLeaders()).resolves.toEqual(
       leaders
     )

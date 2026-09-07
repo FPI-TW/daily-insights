@@ -204,6 +204,17 @@ async def test_market_flows_endpoint_folds_five_categories_into_three(
 
     async with _signed_in_client(session_factory) as client:
         response = await client.get("/api/markets/institutional/market-flows")
+        windowed = await client.get(
+            "/api/markets/institutional/market-flows",
+            params={"start_date": "2026-09-04", "end_date": "2026-09-04"},
+        )
+        open_ended = await client.get(
+            "/api/markets/institutional/market-flows", params={"end_date": "2026-09-03"}
+        )
+        inverted = await client.get(
+            "/api/markets/institutional/market-flows",
+            params={"start_date": "2026-09-04", "end_date": "2026-09-03"},
+        )
 
     assert response.status_code == 200, response.text
     # Newest first, and the two dealer books and the two foreign books are summed.
@@ -211,6 +222,11 @@ async def test_market_flows_endpoint_folds_five_categories_into_three(
         {"trade_date": "2026-09-04", "foreign": 121, "trust": -30, "dealer": 4},
         {"trade_date": "2026-09-03", "foreign": 120, "trust": -30, "dealer": 4},
     ]
+    # Both bounds are inclusive, and either one alone is enough.
+    assert [row["trade_date"] for row in windowed.json()] == ["2026-09-04"]
+    assert [row["trade_date"] for row in open_ended.json()] == ["2026-09-03"]
+    assert inverted.status_code == 422
+    assert inverted.json()["detail"] == "start_date must not be after end_date"
 
 
 @pytest.mark.asyncio
