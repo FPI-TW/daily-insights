@@ -206,16 +206,15 @@ describe("three-market report presentation", () => {
     expect(section).not.toHaveTextContent("Crypto")
   })
 
-  it("renders the not-launched state inside the shared shell with a single nav", async () => {
+  it("omits the Taiwan not-launched notice while retaining its shared shell", async () => {
     await renderLocalized(
       <ReportShell locale="en" markets={markets} activeMarket="tw_equity">
         <ReportNotLaunchedScreen locale="en" marketCode="tw_equity" />
       </ReportShell>,
       "en"
     )
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Report not launched yet"
-    )
+    expect(screen.queryByRole("status")).toBeNull()
+    expect(screen.queryByText("Report not launched yet")).toBeNull()
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
       "Taiwan equities"
     )

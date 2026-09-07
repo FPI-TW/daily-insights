@@ -808,8 +808,8 @@ export function ReportNotLaunchedScreen({
   locale?: Locale
   marketCode: MarketCode
 }) {
-  void marketCode
   const { t } = useTranslation()
+  if (marketCode === "tw_equity") return null
   return (
     <section
       className="surface-panel p-10 text-center"
