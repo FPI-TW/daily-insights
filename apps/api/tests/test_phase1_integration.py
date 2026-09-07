@@ -57,6 +57,7 @@ async def harness() -> AsyncIterator[Harness]:
         database_url=database_url,
         session_secret=SecretStr("phase1-test-session-secret"),
         password_pepper=SecretStr("phase1-test-password-pepper"),
+        yfinance_enabled=False,
     )
     engine = create_async_engine(database_url)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
