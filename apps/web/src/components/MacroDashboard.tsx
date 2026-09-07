@@ -44,11 +44,7 @@ export function MacroDashboardLoading() {
       {[0, 1, 2].map(i => (
         <div
           key={i}
-          className={
-            i < 2
-              ? "grid grid-cols-1 gap-6"
-              : "grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] gap-4"
-          }
+          className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] gap-6"
         >
           {[0, 1].map(j => (
             <div
@@ -103,13 +99,16 @@ function Change({
   const flat = value !== null && Math.abs(value) < 0.005
   return (
     <span
-      className={`whitespace-nowrap font-mono font-bold tabular-nums text-sm ${value === null || flat ? "text-sea-ink-soft" : value > 0 ? "text-market-up" : "text-market-down"}`}
+      className={`inline-flex items-baseline gap-2 whitespace-nowrap font-mono font-bold tabular-nums text-sm ${value === null || flat ? "text-sea-ink-soft" : value > 0 ? "text-market-up" : "text-market-down"}`}
     >
-      {value === null
-        ? "—"
-        : `${flat ? "" : value > 0 ? "▲" : "▼"}${new Intl.NumberFormat(numberLocales[locale], { maximumFractionDigits: 2 }).format(flat ? 0 : Math.abs(value))}${rates ? "" : "%"}`}
+      {value !== null && !flat ? <span>{value > 0 ? "▲" : "▼"}</span> : null}
+      <span>
+        {value === null
+          ? "—"
+          : `${new Intl.NumberFormat(numberLocales[locale], { maximumFractionDigits: 2 }).format(flat ? 0 : Math.abs(value))}${rates ? "" : "%"}`}
+      </span>
       {value !== null && rates ? (
-        <span className="font-sans text-xs"> bp</span>
+        <span className="font-sans text-xs">bp</span>
       ) : null}
     </span>
   )
@@ -206,7 +205,7 @@ function Chart({
           return (
             <div
               key={line.name}
-              className="flex flex-wrap items-baseline gap-1.5 text-xs text-sea-ink-soft"
+              className="flex flex-wrap items-baseline gap-x-3 gap-y-2 text-xs text-sea-ink-soft"
             >
               <span
                 className="inline-block size-2.5 rounded-full"
@@ -541,7 +540,7 @@ export function MacroDashboard({
         ) : null}
       </div>
       <section className="min-w-0">
-        <div className="grid grid-cols-1 items-start gap-6">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-6">
           <DashboardPanel title={t("macroCommodities")}>
             <HistoryTable
               ids={commodityIds}
@@ -578,7 +577,7 @@ export function MacroDashboard({
         </div>
       </section>
       <section className="min-w-0">
-        <div className="grid grid-cols-1 items-start gap-6">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-6">
           <DashboardPanel title={t("macroYieldChanges")}>
             <HistoryTable
               ids={[...tenorIds, "sofr"]}
@@ -639,7 +638,7 @@ export function MacroDashboard({
         </div>
       </section>
       <section className="min-w-0">
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-4">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-6">
           <DashboardPanel
             title={t("macroDollarIndex")}
             controls={<Range value={dxyDays} onChange={setDxyDays} />}
@@ -686,14 +685,19 @@ export function MacroDashboard({
               </span>
             }
           >
-            <HistoryTable
-              ids={fxIds}
-              histories={histories}
-              locale={locale}
-              selected={selectedFx}
-              onSelect={setSelectedFx}
-              fetchedAt={data?.fetched_at}
-            />
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] gap-6">
+              {[fxIds.slice(0, 4), fxIds.slice(4)].map(ids => (
+                <HistoryTable
+                  key={ids[0]}
+                  ids={ids}
+                  histories={histories}
+                  locale={locale}
+                  selected={selectedFx}
+                  onSelect={setSelectedFx}
+                  fetchedAt={data?.fetched_at}
+                />
+              ))}
+            </div>
             <p className="mt-3 mb-0 font-mono text-xs text-sea-ink-soft tabular-nums">
               {allFxSameDate
                 ? t("fxAsOf", { date: fxDates[0] })
