@@ -44,6 +44,7 @@ MAX_BIND_PARAMETERS = 65535
 # Yahoo publishes no rate limit and is reached through a scraping client, so
 # this stays conservative; it matches TwelveDataTransport's default.
 MAX_FETCH_CONCURRENCY = 4
+YAHOO_REFRESH_LOCK_KEY = 4_741_901_938_764_211_037
 MOVING_AVERAGE_PERIODS = (20, 60, 120, 240)
 MOVING_AVERAGE_WARMUP_SESSIONS = max(MOVING_AVERAGE_PERIODS) - 1
 MOVING_AVERAGE_QUANTUM = Decimal("0.0000000001")
@@ -455,6 +456,30 @@ async def refresh_index_daily_bars(
     not discard the symbols that did resolve, which matters most for the nightly
     run where nobody is watching.
     """
+    # Reject invalid caller input before using a database connection/lock.
+    untracked = sorted(set(symbols) - set(TRACKED_INDICES))
+    if untracked:
+        raise ValueError(f"untracked symbols: {', '.join(untracked)}")
+    # One session-scoped lock covers the legacy synchronous endpoint, scheduler
+    # and durable worker. It is deliberately acquired before any Yahoo call,
+    # because this provider has no published quota and credits/cookies are not
+    # safe to duplicate.
+    await database.execute(select(func.pg_advisory_lock(YAHOO_REFRESH_LOCK_KEY)))
+    try:
+        return await _refresh_index_daily_bars_unlocked(
+            database, adapter=adapter, symbols=symbols, period=period
+        )
+    finally:
+        await database.execute(select(func.pg_advisory_unlock(YAHOO_REFRESH_LOCK_KEY)))
+
+
+async def _refresh_index_daily_bars_unlocked(
+    database: AsyncSession,
+    *,
+    adapter: YfinanceAdapter,
+    symbols: Sequence[IndexSymbol],
+    period: str,
+) -> tuple[list[IndexRefresh], list[IndexRefreshFailure]]:
     # Typing keeps checked callers honest; this guard keeps an untyped one from
     # reaching a bare KeyError on the lookup below.
     untracked = sorted(set(symbols) - set(TRACKED_INDICES))

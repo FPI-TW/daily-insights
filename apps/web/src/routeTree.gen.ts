@@ -8,320 +8,333 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from "./routes/__root"
-import { Route as IndexRouteImport } from "./routes/index"
-import { Route as LocaleRouteImport } from "./routes/$locale"
-import { Route as LocaleIndexRouteImport } from "./routes/$locale/index"
-import { Route as LocaleAuthenticatedRouteImport } from "./routes/$locale/_authenticated"
-import { Route as LocaleChangePasswordRouteImport } from "./routes/$locale/change-password"
-import { Route as LocaleLoginRouteImport } from "./routes/$locale/login"
-import { Route as LocaleAuthenticatedAdminRouteImport } from "./routes/$locale/_authenticated/_admin"
-import { Route as LocaleAuthenticatedCustomerRouteImport } from "./routes/$locale/_authenticated/_customer"
-import { Route as LocaleAuthenticatedBackOfficeRouteImport } from "./routes/$locale/_authenticated/back-office"
-import { Route as LocaleAdminChangePasswordRouteImport } from "./routes/$locale/admin/change-password"
-import { Route as LocaleAdminLoginRouteImport } from "./routes/$locale/admin/login"
-import { Route as LocaleAuthenticatedCustomerAccountRouteImport } from "./routes/$locale/_authenticated/_customer/account"
-import { Route as LocaleAuthenticatedCustomerPodcastsRouteImport } from "./routes/$locale/_authenticated/_customer/podcasts"
-import { Route as LocaleAuthenticatedCustomerReportsRouteImport } from "./routes/$locale/_authenticated/_customer/reports"
-import { Route as LocaleAuthenticatedBackOfficePodcastsRouteImport } from "./routes/$locale/_authenticated/back-office/podcasts"
-import { Route as LocaleAuthenticatedAdminAdminAnalystViewpointsRouteImport } from "./routes/$locale/_authenticated/_admin/admin/analyst-viewpoints"
-import { Route as LocaleAuthenticatedAdminAdminAudioRouteImport } from "./routes/$locale/_authenticated/_admin/admin/audio"
-import { Route as LocaleAuthenticatedAdminAdminIndexDataRouteImport } from "./routes/$locale/_authenticated/_admin/admin/index-data"
-import { Route as LocaleAuthenticatedAdminAdminMembersRouteImport } from "./routes/$locale/_authenticated/_admin/admin/members"
-import { Route as LocaleAuthenticatedCustomerPodcastsIndexRouteImport } from "./routes/$locale/_authenticated/_customer/podcasts/index"
-import { Route as LocaleAuthenticatedCustomerPodcastsEpisodeIdRouteImport } from "./routes/$locale/_authenticated/_customer/podcasts/$episodeId"
-import { Route as LocaleAuthenticatedCustomerReportsIndexRouteImport } from "./routes/$locale/_authenticated/_customer/reports/index"
-import { Route as LocaleAuthenticatedCustomerReportsMarketCodeRouteImport } from "./routes/$locale/_authenticated/_customer/reports/$marketCode"
-import { Route as LocaleAuthenticatedAdminAdminConversationsIndexRouteImport } from "./routes/$locale/_authenticated/_admin/admin/conversations/index"
-import { Route as LocaleAuthenticatedAdminAdminConversationsConversationIdRouteImport } from "./routes/$locale/_authenticated/_admin/admin/conversations/$conversationId"
+import { Route as rootRouteImport } from './routes/__root'
+import { Route as IndexRouteImport } from './routes/index'
+import { Route as LocaleRouteImport } from './routes/$locale'
+import { Route as LocaleIndexRouteImport } from './routes/$locale/index'
+import { Route as LocaleAuthenticatedRouteImport } from './routes/$locale/_authenticated'
+import { Route as LocaleChangePasswordRouteImport } from './routes/$locale/change-password'
+import { Route as LocaleLoginRouteImport } from './routes/$locale/login'
+import { Route as LocaleAuthenticatedAdminRouteImport } from './routes/$locale/_authenticated/_admin'
+import { Route as LocaleAuthenticatedCustomerRouteImport } from './routes/$locale/_authenticated/_customer'
+import { Route as LocaleAuthenticatedBackOfficeRouteImport } from './routes/$locale/_authenticated/back-office'
+import { Route as LocaleAdminChangePasswordRouteImport } from './routes/$locale/admin/change-password'
+import { Route as LocaleAdminLoginRouteImport } from './routes/$locale/admin/login'
+import { Route as LocaleAuthenticatedCustomerAccountRouteImport } from './routes/$locale/_authenticated/_customer/account'
+import { Route as LocaleAuthenticatedCustomerPodcastsRouteImport } from './routes/$locale/_authenticated/_customer/podcasts'
+import { Route as LocaleAuthenticatedCustomerReportsRouteImport } from './routes/$locale/_authenticated/_customer/reports'
+import { Route as LocaleAuthenticatedBackOfficePodcastsRouteImport } from './routes/$locale/_authenticated/back-office/podcasts'
+import { Route as LocaleAuthenticatedAdminAdminAnalystViewpointsRouteImport } from './routes/$locale/_authenticated/_admin/admin/analyst-viewpoints'
+import { Route as LocaleAuthenticatedAdminAdminAudioRouteImport } from './routes/$locale/_authenticated/_admin/admin/audio'
+import { Route as LocaleAuthenticatedAdminAdminDataManagementRouteImport } from './routes/$locale/_authenticated/_admin/admin/data-management'
+import { Route as LocaleAuthenticatedAdminAdminIndexDataRouteImport } from './routes/$locale/_authenticated/_admin/admin/index-data'
+import { Route as LocaleAuthenticatedAdminAdminMembersRouteImport } from './routes/$locale/_authenticated/_admin/admin/members'
+import { Route as LocaleAuthenticatedCustomerPodcastsIndexRouteImport } from './routes/$locale/_authenticated/_customer/podcasts/index'
+import { Route as LocaleAuthenticatedCustomerPodcastsEpisodeIdRouteImport } from './routes/$locale/_authenticated/_customer/podcasts/$episodeId'
+import { Route as LocaleAuthenticatedCustomerReportsIndexRouteImport } from './routes/$locale/_authenticated/_customer/reports/index'
+import { Route as LocaleAuthenticatedCustomerReportsMarketCodeRouteImport } from './routes/$locale/_authenticated/_customer/reports/$marketCode'
+import { Route as LocaleAuthenticatedAdminAdminConversationsIndexRouteImport } from './routes/$locale/_authenticated/_admin/admin/conversations/index'
+import { Route as LocaleAuthenticatedAdminAdminConversationsConversationIdRouteImport } from './routes/$locale/_authenticated/_admin/admin/conversations/$conversationId'
 
 const IndexRoute = IndexRouteImport.update({
-  id: "/",
-  path: "/",
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LocaleRoute = LocaleRouteImport.update({
-  id: "/$locale",
-  path: "/$locale",
+  id: '/$locale',
+  path: '/$locale',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LocaleIndexRoute = LocaleIndexRouteImport.update({
-  id: "/",
-  path: "/",
+  id: '/',
+  path: '/',
   getParentRoute: () => LocaleRoute,
 } as any)
 const LocaleAuthenticatedRoute = LocaleAuthenticatedRouteImport.update({
-  id: "/_authenticated",
+  id: '/_authenticated',
   getParentRoute: () => LocaleRoute,
 } as any)
 const LocaleChangePasswordRoute = LocaleChangePasswordRouteImport.update({
-  id: "/change-password",
-  path: "/change-password",
+  id: '/change-password',
+  path: '/change-password',
   getParentRoute: () => LocaleRoute,
 } as any)
 const LocaleLoginRoute = LocaleLoginRouteImport.update({
-  id: "/login",
-  path: "/login",
+  id: '/login',
+  path: '/login',
   getParentRoute: () => LocaleRoute,
 } as any)
 const LocaleAuthenticatedAdminRoute =
   LocaleAuthenticatedAdminRouteImport.update({
-    id: "/_admin",
+    id: '/_admin',
     getParentRoute: () => LocaleAuthenticatedRoute,
   } as any)
 const LocaleAuthenticatedCustomerRoute =
   LocaleAuthenticatedCustomerRouteImport.update({
-    id: "/_customer",
+    id: '/_customer',
     getParentRoute: () => LocaleAuthenticatedRoute,
   } as any)
 const LocaleAuthenticatedBackOfficeRoute =
   LocaleAuthenticatedBackOfficeRouteImport.update({
-    id: "/back-office",
-    path: "/back-office",
+    id: '/back-office',
+    path: '/back-office',
     getParentRoute: () => LocaleAuthenticatedRoute,
   } as any)
 const LocaleAdminChangePasswordRoute =
   LocaleAdminChangePasswordRouteImport.update({
-    id: "/admin/change-password",
-    path: "/admin/change-password",
+    id: '/admin/change-password',
+    path: '/admin/change-password',
     getParentRoute: () => LocaleRoute,
   } as any)
 const LocaleAdminLoginRoute = LocaleAdminLoginRouteImport.update({
-  id: "/admin/login",
-  path: "/admin/login",
+  id: '/admin/login',
+  path: '/admin/login',
   getParentRoute: () => LocaleRoute,
 } as any)
 const LocaleAuthenticatedCustomerAccountRoute =
   LocaleAuthenticatedCustomerAccountRouteImport.update({
-    id: "/account",
-    path: "/account",
+    id: '/account',
+    path: '/account',
     getParentRoute: () => LocaleAuthenticatedCustomerRoute,
   } as any)
 const LocaleAuthenticatedCustomerPodcastsRoute =
   LocaleAuthenticatedCustomerPodcastsRouteImport.update({
-    id: "/podcasts",
-    path: "/podcasts",
+    id: '/podcasts',
+    path: '/podcasts',
     getParentRoute: () => LocaleAuthenticatedCustomerRoute,
   } as any)
 const LocaleAuthenticatedCustomerReportsRoute =
   LocaleAuthenticatedCustomerReportsRouteImport.update({
-    id: "/reports",
-    path: "/reports",
+    id: '/reports',
+    path: '/reports',
     getParentRoute: () => LocaleAuthenticatedCustomerRoute,
   } as any)
 const LocaleAuthenticatedBackOfficePodcastsRoute =
   LocaleAuthenticatedBackOfficePodcastsRouteImport.update({
-    id: "/podcasts",
-    path: "/podcasts",
+    id: '/podcasts',
+    path: '/podcasts',
     getParentRoute: () => LocaleAuthenticatedBackOfficeRoute,
   } as any)
 const LocaleAuthenticatedAdminAdminAnalystViewpointsRoute =
   LocaleAuthenticatedAdminAdminAnalystViewpointsRouteImport.update({
-    id: "/admin/analyst-viewpoints",
-    path: "/admin/analyst-viewpoints",
+    id: '/admin/analyst-viewpoints',
+    path: '/admin/analyst-viewpoints',
     getParentRoute: () => LocaleAuthenticatedAdminRoute,
   } as any)
 const LocaleAuthenticatedAdminAdminAudioRoute =
   LocaleAuthenticatedAdminAdminAudioRouteImport.update({
-    id: "/admin/audio",
-    path: "/admin/audio",
+    id: '/admin/audio',
+    path: '/admin/audio',
+    getParentRoute: () => LocaleAuthenticatedAdminRoute,
+  } as any)
+const LocaleAuthenticatedAdminAdminDataManagementRoute =
+  LocaleAuthenticatedAdminAdminDataManagementRouteImport.update({
+    id: '/admin/data-management',
+    path: '/admin/data-management',
     getParentRoute: () => LocaleAuthenticatedAdminRoute,
   } as any)
 const LocaleAuthenticatedAdminAdminIndexDataRoute =
   LocaleAuthenticatedAdminAdminIndexDataRouteImport.update({
-    id: "/admin/index-data",
-    path: "/admin/index-data",
+    id: '/admin/index-data',
+    path: '/admin/index-data',
     getParentRoute: () => LocaleAuthenticatedAdminRoute,
   } as any)
 const LocaleAuthenticatedAdminAdminMembersRoute =
   LocaleAuthenticatedAdminAdminMembersRouteImport.update({
-    id: "/admin/members",
-    path: "/admin/members",
+    id: '/admin/members',
+    path: '/admin/members',
     getParentRoute: () => LocaleAuthenticatedAdminRoute,
   } as any)
 const LocaleAuthenticatedCustomerPodcastsIndexRoute =
   LocaleAuthenticatedCustomerPodcastsIndexRouteImport.update({
-    id: "/",
-    path: "/",
+    id: '/',
+    path: '/',
     getParentRoute: () => LocaleAuthenticatedCustomerPodcastsRoute,
   } as any)
 const LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute =
   LocaleAuthenticatedCustomerPodcastsEpisodeIdRouteImport.update({
-    id: "/$episodeId",
-    path: "/$episodeId",
+    id: '/$episodeId',
+    path: '/$episodeId',
     getParentRoute: () => LocaleAuthenticatedCustomerPodcastsRoute,
   } as any)
 const LocaleAuthenticatedCustomerReportsIndexRoute =
   LocaleAuthenticatedCustomerReportsIndexRouteImport.update({
-    id: "/",
-    path: "/",
+    id: '/',
+    path: '/',
     getParentRoute: () => LocaleAuthenticatedCustomerReportsRoute,
   } as any)
 const LocaleAuthenticatedCustomerReportsMarketCodeRoute =
   LocaleAuthenticatedCustomerReportsMarketCodeRouteImport.update({
-    id: "/$marketCode",
-    path: "/$marketCode",
+    id: '/$marketCode',
+    path: '/$marketCode',
     getParentRoute: () => LocaleAuthenticatedCustomerReportsRoute,
   } as any)
 const LocaleAuthenticatedAdminAdminConversationsIndexRoute =
   LocaleAuthenticatedAdminAdminConversationsIndexRouteImport.update({
-    id: "/admin/conversations/",
-    path: "/admin/conversations/",
+    id: '/admin/conversations/',
+    path: '/admin/conversations/',
     getParentRoute: () => LocaleAuthenticatedAdminRoute,
   } as any)
 const LocaleAuthenticatedAdminAdminConversationsConversationIdRoute =
   LocaleAuthenticatedAdminAdminConversationsConversationIdRouteImport.update({
-    id: "/admin/conversations/$conversationId",
-    path: "/admin/conversations/$conversationId",
+    id: '/admin/conversations/$conversationId',
+    path: '/admin/conversations/$conversationId',
     getParentRoute: () => LocaleAuthenticatedAdminRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
-  "/": typeof IndexRoute
-  "/$locale": typeof LocaleRouteWithChildren
-  "/$locale/change-password": typeof LocaleChangePasswordRoute
-  "/$locale/login": typeof LocaleLoginRoute
-  "/$locale/": typeof LocaleIndexRoute
-  "/$locale/back-office": typeof LocaleAuthenticatedBackOfficeRouteWithChildren
-  "/$locale/admin/change-password": typeof LocaleAdminChangePasswordRoute
-  "/$locale/admin/login": typeof LocaleAdminLoginRoute
-  "/$locale/account": typeof LocaleAuthenticatedCustomerAccountRoute
-  "/$locale/podcasts": typeof LocaleAuthenticatedCustomerPodcastsRouteWithChildren
-  "/$locale/reports": typeof LocaleAuthenticatedCustomerReportsRouteWithChildren
-  "/$locale/back-office/podcasts": typeof LocaleAuthenticatedBackOfficePodcastsRoute
-  "/$locale/admin/analyst-viewpoints": typeof LocaleAuthenticatedAdminAdminAnalystViewpointsRoute
-  "/$locale/admin/audio": typeof LocaleAuthenticatedAdminAdminAudioRoute
-  "/$locale/admin/index-data": typeof LocaleAuthenticatedAdminAdminIndexDataRoute
-  "/$locale/admin/members": typeof LocaleAuthenticatedAdminAdminMembersRoute
-  "/$locale/podcasts/$episodeId": typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
-  "/$locale/reports/$marketCode": typeof LocaleAuthenticatedCustomerReportsMarketCodeRoute
-  "/$locale/podcasts/": typeof LocaleAuthenticatedCustomerPodcastsIndexRoute
-  "/$locale/reports/": typeof LocaleAuthenticatedCustomerReportsIndexRoute
-  "/$locale/admin/conversations/$conversationId": typeof LocaleAuthenticatedAdminAdminConversationsConversationIdRoute
-  "/$locale/admin/conversations/": typeof LocaleAuthenticatedAdminAdminConversationsIndexRoute
+  '/': typeof IndexRoute
+  '/$locale': typeof LocaleRouteWithChildren
+  '/$locale/change-password': typeof LocaleChangePasswordRoute
+  '/$locale/login': typeof LocaleLoginRoute
+  '/$locale/': typeof LocaleIndexRoute
+  '/$locale/back-office': typeof LocaleAuthenticatedBackOfficeRouteWithChildren
+  '/$locale/admin/change-password': typeof LocaleAdminChangePasswordRoute
+  '/$locale/admin/login': typeof LocaleAdminLoginRoute
+  '/$locale/account': typeof LocaleAuthenticatedCustomerAccountRoute
+  '/$locale/podcasts': typeof LocaleAuthenticatedCustomerPodcastsRouteWithChildren
+  '/$locale/reports': typeof LocaleAuthenticatedCustomerReportsRouteWithChildren
+  '/$locale/back-office/podcasts': typeof LocaleAuthenticatedBackOfficePodcastsRoute
+  '/$locale/admin/analyst-viewpoints': typeof LocaleAuthenticatedAdminAdminAnalystViewpointsRoute
+  '/$locale/admin/audio': typeof LocaleAuthenticatedAdminAdminAudioRoute
+  '/$locale/admin/data-management': typeof LocaleAuthenticatedAdminAdminDataManagementRoute
+  '/$locale/admin/index-data': typeof LocaleAuthenticatedAdminAdminIndexDataRoute
+  '/$locale/admin/members': typeof LocaleAuthenticatedAdminAdminMembersRoute
+  '/$locale/podcasts/$episodeId': typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
+  '/$locale/reports/$marketCode': typeof LocaleAuthenticatedCustomerReportsMarketCodeRoute
+  '/$locale/podcasts/': typeof LocaleAuthenticatedCustomerPodcastsIndexRoute
+  '/$locale/reports/': typeof LocaleAuthenticatedCustomerReportsIndexRoute
+  '/$locale/admin/conversations/$conversationId': typeof LocaleAuthenticatedAdminAdminConversationsConversationIdRoute
+  '/$locale/admin/conversations/': typeof LocaleAuthenticatedAdminAdminConversationsIndexRoute
 }
 export interface FileRoutesByTo {
-  "/": typeof IndexRoute
-  "/$locale": typeof LocaleIndexRoute
-  "/$locale/change-password": typeof LocaleChangePasswordRoute
-  "/$locale/login": typeof LocaleLoginRoute
-  "/$locale/back-office": typeof LocaleAuthenticatedBackOfficeRouteWithChildren
-  "/$locale/admin/change-password": typeof LocaleAdminChangePasswordRoute
-  "/$locale/admin/login": typeof LocaleAdminLoginRoute
-  "/$locale/account": typeof LocaleAuthenticatedCustomerAccountRoute
-  "/$locale/back-office/podcasts": typeof LocaleAuthenticatedBackOfficePodcastsRoute
-  "/$locale/admin/analyst-viewpoints": typeof LocaleAuthenticatedAdminAdminAnalystViewpointsRoute
-  "/$locale/admin/audio": typeof LocaleAuthenticatedAdminAdminAudioRoute
-  "/$locale/admin/index-data": typeof LocaleAuthenticatedAdminAdminIndexDataRoute
-  "/$locale/admin/members": typeof LocaleAuthenticatedAdminAdminMembersRoute
-  "/$locale/podcasts/$episodeId": typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
-  "/$locale/reports/$marketCode": typeof LocaleAuthenticatedCustomerReportsMarketCodeRoute
-  "/$locale/podcasts": typeof LocaleAuthenticatedCustomerPodcastsIndexRoute
-  "/$locale/reports": typeof LocaleAuthenticatedCustomerReportsIndexRoute
-  "/$locale/admin/conversations/$conversationId": typeof LocaleAuthenticatedAdminAdminConversationsConversationIdRoute
-  "/$locale/admin/conversations": typeof LocaleAuthenticatedAdminAdminConversationsIndexRoute
+  '/': typeof IndexRoute
+  '/$locale': typeof LocaleIndexRoute
+  '/$locale/change-password': typeof LocaleChangePasswordRoute
+  '/$locale/login': typeof LocaleLoginRoute
+  '/$locale/back-office': typeof LocaleAuthenticatedBackOfficeRouteWithChildren
+  '/$locale/admin/change-password': typeof LocaleAdminChangePasswordRoute
+  '/$locale/admin/login': typeof LocaleAdminLoginRoute
+  '/$locale/account': typeof LocaleAuthenticatedCustomerAccountRoute
+  '/$locale/back-office/podcasts': typeof LocaleAuthenticatedBackOfficePodcastsRoute
+  '/$locale/admin/analyst-viewpoints': typeof LocaleAuthenticatedAdminAdminAnalystViewpointsRoute
+  '/$locale/admin/audio': typeof LocaleAuthenticatedAdminAdminAudioRoute
+  '/$locale/admin/data-management': typeof LocaleAuthenticatedAdminAdminDataManagementRoute
+  '/$locale/admin/index-data': typeof LocaleAuthenticatedAdminAdminIndexDataRoute
+  '/$locale/admin/members': typeof LocaleAuthenticatedAdminAdminMembersRoute
+  '/$locale/podcasts/$episodeId': typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
+  '/$locale/reports/$marketCode': typeof LocaleAuthenticatedCustomerReportsMarketCodeRoute
+  '/$locale/podcasts': typeof LocaleAuthenticatedCustomerPodcastsIndexRoute
+  '/$locale/reports': typeof LocaleAuthenticatedCustomerReportsIndexRoute
+  '/$locale/admin/conversations/$conversationId': typeof LocaleAuthenticatedAdminAdminConversationsConversationIdRoute
+  '/$locale/admin/conversations': typeof LocaleAuthenticatedAdminAdminConversationsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  "/": typeof IndexRoute
-  "/$locale": typeof LocaleRouteWithChildren
-  "/$locale/_authenticated": typeof LocaleAuthenticatedRouteWithChildren
-  "/$locale/change-password": typeof LocaleChangePasswordRoute
-  "/$locale/login": typeof LocaleLoginRoute
-  "/$locale/": typeof LocaleIndexRoute
-  "/$locale/_authenticated/_admin": typeof LocaleAuthenticatedAdminRouteWithChildren
-  "/$locale/_authenticated/_customer": typeof LocaleAuthenticatedCustomerRouteWithChildren
-  "/$locale/_authenticated/back-office": typeof LocaleAuthenticatedBackOfficeRouteWithChildren
-  "/$locale/admin/change-password": typeof LocaleAdminChangePasswordRoute
-  "/$locale/admin/login": typeof LocaleAdminLoginRoute
-  "/$locale/_authenticated/_customer/account": typeof LocaleAuthenticatedCustomerAccountRoute
-  "/$locale/_authenticated/_customer/podcasts": typeof LocaleAuthenticatedCustomerPodcastsRouteWithChildren
-  "/$locale/_authenticated/_customer/reports": typeof LocaleAuthenticatedCustomerReportsRouteWithChildren
-  "/$locale/_authenticated/back-office/podcasts": typeof LocaleAuthenticatedBackOfficePodcastsRoute
-  "/$locale/_authenticated/_admin/admin/analyst-viewpoints": typeof LocaleAuthenticatedAdminAdminAnalystViewpointsRoute
-  "/$locale/_authenticated/_admin/admin/audio": typeof LocaleAuthenticatedAdminAdminAudioRoute
-  "/$locale/_authenticated/_admin/admin/index-data": typeof LocaleAuthenticatedAdminAdminIndexDataRoute
-  "/$locale/_authenticated/_admin/admin/members": typeof LocaleAuthenticatedAdminAdminMembersRoute
-  "/$locale/_authenticated/_customer/podcasts/$episodeId": typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
-  "/$locale/_authenticated/_customer/reports/$marketCode": typeof LocaleAuthenticatedCustomerReportsMarketCodeRoute
-  "/$locale/_authenticated/_customer/podcasts/": typeof LocaleAuthenticatedCustomerPodcastsIndexRoute
-  "/$locale/_authenticated/_customer/reports/": typeof LocaleAuthenticatedCustomerReportsIndexRoute
-  "/$locale/_authenticated/_admin/admin/conversations/$conversationId": typeof LocaleAuthenticatedAdminAdminConversationsConversationIdRoute
-  "/$locale/_authenticated/_admin/admin/conversations/": typeof LocaleAuthenticatedAdminAdminConversationsIndexRoute
+  '/': typeof IndexRoute
+  '/$locale': typeof LocaleRouteWithChildren
+  '/$locale/_authenticated': typeof LocaleAuthenticatedRouteWithChildren
+  '/$locale/change-password': typeof LocaleChangePasswordRoute
+  '/$locale/login': typeof LocaleLoginRoute
+  '/$locale/': typeof LocaleIndexRoute
+  '/$locale/_authenticated/_admin': typeof LocaleAuthenticatedAdminRouteWithChildren
+  '/$locale/_authenticated/_customer': typeof LocaleAuthenticatedCustomerRouteWithChildren
+  '/$locale/_authenticated/back-office': typeof LocaleAuthenticatedBackOfficeRouteWithChildren
+  '/$locale/admin/change-password': typeof LocaleAdminChangePasswordRoute
+  '/$locale/admin/login': typeof LocaleAdminLoginRoute
+  '/$locale/_authenticated/_customer/account': typeof LocaleAuthenticatedCustomerAccountRoute
+  '/$locale/_authenticated/_customer/podcasts': typeof LocaleAuthenticatedCustomerPodcastsRouteWithChildren
+  '/$locale/_authenticated/_customer/reports': typeof LocaleAuthenticatedCustomerReportsRouteWithChildren
+  '/$locale/_authenticated/back-office/podcasts': typeof LocaleAuthenticatedBackOfficePodcastsRoute
+  '/$locale/_authenticated/_admin/admin/analyst-viewpoints': typeof LocaleAuthenticatedAdminAdminAnalystViewpointsRoute
+  '/$locale/_authenticated/_admin/admin/audio': typeof LocaleAuthenticatedAdminAdminAudioRoute
+  '/$locale/_authenticated/_admin/admin/data-management': typeof LocaleAuthenticatedAdminAdminDataManagementRoute
+  '/$locale/_authenticated/_admin/admin/index-data': typeof LocaleAuthenticatedAdminAdminIndexDataRoute
+  '/$locale/_authenticated/_admin/admin/members': typeof LocaleAuthenticatedAdminAdminMembersRoute
+  '/$locale/_authenticated/_customer/podcasts/$episodeId': typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRoute
+  '/$locale/_authenticated/_customer/reports/$marketCode': typeof LocaleAuthenticatedCustomerReportsMarketCodeRoute
+  '/$locale/_authenticated/_customer/podcasts/': typeof LocaleAuthenticatedCustomerPodcastsIndexRoute
+  '/$locale/_authenticated/_customer/reports/': typeof LocaleAuthenticatedCustomerReportsIndexRoute
+  '/$locale/_authenticated/_admin/admin/conversations/$conversationId': typeof LocaleAuthenticatedAdminAdminConversationsConversationIdRoute
+  '/$locale/_authenticated/_admin/admin/conversations/': typeof LocaleAuthenticatedAdminAdminConversationsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | "/"
-    | "/$locale"
-    | "/$locale/change-password"
-    | "/$locale/login"
-    | "/$locale/"
-    | "/$locale/back-office"
-    | "/$locale/admin/change-password"
-    | "/$locale/admin/login"
-    | "/$locale/account"
-    | "/$locale/podcasts"
-    | "/$locale/reports"
-    | "/$locale/back-office/podcasts"
-    | "/$locale/admin/analyst-viewpoints"
-    | "/$locale/admin/audio"
-    | "/$locale/admin/index-data"
-    | "/$locale/admin/members"
-    | "/$locale/podcasts/$episodeId"
-    | "/$locale/reports/$marketCode"
-    | "/$locale/podcasts/"
-    | "/$locale/reports/"
-    | "/$locale/admin/conversations/$conversationId"
-    | "/$locale/admin/conversations/"
+    | '/'
+    | '/$locale'
+    | '/$locale/change-password'
+    | '/$locale/login'
+    | '/$locale/'
+    | '/$locale/back-office'
+    | '/$locale/admin/change-password'
+    | '/$locale/admin/login'
+    | '/$locale/account'
+    | '/$locale/podcasts'
+    | '/$locale/reports'
+    | '/$locale/back-office/podcasts'
+    | '/$locale/admin/analyst-viewpoints'
+    | '/$locale/admin/audio'
+    | '/$locale/admin/data-management'
+    | '/$locale/admin/index-data'
+    | '/$locale/admin/members'
+    | '/$locale/podcasts/$episodeId'
+    | '/$locale/reports/$marketCode'
+    | '/$locale/podcasts/'
+    | '/$locale/reports/'
+    | '/$locale/admin/conversations/$conversationId'
+    | '/$locale/admin/conversations/'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | "/"
-    | "/$locale"
-    | "/$locale/change-password"
-    | "/$locale/login"
-    | "/$locale/back-office"
-    | "/$locale/admin/change-password"
-    | "/$locale/admin/login"
-    | "/$locale/account"
-    | "/$locale/back-office/podcasts"
-    | "/$locale/admin/analyst-viewpoints"
-    | "/$locale/admin/audio"
-    | "/$locale/admin/index-data"
-    | "/$locale/admin/members"
-    | "/$locale/podcasts/$episodeId"
-    | "/$locale/reports/$marketCode"
-    | "/$locale/podcasts"
-    | "/$locale/reports"
-    | "/$locale/admin/conversations/$conversationId"
-    | "/$locale/admin/conversations"
+    | '/'
+    | '/$locale'
+    | '/$locale/change-password'
+    | '/$locale/login'
+    | '/$locale/back-office'
+    | '/$locale/admin/change-password'
+    | '/$locale/admin/login'
+    | '/$locale/account'
+    | '/$locale/back-office/podcasts'
+    | '/$locale/admin/analyst-viewpoints'
+    | '/$locale/admin/audio'
+    | '/$locale/admin/data-management'
+    | '/$locale/admin/index-data'
+    | '/$locale/admin/members'
+    | '/$locale/podcasts/$episodeId'
+    | '/$locale/reports/$marketCode'
+    | '/$locale/podcasts'
+    | '/$locale/reports'
+    | '/$locale/admin/conversations/$conversationId'
+    | '/$locale/admin/conversations'
   id:
-    | "__root__"
-    | "/"
-    | "/$locale"
-    | "/$locale/_authenticated"
-    | "/$locale/change-password"
-    | "/$locale/login"
-    | "/$locale/"
-    | "/$locale/_authenticated/_admin"
-    | "/$locale/_authenticated/_customer"
-    | "/$locale/_authenticated/back-office"
-    | "/$locale/admin/change-password"
-    | "/$locale/admin/login"
-    | "/$locale/_authenticated/_customer/account"
-    | "/$locale/_authenticated/_customer/podcasts"
-    | "/$locale/_authenticated/_customer/reports"
-    | "/$locale/_authenticated/back-office/podcasts"
-    | "/$locale/_authenticated/_admin/admin/analyst-viewpoints"
-    | "/$locale/_authenticated/_admin/admin/audio"
-    | "/$locale/_authenticated/_admin/admin/index-data"
-    | "/$locale/_authenticated/_admin/admin/members"
-    | "/$locale/_authenticated/_customer/podcasts/$episodeId"
-    | "/$locale/_authenticated/_customer/reports/$marketCode"
-    | "/$locale/_authenticated/_customer/podcasts/"
-    | "/$locale/_authenticated/_customer/reports/"
-    | "/$locale/_authenticated/_admin/admin/conversations/$conversationId"
-    | "/$locale/_authenticated/_admin/admin/conversations/"
+    | '__root__'
+    | '/'
+    | '/$locale'
+    | '/$locale/_authenticated'
+    | '/$locale/change-password'
+    | '/$locale/login'
+    | '/$locale/'
+    | '/$locale/_authenticated/_admin'
+    | '/$locale/_authenticated/_customer'
+    | '/$locale/_authenticated/back-office'
+    | '/$locale/admin/change-password'
+    | '/$locale/admin/login'
+    | '/$locale/_authenticated/_customer/account'
+    | '/$locale/_authenticated/_customer/podcasts'
+    | '/$locale/_authenticated/_customer/reports'
+    | '/$locale/_authenticated/back-office/podcasts'
+    | '/$locale/_authenticated/_admin/admin/analyst-viewpoints'
+    | '/$locale/_authenticated/_admin/admin/audio'
+    | '/$locale/_authenticated/_admin/admin/data-management'
+    | '/$locale/_authenticated/_admin/admin/index-data'
+    | '/$locale/_authenticated/_admin/admin/members'
+    | '/$locale/_authenticated/_customer/podcasts/$episodeId'
+    | '/$locale/_authenticated/_customer/reports/$marketCode'
+    | '/$locale/_authenticated/_customer/podcasts/'
+    | '/$locale/_authenticated/_customer/reports/'
+    | '/$locale/_authenticated/_admin/admin/conversations/$conversationId'
+    | '/$locale/_authenticated/_admin/admin/conversations/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -329,180 +342,187 @@ export interface RootRouteChildren {
   LocaleRoute: typeof LocaleRouteWithChildren
 }
 
-declare module "@tanstack/react-router" {
+declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    "/": {
-      id: "/"
-      path: "/"
-      fullPath: "/"
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/$locale": {
-      id: "/$locale"
-      path: "/$locale"
-      fullPath: "/$locale"
+    '/$locale': {
+      id: '/$locale'
+      path: '/$locale'
+      fullPath: '/$locale'
       preLoaderRoute: typeof LocaleRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/$locale/": {
-      id: "/$locale/"
-      path: "/"
-      fullPath: "/$locale/"
+    '/$locale/': {
+      id: '/$locale/'
+      path: '/'
+      fullPath: '/$locale/'
       preLoaderRoute: typeof LocaleIndexRouteImport
       parentRoute: typeof LocaleRoute
     }
-    "/$locale/_authenticated": {
-      id: "/$locale/_authenticated"
-      path: ""
-      fullPath: "/$locale"
+    '/$locale/_authenticated': {
+      id: '/$locale/_authenticated'
+      path: ''
+      fullPath: '/$locale'
       preLoaderRoute: typeof LocaleAuthenticatedRouteImport
       parentRoute: typeof LocaleRoute
     }
-    "/$locale/change-password": {
-      id: "/$locale/change-password"
-      path: "/change-password"
-      fullPath: "/$locale/change-password"
+    '/$locale/change-password': {
+      id: '/$locale/change-password'
+      path: '/change-password'
+      fullPath: '/$locale/change-password'
       preLoaderRoute: typeof LocaleChangePasswordRouteImport
       parentRoute: typeof LocaleRoute
     }
-    "/$locale/login": {
-      id: "/$locale/login"
-      path: "/login"
-      fullPath: "/$locale/login"
+    '/$locale/login': {
+      id: '/$locale/login'
+      path: '/login'
+      fullPath: '/$locale/login'
       preLoaderRoute: typeof LocaleLoginRouteImport
       parentRoute: typeof LocaleRoute
     }
-    "/$locale/_authenticated/_admin": {
-      id: "/$locale/_authenticated/_admin"
-      path: ""
-      fullPath: "/$locale"
+    '/$locale/_authenticated/_admin': {
+      id: '/$locale/_authenticated/_admin'
+      path: ''
+      fullPath: '/$locale'
       preLoaderRoute: typeof LocaleAuthenticatedAdminRouteImport
       parentRoute: typeof LocaleAuthenticatedRoute
     }
-    "/$locale/_authenticated/_customer": {
-      id: "/$locale/_authenticated/_customer"
-      path: ""
-      fullPath: "/$locale"
+    '/$locale/_authenticated/_customer': {
+      id: '/$locale/_authenticated/_customer'
+      path: ''
+      fullPath: '/$locale'
       preLoaderRoute: typeof LocaleAuthenticatedCustomerRouteImport
       parentRoute: typeof LocaleAuthenticatedRoute
     }
-    "/$locale/_authenticated/back-office": {
-      id: "/$locale/_authenticated/back-office"
-      path: "/back-office"
-      fullPath: "/$locale/back-office"
+    '/$locale/_authenticated/back-office': {
+      id: '/$locale/_authenticated/back-office'
+      path: '/back-office'
+      fullPath: '/$locale/back-office'
       preLoaderRoute: typeof LocaleAuthenticatedBackOfficeRouteImport
       parentRoute: typeof LocaleAuthenticatedRoute
     }
-    "/$locale/admin/change-password": {
-      id: "/$locale/admin/change-password"
-      path: "/admin/change-password"
-      fullPath: "/$locale/admin/change-password"
+    '/$locale/admin/change-password': {
+      id: '/$locale/admin/change-password'
+      path: '/admin/change-password'
+      fullPath: '/$locale/admin/change-password'
       preLoaderRoute: typeof LocaleAdminChangePasswordRouteImport
       parentRoute: typeof LocaleRoute
     }
-    "/$locale/admin/login": {
-      id: "/$locale/admin/login"
-      path: "/admin/login"
-      fullPath: "/$locale/admin/login"
+    '/$locale/admin/login': {
+      id: '/$locale/admin/login'
+      path: '/admin/login'
+      fullPath: '/$locale/admin/login'
       preLoaderRoute: typeof LocaleAdminLoginRouteImport
       parentRoute: typeof LocaleRoute
     }
-    "/$locale/_authenticated/_customer/account": {
-      id: "/$locale/_authenticated/_customer/account"
-      path: "/account"
-      fullPath: "/$locale/account"
+    '/$locale/_authenticated/_customer/account': {
+      id: '/$locale/_authenticated/_customer/account'
+      path: '/account'
+      fullPath: '/$locale/account'
       preLoaderRoute: typeof LocaleAuthenticatedCustomerAccountRouteImport
       parentRoute: typeof LocaleAuthenticatedCustomerRoute
     }
-    "/$locale/_authenticated/_customer/podcasts": {
-      id: "/$locale/_authenticated/_customer/podcasts"
-      path: "/podcasts"
-      fullPath: "/$locale/podcasts"
+    '/$locale/_authenticated/_customer/podcasts': {
+      id: '/$locale/_authenticated/_customer/podcasts'
+      path: '/podcasts'
+      fullPath: '/$locale/podcasts'
       preLoaderRoute: typeof LocaleAuthenticatedCustomerPodcastsRouteImport
       parentRoute: typeof LocaleAuthenticatedCustomerRoute
     }
-    "/$locale/_authenticated/_customer/reports": {
-      id: "/$locale/_authenticated/_customer/reports"
-      path: "/reports"
-      fullPath: "/$locale/reports"
+    '/$locale/_authenticated/_customer/reports': {
+      id: '/$locale/_authenticated/_customer/reports'
+      path: '/reports'
+      fullPath: '/$locale/reports'
       preLoaderRoute: typeof LocaleAuthenticatedCustomerReportsRouteImport
       parentRoute: typeof LocaleAuthenticatedCustomerRoute
     }
-    "/$locale/_authenticated/back-office/podcasts": {
-      id: "/$locale/_authenticated/back-office/podcasts"
-      path: "/podcasts"
-      fullPath: "/$locale/back-office/podcasts"
+    '/$locale/_authenticated/back-office/podcasts': {
+      id: '/$locale/_authenticated/back-office/podcasts'
+      path: '/podcasts'
+      fullPath: '/$locale/back-office/podcasts'
       preLoaderRoute: typeof LocaleAuthenticatedBackOfficePodcastsRouteImport
       parentRoute: typeof LocaleAuthenticatedBackOfficeRoute
     }
-    "/$locale/_authenticated/_admin/admin/analyst-viewpoints": {
-      id: "/$locale/_authenticated/_admin/admin/analyst-viewpoints"
-      path: "/admin/analyst-viewpoints"
-      fullPath: "/$locale/admin/analyst-viewpoints"
+    '/$locale/_authenticated/_admin/admin/analyst-viewpoints': {
+      id: '/$locale/_authenticated/_admin/admin/analyst-viewpoints'
+      path: '/admin/analyst-viewpoints'
+      fullPath: '/$locale/admin/analyst-viewpoints'
       preLoaderRoute: typeof LocaleAuthenticatedAdminAdminAnalystViewpointsRouteImport
       parentRoute: typeof LocaleAuthenticatedAdminRoute
     }
-    "/$locale/_authenticated/_admin/admin/audio": {
-      id: "/$locale/_authenticated/_admin/admin/audio"
-      path: "/admin/audio"
-      fullPath: "/$locale/admin/audio"
+    '/$locale/_authenticated/_admin/admin/audio': {
+      id: '/$locale/_authenticated/_admin/admin/audio'
+      path: '/admin/audio'
+      fullPath: '/$locale/admin/audio'
       preLoaderRoute: typeof LocaleAuthenticatedAdminAdminAudioRouteImport
       parentRoute: typeof LocaleAuthenticatedAdminRoute
     }
-    "/$locale/_authenticated/_admin/admin/index-data": {
-      id: "/$locale/_authenticated/_admin/admin/index-data"
-      path: "/admin/index-data"
-      fullPath: "/$locale/admin/index-data"
+    '/$locale/_authenticated/_admin/admin/data-management': {
+      id: '/$locale/_authenticated/_admin/admin/data-management'
+      path: '/admin/data-management'
+      fullPath: '/$locale/admin/data-management'
+      preLoaderRoute: typeof LocaleAuthenticatedAdminAdminDataManagementRouteImport
+      parentRoute: typeof LocaleAuthenticatedAdminRoute
+    }
+    '/$locale/_authenticated/_admin/admin/index-data': {
+      id: '/$locale/_authenticated/_admin/admin/index-data'
+      path: '/admin/index-data'
+      fullPath: '/$locale/admin/index-data'
       preLoaderRoute: typeof LocaleAuthenticatedAdminAdminIndexDataRouteImport
       parentRoute: typeof LocaleAuthenticatedAdminRoute
     }
-    "/$locale/_authenticated/_admin/admin/members": {
-      id: "/$locale/_authenticated/_admin/admin/members"
-      path: "/admin/members"
-      fullPath: "/$locale/admin/members"
+    '/$locale/_authenticated/_admin/admin/members': {
+      id: '/$locale/_authenticated/_admin/admin/members'
+      path: '/admin/members'
+      fullPath: '/$locale/admin/members'
       preLoaderRoute: typeof LocaleAuthenticatedAdminAdminMembersRouteImport
       parentRoute: typeof LocaleAuthenticatedAdminRoute
     }
-    "/$locale/_authenticated/_customer/podcasts/": {
-      id: "/$locale/_authenticated/_customer/podcasts/"
-      path: "/"
-      fullPath: "/$locale/podcasts/"
+    '/$locale/_authenticated/_customer/podcasts/': {
+      id: '/$locale/_authenticated/_customer/podcasts/'
+      path: '/'
+      fullPath: '/$locale/podcasts/'
       preLoaderRoute: typeof LocaleAuthenticatedCustomerPodcastsIndexRouteImport
       parentRoute: typeof LocaleAuthenticatedCustomerPodcastsRoute
     }
-    "/$locale/_authenticated/_customer/podcasts/$episodeId": {
-      id: "/$locale/_authenticated/_customer/podcasts/$episodeId"
-      path: "/$episodeId"
-      fullPath: "/$locale/podcasts/$episodeId"
+    '/$locale/_authenticated/_customer/podcasts/$episodeId': {
+      id: '/$locale/_authenticated/_customer/podcasts/$episodeId'
+      path: '/$episodeId'
+      fullPath: '/$locale/podcasts/$episodeId'
       preLoaderRoute: typeof LocaleAuthenticatedCustomerPodcastsEpisodeIdRouteImport
       parentRoute: typeof LocaleAuthenticatedCustomerPodcastsRoute
     }
-    "/$locale/_authenticated/_customer/reports/": {
-      id: "/$locale/_authenticated/_customer/reports/"
-      path: "/"
-      fullPath: "/$locale/reports/"
+    '/$locale/_authenticated/_customer/reports/': {
+      id: '/$locale/_authenticated/_customer/reports/'
+      path: '/'
+      fullPath: '/$locale/reports/'
       preLoaderRoute: typeof LocaleAuthenticatedCustomerReportsIndexRouteImport
       parentRoute: typeof LocaleAuthenticatedCustomerReportsRoute
     }
-    "/$locale/_authenticated/_customer/reports/$marketCode": {
-      id: "/$locale/_authenticated/_customer/reports/$marketCode"
-      path: "/$marketCode"
-      fullPath: "/$locale/reports/$marketCode"
+    '/$locale/_authenticated/_customer/reports/$marketCode': {
+      id: '/$locale/_authenticated/_customer/reports/$marketCode'
+      path: '/$marketCode'
+      fullPath: '/$locale/reports/$marketCode'
       preLoaderRoute: typeof LocaleAuthenticatedCustomerReportsMarketCodeRouteImport
       parentRoute: typeof LocaleAuthenticatedCustomerReportsRoute
     }
-    "/$locale/_authenticated/_admin/admin/conversations/": {
-      id: "/$locale/_authenticated/_admin/admin/conversations/"
-      path: "/admin/conversations"
-      fullPath: "/$locale/admin/conversations/"
+    '/$locale/_authenticated/_admin/admin/conversations/': {
+      id: '/$locale/_authenticated/_admin/admin/conversations/'
+      path: '/admin/conversations'
+      fullPath: '/$locale/admin/conversations/'
       preLoaderRoute: typeof LocaleAuthenticatedAdminAdminConversationsIndexRouteImport
       parentRoute: typeof LocaleAuthenticatedAdminRoute
     }
-    "/$locale/_authenticated/_admin/admin/conversations/$conversationId": {
-      id: "/$locale/_authenticated/_admin/admin/conversations/$conversationId"
-      path: "/admin/conversations/$conversationId"
-      fullPath: "/$locale/admin/conversations/$conversationId"
+    '/$locale/_authenticated/_admin/admin/conversations/$conversationId': {
+      id: '/$locale/_authenticated/_admin/admin/conversations/$conversationId'
+      path: '/admin/conversations/$conversationId'
+      fullPath: '/$locale/admin/conversations/$conversationId'
       preLoaderRoute: typeof LocaleAuthenticatedAdminAdminConversationsConversationIdRouteImport
       parentRoute: typeof LocaleAuthenticatedAdminRoute
     }
@@ -512,6 +532,7 @@ declare module "@tanstack/react-router" {
 interface LocaleAuthenticatedAdminRouteChildren {
   LocaleAuthenticatedAdminAdminAnalystViewpointsRoute: typeof LocaleAuthenticatedAdminAdminAnalystViewpointsRoute
   LocaleAuthenticatedAdminAdminAudioRoute: typeof LocaleAuthenticatedAdminAdminAudioRoute
+  LocaleAuthenticatedAdminAdminDataManagementRoute: typeof LocaleAuthenticatedAdminAdminDataManagementRoute
   LocaleAuthenticatedAdminAdminIndexDataRoute: typeof LocaleAuthenticatedAdminAdminIndexDataRoute
   LocaleAuthenticatedAdminAdminMembersRoute: typeof LocaleAuthenticatedAdminAdminMembersRoute
   LocaleAuthenticatedAdminAdminConversationsConversationIdRoute: typeof LocaleAuthenticatedAdminAdminConversationsConversationIdRoute
@@ -524,6 +545,8 @@ const LocaleAuthenticatedAdminRouteChildren: LocaleAuthenticatedAdminRouteChildr
       LocaleAuthenticatedAdminAdminAnalystViewpointsRoute,
     LocaleAuthenticatedAdminAdminAudioRoute:
       LocaleAuthenticatedAdminAdminAudioRoute,
+    LocaleAuthenticatedAdminAdminDataManagementRoute:
+      LocaleAuthenticatedAdminAdminDataManagementRoute,
     LocaleAuthenticatedAdminAdminIndexDataRoute:
       LocaleAuthenticatedAdminAdminIndexDataRoute,
     LocaleAuthenticatedAdminAdminMembersRoute:
@@ -536,7 +559,7 @@ const LocaleAuthenticatedAdminRouteChildren: LocaleAuthenticatedAdminRouteChildr
 
 const LocaleAuthenticatedAdminRouteWithChildren =
   LocaleAuthenticatedAdminRoute._addFileChildren(
-    LocaleAuthenticatedAdminRouteChildren
+    LocaleAuthenticatedAdminRouteChildren,
   )
 
 interface LocaleAuthenticatedCustomerPodcastsRouteChildren {
@@ -554,7 +577,7 @@ const LocaleAuthenticatedCustomerPodcastsRouteChildren: LocaleAuthenticatedCusto
 
 const LocaleAuthenticatedCustomerPodcastsRouteWithChildren =
   LocaleAuthenticatedCustomerPodcastsRoute._addFileChildren(
-    LocaleAuthenticatedCustomerPodcastsRouteChildren
+    LocaleAuthenticatedCustomerPodcastsRouteChildren,
   )
 
 interface LocaleAuthenticatedCustomerReportsRouteChildren {
@@ -572,7 +595,7 @@ const LocaleAuthenticatedCustomerReportsRouteChildren: LocaleAuthenticatedCustom
 
 const LocaleAuthenticatedCustomerReportsRouteWithChildren =
   LocaleAuthenticatedCustomerReportsRoute._addFileChildren(
-    LocaleAuthenticatedCustomerReportsRouteChildren
+    LocaleAuthenticatedCustomerReportsRouteChildren,
   )
 
 interface LocaleAuthenticatedCustomerRouteChildren {
@@ -593,7 +616,7 @@ const LocaleAuthenticatedCustomerRouteChildren: LocaleAuthenticatedCustomerRoute
 
 const LocaleAuthenticatedCustomerRouteWithChildren =
   LocaleAuthenticatedCustomerRoute._addFileChildren(
-    LocaleAuthenticatedCustomerRouteChildren
+    LocaleAuthenticatedCustomerRouteChildren,
   )
 
 interface LocaleAuthenticatedBackOfficeRouteChildren {
@@ -608,7 +631,7 @@ const LocaleAuthenticatedBackOfficeRouteChildren: LocaleAuthenticatedBackOfficeR
 
 const LocaleAuthenticatedBackOfficeRouteWithChildren =
   LocaleAuthenticatedBackOfficeRoute._addFileChildren(
-    LocaleAuthenticatedBackOfficeRouteChildren
+    LocaleAuthenticatedBackOfficeRouteChildren,
   )
 
 interface LocaleAuthenticatedRouteChildren {
@@ -657,9 +680,9 @@ export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
 
-import type { getRouter } from "./router.tsx"
-import type { createStart } from "@tanstack/react-start"
-declare module "@tanstack/react-start" {
+import type { getRouter } from './router.tsx'
+import type { createStart } from '@tanstack/react-start'
+declare module '@tanstack/react-start' {
   interface Register {
     ssr: true
     router: Awaited<ReturnType<typeof getRouter>>

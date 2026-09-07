@@ -450,6 +450,54 @@ async def test_index_refresh_requires_csrf_and_an_administrator(harness: Harness
         await asset_client.aclose()
 
 
+async def test_data_management_requires_real_admin_session_and_csrf(harness: Harness) -> None:
+    """Exercise the data-management router through actual login/session checks."""
+    path = "/api/admin/data-management/runs"
+    assert (await harness.client.get(path)).status_code == 401
+    assert (await harness.client.post(path, json={"operation": "morning_all"})).status_code == 401
+
+    admin_csrf = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    internal = await harness.client.post(
+        "/api/admin/internal-users",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={
+            "email": "data-management-assets@example.com",
+            "display_name": "Data Management Asset Manager",
+            "system_role": "asset_manager",
+            "reason": "Data management authorization test",
+        },
+    )
+    assert internal.status_code == 201, internal.text
+    non_admin_client, non_admin_csrf = await activate_member(harness, internal.json())
+    try:
+        assert (await non_admin_client.get(path)).status_code == 403
+        assert (
+            await non_admin_client.post(
+                path,
+                headers={"X-CSRF-Token": non_admin_csrf},
+                json={"operation": "morning_all"},
+            )
+        ).status_code == 403
+    finally:
+        await non_admin_client.aclose()
+
+    assert (await harness.client.post(path, json={"operation": "morning_all"})).status_code == 403
+    assert (
+        await harness.client.post(
+            path,
+            headers={"X-CSRF-Token": "not-a-csrf-token"},
+            json={"operation": "morning_all"},
+        )
+    ).status_code == 403
+    harness.settings.morning_reports_enabled = True
+    accepted = await harness.client.post(
+        path,
+        headers={"X-CSRF-Token": admin_csrf},
+        json={"operation": "morning_all"},
+    )
+    assert accepted.status_code == 202, accepted.text
+
+
 async def test_index_refresh_disabled_returns_503(harness: Harness) -> None:
     csrf_token = await login(harness.client, "admin@example.com", "AdminPassword123!")
     response = await harness.client.post(

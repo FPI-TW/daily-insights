@@ -89,6 +89,58 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/admin/data-management/catalog": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Catalog */
+    get: operations["catalog_api_admin_data_management_catalog_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/data-management/runs": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Runs */
+    get: operations["list_runs_api_admin_data_management_runs_get"]
+    put?: never
+    /** Create Run */
+    post: operations["create_run_api_admin_data_management_runs_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/data-management/runs/{run_id}": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Run */
+    get: operations["get_run_api_admin_data_management_runs__run_id__get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/admin/data-sources/yfinance/daily-bars": {
     parameters: {
       query?: never
@@ -98,7 +150,10 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** Fetch Yfinance Daily Bars */
+    /**
+     * Fetch Yfinance Daily Bars
+     * @deprecated
+     */
     post: operations["fetch_yfinance_daily_bars_api_admin_data_sources_yfinance_daily_bars_post"]
     delete?: never
     options?: never
@@ -1035,6 +1090,29 @@ export interface components {
       /** Csrf Token */
       csrf_token: string
     }
+    /** DataManagementCatalog */
+    DataManagementCatalog: {
+      /** Markets */
+      markets: ("global_macro_bonds" | "crypto" | "us_equity")[]
+      /** Morning Reports Enabled */
+      morning_reports_enabled: boolean
+      /**
+       * Taipei Date
+       * Format: date
+       */
+      taipei_date: string
+      /** Yfinance Enabled */
+      yfinance_enabled: boolean
+    }
+    /** DataManagementRunList */
+    DataManagementRunList: {
+      /** Items */
+      items: (
+        | components["schemas"]["MorningAllRunResponse"]
+        | components["schemas"]["MorningMarketRunResponse"]
+        | components["schemas"]["IndexYahooRunResponse"]
+      )[]
+    }
     /**
      * GenerationStatus
      * @enum {string}
@@ -1190,6 +1268,61 @@ export interface components {
       ]
       /** Symbol */
       symbol: string
+    }
+    /** IndexYahooRunCreate */
+    IndexYahooRunCreate: {
+      /** Market Code */
+      market_code?: null
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      operation: "index_yahoo"
+    }
+    /** IndexYahooRunResponse */
+    IndexYahooRunResponse: {
+      /** Completed At */
+      completed_at: string | null
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /** Error */
+      error: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Market Code */
+      market_code: null
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      operation: "index_yahoo"
+      /**
+       * Requested By User Id
+       * Format: uuid
+       */
+      requested_by_user_id: string
+      /** Result */
+      result: {
+        [key: string]: unknown
+      } | null
+      /** Started At */
+      started_at: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "pending" | "running" | "succeeded" | "partial" | "failed"
     }
     /** InternalUserCreate */
     InternalUserCreate: {
@@ -1375,6 +1508,122 @@ export interface components {
       unit_code: string
       /** Value */
       value: string
+    }
+    /** MorningAllRunCreate */
+    MorningAllRunCreate: {
+      /** Market Code */
+      market_code?: null
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      operation: "morning_all"
+    }
+    /** MorningAllRunResponse */
+    MorningAllRunResponse: {
+      /** Completed At */
+      completed_at: string | null
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /** Error */
+      error: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Market Code */
+      market_code: null
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      operation: "morning_all"
+      /**
+       * Requested By User Id
+       * Format: uuid
+       */
+      requested_by_user_id: string
+      /** Result */
+      result: {
+        [key: string]: unknown
+      } | null
+      /** Started At */
+      started_at: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "pending" | "running" | "succeeded" | "partial" | "failed"
+    }
+    /** MorningMarketRunCreate */
+    MorningMarketRunCreate: {
+      /**
+       * Market Code
+       * @enum {string}
+       */
+      market_code: "global_macro_bonds" | "crypto" | "us_equity"
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      operation: "morning_market"
+    }
+    /** MorningMarketRunResponse */
+    MorningMarketRunResponse: {
+      /** Completed At */
+      completed_at: string | null
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /** Error */
+      error: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /**
+       * Market Code
+       * @enum {string}
+       */
+      market_code: "global_macro_bonds" | "crypto" | "us_equity"
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      operation: "morning_market"
+      /**
+       * Requested By User Id
+       * Format: uuid
+       */
+      requested_by_user_id: string
+      /** Result */
+      result: {
+        [key: string]: unknown
+      } | null
+      /** Started At */
+      started_at: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "pending" | "running" | "succeeded" | "partial" | "failed"
     }
     /** NewsItemResponse */
     NewsItemResponse: {
@@ -2280,6 +2529,146 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ChatConversationDetailResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  catalog_api_admin_data_management_catalog_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["DataManagementCatalog"]
+        }
+      }
+    }
+  }
+  list_runs_api_admin_data_management_runs_get: {
+    parameters: {
+      query?: {
+        limit?: number
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["DataManagementRunList"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  create_run_api_admin_data_management_runs_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json":
+          | components["schemas"]["MorningAllRunCreate"]
+          | components["schemas"]["MorningMarketRunCreate"]
+          | components["schemas"]["IndexYahooRunCreate"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json":
+            | components["schemas"]["MorningAllRunResponse"]
+            | components["schemas"]["MorningMarketRunResponse"]
+            | components["schemas"]["IndexYahooRunResponse"]
+        }
+      }
+      /** @description An operation class is already active. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+      /** @description Requested provider is unavailable. */
+      503: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+    }
+  }
+  get_run_api_admin_data_management_runs__run_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        run_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json":
+            | components["schemas"]["MorningAllRunResponse"]
+            | components["schemas"]["MorningMarketRunResponse"]
+            | components["schemas"]["IndexYahooRunResponse"]
         }
       }
       /** @description Validation Error */
