@@ -224,6 +224,13 @@ describe("API client trust boundary", () => {
         top_buys: [{ ...leaders.top_buys[0], net_shares: "1000" }],
       }).success
     ).toBe(false)
+    // A blank security name must not cost the caller the whole response.
+    expect(
+      institutionalStockFlowLeadersSchema.safeParse({
+        ...leaders,
+        top_buys: [{ ...leaders.top_buys[0], security_name: "" }],
+      }).success
+    ).toBe(true)
   })
 
   it("fetches and strictly validates index moving averages", async () => {

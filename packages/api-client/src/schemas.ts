@@ -116,7 +116,10 @@ export const institutionalMarketFlowListSchema = z.array(
 export const institutionalStockFlowLeaderSchema = z.object({
   trade_date: z.iso.date(),
   symbol: z.string().min(1),
-  security_name: z.string().min(1),
+  // Copied verbatim from TWSE and never validated on the way in, unlike the
+  // symbol. Requiring it here would turn one blank name into a rejected
+  // response and an empty panel, which is worse than a row showing its code.
+  security_name: z.string(),
   net_shares: z.number().int(),
 })
 export type InstitutionalStockFlowLeader = z.infer<
