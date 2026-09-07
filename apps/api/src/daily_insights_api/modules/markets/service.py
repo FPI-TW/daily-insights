@@ -722,49 +722,59 @@ async def institutional_stock_flow_leaders(
     A security's five investor rows are summed first, so the ranking is on what
     the institutions did to that security as a whole rather than on any one
     investor's book.
-    """
-    day = trade_date or await database.scalar(
-        select(func.max(InstitutionalStockFlow.trade_date)).where(
-            InstitutionalStockFlow.market_code == market_code
-        )
-    )
-    if day is None:
-        return InstitutionalStockFlowLeadersResponse(trade_date=None, top_buys=[], top_sells=[])
-    net_shares = func.sum(InstitutionalStockFlow.net_shares).label("net_shares")
-    totals = (
-        select(InstitutionalStockFlow.symbol, InstitutionalStockFlow.security_name, net_shares)
-        .where(
-            InstitutionalStockFlow.market_code == market_code,
-            InstitutionalStockFlow.trade_date == day,
-        )
-        # The name is functionally dependent on the symbol within a day, but
-        # PostgreSQL only accepts that for a primary key, which this is not.
-        .group_by(InstitutionalStockFlow.symbol, InstitutionalStockFlow.security_name)
-    )
 
-    async def leaders(direction: Any, order: Any) -> list[InstitutionalStockFlowLeaderResponse]:
-        # Each list is filtered to its own sign: a quiet day returns fewer than
-        # five rather than filling the sell list with net buyers, and a total of
-        # zero is neither, so it appears in neither list.
-        # The symbol tie-break keeps the order stable across identical sums,
-        # which a day of untraded securities has plenty of.
-        rows = await database.execute(
-            totals.having(direction)
-            .order_by(order, InstitutionalStockFlow.symbol)
-            .limit(INSTITUTIONAL_STOCK_LEADERS)
+    One statement aggregates the day, and the two ends are taken here: a day is
+    about 1,300 securities, which is cheaper to carry back once than to make the
+    database group them a second time.
+    """
+    day = InstitutionalStockFlow.trade_date
+    on_day = (
+        day
+        == select(func.max(day))
+        .where(InstitutionalStockFlow.market_code == market_code)
+        .scalar_subquery()
+        if trade_date is None
+        else day == trade_date
+    )
+    net_shares = func.sum(InstitutionalStockFlow.net_shares).label("net_shares")
+    rows = (
+        await database.execute(
+            select(
+                day, InstitutionalStockFlow.symbol, InstitutionalStockFlow.security_name, net_shares
+            )
+            .where(InstitutionalStockFlow.market_code == market_code, on_day)
+            # The name is functionally dependent on the symbol within a day, but
+            # PostgreSQL only accepts that for a primary key, which this is not.
+            .group_by(day, InstitutionalStockFlow.symbol, InstitutionalStockFlow.security_name)
         )
+    ).all()
+    if not rows:
+        return InstitutionalStockFlowLeadersResponse(
+            trade_date=trade_date, top_buys=[], top_sells=[]
+        )
+
+    def leaders(side: list[Any], key: Any) -> list[InstitutionalStockFlowLeaderResponse]:
+        # Each list holds its own sign only, so a quiet day returns fewer than
+        # five rather than filling the sell list with net buyers, and a total of
+        # zero is neither, so it is listed nowhere. The symbol tie-break keeps
+        # the order stable across identical sums, which a day of untraded
+        # securities has plenty of.
         return [
             InstitutionalStockFlowLeaderResponse(
-                trade_date=day,
+                trade_date=row.trade_date,
                 symbol=row.symbol,
                 security_name=row.security_name,
                 net_shares=row.net_shares,
             )
-            for row in rows
+            for row in sorted(side, key=key)[:INSTITUTIONAL_STOCK_LEADERS]
         ]
 
     return InstitutionalStockFlowLeadersResponse(
-        trade_date=day,
-        top_buys=await leaders(net_shares > 0, net_shares.desc()),
-        top_sells=await leaders(net_shares < 0, net_shares.asc()),
+        trade_date=rows[0].trade_date,
+        top_buys=leaders(
+            [row for row in rows if row.net_shares > 0], lambda row: (-row.net_shares, row.symbol)
+        ),
+        top_sells=leaders(
+            [row for row in rows if row.net_shares < 0], lambda row: (row.net_shares, row.symbol)
+        ),
     )
