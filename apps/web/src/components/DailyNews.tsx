@@ -59,24 +59,19 @@ export function DailyNews({
             {t(titleKey)}
           </h2>
         </div>
-        <span
-          className={`rounded-full border px-2.5 py-1 text-xs font-bold ${status === "complete" ? "border-line text-sea-ink-soft" : "border-market-caution/50 bg-market-caution/10 text-market-caution"}`}
-        >
-          {t(`dailyNewsStatus_${status}`)}
-        </span>
+        {status === "partial" ? null : (
+          // A partial edition is shown as a plain list: the story count speaks
+          // for itself and a shortfall badge was judged noise.
+          <span
+            className={`rounded-full border px-2.5 py-1 text-xs font-bold ${status === "complete" ? "border-line text-sea-ink-soft" : "border-market-caution/50 bg-market-caution/10 text-market-caution"}`}
+          >
+            {t(`dailyNewsStatus_${status}`)}
+          </span>
+        )}
       </div>
-      {news !== null &&
-      (news.status === "partial" ||
-        (news.status === "complete" && news.caveat)) ? (
-        // A partial badge must explain itself: the caveat from the pipeline,
-        // or at least how many stories made it against the target.
-        <p className="mt-0 mb-4 text-xs text-sea-ink-soft">
-          {news.caveat ??
-            t("dailyNewsPartialExplanation", {
-              count: news.items.length,
-              target: news.target_items,
-            })}
-        </p>
+      {news !== null && news.status !== "unavailable" && news.caveat ? (
+        // Only the pipeline's own caveat (e.g. a stale edition) is surfaced.
+        <p className="mt-0 mb-4 text-xs text-sea-ink-soft">{news.caveat}</p>
       ) : null}
       {news === null ? (
         <div
