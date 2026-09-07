@@ -135,7 +135,9 @@ describe("three-market report presentation", () => {
     expect(opening.compareDocumentPosition(closing)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     )
-    expect(performance.parentElement).toHaveClass("xl:col-span-2")
+    // The five-index table shares its row with the first report block.
+    expect(performance.parentElement).not.toHaveClass("xl:col-span-2")
+    expect(closing.closest("section")).not.toHaveClass("xl:col-span-2")
   })
 
   it("lists every market the API marks visible, in API order", async () => {
@@ -274,7 +276,7 @@ describe("three-market report presentation", () => {
       "24.40EURFlat"
     )
     expect(screen.getByText("Flat")).toHaveClass("text-sea-ink-soft")
-    expect(screen.getByText("Data as of Sep 2, 2026")).toBeVisible()
+    expect(screen.queryByText(/Data as of/)).toBeNull()
     expect(screen.getByText("Possibly stale")).toBeVisible()
     expect(screen.getByText("Provider closed for a holiday.")).toBeVisible()
   })

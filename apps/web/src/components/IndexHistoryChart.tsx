@@ -256,12 +256,6 @@ export function IndexHistoryChart({
       </div>
       <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs text-sea-ink-soft">
         <div className="flex gap-1">
-          <dt>{t("indexChartLatestDate")}</dt>
-          <dd className="m-0 font-semibold text-sea-ink">
-            {formatIsoDate(latest.trade_date, locale)}
-          </dd>
-        </div>
-        <div className="flex gap-1">
           <dt>{t("indexChartLatestClose")}</dt>
           <dd className="m-0 font-mono font-semibold text-sea-ink tabular-nums">
             {formatNumber(latest.close, null, locale)}

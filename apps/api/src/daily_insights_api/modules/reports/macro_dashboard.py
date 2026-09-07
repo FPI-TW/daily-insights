@@ -19,7 +19,12 @@ from defusedxml.ElementTree import fromstring
 from pydantic import BaseModel, ConfigDict, Field
 
 from daily_insights_api.core.config import Settings
-from daily_insights_api.modules.data_sources.api import YfinanceAdapter
+from daily_insights_api.modules.data_sources.api import (
+    RetryPolicy,
+    TwelveDataAdapter,
+    TwelveDataTransport,
+    YfinanceAdapter,
+)
 
 
 class Point(BaseModel):
@@ -63,14 +68,21 @@ class MacroDashboard(BaseModel):
     calendar: Calendar
 
 
-# Explicit quote directions and units. Commodity symbols are front-month
-# futures, not the Twelve Data spot closes in the published morning report.
+# Commodities use the same Twelve Data spot symbols as the published morning
+# report, so the dashboard and the report never disagree on a close. Without
+# type=commodity the provider resolves HG1 to a Frankfurt-listed stock.
+COMMODITY_SOURCE = "Twelve Data"
+COMMODITIES = (
+    ("brent", "XBR/USD", "USD/bbl", "Energy Resource"),
+    ("wti", "WTI/USD", "USD/bbl", "Energy Resource"),
+    ("gold", "XAU/USD", "USD/oz", "Precious Metal"),
+    ("silver", "XAG/USD", "USD/oz", "Precious Metal"),
+    ("copper", "HG1", "USD/lb", "Industrial Metal"),
+)
+# Enough sessions to cover the one-year ratio window with margin.
+COMMODITY_HISTORY = 400
+# Explicit quote directions and units for the Yahoo Finance FX histories.
 INSTRUMENTS = (
-    ("brent", "BZ=F", "USD/bbl"),
-    ("wti", "CL=F", "USD/bbl"),
-    ("gold", "GC=F", "USD/oz"),
-    ("silver", "SI=F", "USD/oz"),
-    ("copper", "HG=F", "USD/lb"),
     ("dxy", "DX-Y.NYB", "index"),
     ("eur_usd", "EURUSD=X", "USD"),
     ("gbp_usd", "GBPUSD=X", "USD"),
@@ -353,7 +365,72 @@ async def load_calendar(client: httpx.AsyncClient, now: datetime) -> Calendar:
         return Calendar(status="unavailable", date=today, source=CALENDAR_SOURCE)
 
 
+async def load_commodity_histories(settings: Settings) -> list[History]:
+    def fallback(status: Literal["unavailable", "disabled"]) -> list[History]:
+        return [
+            History(id=key, symbol=symbol, unit=unit, source=COMMODITY_SOURCE, status=status)
+            for key, symbol, unit, _asset_type in COMMODITIES
+        ]
+
+    if settings.twelve_data_api_key is None:
+        return fallback("disabled")
+
+    async def fetch(
+        adapter: TwelveDataAdapter, key: str, symbol: str, unit: str, asset_type: str
+    ) -> History:
+        try:
+            result = await adapter.get_daily_bars(
+                market="global_macro_bonds",
+                symbol=symbol,
+                expected_currency="USD",
+                expected_asset_type=asset_type,
+                symbol_type="commodity",
+                outputsize=COMMODITY_HISTORY,
+            )
+            points = [
+                Point(date=item.trade_date, value=item.close)
+                for item in result.items
+                if item.close is not None
+            ]
+            if not points or any(point.value <= 0 for point in points):
+                raise ValueError("market history must contain positive closes")
+            return History(
+                id=key,
+                symbol=symbol,
+                unit=unit,
+                source=COMMODITY_SOURCE,
+                status="ok",
+                points=points,
+            )
+        except Exception:
+            return History(
+                id=key, symbol=symbol, unit=unit, source=COMMODITY_SOURCE, status="unavailable"
+            )
+
+    try:
+        async with TwelveDataTransport(
+            base_url=settings.twelve_data_base_url,
+            api_key=settings.twelve_data_api_key,
+            timeout_seconds=min(settings.twelve_data_timeout_seconds, 10),
+            retry_policy=RetryPolicy(max_attempts=settings.twelve_data_retry_attempts),
+            max_concurrency=settings.twelve_data_max_concurrency,
+        ) as transport:
+            adapter = TwelveDataAdapter(transport)
+            return list(
+                await asyncio.gather(*(fetch(adapter, *commodity) for commodity in COMMODITIES))
+            )
+    except Exception:
+        return fallback("unavailable")
+
+
 async def load_market_histories(settings: Settings) -> list[History]:
+    commodities, fx = await asyncio.gather(
+        load_commodity_histories(settings), load_fx_histories(settings)
+    )
+    return [*commodities, *fx]
+
+
+async def load_fx_histories(settings: Settings) -> list[History]:
     if not settings.yfinance_enabled:
         return [
             History(id=key, symbol=symbol, unit=unit, source="Yahoo Finance", status="disabled")

@@ -16,7 +16,6 @@ import {
   DashboardChoices,
   DashboardPanel,
   DashboardSection,
-  Methodology,
 } from "./DashboardPrimitives"
 
 type Institution = "all" | "foreign" | "trust" | "dealer"
@@ -115,7 +114,6 @@ function FlowPanel({
         />
       }
     >
-      <p className="mt-1 text-xs text-sea-ink-soft">{t("flowSub")}</p>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
         <DashboardChoices
           label={t("sectionFlows")}
@@ -283,7 +281,6 @@ function FlowPanel({
               }}
             />
           </ClientOnly>
-          <Methodology>{t("flowFormula")}</Methodology>
         </>
       )}
     </DashboardPanel>
@@ -327,7 +324,7 @@ function FlowTable({
               ].map((key, index) => (
                 <th
                   key={key}
-                  className={`border-b border-line whitespace-nowrap px-4 py-3 font-semibold ${index === 0 ? "text-left" : "text-right"}`}
+                  className={`border-b border-line whitespace-nowrap px-4 py-1.5 font-semibold ${index === 0 ? "text-left" : "text-right"}`}
                 >
                   {t(key)}
                 </th>
@@ -342,7 +339,7 @@ function FlowTable({
               >
                 <th
                   scope="row"
-                  className="px-4 py-4 text-left font-semibold text-sea-ink"
+                  className="px-4 py-1 text-left font-semibold text-sea-ink"
                 >
                   <span className="block">{row.name}</span>
                   <span className="mt-1 block font-mono text-xs text-sea-ink-soft">
@@ -364,7 +361,7 @@ function FlowTable({
                           index
                         ]!
                       )}
-                      className={`whitespace-nowrap px-4 py-4 text-right font-mono tabular-nums ${index === 3 ? "font-bold" : ""} ${directionClass(value)}`}
+                      className={`whitespace-nowrap px-4 py-1 text-right font-mono tabular-nums ${index === 3 ? "font-bold" : ""} ${directionClass(value)}`}
                     >
                       {signed(value, locale, value % 1 === 0 ? 0 : 1)}
                     </td>
@@ -404,7 +401,6 @@ function StocksPanel({
         </span>
       }
     >
-      <p className="mt-1 text-xs text-sea-ink-soft">{t("stockSub")}</p>
       {!stocks || (!buys.length && !sells.length) ? (
         <p
           role="status"
@@ -429,7 +425,7 @@ function StocksPanel({
             />
           </div>
           <p className="mt-4 text-xs leading-5 text-pretty text-sea-ink-soft">
-            {t("stockNote", { date: stocks.as_of ?? "—" })}
+            {t("stockNote")}
           </p>
         </>
       )}
@@ -446,11 +442,9 @@ export function TaiwanInstitutionalFlows({
   history: MarketIndexHistory | null
   locale: Locale
 }) {
-  const { t } = useTranslation()
-  const asOf = data.flows?.as_of ?? data.stocks?.as_of ?? "—"
   return (
     <div className="mt-6 min-w-0">
-      <DashboardSection meta={t("flowsMeta", { date: asOf })}>
+      <DashboardSection>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,560px),1fr))] items-start gap-6">
           <FlowPanel flows={data.flows} history={history} locale={locale} />
           <StocksPanel stocks={data.stocks} locale={locale} />
