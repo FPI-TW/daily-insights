@@ -281,7 +281,7 @@ async def test_institutional_twse_rerun_whose_only_fetch_fails_is_partial_not_fa
 
     edition = date(2026, 9, 7)
     stored_market = _weekdays_before(edition, 40)
-    stored_stock = _weekdays_before(edition, 7)
+    stored_stock = _weekdays_before(edition, 1)
 
     class Adapter:
         def __init__(self, **_: object) -> None:
@@ -316,14 +316,14 @@ async def test_institutional_twse_rerun_whose_only_fetch_fails_is_partial_not_fa
 
     assert (status, error) == ("partial", "twse_fetch_failures")
     assert cast(dict[str, Any], result["market_flows"])["covered_trading_days"] == 40
-    assert cast(dict[str, Any], result["stock_flows"])["covered_trading_days"] == 7
+    assert cast(dict[str, Any], result["stock_flows"])["covered_trading_days"] == 1
 
 
 @pytest.mark.asyncio
 async def test_institutional_twse_stops_walking_once_the_source_is_clearly_down(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An outage would otherwise cost 100 requests: 20 stock dates plus 80
+    """An outage would otherwise cost 90 requests: 10 stock dates plus 80
     market dates, each spaced by the adapter's interval."""
     from daily_insights_api.modules.data_management import service
 
@@ -470,13 +470,12 @@ async def test_institutional_twse_walks_back_to_forty_trading_days_without_refet
     )
 
     assert status == "partial" and error == "twse_fetch_failures"
-    # Stock flows: 7 trading days back from Monday 09-07 reach Friday 08-28,
-    # crossing two weekends, so 11 calendar days are asked and 7 are stored.
-    assert fetched_stock == [edition - timedelta(days=offset) for offset in range(11)]
+    # Stock flows: Monday 09-07 is a trading day, so the walk stores it and stops.
+    assert fetched_stock == [edition]
     stock = cast(dict[str, Any], result["stock_flows"])
-    assert stock["covered_trading_days"] == 7
+    assert stock["covered_trading_days"] == 1
     stock_statuses = [day["status"] for day in stock["days"]]
-    assert stock_statuses.count("stored") == 7 and stock_statuses.count("no_data") == 4
+    assert stock_statuses == ["stored"]
     assert already_stored.isdisjoint(fetched_market)
     market = cast(dict[str, Any], result["market_flows"])
     assert market["covered_trading_days"] == 40
