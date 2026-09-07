@@ -233,14 +233,14 @@ function AnalystViewpoints({
   if (!latest) return null
   return (
     <section className="mb-6" aria-labelledby="analyst-viewpoints-title">
-      <div className="mb-3">
+      <div className="mb-3 flex items-baseline justify-between gap-4">
         <h2
           id="analyst-viewpoints-title"
           className="m-0 text-lg font-extrabold tracking-[-0.02em] text-sea-ink"
         >
           {t("analystViewpointsTitle")}
         </h2>
-        <p className="mt-1 mb-0 text-xs text-sea-ink-soft">
+        <p className="m-0 text-xs text-sea-ink-soft">
           {t("analystViewpointsUpdated", {
             timestamp: formatTimestamp(latest.fetched_at),
           })}
@@ -345,14 +345,14 @@ export function MarketViewpoint({
       className="surface-panel mb-4 border-t-[3px] border-t-lagoon p-5"
       aria-labelledby={`viewpoint-${viewpoint.market_code}`}
     >
-      <div className="mb-2">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-3">
         <h2
           id={`viewpoint-${viewpoint.market_code}`}
           className="m-0 text-base font-extrabold tracking-[-0.015em] text-sea-ink"
         >
           {t("marketViewpointTitle")}
         </h2>
-        <p className="mt-1 mb-0 text-xs text-sea-ink-soft">
+        <p className="m-0 text-xs text-sea-ink-soft">
           {t("analystViewpointsUpdated", {
             timestamp: formatTimestamp(viewpoint.fetched_at),
           })}
