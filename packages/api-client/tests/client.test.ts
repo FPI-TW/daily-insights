@@ -179,7 +179,6 @@ describe("API client trust boundary", () => {
       trade_date: "2026-09-04",
       top_buys: [
         {
-          trade_date: "2026-09-04",
           symbol: "2330",
           security_name: "台積電",
           net_shares: 1000,

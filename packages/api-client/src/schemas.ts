@@ -112,9 +112,9 @@ export type InstitutionalMarketFlow = z.infer<
 export const institutionalMarketFlowListSchema = z.array(
   institutionalMarketFlowSchema
 )
-// net_shares is the security's total across all five investor categories.
+// net_shares is the security's total across all five investor categories. The
+// day is on the envelope, not repeated on every row.
 export const institutionalStockFlowLeaderSchema = z.object({
-  trade_date: z.iso.date(),
   symbol: z.string().min(1),
   // Copied verbatim from TWSE and never validated on the way in, unlike the
   // symbol. Requiring it here would turn one blank name into a rejected

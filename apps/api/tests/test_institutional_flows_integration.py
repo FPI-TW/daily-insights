@@ -292,8 +292,8 @@ async def test_stock_flow_leaders_rank_on_the_sum_of_all_five_investors(
     # 2306 sums to 15,000 and 2305 to 17,000: the single large foreign row wins,
     # which a per-investor ranking would have ordered the other way.
     assert [row["symbol"] for row in body["top_buys"]] == ["2305", "2306", "2304"]
+    # The day is on the envelope only; a row does not repeat it.
     assert body["top_buys"][0] == {
-        "trade_date": "2026-09-04",
         "symbol": "2305",
         "security_name": "公司2305",
         "net_shares": 17_000,

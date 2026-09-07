@@ -1405,6 +1405,9 @@ export interface components {
     /**
      * InstitutionalStockFlowLeaderResponse
      * @description One security's net shares for one day, summed over all five investors.
+     *
+     *     The day is on the envelope, which is also where it lives when both lists
+     *     are empty, so a row does not repeat it.
      */
     InstitutionalStockFlowLeaderResponse: {
       /** Net Shares */
@@ -1413,11 +1416,6 @@ export interface components {
       security_name: string
       /** Symbol */
       symbol: string
-      /**
-       * Trade Date
-       * Format: date
-       */
-      trade_date: string
     }
     /**
      * InstitutionalStockFlowLeadersResponse

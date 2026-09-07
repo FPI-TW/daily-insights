@@ -761,7 +761,6 @@ async def institutional_stock_flow_leaders(
         # securities has plenty of.
         return [
             InstitutionalStockFlowLeaderResponse(
-                trade_date=row.trade_date,
                 symbol=row.symbol,
                 security_name=row.security_name,
                 net_shares=row.net_shares,

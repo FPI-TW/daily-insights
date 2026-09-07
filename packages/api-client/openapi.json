@@ -1423,7 +1423,7 @@
         "type": "object"
       },
       "InstitutionalStockFlowLeaderResponse": {
-        "description": "One security's net shares for one day, summed over all five investors.",
+        "description": "One security's net shares for one day, summed over all five investors.\n\nThe day is on the envelope, which is also where it lives when both lists\nare empty, so a row does not repeat it.",
         "properties": {
           "net_shares": {
             "title": "Net Shares",
@@ -1436,14 +1436,9 @@
           "symbol": {
             "title": "Symbol",
             "type": "string"
-          },
-          "trade_date": {
-            "format": "date",
-            "title": "Trade Date",
-            "type": "string"
           }
         },
-        "required": ["trade_date", "symbol", "security_name", "net_shares"],
+        "required": ["symbol", "security_name", "net_shares"],
         "title": "InstitutionalStockFlowLeaderResponse",
         "type": "object"
       },

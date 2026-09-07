@@ -102,9 +102,12 @@ class InstitutionalMarketFlowResponse(BaseModel):
 
 
 class InstitutionalStockFlowLeaderResponse(BaseModel):
-    """One security's net shares for one day, summed over all five investors."""
+    """One security's net shares for one day, summed over all five investors.
 
-    trade_date: date
+    The day is on the envelope, which is also where it lives when both lists
+    are empty, so a row does not repeat it.
+    """
+
     symbol: str
     security_name: str
     net_shares: int
