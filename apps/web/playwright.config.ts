@@ -27,13 +27,13 @@ export default defineConfig({
   webServer: [
     {
       command: `node e2e/mock-api.mjs --port ${apiPort}`,
-      port: apiPort,
+      url: `http://127.0.0.1:${apiPort}/__e2e/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,
     },
     {
       command: `API_INTERNAL_URL=http://127.0.0.1:${apiPort} pnpm dev --host 127.0.0.1 --port ${webPort}`,
-      port: webPort,
+      url: `http://127.0.0.1:${webPort}/en/login`,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },

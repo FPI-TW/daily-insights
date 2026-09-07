@@ -294,11 +294,11 @@ function pastEpisodes(locale) {
   }))
 }
 
-const reportMarkets = ["global_macro_bonds", "crypto", "us_equity"]
+const reportMarkets = ["global_macro_bonds", "crypto", "us_equity", "tw_equity"]
 
 function reportSummary(marketCode, locale) {
   return {
-    publication_id: `${reportMarkets.indexOf(marketCode) + 7}0000000-0000-4000-8000-000000000001`,
+    publication_id: `${String(reportMarkets.indexOf(marketCode) + 7).padEnd(8, "0")}-0000-4000-8000-000000000001`,
     report_key: "daily-market",
     market_code: marketCode,
     edition_date: "2026-08-30",
@@ -433,15 +433,13 @@ const server = createServer(async (request, response) => {
     sendJson(
       response,
       200,
-      [...reportMarkets, "forex", "tw_equity", "tw_index_derivatives"].map(
-        code => ({
-          code,
-          is_visible: true,
-          name_en: code,
-          name_zh_hant: code,
-          name_zh_hans: code,
-        })
-      )
+      [...reportMarkets, "forex", "tw_index_derivatives"].map(code => ({
+        code,
+        is_visible: true,
+        name_en: code,
+        name_zh_hant: code,
+        name_zh_hans: code,
+      }))
     )
     return
   }
@@ -545,6 +543,70 @@ const server = createServer(async (request, response) => {
         ],
       },
     })
+    return
+  }
+
+  const indexMatch =
+    /^\/api\/markets\/indices\/([^/]+)\/(daily-bars|moving-averages)$/.exec(
+      url.pathname
+    )
+  if (indexMatch && request.method === "GET") {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    const symbol = decodeURIComponent(indexMatch[1])
+    const market = symbol === "^TWII" ? "tw_equity" : "us_equity"
+    // API fixtures only: no generated data or local SMA enters production code.
+    const dates = Array.from(
+      { length: 730 },
+      (_, i) => new Date(Date.UTC(2026, 8, 4) - (729 - i) * 86400000)
+    ).filter(date => date.getUTCDay() !== 0 && date.getUTCDay() !== 6)
+    const bars = dates.map((date, i) => {
+      const close =
+        21000 + i * 10 + Math.sin(i / 20) * 1700 + Math.cos(i / 43) * 900
+      const open = close + Math.sin(i * 1.7) * 130
+      return {
+        symbol,
+        market_code: market,
+        trade_date: date.toISOString().slice(0, 10),
+        open: open.toFixed(2),
+        high: (Math.max(open, close) + 100).toFixed(2),
+        low: (Math.min(open, close) - 100).toFixed(2),
+        close: close.toFixed(2),
+        volume: Math.round(3500000000 + Math.sin(i / 4) * 1600000000),
+      }
+    })
+    recordRequest(request, url, role)
+    sendJson(
+      response,
+      200,
+      indexMatch[2] === "daily-bars"
+        ? bars
+        : {
+            symbol,
+            market_code: market,
+            method: "sma",
+            price_field: "close",
+            formula_version: "sma-close-v1",
+            as_of: bars.at(-1).trade_date,
+            series: [20, 60, 120, 240].map(period => ({
+              period,
+              points: bars.map((bar, i) => ({
+                trade_date: bar.trade_date,
+                value:
+                  i < period - 1
+                    ? null
+                    : (
+                        bars
+                          .slice(i - period + 1, i + 1)
+                          .reduce(
+                            (sum, point) => sum + Number(point.close),
+                            0
+                          ) / period
+                      ).toFixed(10),
+              })),
+            })),
+          }
+    )
     return
   }
 
