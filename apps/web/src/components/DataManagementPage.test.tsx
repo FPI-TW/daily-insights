@@ -303,4 +303,128 @@ describe("DataManagementPage", () => {
       expect(redirectExpired).toHaveBeenCalledWith(expect.any(ApiError))
     )
   })
+
+  it("enqueues the Taiwan institutional rerun and reports what it covered", async () => {
+    catalog.mockResolvedValue({
+      taipei_date: "2026-09-07",
+      morning_reports_enabled: true,
+      yfinance_enabled: true,
+      twse_enabled: true,
+      markets: ["crypto"],
+    })
+    listRuns.mockResolvedValue({
+      items: [
+        {
+          id: "twse-run",
+          status: "partial",
+          operation: "institutional_twse",
+          market_code: null,
+          edition_date: "2026-09-07",
+          completed_at: "2026-09-07T09:00:00Z",
+          result: {
+            stock_flows: {
+              lookback_trading_days: 7,
+              covered_trading_days: 7,
+              aborted: false,
+              days: [
+                { trade_date: "2026-09-05", status: "no_data" },
+                {
+                  trade_date: "2026-09-04",
+                  status: "stored",
+                  record_count: 6700,
+                },
+              ],
+            },
+            market_flows: {
+              lookback_trading_days: 40,
+              covered_trading_days: 39,
+              aborted: false,
+              days: [
+                { trade_date: "2026-09-04", status: "failed", error: "boom" },
+              ],
+            },
+          },
+          error: null,
+        },
+      ],
+    })
+    createRun.mockResolvedValue({})
+    renderPage()
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Update institutional flows" })
+    )
+    await waitFor(() =>
+      expect(createRun).toHaveBeenCalledWith(
+        { operation: "institutional_twse" },
+        "csrf"
+      )
+    )
+    // The run detail says how much of each window was actually covered, which
+    // is what tells an operator whether to run it again.
+    expect(
+      screen.getByText(/stock_flows · covered_trading_days: 7 \/ 7/)
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/market_flows · covered_trading_days: 39 \/ 40/)
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/2026-09-04 · stored · record_count: 6700/)
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/2026-09-04 · failed · error: boom/)
+    ).toBeInTheDocument()
+  })
+
+  it("disables the Taiwan rerun when TWSE is off, and its own run locks only itself", async () => {
+    catalog.mockResolvedValue({
+      taipei_date: "2026-09-07",
+      morning_reports_enabled: true,
+      yfinance_enabled: true,
+      twse_enabled: false,
+      markets: ["crypto"],
+    })
+    listRuns.mockResolvedValue({ items: [] })
+    renderPage()
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Update institutional flows" })
+      ).toBeDisabled()
+    )
+    cleanup()
+
+    catalog.mockResolvedValue({
+      taipei_date: "2026-09-07",
+      morning_reports_enabled: true,
+      yfinance_enabled: true,
+      twse_enabled: true,
+      markets: ["crypto"],
+    })
+    listRuns.mockResolvedValue({
+      items: [
+        {
+          id: "twse-run",
+          status: "running",
+          operation: "institutional_twse",
+          market_code: null,
+          edition_date: "2026-09-07",
+          completed_at: null,
+          result: null,
+          error: null,
+        },
+      ],
+    })
+    renderPage()
+    // The API locks the three operation classes separately, so a running
+    // institutional job must not disable the morning or index buttons.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Update institutional flows" })
+      ).toBeDisabled()
+    )
+    expect(
+      screen.getByRole("button", { name: "Rerun all markets" })
+    ).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Crypto" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Update indices" })).toBeEnabled()
+  })
 })

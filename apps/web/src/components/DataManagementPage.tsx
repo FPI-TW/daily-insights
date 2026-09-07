@@ -10,6 +10,19 @@ import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
 
 const catalogKey = ["data-management", "catalog"] as const
 const runsKey = ["data-management", "runs"] as const
+// The operation classes the API locks separately: one run of each may be
+// active at a time, which is what the buttons below are disabled against.
+const MORNING_OPERATIONS = ["morning_all", "morning_market"]
+const ACTIVE_STATUSES = ["pending", "running"]
+
+type RunInput =
+  | { operation: "morning_all" }
+  | {
+      operation: "morning_market"
+      market_code: "global_macro_bonds" | "crypto" | "us_equity"
+    }
+  | { operation: "index_yahoo" }
+  | { operation: "institutional_twse" }
 
 export function DataManagementPage({ locale }: { locale: Locale }) {
   const { t } = useTranslation()
@@ -37,15 +50,7 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
         : false,
   })
   const enqueue = useMutation({
-    mutationFn: async (
-      input:
-        | { operation: "morning_all" }
-        | {
-            operation: "morning_market"
-            market_code: "global_macro_bonds" | "crypto" | "us_equity"
-          }
-        | { operation: "index_yahoo" }
-    ) =>
+    mutationFn: async (input: RunInput) =>
       browserAdministrationClient().createDataManagementRun(
         input,
         await requireCsrfToken()
@@ -65,15 +70,7 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
         : error
           ? t("dataManagementFailed")
           : ""
-  const submit = async (
-    input:
-      | { operation: "morning_all" }
-      | {
-          operation: "morning_market"
-          market_code: "global_macro_bonds" | "crypto" | "us_equity"
-        }
-      | { operation: "index_yahoo" }
-  ) => {
+  const submit = async (input: RunInput) => {
     try {
       await enqueue.mutateAsync(input)
     } catch (caught) {
@@ -91,16 +88,15 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
     )
   }
 
-  const activeMorning = runs.data?.items.some(
-    run =>
-      run.operation !== "index_yahoo" &&
-      ["pending", "running"].includes(run.status)
-  )
-  const activeIndex = runs.data?.items.some(
-    run =>
-      run.operation === "index_yahoo" &&
-      ["pending", "running"].includes(run.status)
-  )
+  const active = (operations: string[]) =>
+    runs.data?.items.some(
+      run =>
+        operations.includes(run.operation) &&
+        ACTIVE_STATUSES.includes(run.status)
+    )
+  const activeMorning = active(MORNING_OPERATIONS)
+  const activeIndex = active(["index_yahoo"])
+  const activeInstitutional = active(["institutional_twse"])
   return (
     <main className="page-shell">
       <header className="mb-8 max-w-3xl">
@@ -117,7 +113,7 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
           {errorMessage}
         </p>
       ) : null}
-      <div className="grid max-w-5xl gap-5 lg:grid-cols-3">
+      <div className="grid max-w-5xl gap-5 lg:grid-cols-2">
         <section
           className="surface-panel p-5"
           aria-labelledby="full-rerun-title"
@@ -201,6 +197,38 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
             {t("dataManagementIndexAction")}
           </button>
         </section>
+        <section
+          className="surface-panel p-5"
+          aria-labelledby="institutional-rerun-title"
+        >
+          <h2
+            id="institutional-rerun-title"
+            className="m-0 text-lg font-extrabold"
+          >
+            {t("dataManagementInstitutional")}
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-sea-ink-soft">
+            {t("dataManagementInstitutionalDescription")}
+          </p>
+          <button
+            type="button"
+            className="primary-action mt-4"
+            disabled={
+              Boolean(activeInstitutional) ||
+              enqueue.isPending ||
+              !catalog.data?.twse_enabled
+            }
+            onClick={() => void submit({ operation: "institutional_twse" })}
+          >
+            {enqueue.isPending ? (
+              <LoaderCircle
+                className="mr-2 inline size-4 animate-spin"
+                aria-hidden="true"
+              />
+            ) : null}
+            {t("dataManagementInstitutionalAction")}
+          </button>
+        </section>
       </div>
       <section
         className="surface-panel mt-6 max-w-5xl p-5"
@@ -275,6 +303,10 @@ function RunDetail({
 }) {
   const markets = Array.isArray(result?.markets) ? result.markets : null
   const symbols = Array.isArray(result?.symbols) ? result.symbols : null
+  const walk = (value: unknown) =>
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : null
   if (markets) {
     return (
       <div className="mt-3 grid gap-3 text-sm text-sea-ink-soft">
@@ -296,6 +328,39 @@ function RunDetail({
                   return (
                     <li key={`${String(entry.dataset_key)}-${datasetIndex}`}>
                       {`${String(entry.dataset_key)} · ${String(entry.status)} · record_count: ${String(entry.record_count ?? "—")} · fetched_at: ${String(entry.fetched_at ?? "—")} · source_as_of: ${String(entry.source_as_of ?? "—")}${entry.error ? ` · error: ${String(entry.error)}` : ""}`}
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+  const stockFlows = walk(result?.stock_flows)
+  const marketFlows = walk(result?.market_flows)
+  if (stockFlows || marketFlows) {
+    return (
+      <div className="mt-3 grid gap-3 text-sm text-sea-ink-soft">
+        {[
+          ["stock_flows", stockFlows],
+          ["market_flows", marketFlows],
+        ].map(([key, walk]) => {
+          const entry = walk as Record<string, unknown> | null
+          if (!entry) return null
+          const days = Array.isArray(entry.days) ? entry.days : []
+          return (
+            <div key={String(key)}>
+              <p className="m-0 font-bold text-sea-ink">
+                {`${String(key)} · covered_trading_days: ${String(entry.covered_trading_days ?? "—")} / ${String(entry.lookback_trading_days ?? "—")}${entry.aborted ? " · aborted" : ""}`}
+              </p>
+              <ul className="mt-1 list-disc pl-5">
+                {days.map((day, index) => {
+                  const item = day as Record<string, unknown>
+                  return (
+                    <li key={`${String(item.trade_date)}-${index}`}>
+                      {`${String(item.trade_date)} · ${String(item.status)}${item.record_count === undefined ? "" : ` · record_count: ${String(item.record_count)}`}${item.error ? ` · error: ${String(item.error)}` : ""}`}
                     </li>
                   )
                 })}

@@ -16,6 +16,7 @@ SERVICES = (
     "daily-news-scheduler",
     "analyst-viewpoints-scheduler",
     "index-daily-bars-scheduler",
+    "institutional-flows-scheduler",
     "data-management-worker",
 )
 API_ENVIRONMENT_KEYS = {
@@ -46,6 +47,7 @@ API_ENVIRONMENT_KEYS = {
     "DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS",
     "DAILY_INSIGHTS_SESSION_SECRET",
     "DAILY_INSIGHTS_TRUSTED_PROXY_CIDRS",
+    "DAILY_INSIGHTS_TWSE_ENABLED",
 }
 
 
@@ -120,6 +122,13 @@ def main() -> None:
         (
             "index-daily-bars-scheduler",
             "DAILY_INSIGHTS_YFINANCE_ENABLED",
+            None,
+        ),
+        # TWSE publishes no API either; the scheduler only queues the run
+        # that the worker below executes.
+        (
+            "institutional-flows-scheduler",
+            "DAILY_INSIGHTS_TWSE_ENABLED",
             None,
         ),
         (

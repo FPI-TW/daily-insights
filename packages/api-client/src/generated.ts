@@ -1454,11 +1454,8 @@ export interface components {
        * @enum {string}
        */
       operation: "index_yahoo"
-      /**
-       * Requested By User Id
-       * Format: uuid
-       */
-      requested_by_user_id: string
+      /** Requested By User Id */
+      requested_by_user_id: string | null
       /** Result */
       result: {
         [key: string]: unknown
@@ -1570,11 +1567,8 @@ export interface components {
        * @enum {string}
        */
       operation: "institutional_twse"
-      /**
-       * Requested By User Id
-       * Format: uuid
-       */
-      requested_by_user_id: string
+      /** Requested By User Id */
+      requested_by_user_id: string | null
       /** Result */
       result: {
         [key: string]: unknown
@@ -1821,11 +1815,8 @@ export interface components {
        * @enum {string}
        */
       operation: "morning_all"
-      /**
-       * Requested By User Id
-       * Format: uuid
-       */
-      requested_by_user_id: string
+      /** Requested By User Id */
+      requested_by_user_id: string | null
       /** Result */
       result: {
         [key: string]: unknown
@@ -1882,11 +1873,8 @@ export interface components {
        * @enum {string}
        */
       operation: "morning_market"
-      /**
-       * Requested By User Id
-       * Format: uuid
-       */
-      requested_by_user_id: string
+      /** Requested By User Id */
+      requested_by_user_id: string | null
       /** Result */
       result: {
         [key: string]: unknown
