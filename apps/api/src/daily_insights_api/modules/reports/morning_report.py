@@ -520,7 +520,7 @@ async def _build_dataset_blocks(
             )
         )
         completed_histories = tuple(
-            _completed_history_for_eod(result.items, eod)
+            completed_history_for_eod(result.items, eod)
             for result, eod in zip(histories, eods.items, strict=True)
         )
         macro_block = MetricBlock(
@@ -739,7 +739,7 @@ def _commodity_metric_item(
     )
 
 
-def _completed_history_for_eod(bars: tuple[DailyBar, ...], eod: EodResult) -> tuple[DailyBar, ...]:
+def completed_history_for_eod(bars: tuple[DailyBar, ...], eod: EodResult) -> tuple[DailyBar, ...]:
     """Cut mutable daily bars at the EOD date and reconcile the EOD close."""
     if any(bar.symbol != eod.symbol for bar in bars):
         raise DataSourceContractError("commodity history symbol did not match EOD symbol")

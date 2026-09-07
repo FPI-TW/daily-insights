@@ -320,6 +320,8 @@ function HistoryTable({
 }) {
   const { t } = useTranslation()
   const fx = Boolean(onSelect)
+  // Commodity closes carry their quote unit; FX and yields already say so.
+  const units = !fx && !rates
   if (
     !ids.some(id =>
       histories.some(history => history.id === id && history.points.length)
@@ -331,12 +333,15 @@ function HistoryTable({
       <ResponsiveTable>
         <thead className="border-b border-line text-sea-ink-soft">
           <tr>
-            <th scope="col" className="px-4 py-1.5 text-left font-semibold">
+            <th
+              scope="col"
+              className={`px-2 py-1.5 text-left font-semibold ${units ? "@lg:w-[17%]!" : ""}`}
+            >
               {t(rates ? "macroTenor" : "macroInstrument")}
             </th>
             <th
               scope="col"
-              className="whitespace-nowrap px-4 py-1.5 font-semibold"
+              className={`whitespace-nowrap px-2 py-1.5 font-semibold ${units ? "@lg:w-[20%]" : ""}`}
             >
               {t(rates ? "macroYield" : "macroClose")}
             </th>
@@ -344,7 +349,7 @@ function HistoryTable({
               <th
                 key={period}
                 scope="col"
-                className="whitespace-nowrap px-4 py-1.5 font-semibold"
+                className="whitespace-nowrap px-2 py-1.5 font-semibold"
               >
                 {t(`macroPeriod_${period}`)}
               </th>
@@ -366,7 +371,7 @@ function HistoryTable({
               >
                 <th
                   scope="row"
-                  className="px-4 py-1 text-left font-semibold text-pretty text-sea-ink"
+                  className="px-2 py-1 text-left font-semibold text-pretty text-sea-ink"
                 >
                   {onSelect ? (
                     <button
@@ -380,11 +385,6 @@ function HistoryTable({
                   ) : (
                     t(`macroAsset_${id}`)
                   )}
-                  {history && !fx && !rates ? (
-                    <span className="mt-0.5 block font-mono text-xs leading-4 font-normal text-sea-ink-soft">
-                      {unitLabel(history.unit, t) ?? history.unit}
-                    </span>
-                  ) : null}
                   {stale ? (
                     <span className="block text-xs font-normal text-sea-ink-soft">
                       {t("reportStale")}
@@ -393,19 +393,26 @@ function HistoryTable({
                 </th>
                 <td
                   data-label={t(rates ? "macroYield" : "macroClose")}
-                  className="px-4 py-1 text-right font-mono font-bold text-sea-ink"
+                  className="whitespace-nowrap px-2 py-1 text-right font-mono font-bold text-sea-ink"
                 >
-                  {formatValue(
-                    latest ? Number(latest.value) : null,
-                    history?.unit,
-                    locale
-                  )}
+                  <span className="whitespace-nowrap">
+                    {formatValue(
+                      latest ? Number(latest.value) : null,
+                      history?.unit,
+                      locale
+                    )}
+                    {history && units ? (
+                      <span className="ml-1 font-sans text-xs font-normal text-sea-ink-soft">
+                        {unitLabel(history.unit, t) ?? history.unit}
+                      </span>
+                    ) : null}
+                  </span>
                 </td>
                 {periods.map(period => (
                   <td
                     key={period}
                     data-label={t(`macroPeriod_${period}`)}
-                    className="px-4 py-1 text-right"
+                    className="px-2 py-1 text-right"
                   >
                     <Change
                       value={
@@ -433,7 +440,8 @@ export function MacroDashboard({
 }) {
   const { t } = useTranslation()
   const [selectedFx, setSelectedFx] = useState("eur_usd")
-  const [ratioDays, setRatioDays] = useState(365)
+  const [oilGoldDays, setOilGoldDays] = useState(365)
+  const [copperGoldDays, setCopperGoldDays] = useState(365)
   const [dxyDays, setDxyDays] = useState(90)
   const [fxDays, setFxDays] = useState(90)
   const [compare, setCompare] = useState<Period>("week")
@@ -451,13 +459,16 @@ export function MacroDashboard({
     })),
     change: byId.has(id) ? periodChange(byId.get(id)!, "day") : null,
   })
-  function slicedRatio(points: { date: string; value: number }[]) {
+  function slicedRatio(
+    points: { date: string; value: number }[],
+    days: number
+  ) {
     const latest = points.at(-1)
     return latest
       ? points.filter(
           p =>
             Date.parse(p.date) >=
-            Date.parse(latest.date) - (ratioDays - 1) * 86_400_000
+            Date.parse(latest.date) - (days - 1) * 86_400_000
         )
       : []
   }
@@ -465,33 +476,49 @@ export function MacroDashboard({
     <div className="min-w-0 pb-6 [&>section+section]:mt-9">
       <section className="min-w-0">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,560px),1fr))] items-start gap-6">
-          <DashboardPanel title={t("macroCommodities")}>
-            <HistoryTable
-              ids={commodityIds}
-              histories={histories}
-              locale={locale}
-              fetchedAt={data?.fetched_at}
-            />
-          </DashboardPanel>
+          <div className="col-span-full min-w-0">
+            <DashboardPanel title={t("macroCommodities")}>
+              <HistoryTable
+                ids={commodityIds}
+                histories={histories}
+                locale={locale}
+                fetchedAt={data?.fetched_at}
+              />
+            </DashboardPanel>
+          </div>
+          {/* One ratio per chart: a date missing from one pair must not break the other's line. */}
           <DashboardPanel
-            title={t("reportBlockMacroCommodityRatios")}
-            controls={<Range value={ratioDays} onChange={setRatioDays} />}
+            title={t("macroOilGold")}
+            controls={<Range value={oilGoldDays} onChange={setOilGoldDays} />}
           >
             <Chart
               locale={locale}
-              label={t("reportBlockMacroCommodityRatios")}
-              dual
-              days={ratioDays}
+              label={t("macroOilGold")}
+              days={oilGoldDays}
               lines={[
                 {
                   name: t("macroOilGold"),
                   unit: "ratio",
-                  points: slicedRatio(oilGold),
+                  points: slicedRatio(oilGold, oilGoldDays),
                 },
+              ]}
+            />
+          </DashboardPanel>
+          <DashboardPanel
+            title={t("macroCopperGold")}
+            controls={
+              <Range value={copperGoldDays} onChange={setCopperGoldDays} />
+            }
+          >
+            <Chart
+              locale={locale}
+              label={t("macroCopperGold")}
+              days={copperGoldDays}
+              lines={[
                 {
                   name: t("macroCopperGold"),
                   unit: "ratio",
-                  points: slicedRatio(copperGold),
+                  points: slicedRatio(copperGold, copperGoldDays),
                 },
               ]}
             />

@@ -135,7 +135,7 @@ function BiasPanel({
 }) {
   const { t } = useTranslation()
   const colors = useChartColors()
-  const [months, setMonths] = useState<12 | 18 | 24>(18)
+  const [months, setMonths] = useState<12 | 18>(18)
   const [zoom, setZoom] = useState({ start: 0, end: 100 })
   const all = useMemo(
     () => biasSeries(selected.bars, averages),
@@ -177,7 +177,7 @@ function BiasPanel({
               setMonths(value)
               setZoom({ start: 0, end: 100 })
             }}
-            options={([12, 18, 24] as const).map(value => ({
+            options={([12, 18] as const).map(value => ({
               value,
               label: t(`window_${value}`),
             }))}

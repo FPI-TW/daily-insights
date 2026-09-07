@@ -129,10 +129,10 @@ export function UsIndexPerformanceTable({
         <ResponsiveTable>
           <thead className="border-y border-line bg-link-hover text-xs font-bold text-sea-ink-soft">
             <tr>
-              <th scope="col" className="px-4 py-1.5 text-left">
+              <th scope="col" className="px-4 py-1.5 text-left @lg:w-[36%]!">
                 {t("usIndexTableIndex")}
               </th>
-              <th scope="col" className="px-4 py-1.5 text-right">
+              <th scope="col" className="px-4 py-1.5 text-right @lg:w-[20%]">
                 {t("usIndexTableClose")}
               </th>
               <th scope="col" className="px-4 py-1.5 text-right">
@@ -147,45 +147,55 @@ export function UsIndexPerformanceTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map(row => (
-              <tr
-                key={row.symbol}
-                className="border-b border-line last:border-b-0"
-              >
-                <th
-                  scope="row"
-                  className="whitespace-nowrap px-4 py-1 text-left font-semibold text-sea-ink"
+            {rows.map(row => {
+              const nameKey = indexNameKey(row.symbol)
+              return (
+                <tr
+                  key={row.symbol}
+                  className="border-b border-line last:border-b-0"
                 >
-                  {t(indexNameKey(row.symbol) ?? row.symbol)}
-                </th>
-                <td
-                  data-label={t("usIndexTableClose")}
-                  className="px-4 py-1 text-right font-mono tabular-nums text-sea-ink"
-                >
-                  {formatNumber(row.close, "index", locale)}
-                </td>
-                {[row.daily, row.monthly, row.ytd].map((value, column) => {
-                  const change = formatChange(value, locale, {
-                    flatLabel: t("reportChangeFlat"),
-                  })
-                  return (
-                    <td
-                      key={column}
-                      data-label={t(
-                        [
-                          "usIndexTableDaily",
-                          "usIndexTableMonthly",
-                          "usIndexTableYearly",
-                        ][column]!
-                      )}
-                      className={`whitespace-nowrap px-4 py-1 text-right font-mono tabular-nums ${directionClass(change.direction)}`}
-                    >
-                      {change.text}
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
+                  <th
+                    scope="row"
+                    className="whitespace-nowrap px-4 py-1 text-left font-semibold text-sea-ink"
+                  >
+                    <span className="block">{t(nameKey ?? row.symbol)}</span>
+                    {nameKey && locale !== "en" ? (
+                      <span className="block text-xs leading-4 font-normal text-sea-ink-soft">
+                        {t(nameKey, { lng: "en" })}
+                      </span>
+                    ) : null}
+                  </th>
+                  <td
+                    data-label={t("usIndexTableClose")}
+                    className="px-4 py-1 text-right font-mono tabular-nums text-sea-ink"
+                  >
+                    <span className="whitespace-nowrap">
+                      {formatNumber(row.close, "index", locale)}
+                    </span>
+                  </td>
+                  {[row.daily, row.monthly, row.ytd].map((value, column) => {
+                    const change = formatChange(value, locale, {
+                      flatLabel: t("reportChangeFlat"),
+                    })
+                    return (
+                      <td
+                        key={column}
+                        data-label={t(
+                          [
+                            "usIndexTableDaily",
+                            "usIndexTableMonthly",
+                            "usIndexTableYearly",
+                          ][column]!
+                        )}
+                        className={`whitespace-nowrap px-4 py-1 text-right font-mono tabular-nums ${directionClass(change.direction)}`}
+                      >
+                        <span className="whitespace-nowrap">{change.text}</span>
+                      </td>
+                    )
+                  })}
+                </tr>
+              )
+            })}
           </tbody>
         </ResponsiveTable>
       </div>

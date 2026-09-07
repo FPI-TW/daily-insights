@@ -20,11 +20,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.data_sources.api import (
+    EodResult,
     RetryPolicy,
     TwelveDataAdapter,
     TwelveDataTransport,
     YfinanceAdapter,
 )
+from daily_insights_api.modules.reports.morning_report import completed_history_for_eod
 
 
 class Point(BaseModel):
@@ -68,8 +70,11 @@ class MacroDashboard(BaseModel):
     calendar: Calendar
 
 
-# Commodities use the same Twelve Data spot symbols as the published morning
-# report, so the dashboard and the report never disagree on a close. Without
+# Commodities use the same Twelve Data spot symbols and the same /eod cut as
+# the published morning report, so the dashboard and the report never disagree
+# on a close: the 1day series still carries the session in progress, whose
+# close moves with the live price until the provider settles it, so the history
+# is cut at the /eod date and its last close must match /eod exactly. Without
 # type=commodity the provider resolves HG1 to a Frankfurt-listed stock.
 COMMODITY_SOURCE = "Twelve Data"
 COMMODITIES = (
@@ -376,7 +381,12 @@ async def load_commodity_histories(settings: Settings) -> list[History]:
         return fallback("disabled")
 
     async def fetch(
-        adapter: TwelveDataAdapter, key: str, symbol: str, unit: str, asset_type: str
+        adapter: TwelveDataAdapter,
+        eod: EodResult,
+        key: str,
+        symbol: str,
+        unit: str,
+        asset_type: str,
     ) -> History:
         try:
             result = await adapter.get_daily_bars(
@@ -385,11 +395,15 @@ async def load_commodity_histories(settings: Settings) -> list[History]:
                 expected_currency="USD",
                 expected_asset_type=asset_type,
                 symbol_type="commodity",
+                # The last close is compared exactly with /eod, so both endpoints
+                # must use the same reviewed provider precision.
+                dp=11,
                 outputsize=COMMODITY_HISTORY,
             )
+            completed = completed_history_for_eod(result.items, eod)
             points = [
                 Point(date=item.trade_date, value=item.close)
-                for item in result.items
+                for item in completed
                 if item.close is not None
             ]
             if not points or any(point.value <= 0 for point in points):
@@ -416,8 +430,22 @@ async def load_commodity_histories(settings: Settings) -> list[History]:
             max_concurrency=settings.twelve_data_max_concurrency,
         ) as transport:
             adapter = TwelveDataAdapter(transport)
+            # One batch request settles every commodity's completed date; without
+            # it no history can be cut, so a failure here degrades all five.
+            eods = await adapter.get_eods(
+                market="global_macro_bonds",
+                symbols=tuple(symbol for _key, symbol, _unit, _asset_type in COMMODITIES),
+                expected_currencies={
+                    symbol: "USD" for _key, symbol, _unit, _asset_type in COMMODITIES
+                },
+            )
             return list(
-                await asyncio.gather(*(fetch(adapter, *commodity) for commodity in COMMODITIES))
+                await asyncio.gather(
+                    *(
+                        fetch(adapter, eod, *commodity)
+                        for eod, commodity in zip(eods.items, COMMODITIES, strict=True)
+                    )
+                )
             )
     except Exception:
         return fallback("unavailable")
