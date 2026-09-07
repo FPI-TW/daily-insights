@@ -125,6 +125,65 @@ export const yfinanceDailyBarsResponseSchema = z.object({
 export type YfinanceDailyBarsResponse = z.infer<
   typeof yfinanceDailyBarsResponseSchema
 >
+export const dataManagementOperationSchema = z.enum([
+  "morning_all",
+  "morning_market",
+  "index_yahoo",
+])
+export const dataManagementRunStatusSchema = z.enum([
+  "pending",
+  "running",
+  "succeeded",
+  "partial",
+  "failed",
+])
+export const dataManagementRunCreateSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("morning_all") }),
+  z.object({
+    operation: z.literal("morning_market"),
+    market_code: launchMarketCodeSchema,
+  }),
+  z.object({ operation: z.literal("index_yahoo") }),
+])
+export type DataManagementRunCreateInput = z.infer<
+  typeof dataManagementRunCreateSchema
+>
+export const dataManagementCatalogSchema = z.object({
+  taipei_date: z.iso.date(),
+  morning_reports_enabled: z.boolean(),
+  yfinance_enabled: z.boolean(),
+  markets: z.array(launchMarketCodeSchema),
+})
+export type DataManagementCatalog = z.infer<typeof dataManagementCatalogSchema>
+const dataManagementRunBaseSchema = z.object({
+  id: z.uuid(),
+  edition_date: z.iso.date(),
+  status: dataManagementRunStatusSchema,
+  requested_by_user_id: z.uuid(),
+  created_at: z.iso.datetime({ offset: true }),
+  started_at: z.iso.datetime({ offset: true }).nullable(),
+  completed_at: z.iso.datetime({ offset: true }).nullable(),
+  result: z.record(z.string(), z.unknown()).nullable(),
+  error: z.string().nullable(),
+})
+export const dataManagementRunSchema = z.discriminatedUnion("operation", [
+  dataManagementRunBaseSchema.extend({
+    operation: z.literal("morning_all"),
+    market_code: z.null(),
+  }),
+  dataManagementRunBaseSchema.extend({
+    operation: z.literal("morning_market"),
+    market_code: launchMarketCodeSchema,
+  }),
+  dataManagementRunBaseSchema.extend({
+    operation: z.literal("index_yahoo"),
+    market_code: z.null(),
+  }),
+])
+export type DataManagementRun = z.infer<typeof dataManagementRunSchema>
+export const dataManagementRunListSchema = z.object({
+  items: z.array(dataManagementRunSchema),
+})
 const chartPointSchema = z.object({
   x: z.string().min(1),
   value: decimalSchema.nullable(),

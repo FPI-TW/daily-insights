@@ -818,6 +818,71 @@
         "title": "CsrfTokenResponse",
         "type": "object"
       },
+      "DataManagementCatalog": {
+        "properties": {
+          "markets": {
+            "items": {
+              "enum": ["global_macro_bonds", "crypto", "us_equity"],
+              "type": "string"
+            },
+            "title": "Markets",
+            "type": "array"
+          },
+          "morning_reports_enabled": {
+            "title": "Morning Reports Enabled",
+            "type": "boolean"
+          },
+          "taipei_date": {
+            "format": "date",
+            "title": "Taipei Date",
+            "type": "string"
+          },
+          "yfinance_enabled": {
+            "title": "Yfinance Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "taipei_date",
+          "morning_reports_enabled",
+          "yfinance_enabled",
+          "markets"
+        ],
+        "title": "DataManagementCatalog",
+        "type": "object"
+      },
+      "DataManagementRunList": {
+        "properties": {
+          "items": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
+                  "morning_all": "#/components/schemas/MorningAllRunResponse",
+                  "morning_market": "#/components/schemas/MorningMarketRunResponse"
+                },
+                "propertyName": "operation"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/MorningAllRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/MorningMarketRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/IndexYahooRunResponse"
+                }
+              ]
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": ["items"],
+        "title": "DataManagementRunList",
+        "type": "object"
+      },
       "GenerationStatus": {
         "enum": ["pending", "complete", "partial", "error"],
         "title": "GenerationStatus",
@@ -1204,6 +1269,123 @@
           "series"
         ],
         "title": "IndexMovingAveragesResponse",
+        "type": "object"
+      },
+      "IndexYahooRunCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "market_code": {
+            "title": "Market Code",
+            "type": "null"
+          },
+          "operation": {
+            "const": "index_yahoo",
+            "title": "Operation",
+            "type": "string"
+          }
+        },
+        "required": ["operation"],
+        "title": "IndexYahooRunCreate",
+        "type": "object"
+      },
+      "IndexYahooRunResponse": {
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "market_code": {
+            "title": "Market Code",
+            "type": "null"
+          },
+          "operation": {
+            "const": "index_yahoo",
+            "title": "Operation",
+            "type": "string"
+          },
+          "requested_by_user_id": {
+            "format": "uuid",
+            "title": "Requested By User Id",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "enum": ["pending", "running", "succeeded", "partial", "failed"],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "edition_date",
+          "status",
+          "requested_by_user_id",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "result",
+          "error",
+          "operation",
+          "market_code"
+        ],
+        "title": "IndexYahooRunResponse",
         "type": "object"
       },
       "InternalUserCreate": {
@@ -1722,6 +1904,242 @@
         },
         "required": ["id", "value", "unit_code"],
         "title": "MetricValue",
+        "type": "object"
+      },
+      "MorningAllRunCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "market_code": {
+            "title": "Market Code",
+            "type": "null"
+          },
+          "operation": {
+            "const": "morning_all",
+            "title": "Operation",
+            "type": "string"
+          }
+        },
+        "required": ["operation"],
+        "title": "MorningAllRunCreate",
+        "type": "object"
+      },
+      "MorningAllRunResponse": {
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "market_code": {
+            "title": "Market Code",
+            "type": "null"
+          },
+          "operation": {
+            "const": "morning_all",
+            "title": "Operation",
+            "type": "string"
+          },
+          "requested_by_user_id": {
+            "format": "uuid",
+            "title": "Requested By User Id",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "enum": ["pending", "running", "succeeded", "partial", "failed"],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "edition_date",
+          "status",
+          "requested_by_user_id",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "result",
+          "error",
+          "operation",
+          "market_code"
+        ],
+        "title": "MorningAllRunResponse",
+        "type": "object"
+      },
+      "MorningMarketRunCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "market_code": {
+            "enum": ["global_macro_bonds", "crypto", "us_equity"],
+            "title": "Market Code",
+            "type": "string"
+          },
+          "operation": {
+            "const": "morning_market",
+            "title": "Operation",
+            "type": "string"
+          }
+        },
+        "required": ["operation", "market_code"],
+        "title": "MorningMarketRunCreate",
+        "type": "object"
+      },
+      "MorningMarketRunResponse": {
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "market_code": {
+            "enum": ["global_macro_bonds", "crypto", "us_equity"],
+            "title": "Market Code",
+            "type": "string"
+          },
+          "operation": {
+            "const": "morning_market",
+            "title": "Operation",
+            "type": "string"
+          },
+          "requested_by_user_id": {
+            "format": "uuid",
+            "title": "Requested By User Id",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "enum": ["pending", "running", "succeeded", "partial", "failed"],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "edition_date",
+          "status",
+          "requested_by_user_id",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "result",
+          "error",
+          "operation",
+          "market_code"
+        ],
+        "title": "MorningMarketRunResponse",
         "type": "object"
       },
       "NewsItemResponse": {
@@ -3812,8 +4230,229 @@
         "tags": ["chat"]
       }
     },
+    "/api/admin/data-management/catalog": {
+      "get": {
+        "operationId": "catalog_api_admin_data_management_catalog_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataManagementCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Catalog",
+        "tags": ["data management"]
+      }
+    },
+    "/api/admin/data-management/runs": {
+      "get": {
+        "operationId": "list_runs_api_admin_data_management_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataManagementRunList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Runs",
+        "tags": ["data management"]
+      },
+      "post": {
+        "operationId": "create_run_api_admin_data_management_runs_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "discriminator": {
+                  "mapping": {
+                    "index_yahoo": "#/components/schemas/IndexYahooRunCreate",
+                    "morning_all": "#/components/schemas/MorningAllRunCreate",
+                    "morning_market": "#/components/schemas/MorningMarketRunCreate"
+                  },
+                  "propertyName": "operation"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/MorningAllRunCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MorningMarketRunCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/IndexYahooRunCreate"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
+                      "morning_all": "#/components/schemas/MorningAllRunResponse",
+                      "morning_market": "#/components/schemas/MorningMarketRunResponse"
+                    },
+                    "propertyName": "operation"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MorningAllRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MorningMarketRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexYahooRunResponse"
+                    }
+                  ],
+                  "title": "Response Create Run Api Admin Data Management Runs Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "An operation class is already active."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Requested provider is unavailable."
+          }
+        },
+        "summary": "Create Run",
+        "tags": ["data management"]
+      }
+    },
+    "/api/admin/data-management/runs/{run_id}": {
+      "get": {
+        "operationId": "get_run_api_admin_data_management_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
+                      "morning_all": "#/components/schemas/MorningAllRunResponse",
+                      "morning_market": "#/components/schemas/MorningMarketRunResponse"
+                    },
+                    "propertyName": "operation"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MorningAllRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MorningMarketRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexYahooRunResponse"
+                    }
+                  ],
+                  "title": "Response Get Run Api Admin Data Management Runs  Run Id  Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run",
+        "tags": ["data management"]
+      }
+    },
     "/api/admin/data-sources/yfinance/daily-bars": {
       "post": {
+        "deprecated": true,
         "operationId": "fetch_yfinance_daily_bars_api_admin_data_sources_yfinance_daily_bars_post",
         "parameters": [
           {

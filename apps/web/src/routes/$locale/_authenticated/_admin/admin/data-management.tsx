@@ -1,7 +1,8 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
+import { DataManagementPage } from "#/components/DataManagementPage"
 
 export const Route = createFileRoute(
-  "/$locale/_authenticated/_admin/admin/index-data"
+  "/$locale/_authenticated/_admin/admin/data-management"
 )({
   beforeLoad: ({ context }) => {
     if (context.user.system_role !== "admin") {
@@ -10,10 +11,8 @@ export const Route = createFileRoute(
         params: { locale: context.locale },
       })
     }
-    throw redirect({
-      to: "/$locale/admin/data-management",
-      params: { locale: context.locale },
-    })
   },
-  component: () => null,
+  component: () => (
+    <DataManagementPage locale={Route.useRouteContext().locale} />
+  ),
 })

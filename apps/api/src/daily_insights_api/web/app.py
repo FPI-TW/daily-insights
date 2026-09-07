@@ -25,6 +25,7 @@ from daily_insights_api.modules.assets.object_store import ObjectStore
 from daily_insights_api.modules.assets.r2.store import R2ObjectStore
 from daily_insights_api.modules.chat.api import router as chat_router
 from daily_insights_api.modules.chat.provider import OpenAICompatibleChatProvider
+from daily_insights_api.modules.data_management.router import router as data_management_router
 from daily_insights_api.modules.identity.password_work import PasswordWork
 from daily_insights_api.modules.identity.router import router as identity_router
 from daily_insights_api.modules.markets.router import router as markets_router
@@ -186,6 +187,7 @@ def create_app(
 
     app.include_router(identity_router)
     app.include_router(admin_router)
+    app.include_router(data_management_router)
     app.include_router(analyst_viewpoints_admin_router)
     app.include_router(analyst_viewpoints_router)
     app.include_router(markets_router)

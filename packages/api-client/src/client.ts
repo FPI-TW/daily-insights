@@ -36,6 +36,11 @@ import {
   indexLatestBarListSchema,
   marketListSchema,
   yfinanceDailyBarsResponseSchema,
+  dataManagementCatalogSchema,
+  dataManagementRunListSchema,
+  dataManagementRunSchema,
+  type DataManagementRun,
+  type DataManagementRunCreateInput,
   userSchema,
 } from "./schemas"
 
@@ -286,6 +291,31 @@ function mutationHeaders(csrfToken: string) {
 
 export function createAdministrationClient(transport: ApiTransport) {
   return {
+    async dataManagementCatalog() {
+      return parseResponse(
+        await transport("/api/admin/data-management/catalog"),
+        dataManagementCatalogSchema
+      )
+    },
+    async listDataManagementRuns() {
+      return parseResponse(
+        await transport("/api/admin/data-management/runs?limit=20"),
+        dataManagementRunListSchema
+      )
+    },
+    async createDataManagementRun(
+      input: DataManagementRunCreateInput,
+      csrfToken: string
+    ): Promise<DataManagementRun> {
+      return parseResponse(
+        await transport("/api/admin/data-management/runs", {
+          method: "POST",
+          headers: mutationHeaders(csrfToken),
+          body: JSON.stringify(input),
+        }),
+        dataManagementRunSchema
+      )
+    },
     async refreshIndexDailyBars(csrfToken: string) {
       return parseResponse(
         await transport("/api/admin/data-sources/yfinance/daily-bars", {

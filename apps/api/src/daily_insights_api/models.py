@@ -11,6 +11,7 @@ from daily_insights_api.modules.assets.models import (
 )
 from daily_insights_api.modules.audit.models import AuditEvent
 from daily_insights_api.modules.chat.models import Conversation, Message
+from daily_insights_api.modules.data_management.models import DataManagementRun
 from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.identity.session_models import LoginThrottle, Session
 from daily_insights_api.modules.markets.models import Market, OrganizationMarketPolicy
@@ -43,6 +44,7 @@ __all__ = [
     "AssetMigrationManifest",
     "AuditEvent",
     "Conversation",
+    "DataManagementRun",
     "GenerationRecord",
     "LoginThrottle",
     "Market",

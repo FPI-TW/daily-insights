@@ -125,7 +125,7 @@ compose up -d --no-build --force-recreate --no-deps nginx
 # previous application version during rollout.
 compose run --rm --no-deps api alembic upgrade head
 
-if ! compose up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler; then
+if ! compose up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler data-management-worker; then
   "$script_dir/diagnose.sh" >&2
   exit 1
 fi

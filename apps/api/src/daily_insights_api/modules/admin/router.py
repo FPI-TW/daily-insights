@@ -717,6 +717,7 @@ async def set_organization_market(
 @router.post(
     "/data-sources/yfinance/daily-bars",
     response_model=YfinanceDailyBarsResponse,
+    deprecated=True,
 )
 async def fetch_yfinance_daily_bars(
     payload: YfinanceDailyBarsFetch,

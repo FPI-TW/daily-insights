@@ -51,12 +51,12 @@ async def run_manual_morning_report_edition(
     heartbeat: Path,
 ) -> str:
     """Run a manual edition without the scheduled publication guard."""
+
+    async def run_manual(target_date: date) -> None:
+        await run_morning_report_edition(session_factory, adapter, target_date)
+
     await run_with_heartbeat(
-        lambda target_date: run_morning_report_edition(
-            session_factory,
-            adapter,
-            target_date,
-        ),
+        run_manual,
         edition_date,
         heartbeat,
     )

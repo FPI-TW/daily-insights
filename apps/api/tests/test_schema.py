@@ -19,6 +19,7 @@ EXPECTED_TABLES = {
     "asset_migration_manifests",
     "audit_events",
     "conversations",
+    "data_management_runs",
     "generation_records",
     "index_daily_bars",
     "index_daily_bar_series",

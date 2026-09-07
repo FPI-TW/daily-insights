@@ -99,22 +99,43 @@ class DatasetBuild:
         )
 
 
+@dataclass(frozen=True)
+class MorningDatasetExecution:
+    dataset_key: str
+    status: str
+    fetched_at: datetime | None
+    source_as_of: date | None
+    record_count: int | None
+    error: str | None
+
+
+@dataclass(frozen=True)
+class MorningMarketExecution:
+    market_code: LaunchMarketCode
+    publication_action: str
+    revision: int | None
+    report_status: str | None
+    source_date: date | None
+    datasets: tuple[MorningDatasetExecution, ...]
+
+
 async def run_morning_report_edition(
     session_factory: async_sessionmaker[AsyncSession],
     adapter: TwelveDataAdapter,
     edition_date: date,
     *,
     market_codes: tuple[LaunchMarketCode, ...] | None = None,
-) -> None:
+) -> tuple[MorningMarketExecution, ...]:
     requested_markets = market_codes or tuple(
         market.market_code for market in ACTIVE_LAUNCH_MANIFEST.markets
     )
-    await asyncio.gather(
+    executions = await asyncio.gather(
         *(
             _run_market(session_factory, adapter, market_code, edition_date)
             for market_code in requested_markets
         )
     )
+    return tuple(executions)
 
 
 async def unpublished_morning_report_markets(
@@ -178,27 +199,29 @@ async def _run_scheduled_market(
     edition_date: date,
 ) -> bool:
     """Return whether a concurrent scheduler had already published the market."""
-    async with session_factory.begin() as database:
-        await database.execute(
-            select(
-                func.pg_advisory_xact_lock(
-                    _scheduled_edition_lock_key("daily-market", market_code, edition_date)
+    # This session-scoped lock remains held while Twelve Data is called.  A
+    # transaction-scoped lock would be released by the guard's commit before
+    # the provider request, allowing a manual rerun to spend duplicate credit.
+    async with session_factory() as database:
+        key = _provider_lock_key("daily-market", market_code, edition_date)
+        await database.execute(select(func.pg_advisory_lock(key)))
+        try:
+            publication_id = await database.scalar(
+                select(ReportPublication.id)
+                .where(
+                    ReportPublication.report_key == "daily-market",
+                    ReportPublication.market_code == market_code,
+                    ReportPublication.edition_date == edition_date,
                 )
+                .limit(1)
             )
-        )
-        publication_id = await database.scalar(
-            select(ReportPublication.id)
-            .where(
-                ReportPublication.report_key == "daily-market",
-                ReportPublication.market_code == market_code,
-                ReportPublication.edition_date == edition_date,
-            )
-            .limit(1)
-        )
-        if publication_id is not None:
-            return True
-        await _run_market(session_factory, adapter, market_code, edition_date)
-        return False
+            if publication_id is not None:
+                return True
+            await _run_market_unlocked(session_factory, adapter, market_code, edition_date)
+            return False
+        finally:
+            await database.execute(select(func.pg_advisory_unlock(key)))
+            await database.rollback()
 
 
 async def _run_market(
@@ -206,7 +229,25 @@ async def _run_market(
     adapter: TwelveDataAdapter,
     market_code: LaunchMarketCode,
     edition_date: date,
-) -> None:
+) -> MorningMarketExecution:
+    # Share exactly the same lock with the scheduled path and CLI --once. The
+    # lock is acquired before _build_blocks, which is the first provider call.
+    async with session_factory() as lock_database:
+        key = _provider_lock_key("daily-market", market_code, edition_date)
+        await lock_database.execute(select(func.pg_advisory_lock(key)))
+        try:
+            return await _run_market_unlocked(session_factory, adapter, market_code, edition_date)
+        finally:
+            await lock_database.execute(select(func.pg_advisory_unlock(key)))
+            await lock_database.rollback()
+
+
+async def _run_market_unlocked(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: TwelveDataAdapter,
+    market_code: LaunchMarketCode,
+    edition_date: date,
+) -> MorningMarketExecution:
     owner = f"morning-report-{uuid.uuid4()}"
     datasets = _market_datasets(market_code)
     builds = await _build_blocks(adapter, market_code, datasets)
@@ -246,8 +287,9 @@ async def _run_market(
                 candidate_manifest_hash=ACTIVE_LAUNCH_MANIFEST.sha256,
             )
             if revision is None:
+                execution = _market_execution(builds, market_code, latest, "no_change")
                 await database.rollback()
-                return
+                return execution
             latest_run = (
                 await database.scalars(
                     select(ReportPipelineRun)
@@ -343,7 +385,7 @@ async def _run_market(
         await database.commit()
 
         bundle = _bundle(market_code, blocks)
-        await publish_completed_run(
+        published = await publish_completed_run(
             database,
             pipeline_run_id=run.id,
             lease_owner=owner,
@@ -354,6 +396,37 @@ async def _run_market(
             now=datetime.now(UTC),
         )
         await database.commit()
+        return _market_execution(builds, market_code, published.publication, "published")
+
+
+def _market_execution(
+    builds: tuple[DatasetBuild, ...],
+    market_code: LaunchMarketCode,
+    publication: ReportPublication | None,
+    publication_action: str,
+) -> MorningMarketExecution:
+    return MorningMarketExecution(
+        market_code=market_code,
+        publication_action=publication_action,
+        revision=publication.revision if publication is not None else None,
+        report_status=(str(publication.content.get("status")) if publication is not None else None),
+        source_date=publication.source_as_of if publication is not None else None,
+        datasets=tuple(
+            MorningDatasetExecution(
+                dataset_key=build.dataset.key,
+                status=build.status,
+                fetched_at=build.provenance.fetched_at if build.provenance else None,
+                source_as_of=build.provenance.as_of if build.provenance else None,
+                record_count=build.provenance.record_count if build.provenance else None,
+                error=(
+                    sanitize_error_code(type(build.error).__name__)
+                    if build.error is not None
+                    else None
+                ),
+            )
+            for build in builds
+        ),
+    )
 
 
 def _market_datasets(market_code: LaunchMarketCode) -> tuple[DatasetManifest, ...]:
@@ -1124,11 +1197,21 @@ def _revision_lock_key(report_key: str, market_code: str, edition_date: date) ->
     return value - 2**64 if value >= 2**63 else value
 
 
-def _scheduled_edition_lock_key(report_key: str, market_code: str, edition_date: date) -> int:
+def _provider_lock_key(report_key: str, market_code: str, edition_date: date) -> int:
     """A namespace distinct from revision publishing's advisory lock."""
     material = f"scheduled-edition|{report_key}|{market_code}|{edition_date.isoformat()}".encode()
     value = int(hashlib.sha256(material).hexdigest()[:16], 16)
     return value - 2**64 if value >= 2**63 else value
+
+
+def _scheduled_edition_lock_key(report_key: str, market_code: str, edition_date: date) -> int:
+    """Compatibility name for the shared pre-provider lock.
+
+    The scheduler used to own this namespace. Manual and queued reruns now
+    deliberately use it too, so all Twelve Data callers serialize before a
+    provider request.
+    """
+    return _provider_lock_key(report_key, market_code, edition_date)
 
 
 def _has_active_lease(run: ReportPipelineRun, now: datetime) -> bool:
