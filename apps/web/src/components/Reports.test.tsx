@@ -590,6 +590,12 @@ describe("three-market report presentation", () => {
     expect(chart).toHaveTextContent('"yAxisIndex":0')
     expect(chart).toHaveTextContent('"yAxisIndex":1')
     expect(chart).not.toHaveTextContent('"yAxis":100')
+    expect(
+      screen.getByRole("heading", {
+        name: "Oil-Gold / Copper-Gold Ratios",
+      })
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Unit:")).not.toBeInTheDocument()
     expect(screen.getByText("0.030000")).toBeInTheDocument()
   })
 

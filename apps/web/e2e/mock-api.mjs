@@ -367,7 +367,7 @@ function reportDetail(marketCode, locale) {
           series_labels: {},
         },
         "macro.commodity_ratios": {
-          title: "Commodity ratios",
+          title: "Oil-Gold / Copper-Gold Ratios",
           description: null,
           unit_label: "Ratio",
           series_labels: {

@@ -882,16 +882,18 @@ function ReportBlockView({
               />
             </ClientOnly>
           </div>
-          <dl className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-sea-ink-soft">
-            <div className="flex gap-1">
-              <dt>{t("reportChartUnit")}</dt>
-              <dd className="m-0 text-sea-ink">
-                {block.unitLabel
-                  ? valueText(block.unitLabel, t)
-                  : (unitLabel(block.unitCode, t) ?? "—")}
-              </dd>
-            </div>
-          </dl>
+          {!isCommodityRatioSeries(block) ? (
+            <dl className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-sea-ink-soft">
+              <div className="flex gap-1">
+                <dt>{t("reportChartUnit")}</dt>
+                <dd className="m-0 text-sea-ink">
+                  {block.unitLabel
+                    ? valueText(block.unitLabel, t)
+                    : (unitLabel(block.unitCode, t) ?? "—")}
+                </dd>
+              </div>
+            </dl>
+          ) : null}
           <div className="sr-only">
             <table>
               <caption>{t("reportChartSummary")}</caption>

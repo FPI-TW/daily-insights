@@ -265,7 +265,7 @@ const resources: Resource = {
       reportBlockNormalizedPerformance: "標準化表現",
       reportBlockMacroCommodityNormalizedPerformance:
         "布蘭特原油與黃金標準化表現",
-      reportBlockMacroCommodityRatios: "商品比率走勢",
+      reportBlockMacroCommodityRatios: "油金比 / 銅金比",
       reportBlockUsSectors: "美股十一大類股",
       reportBlockTaiwanIndex: "台灣加權指數快照",
       reportBlockBreadth: "市場廣度分布",
@@ -787,7 +787,7 @@ const resources: Resource = {
       reportBlockNormalizedPerformance: "标准化表现",
       reportBlockMacroCommodityNormalizedPerformance:
         "布兰特原油与黄金标准化表现",
-      reportBlockMacroCommodityRatios: "商品比率走势",
+      reportBlockMacroCommodityRatios: "油金比 / 铜金比",
       reportBlockUsSectors: "美股十一大类股",
       reportBlockTaiwanIndex: "台湾加权指数快照",
       reportBlockBreadth: "市场广度分布",
@@ -1322,7 +1322,7 @@ const resources: Resource = {
       reportBlockNormalizedPerformance: "Normalized performance",
       reportBlockMacroCommodityNormalizedPerformance:
         "Brent and gold normalized performance",
-      reportBlockMacroCommodityRatios: "Commodity ratios",
+      reportBlockMacroCommodityRatios: "Oil-Gold / Copper-Gold Ratios",
       reportBlockUsSectors: "US 11-sector performance",
       reportBlockTaiwanIndex: "Taiwan index snapshot",
       reportBlockBreadth: "Breadth distribution",

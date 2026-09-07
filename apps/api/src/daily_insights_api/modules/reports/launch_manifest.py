@@ -179,9 +179,9 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
                     unit_code="ratio",
                     precision=6,
                     labels={
-                        "zh-hant": "商品比率走勢",
-                        "zh-hans": "商品比率走势",
-                        "en": "Commodity ratios",
+                        "zh-hant": "油金比 / 銅金比",
+                        "zh-hans": "油金比 / 铜金比",
+                        "en": "Oil-Gold / Copper-Gold Ratios",
                     },
                     series_labels={
                         "zh-hant": {"oil_gold_ratio": "油金比", "copper_gold_ratio": "銅金比"},
