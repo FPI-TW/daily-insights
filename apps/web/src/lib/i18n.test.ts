@@ -21,6 +21,9 @@ describe("request-local i18n", () => {
       "外资 TX 净部位"
     )
     expect(english.t("reportAxisMonday")).toBe("Mon")
+    expect(traditionalChinese.t("reportBlockMacroSnapshot")).toBe("商品收盤")
+    expect(simplifiedChinese.t("reportBlockMacroSnapshot")).toBe("商品收盘")
+    expect(english.t("reportBlockMacroSnapshot")).toBe("Commodity EOD")
     expect(
       traditionalChinese.t("reportBlockMacroCommodityNormalizedPerformance")
     ).toBe("布蘭特原油與黃金標準化表現")

@@ -2,13 +2,16 @@ import asyncio
 from argparse import Namespace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path as FileSystemPath
+from typing import cast
 
 import pytest
 from anyio import Path
 from pydantic import SecretStr
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api.core.config import Settings
 from daily_insights_api.core.models import Base
+from daily_insights_api.modules.data_sources.api import TwelveDataAdapter
 from daily_insights_api.modules.reports.scheduler import (
     TAIPEI,
     SameDayRetry,
@@ -20,6 +23,8 @@ from daily_insights_api.modules.reports.scheduler import (
 from daily_insights_api.scripts import run_morning_reports
 from daily_insights_api.scripts.run_morning_reports import (
     maintain_disabled_heartbeat,
+    run_manual_morning_report_edition,
+    run_scheduled_morning_report_edition,
     run_with_heartbeat,
 )
 
@@ -108,6 +113,109 @@ async def test_enabled_runner_refreshes_heartbeat_even_after_failure(
     with pytest.raises(RuntimeError, match="provider failed"):
         await run_with_heartbeat(fail, date(2026, 8, 30), heartbeat)
     assert await heartbeat.exists()
+
+
+async def test_scheduled_restart_skips_all_published_markets_before_provider_work(
+    tmp_path: FileSystemPath, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    heartbeat = Path(tmp_path / "published-heartbeat")
+    events: list[tuple[str, dict[str, object]]] = []
+
+    async def all_published(_: object, __: date) -> tuple[()]:
+        return ()
+
+    async def provider_must_not_run(*_: object, **__: object) -> tuple[()]:
+        raise AssertionError("provider-backed report generation must not run")
+
+    monkeypatch.setattr(run_morning_reports, "unpublished_morning_report_markets", all_published)
+    monkeypatch.setattr(
+        run_morning_reports, "run_scheduled_morning_report_markets", provider_must_not_run
+    )
+    monkeypatch.setattr(
+        run_morning_reports,
+        "emit_event",
+        lambda name, **details: events.append((name, details)),
+    )
+
+    outcome = await run_scheduled_morning_report_edition(
+        cast(async_sessionmaker[AsyncSession], object()),
+        cast(TwelveDataAdapter, object()),
+        date(2026, 8, 30),
+        heartbeat,
+    )
+
+    assert outcome == "complete"
+    assert await heartbeat.exists()
+    assert events == [
+        (
+            "scheduler.edition.already_published",
+            {
+                "edition_date": "2026-08-30",
+                "skipped_market_codes": ["global_macro_bonds", "crypto", "us_equity"],
+            },
+        )
+    ]
+
+
+async def test_scheduled_restart_processes_only_missing_markets(
+    tmp_path: FileSystemPath, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    heartbeat = Path(tmp_path / "subset-heartbeat")
+    calls: list[tuple[date, tuple[str, ...]]] = []
+    events: list[tuple[str, dict[str, object]]] = []
+
+    async def missing_subset(_: object, __: date) -> tuple[str, ...]:
+        return ("crypto", "us_equity")
+
+    async def record_run(
+        _: object, __: object, edition: date, market_codes: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        calls.append((edition, market_codes))
+        return ("crypto",)
+
+    monkeypatch.setattr(run_morning_reports, "unpublished_morning_report_markets", missing_subset)
+    monkeypatch.setattr(run_morning_reports, "run_scheduled_morning_report_markets", record_run)
+    monkeypatch.setattr(
+        run_morning_reports,
+        "emit_event",
+        lambda name, **details: events.append((name, details)),
+    )
+
+    await run_scheduled_morning_report_edition(
+        cast(async_sessionmaker[AsyncSession], object()),
+        cast(TwelveDataAdapter, object()),
+        date(2026, 8, 30),
+        heartbeat,
+    )
+
+    assert calls == [(date(2026, 8, 30), ("crypto", "us_equity"))]
+    assert events[0][1]["skipped_market_codes"] == ["global_macro_bonds", "crypto"]
+
+
+async def test_manual_once_path_bypasses_durable_publication_guard(
+    tmp_path: FileSystemPath, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    heartbeat = Path(tmp_path / "manual-heartbeat")
+    calls: list[date] = []
+
+    async def unexpected_guard(_: object, __: date) -> tuple[()]:
+        raise AssertionError("manual --once must not inspect existing publications")
+
+    async def record_run(_: object, __: object, edition: date) -> None:
+        calls.append(edition)
+
+    monkeypatch.setattr(run_morning_reports, "unpublished_morning_report_markets", unexpected_guard)
+    monkeypatch.setattr(run_morning_reports, "run_morning_report_edition", record_run)
+
+    outcome = await run_manual_morning_report_edition(
+        cast(async_sessionmaker[AsyncSession], object()),
+        cast(TwelveDataAdapter, object()),
+        date(2026, 8, 30),
+        heartbeat,
+    )
+
+    assert outcome == "complete"
+    assert calls == [date(2026, 8, 30)]
 
 
 class _Clock:

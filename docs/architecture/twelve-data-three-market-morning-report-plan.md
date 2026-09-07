@@ -119,6 +119,38 @@ request ID 是否存在等 sanitized metadata。Twelve Data 本次未回傳 requ
   漲跌幅同樣以前收計算。manifest 升為 `three-market.v6`。
 - `/api/markets` 改依市場目錄順序回傳，客戶端導覽不再是代碼字母序。
 
+### 2026-09-04 修正：商品 EOD 與 scheduler restart deduplication
+
+- 商品卡的 immutable dataset 改為 `macro.commodity_eod`，以一次
+  `/eod?symbol=XBR/USD,XAU/USD,HG1&type=commodity&dp=11` 批次取得 Brent、Gold、Copper
+  的權威收盤。回應必須精確覆蓋三個 symbol、每筆有有效 date 與正的 close；commodity
+  回應缺 currency 時仍由 manifest 固定為 USD。`/quote` 不再用於商品，也沒有 fallback。
+- 同一 dataset 會取三個 `type=commodity` 的 1day histories；metadata asset type 必須分別為
+  `Energy Resource`、`Precious Metal`、`Industrial Metal`。不得相信 time-series 最新日期：
+  每個 history 都以其 `/eod` date 為 cutoff，捨棄較晚的 mutable bars，並要求該日的 history
+  close 與 `/eod` close 完全一致、且存在正值的前一完成日。為避免 provider 預設 rounding 造成
+  假性不一致，兩個 endpoint 一律帶 `dp=11`。任何一項缺失都是 atomic error。
+- 商品卡 value 是 `/eod` close，change 為 `(latest EOD - previous completed EOD) / previous
+completed EOD * 100`。圖表只顯示 Brent/Gold 的最新 30 個共同完成日期；Copper history 僅用於
+  自身前收計算。公開 label 為「商品收盤」／「商品收盘」／`Commodity EOD`，block id 和 report API
+  shape 不變。
+- scheduler 固定在 `08:00 Asia/Taipei`。每個 scheduled attempt 在任何 provider call 前以
+  `report_key + market_code + edition_date` 查 `ReportPublication`；任何 revision、包含
+  complete/partial/unavailable 都是已完成，僅執行缺少的 launch markets。全數存在時發出
+  `scheduler.edition.already_published`（edition date 與 skipped market codes）後等待隔日。
+  此 preflight 僅為快速路徑；每個候選 market 還會取得獨立 namespace 的 PostgreSQL
+  transaction advisory lock，在 lock 內再次查 publication，並持有至 provider/publish 結束。
+  因此平行 scheduler 的第二個 instance 會等待並跳過剛被第一個 instance 出版的 market，
+  不會產生第二次 provider build。此 lock 與 revision publishing lock 使用不同 namespace。
+  `--once` 是 manual rerun，刻意略過此 startup guard，仍遵守既有 immutable revision/no-op 規則。
+- manifest 為 `three-market.v7`、derivation 為 `twelve-data.three-market.v7`、Twelve Data
+  contract 為 `2026-09-04.v4`；舊 publication 保持原 manifest/derivation，不重寫。
+- `SourceRun` 仍是一筆對應一個 immutable logical dataset，而不是每個 HTTP request 一筆：
+  `macro.commodity_eod` 的 endpoint 固定記為其權威 value endpoint `/eod`；其 provenance
+  digest、record count、fetch time 則聚合該 EOD batch 與三個 validation histories。這保留既有
+  schema 和 approved source-run shape，同時使 audit 可辨識商品卡沒有 `/quote` fallback；不在本
+  變更新增 HTTP-request 細粒度 table。
+
 ### 2026-09-03 修正：固定籃子與銅的資產類別
 
 - `/market_movers/stocks` 依漲跌幅排序全美股票池，前幾名必然是低價股（正式站曾顯示

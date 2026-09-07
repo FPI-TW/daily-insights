@@ -66,3 +66,13 @@ class TwelveDataQuote(TwelveDataModel):
         except ValueError as error:
             raise ValueError("quote datetime must be a valid calendar date") from error
         return value
+
+
+class TwelveDataEod(TwelveDataModel):
+    """Reviewed payload returned by Twelve Data's commodity ``/eod`` endpoint."""
+
+    symbol: str
+    exchange: str
+    currency: str | None = None
+    datetime: date
+    close: Decimal

@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import os
 from collections.abc import AsyncIterator
@@ -20,6 +21,8 @@ from daily_insights_api.modules.data_sources.api import (
 )
 from daily_insights_api.modules.data_sources.twelve_data.adapter import (
     DailyBarsResult,
+    EodResult,
+    EodsResult,
     QuoteResult,
     QuotesResult,
     TwelveDataAdapter,
@@ -31,6 +34,7 @@ from daily_insights_api.modules.reports.models import PublicationSourceRun, Repo
 from daily_insights_api.modules.reports.morning_report import (
     MORNING_REPORT_DERIVATION_VERSION,
     _run_market,
+    run_scheduled_morning_report_markets,
 )
 
 pytestmark = pytest.mark.integration
@@ -76,6 +80,37 @@ class DeterministicMacroAdapter:
     history_mode: str = "success"
     quote_marker: str = "quote-v1"
     history_marker: str = "history-v1"
+    eod_marker: str = "eod-v1"
+    eod_requests: int = 0
+
+    async def get_eods(
+        self,
+        *,
+        market: str,
+        symbols: tuple[str, ...],
+        expected_currencies: dict[str, str],
+    ) -> EodsResult:
+        self.eod_requests += 1
+        assert market == "global_macro_bonds"
+        assert symbols == ("XBR/USD", "XAU/USD", "HG1")
+        assert expected_currencies == {"XBR/USD": "USD", "XAU/USD": "USD", "HG1": "USD"}
+        as_of = date(2026, 8, 29)
+        provenance = _provenance(
+            endpoint="/eod", marker=self.eod_marker, as_of=as_of, record_count=len(symbols)
+        )
+        return EodsResult(
+            items=tuple(
+                EodResult(
+                    symbol=symbol,
+                    currency="USD",
+                    as_of=as_of,
+                    close=Decimal("30"),
+                    provenance=provenance,
+                )
+                for symbol in symbols
+            ),
+            provenance=provenance,
+        )
 
     async def get_quotes(
         self,
@@ -124,11 +159,16 @@ class DeterministicMacroAdapter:
         expected_currency: str,
         outputsize: int,
         expected_asset_type: str | None = None,
+        symbol_type: str | None = None,
+        dp: int | None = None,
     ) -> DailyBarsResult:
         assert market == "global_macro_bonds"
         assert expected_currency == "USD"
         assert outputsize == 500
-        assert expected_asset_type in {"Energy Resource", "Precious Metal"}
+        if symbol in {"XBR/USD", "XAU/USD", "HG1"}:
+            assert expected_asset_type in {"Energy Resource", "Precious Metal", "Industrial Metal"}
+            assert symbol_type == "commodity"
+            assert dp == 11
         if self.history_mode == "failed":
             raise DataSourceContractError("token=history-secret")
         start = date(2026, 7, 31)
@@ -231,6 +271,32 @@ def _blocks(publication: ReportPublication) -> list[dict[str, object]]:
     return blocks
 
 
+async def test_concurrent_scheduled_market_lock_allows_one_provider_build(
+    macro_report_database: async_sessionmaker[AsyncSession],
+) -> None:
+    adapter = DeterministicMacroAdapter()
+    adapter_for_run = cast(TwelveDataAdapter, adapter)
+    edition_date = date(2026, 8, 31)
+
+    first, second = await asyncio.gather(
+        run_scheduled_morning_report_markets(
+            macro_report_database,
+            adapter_for_run,
+            edition_date,
+            ("global_macro_bonds",),
+        ),
+        run_scheduled_morning_report_markets(
+            macro_report_database,
+            adapter_for_run,
+            edition_date,
+            ("global_macro_bonds",),
+        ),
+    )
+
+    assert {first, second} == {(), ("global_macro_bonds",)}
+    assert adapter.eod_requests == 1
+
+
 async def test_macro_orchestration_persists_all_dataset_outcomes_and_revisions(
     macro_report_database: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -251,17 +317,15 @@ async def test_macro_orchestration_persists_all_dataset_outcomes_and_revisions(
     ]
     assert [block["status"] for block in _blocks(complete)] == ["ok", "ok", "ok"]
     assert [source.dataset_key for source in complete_sources] == [
-        "macro.commodity_daily_bars",
-        "macro.commodity_quotes",
+        "macro.commodity_eod",
         "macro.rates_fx_quotes",
     ]
     assert all(source.status == "succeeded" for source in complete_sources)
     assert {
         source.dataset_key: (source.provider, source.endpoint) for source in complete_sources
     } == {
-        "macro.commodity_quotes": ("twelve_data", "/quote"),
+        "macro.commodity_eod": ("twelve_data", "/eod"),
         "macro.rates_fx_quotes": ("twelve_data", "/quote"),
-        "macro.commodity_daily_bars": ("twelve_data", "/time_series"),
     }
     assert all(source.payload_sha256 is not None for source in complete_sources)
     assert all(
@@ -279,13 +343,13 @@ async def test_macro_orchestration_persists_all_dataset_outcomes_and_revisions(
     assert {link.source_run_id for link in complete_links} == {
         source.id for source in complete_sources
     }
-    assert len(complete_links) == 3
+    assert len(complete_links) == 2
     assert not {"payload", "raw_payload", "raw_rows", "rows"} & set(
         SourceRun.__table__.columns.keys()
     )
 
     await _run_market(macro_report_database, adapter_for_run, "global_macro_bonds", edition_date)
-    assert await _counts(macro_report_database) == (1, 3)
+    assert await _counts(macro_report_database) == (1, 2)
 
     adapter.history_mode = "failed"
     await _run_market(macro_report_database, adapter_for_run, "global_macro_bonds", edition_date)
@@ -294,14 +358,13 @@ async def test_macro_orchestration_persists_all_dataset_outcomes_and_revisions(
     assert partial.source_as_of == date(2026, 8, 30)
     assert partial.content["status"] == "partial"
     assert partial.input_digest == _expected_input_digest(partial_sources)
-    assert [block["status"] for block in _blocks(partial)] == ["ok", "ok", "error"]
+    assert [block["status"] for block in _blocks(partial)] == ["error", "ok", "error"]
     assert {source.dataset_key: source.status for source in partial_sources} == {
-        "macro.commodity_quotes": "succeeded",
+        "macro.commodity_eod": "failed",
         "macro.rates_fx_quotes": "succeeded",
-        "macro.commodity_daily_bars": "failed",
     }
     failed_history = next(
-        source for source in partial_sources if source.dataset_key == "macro.commodity_daily_bars"
+        source for source in partial_sources if source.dataset_key == "macro.commodity_eod"
     )
     assert failed_history.payload_sha256 is None
     assert failed_history.record_count is None
@@ -315,10 +378,10 @@ async def test_macro_orchestration_persists_all_dataset_outcomes_and_revisions(
     assert {link.source_run_id for link in partial_links} == {
         source.id for source in partial_sources
     }
-    assert len(partial_links) == 3
+    assert len(partial_links) == 2
 
     await _run_market(macro_report_database, adapter_for_run, "global_macro_bonds", edition_date)
-    assert await _counts(macro_report_database) == (2, 6)
+    assert await _counts(macro_report_database) == (2, 4)
 
     adapter.quote_mode = "failed"
     await _run_market(macro_report_database, adapter_for_run, "global_macro_bonds", edition_date)
@@ -339,7 +402,7 @@ async def test_macro_orchestration_persists_all_dataset_outcomes_and_revisions(
         and source.record_count is None
         for source in unavailable_sources
     )
-    assert len(unavailable_links) == 3
+    assert len(unavailable_links) == 2
     assert {link.source_run_id for link in unavailable_links} == {
         source.id for source in unavailable_sources
     }
@@ -353,4 +416,4 @@ async def test_macro_orchestration_persists_all_dataset_outcomes_and_revisions(
     assert corrected.input_digest == _expected_input_digest(corrected_sources)
     assert corrected.input_digest != complete.input_digest
     assert [block["status"] for block in _blocks(corrected)] == ["ok", "ok", "ok"]
-    assert await _counts(macro_report_database) == (4, 12)
+    assert await _counts(macro_report_database) == (4, 8)
