@@ -648,6 +648,9 @@ async def store_institutional_stock_flows(
 # in when it stores a run's rows, so it lives with the tables it belongs to.
 INSTITUTIONAL_MARKET_CODE = "tw_equity"
 # The five stored categories folded into the three the product reports on.
+# foreign_dealer goes with foreign, never with the dealer books; see the note on
+# INVESTOR_TYPES in models.py. TWSE has reported it as 0 on every day observed so
+# far, so nothing in the stored data pins this down numerically.
 INSTITUTIONAL_FOREIGN_TYPES = ("foreign", "foreign_dealer")
 INSTITUTIONAL_TRUST_TYPES = ("trust",)
 INSTITUTIONAL_DEALER_TYPES = ("dealer_self", "dealer_hedge")
