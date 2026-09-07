@@ -120,7 +120,7 @@ export function AppShell({
         data-surface={surface}
         layoutRoot
       >
-        <div className="mx-auto flex min-h-[68px] w-full max-w-[1240px] items-center justify-between gap-4 px-6 py-3 max-sm:px-4 max-sm:py-2.5">
+        <div className="mx-auto flex min-h-[68px] w-full max-w-[1240px] items-center justify-between gap-4 px-6 py-3 max-sm:flex-wrap max-sm:gap-x-2 max-sm:gap-y-1 max-sm:px-4 max-sm:py-2.5">
           <Link
             to={
               surface === "customer"
@@ -128,24 +128,26 @@ export function AppShell({
                 : "/$locale/admin/audio"
             }
             params={{ locale }}
-            className="flex min-w-0 items-center gap-3 text-sea-ink no-underline"
+            className="flex min-w-0 items-center gap-3 text-sea-ink no-underline max-sm:flex-1"
           >
-            <span
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-lagoon text-lg font-black text-white shadow-[0_6px_16px_rgb(21_158_132/25%)]"
+            <img
+              className="h-10 w-10 shrink-0 object-contain"
+              src="/tf-icon.png"
+              alt=""
+              width="40"
+              height="40"
               aria-hidden="true"
-            >
-              DI
-            </span>
+            />
             <span className="min-w-0">
               <span className="block truncate text-[15px] font-extrabold tracking-[-0.02em]">
                 {t("brand")}
               </span>
             </span>
           </Link>
-          <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-2 max-sm:contents">
             {surface === "customer" ? (
               <nav
-                className="relative isolate flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                className="relative isolate flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] max-sm:order-3 max-sm:w-full [&::-webkit-scrollbar]:hidden"
                 aria-label={t("customerNav")}
               >
                 <ActiveIndicator
@@ -166,6 +168,14 @@ export function AppShell({
                 >
                   {t("podcastNav")}
                 </Link>
+                <a
+                  href="https://geaimarketing.github.io/ai-news-daily/"
+                  className={customerNavLinkClass}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {t("aiDailyNewsNav")}
+                </a>
                 <Link
                   to="/$locale/account"
                   params={{ locale }}
@@ -180,7 +190,7 @@ export function AppShell({
               </span>
             )}
             <button
-              className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-md px-2 text-sea-ink-soft transition-colors hover:bg-link-hover hover:text-sea-ink"
+              className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-md px-2 text-sea-ink-soft transition-colors hover:bg-link-hover hover:text-sea-ink max-sm:order-2"
               type="button"
               ref={settingsButtonRef}
               onClick={() => setSettingsOpen(true)}
