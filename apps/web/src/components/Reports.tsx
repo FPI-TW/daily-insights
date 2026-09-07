@@ -28,6 +28,9 @@ import { ActiveIndicator } from "./ActiveIndicator"
 
 type Translate = ReturnType<typeof useTranslation>["t"]
 
+/** Replaces a report block by its durable API identity at the same grid slot. */
+export type ReportBlockReplacement = (block: ReportBlock) => ReactNode
+
 /** Display text for a value that is not a number: translation keys and
  * pre-formatted literals. Numbers go through `formatNumber`/`formatChange`. */
 function valueText(value: ReportValue | null, t: Translate) {
@@ -321,28 +324,46 @@ export function ReportDetail({
   locale = "zh-hant",
   report,
   viewpoint = null,
+  hiddenBlockIds = [],
+  blockReplacements = {},
 }: {
   locale?: Locale
   report: ProvisionalReport
   viewpoint?: AnalystViewpoint | null
+  hiddenBlockIds?: readonly string[]
+  blockReplacements?: Readonly<Record<string, ReportBlockReplacement>>
 }) {
   // A lone metric or table block spans the full width; half-width panels
   // only make sense when there is a second one to sit beside.
-  const narrowBlocks = report.blocks.filter(block => block.kind !== "series")
+  const visibleBlocks = report.blocks.filter(block => {
+    const id = block.id ?? ""
+    return !hiddenBlockIds.includes(id) || blockReplacements[id] !== undefined
+  })
+  const narrowBlocks = visibleBlocks.filter(
+    block =>
+      block.kind !== "series" && blockReplacements[block.id ?? ""] === undefined
+  )
   return (
     <>
       <ReportFreshness report={report} locale={locale} />
       {viewpoint ? <MarketViewpoint viewpoint={viewpoint} /> : null}
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">
-        {report.blocks.map((block, index) => (
-          <ReportBlockView
-            block={block}
-            index={index}
-            locale={locale}
-            fullWidth={block.kind !== "series" && narrowBlocks.length === 1}
-            key={`${block.titleKey}-${index}`}
-          />
-        ))}
+        {visibleBlocks.map((block, index) => {
+          const replacement = blockReplacements[block.id ?? ""]
+          return replacement ? (
+            <div className="min-w-0 xl:col-span-2" key={block.id ?? index}>
+              {replacement(block)}
+            </div>
+          ) : (
+            <ReportBlockView
+              block={block}
+              index={index}
+              locale={locale}
+              fullWidth={block.kind !== "series" && narrowBlocks.length === 1}
+              key={`${block.titleKey}-${index}`}
+            />
+          )
+        })}
       </div>
     </>
   )

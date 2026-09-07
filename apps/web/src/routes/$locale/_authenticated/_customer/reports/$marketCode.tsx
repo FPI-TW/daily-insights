@@ -11,6 +11,10 @@ import {
   IndexHistoryLoading,
 } from "#/components/IndexHistoryChart"
 import {
+  UsIndexPerformanceTable,
+  UsIndexPerformanceTableLoading,
+} from "#/components/UsIndexPerformanceTable"
+import {
   MarketViewpoint,
   ReportDetail,
   ReportErrorScreen,
@@ -194,6 +198,24 @@ function ReportPage() {
           locale={locale}
           report={report.report}
           viewpoint={viewpoint}
+          blockReplacements={
+            marketCode === "us_equity" && indexHistory
+              ? {
+                  "us.index_proxies": () => (
+                    <Suspense fallback={<UsIndexPerformanceTableLoading />}>
+                      <Await promise={indexHistory}>
+                        {history => (
+                          <UsIndexPerformanceTable
+                            history={history}
+                            locale={locale}
+                          />
+                        )}
+                      </Await>
+                    </Suspense>
+                  ),
+                }
+              : {}
+          }
         />
       )}
       {(chartMarketCodes as readonly string[]).includes(marketCode) &&
@@ -223,9 +245,11 @@ function ReportPage() {
 }
 
 function MarketPageLoading() {
+  const { marketCode } = Route.useParams()
   return (
     <>
       <ReportLoadingScreen />
+      {marketCode === "us_equity" ? <UsIndexPerformanceTableLoading /> : null}
       <IndexHistoryLoading />
     </>
   )

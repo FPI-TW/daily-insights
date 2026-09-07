@@ -92,6 +92,7 @@ function mapBlock(
 ): ReportBlock {
   const titleKey = blockTitleKeys[block.id] ?? "reportsTitle"
   const meta = {
+    id: block.id,
     status: block.status,
     titleKey,
     sourceDate: block.source_as_of,
@@ -128,7 +129,6 @@ function mapBlock(
   }
   return {
     kind: "series",
-    id: block.id,
     ...meta,
     title: literal(presentationLabel?.title ?? titleKey),
     unitCode: block.unit_code,
