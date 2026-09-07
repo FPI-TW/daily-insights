@@ -19,7 +19,6 @@ import {
 import {
   DashboardChoices,
   DashboardPanel,
-  DashboardSection,
   Methodology,
 } from "./DashboardPrimitives"
 
@@ -535,11 +534,7 @@ export function MacroDashboard({
           </span>
         ) : null}
       </div>
-      <DashboardSection
-        number="01"
-        title={t("sectionCommodities")}
-        meta={t("metaCommodities")}
-      >
+      <section className="min-w-0">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-4">
           <DashboardPanel title={t("macroCommodities")}>
             <HistoryTable
@@ -575,12 +570,8 @@ export function MacroDashboard({
             <Methodology>{t("macroRatioNote")}</Methodology>
           </DashboardPanel>
         </div>
-      </DashboardSection>
-      <DashboardSection
-        number="02"
-        title={t("sectionRates")}
-        meta={t("metaRates")}
-      >
+      </section>
+      <section className="min-w-0">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-4">
           <DashboardPanel title={t("macroYieldChanges")}>
             <HistoryTable
@@ -640,8 +631,8 @@ export function MacroDashboard({
             <Methodology>{t("curveNote")}</Methodology>
           </DashboardPanel>
         </div>
-      </DashboardSection>
-      <DashboardSection number="03" title={t("sectionFx")} meta={t("metaFx")}>
+      </section>
+      <section className="min-w-0">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-4">
           <DashboardPanel
             title={t("macroDollarIndex")}
@@ -714,7 +705,7 @@ export function MacroDashboard({
             </p>
           </DashboardPanel>
         </div>
-      </DashboardSection>
+      </section>
       <p className="mt-5 max-w-[100ch] text-xs leading-5 text-pretty text-sea-ink-soft">
         {t("macroPeriodNote")}
       </p>

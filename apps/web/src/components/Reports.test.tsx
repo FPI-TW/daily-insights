@@ -151,7 +151,7 @@ describe("three-market report presentation", () => {
     const links = screen.getByRole("navigation").querySelectorAll("a")
     expect(Array.from(links).map(link => link.textContent)).toEqual([
       "All markets",
-      "US macro & bonds",
+      "Global macro & bonds",
       "Crypto",
       "US equities",
       "Taiwan equities",
@@ -200,7 +200,7 @@ describe("three-market report presentation", () => {
     expect(navigation.compareDocumentPosition(section)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     )
-    expect(section).toHaveTextContent("US macro & bonds")
+    expect(section).toHaveTextContent("Global macro & bonds")
     expect(section).toHaveTextContent("Taiwan equities")
     expect(section).not.toHaveTextContent("US equities")
     expect(section).not.toHaveTextContent("Crypto")

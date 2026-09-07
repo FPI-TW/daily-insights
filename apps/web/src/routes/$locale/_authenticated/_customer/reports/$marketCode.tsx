@@ -9,8 +9,11 @@ import {
   notFound,
   redirect,
 } from "@tanstack/react-router"
-import { Suspense, useState } from "react"
-import { useTranslation } from "react-i18next"
+import { Suspense } from "react"
+import {
+  TaiwanIndexHistoryChart,
+  TaiwanIndexHistoryLoading,
+} from "#/components/TaiwanIndexHistoryChart"
 import {
   MacroDashboard,
   MacroDashboardLoading,
@@ -281,8 +284,6 @@ export const Route = createFileRoute(
 })
 
 function ReportPage() {
-  const { t } = useTranslation()
-  const [reportExpanded, setReportExpanded] = useState(false)
   const {
     report,
     news,
@@ -306,28 +307,11 @@ function ReportPage() {
         <MarketViewpoint viewpoint={viewpoint} />
       ) : null}
       {macroDashboard ? (
-        <>
-          <Suspense fallback={<MacroDashboardLoading />}>
-            <Await promise={macroDashboard}>
-              {data => <MacroDashboard data={data} locale={locale} />}
-            </Await>
-          </Suspense>
-          {report.kind === "report" ? (
-            <details
-              className="mt-6 rounded-2xl border border-line p-5"
-              onToggle={event => setReportExpanded(event.currentTarget.open)}
-            >
-              <summary className="cursor-pointer text-sm font-bold text-sea-ink">
-                {t("macroPublishedReport")}
-              </summary>
-              <div className="mt-4">
-                {reportExpanded ? (
-                  <ReportDetail locale={locale} report={report.report} />
-                ) : null}
-              </div>
-            </details>
-          ) : null}
-        </>
+        <Suspense fallback={<MacroDashboardLoading />}>
+          <Await promise={macroDashboard}>
+            {data => <MacroDashboard data={data} locale={locale} />}
+          </Await>
+        </Suspense>
       ) : report.kind === "not-generated" ? (
         <ReportNotGeneratedScreen
           locale={locale}
@@ -361,15 +345,31 @@ function ReportPage() {
       )}
       {(chartMarketCodes as readonly string[]).includes(marketCode) &&
       indexHistory ? (
-        <Suspense fallback={<IndexHistoryLoading />}>
+        <Suspense
+          fallback={
+            marketCode === "tw_equity" ? (
+              <TaiwanIndexHistoryLoading />
+            ) : (
+              <IndexHistoryLoading />
+            )
+          }
+        >
           <Await promise={indexHistory}>
             {history => (
               <>
-                <IndexHistoryChart
-                  history={history}
-                  locale={locale}
-                  movingAverages={indexMovingAverages}
-                />
+                {marketCode === "tw_equity" ? (
+                  <TaiwanIndexHistoryChart
+                    history={history}
+                    locale={locale}
+                    movingAverages={indexMovingAverages}
+                  />
+                ) : (
+                  <IndexHistoryChart
+                    history={history}
+                    locale={locale}
+                    movingAverages={indexMovingAverages}
+                  />
+                )}
                 {marketCode === "tw_equity" && institutionalData ? (
                   <Suspense fallback={<TaiwanInstitutionalFlowsLoading />}>
                     <Await promise={institutionalData}>

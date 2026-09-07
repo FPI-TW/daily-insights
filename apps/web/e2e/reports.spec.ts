@@ -22,11 +22,11 @@ test("customer login opens reports, then a market detail without mobile overflow
   await expect(page).toHaveURL("/en/reports")
   await page
     .getByRole("navigation", { name: "Market category navigation" })
-    .getByRole("link", { name: "US macro & bonds" })
+    .getByRole("link", { name: "Global macro & bonds" })
     .click()
   await expect(page).toHaveURL("/en/reports/global_macro_bonds")
   await expect(
-    page.getByRole("heading", { name: "US macro & bonds", level: 1 })
+    page.getByRole("heading", { name: "Global macro & bonds", level: 1 })
   ).toBeVisible()
   await expect(
     page.getByRole("heading", {
@@ -107,6 +107,12 @@ test("US market renders a dedicated responsive VIX chart", async ({
   await authenticateAs(context, "org_member")
   await page.goto("/en/reports/us_equity")
 
+  await expect(
+    page.getByRole("heading", { name: "Index performance", exact: true })
+  ).toBeVisible()
+  await expect(
+    page.getByRole("heading", { name: "Index technicals", exact: true })
+  ).toHaveCount(0)
   await expect(
     page.getByRole("heading", { name: "VIX volatility trend" })
   ).toBeVisible()
