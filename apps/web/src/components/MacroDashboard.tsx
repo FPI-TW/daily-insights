@@ -1,3 +1,4 @@
+import { ResponsiveTable } from "./ResponsiveTable"
 import { ClientOnly } from "@tanstack/react-router"
 import ReactECharts from "echarts-for-react"
 import { useState } from "react"
@@ -44,7 +45,7 @@ export function MacroDashboardLoading() {
       {[0, 1, 2].map(i => (
         <div
           key={i}
-          className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] gap-6"
+          className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,560px),1fr))] gap-6"
         >
           {[0, 1].map(j => (
             <div
@@ -99,7 +100,7 @@ function Change({
   const flat = value !== null && Math.abs(value) < 0.005
   return (
     <span
-      className={`inline-flex items-baseline gap-2 whitespace-nowrap font-mono font-bold tabular-nums text-sm ${value === null || flat ? "text-sea-ink-soft" : value > 0 ? "text-market-up" : "text-market-down"}`}
+      className={`inline-flex max-w-full flex-wrap items-baseline justify-end gap-x-2 gap-y-1 font-mono font-bold tabular-nums text-sm ${value === null || flat ? "text-sea-ink-soft" : value > 0 ? "text-market-up" : "text-market-down"}`}
     >
       {value !== null && !flat ? <span>{value > 0 ? "▲" : "▼"}</span> : null}
       <span>
@@ -306,8 +307,8 @@ function Chart({
         <summary className="cursor-pointer hover:text-palm">
           {t("macroChartData")}
         </summary>
-        <div className="mt-2 max-h-56 overflow-auto">
-          <table className="w-full table-fixed text-right font-mono tabular-nums">
+        <div className="mt-2 min-w-0">
+          <table className="w-full table-fixed text-right font-mono tabular-nums [&_td]:wrap-anywhere [&_th]:wrap-anywhere">
             <thead>
               <tr>
                 <th className="text-left">{t("macroDate")}</th>
@@ -360,22 +361,8 @@ function HistoryTable({
   )
     return <Unavailable />
   return (
-    <div className="mt-4 overflow-x-auto">
-      <table
-        className={
-          fx
-            ? "w-full min-w-180 table-auto text-right text-sm leading-6 tabular-nums"
-            : "w-full min-w-216 table-auto text-right text-sm leading-6 tabular-nums"
-        }
-      >
-        <colgroup>
-          <col className="w-44" />
-          <col className="w-36" />
-          {!fx ? <col className="w-36" /> : null}
-          {periods.map(period => (
-            <col key={period} className="w-24" />
-          ))}
-        </colgroup>
+    <div className="mt-4 min-w-0">
+      <ResponsiveTable>
         <thead className="border-b border-line text-sea-ink-soft">
           <tr>
             <th scope="col" className="px-4 py-3 text-left font-semibold">
@@ -387,14 +374,6 @@ function HistoryTable({
             >
               {t(rates ? "macroYield" : "macroClose")}
             </th>
-            {!fx ? (
-              <th
-                scope="col"
-                className="whitespace-nowrap px-4 py-3 font-semibold"
-              >
-                {t("macroDate")}
-              </th>
-            ) : null}
             {periods.map(period => (
               <th
                 key={period}
@@ -441,26 +420,33 @@ function HistoryTable({
                       {unitLabel(history.unit, t) ?? history.unit}
                     </span>
                   ) : null}
+                  {!fx ? (
+                    <span className="mt-1 block font-mono text-xs font-normal text-sea-ink-soft">
+                      {latest?.date ?? "—"}
+                    </span>
+                  ) : null}
                   {stale ? (
                     <span className="block text-xs font-normal text-sea-ink-soft">
                       {t("reportStale")}
                     </span>
                   ) : null}
                 </th>
-                <td className="whitespace-nowrap px-4 py-4 font-mono font-bold text-sea-ink">
+                <td
+                  data-label={t(rates ? "macroYield" : "macroClose")}
+                  className="px-4 py-4 text-right font-mono font-bold text-sea-ink"
+                >
                   {formatValue(
                     latest ? Number(latest.value) : null,
                     history?.unit,
                     locale
                   )}
                 </td>
-                {!fx ? (
-                  <td className="whitespace-nowrap px-4 py-4 font-mono text-sm text-sea-ink-soft">
-                    {latest?.date ?? "—"}
-                  </td>
-                ) : null}
                 {periods.map(period => (
-                  <td key={period} className="px-4 py-4">
+                  <td
+                    key={period}
+                    data-label={t(`macroPeriod_${period}`)}
+                    className="px-4 py-4 text-right"
+                  >
                     <Change
                       value={
                         history ? periodChange(history, period, rates) : null
@@ -474,7 +460,7 @@ function HistoryTable({
             )
           })}
         </tbody>
-      </table>
+      </ResponsiveTable>
     </div>
   )
 }
@@ -540,7 +526,7 @@ export function MacroDashboard({
         ) : null}
       </div>
       <section className="min-w-0">
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-6">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,560px),1fr))] items-start gap-6">
           <DashboardPanel title={t("macroCommodities")}>
             <HistoryTable
               ids={commodityIds}
@@ -577,7 +563,7 @@ export function MacroDashboard({
         </div>
       </section>
       <section className="min-w-0">
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-6">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,560px),1fr))] items-start gap-6">
           <DashboardPanel title={t("macroYieldChanges")}>
             <HistoryTable
               ids={[...tenorIds, "sofr"]}
@@ -638,7 +624,7 @@ export function MacroDashboard({
         </div>
       </section>
       <section className="min-w-0">
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-start gap-6">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,560px),1fr))] items-start gap-6">
           <DashboardPanel
             title={t("macroDollarIndex")}
             controls={<Range value={dxyDays} onChange={setDxyDays} />}
@@ -685,7 +671,7 @@ export function MacroDashboard({
               </span>
             }
           >
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] gap-6">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,560px),1fr))] gap-6">
               {[fxIds.slice(0, 4), fxIds.slice(4)].map(ids => (
                 <HistoryTable
                   key={ids[0]}

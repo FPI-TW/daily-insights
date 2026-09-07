@@ -1,3 +1,4 @@
+import { ResponsiveTable } from "./ResponsiveTable"
 import type { Locale } from "@daily-insights/api-client"
 import { useTranslation } from "react-i18next"
 import { directionClass, formatChange, formatNumber } from "#/lib/format"
@@ -132,8 +133,8 @@ export function UsIndexPerformanceTable({
           })}
         </p>
       ) : null}
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-180 border-collapse text-sm leading-6">
+      <div className="mt-4 min-w-0">
+        <ResponsiveTable>
           <thead className="border-y border-line bg-link-hover text-xs font-bold text-sea-ink-soft">
             <tr>
               <th scope="col" className="px-4 py-3 text-left">
@@ -165,7 +166,10 @@ export function UsIndexPerformanceTable({
                 >
                   {t(indexNameKey(row.symbol) ?? row.symbol)}
                 </th>
-                <td className="whitespace-nowrap px-4 py-4 text-right font-mono tabular-nums text-sea-ink">
+                <td
+                  data-label={t("usIndexTableClose")}
+                  className="px-4 py-4 text-right font-mono tabular-nums text-sea-ink"
+                >
                   {formatNumber(row.close, "index", locale)}
                 </td>
                 {[row.daily, row.monthly, row.ytd].map((value, column) => {
@@ -175,6 +179,13 @@ export function UsIndexPerformanceTable({
                   return (
                     <td
                       key={column}
+                      data-label={t(
+                        [
+                          "usIndexTableDaily",
+                          "usIndexTableMonthly",
+                          "usIndexTableYearly",
+                        ][column]!
+                      )}
                       className={`whitespace-nowrap px-4 py-4 text-right font-mono tabular-nums ${directionClass(change.direction)}`}
                     >
                       {change.text}
@@ -184,7 +195,7 @@ export function UsIndexPerformanceTable({
               </tr>
             ))}
           </tbody>
-        </table>
+        </ResponsiveTable>
       </div>
     </section>
   )
