@@ -13,6 +13,7 @@ from daily_insights_api.modules.reports.contracts import (
     PublicationContent,
 )
 from daily_insights_api.modules.reports.launch_manifest import LAUNCH_MARKET_ORDER
+from daily_insights_api.modules.reports.macro_dashboard import MacroDashboard, MacroDashboardService
 from daily_insights_api.modules.reports.schemas import ReportDetailResponse, ReportSummaryResponse
 from daily_insights_api.web.dependencies import get_database_session
 
@@ -130,3 +131,16 @@ async def get_latest_report(
             },
         )
     return _detail_response(result, locale)
+
+
+@router.get("/global_macro_bonds/dashboard", response_model=MacroDashboard)
+async def get_macro_dashboard(
+    request: Request,
+    context: Member,
+    database: Annotated[AsyncSession, Depends(get_database_session)],
+) -> MacroDashboard:
+    visible = await visible_report_market_codes(database, context)
+    if "global_macro_bonds" not in visible:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "report not found")
+    service: MacroDashboardService = request.app.state.macro_dashboard
+    return await service.get()

@@ -687,6 +687,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/reports/global_macro_bonds/dashboard": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Macro Dashboard */
+    get: operations["get_macro_dashboard_api_reports_global_macro_bonds_dashboard_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/reports/{market_code}/latest": {
     parameters: {
       query?: never
@@ -877,6 +894,21 @@ export interface components {
       /** Zh Hant */
       zh_hant?: string | null
     }
+    /** Calendar */
+    Calendar: {
+      /**
+       * Date
+       * Format: date
+       */
+      date: string
+      /** Events */
+      events?: components["schemas"]["EconomicEvent"][]
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "ok" | "unavailable" | "disabled"
+    }
     /** ChangePasswordRequest */
     ChangePasswordRequest: {
       /** Current Password */
@@ -1055,6 +1087,30 @@ export interface components {
       /** Csrf Token */
       csrf_token: string
     }
+    /** EconomicEvent */
+    EconomicEvent: {
+      /** Actual */
+      actual?: string | null
+      /** Country */
+      country: string
+      /** Currency */
+      currency?: string | null
+      /**
+       * Date
+       * Format: date-time
+       */
+      date: string
+      /** Estimate */
+      estimate?: string | null
+      /** Event */
+      event: string
+      /** Impact */
+      impact?: string | null
+      /** Previous */
+      previous?: string | null
+      /** Unit */
+      unit?: string | null
+    }
     /**
      * GenerationStatus
      * @enum {string}
@@ -1077,6 +1133,24 @@ export interface components {
     HealthResponse: {
       /** Status */
       status: string
+    }
+    /** History */
+    History: {
+      /** Id */
+      id: string
+      /** Points */
+      points?: components["schemas"]["Point"][]
+      /** Source */
+      source: string
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "ok" | "unavailable" | "disabled"
+      /** Symbol */
+      symbol: string
+      /** Unit */
+      unit: string
     }
     /** IndexDailyBarResponse */
     IndexDailyBarResponse: {
@@ -1285,6 +1359,17 @@ export interface components {
       email: string
       /** Password */
       password: string
+    }
+    /** MacroDashboard */
+    MacroDashboard: {
+      calendar: components["schemas"]["Calendar"]
+      /**
+       * Fetched At
+       * Format: date-time
+       */
+      fetched_at: string
+      /** Histories */
+      histories: components["schemas"]["History"][]
     }
     /** MarketPolicyUpdate */
     MarketPolicyUpdate: {
@@ -1746,6 +1831,16 @@ export interface components {
     PodcastPublicationRequest: {
       /** Expected Version */
       expected_version: number
+    }
+    /** Point */
+    Point: {
+      /**
+       * Date
+       * Format: date
+       */
+      date: string
+      /** Value */
+      value: string
     }
     /** PresentationContract */
     PresentationContract: {
@@ -3604,6 +3699,26 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  get_macro_dashboard_api_reports_global_macro_bonds_dashboard_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["MacroDashboard"]
         }
       }
     }

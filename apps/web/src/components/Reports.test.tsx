@@ -92,11 +92,10 @@ describe("three-market report presentation", () => {
     const links = screen.getByRole("navigation").querySelectorAll("a")
     expect(Array.from(links).map(link => link.textContent)).toEqual([
       "All markets",
-      "Macro analysis",
+      "Macro, bonds & FX",
       "Crypto",
       "US equities",
       "Taiwan equities",
-      "Forex",
     ])
     expect(links[2]).toHaveAttribute(
       "data-params",
@@ -142,7 +141,7 @@ describe("three-market report presentation", () => {
     expect(navigation.compareDocumentPosition(section)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     )
-    expect(section).toHaveTextContent("Global macro")
+    expect(section).toHaveTextContent("Global macro, bonds & FX")
     expect(section).toHaveTextContent("Taiwan equities")
     expect(section).not.toHaveTextContent("US equities")
     expect(section).not.toHaveTextContent("Crypto")
@@ -889,7 +888,9 @@ describe("three-market report presentation", () => {
       "en"
     )
 
-    const macroCard = screen.getByRole("article", { name: "Global macro" })
+    const macroCard = screen.getByRole("article", {
+      name: "Global macro, bonds & FX",
+    })
     expect(macroCard).toHaveTextContent("Brent crude94.45-0.17%")
     expect(macroCard).toHaveTextContent("Gold4,477.29+0.08%")
     expect(macroCard).toHaveTextContent("Sep 3, 2026")

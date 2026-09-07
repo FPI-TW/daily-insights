@@ -3,8 +3,21 @@ import type {
   LatestNews,
   Locale,
 } from "@daily-insights/api-client"
-import { Await, createFileRoute, notFound } from "@tanstack/react-router"
-import { Suspense } from "react"
+import {
+  Await,
+  createFileRoute,
+  notFound,
+  redirect,
+} from "@tanstack/react-router"
+import { Suspense, useState } from "react"
+import { useTranslation } from "react-i18next"
+import {
+  MacroDashboard,
+  MacroDashboardLoading,
+} from "#/components/MacroDashboard"
+import { getMacroDashboard } from "#/lib/macro-dashboard.functions"
+import type { MacroDashboardData } from "#/lib/macro-dashboard"
+import { getVisibleMarkets } from "#/lib/markets"
 import { DailyNews } from "#/components/DailyNews"
 import {
   IndexHistoryChart,
@@ -40,6 +53,8 @@ type MarketPage = {
   report: Exclude<ReportResult, { kind: "not-found" }>
   news: { marketCode: NewsMarketCode; latest: LatestNews | null } | null
   viewpoint: AnalystViewpoint | null
+  forexViewpoint: AnalystViewpoint | null
+  macroDashboard: Promise<MacroDashboardData | null> | null
   indexHistory: Promise<MarketIndexHistory | null> | null
   indexMovingAverages: Promise<IndexMovingAverageMap> | null
 }
@@ -94,6 +109,20 @@ export async function loadMarketPage({
   params: { marketCode: string }
   context: { locale: Locale }
 }): Promise<MarketPage> {
+  if (params.marketCode === "forex") {
+    const markets = await getVisibleMarkets({ data: context.locale })
+    if (markets.some(market => market.code === "global_macro_bonds")) {
+      throw redirect({
+        to: "/$locale/reports/$marketCode",
+        params: { locale: context.locale, marketCode: "global_macro_bonds" },
+        replace: true,
+      })
+    }
+  }
+  const macroDashboard =
+    params.marketCode === "global_macro_bonds"
+      ? getMacroDashboard().catch(() => null)
+      : null
   const newsMarket = isNewsMarketCode(params.marketCode)
     ? params.marketCode
     : null
@@ -150,6 +179,12 @@ export async function loadMarketPage({
         }
       : null,
     viewpoint,
+    forexViewpoint:
+      params.marketCode === "global_macro_bonds" &&
+      viewpoints.status === "fulfilled"
+        ? (viewpoints.value.find(item => item.market_code === "forex") ?? null)
+        : null,
+    macroDashboard,
     indexHistory,
     indexMovingAverages,
   }
@@ -165,8 +200,17 @@ export const Route = createFileRoute(
 })
 
 function ReportPage() {
-  const { report, news, viewpoint, indexHistory, indexMovingAverages } =
-    Route.useLoaderData()
+  const { t } = useTranslation()
+  const [reportExpanded, setReportExpanded] = useState(false)
+  const {
+    report,
+    news,
+    viewpoint,
+    forexViewpoint,
+    macroDashboard,
+    indexHistory,
+    indexMovingAverages,
+  } = Route.useLoaderData()
   const { marketCode } = Route.useParams()
   const { locale } = Route.useRouteContext()
   useChatPageContext(
@@ -176,10 +220,36 @@ function ReportPage() {
   )
   return (
     <>
-      {report.kind !== "report" && viewpoint ? (
+      {(report.kind !== "report" || macroDashboard) && viewpoint ? (
         <MarketViewpoint viewpoint={viewpoint} />
       ) : null}
-      {report.kind === "not-generated" ? (
+      {macroDashboard ? (
+        <>
+          {forexViewpoint ? (
+            <MarketViewpoint viewpoint={forexViewpoint} />
+          ) : null}
+          <Suspense fallback={<MacroDashboardLoading />}>
+            <Await promise={macroDashboard}>
+              {data => <MacroDashboard data={data} locale={locale} />}
+            </Await>
+          </Suspense>
+          {report.kind === "report" ? (
+            <details
+              className="mt-6 rounded-2xl border border-line p-5"
+              onToggle={event => setReportExpanded(event.currentTarget.open)}
+            >
+              <summary className="cursor-pointer text-sm font-bold text-sea-ink">
+                {t("macroPublishedReport")}
+              </summary>
+              <div className="mt-4">
+                {reportExpanded ? (
+                  <ReportDetail locale={locale} report={report.report} />
+                ) : null}
+              </div>
+            </details>
+          ) : null}
+        </>
+      ) : report.kind === "not-generated" ? (
         <ReportNotGeneratedScreen
           locale={locale}
           marketCode={report.marketCode}

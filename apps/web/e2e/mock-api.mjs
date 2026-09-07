@@ -324,10 +324,10 @@ function reportDetail(marketCode, locale) {
     caveat: null,
     metrics: [
       { id: "wti", value: "68.4", change: "0.7", unit_code: "usd" },
-      { id: "brent", value: "72.4", change: "0.8", unit_code: "price" },
-      { id: "gold", value: "2418", change: "0.3", unit_code: "price" },
+      { id: "brent", value: "72.4", change: "0.8", unit_code: "usd" },
+      { id: "gold", value: "2418", change: "0.3", unit_code: "usd" },
       { id: "silver", value: "28.4", change: "0.1", unit_code: "usd" },
-      { id: "copper", value: "4.18", change: "-0.2", unit_code: "price" },
+      { id: "copper", value: "4.18", change: "-0.2", unit_code: "usd" },
     ],
   }
   const commodityPerformance = {
@@ -427,6 +427,34 @@ const server = createServer(async (request, response) => {
     return
   }
 
+  if (url.pathname === "/api/markets" && request.method === "GET") {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    sendJson(
+      response,
+      200,
+      [...reportMarkets, "forex", "tw_equity", "tw_index_derivatives"].map(
+        code => ({
+          code,
+          is_visible: true,
+          name_en: code,
+          name_zh_hant: code,
+          name_zh_hans: code,
+        })
+      )
+    )
+    return
+  }
+  if (
+    url.pathname === "/api/analyst-viewpoints/today" &&
+    request.method === "GET"
+  ) {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    sendJson(response, 200, [])
+    return
+  }
+
   if (url.pathname === "/api/reports" && request.method === "GET") {
     const role = requireRole(request, response, ["org_member"])
     if (!role) return
@@ -437,6 +465,85 @@ const server = createServer(async (request, response) => {
       200,
       reportMarkets.map(market => reportSummary(market, locale))
     )
+    return
+  }
+
+  if (
+    url.pathname === "/api/reports/global_macro_bonds/dashboard" &&
+    request.method === "GET"
+  ) {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    // Deterministic test-only histories; production always calls provider adapters.
+    const assets = [
+      ["brent", "USD/bbl", 72],
+      ["wti", "USD/bbl", 69],
+      ["gold", "USD/oz", 2648],
+      ["silver", "USD/oz", 31],
+      ["copper", "USD/lb", 4.28],
+      ["dxy", "index", 101],
+      ["eur_usd", "USD", 1.17],
+      ["gbp_usd", "USD", 1.35],
+      ["aud_usd", "USD", 0.67],
+      ["nzd_usd", "USD", 0.59],
+      ["usd_jpy", "JPY", 145],
+      ["usd_chf", "CHF", 0.81],
+      ["usd_cad", "CAD", 1.38],
+      ["usd_twd", "TWD", 30.5],
+      ["3m", "percent", 4.42],
+      ["2y", "percent", 3.98],
+      ["5y", "percent", 4.08],
+      ["10y", "percent", 4.28],
+      ["30y", "percent", 4.55],
+      ["sofr", "percent", 4.58],
+    ]
+    sendJson(response, 200, {
+      fetched_at: "2026-09-04T00:00:00Z",
+      histories: assets.map(([id, unit, value], index) => ({
+        id,
+        symbol: id,
+        unit,
+        source: "E2E fixture",
+        status: "ok",
+        points: Array.from({ length: 400 }, (_, day) => ({
+          date: new Date(Date.UTC(2026, 8, 4) - (399 - day) * 86400000)
+            .toISOString()
+            .slice(0, 10),
+          value: (
+            value *
+            (1 + Math.sin(day / 12 + index) * 0.02 + day / 15000)
+          ).toFixed(6),
+        })),
+      })),
+      calendar: {
+        date: "2026-09-04",
+        status: "ok",
+        events: [
+          {
+            date: "2026-09-04T12:30:00Z",
+            country: "US",
+            event: "Nonfarm payrolls",
+            currency: "USD",
+            impact: "High",
+            estimate: "185000",
+            previous: "272000",
+            actual: null,
+            unit: null,
+          },
+          {
+            date: "2026-09-04T12:30:00Z",
+            country: "US",
+            event: "Unemployment rate",
+            currency: "USD",
+            impact: "High",
+            estimate: "4.1",
+            previous: "4.0",
+            actual: null,
+            unit: "%",
+          },
+        ],
+      },
+    })
     return
   }
 

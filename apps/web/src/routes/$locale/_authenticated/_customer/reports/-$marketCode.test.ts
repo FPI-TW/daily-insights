@@ -1,12 +1,20 @@
-import { isNotFound } from "@tanstack/react-router"
+import { isNotFound, isRedirect } from "@tanstack/react-router"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+const getVisibleMarkets = vi.fn().mockResolvedValue([])
 const getReportDetail = vi.fn()
 const getMarketNews = vi.fn()
 const getTodayAnalystViewpoints = vi.fn()
 const getMarketIndexHistory = vi.fn()
 const getMarketIndexMovingAverages = vi.fn()
 const indexRange = { start: "2024-09-02", end: "2026-09-02" }
+
+vi.mock("#/lib/macro-dashboard.functions", () => ({
+  getMacroDashboard: vi.fn().mockResolvedValue(null),
+}))
+vi.mock("#/lib/markets", () => ({
+  getVisibleMarkets,
+}))
 
 vi.mock("#/lib/reports", () => ({ getReportDetail }))
 vi.mock("#/lib/news", () => ({ getMarketNews }))
@@ -146,6 +154,8 @@ describe("market report loader", () => {
       report: { kind: "not-generated", marketCode: "crypto" },
       news: null,
       viewpoint: null,
+      forexViewpoint: null,
+      macroDashboard: null,
       indexHistory: null,
       indexMovingAverages: null,
     })
@@ -235,4 +245,24 @@ describe("market report loader", () => {
     await vi.advanceTimersByTimeAsync(INDEX_MOVING_AVERAGES_DEADLINE_MS)
     await expect(page.indexMovingAverages).resolves.toEqual({})
   })
+})
+
+it("redirects the legacy forex URL when the merged market is visible", async () => {
+  getVisibleMarkets.mockResolvedValueOnce([
+    { code: "global_macro_bonds", name: "Macro" },
+  ])
+  try {
+    await loadMarketPage({
+      params: { marketCode: "forex" },
+      context: { locale: "zh-hant" },
+    })
+    throw new Error("expected redirect")
+  } catch (error) {
+    expect(isRedirect(error)).toBe(true)
+    if (isRedirect(error))
+      expect(error.options).toMatchObject({
+        params: { locale: "zh-hant", marketCode: "global_macro_bonds" },
+        replace: true,
+      })
+  }
 })

@@ -118,18 +118,24 @@ function ReportMarketNav({
       >
         {t("reportAllMarkets")}
       </Link>
-      {markets.map(market => (
-        <Link
-          key={market.code}
-          to="/$locale/reports/$marketCode"
-          params={{ locale, marketCode: market.code }}
-          className={linkClass(activeMarket === market.code)}
-        >
-          {i18n.exists(`reportMarketShort_${market.code}`)
-            ? t(`reportMarketShort_${market.code}`)
-            : market.name}
-        </Link>
-      ))}
+      {markets
+        .filter(
+          market =>
+            market.code !== "forex" ||
+            !markets.some(item => item.code === "global_macro_bonds")
+        )
+        .map(market => (
+          <Link
+            key={market.code}
+            to="/$locale/reports/$marketCode"
+            params={{ locale, marketCode: market.code }}
+            className={linkClass(activeMarket === market.code)}
+          >
+            {i18n.exists(`reportMarketShort_${market.code}`)
+              ? t(`reportMarketShort_${market.code}`)
+              : market.name}
+          </Link>
+        ))}
     </nav>
   )
 }

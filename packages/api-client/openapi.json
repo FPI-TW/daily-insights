@@ -354,6 +354,30 @@
         "title": "Body_admin_podcasts_upload",
         "type": "object"
       },
+      "Calendar": {
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/EconomicEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "status": {
+            "enum": ["ok", "unavailable", "disabled"],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": ["status", "date"],
+        "title": "Calendar",
+        "type": "object"
+      },
       "ChangePasswordRequest": {
         "properties": {
           "current_password": {
@@ -818,6 +842,98 @@
         "title": "CsrfTokenResponse",
         "type": "object"
       },
+      "EconomicEvent": {
+        "properties": {
+          "actual": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual"
+          },
+          "country": {
+            "maxLength": 100,
+            "title": "Country",
+            "type": "string"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "date": {
+            "format": "date-time",
+            "title": "Date",
+            "type": "string"
+          },
+          "estimate": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimate"
+          },
+          "event": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Event",
+            "type": "string"
+          },
+          "impact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact"
+          },
+          "previous": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": ["date", "country", "event"],
+        "title": "EconomicEvent",
+        "type": "object"
+      },
       "GenerationStatus": {
         "enum": ["pending", "complete", "partial", "error"],
         "title": "GenerationStatus",
@@ -857,6 +973,41 @@
         },
         "required": ["status"],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "History": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": ["ok", "unavailable", "disabled"],
+            "title": "Status",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": ["id", "symbol", "unit", "source", "status"],
+        "title": "History",
         "type": "object"
       },
       "IndexDailyBarResponse": {
@@ -1435,6 +1586,28 @@
         },
         "required": ["email", "password"],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "MacroDashboard": {
+        "properties": {
+          "calendar": {
+            "$ref": "#/components/schemas/Calendar"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "histories": {
+            "items": {
+              "$ref": "#/components/schemas/History"
+            },
+            "title": "Histories",
+            "type": "array"
+          }
+        },
+        "required": ["fetched_at", "histories", "calendar"],
+        "title": "MacroDashboard",
         "type": "object"
       },
       "MarketPolicyUpdate": {
@@ -2562,6 +2735,23 @@
         },
         "required": ["expected_version"],
         "title": "PodcastPublicationRequest",
+        "type": "object"
+      },
+      "Point": {
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "value": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": ["date", "value"],
+        "title": "Point",
         "type": "object"
       },
       "PresentationContract": {
@@ -5868,6 +6058,25 @@
           }
         },
         "summary": "List Latest Reports",
+        "tags": ["reports"]
+      }
+    },
+    "/api/reports/global_macro_bonds/dashboard": {
+      "get": {
+        "operationId": "get_macro_dashboard_api_reports_global_macro_bonds_dashboard_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MacroDashboard"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Macro Dashboard",
         "tags": ["reports"]
       }
     },
