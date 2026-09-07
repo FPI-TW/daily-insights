@@ -92,8 +92,14 @@ class DeterministicMacroAdapter:
     ) -> EodsResult:
         self.eod_requests += 1
         assert market == "global_macro_bonds"
-        assert symbols == ("XBR/USD", "XAU/USD", "HG1")
-        assert expected_currencies == {"XBR/USD": "USD", "XAU/USD": "USD", "HG1": "USD"}
+        assert symbols == ("WTI/USD", "XBR/USD", "XAU/USD", "XAG/USD", "HG1")
+        assert expected_currencies == {
+            "WTI/USD": "USD",
+            "XBR/USD": "USD",
+            "XAU/USD": "USD",
+            "XAG/USD": "USD",
+            "HG1": "USD",
+        }
         as_of = date(2026, 8, 29)
         provenance = _provenance(
             endpoint="/eod", marker=self.eod_marker, as_of=as_of, record_count=len(symbols)
@@ -122,7 +128,9 @@ class DeterministicMacroAdapter:
     ) -> QuotesResult:
         assert market == "global_macro_bonds"
         assert set(expected_currencies) == set(symbols)
-        assert symbol_types == ({"HG1": "commodity"} if "HG1" in symbols else {})
+        assert symbol_types == (
+            {symbol: "commodity" for symbol in symbols} if "HG1" in symbols else {}
+        )
         if self.quote_mode == "failed":
             raise DataSourceContractError("api_key=quote-secret")
         as_of = date(2026, 8, 30)
@@ -164,27 +172,27 @@ class DeterministicMacroAdapter:
     ) -> DailyBarsResult:
         assert market == "global_macro_bonds"
         assert expected_currency == "USD"
-        assert outputsize == 500
-        if symbol in {"XBR/USD", "XAU/USD", "HG1"}:
+        assert outputsize == 800
+        if symbol in {"WTI/USD", "XBR/USD", "XAU/USD", "XAG/USD", "HG1"}:
             assert expected_asset_type in {"Energy Resource", "Precious Metal", "Industrial Metal"}
             assert symbol_type == "commodity"
             assert dp == 11
         if self.history_mode == "failed":
             raise DataSourceContractError("token=history-secret")
-        start = date(2026, 7, 31)
+        start = date(2026, 8, 29) - timedelta(days=799)
         items = tuple(
             DailyBar(
                 instrument_source_id=symbol,
                 market="global_macro_bonds",
                 symbol=symbol,
                 trade_date=start + timedelta(days=index),
-                open=Decimal(index + 1),
-                high=Decimal(index + 2),
-                low=Decimal(index + 1),
-                close=Decimal(index + 1),
+                open=Decimal("30"),
+                high=Decimal("30"),
+                low=Decimal("30"),
+                close=Decimal("30"),
                 source="twelve_data",
             )
-            for index in range(30)
+            for index in range(800)
         )
         return DailyBarsResult(
             items=items,
@@ -313,7 +321,7 @@ async def test_macro_orchestration_persists_all_dataset_outcomes_and_revisions(
     assert [block["id"] for block in _blocks(complete)] == [
         "macro.commodities",
         "macro.rates_fx",
-        "macro.commodity_normalized_performance",
+        "macro.commodity_ratios",
     ]
     assert [block["status"] for block in _blocks(complete)] == ["ok", "ok", "ok"]
     assert [source.dataset_key for source in complete_sources] == [

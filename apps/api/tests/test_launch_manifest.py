@@ -20,6 +20,7 @@ from daily_insights_api.modules.reports.morning_report import (
     DatasetBuild,
     _bundle,
     _commodity_metric_item,
+    _commodity_ratio_window_dates,
     _completed_history_for_eod,
     _error_blocks,
     _error_blocks_for_dataset,
@@ -30,6 +31,7 @@ from daily_insights_api.modules.reports.morning_report import (
     _normalized_common_date_points,
     _normalized_points,
     _quantize,
+    _ratio_common_date_points,
     _revision_lock_key,
     _scheduled_edition_lock_key,
     _validate_dataset_contract,
@@ -40,8 +42,8 @@ from daily_insights_api.modules.reports.morning_report import (
 
 
 def test_manifest_freezes_three_markets_and_block_order() -> None:
-    assert MORNING_REPORT_DERIVATION_VERSION == "twelve-data.three-market.v7"
-    assert ACTIVE_LAUNCH_MANIFEST.version == "three-market.v7"
+    assert MORNING_REPORT_DERIVATION_VERSION == "twelve-data.three-market.v8"
+    assert ACTIVE_LAUNCH_MANIFEST.version == "three-market.v8"
     assert tuple(market.market_code for market in ACTIVE_LAUNCH_MANIFEST.markets) == (
         "global_macro_bonds",
         "crypto",
@@ -53,7 +55,7 @@ def test_manifest_freezes_three_markets_and_block_order() -> None:
     assert [block.id for market in ACTIVE_LAUNCH_MANIFEST.markets for block in market.blocks] == [
         "macro.commodities",
         "macro.rates_fx",
-        "macro.commodity_normalized_performance",
+        "macro.commodity_ratios",
         "crypto.overview",
         "crypto.normalized_performance",
         "us.index_proxies",
@@ -70,7 +72,7 @@ def test_manifest_freezes_three_markets_and_block_order() -> None:
 def test_manifest_hash_is_stable_and_changes_with_content() -> None:
     round_trip = LaunchManifest.model_validate(ACTIVE_LAUNCH_MANIFEST.model_dump(mode="json"))
     assert round_trip.sha256 == ACTIVE_LAUNCH_MANIFEST.sha256
-    changed = round_trip.model_copy(update={"version": "three-market.v8"})
+    changed = round_trip.model_copy(update={"version": "three-market.v9"})
     assert changed.sha256 != round_trip.sha256
 
 
@@ -80,7 +82,13 @@ def test_manifest_keeps_atomic_dataset_contracts() -> None:
         dataset.symbol_units
         for dataset in ACTIVE_LAUNCH_MANIFEST.datasets
         if dataset.key == "macro.commodity_eod"
-    ) == {"XBR/USD": "USD", "XAU/USD": "USD", "HG1": "USD"}
+    ) == {
+        "WTI/USD": "USD",
+        "XBR/USD": "USD",
+        "XAU/USD": "USD",
+        "XAG/USD": "USD",
+        "HG1": "USD",
+    }
     quotes = next(
         dataset
         for dataset in ACTIVE_LAUNCH_MANIFEST.datasets
@@ -89,14 +97,18 @@ def test_manifest_keeps_atomic_dataset_contracts() -> None:
     # HG1 without a type resolves to a German stock; the manifest pins copper.
     assert quotes.endpoint == "/eod"
     assert quotes.symbol_types == {
+        "WTI/USD": "commodity",
         "XBR/USD": "commodity",
         "XAU/USD": "commodity",
+        "XAG/USD": "commodity",
         "HG1": "commodity",
     }
-    assert quotes.minimum_history == 500
+    assert quotes.minimum_history == 800
     assert quotes.expected_asset_types == {
+        "WTI/USD": "Energy Resource",
         "XBR/USD": "Energy Resource",
         "XAU/USD": "Precious Metal",
+        "XAG/USD": "Precious Metal",
         "HG1": "Industrial Metal",
     }
     assert tuple(dataset.key for dataset in _market_datasets("global_macro_bonds")) == (
@@ -109,6 +121,42 @@ def test_manifest_keeps_atomic_dataset_contracts() -> None:
         if dataset.key == "macro.rates_fx_quotes"
     )
     assert rates.symbol_units["USD/TWD"] == "TWD" and rates.symbol_units["TLT"] == "USD"
+
+
+def test_manifest_freezes_commodity_ratio_labels_and_precision() -> None:
+    ratios = next(
+        block
+        for market in ACTIVE_LAUNCH_MANIFEST.markets
+        for block in market.blocks
+        if block.id == "macro.commodity_ratios"
+    )
+    assert ratios.unit_code == "ratio"
+    assert ratios.precision == 6
+    assert (
+        "each WTI/USD, XAU/USD, and HG1 completed history must reach on or before "
+        "the exact two-calendar-year start boundary"
+    ) in ratios.formula
+    commodity_dataset = next(
+        dataset
+        for dataset in ACTIVE_LAUNCH_MANIFEST.datasets
+        if dataset.key == "macro.commodity_eod"
+    )
+    assert "each WTI/USD, XAU/USD, and HG1 history reaches that exact boundary" in (
+        commodity_dataset.freshness
+    )
+    assert ratios.labels == {
+        "zh-hant": "油金比 / 銅金比",
+        "zh-hans": "油金比 / 铜金比",
+        "en": "Oil-Gold / Copper-Gold Ratios",
+    }
+    assert ratios.series_labels == {
+        "zh-hant": {"oil_gold_ratio": "油金比", "copper_gold_ratio": "銅金比"},
+        "zh-hans": {"oil_gold_ratio": "油金比", "copper_gold_ratio": "铜金比"},
+        "en": {
+            "oil_gold_ratio": "Oil-Gold Ratio",
+            "copper_gold_ratio": "Copper-Gold Ratio",
+        },
+    }
 
 
 def test_us_equity_uses_fixed_usd_baskets_instead_of_provider_movers() -> None:
@@ -365,6 +413,112 @@ def test_commodity_history_uses_eod_as_mutable_bar_cutoff_and_requires_reconcili
         _completed_history_for_eod(bars[:-2], eod)
     with pytest.raises(DataSourceContractError, match="previous completed"):
         _completed_history_for_eod((bars[1],), eod)
+
+
+def test_commodity_ratio_window_uses_exact_common_completed_dates_for_two_calendar_years() -> None:
+    latest = date(2026, 2, 28)
+    start = date(2024, 2, 28)
+
+    def history(symbol: str, skipped: set[date] | None = None) -> tuple[DailyBar, ...]:
+        return tuple(
+            DailyBar(
+                instrument_source_id=symbol,
+                market="global_macro_bonds",
+                symbol=symbol,
+                trade_date=start + timedelta(days=index),
+                close=Decimal("10"),
+            )
+            for index in range((latest - start).days + 1)
+            if start + timedelta(days=index) not in (skipped or set())
+        )
+
+    wti = history("WTI/USD")
+    gold = history("XAU/USD", {date(2025, 1, 1)})
+    copper = history("HG1")
+
+    window = _commodity_ratio_window_dates((wti, gold, copper))
+
+    assert window[0] == start
+    assert window[-1] == latest
+    assert date(2025, 1, 1) not in window
+    with pytest.raises(DataSourceContractError, match="start boundary"):
+        _commodity_ratio_window_dates((wti[1:], gold, copper))
+    with pytest.raises(DataSourceContractError, match="no common"):
+        _commodity_ratio_window_dates((wti[:1], gold[1:], copper))
+
+
+def test_commodity_ratio_window_rejects_late_common_coverage_but_allows_week_one() -> None:
+    start = date(2024, 8, 29)
+    latest = date(2026, 8, 29)
+
+    def history(symbol: str, dates: tuple[date, ...]) -> tuple[DailyBar, ...]:
+        return tuple(
+            DailyBar(
+                instrument_source_id=symbol,
+                market="global_macro_bonds",
+                symbol=symbol,
+                trade_date=item,
+                close=Decimal("10"),
+            )
+            for item in dates
+        )
+
+    baseline = tuple(start + timedelta(days=index) for index in range((latest - start).days + 1))
+    # Each history reaches the boundary, but their only common run begins ten
+    # days later. The gap must not silently shorten the two-year ratio window.
+    late = (
+        history("WTI/USD", (start, *baseline[10:])),
+        history("XAU/USD", (start - timedelta(days=1), *baseline[10:])),
+        history("HG1", (start - timedelta(days=2), *baseline[10:])),
+    )
+    with pytest.raises(DataSourceContractError, match="more than seven days"):
+        _commodity_ratio_window_dates(late)
+
+    accepted = (
+        history("WTI/USD", (start, *baseline[7:])),
+        history("XAU/USD", (start - timedelta(days=1), *baseline[7:])),
+        history("HG1", (start - timedelta(days=2), *baseline[7:])),
+    )
+    window = _commodity_ratio_window_dates(accepted)
+    assert window[0] == start + timedelta(days=7)
+    assert window[-1] == latest
+
+
+@pytest.mark.parametrize(
+    ("numerator_close", "denominator_close"),
+    [
+        (None, Decimal("10")),
+        (Decimal("0"), Decimal("10")),
+        (Decimal("-1"), Decimal("10")),
+        (Decimal("10"), None),
+        (Decimal("10"), Decimal("0")),
+        (Decimal("10"), Decimal("-1")),
+    ],
+)
+def test_commodity_ratio_rejects_non_positive_or_missing_inputs(
+    numerator_close: Decimal | None, denominator_close: Decimal | None
+) -> None:
+    day = date(2026, 8, 29)
+
+    def bars(symbol: str, close: Decimal | None) -> tuple[DailyBar, ...]:
+        return (
+            DailyBar(
+                instrument_source_id=symbol,
+                market="global_macro_bonds",
+                symbol=symbol,
+                trade_date=day,
+                close=close,
+            ),
+        )
+
+    with pytest.raises(DataSourceContractError, match="no usable completed close"):
+        _ratio_common_date_points(
+            bars("WTI/USD", numerator_close),
+            bars("XAU/USD", denominator_close),
+            (day,),
+            precision=6,
+            rounding="ROUND_HALF_EVEN",
+        )
 
 
 def test_manifest_rounding_does_not_depend_on_decimal_context() -> None:

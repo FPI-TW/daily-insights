@@ -17,6 +17,7 @@ const KNOWN_UNITS = new Set([
   "index",
   "usd_percent",
   "provider_quote_currency",
+  "ratio",
 ])
 const warnedUnits = new Set<string>()
 
@@ -34,6 +35,7 @@ function warnUnknownUnit(unit: string) {
 /** Fraction digits by unit: currencies keep four digits below 10 (ADA at
  * 0.2046 would otherwise lose its meaningful digits). */
 function fractionDigits(unit: string, value: number) {
+  if (unit === "ratio") return 6
   if (unit === "percent") return 2
   if (CURRENCY_CODE.test(unit)) return Math.abs(value) < 10 ? 4 : 2
   if (!KNOWN_UNITS.has(unit) && unit !== "") warnUnknownUnit(unit)

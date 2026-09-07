@@ -369,7 +369,45 @@ async def test_daily_bars_enforce_expected_provider_asset_type() -> None:
         )
 
 
-@pytest.mark.parametrize("currency_quote", [None, "Euro"])
+async def test_commodity_daily_bars_accept_hg1_iso_usd_quote_currency() -> None:
+    payload = {
+        "meta": {
+            "symbol": "HG1",
+            "interval": "1day",
+            "currency_quote": "USD",
+            "type": "Industrial Metal",
+        },
+        "values": [
+            {
+                "datetime": "2026-08-29",
+                "open": "1",
+                "high": "2",
+                "low": "1",
+                "close": "2",
+            }
+        ],
+        "status": "ok",
+    }
+    adapter = TwelveDataAdapter(
+        transport(
+            httpx.MockTransport(lambda request: httpx.Response(200, json=payload, request=request))
+        )
+    )
+
+    result = await adapter.get_daily_bars(
+        market="global_macro_bonds",
+        symbol="HG1",
+        expected_currency="USD",
+        expected_asset_type="Industrial Metal",
+        symbol_type="commodity",
+        dp=11,
+        outputsize=1,
+    )
+
+    assert result.items[0].symbol == "HG1"
+
+
+@pytest.mark.parametrize("currency_quote", [None, "Euro", "US Dollars"])
 async def test_daily_bars_reject_quote_currency_drift(currency_quote: object) -> None:
     payload = {
         "meta": {

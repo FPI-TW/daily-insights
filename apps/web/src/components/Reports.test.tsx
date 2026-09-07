@@ -541,6 +541,64 @@ describe("three-market report presentation", () => {
     }
   )
 
+  it("uses separate scaled axes and six-decimal formatting for commodity ratios", async () => {
+    const report = {
+      marketCode: "global_macro_bonds",
+      status: "complete",
+      editionDate: "2026-08-30",
+      sourceDate: "2026-08-29",
+      caveatKey: "reportCaveatLive",
+      summaryKey: "reportSummary_global_macro_bonds",
+      blocks: [
+        {
+          kind: "series",
+          id: "macro.commodity_ratios",
+          status: "ok",
+          titleKey: "reportBlockMacroCommodityRatios",
+          unitCode: "ratio",
+          unitLabel: { kind: "literal", value: "Ratio" },
+          series: [
+            {
+              id: "oil_gold_ratio",
+              label: { kind: "literal", value: "Oil-Gold Ratio" },
+              points: [
+                {
+                  label: { kind: "literal", value: "2026-08-29" },
+                  value: 0.03,
+                },
+              ],
+            },
+            {
+              id: "copper_gold_ratio",
+              label: { kind: "literal", value: "Copper-Gold Ratio" },
+              points: [
+                {
+                  label: { kind: "literal", value: "2026-08-29" },
+                  value: 0.0017,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } satisfies ProvisionalReport
+
+    await renderLocalized(<ReportDetail locale="en" report={report} />, "en")
+
+    const chart = screen.getByTestId("chart")
+    expect(chart).toHaveTextContent('"right":76')
+    expect(chart).toHaveTextContent('"yAxisIndex":0')
+    expect(chart).toHaveTextContent('"yAxisIndex":1')
+    expect(chart).not.toHaveTextContent('"yAxis":100')
+    expect(
+      screen.getByRole("heading", {
+        name: "Oil-Gold / Copper-Gold Ratios",
+      })
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Unit:")).not.toBeInTheDocument()
+    expect(screen.getByText("0.030000")).toBeInTheDocument()
+  })
+
   it("sorts an uneven ISO-date category union and aligns each series with null gaps", async () => {
     const report = {
       marketCode: "crypto",
