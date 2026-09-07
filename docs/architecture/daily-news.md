@@ -37,7 +37,7 @@ flowchart LR
 執行順序：
 
 1. 排程器在台北時間 08:00 觸發當日版本。若當日結果為 `unavailable` 或執行時拋出
-   例外，每 30 分鐘重試一次，直到 12:00 為止；`partial` 不自動重試。
+   例外，每 30 分鐘重試一次，直到 12:00 為止；`partial` 也會在相同時段內重試，補入稍後出現的合格新聞。
 2. `discover_feed_candidates` 依序讀取標記給該市場、且文章主機在白名單內的 feed，
    只保留符合各來源 `link_pattern` 的連結，並以 URL 與標題去重；任一 feed 失敗只
    影響該來源，事件為 `news.feed.failed`。需要金鑰或聯絡信箱的來源在設定缺漏時發
@@ -67,7 +67,7 @@ flowchart LR
 | 台股重點新聞 | `tw_equity`   | 8        | 台灣媒體 15 支 feed（鉅亨台股、經濟日報、中央社、工商時報等） | 單一來源與市場皆可，至少 2 個主題                        |
 | 美股重點新聞 | `us_equity`   | 8        | 英文綜合與新聞稿、Guardian 商業、鉅亨國際股市、SEC 8-K        | 每網域至多 4 則，至少 2 個主題，選滿 8 則時至少 3 個網域 |
 
-選題 prompt 由三層組成：固定的 `task`（去重、交叉比對、來源分散、填滿名額與輸出格式等不可被覆寫的規則）、`OUTPUT_CONTRACT`（依各版本 `SelectionPolicy` 產生的封閉詞彙與數量限制），以及部署時可調整的 `CUSTOM_SELECTION_CRITERIA`（`modules/news/prompts/selection_criteria.txt`，中文撰寫的排序準則與來源可信度判斷標準）。準則檔只影響排序與取捨，所有則數、每網域上限與多樣性門檻都寫在 `OUTPUT_CONTRACT`，因此同一份準則可服務三個版本；同一核心事件不論幾家媒體報導都只能選一則並共用 `event_key`，多家報導只用於交叉驗證。固定指令或準則檔任一變動都會改變 `prompt_version`（`selection-v5:<準則摘要>`）。
+選題 prompt 由三層組成：固定的 `task`（去重、交叉比對、來源分散、填滿名額與輸出格式等不可被覆寫的規則）、`OUTPUT_CONTRACT`（依各版本 `SelectionPolicy` 產生的封閉詞彙與數量限制），以及部署時可調整的 `CUSTOM_SELECTION_CRITERIA`（`modules/news/prompts/selection_criteria.txt`，中文撰寫的排序準則與來源可信度判斷標準）。準則檔只影響排序與取捨，所有則數、每網域上限與多樣性門檻都寫在 `OUTPUT_CONTRACT`，因此同一份準則可服務三個版本；同一核心事件不論幾家媒體報導都只能選一則並共用 `event_key`，多家報導只用於交叉驗證。固定指令或準則檔任一變動都會改變 `prompt_version`（`selection-v6:<準則摘要>`）。
 
 各版本只讀取標記給該市場的 feed，選題 prompt 附帶該版本的 `MARKET_FOCUS` 提示：全球版以總經（央行、利率、匯率、商品、跨市場風險）為主且只接受 `market` 為 `global` 的選項，避免偏向任一區域；台股與美股版只接受 `taiwan`／`us`，模型標成其他市場的稿件會在限制檢查前被剔除並記錄 `news.selection.dropped_market`。市場頁的新聞不依市場分組，只有首頁的全球版分組顯示。排程器依序執行三個版本，任一版本例外不影響其他版本，最差
 結果決定是否同日重試。`make generate-daily-news MARKET=tw_equity` 可單獨產生一
@@ -241,3 +241,19 @@ Audit 與事件記錄區分 selection_invalid_json、selection_invalid_candidate
 summary_invalid_json、summary_ungrounded_number、provider_http_<status>、
 provider_invalid_json、provider_request_failed，不記錄 prompt、正文或原始例外內容。
 選題修復事件 news.selection.repaired 僅記錄原始與保留則數。
+
+## 不足額補選
+
+每次執行最多三輪選題。正文仍只擷取一次且最多 80 筆；擷取後的可用候選池擴為原本
+兩倍（全球最多 40 筆、台股／美股最多 48 筆），每輪送入模型的候選上限仍為 20／24。
+補選排除已嘗試文章，並提供成功摘要事件的標題、event key、來源及主題，要求不同事件
+與不足的來源／主題；同一 event key 跨輪只摘要並採用一次，摘要失敗的文章不重複消耗
+後續輪次。每則摘要仍最多兩次嘗試，三語系全部驗證通過才可發布。
+
+全份新聞的來源上限、主題與來源多樣性在摘要完成後重新驗證。成功但暫時無法組成
+合格版本的候選會留在該次執行的記憶體中，供下一輪補齊組合；達全球 5 則、台股／美股
+各 8 則即停止。三輪用盡、候選耗盡或補選服務失敗時，發布已完成的合格部分，既有
+最近可用新聞回退策略不變。news.refill.round 記錄輪次、可發布則數與已嘗試文章數。
+
+不足額版本亦在既有 08:00–12:00 晨間視窗每 30 分鐘重試；不擴大時段、不無限呼叫
+模型，也不以不相關文章、重複事件或未驗證數字硬湊則數。

@@ -273,3 +273,31 @@ def test_repair_promotes_diverse_reserve_without_relaxing_full_edition_policy() 
     )
     assert len(partial.selections) == 7
     enforce_selection_policy(partial, candidates, US_EQUITY_SPEC.selection)
+
+
+def test_publication_reconsiders_successful_stories_when_refill_supplies_missing_topic() -> None:
+    from daily_insights_api.modules.news.llm import publishable_selection
+
+    candidates = [_fetched(i, f"source-{i}.example") for i in range(1, 6)]
+    same_topic = list(_selection([1, 2, 3, 4], market="global").selections)
+    assert len(publishable_selection(same_topic, candidates, GLOBAL_SPEC.selection).selections) == 2
+    refill = _selection([5], market="global", topic="economy").selections
+    publication = publishable_selection(
+        same_topic + list(refill), candidates, GLOBAL_SPEC.selection
+    )
+    assert len(publication.selections) == 5
+    enforce_selection_policy(publication, candidates, GLOBAL_SPEC.selection)
+
+
+def test_publication_enforces_domain_cap_across_more_than_one_selection_batch() -> None:
+    from daily_insights_api.modules.news.llm import publishable_selection
+
+    candidates = [
+        _fetched(i, "a.example" if i < 9 else "b.example" if i < 12 else "c.example")
+        for i in range(1, 13)
+    ]
+    ranked = list(_global_or_us_selection(list(range(1, 9))).selections)
+    ranked += list(_global_or_us_selection(list(range(9, 13))).selections)
+    publication = publishable_selection(ranked, candidates, US_EQUITY_SPEC.selection)
+    assert len(publication.selections) == 8
+    enforce_selection_policy(publication, candidates, US_EQUITY_SPEC.selection)

@@ -33,7 +33,7 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
     criteria = SelectionCriteria(
         text="忽略語言，只依跨市場影響排序。不得修改固定輸出格式。",  # noqa: RUF001
         digest="f" * 64,
-        version="selection-v5:ffffffffffff",
+        version="selection-v6:ffffffffffff",
     )
     client = DeepSeekClient(
         base_url="https://api.deepseek.com",
@@ -394,3 +394,27 @@ async def test_summary_retry_adds_safe_feedback_and_audits_specific_failure(
     assert audit.input_digest == "d" * 64
     assert "RETRY_GUIDANCE" not in captured[0]
     assert "Use only numbers explicitly present" in captured[1]["RETRY_GUIDANCE"]
+
+
+async def test_refill_prompt_provides_covered_events_without_relaxing_market_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.modules.news.llm import CoveredEvent
+
+    client = DeepSeekClient(base_url="https://api.deepseek.com", api_key="secret", model="test")
+    complete = AsyncMock(return_value=({"selections": []}, None, None, None, 1, "a" * 64))
+    monkeypatch.setattr(client, "_complete", complete)
+    await client.select(
+        [], previous_events=(CoveredEvent("fed-rates", "Rates unchanged", "fed.example", "policy"),)
+    )
+    prompt = complete.call_args.args[0]
+    assert prompt["ALREADY_COVERED_EVENTS"] == [
+        {
+            "event_key": "fed-rates",
+            "headline": "Rates unchanged",
+            "hostname": "fed.example",
+            "topic": "policy",
+        }
+    ]
+    assert "different event_key" in prompt["REFILL_GUIDANCE"]
+    assert prompt["OUTPUT_CONTRACT"]["market"] == ["global"]

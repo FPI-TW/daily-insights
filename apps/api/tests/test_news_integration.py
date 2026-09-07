@@ -51,7 +51,7 @@ class _DeterministicNewsClient:
 
     def __init__(self, prompt_marker: str) -> None:
         self.selection_prompt_digest = prompt_marker * 64
-        self.selection_prompt_version = f"selection-v5:{prompt_marker * 12}"
+        self.selection_prompt_version = f"selection-v6:{prompt_marker * 12}"
 
     async def select(self, candidates: list[FetchedCandidate], **kwargs: object) -> ModelCall:
         del kwargs
@@ -187,8 +187,8 @@ async def test_partial_editions_regenerate_and_revisions_are_prompt_sensitive(
         # A partial edition is not final: identical inputs produce a new revision.
         assert editions[0].input_digest == editions[1].input_digest
         assert editions[1].input_digest != editions[2].input_digest
-        assert editions[0].prompt_version.startswith("selection-v5:aaaaaaaaaaaa+")
-        assert editions[2].prompt_version.startswith("selection-v5:bbbbbbbbbbbb+")
+        assert editions[0].prompt_version.startswith("selection-v6:aaaaaaaaaaaa+")
+        assert editions[2].prompt_version.startswith("selection-v6:bbbbbbbbbbbb+")
         for edition in editions:
             items = list(
                 await database.scalars(select(NewsItem).where(NewsItem.edition_id == edition.id))
@@ -218,8 +218,8 @@ async def test_partial_editions_regenerate_and_revisions_are_prompt_sensitive(
         )
         audit_versions = set(await database.scalars(select(NewsGenerationAudit.prompt_version)))
         assert "summary-v3" in audit_versions
-        assert "selection-v5:aaaaaaaaaaaa" in audit_versions
-        assert "selection-v5:bbbbbbbbbbbb" in audit_versions
+        assert "selection-v6:aaaaaaaaaaaa" in audit_versions
+        assert "selection-v6:bbbbbbbbbbbb" in audit_versions
 
 
 class _CompleteNewsClient(_DeterministicNewsClient):
@@ -561,3 +561,215 @@ async def test_latest_news_preserves_last_publishable_edition(
         assert result.edition_date == today - timedelta(days=age_days)
         if age_days:
             assert result.caveat and str(result.edition_date) in result.caveat
+
+
+class _RefillNewsClient(_CompleteNewsClient):
+    def __init__(self, *, fail_refill: bool = False, duplicate_event: bool = False) -> None:
+        super().__init__("a")
+        self.batches: list[list[str]] = []
+        self.histories: list[object] = []
+        self.summarized: list[str] = []
+        self.fail_refill = fail_refill
+        self.duplicate_event = duplicate_event
+
+    async def select(self, candidates: list[FetchedCandidate], **kwargs: object) -> ModelCall:
+        self.batches.append([item.candidate.id for item in candidates])
+        self.histories.append(kwargs.get("previous_events"))
+        if self.fail_refill and len(self.batches) > 1:
+            raise ModelCallError("temporary outage", input_digest="f" * 64, latency_ms=1)
+        chosen = []
+        for item in candidates[:3]:
+            index = int(item.candidate.id, 16)
+            chosen.append(
+                {
+                    "id": item.candidate.id,
+                    "topic": "markets" if index % 2 else "companies",
+                    "event_key": "event-2"
+                    if self.duplicate_event and index == 4
+                    else f"event-{index}",
+                    "market": "global",
+                    "importance": 4,
+                }
+            )
+        return ModelCall(
+            Selection.model_validate({"selections": chosen}), "select", 10, 5, 1, "a" * 64
+        )
+
+    async def summarize(
+        self,
+        candidate: Candidate,
+        article_text: str,
+        locale: str,
+        *,
+        retry_feedback: str | None = None,
+    ) -> ModelCall:
+        self.summarized.append(candidate.id)
+        if int(candidate.id, 16) == 1:
+            raise ModelCallError(
+                "unsupported number",
+                input_digest="f" * 64,
+                latency_ms=1,
+                error_code="summary_ungrounded_number",
+            )
+        return await super().summarize(
+            candidate, article_text, locale, retry_feedback=retry_feedback
+        )
+
+
+@pytest.mark.parametrize("market_code", ["global", "tw_equity", "us_equity"])
+async def test_refill_reaches_target_after_initial_summary_failure(
+    news_database: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    market_code: str,
+) -> None:
+    from daily_insights_api.modules.news.editions import edition_spec
+
+    await _assert_refill(
+        news_database,
+        monkeypatch,
+        _RefillNewsClient(),
+        market_code,
+        edition_spec(market_code).target_items,
+    )
+
+
+async def test_refill_deduplicates_events_across_rounds_before_summarizing(
+    news_database: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _RefillNewsClient(duplicate_event=True)
+    await _assert_refill(news_database, monkeypatch, client, "global", 5)
+    assert len(client.batches) == 3
+    assert f"{4:064x}" in client.batches[1]
+    assert f"{4:064x}" not in client.summarized
+
+
+async def test_refill_outage_preserves_successful_stories_and_audits_failure(
+    news_database: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _assert_refill(
+        news_database, monkeypatch, _RefillNewsClient(fail_refill=True), "global", 2
+    )
+    async with news_database() as database:
+        failed = list(
+            await database.scalars(
+                select(NewsGenerationAudit).where(
+                    NewsGenerationAudit.stage == "selection", NewsGenerationAudit.status == "failed"
+                )
+            )
+        )
+        assert len(failed) == 2
+
+
+async def _assert_refill(
+    database_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    client: _RefillNewsClient,
+    market_code: str,
+    expected: int,
+    *,
+    max_candidates: int | None = None,
+) -> None:
+    from dataclasses import replace
+
+    from daily_insights_api.modules.news.editions import edition_spec
+    from daily_insights_api.modules.news.llm import enforce_selection_policy
+
+    candidates = [
+        FetchedCandidate(
+            Candidate(
+                id=f"{i:064x}",
+                url=f"https://source{i:02d}.example/story",
+                hostname=f"source{i:02d}.example",
+                source_name=f"Source {i}",
+                headline=f"Event {i}",
+            ),
+            f"https://source{i:02d}.example/story",
+            "Source body",
+            f"{i:064x}",
+        )
+        for i in range(1, 13)
+    ]
+
+    async def feeds(*args: object, **kwargs: object) -> list[Candidate]:
+        return [item.candidate for item in candidates]
+
+    async def fetch(*args: object, **kwargs: object) -> list[FetchedCandidate]:
+        return candidates
+
+    monkeypatch.setattr("daily_insights_api.modules.news.service.discover_feed_candidates", feeds)
+    monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
+    spec = edition_spec(market_code)
+    if max_candidates is not None:
+        spec = replace(spec, max_candidates=max_candidates)
+    result = await run_news_edition(
+        database_factory,
+        cast(DeepSeekClient, client),
+        datetime.now(TAIPEI).date(),
+        allowed_hostnames=frozenset(f.candidate.hostname for f in candidates),
+        spec=spec,
+    )
+    assert result == ("complete" if expected == spec.target_items else "partial")
+    assert 2 <= len(client.batches) <= 3
+    assert f"{1:064x}" not in client.batches[1]
+    assert client.histories[1]
+    async with database_factory() as database:
+        items = list(await database.scalars(select(NewsItem).order_by(NewsItem.rank)))
+        assert len(items) == expected
+        assert [item.rank for item in items] == list(range(1, expected + 1))
+        assert len({item.event_key for item in items}) == expected
+        assert (
+            await database.scalar(select(func.count()).select_from(NewsPresentation))
+            == expected * 3
+        )
+        selected = Selection.model_validate(
+            {
+                "selections": [
+                    {
+                        "id": candidates[int(item.source_name.split()[1]) - 1].candidate.id,
+                        "topic": item.topic,
+                        "event_key": item.event_key,
+                        "market": item.market,
+                        "importance": item.importance,
+                    }
+                    for item in items
+                ]
+            }
+        )
+        enforce_selection_policy(selected, candidates, spec.selection)
+
+
+async def test_refill_stops_after_three_rounds_when_target_is_still_short(
+    news_database: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class OneAtATimeClient(_RefillNewsClient):
+        async def select(self, candidates: list[FetchedCandidate], **kwargs: object) -> ModelCall:
+            return await super().select(candidates[:1], **kwargs)
+
+        async def summarize(
+            self,
+            candidate: Candidate,
+            article_text: str,
+            locale: str,
+            *,
+            retry_feedback: str | None = None,
+        ) -> ModelCall:
+            return await _CompleteNewsClient.summarize(
+                self, candidate, article_text, locale, retry_feedback=retry_feedback
+            )
+
+    client = OneAtATimeClient()
+    await _assert_refill(news_database, monkeypatch, client, "global", 3)
+    assert len(client.batches) == 3
+
+
+async def test_refill_uses_candidates_beyond_the_first_prompt_window(
+    news_database: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _RefillNewsClient()
+    await _assert_refill(news_database, monkeypatch, client, "global", 5, max_candidates=3)
+    assert len(client.batches) == 2
+    assert set(client.batches[0]).isdisjoint(client.batches[1])
