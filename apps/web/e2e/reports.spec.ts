@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test"
 import {
   authenticateAs,
   customerCredentials,
+  getMockApiState,
   openHydrated,
   resetMockApi,
 } from "./helpers"
@@ -123,3 +124,60 @@ test("US market renders a dedicated responsive VIX chart", async ({
     )
     .toBe(true)
 })
+
+for (const [locale, heading, cumulative, foreign, days60] of [
+  ["zh-hant", "三大法人", "累積", "外資", "近 60 日"],
+  ["zh-hans", "三大法人", "累积", "外资", "近 60 日"],
+  ["en", "Institutional flows", "Cumulative", "Foreign", "Last 60d"],
+] as const) {
+  test(`Taiwan institutional flows render correctly in ${locale}`, async ({
+    context,
+    page,
+    request,
+  }) => {
+    await authenticateAs(context, "org_member")
+    await page.setViewportSize({ width: 1024, height: 900 })
+    await openHydrated(
+      page,
+      `/${locale}/reports/tw_equity`,
+      'button[aria-pressed="true"]'
+    )
+    const state = await getMockApiState(request)
+    const institutionalRequests = state.requests.filter(item =>
+      item.path.includes("institutional")
+    )
+    expect(institutionalRequests).toHaveLength(2)
+    expect(institutionalRequests.map(item => item.role)).toEqual([
+      "org_member",
+      "org_member",
+    ])
+    const section = page
+      .getByRole("heading", { name: heading, level: 2 })
+      .locator("xpath=ancestor::section[1]")
+    await expect(section).toBeVisible()
+    await expect(section.getByText("2026-09-04").first()).toBeVisible()
+    await expect(section.getByRole("button", { pressed: true })).toHaveCount(3)
+    await expect(
+      section.getByText(locale === "en" ? "TSMC" : "台積電")
+    ).toBeVisible()
+    await expect(
+      section.getByText(locale === "en" ? "ASUS" : "華碩")
+    ).toBeVisible()
+    for (const label of [cumulative, foreign, days60]) {
+      const control = section.getByRole("button", { name: label, exact: true })
+      await control.click()
+      await expect(control).toHaveAttribute("aria-pressed", "true")
+    }
+    await expect(section.getByText(/layout placeholder|版面示意/)).toHaveCount(
+      0
+    )
+    await page.setViewportSize({ width: 375, height: 720 })
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth
+        )
+      )
+      .toBe(true)
+  })
+}

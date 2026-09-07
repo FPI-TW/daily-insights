@@ -303,7 +303,7 @@ function pastEpisodes(locale) {
   }))
 }
 
-const reportMarkets = ["global_macro_bonds", "crypto", "us_equity", "tw_equity"]
+const reportMarkets = ["global_macro_bonds", "crypto", "us_equity"]
 const marketCatalog = [
   ["global_macro_bonds", "Macro analysis", "全球宏觀", "全球宏观"],
   ["forex", "Foreign exchange", "外匯市場", "外汇市场"],
@@ -603,6 +603,92 @@ const server = createServer(async (request, response) => {
     return
   }
 
+  if (
+    url.pathname === "/api/markets/tw/institutional-flows" &&
+    request.method === "GET"
+  ) {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    recordRequest(request, url, role)
+    const dates = Array.from(
+      { length: 86 },
+      (_, index) => new Date(Date.UTC(2026, 8, 4) - (85 - index) * 86400000)
+    ).filter(date => date.getUTCDay() !== 0 && date.getUTCDay() !== 6)
+    sendJson(response, 200, {
+      as_of: "2026-09-04",
+      contract_version: "twse-institutional-v1",
+      contract_hash: "a".repeat(64),
+      endpoint: "/rwd/zh/fund/BFI82U",
+      series: dates.map((date, index) => {
+        const foreign = Math.sin(index / 3) * 75 + index - 25
+        const trust = Math.cos(index / 5) * 12
+        const dealer = Math.sin(index / 7) * 8
+        return {
+          trade_date: date.toISOString().slice(0, 10),
+          foreign: foreign.toFixed(4),
+          trust: trust.toFixed(4),
+          dealer: dealer.toFixed(4),
+          total: (foreign + trust + dealer).toFixed(4),
+        }
+      }),
+    })
+    return
+  }
+
+  if (
+    url.pathname === "/api/markets/tw/institutional-stocks" &&
+    request.method === "GET"
+  ) {
+    const role = requireRole(request, response, ["org_member"])
+    if (!role) return
+    recordRequest(request, url, role)
+    const locale = url.searchParams.get("locale") || "zh-hant"
+    const names =
+      locale === "en"
+        ? [
+            "TSMC",
+            "Hon Hai",
+            "Quanta",
+            "MediaTek",
+            "Evergreen",
+            "ASUS",
+            "Accton",
+            "Formosa Plastics",
+            "Yuanta",
+            "Innolux",
+          ]
+        : [
+            "台積電",
+            "鴻海",
+            "廣達",
+            "聯發科",
+            "長榮",
+            "華碩",
+            "智邦",
+            "台塑",
+            "元大金",
+            "群創",
+          ]
+    const totals = [
+      12840, 8420, 6150, 3920, 2510, -4310, -2880, -1940, -1510, -990,
+    ]
+    sendJson(response, 200, {
+      as_of: "2026-09-04",
+      contract_version: "twse-institutional-v1",
+      contract_hash: "a".repeat(64),
+      endpoint: locale === "en" ? "/rwd/en/fund/T86" : "/rwd/zh/fund/T86",
+      rows: totals.map((total, index) => ({
+        symbol: String(2300 + index),
+        name: names[index],
+        foreign_lots: String(total - 200),
+        trust_lots: "150",
+        dealer_lots: "50",
+        total_lots: String(total),
+      })),
+    })
+    return
+  }
+
   const indexMatch =
     /^\/api\/markets\/indices\/([^/]+)\/(daily-bars|moving-averages)$/.exec(
       url.pathname
@@ -611,6 +697,15 @@ const server = createServer(async (request, response) => {
     const role = requireRole(request, response, ["org_member"])
     if (!role) return
     const symbol = decodeURIComponent(indexMatch[1])
+    if (!indexSymbols.has(symbol)) {
+      sendJson(response, 404, { detail: "index not found" })
+      return
+    }
+    if (symbol === "^VIX" && indexMatch[2] === "daily-bars") {
+      recordRequest(request, url, role, { symbol })
+      sendJson(response, 200, indexBars(symbol))
+      return
+    }
     const market = symbol === "^TWII" ? "tw_equity" : "us_equity"
     // API fixtures only: no generated data or local SMA enters production code.
     const dates = Array.from(
@@ -688,45 +783,6 @@ const server = createServer(async (request, response) => {
     const locale = url.searchParams.get("locale") || "zh-hant"
     recordRequest(request, url, role)
     sendJson(response, 200, reportDetail(marketCode, locale))
-    return
-  }
-
-  const dailyBarsMatch = /^\/api\/markets\/indices\/([^/]+)\/daily-bars$/.exec(
-    url.pathname
-  )
-  if (dailyBarsMatch && request.method === "GET") {
-    const role = requireRole(request, response, ["org_member"])
-    if (!role) return
-    const symbol = decodeURIComponent(dailyBarsMatch[1])
-    if (!indexSymbols.has(symbol)) {
-      sendJson(response, 404, { detail: "index not found" })
-      return
-    }
-    recordRequest(request, url, role, { symbol })
-    sendJson(response, 200, indexBars(symbol))
-    return
-  }
-
-  const movingAveragesMatch =
-    /^\/api\/markets\/indices\/([^/]+)\/moving-averages$/.exec(url.pathname)
-  if (movingAveragesMatch && request.method === "GET") {
-    const role = requireRole(request, response, ["org_member"])
-    if (!role) return
-    const symbol = decodeURIComponent(movingAveragesMatch[1])
-    if (!indexSymbols.has(symbol)) {
-      sendJson(response, 404, { detail: "index not found" })
-      return
-    }
-    recordRequest(request, url, role, { symbol })
-    sendJson(response, 200, {
-      symbol,
-      market_code: symbol === "^TWII" ? "tw_equity" : "us_equity",
-      method: "sma",
-      price_field: "close",
-      formula_version: "sma-close-v1",
-      as_of: "2026-08-29",
-      series: [20, 60, 120, 240].map(period => ({ period, points: [] })),
-    })
     return
   }
 
