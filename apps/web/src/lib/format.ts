@@ -134,3 +134,38 @@ export function formatIsoDate(date: string, locale: Locale): string {
     timeZone: "UTC",
   }).format(new Date(`${date}T00:00:00Z`))
 }
+
+/** Calendar dates keep their day; timestamps use the explicit product zone. */
+export function formatDateStamp(
+  value: string | Date,
+  timeZone = "Asia/Taipei"
+) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value))
+    return value
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "—"
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date)
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find(p => p.type === type)?.value ?? ""
+  return `${part("year")}-${part("month")}-${part("day")}`
+}
+
+export function formatTimestamp(
+  value: string | Date,
+  timeZone = "Asia/Taipei"
+) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "—"
+  const time = new Intl.DateTimeFormat("en", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(date)
+  return `${formatDateStamp(date, timeZone)} ${time}`
+}

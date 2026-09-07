@@ -85,3 +85,36 @@ class IndexMovingAveragesResponse(BaseModel):
         IndexMovingAverage120SeriesResponse,
         IndexMovingAverage240SeriesResponse,
     ]
+
+
+class InstitutionalFlowPointResponse(BaseModel):
+    trade_date: date
+    foreign: PriceDecimal
+    trust: PriceDecimal
+    dealer: PriceDecimal
+    total: PriceDecimal
+
+
+class InstitutionalFlowsResponse(BaseModel):
+    as_of: date | None
+    contract_version: str
+    contract_hash: str
+    endpoint: str
+    series: list[InstitutionalFlowPointResponse]
+
+
+class InstitutionalStockFlowResponse(BaseModel):
+    symbol: str
+    name: str
+    foreign_lots: PriceDecimal
+    trust_lots: PriceDecimal
+    dealer_lots: PriceDecimal
+    total_lots: PriceDecimal
+
+
+class InstitutionalStocksResponse(BaseModel):
+    as_of: date | None
+    contract_version: str
+    contract_hash: str
+    endpoint: str
+    rows: list[InstitutionalStockFlowResponse]

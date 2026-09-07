@@ -99,7 +99,7 @@ class PageInfo(ImmutableDTO):
 
 
 class Provenance(ImmutableDTO):
-    provider: Literal["findb", "twelve_data", "yfinance"] = "findb"
+    provider: Literal["findb", "twelve_data", "yfinance", "twse"] = "findb"
     contract_version: str
     contract_hash: str
     endpoint: str

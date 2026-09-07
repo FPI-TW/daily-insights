@@ -10,7 +10,7 @@ from daily_insights_api.modules.data_sources.api import (
     QuoteResult,
     QuotesResult,
 )
-from daily_insights_api.modules.reports.contracts import MetricBlock, TableBlock
+from daily_insights_api.modules.reports.contracts import TableBlock
 from daily_insights_api.modules.reports.morning_report import (
     _build_dataset_blocks,
     _market_datasets,
@@ -48,11 +48,6 @@ def _quote(symbol: str, close: str, previous_close: str) -> QuoteResult:
 
 
 PRICES = {
-    "SPY": ("765.15997", "761.78003"),
-    "QQQ": ("709.23999", "707.64001"),
-    "DIA": ("530.62", "527.75"),
-    "IWM": ("294.01001", "290.57001"),
-    "VIXY": ("17.28", "17.80"),
     "AAPL": ("324.95999", "325.13"),
     "MSFT": ("100", "100"),
     "NVDA": ("110", "100"),
@@ -83,26 +78,16 @@ class BasketAdapter:
         return QuotesResult(items=items, provenances=(items[0].provenance,))
 
 
-async def test_us_equity_blocks_come_from_fixed_baskets_with_our_own_change() -> None:
+async def test_us_equity_block_comes_from_fixed_mega_cap_basket() -> None:
     adapter = BasketAdapter(calls=[])
-    proxies_dataset, mega_caps_dataset = _market_datasets("us_equity")
+    (mega_caps_dataset,) = _market_datasets("us_equity")
 
-    (proxies,), _ = await _build_dataset_blocks(adapter, "us_equity", proxies_dataset)  # type: ignore[arg-type]
     (mega_caps,), _ = await _build_dataset_blocks(adapter, "us_equity", mega_caps_dataset)  # type: ignore[arg-type]
 
-    # One batch per dataset, never a per-symbol call.
+    # The fixed basket is fetched as one batch, never as per-symbol calls.
     assert [symbols for symbols, _ in adapter.calls] == [
-        ("SPY", "QQQ", "DIA", "IWM", "VIXY"),
         ("AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "AVGO", "TSLA"),
     ]
-    assert isinstance(proxies, MetricBlock)
-    spy = proxies.metrics[0]
-    assert (spy.id, spy.value, spy.change, spy.unit_code) == (
-        "spy",
-        Decimal("765.16"),
-        Decimal("0.44"),
-        "usd",
-    )
     assert isinstance(mega_caps, TableBlock)
     # Sorted by our percent change, descending; the provider's figure is ignored.
     assert [row[0].text if row[0] is not None else None for row in mega_caps.rows] == [
@@ -120,7 +105,7 @@ async def test_us_equity_blocks_come_from_fixed_baskets_with_our_own_change() ->
     assert changes[4] == Decimal("0.00")
     assert changes[-1] == Decimal("-10.00")
     assert [column.unit_code for column in mega_caps.columns] == [None, "usd", "percent"]
-    _validate_manifest_output("us_equity", (proxies, mega_caps))
+    _validate_manifest_output("us_equity", (mega_caps,))
 
 
 def test_previous_close_change_is_our_definition() -> None:

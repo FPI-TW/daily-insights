@@ -8,6 +8,8 @@ by field name, never by position.
 """
 
 import asyncio
+import hashlib
+import json
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -65,6 +67,23 @@ STOCK_FLOW_COLUMNS: Mapping[str, tuple[str, str, str]] = {
 }
 STOCK_SYMBOL_FIELD = "證券代號"
 STOCK_NAME_FIELD = "證券名稱"
+
+# Reported alongside the numbers so a reader can tell which shape of the source
+# they came from. The hash covers every field this module reads by name, so a
+# renamed or dropped column changes it.
+TWSE_CONTRACT_VERSION = "twse-institutional-v1"
+BFI82U_ENDPOINT = MARKET_FLOWS_PATH
+T86_ENDPOINT = STOCK_FLOWS_PATH
+TWSE_CONTRACT_HASH = hashlib.sha256(
+    json.dumps(
+        {
+            "BFI82U": [MARKET_FLOW_FIELDS, sorted(MARKET_FLOW_INVESTORS)],
+            "T86": [STOCK_SYMBOL_FIELD, STOCK_NAME_FIELD, sorted(STOCK_FLOW_COLUMNS.values())],
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode()
+).hexdigest()
 
 Sleep = Callable[[float], Awaitable[None]]
 Monotonic = Callable[[], float]

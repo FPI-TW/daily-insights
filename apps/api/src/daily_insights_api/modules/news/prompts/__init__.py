@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
 
-SELECTION_PROMPT_BASE_VERSION = "selection-v4"
+SELECTION_PROMPT_BASE_VERSION = "selection-v5"
 MAX_SELECTION_CRITERIA_CHARS = 12_000
 
 

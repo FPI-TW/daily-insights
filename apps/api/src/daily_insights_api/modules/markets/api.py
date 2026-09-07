@@ -11,8 +11,11 @@ from daily_insights_api.modules.markets.schemas import (
     MarketResponse,
 )
 from daily_insights_api.modules.markets.service import (
+    INSTITUTIONAL_MARKET_CODE,
     index_daily_bars,
     index_moving_averages,
+    institutional_flow_series,
+    institutional_stock_rows,
     is_market_visible,
     latest_index_bars,
     market_responses,
@@ -25,6 +28,7 @@ from daily_insights_api.modules.markets.service import (
 )
 
 __all__ = [
+    "INSTITUTIONAL_MARKET_CODE",
     "IndexDailyBarResponse",
     "IndexLatestBarResponse",
     "IndexMovingAveragesResponse",
@@ -33,6 +37,8 @@ __all__ = [
     "MarketResponse",
     "index_daily_bars",
     "index_moving_averages",
+    "institutional_flow_series",
+    "institutional_stock_rows",
     "is_market_visible",
     "latest_index_bars",
     "market_responses",

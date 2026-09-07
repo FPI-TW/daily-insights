@@ -1,24 +1,37 @@
 import uuid
 from datetime import date, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.enums import SystemRole
-from daily_insights_api.modules.data_sources.api import TRACKED_INDICES
+from daily_insights_api.modules.data_sources.api import (
+    BFI82U_ENDPOINT,
+    T86_ENDPOINT,
+    TRACKED_INDICES,
+    TWSE_CONTRACT_HASH,
+    TWSE_CONTRACT_VERSION,
+)
 from daily_insights_api.modules.identity.api import AuthContext, require_password_changed
 from daily_insights_api.modules.markets.api import (
+    INSTITUTIONAL_MARKET_CODE,
     IndexDailyBarResponse,
     IndexLatestBarResponse,
     IndexMovingAveragesResponse,
     MarketResponse,
     index_daily_bars,
     index_moving_averages,
+    institutional_flow_series,
+    institutional_stock_rows,
     latest_index_bars,
     market_responses,
     visible_market_codes,
+)
+from daily_insights_api.modules.markets.schemas import (
+    InstitutionalFlowsResponse,
+    InstitutionalStocksResponse,
 )
 from daily_insights_api.web.dependencies import get_database_session
 
@@ -35,6 +48,7 @@ MAX_BARS_RANGE_YEARS = 10
 # Path parameters arrive as str; the Literal-keyed mapping is widened for lookup.
 INDEX_MARKETS: dict[str, str] = {symbol: market for symbol, market in TRACKED_INDICES.items()}
 INTERNAL_PREVIEW_ROLES = frozenset({SystemRole.ADMIN, SystemRole.ASSET_MANAGER})
+MAX_INSTITUTIONAL_RANGE_DAYS = 180
 
 
 def _earliest_allowed_start(end: date) -> date:
@@ -153,4 +167,68 @@ async def get_index_moving_averages(
         market_code=expected_market,
         start=start,
         end=end,
+    )
+
+
+@router.get("/tw/institutional-flows", response_model=InstitutionalFlowsResponse)
+async def get_tw_institutional_flows(
+    context: Annotated[AuthContext, Depends(require_password_changed)],
+    database: Annotated[AsyncSession, Depends(get_database_session)],
+    start: Annotated[date | None, Query()] = None,
+    end: Annotated[date | None, Query()] = None,
+) -> InstitutionalFlowsResponse:
+    """Stored TWSE market flows, in 億元.
+
+    Read from the tables the `institutional_twse` data-management run fills, not
+    from TWSE: the source answers one date per request and spaces its callers,
+    which no page load can wait for.
+    """
+    await _readable_index_market(database, context, "^TWII")
+    resolved_end = end or datetime.now(TAIPEI).date()
+    resolved_start = start or resolved_end - timedelta(days=100)
+    if resolved_start > resolved_end:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "start must not be after end")
+    if (resolved_end - resolved_start).days > MAX_INSTITUTIONAL_RANGE_DAYS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "date range must not exceed 180 days"
+        )
+    series = await institutional_flow_series(
+        database,
+        market_code=INSTITUTIONAL_MARKET_CODE,
+        start=resolved_start,
+        end=resolved_end,
+    )
+    return InstitutionalFlowsResponse(
+        as_of=series[-1].trade_date if series else None,
+        contract_version=TWSE_CONTRACT_VERSION,
+        contract_hash=TWSE_CONTRACT_HASH,
+        endpoint=BFI82U_ENDPOINT,
+        series=series,
+    )
+
+
+@router.get("/tw/institutional-stocks", response_model=InstitutionalStocksResponse)
+async def get_tw_institutional_stocks(
+    context: Annotated[AuthContext, Depends(require_password_changed)],
+    database: Annotated[AsyncSession, Depends(get_database_session)],
+    requested_date: Annotated[date | None, Query(alias="date")] = None,
+    locale: Annotated[Literal["zh-hant", "zh-hans", "en"], Query()] = "zh-hant",
+) -> InstitutionalStocksResponse:
+    """The most recent stored trading day at or before `date`, in 張.
+
+    `locale` is accepted because the caller is localized, but the name is the
+    one TWSE publishes: its English T86 report carries no security names at all,
+    and it does not publish simplified ones.
+    """
+    await _readable_index_market(database, context, "^TWII")
+    day = requested_date or datetime.now(TAIPEI).date()
+    as_of, rows = await institutional_stock_rows(
+        database, market_code=INSTITUTIONAL_MARKET_CODE, on_or_before=day
+    )
+    return InstitutionalStocksResponse(
+        as_of=as_of,
+        contract_version=TWSE_CONTRACT_VERSION,
+        contract_hash=TWSE_CONTRACT_HASH,
+        endpoint=T86_ENDPOINT,
+        rows=rows,
     )

@@ -27,11 +27,29 @@ export type MarketIndexHistory = {
   failedSymbols: string[]
 }
 
+export const VIX_SYMBOL = "^VIX" as const
+
+export type VixHistory = {
+  symbol: typeof VIX_SYMBOL
+  start: string
+  end: string
+  bars: IndexDailyBar[]
+}
+
 export type IndexMovingAverageMap = Record<string, IndexMovingAverages>
+
+const historyRangeSchema = z.object({
+  start: z.iso.date(),
+  end: z.iso.date(),
+})
 
 const marketIndexRequestSchema = z.object({
   marketCode: marketCodeSchema,
-  range: z.object({ start: z.iso.date(), end: z.iso.date() }).optional(),
+  range: historyRangeSchema.optional(),
+})
+
+const vixHistoryRequestSchema = z.object({
+  range: historyRangeSchema.optional(),
 })
 
 export const chartMarketCodes = ["us_equity", "tw_equity"] as const
@@ -40,6 +58,12 @@ export function trackedSymbolsForMarket(marketCode: MarketCode) {
   return trackedIndexCatalog
     .filter(item => item.marketCode === marketCode)
     .map(item => item.symbol)
+}
+
+export function indexChartSymbolsForMarket(marketCode: MarketCode) {
+  return trackedSymbolsForMarket(marketCode).filter(
+    symbol => symbol !== VIX_SYMBOL
+  )
 }
 
 export function indexHistoryOutcomes(
@@ -133,7 +157,7 @@ export const getMarketIndexHistory = createServerFn({ method: "GET" })
     }
 
     const client = serverMarketClient()
-    const symbols = trackedSymbolsForMarket(data.marketCode)
+    const symbols = indexChartSymbolsForMarket(data.marketCode)
     const outcomes = await Promise.allSettled(
       symbols.map(symbol => client.indexDailyBars(symbol, range))
     )
@@ -156,11 +180,24 @@ export const getMarketIndexMovingAverages = createServerFn({ method: "GET" })
     }
     const range = data.range ?? twoYearTaipeiRange()
     const client = serverMarketClient()
-    const symbols = trackedSymbolsForMarket(data.marketCode)
+    const symbols = indexChartSymbolsForMarket(data.marketCode)
     const outcomes = await Promise.allSettled(
       symbols.map(symbol => client.indexMovingAverages(symbol, range))
     )
     return indexMovingAverageOutcomes(symbols, outcomes)
+  })
+
+export const getVixHistory = createServerFn({ method: "GET" })
+  .validator(vixHistoryRequestSchema)
+  .handler(async ({ data }): Promise<VixHistory> => {
+    setResponseHeader("Cache-Control", "no-store")
+    const range = data.range ?? twoYearTaipeiRange()
+    const client = serverMarketClient()
+    return {
+      symbol: VIX_SYMBOL,
+      ...range,
+      bars: await client.indexDailyBars(VIX_SYMBOL, range),
+    }
   })
 
 export function indexNameKey(symbol: string) {
@@ -168,10 +205,87 @@ export function indexNameKey(symbol: string) {
     {
       "^DJI": "indexNameDji",
       "^GSPC": "indexNameGspc",
-      "^IXIC": "indexNameIxic",
+      "^NDX": "indexNameNdx",
       "^RUT": "indexNameRut",
       "^SOX": "indexNameSox",
       "^TWII": "indexNameTwii",
     } satisfies Record<string, string>
   )[symbol]
+}
+
+export const biasPeriods = [20, 60, 120] as const
+export type BiasPoint = { date: string; value: number | null }
+
+/** Join by trading day; use the API's sma-close-v1 values, never a local SMA. */
+export function biasSeries(
+  bars: readonly IndexDailyBar[],
+  averages: IndexMovingAverages | undefined
+) {
+  return biasPeriods.map(period => {
+    const byDate = new Map(
+      averages?.series
+        .find(series => series.period === period)
+        ?.points.map(point => [point.trade_date, point.value])
+    )
+    return {
+      period,
+      points: bars.map(bar => {
+        const ma = byDate.get(bar.trade_date)
+        return {
+          date: bar.trade_date,
+          value:
+            ma == null || Number(ma) === 0
+              ? null
+              : (Number(bar.close) / Number(ma) - 1) * 100,
+        }
+      }),
+    }
+  })
+}
+
+/** Position of the final visible session among non-null values in that window. */
+export function scaleBias(points: readonly BiasPoint[]) {
+  const values = points.flatMap(point =>
+    point.value === null ? [] : [point.value]
+  )
+  const current = points.at(-1)?.value ?? null
+  const min = values.length ? Math.min(...values) : null
+  const max = values.length ? Math.max(...values) : null
+  return {
+    current,
+    min,
+    max,
+    value:
+      current === null || min === null || max === null
+        ? null
+        : max === min
+          ? 50
+          : (100 * (current - min)) / (max - min),
+  }
+}
+
+/** Calendar-month windows clamp month ends instead of rolling into the next month. */
+export function indexWindowStart(end: string, months: number) {
+  const date = new Date(`${end}T00:00:00Z`)
+  const day = date.getUTCDate()
+  date.setUTCDate(1)
+  date.setUTCMonth(date.getUTCMonth() - months)
+  const last = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)
+  ).getUTCDate()
+  date.setUTCDate(Math.min(day, last))
+  return date.toISOString().slice(0, 10)
+}
+
+/** ECharts category zoom uses rounded category indices at each endpoint. */
+export function visibleBiasPoints(
+  points: readonly BiasPoint[],
+  start: number,
+  end: number
+) {
+  const last = Math.max(0, points.length - 1)
+  return points.slice(
+    Math.round((last * start) / 100),
+    Math.round((last * end) / 100) + 1
+  )
 }

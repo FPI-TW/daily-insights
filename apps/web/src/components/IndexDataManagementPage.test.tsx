@@ -107,7 +107,7 @@ describe("IndexDataManagementPage", () => {
 
     expect(screen.getByText("^TWII")).toBeInTheDocument()
     expect(screen.getByText("^HSI")).toBeInTheDocument()
-    expect(screen.getByText("Sep 4, 2026")).toBeInTheDocument()
+    expect(screen.getByText("2026-09-04")).toBeInTheDocument()
     expect(button).toBeDisabled()
     expect(button).toHaveAttribute("aria-busy", "false")
 

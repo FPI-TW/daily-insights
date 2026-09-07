@@ -38,9 +38,10 @@ const decimalSchema = z.string().regex(/^-?\d+(?:\.\d+)?$/)
 export const indexSymbolSchema = z.enum([
   "^DJI",
   "^GSPC",
-  "^IXIC",
+  "^NDX",
   "^RUT",
   "^SOX",
+  "^VIX",
   "^HSI",
   "^TWII",
   "000001.SS",
@@ -104,6 +105,37 @@ export const indexLatestBarSchema = indexDailyBarSchema.extend({
 })
 export type IndexLatestBar = z.infer<typeof indexLatestBarSchema>
 export const indexLatestBarListSchema = z.array(indexLatestBarSchema)
+export const institutionalFlowPointSchema = z.object({
+  trade_date: z.iso.date(),
+  foreign: decimalSchema,
+  trust: decimalSchema,
+  dealer: decimalSchema,
+  total: decimalSchema,
+})
+export const institutionalFlowsSchema = z.object({
+  as_of: z.iso.date().nullable(),
+  contract_version: z.string().min(1),
+  contract_hash: z.string().length(64),
+  endpoint: z.string().min(1),
+  series: z.array(institutionalFlowPointSchema),
+})
+export type InstitutionalFlows = z.infer<typeof institutionalFlowsSchema>
+export const institutionalStockFlowSchema = z.object({
+  symbol: z.string().min(1),
+  name: z.string().min(1),
+  foreign_lots: decimalSchema,
+  trust_lots: decimalSchema,
+  dealer_lots: decimalSchema,
+  total_lots: decimalSchema,
+})
+export const institutionalStocksSchema = z.object({
+  as_of: z.iso.date().nullable(),
+  contract_version: z.string().min(1),
+  contract_hash: z.string().length(64),
+  endpoint: z.string().min(1),
+  rows: z.array(institutionalStockFlowSchema),
+})
+export type InstitutionalStocks = z.infer<typeof institutionalStocksSchema>
 export const yfinanceSymbolBarsSchema = z.object({
   symbol: indexSymbolSchema,
   market: marketCodeSchema,

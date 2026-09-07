@@ -1,3 +1,4 @@
+import { formatTimestamp } from "#/lib/format"
 import type { LatestNews, NewsItem } from "@daily-insights/api-client"
 import { motion } from "motion/react"
 import { useTranslation } from "react-i18next"
@@ -64,7 +65,9 @@ export function DailyNews({
           {t(`dailyNewsStatus_${status}`)}
         </span>
       </div>
-      {news !== null && news.status === "partial" ? (
+      {news !== null &&
+      (news.status === "partial" ||
+        (news.status === "complete" && news.caveat)) ? (
         // A partial badge must explain itself: the caveat from the pipeline,
         // or at least how many stories made it against the target.
         <p className="mt-0 mb-4 text-xs text-sea-ink-soft">
@@ -132,12 +135,7 @@ function NewsGroups({
                 {t(`newsMarket_${market}`)}
               </h3>
             ) : null}
-            <NewsCards
-              items={items}
-              locale={news.locale}
-              animate={animate}
-              startIndex={start}
-            />
+            <NewsCards items={items} animate={animate} startIndex={start} />
           </section>
         )
       })}
@@ -147,12 +145,10 @@ function NewsGroups({
 
 function NewsCards({
   items,
-  locale,
   animate,
   startIndex,
 }: {
   items: ReadonlyArray<NewsItem>
-  locale: LatestNews["locale"]
   animate: boolean
   startIndex: number
 }) {
@@ -198,15 +194,11 @@ function NewsCards({
                 </p>
                 <div className="mt-4 flex items-center justify-between gap-3 text-xs text-sea-ink-soft">
                   {item.source_published_at ? (
-                    <time dateTime={item.source_published_at}>
-                      {new Intl.DateTimeFormat(locale, {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                        // The edition is the Taipei day; pinning the zone also
-                        // keeps SSR and browser output identical (no hydration
-                        // mismatch from differing server and client zones).
-                        timeZone: "Asia/Taipei",
-                      }).format(new Date(item.source_published_at))}
+                    <time
+                      className="font-mono tabular-nums"
+                      dateTime={item.source_published_at}
+                    >
+                      {formatTimestamp(item.source_published_at)}
                     </time>
                   ) : null}
                   <a

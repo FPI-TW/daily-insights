@@ -30,9 +30,9 @@ if TYPE_CHECKING:
 # morning-report scheduler, neither of which touches Yahoo, and the feature is
 # off by default, so both imports are deferred to the functions that use them.
 
-YFINANCE_CONTRACT_VERSION = "2026-09-03.v1"
+YFINANCE_CONTRACT_VERSION = "2026-09-07.v2"
 YFINANCE_CONTRACT_HASH = hashlib.sha256(
-    b"yfinance:Ticker.history,interval:1d,actions:false,auto_adjust:false:2026-09-03.v1"
+    b"yfinance:Ticker.history,interval:1d,actions:false,auto_adjust:false:dxy-business-dates:2026-09-07.v2"
 ).hexdigest()
 YFINANCE_ENDPOINT = "Ticker.history"
 REQUIRED_COLUMNS = ("Open", "High", "Low", "Close", "Volume")
@@ -160,6 +160,11 @@ def normalize_daily_bars(
             regular_market_end=regular_market_end,
         ):
             dropped_unsettled_trade_date = trade_date
+            continue
+        # Yahoo's DXY feed includes an unfinished Sunday overnight row whose
+        # close is NaN even on Monday. DXY daily closes use business dates;
+        # this weekend session must not invalidate settled weekday history.
+        if symbol == "DX-Y.NYB" and trade_date.weekday() >= 5:
             continue
         close = _decimal(row["Close"])
         if close is None:

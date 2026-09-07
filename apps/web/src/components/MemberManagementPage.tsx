@@ -1,3 +1,4 @@
+import { formatDateStamp } from "#/lib/format"
 import {
   ApiError,
   type Locale,
@@ -669,9 +670,7 @@ function MemberCard({
             {t("joinedAt")}
           </dt>
           <dd className="mt-1 ml-0 font-mono text-sm font-bold">
-            {new Intl.DateTimeFormat(locale, {
-              dateStyle: "medium",
-            }).format(new Date(member.joined_at))}
+            {formatDateStamp(member.joined_at)}
           </dd>
         </div>
         <div className="rounded-lg bg-link-hover p-3">

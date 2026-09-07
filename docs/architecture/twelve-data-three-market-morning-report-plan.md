@@ -154,11 +154,9 @@ completed EOD * 100`。圖表只顯示 Brent/Gold 的最新 30 個共同完成�
 ### 2026-09-03 修正：固定籃子與銅的資產類別
 
 - `/market_movers/stocks` 依漲跌幅排序全美股票池，前幾名必然是低價股（正式站曾顯示
-  BURUD、DSX.WT、EYES、ADBT），且該端點需 Grow 方案。`us_equity` 改為兩個固定籃子的
-  `/quote` 資料集：`us.index_proxy_quotes`（SPY、QQQ、DIA、IWM、VIXY，metric 區塊）與
-  `us.mega_cap_quotes`（AAPL、MSFT、NVDA、GOOGL、AMZN、META、AVGO、TSLA，依漲跌幅排序的
-  表格）。`VIX` 指數本身不在 `/quote` 可查範圍，以 VIXY ETF 代理。movers adapter 程式碼已移除，
-  endpoint literal 與 contract hash 保留。
+  BURUD、DSX.WT、EYES、ADBT），且該端點需 Grow 方案。`us_equity` 改為固定權值股籃子的
+  `/quote` 資料集：`us.mega_cap_quotes`（AAPL、MSFT、NVDA、GOOGL、AMZN、META、AVGO、TSLA，
+  依漲跌幅排序的表格）。movers adapter 程式碼已移除，endpoint literal 與 contract hash 保留。
 - `/quote` 支援逗號分隔的批次查詢（每 symbol 1 credit），adapter 的 `get_quotes` 依
   `symbol_types` 分組後每組一次請求，逐 symbol 沿用單筆契約檢查。
 - 漲跌幅改由本專案計算：`(close - previous_close) / previous_close * 100`，
@@ -168,6 +166,11 @@ completed EOD * 100`。圖表只顯示 Brent/Gold 的最新 30 個共同完成�
   `type` 參數取得 Copper Spot（USD 計價，`currency` 欄位為 null 時採用 manifest 的單位）。
 - manifest 升為 `three-market.v5`，`MORNING_REPORT_DERIVATION_VERSION` 同步升級，會產生新
   revision。美股兩個區塊精度為 2。
+
+### 2026-09-07 修正：移除指數代理快照
+
+- 美股晨報 manifest 與 pipeline 不再抓取或產生指數代理 quote snapshot，只保留權值股 block。
+- 美股頁面的五大指數表現改由 `index_daily_bars` 的實際指數日線獨立呈現，不寫入晨報 publication。
 
 欄位與時區語義以 Twelve Data 官方
 [API documentation](https://twelvedata.com/docs/advanced) 與

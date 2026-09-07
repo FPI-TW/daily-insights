@@ -164,23 +164,6 @@ const reports: Record<FixtureCode, FixtureReport> = {
     caveatKey: "reportCaveatMock",
     summaryKey: "reportSummary_us_equity",
     blocks: [
-      metric("reportBlockUsIndices", [
-        {
-          labelKey: "reportLabelSp500",
-          value: value("5,635"),
-          change: value("+0.7%"),
-        },
-        {
-          labelKey: "reportLabelNasdaq",
-          value: value("18,421"),
-          change: value("+1.1%"),
-        },
-        {
-          labelKey: "reportLabelVix",
-          value: value("15.8"),
-          change: value("-0.6"),
-        },
-      ]),
       table(
         "reportBlockUsSectors",
         ["reportColumnSector", "reportColumnChange"],

@@ -8,9 +8,9 @@ import {
   directionClass,
   formatChange,
   formatIsoDate,
+  formatTimestamp,
   formatNumber,
   literalDirection,
-  numberLocales,
   unitLabel,
   type Direction,
 } from "#/lib/format"
@@ -118,18 +118,24 @@ function ReportMarketNav({
       >
         {t("reportAllMarkets")}
       </Link>
-      {markets.map(market => (
-        <Link
-          key={market.code}
-          to="/$locale/reports/$marketCode"
-          params={{ locale, marketCode: market.code }}
-          className={linkClass(activeMarket === market.code)}
-        >
-          {i18n.exists(`reportMarketShort_${market.code}`)
-            ? t(`reportMarketShort_${market.code}`)
-            : market.name}
-        </Link>
-      ))}
+      {markets
+        .filter(
+          market =>
+            market.code !== "forex" ||
+            !markets.some(item => item.code === "global_macro_bonds")
+        )
+        .map(market => (
+          <Link
+            key={market.code}
+            to="/$locale/reports/$marketCode"
+            params={{ locale, marketCode: market.code }}
+            className={linkClass(activeMarket === market.code)}
+          >
+            {i18n.exists(`reportMarketShort_${market.code}`)
+              ? t(`reportMarketShort_${market.code}`)
+              : market.name}
+          </Link>
+        ))}
     </nav>
   )
 }
@@ -207,20 +213,6 @@ export function AnalystViewpointsLoading() {
   )
 }
 
-// Rendered on the server and in the browser: the formatter is pinned to the
-// route locale and the Taipei zone so both produce the same text (a locale or
-// zone taken from the environment differs between them and breaks hydration).
-function viewpointTimestamp(language: string) {
-  const locale = (
-    language in numberLocales ? language : "zh-hant"
-  ) as keyof typeof numberLocales
-  return new Intl.DateTimeFormat(numberLocales[locale], {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "Asia/Taipei",
-  })
-}
-
 function AnalystViewpoints({
   viewpoints,
   markets,
@@ -228,7 +220,7 @@ function AnalystViewpoints({
   viewpoints: ReadonlyArray<AnalystViewpoint>
   markets?: ReadonlyArray<NavMarket> | undefined
 }) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   // Viewpoints follow navigation order and only cover navigable markets when
   // the market list is known; otherwise they are shown as delivered.
   const visibleViewpoints = markets
@@ -250,9 +242,7 @@ function AnalystViewpoints({
         </h2>
         <p className="m-0 text-xs text-sea-ink-soft">
           {t("analystViewpointsUpdated", {
-            timestamp: viewpointTimestamp(i18n.language).format(
-              new Date(latest.fetched_at)
-            ),
+            timestamp: formatTimestamp(latest.fetched_at),
           })}
         </p>
       </div>
@@ -321,10 +311,12 @@ export function ReportDetail({
   locale = "zh-hant",
   report,
   viewpoint = null,
+  leadingBlock = null,
 }: {
   locale?: Locale
   report: ProvisionalReport
   viewpoint?: AnalystViewpoint | null
+  leadingBlock?: ReactNode
 }) {
   // A lone metric or table block spans the full width; half-width panels
   // only make sense when there is a second one to sit beside.
@@ -334,6 +326,9 @@ export function ReportDetail({
       <ReportFreshness report={report} locale={locale} />
       {viewpoint ? <MarketViewpoint viewpoint={viewpoint} /> : null}
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+        {leadingBlock ? (
+          <div className="min-w-0 xl:col-span-2">{leadingBlock}</div>
+        ) : null}
         {report.blocks.map((block, index) => (
           <ReportBlockView
             block={block}
@@ -355,7 +350,7 @@ export function MarketViewpoint({
 }: {
   viewpoint: AnalystViewpoint
 }) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   return (
     <section
       className="surface-panel mb-4 border-t-[3px] border-t-lagoon p-5"
@@ -370,9 +365,7 @@ export function MarketViewpoint({
         </h2>
         <p className="m-0 text-xs text-sea-ink-soft">
           {t("analystViewpointsUpdated", {
-            timestamp: viewpointTimestamp(i18n.language).format(
-              new Date(viewpoint.fetched_at)
-            ),
+            timestamp: formatTimestamp(viewpoint.fetched_at),
           })}
         </p>
       </div>
@@ -381,144 +374,6 @@ export function MarketViewpoint({
           <li key={point}>{point}</li>
         ))}
       </ul>
-    </section>
-  )
-}
-
-export type OverviewEntry = {
-  summary: ProvisionalReport
-  detail: ProvisionalReport | null
-}
-
-type OverviewFigure = {
-  label: string
-  value: string
-  change: { text: string; direction: Direction } | null
-}
-
-/** Up to three headline figures from a report: its first metric block, or
- * the first rows of its first table. */
-function overviewFigures(
-  report: ProvisionalReport,
-  locale: Locale,
-  t: Translate
-): OverviewFigure[] {
-  for (const block of report.blocks) {
-    if (block.status !== "ok") continue
-    if (block.kind === "metric") {
-      return block.metrics.slice(0, 3).map(item => ({
-        label: t(item.labelKey),
-        value: formatValue(item.value, item.unitCode, locale, t),
-        change: "change" in item ? changeOf(item.change, locale, t) : null,
-      }))
-    }
-    if (block.kind === "table") {
-      // Column 0 is the row label; the price is the first later column that
-      // is not a percentage.
-      const price = block.columns.findIndex(
-        (column, index) => index > 0 && column.unitCode !== "percent"
-      )
-      const change = block.columns.findIndex(
-        column => column.unitCode === "percent"
-      )
-      return block.rows.slice(0, 3).map(row => {
-        const priceCell = price > 0 ? (row[price] ?? null) : null
-        const changeCell = change > 0 ? (row[change] ?? null) : null
-        return {
-          label: valueText(row[0] ?? null, t),
-          value: formatValue(
-            priceCell,
-            block.columns[price]?.unitCode,
-            locale,
-            t
-          ),
-          change: change > 0 ? changeOf(changeCell, locale, t) : null,
-        }
-      })
-    }
-  }
-  return []
-}
-
-/** Entry cards for every launched report so the index page carries the
- * numbers, not only links to them. */
-export function ReportOverview({
-  locale,
-  entries,
-}: {
-  locale: Locale
-  entries: ReadonlyArray<OverviewEntry>
-}) {
-  const { t } = useTranslation()
-  if (entries.length === 0) return null
-  return (
-    <section className="mb-6" aria-labelledby="report-overview-title">
-      <h2
-        id="report-overview-title"
-        className="mt-0 mb-3 text-lg font-extrabold tracking-[-0.02em] text-sea-ink"
-      >
-        {t("reportOverviewTitle")}
-      </h2>
-      <div className="grid gap-3 md:grid-cols-3">
-        {entries.map(({ summary, detail }) => {
-          const figures = detail ? overviewFigures(detail, locale, t) : []
-          return (
-            <article
-              key={summary.marketCode}
-              className="surface-panel flex flex-col gap-3 p-4"
-              aria-label={t(`reportMarket_${summary.marketCode}`)}
-            >
-              <div className="flex items-baseline justify-between gap-2">
-                <h3 className="m-0 text-sm font-extrabold text-sea-ink">
-                  {t(`reportMarket_${summary.marketCode}`)}
-                </h3>
-                <span className="text-xs text-sea-ink-soft">
-                  {summary.sourceDate
-                    ? formatIsoDate(summary.sourceDate, locale)
-                    : ""}
-                </span>
-              </div>
-              {figures.length > 0 ? (
-                <dl className="m-0 grid gap-2">
-                  {figures.map(figure => (
-                    <div
-                      key={figure.label}
-                      className="flex items-baseline justify-between gap-3 text-sm"
-                    >
-                      <dt className="min-w-0 truncate text-sea-ink-soft">
-                        {figure.label}
-                      </dt>
-                      <dd className="m-0 flex shrink-0 items-baseline gap-2 font-mono tabular-nums">
-                        <span className="font-bold text-sea-ink">
-                          {figure.value}
-                        </span>
-                        {figure.change ? (
-                          <span
-                            className={`text-xs font-bold ${directionClass(figure.change.direction)}`}
-                          >
-                            {figure.change.text}
-                          </span>
-                        ) : null}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              ) : (
-                <p className="m-0 text-sm text-sea-ink-soft">
-                  {t("reportOverviewUnavailable")}
-                </p>
-              )}
-              <Link
-                to="/$locale/reports/$marketCode"
-                params={{ locale, marketCode: summary.marketCode }}
-                className="mt-auto text-sm font-bold text-lagoon no-underline"
-              >
-                {t("reportOverviewOpen")}
-              </Link>
-            </article>
-          )
-        })}
-      </div>
     </section>
   )
 }
@@ -687,12 +542,12 @@ function ReportBlockView({
       ) : null}
       {block.status === "ok" && block.kind === "table" ? (
         <div className="min-w-0 max-w-full overflow-x-auto border-y border-line">
-          <table className="w-full min-w-120 text-sm">
+          <table className="w-full min-w-120 text-sm leading-6">
             <thead className="bg-link-hover text-xs text-sea-ink-soft">
               <tr>
                 {block.columns.map((column, index) => (
                   <th
-                    className={`whitespace-nowrap px-3 py-2.5 font-bold ${index === 0 ? "text-left" : "text-right"}`}
+                    className={`whitespace-nowrap px-4 py-3 font-bold ${index === 0 ? "text-left" : "text-right"}`}
                     key={column.labelKey}
                   >
                     {columnHeading(column, t)}
@@ -707,7 +562,7 @@ function ReportBlockView({
                     if (cellIndex === 0) {
                       return (
                         <td
-                          className="whitespace-nowrap px-3 py-2.5 font-semibold text-sea-ink"
+                          className="whitespace-nowrap px-4 py-4 font-semibold text-sea-ink"
                           key={cellIndex}
                         >
                           {valueText(cell, t)}
@@ -727,7 +582,7 @@ function ReportBlockView({
                         }
                     return (
                       <td
-                        className={`whitespace-nowrap px-3 py-2.5 text-right font-mono tabular-nums ${shown.direction === "none" ? "text-sea-ink" : directionClass(shown.direction)}`}
+                        className={`whitespace-nowrap px-4 py-4 text-right font-mono tabular-nums ${shown.direction === "none" ? "text-sea-ink" : directionClass(shown.direction)}`}
                         key={cellIndex}
                       >
                         {shown.text}
@@ -953,8 +808,8 @@ export function ReportNotLaunchedScreen({
   locale?: Locale
   marketCode: MarketCode
 }) {
-  void marketCode
   const { t } = useTranslation()
+  if (marketCode === "tw_equity") return null
   return (
     <section
       className="surface-panel p-10 text-center"

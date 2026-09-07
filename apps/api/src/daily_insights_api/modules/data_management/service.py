@@ -26,6 +26,7 @@ from daily_insights_api.modules.data_sources.api import (
     YfinanceAdapter,
 )
 from daily_insights_api.modules.markets.api import (
+    INSTITUTIONAL_MARKET_CODE,
     InstitutionalMarketFlow,
     InstitutionalStockFlow,
     refresh_index_daily_bars,
@@ -45,7 +46,6 @@ TAIPEI = ZoneInfo("Asia/Taipei")
 LEASE_FOR = timedelta(minutes=10)
 HEARTBEAT_SECONDS = 30.0
 # Both TWSE reports cover the listed market only; TPEx has its own endpoints.
-INSTITUTIONAL_MARKET_CODE = "tw_equity"
 # Rolling windows in trading days. The calendar ceilings are what ends a walk
 # when TWSE answers "no data" for every date (blocked IP, outage); 40 trading
 # days span ~56 calendar days and 7 span ~11.

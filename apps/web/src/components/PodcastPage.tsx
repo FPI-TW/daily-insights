@@ -1,10 +1,10 @@
+import { formatDateStamp } from "#/lib/format"
 import type {
   Locale,
   PodcastAudioPlayback,
   PodcastEpisodeSummary,
   User,
 } from "@daily-insights/api-client"
-import { Link } from "@tanstack/react-router"
 import {
   type MouseEvent,
   useCallback,
@@ -21,12 +21,10 @@ import {
   clockTime,
   collapsedListSize,
   currentChapterIndex,
-  dotDate,
   episodeFilters,
   formatSpeed,
   listeningStatus,
   matchesFilter,
-  monthDayLabel,
   nextPlaybackSpeed,
   releaseTimeLabel,
   skipSeconds,
@@ -441,7 +439,7 @@ export function PodcastPage({
             className="text-[15px] font-semibold text-sea-ink tabular-nums"
             dateTime={current.trading_date}
           >
-            {dotDate(current.trading_date)}
+            {formatDateStamp(current.trading_date)}
           </time>
           <span className="text-sea-ink-faint">
             {[
@@ -702,17 +700,6 @@ export function PodcastPage({
             })}
           </div>
         ) : null}
-
-        <div className="flex max-w-[620px] items-center gap-3 border-t border-line pt-[18px] text-[13px] text-sea-ink-muted">
-          <span>{t("podcastRelatedReport")}</span>
-          <Link
-            to="/$locale/reports"
-            params={{ locale }}
-            className="inline-flex items-center gap-1.5 font-medium text-lagoon-deep no-underline hover:text-palm"
-          >
-            {t("podcastReportLink", { date: dotDate(current.trading_date) })}
-          </Link>
-        </div>
       </section>
 
       <aside
@@ -798,7 +785,7 @@ export function PodcastPage({
                     <span className="flex min-w-0 flex-1 flex-col gap-[5px]">
                       <span className="flex items-center justify-between text-xs text-sea-ink-faint tabular-nums">
                         <span className="font-semibold text-lagoon-deep">
-                          {monthDayLabel(episode.trading_date, locale)} ·{" "}
+                          {formatDateStamp(episode.trading_date)} ·{" "}
                           {weekdayLabel(episode.trading_date, locale)}
                         </span>
                         <span>

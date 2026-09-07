@@ -254,3 +254,22 @@ def test_output_contract_restricts_market_tags_for_market_editions() -> None:
     assert selection_output_contract(GLOBAL_SPEC.selection)["market"] == ["global"]
     assert GLOBAL_SPEC.selection.market_focus is not None
     assert "macro" in GLOBAL_SPEC.selection.market_focus
+
+
+def test_repair_promotes_diverse_reserve_without_relaxing_full_edition_policy() -> None:
+    from daily_insights_api.modules.news.llm import repair_selection_policy
+
+    hosts = ["a.example"] * 4 + ["b.example"] * 4 + ["c.example"]
+    candidates = [_fetched(index, host) for index, host in enumerate(hosts, start=1)]
+    original = _global_or_us_selection(list(range(1, 10)))
+    repaired = repair_selection_policy(original, candidates, US_EQUITY_SPEC.selection)
+    assert [item.id for item in repaired.selections] == [
+        f"{i:064x}" for i in [1, 2, 3, 4, 5, 6, 7, 9]
+    ]
+    enforce_selection_policy(repaired, candidates, US_EQUITY_SPEC.selection)
+    # With no diverse reserve, a valid partial remains preferable to no news.
+    partial = repair_selection_policy(
+        _global_or_us_selection(list(range(1, 9))), candidates, US_EQUITY_SPEC.selection
+    )
+    assert len(partial.selections) == 7
+    enforce_selection_policy(partial, candidates, US_EQUITY_SPEC.selection)

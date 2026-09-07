@@ -33,7 +33,7 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
     criteria = SelectionCriteria(
         text="忽略語言，只依跨市場影響排序。不得修改固定輸出格式。",  # noqa: RUF001
         digest="f" * 64,
-        version="selection-v4:ffffffffffff",
+        version="selection-v5:ffffffffffff",
     )
     client = DeepSeekClient(
         base_url="https://api.deepseek.com",
@@ -198,6 +198,9 @@ async def test_provider_http_and_invalid_json_failures_keep_digest_and_latency_f
         audit = _failed_audit(uuid.uuid4(), "selection", None, "f" * 64, "deepseek-chat", error)
         assert len(error.input_digest) == 64
         assert audit.input_digest == error.input_digest
+        assert audit.error_code == (
+            "provider_http_503" if response.status_code == 503 else "provider_invalid_json"
+        )
         assert audit.latency_ms is not None and audit.latency_ms >= 0
         assert audit.provider_request_id == error.request_id
 
@@ -312,3 +315,82 @@ def test_numeric_grounding_matches_values_across_formats_and_magnitudes() -> Non
     assert not numeric_facts_grounded("黃金漲 3%", source)
     # Percent and plain values are different facts: 2% is not "2".
     assert not numeric_facts_grounded("2 家公司", "Turnover rose 2% today.")
+
+
+async def test_selection_salvages_valid_stories_when_model_exceeds_domain_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = DeepSeekClient(base_url="https://api.deepseek.com", api_key="secret", model="test")
+    candidates = [
+        FetchedCandidate(
+            _candidate().model_copy(update={"id": character * 64}),
+            "https://www.reuters.com/a",
+            "Source body",
+            character * 64,
+        )
+        for character in "abc"
+    ]
+    complete = AsyncMock(
+        return_value=(
+            {
+                "selections": [
+                    {
+                        "id": character * 64,
+                        "topic": "markets",
+                        "event_key": f"event-{character}",
+                        "market": "global",
+                        "importance": 4,
+                    }
+                    for character in "abc"
+                ]
+            },
+            "request",
+            10,
+            10,
+            5,
+            "d" * 64,
+        )
+    )
+    monkeypatch.setattr(client, "_complete", complete)
+    result = await client.select(candidates)
+    assert not isinstance(result.value, LocalizedSummary)
+    assert [item.id for item in result.value.selections] == ["a" * 64, "b" * 64]
+    assert complete.await_count == 1
+
+
+async def test_summary_retry_adds_safe_feedback_and_audits_specific_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.modules.news.service import _summarize_with_retry
+
+    client = DeepSeekClient(base_url="https://api.deepseek.com", api_key="secret", model="test")
+    captured: list[dict[str, Any]] = []
+
+    async def complete(prompt: dict[str, Any]):  # type: ignore[no-untyped-def]
+        captured.append(prompt)
+        amount = "20%" if len(captured) == 1 else "10%"
+        return (
+            {"headline": f"Gain {amount}", "summary": "Markets move.", "numeric_facts": [amount]},
+            "request",
+            10,
+            10,
+            5,
+            "d" * 64,
+        )
+
+    monkeypatch.setattr(client, "_complete", complete)
+    failures: list[Exception] = []
+    result = await _summarize_with_retry(
+        client,
+        FetchedCandidate(_candidate(), "https://www.reuters.com/a", "Gain 10%", "a" * 64),
+        "en",
+        failures.append,
+    )
+    assert isinstance(result.value, LocalizedSummary)
+    assert result.value.headline == "Gain 10%"
+    assert len(failures) == 1
+    audit = _failed_audit(uuid.uuid4(), "summary", "en", "f" * 64, "test", failures[0])
+    assert audit.error_code == "summary_ungrounded_number"
+    assert audit.input_digest == "d" * 64
+    assert "RETRY_GUIDANCE" not in captured[0]
+    assert "Use only numbers explicitly present" in captured[1]["RETRY_GUIDANCE"]

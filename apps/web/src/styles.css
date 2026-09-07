@@ -126,7 +126,15 @@
 /* Direction colours follow the reader's market convention: Chinese locales
    read red as up and green as down; English readers expect the opposite. The
    tokens swap by document language so components never branch on locale. */
+html[lang="zh-hans"] {
+  --font-sans:
+    "Noto Sans SC", "Noto Sans TC", "PingFang SC", "Microsoft YaHei",
+    "Noto Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
 html[lang="en"] {
+  --font-sans:
+    "Noto Sans", "Noto Sans TC", ui-sans-serif, system-ui, sans-serif;
   --market-up: #2f9e69;
   --market-down: #d6453f;
 }
@@ -136,14 +144,15 @@ html[lang="en"].dark {
   --market-down: #f16c63;
 }
 
-@theme inline {
+@theme {
   --font-sans:
-    "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", ui-sans-serif,
-    system-ui, sans-serif;
-  --font-display:
-    "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", ui-sans-serif,
-    system-ui, sans-serif;
+    "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", "Noto Sans",
+    ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-sans);
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+@theme inline {
   --color-sea-ink: var(--sea-ink);
   --color-sea-ink-soft: var(--sea-ink-soft);
   --color-lagoon: var(--lagoon);
