@@ -34,6 +34,8 @@ import {
   indexDailyBarListSchema,
   indexMovingAveragesSchema,
   indexLatestBarListSchema,
+  institutionalFlowsSchema,
+  institutionalStocksSchema,
   marketListSchema,
   yfinanceDailyBarsResponseSchema,
   userSchema,
@@ -114,6 +116,32 @@ export function createMarketClient(transport: ApiTransport) {
           `/api/markets/indices/${encodeURIComponent(symbol)}/moving-averages${suffix}`
         ),
         indexMovingAveragesSchema
+      )
+    },
+    async institutionalFlows(range: { start?: string; end?: string } = {}) {
+      const query = new URLSearchParams()
+      if (range.start) query.set("start", range.start)
+      if (range.end) query.set("end", range.end)
+      const search = query.toString()
+      return parseResponse(
+        await transport(
+          `/api/markets/tw/institutional-flows${search ? `?${search}` : ""}`
+        ),
+        institutionalFlowsSchema
+      )
+    },
+    async institutionalStocks(
+      options: { date?: string; locale?: Locale } = {}
+    ) {
+      const query = new URLSearchParams()
+      if (options.date) query.set("date", options.date)
+      if (options.locale) query.set("locale", options.locale)
+      const search = query.toString()
+      return parseResponse(
+        await transport(
+          `/api/markets/tw/institutional-stocks${search ? `?${search}` : ""}`
+        ),
+        institutionalStocksSchema
       )
     },
   }

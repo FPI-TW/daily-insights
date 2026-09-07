@@ -585,6 +585,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/markets/tw/institutional-flows": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Tw Institutional Flows */
+    get: operations["get_tw_institutional_flows_api_markets_tw_institutional_flows_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/markets/tw/institutional-stocks": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Tw Institutional Stocks */
+    get: operations["get_tw_institutional_stocks_api_markets_tw_institutional_stocks_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/news/latest": {
     parameters: {
       query?: never
@@ -1286,6 +1320,63 @@ export interface components {
       ]
       /** Symbol */
       symbol: string
+    }
+    /** InstitutionalFlowPointResponse */
+    InstitutionalFlowPointResponse: {
+      /** Dealer */
+      dealer: string
+      /** Foreign */
+      foreign: string
+      /** Total */
+      total: string
+      /**
+       * Trade Date
+       * Format: date
+       */
+      trade_date: string
+      /** Trust */
+      trust: string
+    }
+    /** InstitutionalFlowsResponse */
+    InstitutionalFlowsResponse: {
+      /** As Of */
+      as_of: string | null
+      /** Contract Hash */
+      contract_hash: string
+      /** Contract Version */
+      contract_version: string
+      /** Endpoint */
+      endpoint: string
+      /** Series */
+      series: components["schemas"]["InstitutionalFlowPointResponse"][]
+    }
+    /** InstitutionalStockFlowResponse */
+    InstitutionalStockFlowResponse: {
+      /** Dealer Lots */
+      dealer_lots: string
+      /** Foreign Lots */
+      foreign_lots: string
+      /** Name */
+      name: string
+      /** Symbol */
+      symbol: string
+      /** Total Lots */
+      total_lots: string
+      /** Trust Lots */
+      trust_lots: string
+    }
+    /** InstitutionalStocksResponse */
+    InstitutionalStocksResponse: {
+      /** As Of */
+      as_of: string | null
+      /** Contract Hash */
+      contract_hash: string
+      /** Contract Version */
+      contract_version: string
+      /** Endpoint */
+      endpoint: string
+      /** Rows */
+      rows: components["schemas"]["InstitutionalStockFlowResponse"][]
     }
     /** InternalUserCreate */
     InternalUserCreate: {
@@ -3499,6 +3590,70 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["IndexMovingAveragesResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  get_tw_institutional_flows_api_markets_tw_institutional_flows_get: {
+    parameters: {
+      query?: {
+        start?: string | null
+        end?: string | null
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["InstitutionalFlowsResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  get_tw_institutional_stocks_api_markets_tw_institutional_stocks_get: {
+    parameters: {
+      query?: {
+        date?: string | null
+        locale?: "zh-hant" | "zh-hans" | "en"
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["InstitutionalStocksResponse"]
         }
       }
       /** @description Validation Error */

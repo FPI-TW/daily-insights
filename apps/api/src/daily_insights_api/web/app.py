@@ -25,8 +25,10 @@ from daily_insights_api.modules.assets.object_store import ObjectStore
 from daily_insights_api.modules.assets.r2.store import R2ObjectStore
 from daily_insights_api.modules.chat.api import router as chat_router
 from daily_insights_api.modules.chat.provider import OpenAICompatibleChatProvider
+from daily_insights_api.modules.data_sources.twse import TwseAdapter, TwseTransport
 from daily_insights_api.modules.identity.password_work import PasswordWork
 from daily_insights_api.modules.identity.router import router as identity_router
+from daily_insights_api.modules.markets.institutional_flows import TwseInstitutionalFlowService
 from daily_insights_api.modules.markets.router import router as markets_router
 from daily_insights_api.modules.model_runtime.service import sync_chat_model_configuration
 from daily_insights_api.modules.news.router import router as news_router
@@ -119,6 +121,7 @@ def create_app(
             yield
         finally:
             app.state.password_work.close()
+            await app.state.twse_institutional_flows.close()
             if engine is not None:
                 await engine.dispose()
 
@@ -128,6 +131,7 @@ def create_app(
 
     app.state.settings = resolved_settings
     app.state.macro_dashboard = MacroDashboardService(resolved_settings)
+    app.state.twse_institutional_flows = TwseInstitutionalFlowService(TwseAdapter(TwseTransport()))
     app.state.session_factory = session_factory
     app.state.object_store = object_store
     if (

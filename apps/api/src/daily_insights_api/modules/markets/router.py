@@ -1,13 +1,23 @@
 import uuid
 from datetime import date, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.enums import SystemRole
 from daily_insights_api.modules.data_sources.api import TRACKED_INDICES
+from daily_insights_api.modules.data_sources.errors import (
+    DataSourceContractError,
+    DataSourceTransientError,
+)
+from daily_insights_api.modules.data_sources.twse import (
+    BFI82U_ENDPOINT,
+    T86_ENDPOINTS,
+    TWSE_CONTRACT_HASH,
+    TWSE_CONTRACT_VERSION,
+)
 from daily_insights_api.modules.identity.api import AuthContext, require_password_changed
 from daily_insights_api.modules.markets.api import (
     IndexDailyBarResponse,
@@ -19,6 +29,13 @@ from daily_insights_api.modules.markets.api import (
     latest_index_bars,
     market_responses,
     visible_market_codes,
+)
+from daily_insights_api.modules.markets.institutional_flows import TwseInstitutionalFlowService
+from daily_insights_api.modules.markets.schemas import (
+    InstitutionalFlowPointResponse,
+    InstitutionalFlowsResponse,
+    InstitutionalStockFlowResponse,
+    InstitutionalStocksResponse,
 )
 from daily_insights_api.web.dependencies import get_database_session
 
@@ -35,6 +52,7 @@ MAX_BARS_RANGE_YEARS = 10
 # Path parameters arrive as str; the Literal-keyed mapping is widened for lookup.
 INDEX_MARKETS: dict[str, str] = {symbol: market for symbol, market in TRACKED_INDICES.items()}
 INTERNAL_PREVIEW_ROLES = frozenset({SystemRole.ADMIN, SystemRole.ASSET_MANAGER})
+MAX_INSTITUTIONAL_RANGE_DAYS = 180
 
 
 def _earliest_allowed_start(end: date) -> date:
@@ -153,4 +171,74 @@ async def get_index_moving_averages(
         market_code=expected_market,
         start=start,
         end=end,
+    )
+
+
+def _provider_http_error(error: Exception) -> HTTPException:
+    if isinstance(error, DataSourceTransientError):
+        return HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "TWSE is temporarily unavailable")
+    return HTTPException(status.HTTP_502_BAD_GATEWAY, "TWSE response contract changed")
+
+
+@router.get("/tw/institutional-flows", response_model=InstitutionalFlowsResponse)
+async def get_tw_institutional_flows(
+    request: Request,
+    context: Annotated[AuthContext, Depends(require_password_changed)],
+    database: Annotated[AsyncSession, Depends(get_database_session)],
+    start: Annotated[date | None, Query()] = None,
+    end: Annotated[date | None, Query()] = None,
+) -> InstitutionalFlowsResponse:
+    await _readable_index_market(database, context, "^TWII")
+    resolved_end = end or datetime.now(TAIPEI).date()
+    resolved_start = start or resolved_end - timedelta(days=100)
+    if resolved_start > resolved_end:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "start must not be after end")
+    if (resolved_end - resolved_start).days > MAX_INSTITUTIONAL_RANGE_DAYS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "date range must not exceed 180 days"
+        )
+    service: TwseInstitutionalFlowService = request.app.state.twse_institutional_flows
+    try:
+        results = await service.daily_flows(resolved_start, resolved_end)
+    except (DataSourceContractError, DataSourceTransientError) as error:
+        raise _provider_http_error(error) from error
+    series = [
+        InstitutionalFlowPointResponse(**result.item.model_dump())
+        for result in results
+        if result.item
+    ]
+    return InstitutionalFlowsResponse(
+        as_of=series[-1].trade_date if series else None,
+        contract_version=TWSE_CONTRACT_VERSION,
+        contract_hash=TWSE_CONTRACT_HASH,
+        endpoint=BFI82U_ENDPOINT,
+        series=series,
+    )
+
+
+@router.get("/tw/institutional-stocks", response_model=InstitutionalStocksResponse)
+async def get_tw_institutional_stocks(
+    request: Request,
+    context: Annotated[AuthContext, Depends(require_password_changed)],
+    database: Annotated[AsyncSession, Depends(get_database_session)],
+    requested_date: Annotated[date | None, Query(alias="date")] = None,
+    locale: Annotated[Literal["zh-hant", "zh-hans", "en"], Query()] = "zh-hant",
+) -> InstitutionalStocksResponse:
+    await _readable_index_market(database, context, "^TWII")
+    day = requested_date or datetime.now(TAIPEI).date()
+    service: TwseInstitutionalFlowService = request.app.state.twse_institutional_flows
+    try:
+        result = await service.latest_stock_flows(day, locale=locale)
+    except (DataSourceContractError, DataSourceTransientError) as error:
+        raise _provider_http_error(error) from error
+    rows = sorted(result.items, key=lambda item: item.total_lots, reverse=True)
+    return InstitutionalStocksResponse(
+        as_of=result.provenance.as_of if rows else None,
+        contract_version=TWSE_CONTRACT_VERSION,
+        contract_hash=TWSE_CONTRACT_HASH,
+        endpoint=T86_ENDPOINTS[locale],
+        rows=[
+            InstitutionalStockFlowResponse(**item.model_dump(exclude={"trade_date"}))
+            for item in rows
+        ],
     )
