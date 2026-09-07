@@ -6,18 +6,7 @@ from datetime import date, datetime
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
 
-from sqlalchemy import (
-    Result,
-    String,
-    column,
-    func,
-    literal_column,
-    or_,
-    select,
-    true,
-    update,
-    values,
-)
+from sqlalchemy import Result, String, column, func, literal_column, select, true, update, values
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -707,11 +696,11 @@ async def institutional_market_flows(
 async def institutional_stock_flow_leaders(
     database: AsyncSession, *, market_code: str, trade_date: date | None = None
 ) -> InstitutionalStockFlowLeadersResponse:
-    """The largest net buys and net sells of one trading day, per investor type.
+    """The five largest net buys and net sells of one trading day.
 
-    Ranked within each investor type rather than across all five: foreign flows
-    are an order of magnitude larger than the rest, so one pooled ranking would
-    be the foreign list with the other four investors' rows pushed out.
+    A security's five investor rows are summed first, so the ranking is on what
+    the institutions did to that security as a whole rather than on any one
+    investor's book.
     """
     day = trade_date or await database.scalar(
         select(func.max(InstitutionalStockFlow.trade_date)).where(
@@ -720,58 +709,36 @@ async def institutional_stock_flow_leaders(
     )
     if day is None:
         return InstitutionalStockFlowLeadersResponse(trade_date=None, top_buys=[], top_sells=[])
-    ranked = (
-        select(
-            InstitutionalStockFlow.trade_date,
-            InstitutionalStockFlow.symbol,
-            InstitutionalStockFlow.security_name,
-            InstitutionalStockFlow.investor_type,
-            InstitutionalStockFlow.net_shares,
-            # The symbol tie-break keeps the order stable across identical nets,
-            # which a day of untraded securities has plenty of.
-            func.row_number()
-            .over(
-                partition_by=InstitutionalStockFlow.investor_type,
-                order_by=(InstitutionalStockFlow.net_shares.desc(), InstitutionalStockFlow.symbol),
-            )
-            .label("buy_rank"),
-            func.row_number()
-            .over(
-                partition_by=InstitutionalStockFlow.investor_type,
-                order_by=(InstitutionalStockFlow.net_shares.asc(), InstitutionalStockFlow.symbol),
-            )
-            .label("sell_rank"),
-        )
+    net_shares = func.sum(InstitutionalStockFlow.net_shares).label("net_shares")
+    totals = (
+        select(InstitutionalStockFlow.symbol, InstitutionalStockFlow.security_name, net_shares)
         .where(
             InstitutionalStockFlow.market_code == market_code,
             InstitutionalStockFlow.trade_date == day,
         )
-        .subquery()
+        # The name is functionally dependent on the symbol within a day, but
+        # PostgreSQL only accepts that for a primary key, which this is not.
+        .group_by(InstitutionalStockFlow.symbol, InstitutionalStockFlow.security_name)
     )
-    result = await database.execute(
-        select(ranked).where(
-            or_(
-                ranked.c.buy_rank <= INSTITUTIONAL_STOCK_LEADERS,
-                ranked.c.sell_rank <= INSTITUTIONAL_STOCK_LEADERS,
-            )
-        )
-    )
-    rows = result.all()
 
-    def leaders(rank: str) -> list[InstitutionalStockFlowLeaderResponse]:
-        chosen = [row for row in rows if getattr(row, rank) <= INSTITUTIONAL_STOCK_LEADERS]
-        chosen.sort(key=lambda row: (row.investor_type, getattr(row, rank)))
+    async def leaders(order: Any) -> list[InstitutionalStockFlowLeaderResponse]:
+        # The symbol tie-break keeps the order stable across identical sums,
+        # which a day of untraded securities has plenty of.
+        rows = await database.execute(
+            totals.order_by(order, InstitutionalStockFlow.symbol).limit(INSTITUTIONAL_STOCK_LEADERS)
+        )
         return [
             InstitutionalStockFlowLeaderResponse(
-                trade_date=row.trade_date,
+                trade_date=day,
                 symbol=row.symbol,
                 security_name=row.security_name,
-                investor_type=row.investor_type,
                 net_shares=row.net_shares,
             )
-            for row in chosen
+            for row in rows
         ]
 
     return InstitutionalStockFlowLeadersResponse(
-        trade_date=day, top_buys=leaders("buy_rank"), top_sells=leaders("sell_rank")
+        trade_date=day,
+        top_buys=await leaders(net_shares.desc()),
+        top_sells=await leaders(net_shares.asc()),
     )

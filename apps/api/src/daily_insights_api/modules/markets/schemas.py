@@ -102,15 +102,16 @@ class InstitutionalMarketFlowResponse(BaseModel):
 
 
 class InstitutionalStockFlowLeaderResponse(BaseModel):
+    """One security's net shares for one day, summed over all five investors."""
+
     trade_date: date
     symbol: str
     security_name: str
-    investor_type: str
     net_shares: int
 
 
 class InstitutionalStockFlowLeadersResponse(BaseModel):
-    """The five largest net buys and net sells per investor type for one day."""
+    """The five largest net buys and net sells of one trading day."""
 
     trade_date: date | None
     top_buys: list[InstitutionalStockFlowLeaderResponse]

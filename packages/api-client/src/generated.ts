@@ -1402,10 +1402,11 @@ export interface components {
       /** Trust */
       trust: number
     }
-    /** InstitutionalStockFlowLeaderResponse */
+    /**
+     * InstitutionalStockFlowLeaderResponse
+     * @description One security's net shares for one day, summed over all five investors.
+     */
     InstitutionalStockFlowLeaderResponse: {
-      /** Investor Type */
-      investor_type: string
       /** Net Shares */
       net_shares: number
       /** Security Name */
@@ -1420,7 +1421,7 @@ export interface components {
     }
     /**
      * InstitutionalStockFlowLeadersResponse
-     * @description The five largest net buys and net sells per investor type for one day.
+     * @description The five largest net buys and net sells of one trading day.
      */
     InstitutionalStockFlowLeadersResponse: {
       /** Top Buys */

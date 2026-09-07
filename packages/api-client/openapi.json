@@ -1423,11 +1423,8 @@
         "type": "object"
       },
       "InstitutionalStockFlowLeaderResponse": {
+        "description": "One security's net shares for one day, summed over all five investors.",
         "properties": {
-          "investor_type": {
-            "title": "Investor Type",
-            "type": "string"
-          },
           "net_shares": {
             "title": "Net Shares",
             "type": "integer"
@@ -1446,18 +1443,12 @@
             "type": "string"
           }
         },
-        "required": [
-          "trade_date",
-          "symbol",
-          "security_name",
-          "investor_type",
-          "net_shares"
-        ],
+        "required": ["trade_date", "symbol", "security_name", "net_shares"],
         "title": "InstitutionalStockFlowLeaderResponse",
         "type": "object"
       },
       "InstitutionalStockFlowLeadersResponse": {
-        "description": "The five largest net buys and net sells per investor type for one day.",
+        "description": "The five largest net buys and net sells of one trading day.",
         "properties": {
           "top_buys": {
             "items": {

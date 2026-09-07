@@ -174,7 +174,7 @@ describe("API client trust boundary", () => {
     )
   })
 
-  it("fetches institutional flows and rejects an unknown investor type", async () => {
+  it("fetches institutional flows and rejects a malformed leader row", async () => {
     const leaders = {
       trade_date: "2026-09-04",
       top_buys: [
@@ -182,7 +182,6 @@ describe("API client trust boundary", () => {
           trade_date: "2026-09-04",
           symbol: "2330",
           security_name: "台積電",
-          investor_type: "foreign",
           net_shares: 1000,
         },
       ],
@@ -215,7 +214,7 @@ describe("API client trust boundary", () => {
     expect(
       institutionalStockFlowLeadersSchema.safeParse({
         ...leaders,
-        top_buys: [{ ...leaders.top_buys[0], investor_type: "retail" }],
+        top_buys: [{ ...leaders.top_buys[0], net_shares: "1000" }],
       }).success
     ).toBe(false)
   })

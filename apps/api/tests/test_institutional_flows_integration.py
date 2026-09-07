@@ -214,16 +214,27 @@ async def test_market_flows_endpoint_folds_five_categories_into_three(
 
 
 @pytest.mark.asyncio
-async def test_stock_flow_leaders_rank_within_each_investor_type(
+async def test_stock_flow_leaders_rank_on_the_sum_of_all_five_investors(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     fetched_at = datetime(2026, 9, 4, 8, tzinfo=UTC)
     day = date(2026, 9, 4)
-    # Seven securities per investor type, so the fives have something to exclude.
-    # Trust's numbers are far smaller than foreign's: one pooled ranking would
-    # drop every trust row, which is the reason for ranking per investor type.
-    nets = {(f"{2300 + index}", "foreign"): (index - 3) * 1_000_000 for index in range(7)}
-    nets.update({(f"{2300 + index}", "trust"): (index - 3) * 10 for index in range(7)})
+    # Seven securities, each with all five investor rows, so the fives have
+    # something to exclude. 2306 only tops the list once the five are summed:
+    # no single investor of its own puts it above 2305.
+    nets: dict[tuple[str, str], int] = {}
+    for index in range(7):
+        symbol = f"{2300 + index}"
+        base = (index - 3) * 1_000
+        for investor_type in (
+            "foreign",
+            "foreign_dealer",
+            "trust",
+            "dealer_self",
+            "dealer_hedge",
+        ):
+            nets[(symbol, investor_type)] = base
+    nets[("2305", "foreign")] = 9_000
     async with session_factory.begin() as database:
         await store_institutional_stock_flows(
             database, market_code="tw_equity", flows=_stock_day(day, nets, fetched_at)
@@ -232,7 +243,7 @@ async def test_stock_flow_leaders_rank_within_each_investor_type(
         await store_institutional_stock_flows(
             database,
             market_code="tw_equity",
-            flows=_stock_day(date(2026, 9, 3), {("9999", "foreign"): 99_000_000}, fetched_at),
+            flows=_stock_day(date(2026, 9, 3), {("9999", "foreign"): 99_000}, fetched_at),
         )
 
     async with _signed_in_client(session_factory) as client:
@@ -244,24 +255,19 @@ async def test_stock_flow_leaders_rank_within_each_investor_type(
     assert latest.status_code == 200, latest.text
     body = latest.json()
     assert body["trade_date"] == "2026-09-04"
-    by_type: dict[str, list[dict[str, object]]] = {"foreign": [], "trust": []}
-    for row in body["top_buys"]:
-        by_type[str(row["investor_type"])].append(row)
-    assert [row["symbol"] for row in by_type["foreign"]] == ["2306", "2305", "2304", "2303", "2302"]
-    assert [row["symbol"] for row in by_type["trust"]] == ["2306", "2305", "2304", "2303", "2302"]
-    assert by_type["foreign"][0]["net_shares"] == 3_000_000
-    assert by_type["trust"][0] == {
+    # 2306 sums to 15,000 and 2305 to 17,000: the single large foreign row wins,
+    # which a per-investor ranking would have ordered the other way.
+    assert [row["symbol"] for row in body["top_buys"]] == ["2305", "2306", "2304", "2303", "2302"]
+    assert body["top_buys"][0] == {
         "trade_date": "2026-09-04",
-        "symbol": "2306",
-        "security_name": "公司2306",
-        "investor_type": "trust",
-        "net_shares": 30,
+        "symbol": "2305",
+        "security_name": "公司2305",
+        "net_shares": 17_000,
     }
-    sells = [row for row in body["top_sells"] if row["investor_type"] == "foreign"]
-    assert [row["symbol"] for row in sells] == ["2300", "2301", "2302", "2303", "2304"]
-    assert sells[0]["net_shares"] == -3_000_000
-    # Both directions cover all five per type, for both types.
-    assert len(body["top_buys"]) == len(body["top_sells"]) == 10
+    assert body["top_buys"][1]["net_shares"] == 15_000
+    assert [row["symbol"] for row in body["top_sells"]] == ["2300", "2301", "2302", "2303", "2304"]
+    assert body["top_sells"][0]["net_shares"] == -15_000
+    assert len(body["top_buys"]) == len(body["top_sells"]) == 5
 
     assert earlier.status_code == 200, earlier.text
     assert [row["symbol"] for row in earlier.json()["top_buys"]] == ["9999"]
