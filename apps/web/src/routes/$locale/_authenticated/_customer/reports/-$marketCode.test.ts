@@ -33,8 +33,8 @@ vi.mock("#/lib/institutional-flows", () => ({
   getTaiwanInstitutionalFlows,
   getTaiwanInstitutionalStocks,
   institutionalFlowRange: (end: string) => ({
-    start: "2026-05-25",
-    end,
+    startDate: "2026-05-25",
+    endDate: end,
   }),
 }))
 
@@ -83,8 +83,12 @@ describe("market report loader", () => {
   beforeEach(() => {
     getTodayAnalystViewpoints.mockResolvedValue([])
     getMarketIndexMovingAverages.mockResolvedValue({})
-    getTaiwanInstitutionalFlows.mockResolvedValue({ as_of: null, series: [] })
-    getTaiwanInstitutionalStocks.mockResolvedValue({ as_of: null, rows: [] })
+    getTaiwanInstitutionalFlows.mockResolvedValue([])
+    getTaiwanInstitutionalStocks.mockResolvedValue({
+      trade_date: null,
+      top_buys: [],
+      top_sells: [],
+    })
     getVixHistory.mockResolvedValue(vixHistory)
   })
 
@@ -171,10 +175,14 @@ describe("market report loader", () => {
       throw new Error("expected deferred institutional data")
     }
     await expect(taiwanPage.institutionalData).resolves.toMatchObject({
-      flows: { series: [] },
-      stocks: { rows: [] },
+      flows: [],
+      stocks: { trade_date: null, top_buys: [], top_sells: [] },
     })
 
+    expect(getTaiwanInstitutionalFlows).toHaveBeenCalledWith({
+      data: { startDate: "2026-05-25", endDate: indexRange.end },
+    })
+    expect(getTaiwanInstitutionalStocks).toHaveBeenCalledWith({ data: {} })
     getMarketNews.mockClear()
     getReportDetail.mockResolvedValueOnce({
       kind: "not-generated",

@@ -1,6 +1,6 @@
 import type {
-  InstitutionalFlows,
-  InstitutionalStocks,
+  InstitutionalMarketFlow,
+  InstitutionalStockFlowLeaders,
   Locale,
 } from "@daily-insights/api-client"
 import { ClientOnly } from "@tanstack/react-router"
@@ -31,7 +31,7 @@ function signed(value: number, locale: Locale, digits: number) {
     maximumFractionDigits: digits,
     minimumFractionDigits: digits,
     signDisplay: "exceptZero",
-  }).format(Math.abs(value) < 0.05 ? 0 : value)
+  }).format(Math.abs(value) < 0.5 * 10 ** -digits ? 0 : value)
 }
 
 function niceStep(value: number) {
@@ -53,7 +53,7 @@ function FlowPanel({
   history,
   locale,
 }: {
-  flows: InstitutionalFlows | null
+  flows: InstitutionalMarketFlow[] | null
   history: MarketIndexHistory | null
   locale: Locale
 }) {
@@ -63,11 +63,17 @@ function FlowPanel({
   const [mode, setMode] = useState<FlowMode>("daily")
   const [range, setRange] = useState<FlowRange>(40)
   const visible = useMemo(
-    () => flows?.series.slice(-range) ?? [],
+    () =>
+      [...(flows ?? [])]
+        .sort((a, b) => a.trade_date.localeCompare(b.trade_date))
+        .slice(-range),
     [flows, range]
   )
-  const dailyValues = visible.map(point =>
-    Number(point[institution === "all" ? "total" : institution])
+  const dailyValues = visible.map(
+    point =>
+      (institution === "all"
+        ? point.foreign + point.trust + point.dealer
+        : point[institution]) / 100_000_000
   )
   let running = 0
   const values = dailyValues.map(value => {
@@ -97,7 +103,7 @@ function FlowPanel({
   const rightMax = indexMax + indexPadding
   const latest = dailyValues.at(-1) ?? 0
   const sum = dailyValues.reduce((total, value) => total + value, 0)
-  const ready = visible.length > 0 && indexNumbers.length > 0
+  const ready = visible.length > 0
 
   return (
     <DashboardPanel
@@ -142,7 +148,7 @@ function FlowPanel({
           role="status"
           className="flex min-h-64 items-center justify-center text-sm text-sea-ink-soft"
         >
-          {t(unavailableText())}
+          {t(flows === null ? unavailableText() : "flowEmpty")}
         </p>
       ) : (
         <>
@@ -296,7 +302,7 @@ function FlowTable({
   direction,
 }: {
   title: string
-  rows: InstitutionalStocks["rows"]
+  rows: InstitutionalStockFlowLeaders["top_buys"]
   locale: Locale
   direction: "up" | "down"
 }) {
@@ -314,60 +320,60 @@ function FlowTable({
         {title}
       </h4>
       <div className="overflow-x-auto rounded-lg border border-line">
-        <table className="w-full min-w-160 table-auto text-sm leading-6">
+        <table className="w-full min-w-80 table-auto text-sm leading-6">
           <colgroup>
-            <col className="w-44" />
             <col />
-            <col />
-            <col />
-            <col className="w-32" />
+            <col className="w-48" />
           </colgroup>
           <thead className="text-sea-ink-soft">
             <tr>
-              {[
-                "colStock",
-                "colForeign",
-                "colTrust",
-                "colDealer",
-                "colTotal",
-              ].map((key, index) => (
-                <th
-                  key={key}
-                  className={`border-b border-line whitespace-nowrap px-4 py-3 font-semibold ${index === 0 ? "text-left" : "text-right"}`}
-                >
-                  {t(key)}
-                </th>
-              ))}
+              <th
+                scope="col"
+                className="border-b border-line px-4 py-3 text-left font-semibold"
+              >
+                {t("colStock")}
+              </th>
+              <th
+                scope="col"
+                className="border-b border-line whitespace-nowrap px-4 py-3 text-right font-semibold"
+              >
+                {t("colTotal")}
+              </th>
             </tr>
           </thead>
           <tbody>
+            {!rows.length ? (
+              <tr>
+                <td
+                  colSpan={2}
+                  className="px-4 py-4 text-center text-sea-ink-soft"
+                >
+                  {t("stockLeadersEmpty")}
+                </td>
+              </tr>
+            ) : null}
             {rows.map(row => (
               <tr
                 key={row.symbol}
                 className="border-t border-line-soft first:border-t-0"
               >
                 <td className="px-4 py-4 font-semibold text-sea-ink">
-                  <span className="block whitespace-nowrap">{row.name}</span>
+                  <span className="block whitespace-nowrap">
+                    {row.security_name}
+                  </span>
                   <span className="mt-1 block font-mono text-xs text-sea-ink-soft">
                     {row.symbol}
                   </span>
                 </td>
-                {[
-                  row.foreign_lots,
-                  row.trust_lots,
-                  row.dealer_lots,
-                  row.total_lots,
-                ].map((raw, index) => {
-                  const value = Number(raw)
-                  return (
-                    <td
-                      key={index}
-                      className={`whitespace-nowrap px-4 py-4 text-right font-mono tabular-nums ${index === 3 ? "font-bold" : ""} ${directionClass(value)}`}
-                    >
-                      {signed(value, locale, value % 1 === 0 ? 0 : 1)}
-                    </td>
-                  )
-                })}
+                <td
+                  className={`whitespace-nowrap px-4 py-4 text-right font-mono font-bold tabular-nums ${directionClass(row.net_shares)}`}
+                >
+                  {signed(
+                    row.net_shares / 1000,
+                    locale,
+                    row.net_shares % 1000 === 0 ? 0 : 3
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -381,18 +387,12 @@ function StocksPanel({
   stocks,
   locale,
 }: {
-  stocks: InstitutionalStocks | null
+  stocks: InstitutionalStockFlowLeaders | null
   locale: Locale
 }) {
   const { t } = useTranslation()
-  const buys = [...(stocks?.rows ?? [])]
-    .filter(row => Number(row.total_lots) > 0)
-    .sort((a, b) => Number(b.total_lots) - Number(a.total_lots))
-    .slice(0, 5)
-  const sells = [...(stocks?.rows ?? [])]
-    .filter(row => Number(row.total_lots) < 0)
-    .sort((a, b) => Number(a.total_lots) - Number(b.total_lots))
-    .slice(0, 5)
+  const buys = (stocks?.top_buys ?? []).filter(row => row.net_shares > 0)
+  const sells = (stocks?.top_sells ?? []).filter(row => row.net_shares < 0)
   return (
     <DashboardPanel
       title={t("stockTitle")}
@@ -408,7 +408,7 @@ function StocksPanel({
           role="status"
           className="flex min-h-64 items-center justify-center text-sm text-sea-ink-soft"
         >
-          {t(unavailableText())}
+          {t(stocks === null ? unavailableText() : "stockFlowsEmpty")}
         </p>
       ) : (
         <>
@@ -427,7 +427,7 @@ function StocksPanel({
             />
           </div>
           <p className="mt-4 text-xs leading-5 text-pretty text-sea-ink-soft">
-            {t("stockNote", { date: stocks.as_of ?? "—" })}
+            {t("stockNote", { date: stocks.trade_date ?? "—" })}
           </p>
         </>
       )}
@@ -445,13 +445,20 @@ export function TaiwanInstitutionalFlows({
   locale: Locale
 }) {
   const { t } = useTranslation()
-  const asOf = data.flows?.as_of ?? data.stocks?.as_of ?? "—"
+  const marketDate =
+    data.flows
+      ?.map(point => point.trade_date)
+      .sort()
+      .at(-1) ?? "—"
   return (
     <div className="mt-6 min-w-0">
       <DashboardSection
         number="02"
         title={t("sectionFlows")}
-        meta={t("flowsMeta", { date: asOf })}
+        meta={t("flowsMeta", {
+          marketDate,
+          stockDate: data.stocks?.trade_date ?? "—",
+        })}
       >
         <div className="grid grid-cols-1 items-start gap-6">
           <FlowPanel flows={data.flows} history={history} locale={locale} />

@@ -232,6 +232,108 @@ describe("API client trust boundary", () => {
     })
   })
 
+  it("uses the stored market-flow endpoint with inclusive optional date bounds", async () => {
+    const flows = [
+      {
+        trade_date: "2026-09-04",
+        foreign: 1_250_000_000,
+        trust: -100_000_000,
+        dealer: 50_000_000,
+      },
+    ]
+    const transport = vi.fn(async () => Response.json(flows))
+    const client = createMarketClient(transport)
+    await expect(
+      client.institutionalMarketFlows({
+        startDate: "2026-07-01",
+        endDate: "2026-09-04",
+      })
+    ).resolves.toEqual(flows)
+    expect(transport).toHaveBeenLastCalledWith(
+      "/api/markets/institutional/market-flows?start_date=2026-07-01&end_date=2026-09-04"
+    )
+    await client.institutionalMarketFlows()
+    expect(transport).toHaveBeenLastCalledWith(
+      "/api/markets/institutional/market-flows"
+    )
+    await client.institutionalMarketFlows({ startDate: "2026-07-01" })
+    expect(transport).toHaveBeenLastCalledWith(
+      "/api/markets/institutional/market-flows?start_date=2026-07-01"
+    )
+    await client.institutionalMarketFlows({ endDate: "2026-09-04" })
+    expect(transport).toHaveBeenLastCalledWith(
+      "/api/markets/institutional/market-flows?end_date=2026-09-04"
+    )
+  })
+
+  it("reads stock leaders for the latest stored day or an explicitly selected trading day", async () => {
+    const leaders = {
+      trade_date: "2026-09-04",
+      top_buys: [
+        {
+          trade_date: "2026-09-04",
+          symbol: "2330",
+          security_name: "台積電",
+          net_shares: 12345,
+        },
+      ],
+      top_sells: [],
+    }
+    const transport = vi.fn(async () => Response.json(leaders))
+    const client = createMarketClient(transport)
+    await expect(client.institutionalStockFlowLeaders()).resolves.toEqual(
+      leaders
+    )
+    expect(transport).toHaveBeenLastCalledWith(
+      "/api/markets/institutional/stock-flows"
+    )
+    await client.institutionalStockFlowLeaders("2026-09-04")
+    expect(transport).toHaveBeenLastCalledWith(
+      "/api/markets/institutional/stock-flows?trade_date=2026-09-04"
+    )
+  })
+
+  it("accepts empty stored data but rejects malformed institutional responses", async () => {
+    const transport = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json([]))
+      .mockResolvedValueOnce(
+        Response.json({ trade_date: null, top_buys: [], top_sells: [] })
+      )
+      .mockResolvedValueOnce(
+        Response.json([
+          { trade_date: "2026-09-04", foreign: "12.5", trust: 0, dealer: 0 },
+        ])
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          trade_date: "2026-09-04",
+          top_buys: [
+            {
+              trade_date: "2026-09-04",
+              symbol: "2330",
+              security_name: "台積電",
+              net_shares: 1.5,
+            },
+          ],
+          top_sells: [],
+        })
+      )
+    const client = createMarketClient(transport)
+    await expect(client.institutionalMarketFlows()).resolves.toEqual([])
+    await expect(client.institutionalStockFlowLeaders()).resolves.toEqual({
+      trade_date: null,
+      top_buys: [],
+      top_sells: [],
+    })
+    await expect(client.institutionalMarketFlows()).rejects.toMatchObject({
+      status: 502,
+    })
+    await expect(client.institutionalStockFlowLeaders()).rejects.toMatchObject({
+      status: 502,
+    })
+  })
+
   it("fetches and validates TWSE institutional flow contracts", async () => {
     const contract = {
       as_of: "2026-09-04",

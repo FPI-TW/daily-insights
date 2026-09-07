@@ -155,6 +155,12 @@ for (const [locale, heading, cumulative, foreign, days60] of [
       item.path.includes("institutional")
     )
     expect(institutionalRequests).toHaveLength(2)
+    expect(institutionalRequests.map(item => item.path)).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^\/api\/markets\/institutional\/market-flows/),
+        expect.stringMatching(/^\/api\/markets\/institutional\/stock-flows/),
+      ])
+    )
     expect(institutionalRequests.map(item => item.role)).toEqual([
       "org_member",
       "org_member",
@@ -165,12 +171,8 @@ for (const [locale, heading, cumulative, foreign, days60] of [
     await expect(section).toBeVisible()
     await expect(section.getByText("2026-09-04").first()).toBeVisible()
     await expect(section.getByRole("button", { pressed: true })).toHaveCount(3)
-    await expect(
-      section.getByText(locale === "en" ? "TSMC" : "台積電")
-    ).toBeVisible()
-    await expect(
-      section.getByText(locale === "en" ? "ASUS" : "華碩")
-    ).toBeVisible()
+    await expect(section.getByText("台積電")).toBeVisible()
+    await expect(section.getByText("華碩")).toBeVisible()
     for (const label of [cumulative, foreign, days60]) {
       const control = section.getByRole("button", { name: label, exact: true })
       await control.click()

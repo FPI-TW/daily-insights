@@ -225,7 +225,7 @@ export async function loadMarketPage({
               data: institutionalFlowRange(indexRange.end),
             }),
             getTaiwanInstitutionalStocks({
-              data: { date: indexRange.end, locale: context.locale },
+              data: {},
             }),
           ]).then(([flows, stocks]) => ({
             flows: flows.status === "fulfilled" ? flows.value : null,

@@ -105,6 +105,37 @@ export const indexLatestBarSchema = indexDailyBarSchema.extend({
 })
 export type IndexLatestBar = z.infer<typeof indexLatestBarSchema>
 export const indexLatestBarListSchema = z.array(indexLatestBarSchema)
+export const institutionalMarketFlowSchema = z.object({
+  trade_date: z.iso.date(),
+  foreign: z.number().int(),
+  trust: z.number().int(),
+  dealer: z.number().int(),
+})
+export type InstitutionalMarketFlow = z.infer<
+  typeof institutionalMarketFlowSchema
+>
+export const institutionalMarketFlowListSchema = z.array(
+  institutionalMarketFlowSchema
+)
+// net_shares is the security's total across all five investor categories.
+export const institutionalStockFlowLeaderSchema = z.object({
+  trade_date: z.iso.date(),
+  symbol: z.string().min(1),
+  security_name: z.string().min(1),
+  net_shares: z.number().int(),
+})
+export type InstitutionalStockFlowLeader = z.infer<
+  typeof institutionalStockFlowLeaderSchema
+>
+// Five rows in each direction.
+export const institutionalStockFlowLeadersSchema = z.object({
+  trade_date: z.iso.date().nullable(),
+  top_buys: z.array(institutionalStockFlowLeaderSchema),
+  top_sells: z.array(institutionalStockFlowLeaderSchema),
+})
+export type InstitutionalStockFlowLeaders = z.infer<
+  typeof institutionalStockFlowLeadersSchema
+>
 export const institutionalFlowPointSchema = z.object({
   trade_date: z.iso.date(),
   foreign: decimalSchema,

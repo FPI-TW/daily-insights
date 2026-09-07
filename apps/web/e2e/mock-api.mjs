@@ -604,7 +604,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (
-    url.pathname === "/api/markets/tw/institutional-flows" &&
+    url.pathname === "/api/markets/institutional/market-flows" &&
     request.method === "GET"
   ) {
     const role = requireRole(request, response, ["org_member"])
@@ -614,77 +614,66 @@ const server = createServer(async (request, response) => {
       { length: 86 },
       (_, index) => new Date(Date.UTC(2026, 8, 4) - (85 - index) * 86400000)
     ).filter(date => date.getUTCDay() !== 0 && date.getUTCDay() !== 6)
-    sendJson(response, 200, {
-      as_of: "2026-09-04",
-      contract_version: "twse-institutional-v1",
-      contract_hash: "a".repeat(64),
-      endpoint: "/rwd/zh/fund/BFI82U",
-      series: dates.map((date, index) => {
-        const foreign = Math.sin(index / 3) * 75 + index - 25
-        const trust = Math.cos(index / 5) * 12
-        const dealer = Math.sin(index / 7) * 8
-        return {
+    const startDate = url.searchParams.get("start_date")
+    const endDate = url.searchParams.get("end_date")
+    sendJson(
+      response,
+      200,
+      dates
+        .map((date, index) => ({
           trade_date: date.toISOString().slice(0, 10),
-          foreign: foreign.toFixed(4),
-          trust: trust.toFixed(4),
-          dealer: dealer.toFixed(4),
-          total: (foreign + trust + dealer).toFixed(4),
-        }
-      }),
-    })
+          foreign: Math.round(
+            (Math.sin(index / 3) * 75 + index - 25) * 100_000_000
+          ),
+          trust: Math.round(Math.cos(index / 5) * 12 * 100_000_000),
+          dealer: Math.round(Math.sin(index / 7) * 8 * 100_000_000),
+        }))
+        .filter(
+          row =>
+            (!startDate || row.trade_date >= startDate) &&
+            (!endDate || row.trade_date <= endDate)
+        )
+        .reverse()
+    )
     return
   }
 
   if (
-    url.pathname === "/api/markets/tw/institutional-stocks" &&
+    url.pathname === "/api/markets/institutional/stock-flows" &&
     request.method === "GET"
   ) {
     const role = requireRole(request, response, ["org_member"])
     if (!role) return
     recordRequest(request, url, role)
-    const locale = url.searchParams.get("locale") || "zh-hant"
-    const names =
-      locale === "en"
-        ? [
-            "TSMC",
-            "Hon Hai",
-            "Quanta",
-            "MediaTek",
-            "Evergreen",
-            "ASUS",
-            "Accton",
-            "Formosa Plastics",
-            "Yuanta",
-            "Innolux",
-          ]
-        : [
-            "台積電",
-            "鴻海",
-            "廣達",
-            "聯發科",
-            "長榮",
-            "華碩",
-            "智邦",
-            "台塑",
-            "元大金",
-            "群創",
-          ]
+    const tradeDate = url.searchParams.get("trade_date") || "2026-09-04"
+    const names = [
+      "台積電",
+      "鴻海",
+      "廣達",
+      "聯發科",
+      "長榮",
+      "華碩",
+      "智邦",
+      "台塑",
+      "元大金",
+      "群創",
+    ]
     const totals = [
       12840, 8420, 6150, 3920, 2510, -4310, -2880, -1940, -1510, -990,
     ]
+    const rows =
+      tradeDate === "2026-09-04"
+        ? totals.map((total, index) => ({
+            trade_date: tradeDate,
+            symbol: String(2300 + index),
+            security_name: names[index],
+            net_shares: total * 1000,
+          }))
+        : []
     sendJson(response, 200, {
-      as_of: "2026-09-04",
-      contract_version: "twse-institutional-v1",
-      contract_hash: "a".repeat(64),
-      endpoint: locale === "en" ? "/rwd/en/fund/T86" : "/rwd/zh/fund/T86",
-      rows: totals.map((total, index) => ({
-        symbol: String(2300 + index),
-        name: names[index],
-        foreign_lots: String(total - 200),
-        trust_lots: "150",
-        dealer_lots: "50",
-        total_lots: String(total),
-      })),
+      trade_date: tradeDate,
+      top_buys: rows.filter(row => row.net_shares > 0),
+      top_sells: rows.filter(row => row.net_shares < 0),
     })
     return
   }
@@ -693,6 +682,7 @@ const server = createServer(async (request, response) => {
     /^\/api\/markets\/indices\/([^/]+)\/(daily-bars|moving-averages)$/.exec(
       url.pathname
     )
+
   if (indexMatch && request.method === "GET") {
     const role = requireRole(request, response, ["org_member"])
     if (!role) return

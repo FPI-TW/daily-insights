@@ -34,6 +34,8 @@ import {
   indexDailyBarListSchema,
   indexMovingAveragesSchema,
   indexLatestBarListSchema,
+  institutionalMarketFlowListSchema,
+  institutionalStockFlowLeadersSchema,
   institutionalFlowsSchema,
   institutionalStocksSchema,
   marketListSchema,
@@ -121,6 +123,29 @@ export function createMarketClient(transport: ApiTransport) {
           `/api/markets/indices/${encodeURIComponent(symbol)}/moving-averages${suffix}`
         ),
         indexMovingAveragesSchema
+      )
+    },
+    async institutionalMarketFlows(
+      range: { startDate?: string; endDate?: string } = {}
+    ) {
+      const query = new URLSearchParams()
+      if (range.startDate) query.set("start_date", range.startDate)
+      if (range.endDate) query.set("end_date", range.endDate)
+      const search = query.toString()
+      return parseResponse(
+        await transport(
+          `/api/markets/institutional/market-flows${search ? `?${search}` : ""}`
+        ),
+        institutionalMarketFlowListSchema
+      )
+    },
+    async institutionalStockFlowLeaders(tradeDate?: string) {
+      const suffix = tradeDate
+        ? `?${new URLSearchParams({ trade_date: tradeDate }).toString()}`
+        : ""
+      return parseResponse(
+        await transport(`/api/markets/institutional/stock-flows${suffix}`),
+        institutionalStockFlowLeadersSchema
       )
     },
     async institutionalFlows(range: { start?: string; end?: string } = {}) {

@@ -1,8 +1,7 @@
 import {
   createMarketClient,
-  localeSchema,
-  type InstitutionalFlows,
-  type InstitutionalStocks,
+  type InstitutionalMarketFlow,
+  type InstitutionalStockFlowLeaders,
 } from "@daily-insights/api-client"
 import { createServerTransport } from "@daily-insights/api-client/server"
 import { createServerFn } from "@tanstack/react-start"
@@ -13,12 +12,11 @@ import {
 import { z } from "zod"
 
 const flowRequestSchema = z.object({
-  start: z.iso.date(),
-  end: z.iso.date(),
+  startDate: z.iso.date(),
+  endDate: z.iso.date(),
 })
 const stockRequestSchema = z.object({
-  date: z.iso.date(),
-  locale: localeSchema,
+  tradeDate: z.iso.date().optional(),
 })
 
 function serverMarketClient() {
@@ -36,25 +34,25 @@ function serverMarketClient() {
 
 export const getTaiwanInstitutionalFlows = createServerFn({ method: "GET" })
   .validator(flowRequestSchema)
-  .handler(async ({ data }): Promise<InstitutionalFlows> => {
+  .handler(async ({ data }): Promise<InstitutionalMarketFlow[]> => {
     setResponseHeader("Cache-Control", "no-store")
-    return serverMarketClient().institutionalFlows(data)
+    return serverMarketClient().institutionalMarketFlows(data)
   })
 
 export const getTaiwanInstitutionalStocks = createServerFn({ method: "GET" })
   .validator(stockRequestSchema)
-  .handler(async ({ data }): Promise<InstitutionalStocks> => {
+  .handler(async ({ data }): Promise<InstitutionalStockFlowLeaders> => {
     setResponseHeader("Cache-Control", "no-store")
-    return serverMarketClient().institutionalStocks(data)
+    return serverMarketClient().institutionalStockFlowLeaders(data.tradeDate)
   })
 
 export function institutionalFlowRange(end: string) {
   const endDate = new Date(`${end}T00:00:00Z`)
   endDate.setUTCDate(endDate.getUTCDate() - 100)
-  return { start: endDate.toISOString().slice(0, 10), end }
+  return { startDate: endDate.toISOString().slice(0, 10), endDate: end }
 }
 
 export type TaiwanInstitutionalData = {
-  flows: InstitutionalFlows | null
-  stocks: InstitutionalStocks | null
+  flows: InstitutionalMarketFlow[] | null
+  stocks: InstitutionalStockFlowLeaders | null
 }

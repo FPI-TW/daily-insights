@@ -34,7 +34,7 @@ const resources: Resource = {
       footNote:
         "資料來源 Yahoo Finance（{{symbol}}），為已完成交易日的日線收盤，非即時報價；日期一律以 YYYY-MM-DD 呈現。均線需足夠交易日才會出現（120MA 需 120 個交易日）。",
       sectionFlows: "三大法人",
-      flowsMeta: "TWSE · BFI82U / T86 · 資料日期 {{date}}",
+      flowsMeta: "TWSE · 市場資料 {{marketDate}} · 個股資料 {{stockDate}}",
       flowTitle: "三大法人每日買賣超",
       flowSub: "TWSE · BFI82U",
       flowMode_daily: "每日",
@@ -66,8 +66,11 @@ const resources: Resource = {
       topBuy5: "買超前五大",
       topSell5: "賣超前五大",
       stockNote:
-        "僅計入上市（TWSE）個股，不含上櫃與興櫃；外資／投信／自營與合計皆為張數 · 依三大法人合計張數取前五大 · 資料日期 {{date}}",
+        "僅計入上市（TWSE）個股，不含上櫃與興櫃；依三大法人合計買賣超股數取前五大，以 1,000 股換算 1 張 · 資料日期 {{date}}",
       flowLoading: "正在載入三大法人資料。",
+      flowEmpty: "所選期間尚無已儲存的三大法人資料。",
+      stockFlowsEmpty: "尚無可顯示的個股買賣超排行。",
+      stockLeadersEmpty: "無符合條件的個股。",
       biasTitleIndex: "{{index}}乖離率",
       kTitleIndex: "{{index}} 日K + 均線 + 量",
       biasAsOf: "可見區間末日 {{date}}",
@@ -786,7 +789,7 @@ const resources: Resource = {
       footNote:
         "数据来源 Yahoo Finance（{{symbol}}），为已完成交易日的日线收盘，非实时报价；日期一律以 YYYY-MM-DD 呈现。均线需足够交易日才会出现（120MA 需 120 个交易日）。",
       sectionFlows: "三大法人",
-      flowsMeta: "TWSE · BFI82U / T86 · 数据日期 {{date}}",
+      flowsMeta: "TWSE · 市场数据 {{marketDate}} · 个股数据 {{stockDate}}",
       flowTitle: "三大法人每日买卖超",
       flowSub: "TWSE · BFI82U",
       flowMode_daily: "每日",
@@ -818,8 +821,11 @@ const resources: Resource = {
       topBuy5: "买超前五大",
       topSell5: "卖超前五大",
       stockNote:
-        "仅计入上市（TWSE）个股，不含上柜与兴柜；外资／投信／自营与合计皆为张数 · 依三大法人合计张数取前五大 · 数据日期 {{date}}",
+        "仅计入上市（TWSE）个股，不含上柜与兴柜；依三大法人合计买卖超股数取前五大，以 1,000 股换算 1 张 · 数据日期 {{date}}",
       flowLoading: "正在加载三大法人数据。",
+      flowEmpty: "所选期间尚无已储存的三大法人数据。",
+      stockFlowsEmpty: "尚无可显示的个股买卖超排行。",
+      stockLeadersEmpty: "无符合条件的个股。",
       biasTitleIndex: "{{index}}乖离率",
       kTitleIndex: "{{index}} 日K + 均线 + 量",
       biasAsOf: "可见区间末日 {{date}}",
@@ -1538,7 +1544,8 @@ const resources: Resource = {
       footNote:
         "Source: Yahoo Finance ({{symbol}}), completed daily closes rather than live quotes; every date is shown as YYYY-MM-DD. A moving average appears only once enough sessions exist (120MA needs 120 sessions).",
       sectionFlows: "Institutional flows",
-      flowsMeta: "TWSE · BFI82U / T86 · as of {{date}}",
+      flowsMeta:
+        "TWSE · Market as of {{marketDate}} · Stocks as of {{stockDate}}",
       flowTitle: "Daily institutional net buying",
       flowSub: "TWSE · BFI82U",
       flowMode_daily: "Daily",
@@ -1570,8 +1577,11 @@ const resources: Resource = {
       topBuy5: "Top 5 net buys",
       topSell5: "Top 5 net sells",
       stockNote:
-        "TWSE-listed stocks only (no OTC or emerging board); foreign, trust, dealer and total columns are lots · top five by total institutional lots · as of {{date}}",
+        "TWSE-listed stocks only (no OTC or emerging board); top five by total institutional net shares, converted at 1,000 shares per lot · as of {{date}}",
       flowLoading: "Loading institutional flow data.",
+      flowEmpty: "No stored institutional flows for this period.",
+      stockFlowsEmpty: "No stock flow rankings are available yet.",
+      stockLeadersEmpty: "No matching stocks.",
       biasTitleIndex: "{{index}} bias",
       kTitleIndex: "{{index}} — daily candles + MA + volume",
       biasAsOf: "Last visible session {{date}}",

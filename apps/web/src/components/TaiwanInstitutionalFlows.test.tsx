@@ -24,35 +24,32 @@ afterEach(() => {
 
 const dates = ["2026-09-02", "2026-09-03", "2026-09-04"]
 const data: TaiwanInstitutionalData = {
-  flows: {
-    as_of: "2026-09-04",
-    contract_version: "twse-institutional-v1",
-    contract_hash: "a".repeat(64),
-    endpoint: "/rwd/zh/fund/BFI82U",
-    series: dates.map((trade_date, index) => ({
+  flows: dates
+    .map((trade_date, index) => ({
       trade_date,
-      foreign: String([2, -3, 4][index]),
-      trust: String([1, 1, -1][index]),
-      dealer: String([0.5, -0.5, 1][index]),
-      total: String([3.5, -2.5, 4][index]),
-    })),
-  },
+      foreign: [200_000_000, -300_000_000, 400_000_000][index]!,
+      trust: [100_000_000, 100_000_000, -100_000_000][index]!,
+      dealer: [50_000_000, -50_000_000, 100_000_000][index]!,
+    }))
+    .reverse(),
   stocks: {
-    as_of: "2026-09-04",
-    contract_version: "twse-institutional-v1",
-    contract_hash: "a".repeat(64),
-    endpoint: "/rwd/zh/fund/T86",
-    rows: Array.from({ length: 12 }, (_, index) => {
-      const total = index < 6 ? 12 - index : -(index - 5)
-      return {
+    trade_date: "2026-09-03",
+    top_buys: [12_000, 11_000, 10_000, 9_000, 8_000].map(
+      (net_shares, index) => ({
+        trade_date: "2026-09-03",
         symbol: String(2300 + index),
-        name: `Stock ${index}`,
-        foreign_lots: String(total),
-        trust_lots: "0",
-        dealer_lots: "0",
-        total_lots: String(total),
-      }
-    }),
+        security_name: `Stock ${index}`,
+        net_shares,
+      })
+    ),
+    top_sells: [-6_000, -5_000, -4_000, -3_000, -1].map(
+      (net_shares, index) => ({
+        trade_date: "2026-09-03",
+        symbol: String(2311 - index),
+        security_name: `Stock ${11 - index}`,
+        net_shares,
+      })
+    ),
   },
 }
 const history: MarketIndexHistory = {
@@ -77,10 +74,18 @@ const history: MarketIndexHistory = {
   ],
 }
 
-function show(locale: "zh-hant" | "zh-hans" | "en" = "en") {
+function show(
+  locale: "zh-hant" | "zh-hans" | "en" = "en",
+  suppliedData = data,
+  suppliedHistory: MarketIndexHistory | null = history
+) {
   return render(
     <I18nextProvider i18n={createI18n(locale)}>
-      <TaiwanInstitutionalFlows data={data} history={history} locale={locale} />
+      <TaiwanInstitutionalFlows
+        data={suppliedData}
+        history={suppliedHistory}
+        locale={locale}
+      />
     </I18nextProvider>
   )
 }
@@ -95,6 +100,11 @@ describe("TaiwanInstitutionalFlows", () => {
     expect(screen.getByText("Stock 0")).toBeInTheDocument()
     expect(screen.queryByText("Stock 5")).not.toBeInTheDocument()
     expect(screen.getByText("Stock 11")).toBeInTheDocument()
+    expect(screen.getByText("-0.001")).toBeInTheDocument()
+    expect(screen.queryByRole("columnheader", { name: "Foreign" })).toBeNull()
+    expect(
+      screen.getByText(/Market as of 2026-09-04 · Stocks as of 2026-09-03/)
+    ).toBeInTheDocument()
     expect(
       screen.queryByText("Figures are layout placeholders pending the T86 feed")
     ).not.toBeInTheDocument()
@@ -107,6 +117,57 @@ describe("TaiwanInstitutionalFlows", () => {
       "aria-pressed",
       "false"
     )
+  })
+
+  it("sorts the API's descending dates and converts TWD to NT$100M before accumulation", () => {
+    show()
+    expect(chartOption?.xAxis).toMatchObject({ data: dates })
+    expect(chartOption?.series).toMatchObject([
+      { data: [3.5, null, 4] },
+      { data: [null, -2.5, null] },
+      { type: "line" },
+    ])
+    fireEvent.click(screen.getByRole("button", { name: "Cumulative" }))
+    expect(chartOption?.series).toMatchObject([
+      { data: [3.5, 1, 5] },
+      { data: [null, null, null] },
+      { type: "line" },
+    ])
+    fireEvent.click(screen.getByRole("button", { name: "Foreign" }))
+    expect(chartOption?.series).toMatchObject([
+      { data: [2, null, 3] },
+      { data: [null, -1, null] },
+      { type: "line" },
+    ])
+  })
+
+  it("keeps institutional values visible when index history is unavailable", () => {
+    show("en", data, null)
+    expect(screen.getByTestId("institutional-chart")).toBeInTheDocument()
+    expect(chartOption?.series).toMatchObject([
+      { data: [3.5, null, 4] },
+      {},
+      { data: [null, null, null] },
+    ])
+  })
+
+  it("distinguishes a successful empty result from an unavailable API", () => {
+    show("en", {
+      flows: [],
+      stocks: { trade_date: null, top_buys: [], top_sells: [] },
+    })
+    expect(
+      screen.getByText("No stored institutional flows for this period.")
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("No stock flow rankings are available yet.")
+    ).toBeInTheDocument()
+    cleanup()
+    show("en", { flows: null, stocks: null })
+    expect(
+      screen.queryByText("No stored institutional flows for this period.")
+    ).toBeNull()
+    expect(screen.getAllByRole("status")).toHaveLength(2)
   })
 
   it("aligns both axes to six intervals and keeps zero on the left grid", () => {
