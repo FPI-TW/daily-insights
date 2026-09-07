@@ -53,8 +53,6 @@ const resources: Resource = {
       colTotal: "合計（張）",
       topBuy5: "買超前五大",
       topSell5: "賣超前五大",
-      stockNote:
-        "僅計入上市（TWSE）個股，不含上櫃與興櫃；外資／投信／自營與合計皆為張數 · 依三大法人合計張數取前五大",
       flowLoading: "正在載入三大法人資料。",
       biasTitleIndex: "{{index}}乖離率",
       kTitleIndex: "{{index}} 日K + 均線 + 量",
@@ -767,8 +765,6 @@ const resources: Resource = {
       colTotal: "合计（张）",
       topBuy5: "买超前五大",
       topSell5: "卖超前五大",
-      stockNote:
-        "仅计入上市（TWSE）个股，不含上柜与兴柜；外资／投信／自营与合计皆为张数 · 依三大法人合计张数取前五大",
       flowLoading: "正在加载三大法人数据。",
       biasTitleIndex: "{{index}}乖离率",
       kTitleIndex: "{{index}} 日K + 均线 + 量",
@@ -1481,8 +1477,6 @@ const resources: Resource = {
       colTotal: "Total (lots)",
       topBuy5: "Top 5 net buys",
       topSell5: "Top 5 net sells",
-      stockNote:
-        "TWSE-listed stocks only (no OTC or emerging board); foreign, trust, dealer and total columns are lots · top five by total institutional lots",
       flowLoading: "Loading institutional flow data.",
       biasTitleIndex: "{{index}} bias",
       kTitleIndex: "{{index}} — daily candles + MA + volume",

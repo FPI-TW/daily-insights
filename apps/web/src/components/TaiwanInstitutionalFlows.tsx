@@ -300,8 +300,8 @@ function FlowTable({
 }) {
   const { t } = useTranslation()
   return (
-    <div className={direction === "down" ? "mt-6" : ""}>
-      <h4 className="mb-3 flex items-center gap-2 text-sm font-bold">
+    <div className={direction === "down" ? "mt-4" : ""}>
+      <h4 className="mb-2 flex items-center gap-2 text-sm font-bold">
         <span
           className={
             direction === "up"
@@ -324,7 +324,7 @@ function FlowTable({
               ].map((key, index) => (
                 <th
                   key={key}
-                  className={`border-b border-line whitespace-nowrap px-4 py-1.5 font-semibold ${index === 0 ? "text-left" : "text-right"}`}
+                  className={`border-b border-line whitespace-nowrap px-3 py-1 font-semibold ${index === 0 ? "text-left" : "text-right"}`}
                 >
                   {t(key)}
                 </th>
@@ -339,11 +339,13 @@ function FlowTable({
               >
                 <th
                   scope="row"
-                  className="px-4 py-1 text-left font-semibold text-sea-ink"
+                  className="px-3 py-0.5 text-left font-semibold text-sea-ink"
                 >
-                  <span className="block">{row.name}</span>
-                  <span className="mt-1 block font-mono text-xs text-sea-ink-soft">
-                    {row.symbol}
+                  <span className="whitespace-nowrap">
+                    {row.name}
+                    <span className="ml-1.5 font-mono text-xs font-normal text-sea-ink-soft">
+                      {row.symbol}
+                    </span>
                   </span>
                 </th>
                 {[
@@ -361,7 +363,7 @@ function FlowTable({
                           index
                         ]!
                       )}
-                      className={`whitespace-nowrap px-4 py-1 text-right font-mono tabular-nums ${index === 3 ? "font-bold" : ""} ${directionClass(value)}`}
+                      className={`whitespace-nowrap px-3 py-0.5 text-right font-mono tabular-nums ${index === 3 ? "font-bold" : ""} ${directionClass(value)}`}
                     >
                       {signed(value, locale, value % 1 === 0 ? 0 : 1)}
                     </td>
@@ -410,7 +412,7 @@ function StocksPanel({
         </p>
       ) : (
         <>
-          <div className="mt-4">
+          <div className="mt-3">
             <FlowTable
               title={t("topBuy5")}
               rows={buys}
@@ -424,9 +426,6 @@ function StocksPanel({
               direction="down"
             />
           </div>
-          <p className="mt-4 text-xs leading-5 text-pretty text-sea-ink-soft">
-            {t("stockNote")}
-          </p>
         </>
       )}
     </DashboardPanel>
