@@ -48,11 +48,15 @@ HEARTBEAT_SECONDS = 30.0
 # Both TWSE reports cover the listed market only; TPEx has its own endpoints.
 # Rolling windows in trading days. The calendar ceilings are what ends a walk
 # when TWSE answers "no data" for every date (blocked IP, outage); 40 trading
-# days span ~56 calendar days and 7 span ~11.
+# days span ~56 calendar days.
 MARKET_FLOW_LOOKBACK_TRADING_DAYS = 40
 MARKET_FLOW_LOOKBACK_CALENDAR_DAYS = 80
-STOCK_FLOW_LOOKBACK_TRADING_DAYS = 7
-STOCK_FLOW_LOOKBACK_CALENDAR_DAYS = 20
+# Per-stock flows are only ever read for the latest stored day, so one trading
+# day is the whole need; a missed day is not backfilled. The calendar ceiling
+# is what lets a run on a holiday reach the last trading day, which is already
+# stored and therefore costs no request.
+STOCK_FLOW_LOOKBACK_TRADING_DAYS = 1
+STOCK_FLOW_LOOKBACK_CALENDAR_DAYS = 10
 # TWSE being down looks the same on every date, so stop asking after three.
 MAX_CONSECUTIVE_FAILURES = 3
 
@@ -417,7 +421,7 @@ async def _fetch_flows_back[Flows: _TwseFlows](
 async def _execute_institutional_twse(
     run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
 ) -> tuple[str, dict[str, object], str | None]:
-    """Per-stock flows back to 7 trading days; market flows back to 40."""
+    """Per-stock flows for the edition date only; market flows back to 40."""
     if not settings.twse_enabled:
         return "failed", {}, "twse_unavailable"
 

@@ -291,7 +291,7 @@ const resources: Resource = {
       dataManagementIndexAction: "更新指數",
       dataManagementInstitutional: "台股三大法人",
       dataManagementInstitutionalDescription:
-        "以證交所資料回補個股 7 個交易日、大盤 40 個交易日；已存在的日期不重抓。",
+        "以證交所資料抓當天個股，並回補大盤 40 個交易日；已存在的日期不重抓。",
       dataManagementInstitutionalAction: "更新三大法人",
       dataManagementLatest: "最近執行結果",
       dataManagementAllMarkets: "全部市場",
@@ -1005,7 +1005,7 @@ const resources: Resource = {
       dataManagementIndexAction: "更新指数",
       dataManagementInstitutional: "台股三大法人",
       dataManagementInstitutionalDescription:
-        "以证交所数据回补个股 7 个交易日、大盘 40 个交易日；已存在的日期不重抓。",
+        "以证交所数据抓当天个股，并回补大盘 40 个交易日；已存在的日期不重抓。",
       dataManagementInstitutionalAction: "更新三大法人",
       dataManagementLatest: "最近执行结果",
       dataManagementAllMarkets: "全部市场",
@@ -1730,7 +1730,7 @@ const resources: Resource = {
       dataManagementIndexAction: "Update indices",
       dataManagementInstitutional: "Taiwan institutional flows",
       dataManagementInstitutionalDescription:
-        "Backfill 7 trading days per security and 40 for the market from TWSE; dates already stored are not fetched again.",
+        "Fetch the current trading day per security and backfill 40 trading days for the market from TWSE; dates already stored are not fetched again.",
       dataManagementInstitutionalAction: "Update institutional flows",
       dataManagementLatest: "Latest runs",
       dataManagementAllMarkets: "All markets",
