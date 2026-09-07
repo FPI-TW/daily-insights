@@ -8,7 +8,6 @@ import { useChartColors } from "#/lib/chart"
 import { numberLocales, unitLabel } from "#/lib/format"
 import {
   alignedRatioAxes,
-  formatTaipeiTimestamp,
   periodChange,
   ratioPoints,
   recentPoints,
@@ -17,11 +16,7 @@ import {
   type MacroHistory,
   type Period,
 } from "#/lib/macro-dashboard"
-import {
-  DashboardChoices,
-  DashboardPanel,
-  Methodology,
-} from "./DashboardPrimitives"
+import { DashboardChoices, DashboardPanel } from "./DashboardPrimitives"
 
 const commodityIds = ["brent", "wti", "gold", "silver", "copper"]
 const fxIds = [
@@ -303,35 +298,6 @@ function Chart({
           />
         </ClientOnly>
       </div>
-      <details className="mt-2 text-xs text-sea-ink-soft">
-        <summary className="cursor-pointer hover:text-palm">
-          {t("macroChartData")}
-        </summary>
-        <div className="mt-2 min-w-0">
-          <table className="w-full table-fixed text-right font-mono tabular-nums [&_td]:wrap-anywhere [&_th]:wrap-anywhere">
-            <thead>
-              <tr>
-                <th className="text-left">{t("macroDate")}</th>
-                {lines.map(line => (
-                  <th key={line.name}>{line.name}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {dates.map(date => (
-                <tr key={date}>
-                  <th className="text-left font-normal">{date}</th>
-                  {lines.map((line, i) => (
-                    <td key={line.name}>
-                      {formatValue(maps[i]!.get(date), line.unit, locale)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </details>
     </>
   )
 }
@@ -365,12 +331,12 @@ function HistoryTable({
       <ResponsiveTable>
         <thead className="border-b border-line text-sea-ink-soft">
           <tr>
-            <th scope="col" className="px-4 py-3 text-left font-semibold">
+            <th scope="col" className="px-4 py-1.5 text-left font-semibold">
               {t(rates ? "macroTenor" : "macroInstrument")}
             </th>
             <th
               scope="col"
-              className="whitespace-nowrap px-4 py-3 font-semibold"
+              className="whitespace-nowrap px-4 py-1.5 font-semibold"
             >
               {t(rates ? "macroYield" : "macroClose")}
             </th>
@@ -378,7 +344,7 @@ function HistoryTable({
               <th
                 key={period}
                 scope="col"
-                className="whitespace-nowrap px-4 py-3 font-semibold"
+                className="whitespace-nowrap px-4 py-1.5 font-semibold"
               >
                 {t(`macroPeriod_${period}`)}
               </th>
@@ -400,7 +366,7 @@ function HistoryTable({
               >
                 <th
                   scope="row"
-                  className="px-4 py-4 text-left font-semibold text-pretty text-sea-ink"
+                  className="px-4 py-1 text-left font-semibold text-pretty text-sea-ink"
                 >
                   {onSelect ? (
                     <button
@@ -415,14 +381,8 @@ function HistoryTable({
                     t(`macroAsset_${id}`)
                   )}
                   {history && !fx ? (
-                    <span className="mt-1 block font-mono text-xs font-normal text-sea-ink-soft">
-                      {history.symbol} ·{" "}
+                    <span className="mt-0.5 block font-mono text-xs leading-4 font-normal text-sea-ink-soft">
                       {unitLabel(history.unit, t) ?? history.unit}
-                    </span>
-                  ) : null}
-                  {!fx ? (
-                    <span className="mt-1 block font-mono text-xs font-normal text-sea-ink-soft">
-                      {latest?.date ?? "—"}
                     </span>
                   ) : null}
                   {stale ? (
@@ -433,7 +393,7 @@ function HistoryTable({
                 </th>
                 <td
                   data-label={t(rates ? "macroYield" : "macroClose")}
-                  className="px-4 py-4 text-right font-mono font-bold text-sea-ink"
+                  className="px-4 py-1 text-right font-mono font-bold text-sea-ink"
                 >
                   {formatValue(
                     latest ? Number(latest.value) : null,
@@ -445,7 +405,7 @@ function HistoryTable({
                   <td
                     key={period}
                     data-label={t(`macroPeriod_${period}`)}
-                    className="px-4 py-4 text-right"
+                    className="px-4 py-1 text-right"
                   >
                     <Change
                       value={
@@ -482,11 +442,6 @@ export function MacroDashboard({
   const oilGold = ratioPoints(byId.get("wti"), byId.get("gold"))
   const copperGold = ratioPoints(byId.get("copper"), byId.get("gold"))
   const curve = yieldCurve(histories, compare)
-  const fxDates = [
-    ...new Set(fxIds.flatMap(id => byId.get(id)?.points.at(-1)?.date ?? [])),
-  ].sort()
-  const allFxSameDate =
-    fxDates.length === 1 && fxIds.every(id => byId.get(id)?.points.length)
   const line = (id: string, days: number): ChartLine => ({
     name: t(`macroAsset_${id}`),
     unit: byId.get(id)?.unit,
@@ -508,23 +463,6 @@ export function MacroDashboard({
   }
   return (
     <div className="min-w-0 pb-6 [&>section+section]:mt-9">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 text-xs text-sea-ink-soft">
-        <div className="flex flex-wrap items-center gap-3">
-          <p className="m-0 max-w-[52ch] text-pretty">{t("macroIntro")}</p>
-          <span className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-2.5 py-0.5 font-bold">
-            <span className="text-market-up">▲ {t("convUp")}</span>
-            <span className="h-2.5 w-px bg-line" />
-            <span className="text-market-down">▼ {t("convDown")}</span>
-          </span>
-        </div>
-        {data ? (
-          <span className="whitespace-nowrap font-mono tabular-nums">
-            {t("macroFetched", {
-              date: formatTaipeiTimestamp(data.fetched_at),
-            })}
-          </span>
-        ) : null}
-      </div>
       <section className="min-w-0">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,560px),1fr))] items-start gap-6">
           <DashboardPanel title={t("macroCommodities")}>
@@ -534,7 +472,6 @@ export function MacroDashboard({
               locale={locale}
               fetchedAt={data?.fetched_at}
             />
-            <Methodology>{t("macroCommodityNote")}</Methodology>
           </DashboardPanel>
           <DashboardPanel
             title={t("reportBlockMacroCommodityRatios")}
@@ -558,7 +495,6 @@ export function MacroDashboard({
                 },
               ]}
             />
-            <Methodology>{t("macroRatioNote")}</Methodology>
           </DashboardPanel>
         </div>
       </section>
@@ -572,7 +508,6 @@ export function MacroDashboard({
               rates
               fetchedAt={data?.fetched_at}
             />
-            <Methodology>{t("macroYieldNote")}</Methodology>
           </DashboardPanel>
           <DashboardPanel
             title={t("macroYieldCurve")}
@@ -593,9 +528,6 @@ export function MacroDashboard({
               </div>
             }
           >
-            <p className="mt-2 mb-0 font-mono text-xs text-sea-ink-soft">
-              {curve.date ?? "—"}
-            </p>
             <Chart
               locale={locale}
               label={t("macroYieldCurve")}
@@ -619,7 +551,6 @@ export function MacroDashboard({
                 },
               ]}
             />
-            <Methodology>{t("curveNote")}</Methodology>
           </DashboardPanel>
         </div>
       </section>
@@ -635,7 +566,6 @@ export function MacroDashboard({
               lines={[line("dxy", dxyDays)]}
               days={dxyDays}
             />
-            <Methodology>{t("macroDxyNote")}</Methodology>
           </DashboardPanel>
           <DashboardPanel
             title={t("macroFxTitle")}
@@ -659,7 +589,6 @@ export function MacroDashboard({
               days={fxDays}
               height={224}
             />
-            <Methodology>{t("macroFxNote")}</Methodology>
           </DashboardPanel>
         </div>
         <div className="mt-4">
@@ -684,22 +613,9 @@ export function MacroDashboard({
                 />
               ))}
             </div>
-            <p className="mt-3 mb-0 font-mono text-xs text-sea-ink-soft tabular-nums">
-              {allFxSameDate
-                ? t("fxAsOf", { date: fxDates[0] })
-                : fxIds
-                    .map(
-                      id =>
-                        `${t(`macroAsset_${id}`)} ${byId.get(id)?.points.at(-1)?.date ?? "—"}`
-                    )
-                    .join(" · ")}
-            </p>
           </DashboardPanel>
         </div>
       </section>
-      <p className="mt-5 max-w-[100ch] text-xs leading-5 text-pretty text-sea-ink-soft">
-        {t("macroPeriodNote")}
-      </p>
     </div>
   )
 }

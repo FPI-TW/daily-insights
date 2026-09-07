@@ -412,7 +412,11 @@ function MarketPageLoading() {
   return (
     <>
       <ReportLoadingScreen />
-      {marketCode === "us_equity" ? <UsIndexPerformanceTableLoading /> : null}
+      {marketCode === "us_equity" ? (
+        <div className="mt-6">
+          <UsIndexPerformanceTableLoading />
+        </div>
+      ) : null}
       <IndexHistoryLoading />
       {marketCode === "us_equity" ? <VixHistoryLoading /> : null}
     </>

@@ -8,7 +8,6 @@ import type { AnalystViewpoint, Locale } from "@daily-insights/api-client"
 import {
   directionClass,
   formatChange,
-  formatIsoDate,
   formatTimestamp,
   formatNumber,
   literalDirection,
@@ -234,14 +233,14 @@ function AnalystViewpoints({
   if (!latest) return null
   return (
     <section className="mb-6" aria-labelledby="analyst-viewpoints-title">
-      <div className="mb-3 flex items-baseline justify-between gap-4">
+      <div className="mb-3">
         <h2
           id="analyst-viewpoints-title"
           className="m-0 text-lg font-extrabold tracking-[-0.02em] text-sea-ink"
         >
           {t("analystViewpointsTitle")}
         </h2>
-        <p className="m-0 text-xs text-sea-ink-soft">
+        <p className="mt-1 mb-0 text-xs text-sea-ink-soft">
           {t("analystViewpointsUpdated", {
             timestamp: formatTimestamp(latest.fetched_at),
           })}
@@ -268,27 +267,15 @@ function AnalystViewpoints({
   )
 }
 
-/** Freshness line above the blocks: the data cut-off, a stale marker with
- * its reason, and the report-level caveat when the pipeline attached one. */
-function ReportFreshness({
-  report,
-  locale,
-}: {
-  report: ProvisionalReport
-  locale: Locale
-}) {
+/** Freshness line above the blocks: a stale marker with its reason and the
+ * report-level caveat when the pipeline attached one. */
+function ReportFreshness({ report }: { report: ProvisionalReport }) {
   const { t } = useTranslation()
-  if (!report.sourceDate && !report.stale && !report.caveat) return null
+  if (!report.stale && !report.caveat && report.status !== "partial")
+    return null
   return (
     <div className="mb-4 text-xs text-sea-ink-soft">
       <div className="flex flex-wrap items-center gap-2">
-        {report.sourceDate ? (
-          <span>
-            {t("reportSourceAsOf", {
-              date: formatIsoDate(report.sourceDate, locale),
-            })}
-          </span>
-        ) : null}
         {report.stale ? (
           <span className="rounded-full border border-market-caution/50 bg-market-caution/10 px-2 py-0.5 font-bold text-market-caution">
             {t("reportStale")}
@@ -320,22 +307,23 @@ export function ReportDetail({
   leadingBlock?: ReactNode
 }) {
   // A lone metric or table block spans the full width; half-width panels
-  // only make sense when there is a second one to sit beside.
+  // only make sense when there is a second one to sit beside. The leading
+  // block (the US five-index table) counts as that neighbour, so it and the
+  // mega-caps block share one row.
   const narrowBlocks = report.blocks.filter(block => block.kind !== "series")
+  const loneNarrowBlock = narrowBlocks.length === 1 && !leadingBlock
   return (
     <>
-      <ReportFreshness report={report} locale={locale} />
+      <ReportFreshness report={report} />
       {viewpoint ? <MarketViewpoint viewpoint={viewpoint} /> : null}
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">
-        {leadingBlock ? (
-          <div className="min-w-0 xl:col-span-2">{leadingBlock}</div>
-        ) : null}
+        {leadingBlock ? <div className="min-w-0">{leadingBlock}</div> : null}
         {report.blocks.map((block, index) => (
           <ReportBlockView
             block={block}
             index={index}
             locale={locale}
-            fullWidth={block.kind !== "series" && narrowBlocks.length === 1}
+            fullWidth={block.kind !== "series" && loneNarrowBlock}
             key={`${block.titleKey}-${index}`}
           />
         ))}
@@ -357,14 +345,14 @@ export function MarketViewpoint({
       className="surface-panel mb-4 border-t-[3px] border-t-lagoon p-5"
       aria-labelledby={`viewpoint-${viewpoint.market_code}`}
     >
-      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-3">
+      <div className="mb-2">
         <h2
           id={`viewpoint-${viewpoint.market_code}`}
           className="m-0 text-base font-extrabold tracking-[-0.015em] text-sea-ink"
         >
           {t("marketViewpointTitle")}
         </h2>
-        <p className="m-0 text-xs text-sea-ink-soft">
+        <p className="mt-1 mb-0 text-xs text-sea-ink-soft">
           {t("analystViewpointsUpdated", {
             timestamp: formatTimestamp(viewpoint.fetched_at),
           })}
@@ -548,7 +536,7 @@ function ReportBlockView({
               <tr>
                 {block.columns.map((column, index) => (
                   <th
-                    className={`whitespace-nowrap px-4 py-3 font-bold ${index === 0 ? "text-left" : "text-right"}`}
+                    className={`whitespace-nowrap px-4 py-1.5 font-bold ${index === 0 ? "text-left" : "text-right"}`}
                     key={column.labelKey}
                   >
                     {columnHeading(column, t)}
@@ -564,7 +552,7 @@ function ReportBlockView({
                       return (
                         <th
                           scope="row"
-                          className="px-4 py-4 text-left font-semibold text-sea-ink"
+                          className="px-4 py-1 text-left font-semibold text-sea-ink"
                           key={cellIndex}
                         >
                           {valueText(cell, t)}
@@ -584,7 +572,7 @@ function ReportBlockView({
                         }
                     return (
                       <td
-                        className={`whitespace-nowrap px-4 py-4 text-right font-mono tabular-nums ${shown.direction === "none" ? "text-sea-ink" : directionClass(shown.direction)}`}
+                        className={`whitespace-nowrap px-4 py-1 text-right font-mono tabular-nums ${shown.direction === "none" ? "text-sea-ink" : directionClass(shown.direction)}`}
                         data-label={column ? columnHeading(column, t) : ""}
                         key={cellIndex}
                       >

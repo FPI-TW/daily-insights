@@ -20,7 +20,6 @@ import {
   DashboardChoices,
   DashboardPanel,
   DashboardSection,
-  Methodology,
 } from "./DashboardPrimitives"
 
 function ChartSkeleton({ candles = false }: { candles?: boolean }) {
@@ -157,7 +156,6 @@ function BiasPanel({
   const visible = lines.map(line =>
     visibleBiasPoints(line.points, zoom.start, zoom.end)
   )
-  const asOf = visible[0]?.at(-1)?.date
   const ready = lines.some(line =>
     line.points.some(point => point.value !== null)
   )
@@ -172,9 +170,6 @@ function BiasPanel({
       title={title}
       controls={
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] text-sea-ink-soft">
-            {t("windowLabel")}
-          </span>
           <DashboardChoices
             label={t("windowLabel")}
             value={months}
@@ -205,9 +200,6 @@ function BiasPanel({
               {t("biasScaledNote")}
             </span>
           </div>
-          <p className="mt-1 mb-2 font-mono text-[11px] text-sea-ink-soft tabular-nums">
-            {t("biasAsOf", { date: asOf ? formatDateStamp(asOf) : "—" })}
-          </p>
           <div className="grid grid-cols-3 gap-px border-y border-line bg-line">
             {lines.map((line, i) => {
               const scaled = scaleBias(visible[i]!)
@@ -378,7 +370,6 @@ function BiasPanel({
           </div>
         </>
       )}
-      <Methodology>{t("biasFormula")}</Methodology>
     </DashboardPanel>
   )
 }
@@ -483,12 +474,7 @@ function CandlesPanel({
         </div>
       }
     >
-      <p className="mt-1 mb-0 text-xs text-sea-ink-soft">
-        {t("kSub")} ·{" "}
-        <span className="font-mono tabular-nums">
-          {formatDateStamp(latest.trade_date)}
-        </span>
-      </p>
+      <p className="mt-1 mb-0 text-xs text-sea-ink-soft">{t("kSub")}</p>
       {missing ? (
         <p className="mt-2 mb-0 text-xs text-sea-ink-soft" role="status">
           {t("kMissingOhlc", { count: missing })}
@@ -736,7 +722,6 @@ function CandlesPanel({
           </tbody>
         </table>
       </div>
-      <Methodology>{t("kFormula", { symbol: selected.symbol })}</Methodology>
     </DashboardPanel>
   )
 }
@@ -790,12 +775,9 @@ export function TaiwanIndexHistoryChart({
   const pending = movingAverages !== null && state.source !== movingAverages
   const averages =
     state.source === movingAverages ? state.values[selected.symbol] : undefined
-  const name = t(indexNameKey(selected.symbol) ?? selected.symbol)
   return (
     <div className="mt-6 min-w-0">
-      <DashboardSection
-        meta={t("techMeta", { index: name, symbol: selected.symbol })}
-      >
+      <DashboardSection>
         {history.series.length > 1 ? (
           <label className="mb-3 ml-auto max-w-72 text-xs font-bold text-sea-ink-soft">
             {t("indexChartSelect")}
@@ -837,9 +819,6 @@ export function TaiwanIndexHistoryChart({
             locale={locale}
           />
         </div>
-        <p className="mt-5 max-w-[100ch] text-xs leading-5 text-pretty text-sea-ink-soft">
-          {t("footNote", { symbol: selected.symbol })}
-        </p>
       </DashboardSection>
     </div>
   )

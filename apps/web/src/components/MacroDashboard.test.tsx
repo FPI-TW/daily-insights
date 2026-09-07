@@ -78,14 +78,21 @@ describe("integrated macro dashboard", () => {
       within(fxPanel).getByRole("button", { name: "365 days" })
     ).toHaveAttribute("aria-pressed", "true")
   })
-  it("keeps the change legend grouped with the left-side introduction", () => {
+  it("shows no per-panel timestamps, methodology or chart-data toggles", () => {
     show(<MacroDashboard data={data} locale="en" />)
-    const legend = screen.getByText("▲ Up").parentElement!
-    const introduction = screen.getByText(
-      "Macro, bonds and global currencies in one view."
-    )
-    expect(legend.parentElement).toBe(introduction.parentElement)
-    expect(legend.parentElement).toHaveClass("flex")
+    expect(screen.queryByText(/^Updated /)).toBeNull()
+    expect(screen.queryByText(/as of/)).toBeNull()
+    expect(screen.queryByText("Methodology")).toBeNull()
+    expect(screen.queryByText("View chart data")).toBeNull()
+    expect(document.querySelector("details")).toBeNull()
+  })
+  it("omits the introduction, change legend and period note", () => {
+    show(<MacroDashboard data={data} locale="en" />)
+    expect(screen.queryByText("▲ Up")).toBeNull()
+    expect(
+      screen.queryByText("Macro, bonds and global currencies in one view.")
+    ).toBeNull()
+    expect(screen.queryByText(/previous trading day/)).toBeNull()
   })
   it("omits today's overview and economic calendar", () => {
     show(<MacroDashboard data={data} locale="en" />)

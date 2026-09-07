@@ -61,7 +61,7 @@ export function UsIndexPerformanceTableLoading() {
   const { t } = useTranslation()
   return (
     <section
-      className="surface-panel mt-6 animate-pulse p-5"
+      className="surface-panel animate-pulse p-5"
       role="status"
       aria-live="polite"
       aria-label={t("usIndexTableLoading")}
@@ -82,11 +82,7 @@ export function UsIndexPerformanceTable({
   const { t } = useTranslation()
   if (history === null) {
     return (
-      <section
-        className="surface-panel mt-6 p-5"
-        role="status"
-        aria-live="polite"
-      >
+      <section className="surface-panel p-5" role="status" aria-live="polite">
         <h2 className="m-0 text-base font-extrabold">
           {t("usIndexTableTitle")}
         </h2>
@@ -99,11 +95,7 @@ export function UsIndexPerformanceTable({
   const rows = usIndexPerformanceRows(history)
   if (rows.every(row => row.close === null)) {
     return (
-      <section
-        className="surface-panel mt-6 p-5"
-        role="status"
-        aria-live="polite"
-      >
+      <section className="surface-panel p-5" role="status" aria-live="polite">
         <h2 className="m-0 text-base font-extrabold">
           {t("usIndexTableTitle")}
         </h2>
@@ -117,7 +109,7 @@ export function UsIndexPerformanceTable({
   }
   return (
     <section
-      className="surface-panel mt-6 min-w-0 p-5"
+      className="surface-panel h-full min-w-0 p-5"
       aria-labelledby="us-index-table-title"
     >
       <h2 id="us-index-table-title" className="m-0 text-base font-extrabold">
@@ -137,19 +129,19 @@ export function UsIndexPerformanceTable({
         <ResponsiveTable>
           <thead className="border-y border-line bg-link-hover text-xs font-bold text-sea-ink-soft">
             <tr>
-              <th scope="col" className="px-4 py-3 text-left">
+              <th scope="col" className="px-4 py-1.5 text-left">
                 {t("usIndexTableIndex")}
               </th>
-              <th scope="col" className="px-4 py-3 text-right">
+              <th scope="col" className="px-4 py-1.5 text-right">
                 {t("usIndexTableClose")}
               </th>
-              <th scope="col" className="px-4 py-3 text-right">
+              <th scope="col" className="px-4 py-1.5 text-right">
                 {t("usIndexTableDaily")}
               </th>
-              <th scope="col" className="px-4 py-3 text-right">
+              <th scope="col" className="px-4 py-1.5 text-right">
                 {t("usIndexTableMonthly")}
               </th>
-              <th scope="col" className="px-4 py-3 text-right">
+              <th scope="col" className="px-4 py-1.5 text-right">
                 {t("usIndexTableYearly")}
               </th>
             </tr>
@@ -162,13 +154,13 @@ export function UsIndexPerformanceTable({
               >
                 <th
                   scope="row"
-                  className="whitespace-nowrap px-4 py-4 text-left font-semibold text-sea-ink"
+                  className="whitespace-nowrap px-4 py-1 text-left font-semibold text-sea-ink"
                 >
                   {t(indexNameKey(row.symbol) ?? row.symbol)}
                 </th>
                 <td
                   data-label={t("usIndexTableClose")}
-                  className="px-4 py-4 text-right font-mono tabular-nums text-sea-ink"
+                  className="px-4 py-1 text-right font-mono tabular-nums text-sea-ink"
                 >
                   {formatNumber(row.close, "index", locale)}
                 </td>
@@ -186,7 +178,7 @@ export function UsIndexPerformanceTable({
                           "usIndexTableYearly",
                         ][column]!
                       )}
-                      className={`whitespace-nowrap px-4 py-4 text-right font-mono tabular-nums ${directionClass(change.direction)}`}
+                      className={`whitespace-nowrap px-4 py-1 text-right font-mono tabular-nums ${directionClass(change.direction)}`}
                     >
                       {change.text}
                     </td>

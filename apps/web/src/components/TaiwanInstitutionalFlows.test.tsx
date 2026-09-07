@@ -92,6 +92,8 @@ describe("TaiwanInstitutionalFlows", () => {
       screen.getByRole("heading", { name: "Daily institutional net buying" })
     ).toBeInTheDocument()
     expect(screen.getAllByRole("button", { pressed: true })).toHaveLength(3)
+    expect(screen.queryByText(/as of/)).toBeNull()
+    expect(document.querySelector("details")).toBeNull()
     expect(screen.getByText("Stock 0")).toBeInTheDocument()
     expect(screen.queryByText("Stock 5")).not.toBeInTheDocument()
     expect(screen.getByText("Stock 11")).toBeInTheDocument()

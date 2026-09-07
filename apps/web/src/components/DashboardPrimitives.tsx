@@ -1,5 +1,4 @@
 import type { ReactNode } from "react"
-import { useTranslation } from "react-i18next"
 
 export function DashboardPanel({
   title,
@@ -25,12 +24,14 @@ export function DashboardSection({
   meta,
   children,
 }: {
-  meta: ReactNode
+  meta?: ReactNode
   children: ReactNode
 }) {
   return (
     <section className="min-w-0">
-      <div className="mb-3 text-xs text-sea-ink-soft">{meta}</div>
+      {meta ? (
+        <div className="mb-3 text-xs text-sea-ink-soft">{meta}</div>
+      ) : null}
       {children}
     </section>
   )
@@ -65,17 +66,5 @@ export function DashboardChoices<T extends string | number>({
         </button>
       ))}
     </div>
-  )
-}
-
-export function Methodology({ children }: { children: ReactNode }) {
-  const { t } = useTranslation()
-  return (
-    <details className="mt-3 text-xs text-sea-ink-soft">
-      <summary className="cursor-pointer font-bold transition-colors duration-120 hover:text-palm focus-visible:outline-2 focus-visible:outline-lagoon">
-        {t("methodology")}
-      </summary>
-      <p className="mt-2 mb-0 max-w-[80ch] leading-5 text-pretty">{children}</p>
-    </details>
   )
 }

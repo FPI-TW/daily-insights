@@ -119,7 +119,6 @@ describe("TaiwanIndexHistoryChart", () => {
       )
     ).toBeCloseTo(200 / 3)
     fireEvent.click(screen.getByRole("button", { name: "Zoom TAIEX bias" }))
-    expect(screen.getByText("Last visible session 2026-01-01")).toBeVisible()
     expect(
       Number(
         screen

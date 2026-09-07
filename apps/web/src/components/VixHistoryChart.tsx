@@ -199,12 +199,6 @@ export function VixHistoryChart({
       </div>
       <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs text-sea-ink-soft">
         <div className="flex gap-1">
-          <dt>{t("vixChartLatestDate")}</dt>
-          <dd className="m-0 font-semibold text-sea-ink">
-            {formatIsoDate(latest.trade_date, locale)}
-          </dd>
-        </div>
-        <div className="flex gap-1">
           <dt>{t("vixChartLatestClose")}</dt>
           <dd className="m-0 font-mono font-semibold text-sea-ink tabular-nums">
             {formatNumber(latest.close, "index", locale)}
