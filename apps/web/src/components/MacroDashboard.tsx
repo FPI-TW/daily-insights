@@ -380,7 +380,7 @@ function HistoryTable({
                   ) : (
                     t(`macroAsset_${id}`)
                   )}
-                  {history && !fx ? (
+                  {history && !fx && !rates ? (
                     <span className="mt-0.5 block font-mono text-xs leading-4 font-normal text-sea-ink-soft">
                       {unitLabel(history.unit, t) ?? history.unit}
                     </span>
