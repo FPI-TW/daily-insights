@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.reports import macro_dashboard as macro
@@ -151,14 +152,68 @@ def test_calendar_value_parser_preserves_scale_and_rejects_placeholders() -> Non
     assert macro.parse_calendar_value("N/A") == (None, None)
 
 
-async def test_disabled_yahoo_makes_no_provider_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_disabled_providers_make_no_provider_calls(monkeypatch: pytest.MonkeyPatch) -> None:
     def unexpected(**kwargs: object) -> None:
         raise AssertionError("disabled provider was instantiated")
 
     monkeypatch.setattr(macro, "YfinanceAdapter", unexpected)
-    histories = await macro.load_market_histories(Settings(yfinance_enabled=False))
-    assert len(histories) == len(macro.INSTRUMENTS)
+    monkeypatch.setattr(macro, "TwelveDataTransport", unexpected)
+    histories = await macro.load_market_histories(
+        Settings(yfinance_enabled=False, twelve_data_api_key=None)
+    )
+    assert len(histories) == len(macro.COMMODITIES) + len(macro.INSTRUMENTS)
     assert all(item.status == "disabled" for item in histories)
+    assert [item.source for item in histories[: len(macro.COMMODITIES)]] == ["Twelve Data"] * len(
+        macro.COMMODITIES
+    )
+
+
+async def test_commodities_use_twelve_data_spot_symbols(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    calls: list[dict[str, object]] = []
+
+    class FakeTransport:
+        def __init__(self, **kwargs: object) -> None:
+            assert kwargs["api_key"].get_secret_value() == "key"  # type: ignore[attr-defined]
+
+        async def __aenter__(self) -> "FakeTransport":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    class FakeAdapter:
+        def __init__(self, transport: object) -> None:
+            assert isinstance(transport, FakeTransport)
+
+        async def get_daily_bars(self, **kwargs: object) -> object:
+            calls.append(kwargs)
+            if kwargs["symbol"] == "HG1":
+                raise RuntimeError("provider down")
+            return SimpleNamespace(
+                items=(
+                    SimpleNamespace(trade_date=date(2026, 9, 3), close=Decimal("100")),
+                    SimpleNamespace(trade_date=date(2026, 9, 4), close=Decimal("101")),
+                )
+            )
+
+    monkeypatch.setattr(macro, "TwelveDataTransport", FakeTransport)
+    monkeypatch.setattr(macro, "TwelveDataAdapter", FakeAdapter)
+    histories = await macro.load_commodity_histories(Settings(twelve_data_api_key=SecretStr("key")))
+    assert [item.symbol for item in histories] == [
+        "XBR/USD",
+        "WTI/USD",
+        "XAU/USD",
+        "XAG/USD",
+        "HG1",
+    ]
+    assert all(call["symbol_type"] == "commodity" for call in calls)
+    assert all(call["expected_currency"] == "USD" for call in calls)
+    assert all(call["outputsize"] == macro.COMMODITY_HISTORY for call in calls)
+    assert [item.status for item in histories] == ["ok", "ok", "ok", "ok", "unavailable"]
+    assert all(item.source == "Twelve Data" for item in histories)
+    assert histories[0].points[-1].value == Decimal("101")
 
 
 async def test_cache_coalesces_concurrent_requests(monkeypatch: pytest.MonkeyPatch) -> None:
