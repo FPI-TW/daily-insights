@@ -8,6 +8,7 @@ import type { AnalystViewpoint, Locale } from "@daily-insights/api-client"
 import {
   directionClass,
   formatChange,
+  formatIsoDate,
   formatTimestamp,
   formatNumber,
   literalDirection,
@@ -277,9 +278,28 @@ function AnalystViewpoints({
 
 /** Freshness line above the blocks: a stale marker with its reason and the
  * report-level caveat when the pipeline attached one. */
-function ReportFreshness({ report }: { report: ProvisionalReport }) {
+function ReportFreshness({
+  locale,
+  report,
+}: {
+  locale: Locale
+  report: ProvisionalReport
+}) {
   const { t } = useTranslation()
-  if (!report.stale && !report.caveat && report.status !== "partial")
+  const sourceTooOldForUsEquity =
+    report.marketCode === "us_equity" && report.staleReason === "source_too_old"
+  const usEquitySourceDate =
+    report.marketCode === "us_equity" ? report.sourceDate : null
+  const showLastUpdated = usEquitySourceDate !== null
+  const showStaleReason =
+    report.stale && report.staleReason && !sourceTooOldForUsEquity
+
+  if (
+    !report.stale &&
+    !report.caveat &&
+    report.status !== "partial" &&
+    !showLastUpdated
+  )
     return null
   return (
     <div className="mb-4 text-xs text-sea-ink-soft">
@@ -295,8 +315,15 @@ function ReportFreshness({ report }: { report: ProvisionalReport }) {
           </span>
         ) : null}
       </div>
-      {report.stale && report.staleReason ? (
+      {showStaleReason ? (
         <p className="mt-1 mb-0">{report.staleReason}</p>
+      ) : null}
+      {usEquitySourceDate !== null ? (
+        <p className="mt-1 mb-0">
+          {t("reportLastUpdated", {
+            date: formatIsoDate(usEquitySourceDate, locale),
+          })}
+        </p>
       ) : null}
       {report.caveat ? <p className="mt-1 mb-0">{report.caveat}</p> : null}
     </div>
@@ -322,7 +349,7 @@ export function ReportDetail({
   const loneNarrowBlock = narrowBlocks.length === 1 && !leadingBlock
   return (
     <>
-      <ReportFreshness report={report} />
+      <ReportFreshness locale={locale} report={report} />
       {viewpoint ? <MarketViewpoint viewpoint={viewpoint} /> : null}
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">
         {leadingBlock ? <div className="min-w-0">{leadingBlock}</div> : null}

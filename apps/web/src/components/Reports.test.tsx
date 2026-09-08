@@ -286,6 +286,25 @@ describe("three-market report presentation", () => {
     expect(screen.getByText("Provider closed for a holiday.")).toBeVisible()
   })
 
+  it("shows the US equity source date instead of a source_too_old reason", async () => {
+    const report = {
+      marketCode: "us_equity",
+      status: "complete",
+      editionDate: "2026-09-03",
+      sourceDate: "2026-09-02",
+      stale: true,
+      staleReason: "source_too_old",
+      caveatKey: "reportCaveatLive",
+      summaryKey: "reportSummary_us_equity",
+      blocks: [],
+    } satisfies ProvisionalReport
+
+    await renderLocalized(<ReportDetail locale="en" report={report} />, "en")
+
+    expect(screen.getByText("Data last updated: Sep 2, 2026")).toBeVisible()
+    expect(screen.queryByText("source_too_old")).toBeNull()
+  })
+
   it("labels table columns with their units and colours percent cells", async () => {
     const report = {
       marketCode: "us_equity",
