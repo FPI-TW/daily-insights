@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest"
 import type { User } from "@daily-insights/api-client"
 import {
+  adminEntryDestination,
   canEnterAdmin,
   canEnterBackOffice,
   canEnterCustomer,
+  customerEntryDestination,
   customerOrganizationScope,
-  destinationFor,
   INTERNAL_CUSTOMER_ORGANIZATION,
 } from "./authorization"
 
@@ -23,10 +24,16 @@ function user(overrides: Partial<User> = {}): User {
 }
 
 describe("route authorization decisions", () => {
-  it("gates unauthenticated and temporary-password sessions", () => {
-    expect(destinationFor(null)).toBe("login")
-    expect(destinationFor(user({ must_change_password: true }))).toBe(
-      "change-password"
+  it("uses separate customer and admin entry destinations", () => {
+    expect(customerEntryDestination(null)).toBe("customer-login")
+    expect(adminEntryDestination(null)).toBe("admin-login")
+    expect(customerEntryDestination(user())).toBe("reports")
+    expect(adminEntryDestination(user())).toBe("reports")
+    expect(customerEntryDestination(user({ must_change_password: true }))).toBe(
+      "customer-change-password"
+    )
+    expect(adminEntryDestination(user({ must_change_password: true }))).toBe(
+      "customer-change-password"
     )
   })
 
@@ -38,9 +45,29 @@ describe("route authorization decisions", () => {
     })
     const admin = user({ system_role: "admin", organization_id: null })
 
-    expect(destinationFor(member)).toBe("customer")
-    expect(destinationFor(assetManager)).toBe("admin")
-    expect(destinationFor(admin)).toBe("admin")
+    expect(customerEntryDestination(member)).toBe("reports")
+    expect(customerEntryDestination(assetManager)).toBe("reports")
+    expect(customerEntryDestination(admin)).toBe("reports")
+    expect(adminEntryDestination(assetManager)).toBe("admin-audio")
+    expect(adminEntryDestination(admin)).toBe("admin-audio")
+    expect(
+      customerEntryDestination(
+        user({
+          system_role: "admin",
+          organization_id: null,
+          must_change_password: true,
+        })
+      )
+    ).toBe("admin-change-password")
+    expect(
+      adminEntryDestination(
+        user({
+          system_role: "asset_manager",
+          organization_id: null,
+          must_change_password: true,
+        })
+      )
+    ).toBe("admin-change-password")
     expect(canEnterCustomer(member)).toBe(true)
     expect(canEnterBackOffice(member)).toBe(false)
     expect(canEnterCustomer(assetManager)).toBe(true)
@@ -60,6 +87,12 @@ describe("route authorization decisions", () => {
     expect(canEnterCustomer(user({ organization_id: null }))).toBe(false)
     expect(customerOrganizationScope(user({ organization_id: null }))).toBe(
       null
+    )
+    expect(customerEntryDestination(user({ organization_id: null }))).toBe(
+      "customer-login"
+    )
+    expect(adminEntryDestination(user({ organization_id: null }))).toBe(
+      "admin-login"
     )
   })
 })

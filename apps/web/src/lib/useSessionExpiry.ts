@@ -21,13 +21,13 @@ export function useSessionExpiryRedirect(
       }
       if (surface === "customer") {
         await router.navigate({
-          to: "/$locale/login",
+          to: "/{-$locale}/login",
           params: { locale },
           replace: true,
         })
       } else {
         await router.navigate({
-          to: "/$locale/admin/login",
+          to: "/{-$locale}/admin/login",
           params: { locale },
           replace: true,
         })

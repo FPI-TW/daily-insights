@@ -26,7 +26,7 @@ vi.mock("@tanstack/react-router", () => ({
     to,
     ...props
   }: MockLinkProps) => (
-    <a href={to.replace("$locale", params?.locale ?? "")} {...props}>
+    <a href={to.replace("{-$locale}", params?.locale ?? "")} {...props}>
       {children}
     </a>
   ),
@@ -82,5 +82,24 @@ describe("AppShell customer navigation", () => {
     )
     expect(aiNewsLink).toHaveAttribute("target", "_blank")
     expect(aiNewsLink).toHaveAttribute("rel", "noreferrer")
+  })
+
+  it("offers admins a direct route to customer reports", () => {
+    render(
+      <I18nextProvider i18n={createI18n("zh-hant")}>
+        <AppShell
+          locale="zh-hant"
+          user={{ ...user, system_role: "admin", organization_id: null }}
+          surface="admin"
+        >
+          <main>Content</main>
+        </AppShell>
+      </I18nextProvider>
+    )
+
+    expect(screen.getByRole("link", { name: "前往晨間報告" })).toHaveAttribute(
+      "href",
+      "/zh-hant/reports"
+    )
   })
 })

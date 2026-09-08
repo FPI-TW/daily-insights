@@ -25,18 +25,18 @@ type LocaleDestination =
   | "admin-change-password"
 
 const destinations = {
-  "customer-login": "/$locale/login",
-  "customer-reports": "/$locale/reports",
-  "customer-podcasts": "/$locale/podcasts",
-  "customer-account": "/$locale/account",
-  "customer-change-password": "/$locale/change-password",
-  "admin-login": "/$locale/admin/login",
-  "admin-audio": "/$locale/admin/audio",
-  "admin-members": "/$locale/admin/members",
-  "admin-data-management": "/$locale/admin/data-management",
-  "admin-news-management": "/$locale/admin/news-management",
-  "admin-analyst-viewpoints": "/$locale/admin/analyst-viewpoints",
-  "admin-change-password": "/$locale/admin/change-password",
+  "customer-login": "/{-$locale}/login",
+  "customer-reports": "/{-$locale}/reports",
+  "customer-podcasts": "/{-$locale}/podcasts",
+  "customer-account": "/{-$locale}/account",
+  "customer-change-password": "/{-$locale}/change-password",
+  "admin-login": "/{-$locale}/admin/login",
+  "admin-audio": "/{-$locale}/admin/audio",
+  "admin-members": "/{-$locale}/admin/members",
+  "admin-data-management": "/{-$locale}/admin/data-management",
+  "admin-news-management": "/{-$locale}/admin/news-management",
+  "admin-analyst-viewpoints": "/{-$locale}/admin/analyst-viewpoints",
+  "admin-change-password": "/{-$locale}/admin/change-password",
 } as const
 
 export function LocaleSwitcher({
@@ -58,9 +58,9 @@ export function LocaleSwitcher({
       aria-label={t("language")}
       className={`relative isolate flex min-h-9 items-center rounded-lg border border-chip-line bg-chip p-1 [&>a]:rounded-md [&>a]:font-extrabold [&>a]:whitespace-nowrap [&>a]:text-sea-ink-soft [&>a]:no-underline [&>a]:transition-colors [&>a[aria-current=page]]:text-white ${
         variant === "dialog"
-          ? "w-full [&>a]:min-h-7 [&>a]:flex-1 [&>a]:px-3 [&>a]:py-[5px] [&>a]:text-center [&>a]:text-[11.5px] [&>a:not([aria-current=page])]:hover:text-sea-ink"
+          ? "w-full [&>a]:min-h-7 [&>a]:flex-1 [&>a]:px-3 [&>a]:py-1.25 [&>a]:text-center [&>a]:text-[11.5px] [&>a:not([aria-current=page])]:hover:text-sea-ink"
           : variant === "row"
-            ? "shrink-0 [&>a]:min-h-7 [&>a]:px-3 [&>a]:py-[5px] [&>a]:text-[11.5px] [&>a:not([aria-current=page])]:hover:text-sea-ink max-sm:[&>a]:px-2"
+            ? "shrink-0 [&>a]:min-h-7 [&>a]:px-3 [&>a]:py-1.25 [&>a]:text-[11.5px] [&>a:not([aria-current=page])]:hover:text-sea-ink max-sm:[&>a]:px-2"
             : "shrink-0 [&>a]:px-2 [&>a]:py-1 [&>a]:text-[0.68rem] max-sm:[&>a]:px-1.5"
       }`}
     >
@@ -71,7 +71,7 @@ export function LocaleSwitcher({
         return reportMarketCode ? (
           <Link
             key={code}
-            to="/$locale/reports/$marketCode"
+            to="/{-$locale}/reports/$marketCode"
             params={{ locale: code, marketCode: reportMarketCode }}
             aria-current={active ? "page" : undefined}
           >

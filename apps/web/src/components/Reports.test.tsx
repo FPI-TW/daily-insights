@@ -964,7 +964,7 @@ describe("three-market report presentation", () => {
     const simplifiedChinese = screen.getByRole("link", { name: "简中" })
     expect(simplifiedChinese).toHaveAttribute(
       "data-to",
-      "/$locale/reports/$marketCode"
+      "/{-$locale}/reports/$marketCode"
     )
     expect(simplifiedChinese).toHaveAttribute(
       "data-params",

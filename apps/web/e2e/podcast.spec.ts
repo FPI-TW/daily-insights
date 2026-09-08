@@ -152,6 +152,52 @@ test.describe("Portal authentication and boundaries", () => {
     ).toHaveCount(0)
   })
 
+  test("canonicalizes unlocalized customer and admin routes", async ({
+    context,
+    page,
+  }) => {
+    await page.goto("/")
+    await expect(page).toHaveURL("/zh-hant/login")
+
+    await authenticateAs(context, "org_member")
+    await page.goto("/")
+    await expect(page).toHaveURL("/zh-hant/reports")
+
+    await page.goto("/admin")
+    await expect(page).toHaveURL("/zh-hant/reports")
+
+    await page.goto(`/reports/${episodeId}?source=legacy#episode`)
+    await expect(page).toHaveURL(
+      `/zh-hant/reports/${episodeId}?source=legacy#episode`
+    )
+
+    await context.clearCookies()
+    await page.goto("/admin")
+    await expect(page).toHaveURL("/zh-hant/admin/login")
+
+    await authenticateAs(context, "admin")
+    await page.goto("/admin")
+    await expect(page).toHaveURL("/zh-hant/admin/audio")
+    await page.goto("/admin/audio")
+    await expect(page).toHaveURL("/zh-hant/admin/audio")
+  })
+
+  test("admin can open reports from the admin header", async ({
+    context,
+    page,
+  }) => {
+    await authenticateAs(context, "admin")
+    await openHydrated(page, "/en/admin/audio", '[data-surface="admin"]')
+    await page.getByRole("link", { name: "View reports" }).click()
+    await expect(page).toHaveURL("/en/reports")
+    await expect(page.locator('[data-surface="customer"]')).toBeVisible()
+  })
+
+  test("leaves an unknown unlocalized path as a 404", async ({ page }) => {
+    await page.goto("/not-a-route")
+    await expect(page.getByRole("heading", { name: "404" })).toBeVisible()
+  })
+
   test("logout returns each surface to its matching login", async ({
     context,
     page,
