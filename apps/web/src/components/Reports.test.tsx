@@ -140,11 +140,17 @@ describe("three-market report presentation", () => {
     expect(closing.closest("section")).not.toHaveClass("xl:col-span-2")
   })
 
-  it("lists every market the API marks visible, in API order", async () => {
+  it("lists supported market tabs in API order", async () => {
     await renderLocalized(
       <ReportShell
         locale="en"
-        markets={[...markets, { code: "forex", name: "Foreign Exchange" }]}
+        markets={[
+          ...markets,
+          { code: "hk_equity", name: "Hong Kong Equities" },
+          { code: "cn_equity", name: "China Equities" },
+          { code: "tw_index_derivatives", name: "Taiwan Index Derivatives" },
+          { code: "forex", name: "Foreign Exchange" },
+        ]}
       >
         <ReportList />
       </ReportShell>,
@@ -152,15 +158,14 @@ describe("three-market report presentation", () => {
     )
     const links = screen.getByRole("navigation").querySelectorAll("a")
     expect(Array.from(links).map(link => link.textContent)).toEqual([
-      "All markets",
-      "Global macro & bonds",
-      "Crypto",
+      "Global overview",
+      "Global macro",
       "US equities",
       "Taiwan equities",
     ])
     expect(links[2]).toHaveAttribute(
       "data-params",
-      JSON.stringify({ locale: "en", marketCode: "crypto" })
+      JSON.stringify({ locale: "en", marketCode: "us_equity" })
     )
   })
 

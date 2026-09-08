@@ -28,6 +28,13 @@ import { ActiveIndicator } from "./ActiveIndicator"
 
 type Translate = ReturnType<typeof useTranslation>["t"]
 
+const HIDDEN_REPORT_NAV_MARKETS = new Set<MarketCode>([
+  "crypto",
+  "hk_equity",
+  "cn_equity",
+  "tw_index_derivatives",
+])
+
 /** Display text for a value that is not a number: translation keys and
  * pre-formatted literals. Numbers go through `formatNumber`/`formatChange`. */
 function valueText(value: ReportValue | null, t: Translate) {
@@ -121,8 +128,9 @@ function ReportMarketNav({
       {markets
         .filter(
           market =>
-            market.code !== "forex" ||
-            !markets.some(item => item.code === "global_macro_bonds")
+            !HIDDEN_REPORT_NAV_MARKETS.has(market.code) &&
+            (market.code !== "forex" ||
+              !markets.some(item => item.code === "global_macro_bonds"))
         )
         .map(market => (
           <Link
