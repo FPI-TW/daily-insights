@@ -73,7 +73,8 @@ describe("DataManagementPage", () => {
       taipei_date: "2026-09-07",
       morning_reports_enabled: true,
       yfinance_enabled: true,
-      markets: ["crypto"],
+      macro_dashboard_enabled: true,
+      markets: ["global_macro_bonds", "crypto"],
     })
     listRuns.mockResolvedValue({ items: [] })
     renderPage()
@@ -93,7 +94,7 @@ describe("DataManagementPage", () => {
       yfinance_enabled: true,
       twse_enabled: true,
       daily_news_enabled: true,
-      markets: ["crypto"],
+      markets: ["global_macro_bonds", "crypto"],
       news_markets: ["global"],
       macro_dashboard_enabled: true,
     })
@@ -116,7 +117,7 @@ describe("DataManagementPage", () => {
     })
     renderPage()
     expect(
-      await screen.findByRole("button", { name: "Refresh global macro data" })
+      await screen.findByRole("button", { name: "Global macro" })
     ).toBeEnabled()
   })
 
@@ -127,7 +128,7 @@ describe("DataManagementPage", () => {
       yfinance_enabled: true,
       twse_enabled: true,
       daily_news_enabled: true,
-      markets: ["crypto"],
+      markets: ["global_macro_bonds", "crypto"],
       news_markets: ["global"],
       macro_dashboard_enabled: true,
     })
@@ -150,7 +151,7 @@ describe("DataManagementPage", () => {
     })
     renderPage()
     expect(
-      await screen.findByRole("button", { name: "Refresh global macro data" })
+      await screen.findByRole("button", { name: "Global macro" })
     ).toBeDisabled()
   })
 
@@ -200,16 +201,24 @@ describe("DataManagementPage", () => {
     resolve({})
   })
 
-  it("submits single-market and Yahoo operations directly", async () => {
+  it("routes the global macro market to its dashboard refresh and other markets to reports", async () => {
     catalog.mockResolvedValue({
       taipei_date: "2026-09-07",
       morning_reports_enabled: true,
       yfinance_enabled: true,
-      markets: ["crypto"],
+      macro_dashboard_enabled: true,
+      markets: ["global_macro_bonds", "crypto"],
     })
     listRuns.mockResolvedValue({ items: [] })
     createRun.mockResolvedValue({})
     renderPage()
+    fireEvent.click(await screen.findByRole("button", { name: "Global macro" }))
+    await waitFor(() =>
+      expect(createRun).toHaveBeenCalledWith(
+        { operation: "macro_dashboard" },
+        "csrf"
+      )
+    )
     fireEvent.click(await screen.findByRole("button", { name: "Crypto" }))
     await waitFor(() =>
       expect(createRun).toHaveBeenCalledWith(

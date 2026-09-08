@@ -7,6 +7,7 @@ import {
   type Market,
   type MarketCode,
 } from "@daily-insights/api-client"
+import type { TFunction } from "i18next"
 import { createServerTransport } from "@daily-insights/api-client/server"
 import { createServerFn } from "@tanstack/react-start"
 import {
@@ -20,6 +21,18 @@ export function marketName(market: Market, locale: Locale) {
   if (locale === "zh-hant") return market.name_zh_hant
   if (locale === "zh-hans") return market.name_zh_hans
   return market.name_en
+}
+
+/**
+ * The customer report tabs and administration rerun controls deliberately use
+ * the same display label. Keep the localized market name in one translation
+ * family so a rename cannot drift between the two surfaces.
+ */
+export function marketTabLabel(
+  t: TFunction,
+  market: Pick<NavMarket, "code" | "name">
+) {
+  return t(`reportMarket_${market.code}`, { defaultValue: market.name })
 }
 
 // Not exported: anything referencing the server request helpers must stay

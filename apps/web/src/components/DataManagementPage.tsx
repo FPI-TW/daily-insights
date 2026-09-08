@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next"
 import { Dialog } from "#/components/Dialog"
 import { browserAdministrationClient } from "#/lib/admin-members"
 import { requireCsrfToken } from "#/lib/auth"
+import { marketTabLabel } from "#/lib/markets"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
 
 const catalogKey = ["data-management", "catalog"] as const
@@ -155,55 +156,40 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
         </section>
         <section
           className="surface-panel p-5"
-          aria-labelledby="macro-rerun-title"
-        >
-          <h2 id="macro-rerun-title" className="m-0 text-lg font-extrabold">
-            {t("dataManagementMacro")}
-          </h2>
-          <p className="mt-2 text-sm leading-6 text-sea-ink-soft">
-            {t("dataManagementMacroDescription")}
-          </p>
-          <button
-            type="button"
-            className="primary-action mt-4"
-            disabled={
-              Boolean(activeManualMacro) ||
-              enqueue.isPending ||
-              !catalog.data?.macro_dashboard_enabled
-            }
-            onClick={() => void submit({ operation: "macro_dashboard" })}
-          >
-            {t("dataManagementMacroAction")}
-          </button>
-        </section>
-        <section
-          className="surface-panel p-5"
           aria-labelledby="market-rerun-title"
         >
           <h2 id="market-rerun-title" className="m-0 text-lg font-extrabold">
             {t("dataManagementMarket")}
           </h2>
           <div className="mt-4 grid gap-2">
-            {catalog.data?.markets.map(market => (
-              <button
-                key={market}
-                type="button"
-                className="secondary-action text-left"
-                disabled={
-                  Boolean(activeMorning) ||
-                  enqueue.isPending ||
-                  !catalog.data?.morning_reports_enabled
-                }
-                onClick={() =>
-                  void submit({
-                    operation: "morning_market",
-                    market_code: market,
-                  })
-                }
-              >
-                {t(`reportMarket_${market}`)}
-              </button>
-            ))}
+            {catalog.data?.markets.map(market => {
+              const isMacroDashboard = market === "global_macro_bonds"
+              return (
+                <button
+                  key={market}
+                  type="button"
+                  className="secondary-action text-left"
+                  disabled={
+                    isMacroDashboard
+                      ? Boolean(activeManualMacro) ||
+                        enqueue.isPending ||
+                        !catalog.data?.macro_dashboard_enabled
+                      : Boolean(activeMorning) ||
+                        enqueue.isPending ||
+                        !catalog.data?.morning_reports_enabled
+                  }
+                  onClick={() =>
+                    void submit(
+                      isMacroDashboard
+                        ? { operation: "macro_dashboard" }
+                        : { operation: "morning_market", market_code: market }
+                    )
+                  }
+                >
+                  {marketTabLabel(t, { code: market, name: market })}
+                </button>
+              )
+            })}
           </div>
         </section>
         <section
@@ -317,7 +303,7 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
           {t("dataManagementConfirmWarning", {
             date: catalog.data?.taipei_date,
             markets: catalog.data?.markets
-              .map(market => t(`reportMarket_${market}`))
+              .map(market => marketTabLabel(t, { code: market, name: market }))
               .join(", "),
           })}
         </p>

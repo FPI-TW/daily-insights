@@ -369,12 +369,19 @@ async def test_admin_api_enqueues_lists_gets_conflicts_and_audits(
             "/api/admin/data-management/runs",
             json={"operation": "morning_market", "market_code": "crypto"},
         )
+        macro = await client.post(
+            "/api/admin/data-management/runs",
+            json={"operation": "morning_market", "market_code": "global_macro_bonds"},
+        )
         fetched = await client.get(f"/api/admin/data-management/runs/{created.json()['id']}")
 
     assert catalog.status_code == 200
     assert created.status_code == 202, created.text
     assert listed.status_code == 200 and len(listed.json()["items"]) == 1
     assert duplicate.status_code == 409
+    assert macro.status_code == 202
+    assert macro.json()["operation"] == "macro_dashboard"
+    assert macro.json()["market_code"] is None
     assert fetched.status_code == 200 and fetched.json()["operation"] == "morning_all"
     async with data_management_database() as database:
         actions = list(

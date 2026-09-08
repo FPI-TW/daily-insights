@@ -110,11 +110,20 @@ async def create_run(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "twse is unavailable")
     if payload.operation.startswith("news") and not settings.daily_news_enabled:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "daily news is unavailable")
+    # The historical single-market request remains accepted for compatibility,
+    # but Global macro is now the durable dashboard snapshot rather than a
+    # separate morning-report target.
+    operation = (
+        "macro_dashboard"
+        if payload.operation == "morning_market" and payload.market_code == "global_macro_bonds"
+        else payload.operation
+    )
+    market_code = None if operation == "macro_dashboard" else payload.market_code
     try:
         run = await enqueue_run(
             database,
-            operation=payload.operation,
-            market_code=payload.market_code,
+            operation=operation,
+            market_code=market_code,
             requester_id=actor.user.id,
             request_id=request.state.request_id,
         )
