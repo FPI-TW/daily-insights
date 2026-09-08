@@ -14,6 +14,7 @@ from daily_insights_api.modules.news.contracts import (
 from daily_insights_api.modules.news.extraction import FetchedCandidate
 from daily_insights_api.modules.news.llm import (
     DeepSeekClient,
+    ModelCall,
     ModelCallError,
     ModelOutputError,
     numeric_facts_grounded,
@@ -510,3 +511,75 @@ async def test_select_drops_picks_the_model_tags_for_another_market(
     assert isinstance(call.value, Selection)
     # The honest "us" tag costs that pick its slot; the Taiwan story stays.
     assert [item.event_key for item in call.value.selections] == ["tsmc-guidance"]
+
+
+async def test_selection_reports_rejected_picks_and_the_model_original_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The candidate record needs the model's own answer, not only what survived."""
+    from daily_insights_api.modules.news.editions import GLOBAL_SPEC
+
+    client = DeepSeekClient(base_url="https://api.deepseek.com", api_key="secret", model="test")
+    candidates = [
+        FetchedCandidate(
+            Candidate(
+                id=character * 64,
+                url=f"https://www.reuters.com/{character}",
+                hostname="www.reuters.com",
+                source_name="Reuters",
+                headline=f"Story {character}",
+            ),
+            f"https://www.reuters.com/{character}",
+            "Source body",
+            character * 64,
+        )
+        for character in "abcd"
+    ]
+    returned = [
+        {
+            "id": "a" * 64,
+            "topic": "markets",
+            "event_key": "event-a",
+            "market": "asia",
+            "importance": 5,
+        },
+        {
+            "id": "b" * 64,
+            "topic": "policy",
+            "event_key": "event-b",
+            "market": "global",
+            "importance": 4,
+        },
+        {
+            "id": "c" * 64,
+            "topic": "economy",
+            "event_key": "event-c",
+            "market": "global",
+            "importance": 3,
+        },
+        {
+            "id": "d" * 64,
+            "topic": "markets",
+            "event_key": "event-d",
+            "market": "global",
+            "importance": 2,
+        },
+    ]
+    monkeypatch.setattr(
+        client,
+        "_complete",
+        AsyncMock(return_value=({"selections": returned}, None, None, None, 1, "a" * 64)),
+    )
+    call = await client.select(candidates, policy=GLOBAL_SPEC.selection)
+    assert isinstance(call.value, Selection)
+    # The global digest allows two stories per domain: "a" is off-market and
+    # the third same-domain pick falls to policy repair.
+    assert [item.id for item in call.value.selections] == ["b" * 64, "c" * 64]
+    assert [(item.id[0], reason) for item, reason in call.rejected] == [
+        ("a", "off_market"),
+        ("d", "policy"),
+    ]
+    assert [item.id[0] for item in call.returned] == ["a", "b", "c", "d"]
+    # Positional construction without the new fields keeps working.
+    plain = ModelCall(call.value, None, None, None, 1, "a" * 64)
+    assert plain.rejected == () and plain.returned == ()

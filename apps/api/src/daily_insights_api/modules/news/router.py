@@ -49,7 +49,11 @@ async def _latest_response(
                 NewsEdition.status.in_(("complete", "partial")),
                 select(NewsItem.id)
                 .join(NewsPresentation, NewsPresentation.item_id == NewsItem.id)
-                .where(NewsItem.edition_id == NewsEdition.id, NewsPresentation.locale == locale)
+                .where(
+                    NewsItem.edition_id == NewsEdition.id,
+                    NewsItem.hidden_at.is_(None),
+                    NewsPresentation.locale == locale,
+                )
                 .exists(),
                 NewsEdition.market_code == spec.market_code,
             )
@@ -76,7 +80,9 @@ async def _latest_response(
             NewsPresentation,
             (NewsPresentation.item_id == NewsItem.id) & (NewsPresentation.locale == locale),
         )
-        .where(NewsItem.edition_id == edition.id)
+        # Hidden items stay in the immutable edition but are not shown to
+        # readers; manually published items are ordinary items.
+        .where(NewsItem.edition_id == edition.id, NewsItem.hidden_at.is_(None))
         .order_by(NewsItem.rank)
     )
     items = [

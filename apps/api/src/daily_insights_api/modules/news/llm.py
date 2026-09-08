@@ -144,6 +144,14 @@ class ModelCall:
     output_tokens: int | None
     latency_ms: int
     input_digest: str
+    # Selection picks the model returned but the edition removed before
+    # ``value``: (item, reason) with reason ``off_market`` (tagged outside the
+    # edition's market) or ``policy`` (cut by repair_selection_policy). Kept so
+    # the candidate record can show what the model actually answered.
+    rejected: tuple[tuple[SelectedCandidate, str], ...] = ()
+    # The model's full validated list in its own order, before filtering and
+    # repair; empty for summaries and for callers that construct positionally.
+    returned: tuple[SelectedCandidate, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -301,6 +309,7 @@ class DeepSeekClient:
             raise _failure_from_call(
                 "invalid selection JSON", call, error_code="selection_invalid_json"
             ) from error
+        returned = value.selections
         value, dropped = filter_selection_markets(value, policy)
         if dropped:
             emit_event(
@@ -308,13 +317,18 @@ class DeepSeekClient:
                 dropped=len(dropped),
                 markets=sorted({item.market for item in dropped}),
             )
+        kept_by_market = value
         try:
             value = repair_selection_policy(value, candidates, policy)
         except ValueError as error:
             raise _failure_from_call(
                 str(error), call, error_code="selection_invalid_candidate"
             ) from error
-        return ModelCall(value, *call[1:])
+        retained = {item.id for item in value.selections}
+        rejected = tuple((item, "off_market") for item in dropped) + tuple(
+            (item, "policy") for item in kept_by_market.selections if item.id not in retained
+        )
+        return ModelCall(value, *call[1:], rejected=rejected, returned=returned)
 
     async def summarize(
         self,

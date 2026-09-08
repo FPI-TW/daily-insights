@@ -31,6 +31,7 @@ EXPECTED_TABLES = {
     "memberships",
     "messages",
     "model_configurations",
+    "news_candidates",
     "news_editions",
     "news_generation_audits",
     "news_items",

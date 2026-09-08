@@ -915,7 +915,8 @@
                   "morning_all": "#/components/schemas/MorningAllRunResponse",
                   "morning_market": "#/components/schemas/MorningMarketRunResponse",
                   "news_all": "#/components/schemas/NewsAllRunResponse",
-                  "news_market": "#/components/schemas/NewsMarketRunResponse"
+                  "news_market": "#/components/schemas/NewsMarketRunResponse",
+                  "news_publish": "#/components/schemas/NewsPublishRunResponse"
                 },
                 "propertyName": "operation"
               },
@@ -937,6 +938,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/NewsMarketRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/NewsPublishRunResponse"
                 },
                 {
                   "$ref": "#/components/schemas/MacroDashboardRunResponse"
@@ -2826,6 +2830,480 @@
         "title": "MorningMarketRunResponse",
         "type": "object"
       },
+      "NewsAdminCandidate": {
+        "properties": {
+          "ai_event_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Event Key"
+          },
+          "ai_importance": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Importance"
+          },
+          "ai_market": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Market"
+          },
+          "ai_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Rank"
+          },
+          "ai_topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Topic"
+          },
+          "drop_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "off_market",
+                  "policy",
+                  "duplicate_event",
+                  "summary_failed",
+                  "reserve"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Drop Reason"
+          },
+          "headline": {
+            "title": "Headline",
+            "type": "string"
+          },
+          "hostname": {
+            "title": "Hostname",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Id"
+          },
+          "publish_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publish Error"
+          },
+          "publish_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publish Requested At"
+          },
+          "publish_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publish Run Id"
+          },
+          "seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seen At"
+          },
+          "source_name": {
+            "title": "Source Name",
+            "type": "string"
+          },
+          "source_published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Published At"
+          },
+          "stage": {
+            "enum": [
+              "discovered",
+              "fetch_failed",
+              "unused",
+              "reviewed",
+              "dropped",
+              "published"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "stage",
+          "drop_reason",
+          "headline",
+          "source_name",
+          "hostname",
+          "url",
+          "seen_at",
+          "source_published_at",
+          "ai_rank",
+          "ai_topic",
+          "ai_market",
+          "ai_importance",
+          "ai_event_key",
+          "item_id",
+          "publish_run_id",
+          "publish_requested_at",
+          "publish_error"
+        ],
+        "title": "NewsAdminCandidate",
+        "type": "object"
+      },
+      "NewsAdminCounts": {
+        "description": "Candidate stage totals for one edition, plus the hidden item count.",
+        "properties": {
+          "discovered": {
+            "title": "Discovered",
+            "type": "integer"
+          },
+          "dropped": {
+            "title": "Dropped",
+            "type": "integer"
+          },
+          "fetch_failed": {
+            "title": "Fetch Failed",
+            "type": "integer"
+          },
+          "hidden": {
+            "title": "Hidden",
+            "type": "integer"
+          },
+          "published": {
+            "title": "Published",
+            "type": "integer"
+          },
+          "reviewed": {
+            "title": "Reviewed",
+            "type": "integer"
+          },
+          "unused": {
+            "title": "Unused",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "discovered",
+          "fetch_failed",
+          "unused",
+          "reviewed",
+          "dropped",
+          "published",
+          "hidden"
+        ],
+        "title": "NewsAdminCounts",
+        "type": "object"
+      },
+      "NewsAdminEdition": {
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/NewsAdminCounts"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "prompt_version": {
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "enum": ["complete", "partial", "unavailable"],
+            "title": "Status",
+            "type": "string"
+          },
+          "target_items": {
+            "title": "Target Items",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "revision",
+          "status",
+          "generated_at",
+          "prompt_version",
+          "target_items",
+          "counts"
+        ],
+        "title": "NewsAdminEdition",
+        "type": "object"
+      },
+      "NewsAdminEditionEntry": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/NewsAdminCandidate"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "edition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NewsAdminEdition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NewsAdminItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "market_code": {
+            "title": "Market Code",
+            "type": "string"
+          }
+        },
+        "required": ["market_code", "edition", "items", "candidates"],
+        "title": "NewsAdminEditionEntry",
+        "type": "object"
+      },
+      "NewsAdminEditionsResponse": {
+        "properties": {
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          },
+          "editions": {
+            "items": {
+              "$ref": "#/components/schemas/NewsAdminEditionEntry"
+            },
+            "title": "Editions",
+            "type": "array"
+          }
+        },
+        "required": ["edition_date", "editions"],
+        "title": "NewsAdminEditionsResponse",
+        "type": "object"
+      },
+      "NewsAdminItem": {
+        "properties": {
+          "candidate_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Id"
+          },
+          "event_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Key"
+          },
+          "headline": {
+            "title": "Headline",
+            "type": "string"
+          },
+          "hidden": {
+            "title": "Hidden",
+            "type": "boolean"
+          },
+          "hidden_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hidden At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "importance": {
+            "title": "Importance",
+            "type": "integer"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market"
+          },
+          "origin": {
+            "enum": ["model", "manual"],
+            "title": "Origin",
+            "type": "string"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "source_headline": {
+            "title": "Source Headline",
+            "type": "string"
+          },
+          "source_hostname": {
+            "title": "Source Hostname",
+            "type": "string"
+          },
+          "source_name": {
+            "title": "Source Name",
+            "type": "string"
+          },
+          "source_published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Published At"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "topic": {
+            "title": "Topic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "rank",
+          "origin",
+          "hidden",
+          "hidden_at",
+          "headline",
+          "source_headline",
+          "source_name",
+          "source_hostname",
+          "source_url",
+          "source_published_at",
+          "topic",
+          "market",
+          "importance",
+          "event_key",
+          "candidate_id"
+        ],
+        "title": "NewsAdminItem",
+        "type": "object"
+      },
       "NewsAllRunCreate": {
         "additionalProperties": false,
         "properties": {
@@ -2955,6 +3433,29 @@
           "market_code"
         ],
         "title": "NewsAllRunResponse",
+        "type": "object"
+      },
+      "NewsCandidatePublishRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Candidate Ids",
+            "type": "array"
+          },
+          "edition_id": {
+            "format": "uuid",
+            "title": "Edition Id",
+            "type": "string"
+          }
+        },
+        "required": ["edition_id", "candidate_ids"],
+        "title": "NewsCandidatePublishRequest",
         "type": "object"
       },
       "NewsItemResponse": {
@@ -3190,6 +3691,121 @@
           "market_code"
         ],
         "title": "NewsMarketRunResponse",
+        "type": "object"
+      },
+      "NewsPublishRunResponse": {
+        "description": "A manual publish of admin-chosen news candidates; created only through\nthe news management API, never through the generic run endpoint.",
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "market_code": {
+            "title": "Market Code",
+            "type": "null"
+          },
+          "operation": {
+            "const": "news_publish",
+            "title": "Operation",
+            "type": "string"
+          },
+          "requested_by_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By User Id"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "succeeded",
+              "partial",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "edition_date",
+          "status",
+          "requested_by_user_id",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "result",
+          "error",
+          "operation",
+          "market_code"
+        ],
+        "title": "NewsPublishRunResponse",
         "type": "object"
       },
       "OrganizationCreate": {
@@ -5322,7 +5938,8 @@
                       "morning_all": "#/components/schemas/MorningAllRunResponse",
                       "morning_market": "#/components/schemas/MorningMarketRunResponse",
                       "news_all": "#/components/schemas/NewsAllRunResponse",
-                      "news_market": "#/components/schemas/NewsMarketRunResponse"
+                      "news_market": "#/components/schemas/NewsMarketRunResponse",
+                      "news_publish": "#/components/schemas/NewsPublishRunResponse"
                     },
                     "propertyName": "operation"
                   },
@@ -5344,6 +5961,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/NewsMarketRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NewsPublishRunResponse"
                     },
                     {
                       "$ref": "#/components/schemas/MacroDashboardRunResponse"
@@ -5403,7 +6023,8 @@
                       "morning_all": "#/components/schemas/MorningAllRunResponse",
                       "morning_market": "#/components/schemas/MorningMarketRunResponse",
                       "news_all": "#/components/schemas/NewsAllRunResponse",
-                      "news_market": "#/components/schemas/NewsMarketRunResponse"
+                      "news_market": "#/components/schemas/NewsMarketRunResponse",
+                      "news_publish": "#/components/schemas/NewsPublishRunResponse"
                     },
                     "propertyName": "operation"
                   },
@@ -5425,6 +6046,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/NewsMarketRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NewsPublishRunResponse"
                     },
                     {
                       "$ref": "#/components/schemas/MacroDashboardRunResponse"
@@ -5494,7 +6118,8 @@
                       "morning_all": "#/components/schemas/MorningAllRunResponse",
                       "morning_market": "#/components/schemas/MorningMarketRunResponse",
                       "news_all": "#/components/schemas/NewsAllRunResponse",
-                      "news_market": "#/components/schemas/NewsMarketRunResponse"
+                      "news_market": "#/components/schemas/NewsMarketRunResponse",
+                      "news_publish": "#/components/schemas/NewsPublishRunResponse"
                     },
                     "propertyName": "operation"
                   },
@@ -5516,6 +6141,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/NewsMarketRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NewsPublishRunResponse"
                     },
                     {
                       "$ref": "#/components/schemas/MacroDashboardRunResponse"
@@ -5679,6 +6307,266 @@
         },
         "summary": "Create Internal User",
         "tags": ["administration"]
+      }
+    },
+    "/api/admin/news/candidates/publish": {
+      "post": {
+        "description": "Queue a manual publish; the worker fetches, summarises and publishes.",
+        "operationId": "publish_candidates_api_admin_news_candidates_publish_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewsCandidatePublishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
+                      "institutional_twse": "#/components/schemas/InstitutionalTwseRunResponse",
+                      "macro_dashboard": "#/components/schemas/MacroDashboardRunResponse",
+                      "morning_all": "#/components/schemas/MorningAllRunResponse",
+                      "morning_market": "#/components/schemas/MorningMarketRunResponse",
+                      "news_all": "#/components/schemas/NewsAllRunResponse",
+                      "news_market": "#/components/schemas/NewsMarketRunResponse",
+                      "news_publish": "#/components/schemas/NewsPublishRunResponse"
+                    },
+                    "propertyName": "operation"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MorningAllRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MorningMarketRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexYahooRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InstitutionalTwseRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NewsAllRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NewsMarketRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NewsPublishRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MacroDashboardRunResponse"
+                    }
+                  ],
+                  "title": "Response Publish Candidates Api Admin News Candidates Publish Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Edition not found."
+          },
+          "409": {
+            "description": "Edition superseded or a manual publish is already active."
+          },
+          "422": {
+            "description": "A candidate is not in the edition or is already published."
+          },
+          "503": {
+            "description": "Daily news is disabled."
+          }
+        },
+        "summary": "Publish Candidates",
+        "tags": ["news management"]
+      }
+    },
+    "/api/admin/news/editions": {
+      "get": {
+        "description": "Latest revision of every market edition for one Taipei date.",
+        "operationId": "list_editions_api_admin_news_editions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsAdminEditionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Editions",
+        "tags": ["news management"]
+      }
+    },
+    "/api/admin/news/items/{item_id}/hide": {
+      "post": {
+        "operationId": "hide_item_api_admin_news_items__item_id__hide_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsAdminItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hide Item",
+        "tags": ["news management"]
+      }
+    },
+    "/api/admin/news/items/{item_id}/unhide": {
+      "post": {
+        "operationId": "unhide_item_api_admin_news_items__item_id__unhide_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsAdminItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unhide Item",
+        "tags": ["news management"]
       }
     },
     "/api/admin/organizations": {
