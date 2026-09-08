@@ -1,6 +1,6 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Protocol
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
@@ -10,10 +10,12 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from daily_insights_api.core.config import Settings
+
+class DatabaseRuntimeSettings(Protocol):
+    database_url: str | None
 
 
-def create_engine(settings: Settings) -> AsyncEngine:
+def create_engine(settings: DatabaseRuntimeSettings) -> AsyncEngine:
     assert settings.database_url is not None
     return create_async_engine(settings.database_url, pool_pre_ping=True)
 
