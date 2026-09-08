@@ -330,3 +330,46 @@ async def test_dashboard_authorizes_before_reading_shared_cache(
         await router.get_macro_dashboard(request, cast(AuthContext, None), cast(AsyncSession, None))
     assert error.value.status_code == 404
     service.get.assert_not_awaited()
+
+
+async def test_dashboard_reads_persisted_snapshot_without_live_provider_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+    from typing import cast
+
+    from fastapi import Request
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from daily_insights_api.modules.identity.api import AuthContext
+    from daily_insights_api.modules.reports import router
+    from daily_insights_api.modules.reports.macro_dashboard_models import MacroDashboardSnapshot
+
+    payload = macro.MacroDashboard(
+        fetched_at=datetime(2026, 9, 8, tzinfo=UTC),
+        histories=[],
+        calendar=macro.Calendar(status="ok", date=date(2026, 9, 8), source="Nasdaq"),
+    ).model_dump(mode="json")
+    database = SimpleNamespace(
+        get=AsyncMock(
+            return_value=MacroDashboardSnapshot(
+                scope_key="global_macro_bonds",
+                fetched_at=datetime(2026, 9, 8, tzinfo=UTC),
+                edition_date=date(2026, 9, 8),
+                payload=payload,
+            )
+        )
+    )
+    request = Request({"type": "http", "app": SimpleNamespace(state=SimpleNamespace())})
+    provider = AsyncMock()
+    monkeypatch.setattr(
+        router, "visible_report_market_codes", AsyncMock(return_value={"global_macro_bonds"})
+    )
+    monkeypatch.setattr(macro, "refresh_macro_dashboard", provider)
+
+    result = await router.get_macro_dashboard(
+        request, cast(AuthContext, None), cast(AsyncSession, database)
+    )
+
+    assert result.model_dump(mode="json") == payload
+    provider.assert_not_awaited()

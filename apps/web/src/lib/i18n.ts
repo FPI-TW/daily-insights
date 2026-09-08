@@ -291,6 +291,10 @@ const resources: Resource = {
       dataManagementInstitutionalDescription:
         "以證交所資料抓當天個股，並回補大盤 40 個交易日；已存在的日期不重抓。",
       dataManagementInstitutionalAction: "更新三大法人",
+      dataManagementMacro: "全球總經儀表板",
+      dataManagementMacroDescription: "重新整理並發布最新的全球總經資料快照。",
+      dataManagementMacroAction: "更新全球總經資料",
+      dataManagementCancel: "取消作業",
       dataManagementLatest: "最近執行結果",
       dataManagementAllMarkets: "全部市場",
       dataManagementConfirmTitle: "確認完整重跑",
@@ -1023,6 +1027,10 @@ const resources: Resource = {
       dataManagementInstitutionalDescription:
         "以证交所数据抓当天个股，并回补大盘 40 个交易日；已存在的日期不重抓。",
       dataManagementInstitutionalAction: "更新三大法人",
+      dataManagementMacro: "全球宏观仪表板",
+      dataManagementMacroDescription: "重新整理并发布最新的全球宏观资料快照。",
+      dataManagementMacroAction: "更新全球宏观资料",
+      dataManagementCancel: "取消任务",
       dataManagementLatest: "最近执行结果",
       dataManagementAllMarkets: "全部市场",
       dataManagementConfirmTitle: "确认完整重跑",
@@ -1766,6 +1774,11 @@ const resources: Resource = {
       dataManagementInstitutionalDescription:
         "Fetch the current trading day per security and backfill 40 trading days for the market from TWSE; dates already stored are not fetched again.",
       dataManagementInstitutionalAction: "Update institutional flows",
+      dataManagementMacro: "Global macro dashboard",
+      dataManagementMacroDescription:
+        "Refresh and publish the latest global macro data snapshot.",
+      dataManagementMacroAction: "Refresh global macro data",
+      dataManagementCancel: "Cancel run",
       dataManagementLatest: "Latest runs",
       dataManagementAllMarkets: "All markets",
       dataManagementConfirmTitle: "Confirm full rerun",

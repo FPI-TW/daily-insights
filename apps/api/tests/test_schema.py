@@ -27,6 +27,7 @@ EXPECTED_TABLES = {
     "institutional_stock_flows",
     "login_throttles",
     "markets",
+    "macro_dashboard_snapshots",
     "memberships",
     "messages",
     "model_configurations",

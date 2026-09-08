@@ -43,6 +43,7 @@ TABLE_OWNERS = {
     "institutional_stock_flows": "markets",
     "login_throttles": "identity",
     "markets": "markets",
+    "macro_dashboard_snapshots": "reports",
     "memberships": "tenancy",
     "messages": "chat",
     "model_configurations": "model_runtime",

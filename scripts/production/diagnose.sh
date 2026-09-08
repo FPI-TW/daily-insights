@@ -14,6 +14,7 @@ for container in \
   daily-insights-index-daily-bars-scheduler \
   daily-insights-institutional-flows-scheduler \
   daily-insights-data-management-worker \
+  daily-insights-macro-dashboard-scheduler \
   daily-insights-nginx; do
   if ! docker inspect "$container" >/dev/null 2>&1; then
     echo "$container: not created"

@@ -16,6 +16,7 @@ from daily_insights_api.modules.reports.scheduler import (
     TAIPEI,
     SameDayRetry,
     due_edition,
+    maintain_scheduler_heartbeat,
     next_run,
     parse_args,
     run_scheduler,
@@ -32,6 +33,33 @@ from daily_insights_api.scripts.run_morning_reports import (
 def test_due_edition_uses_taipei_day_boundary() -> None:
     assert due_edition(datetime(2026, 8, 29, 23, 59, tzinfo=UTC)) is None
     assert due_edition(datetime(2026, 8, 30, 0, 0, tzinfo=UTC)) == date(2026, 8, 30)
+
+
+def test_weekday_scheduler_does_not_make_weekend_editions_due() -> None:
+    saturday = datetime(2026, 8, 29, 8, 1, tzinfo=TAIPEI)
+    monday = datetime(2026, 8, 31, 8, 1, tzinfo=TAIPEI)
+    assert due_edition(saturday, weekdays_only=True) is None
+    assert due_edition(monday, weekdays_only=True) == date(2026, 8, 31)
+
+
+@pytest.mark.asyncio
+async def test_scheduler_heartbeat_runs_while_waiting_between_editions(
+    tmp_path: FileSystemPath,
+) -> None:
+    heartbeat = Path(tmp_path / "scheduler-heartbeat")
+    stopped = asyncio.Event()
+    task = asyncio.create_task(
+        maintain_scheduler_heartbeat(heartbeat, stopped, interval_seconds=0.001)
+    )
+    try:
+        for _ in range(20):
+            if await heartbeat.exists():
+                break
+            await asyncio.sleep(0.001)
+        assert await heartbeat.exists()
+    finally:
+        stopped.set()
+        await task
 
 
 def test_next_run_handles_before_and_after_deadline() -> None:

@@ -39,7 +39,7 @@ if grep -q 'postgres:' "$compose_file"; then
   exit 1
 fi
 
-production_services="api web nginx morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler institutional-flows-scheduler data-management-worker"
+production_services="api web nginx morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler institutional-flows-scheduler data-management-worker macro-dashboard-scheduler"
 for service in $production_services; do
   grep -q "^  ${service}:" "$compose_file"
   grep -q "container_name: daily-insights-${service}" "$compose_file"
@@ -83,6 +83,8 @@ grep -Fq '/tmp/index-daily-bars-heartbeat' "$compose_file"
 [ "$(grep -c 'DAILY_INSIGHTS_TWSE_ENABLED: ${DAILY_INSIGHTS_TWSE_ENABLED:-false}' "$compose_file")" -eq 3 ]
 grep -Fq 'daily_insights_api.scripts.run_institutional_flows' "$compose_file"
 grep -Fq '/tmp/institutional-flows-heartbeat' "$compose_file"
+grep -Fq 'daily_insights_api.scripts.run_macro_dashboard_scheduler' "$compose_file"
+grep -Fq '/tmp/macro-dashboard-scheduler-heartbeat' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_ENABLED: ${DAILY_INSIGHTS_CHAT_ENABLED:-false}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_PROVIDER: ${DAILY_INSIGHTS_CHAT_MODEL_PROVIDER:-deepseek}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_NAME: ${DAILY_INSIGHTS_CHAT_MODEL_NAME:-deepseek-chat}' "$compose_file"
@@ -311,14 +313,14 @@ grep -q 'compose .* pull' "$temporary_dir/deployment.log"
 grep -q 'compose .* run --rm --no-deps nginx nginx -t' "$temporary_dir/deployment.log"
 grep -q 'compose .* up -d --no-build --force-recreate --no-deps nginx' "$temporary_dir/deployment.log"
 grep -q 'compose .* run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log"
-grep -q 'compose .* up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler institutional-flows-scheduler data-management-worker' "$temporary_dir/deployment.log"
+grep -q 'compose .* up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler institutional-flows-scheduler data-management-worker macro-dashboard-scheduler' "$temporary_dir/deployment.log"
 grep -q 'exec daily-insights-nginx wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/api' "$temporary_dir/deployment.log"
 grep -q 'exec daily-insights-nginx wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/web' "$temporary_dir/deployment.log"
 
 nginx_validate_line=$(grep -n 'run --rm --no-deps nginx nginx -t' "$temporary_dir/deployment.log" | cut -d: -f1)
 nginx_recreate_line=$(grep -n 'up -d --no-build --force-recreate --no-deps nginx' "$temporary_dir/deployment.log" | cut -d: -f1)
 migration_line=$(grep -n 'run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log" | cut -d: -f1)
-backend_converge_line=$(grep -n 'up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler institutional-flows-scheduler data-management-worker' "$temporary_dir/deployment.log" | cut -d: -f1)
+backend_converge_line=$(grep -n 'up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler institutional-flows-scheduler data-management-worker macro-dashboard-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
 if [ "$nginx_validate_line" -ge "$nginx_recreate_line" ] ||
   [ "$nginx_recreate_line" -ge "$migration_line" ] ||
   [ "$migration_line" -ge "$backend_converge_line" ]; then

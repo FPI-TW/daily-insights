@@ -63,6 +63,14 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
       setConfirmOpen(false)
     },
   })
+  const cancelRun = useMutation({
+    mutationFn: async (runId: string) =>
+      browserAdministrationClient().cancelDataManagementRun(
+        runId,
+        await requireCsrfToken()
+      ),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: runsKey }),
+  })
   const errorMessage =
     enqueue.error instanceof ApiError && enqueue.error.status === 409
       ? t("newsManagementConflict")
@@ -194,6 +202,18 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
               <p className="mt-3 text-sm text-sea-ink-soft">
                 {run.error ?? String(run.result?.outcome ?? "")}
               </p>
+              {["pending", "running"].includes(run.status) ? (
+                <button
+                  type="button"
+                  className="secondary-action mt-3"
+                  disabled={cancelRun.isPending}
+                  onClick={() =>
+                    void cancelRun.mutateAsync(run.id).catch(redirectExpired)
+                  }
+                >
+                  {t("dataManagementCancel")}
+                </button>
+              ) : null}
             </details>
           ))}
         </div>

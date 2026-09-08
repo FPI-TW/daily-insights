@@ -13,6 +13,7 @@ from daily_insights_api.modules.data_management.schemas import (
     DataManagementRunResponse,
     IndexYahooRunResponse,
     InstitutionalTwseRunResponse,
+    MacroDashboardRunResponse,
     MorningAllRunResponse,
     MorningMarketRunResponse,
     NewsAllRunResponse,
@@ -21,6 +22,7 @@ from daily_insights_api.modules.data_management.schemas import (
 )
 from daily_insights_api.modules.data_management.service import (
     RunAlreadyActiveError,
+    cancel_run,
     enqueue_run,
     taipei_today,
 )
@@ -64,6 +66,8 @@ def response(run: DataManagementRun) -> DataManagementRunResponse:
         return NewsMarketRunResponse(
             operation="news_market", market_code=cast(str, run.market_code), **values
         )
+    if run.operation == "macro_dashboard":
+        return MacroDashboardRunResponse(operation="macro_dashboard", market_code=None, **values)
     return IndexYahooRunResponse(operation="index_yahoo", market_code=None, **values)
 
 
@@ -78,6 +82,7 @@ async def catalog(request: Request, _: AdminRead) -> DataManagementCatalog:
         markets=[item.market_code for item in ACTIVE_LAUNCH_MANIFEST.markets],
         daily_news_enabled=settings.daily_news_enabled,
         news_markets=list(EDITION_ORDER),
+        macro_dashboard_enabled=True,
     )
 
 
@@ -119,6 +124,33 @@ async def create_run(
         raise HTTPException(
             status.HTTP_409_CONFLICT, "an operation of this class is already active"
         ) from None
+    return response(run)
+
+
+@router.post(
+    "/runs/{run_id}/cancel",
+    response_model=DataManagementRunResponse,
+    responses={
+        status.HTTP_409_CONFLICT: {"description": "Run is terminal already or no longer exists."}
+    },
+)
+async def cancel_existing_run(
+    run_id: str,
+    request: Request,
+    actor: AdminWrite,
+    database: Annotated[AsyncSession, Depends(get_database_session)],
+) -> DataManagementRunResponse:
+    import uuid
+
+    try:
+        parsed = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found") from None
+    run = await cancel_run(
+        database, run_id=parsed, actor_user_id=actor.user.id, request_id=request.state.request_id
+    )
+    if run is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "run is not pending or running")
     return response(run)
 
 

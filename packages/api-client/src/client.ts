@@ -352,6 +352,18 @@ export function createAdministrationClient(transport: ApiTransport) {
         dataManagementRunSchema
       )
     },
+    async cancelDataManagementRun(runId: string, csrfToken: string) {
+      return parseResponse(
+        await transport(
+          `/api/admin/data-management/runs/${encodeURIComponent(runId)}/cancel`,
+          {
+            method: "POST",
+            headers: mutationHeaders(csrfToken),
+          }
+        ),
+        dataManagementRunSchema
+      )
+    },
     async refreshIndexDailyBars(csrfToken: string) {
       return parseResponse(
         await transport("/api/admin/data-sources/yfinance/daily-bars", {

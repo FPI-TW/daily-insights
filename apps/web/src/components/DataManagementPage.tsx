@@ -23,6 +23,7 @@ type RunInput =
     }
   | { operation: "index_yahoo" }
   | { operation: "institutional_twse" }
+  | { operation: "macro_dashboard" }
 
 export function DataManagementPage({ locale }: { locale: Locale }) {
   const { t } = useTranslation()
@@ -59,6 +60,14 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
       void queryClient.invalidateQueries({ queryKey: runsKey })
       setConfirmOpen(false)
     },
+  })
+  const cancelRun = useMutation({
+    mutationFn: async (runId: string) =>
+      browserAdministrationClient().cancelDataManagementRun(
+        runId,
+        await requireCsrfToken()
+      ),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: runsKey }),
   })
 
   const error = enqueue.error
@@ -97,6 +106,12 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
   const activeMorning = active(MORNING_OPERATIONS)
   const activeIndex = active(["index_yahoo"])
   const activeInstitutional = active(["institutional_twse"])
+  const activeManualMacro = runs.data?.items.some(
+    run =>
+      run.operation === "macro_dashboard" &&
+      run.requested_by_user_id !== null &&
+      ACTIVE_STATUSES.includes(run.status)
+  )
   return (
     <main className="page-shell">
       <header className="mb-8 max-w-3xl">
@@ -136,6 +151,29 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
             onClick={() => setConfirmOpen(true)}
           >
             {t("dataManagementFullAction")}
+          </button>
+        </section>
+        <section
+          className="surface-panel p-5"
+          aria-labelledby="macro-rerun-title"
+        >
+          <h2 id="macro-rerun-title" className="m-0 text-lg font-extrabold">
+            {t("dataManagementMacro")}
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-sea-ink-soft">
+            {t("dataManagementMacroDescription")}
+          </p>
+          <button
+            type="button"
+            className="primary-action mt-4"
+            disabled={
+              Boolean(activeManualMacro) ||
+              enqueue.isPending ||
+              !catalog.data?.macro_dashboard_enabled
+            }
+            onClick={() => void submit({ operation: "macro_dashboard" })}
+          >
+            {t("dataManagementMacroAction")}
           </button>
         </section>
         <section
@@ -249,6 +287,18 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
                   : ""}
               </summary>
               <RunDetail result={run.result} error={run.error} />
+              {ACTIVE_STATUSES.includes(run.status) ? (
+                <button
+                  type="button"
+                  className="secondary-action mt-3"
+                  disabled={cancelRun.isPending}
+                  onClick={() =>
+                    void cancelRun.mutateAsync(run.id).catch(redirectExpired)
+                  }
+                >
+                  {t("dataManagementCancel")}
+                </button>
+              ) : null}
             </details>
           ))}
         </div>

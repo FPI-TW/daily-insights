@@ -308,7 +308,6 @@ function HistoryTable({
   rates = false,
   selected,
   onSelect,
-  fetchedAt,
 }: {
   ids: string[]
   histories: MacroHistory[]
@@ -316,7 +315,6 @@ function HistoryTable({
   rates?: boolean
   selected?: string
   onSelect?: (id: string) => void
-  fetchedAt: string | undefined
 }) {
   const { t } = useTranslation()
   const fx = Boolean(onSelect)
@@ -360,10 +358,6 @@ function HistoryTable({
           {ids.map(id => {
             const history = histories.find(item => item.id === id)
             const latest = history?.points.at(-1)
-            const stale =
-              latest &&
-              fetchedAt &&
-              Date.parse(fetchedAt) - Date.parse(latest.date) > 7 * 86_400_000
             return (
               <tr
                 key={id}
@@ -385,11 +379,6 @@ function HistoryTable({
                   ) : (
                     t(`macroAsset_${id}`)
                   )}
-                  {stale ? (
-                    <span className="block text-xs font-normal text-sea-ink-soft">
-                      {t("reportStale")}
-                    </span>
-                  ) : null}
                 </th>
                 <td
                   data-label={t(rates ? "macroYield" : "macroClose")}
@@ -482,7 +471,6 @@ export function MacroDashboard({
                 ids={commodityIds}
                 histories={histories}
                 locale={locale}
-                fetchedAt={data?.fetched_at}
               />
             </DashboardPanel>
           </div>
@@ -533,7 +521,6 @@ export function MacroDashboard({
               histories={histories}
               locale={locale}
               rates
-              fetchedAt={data?.fetched_at}
             />
           </DashboardPanel>
           <DashboardPanel
@@ -636,7 +623,6 @@ export function MacroDashboard({
                   locale={locale}
                   selected={selectedFx}
                   onSelect={setSelectedFx}
-                  fetchedAt={data?.fetched_at}
                 />
               ))}
             </div>

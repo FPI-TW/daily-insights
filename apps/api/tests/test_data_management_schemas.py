@@ -25,6 +25,7 @@ response_adapter: TypeAdapter[DataManagementRunResponse] = TypeAdapter(DataManag
         ({"operation": "institutional_twse"}, "institutional_twse"),
         ({"operation": "news_all"}, "news_all"),
         ({"operation": "news_market", "market_code": "global"}, "news_market"),
+        ({"operation": "macro_dashboard"}, "macro_dashboard"),
     ],
 )
 def test_run_create_discriminator_accepts_only_valid_scope(
@@ -73,6 +74,10 @@ def test_run_response_discriminator_preserves_market_scope() -> None:
         {**base, "operation": "news_market", "market_code": "global"}
     )
     assert news_response.operation == "news_market" and news_response.market_code == "global"
+    macro_response = response_adapter.validate_python(
+        {**base, "operation": "macro_dashboard", "market_code": None, "status": "cancelled"}
+    )
+    assert macro_response.operation == "macro_dashboard" and macro_response.status == "cancelled"
 
 
 def test_openapi_declares_discriminated_responses_conflicts_and_legacy_deprecation() -> None:
@@ -88,6 +93,11 @@ def test_openapi_declares_discriminated_responses_conflicts_and_legacy_deprecati
     assert operation_group["schema"]["anyOf"][0]["const"] == "news"
     assert (
         schema["paths"]["/api/admin/data-sources/yfinance/daily-bars"]["post"]["deprecated"] is True
+    )
+    assert "/api/admin/data-management/runs/{run_id}/cancel" in schema["paths"]
+    cancel_post = schema["paths"]["/api/admin/data-management/runs/{run_id}/cancel"]["post"]
+    assert cancel_post["responses"]["409"]["description"] == (
+        "Run is terminal already or no longer exists."
     )
 
 
@@ -108,6 +118,25 @@ def test_run_market_scope_allows_global_news_without_a_market_catalog_foreign_ke
     assert "drop_constraint" in migration
     assert "fk_data_management_runs_market_code_markets" in migration
     assert "market_code_valid_for_operation" in migration
+
+
+def test_macro_snapshot_and_automatic_edition_indexes_are_registered() -> None:
+    run_table = Base.metadata.tables["data_management_runs"]
+    checks = [str(getattr(item, "sqltext", "")) for item in run_table.constraints]
+    assert any("macro_dashboard" in check and "operation IN" in check for check in checks)
+    index_names = {index.name for index in run_table.indexes}
+    assert "uq_data_management_runs_active_manual_macro_dashboard" in index_names
+    assert "uq_data_management_runs_running_macro_dashboard" in index_names
+    assert "uq_data_management_runs_automatic_macro_dashboard_edition" in index_names
+    snapshot = Base.metadata.tables["macro_dashboard_snapshots"]
+    assert {"scope_key", "fetched_at", "edition_date", "payload"} <= set(snapshot.columns.keys())
+    migration = (
+        Path(__file__).parents[1] / "migrations/versions/20260908_0021_macro_dashboard_queue.py"
+    ).read_text()
+    assert "macro_dashboard_snapshots" in migration
+    assert "automatic_macro_dashboard_edition" in migration
+    downgrade = migration[migration.index("def downgrade()") :]
+    assert "EXISTS (SELECT 1 FROM macro_dashboard_snapshots)" in downgrade
 
 
 def test_news_migration_downgrade_preflights_without_deleting_runs() -> None:
