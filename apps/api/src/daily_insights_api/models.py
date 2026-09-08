@@ -32,6 +32,7 @@ from daily_insights_api.modules.podcasts.models import (
     PodcastEpisodeAudioVariant,
     PodcastEpisodeTranslation,
 )
+from daily_insights_api.modules.reports.macro_dashboard_models import MacroDashboardSnapshot
 from daily_insights_api.modules.reports.models import PublicationSourceRun, ReportPublication
 from daily_insights_api.modules.tenancy.models import Membership, Organization
 
@@ -47,6 +48,7 @@ __all__ = [
     "DataManagementRun",
     "GenerationRecord",
     "LoginThrottle",
+    "MacroDashboardSnapshot",
     "Market",
     "Membership",
     "Message",

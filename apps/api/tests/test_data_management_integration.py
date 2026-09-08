@@ -1,7 +1,7 @@
 import os
 import uuid
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -18,9 +18,12 @@ from daily_insights_api.modules.audit.models import AuditEvent
 from daily_insights_api.modules.data_management import service as data_management_service
 from daily_insights_api.modules.data_management.models import DataManagementRun
 from daily_insights_api.modules.data_management.service import (
+    MACRO_EXECUTION_LOCK_KEY,
     RunAlreadyActiveError,
+    cancel_run,
     claim_next_run,
     complete_run,
+    enqueue_automatic_macro_run,
     enqueue_run,
     execution_lock_key,
     heartbeat_run,
@@ -158,6 +161,114 @@ async def test_a_scheduled_run_is_stored_without_a_requester_and_still_locks_its
             )
 
 
+async def test_automatic_macro_persists_behind_manual_run_and_executes_once(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(data_management_database)
+    edition = date(2026, 9, 8)
+    async with data_management_database() as database:
+        manual = await enqueue_run(
+            database,
+            operation="macro_dashboard",
+            market_code=None,
+            requester_id=user.id,
+            request_id="manual",
+            edition_date=edition,
+        )
+
+    assert (
+        await enqueue_automatic_macro_run(data_management_database, edition_date=edition)
+        == "queued"
+    )
+    # The scheduler's obligation is stored immediately and cannot disappear at
+    # midnight. Claiming keeps the manual run ahead of its scheduled companion.
+    claimed_manual = await claim_next_run(data_management_database, "manual-worker")
+    assert claimed_manual is not None and claimed_manual.id == manual.id
+    await complete_run(
+        data_management_database,
+        claimed_manual,
+        "manual-worker",
+        status="succeeded",
+        result={},
+    )
+    claimed_automatic = await claim_next_run(data_management_database, "automatic-worker")
+    assert claimed_automatic is not None
+    assert claimed_automatic.operation == "macro_dashboard"
+    assert claimed_automatic.requested_by_user_id is None
+    await complete_run(
+        data_management_database,
+        claimed_automatic,
+        "automatic-worker",
+        status="succeeded",
+        result={},
+    )
+    assert (
+        await enqueue_automatic_macro_run(data_management_database, edition_date=edition)
+        == "already_recorded"
+    )
+    async with data_management_database() as database:
+        automatic = (
+            await database.scalars(
+                select(DataManagementRun).where(
+                    DataManagementRun.operation == "macro_dashboard",
+                    DataManagementRun.requested_by_user_id.is_(None),
+                    DataManagementRun.edition_date == edition,
+                )
+            )
+        ).all()
+    assert len(automatic) == 1
+
+
+async def test_cancelled_macro_cannot_overlap_another_macro_execution(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(data_management_database)
+    async with data_management_database() as database:
+        first = await enqueue_run(
+            database,
+            operation="macro_dashboard",
+            market_code=None,
+            requester_id=user.id,
+            request_id="first",
+        )
+    claimed_first = await claim_next_run(data_management_database, "worker-one")
+    assert claimed_first is not None and claimed_first.id == first.id
+
+    # Model the first worker's execution session: cancellation changes its
+    # durable row before its task observes the next heartbeat, but this group
+    # lock remains held until the provider task exits.
+    async with data_management_database() as execution_session:
+        await execution_session.execute(select(func.pg_advisory_lock(MACRO_EXECUTION_LOCK_KEY)))
+        try:
+            async with data_management_database() as database:
+                cancelled = await cancel_run(
+                    database,
+                    run_id=first.id,
+                    actor_user_id=user.id,
+                    request_id="cancel",
+                )
+            assert cancelled is not None and cancelled.status == "cancelled"
+            async with data_management_database() as database:
+                await enqueue_run(
+                    database,
+                    operation="macro_dashboard",
+                    market_code=None,
+                    requester_id=user.id,
+                    request_id="second",
+                )
+            claimed_second = await claim_next_run(data_management_database, "worker-two")
+            assert claimed_second is not None and claimed_second.id != first.id
+            async with data_management_database() as contender:
+                assert not await contender.scalar(
+                    select(func.pg_try_advisory_lock(MACRO_EXECUTION_LOCK_KEY))
+                )
+        finally:
+            await execution_session.execute(
+                select(func.pg_advisory_unlock(MACRO_EXECUTION_LOCK_KEY))
+            )
+            await execution_session.rollback()
+
+
 async def test_claim_recovers_expired_lease_heartbeats_and_owner_guards_completion(
     data_management_database: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -258,12 +369,19 @@ async def test_admin_api_enqueues_lists_gets_conflicts_and_audits(
             "/api/admin/data-management/runs",
             json={"operation": "morning_market", "market_code": "crypto"},
         )
+        macro = await client.post(
+            "/api/admin/data-management/runs",
+            json={"operation": "morning_market", "market_code": "global_macro_bonds"},
+        )
         fetched = await client.get(f"/api/admin/data-management/runs/{created.json()['id']}")
 
     assert catalog.status_code == 200
     assert created.status_code == 202, created.text
     assert listed.status_code == 200 and len(listed.json()["items"]) == 1
     assert duplicate.status_code == 409
+    assert macro.status_code == 202
+    assert macro.json()["operation"] == "macro_dashboard"
+    assert macro.json()["market_code"] is None
     assert fetched.status_code == 200 and fetched.json()["operation"] == "morning_all"
     async with data_management_database() as database:
         actions = list(

@@ -207,7 +207,7 @@ describe("three-market report presentation", () => {
     expect(navigation.compareDocumentPosition(section)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     )
-    expect(section).toHaveTextContent("Global macro & bonds")
+    expect(section).toHaveTextContent("Global macro")
     expect(section).toHaveTextContent("Taiwan equities")
     expect(section).not.toHaveTextContent("US equities")
     expect(section).not.toHaveTextContent("Crypto")

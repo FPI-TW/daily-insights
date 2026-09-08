@@ -141,6 +141,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/admin/data-management/runs/{run_id}/cancel": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Cancel Existing Run */
+    post: operations["cancel_existing_run_api_admin_data_management_runs__run_id__cancel_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/admin/data-sources/yfinance/daily-bars": {
     parameters: {
       query?: never
@@ -1196,6 +1213,8 @@ export interface components {
     DataManagementCatalog: {
       /** Daily News Enabled */
       daily_news_enabled: boolean
+      /** Macro Dashboard Enabled */
+      macro_dashboard_enabled: boolean
       /** Markets */
       markets: ("global_macro_bonds" | "crypto" | "us_equity")[]
       /** Morning Reports Enabled */
@@ -1222,6 +1241,7 @@ export interface components {
         | components["schemas"]["InstitutionalTwseRunResponse"]
         | components["schemas"]["NewsAllRunResponse"]
         | components["schemas"]["NewsMarketRunResponse"]
+        | components["schemas"]["MacroDashboardRunResponse"]
       )[]
     }
     /** EconomicEvent */
@@ -1472,7 +1492,8 @@ export interface components {
        * Status
        * @enum {string}
        */
-      status: "pending" | "running" | "succeeded" | "partial" | "failed"
+      status:
+        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
     }
     /** InstitutionalFlowPointResponse */
     InstitutionalFlowPointResponse: {
@@ -1585,7 +1606,8 @@ export interface components {
        * Status
        * @enum {string}
        */
-      status: "pending" | "running" | "succeeded" | "partial" | "failed"
+      status:
+        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
     }
     /** InternalUserCreate */
     InternalUserCreate: {
@@ -1672,6 +1694,59 @@ export interface components {
       fetched_at: string
       /** Histories */
       histories: components["schemas"]["History"][]
+    }
+    /** MacroDashboardRunCreate */
+    MacroDashboardRunCreate: {
+      /** Market Code */
+      market_code?: null
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      operation: "macro_dashboard"
+    }
+    /** MacroDashboardRunResponse */
+    MacroDashboardRunResponse: {
+      /** Completed At */
+      completed_at: string | null
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /** Error */
+      error: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Market Code */
+      market_code: null
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      operation: "macro_dashboard"
+      /** Requested By User Id */
+      requested_by_user_id: string | null
+      /** Result */
+      result: {
+        [key: string]: unknown
+      } | null
+      /** Started At */
+      started_at: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status:
+        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
     }
     /** MarketPolicyUpdate */
     MarketPolicyUpdate: {
@@ -1833,7 +1908,8 @@ export interface components {
        * Status
        * @enum {string}
        */
-      status: "pending" | "running" | "succeeded" | "partial" | "failed"
+      status:
+        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
     }
     /** MorningMarketRunCreate */
     MorningMarketRunCreate: {
@@ -1891,7 +1967,8 @@ export interface components {
        * Status
        * @enum {string}
        */
-      status: "pending" | "running" | "succeeded" | "partial" | "failed"
+      status:
+        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
     }
     /** NewsAllRunCreate */
     NewsAllRunCreate: {
@@ -1943,7 +2020,8 @@ export interface components {
        * Status
        * @enum {string}
        */
-      status: "pending" | "running" | "succeeded" | "partial" | "failed"
+      status:
+        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
     }
     /** NewsItemResponse */
     NewsItemResponse: {
@@ -2036,7 +2114,8 @@ export interface components {
        * Status
        * @enum {string}
        */
-      status: "pending" | "running" | "succeeded" | "partial" | "failed"
+      status:
+        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
     }
     /** OrganizationCreate */
     OrganizationCreate: {
@@ -3022,6 +3101,7 @@ export interface operations {
           | components["schemas"]["InstitutionalTwseRunCreate"]
           | components["schemas"]["NewsAllRunCreate"]
           | components["schemas"]["NewsMarketRunCreate"]
+          | components["schemas"]["MacroDashboardRunCreate"]
       }
     }
     responses: {
@@ -3038,6 +3118,7 @@ export interface operations {
             | components["schemas"]["InstitutionalTwseRunResponse"]
             | components["schemas"]["NewsAllRunResponse"]
             | components["schemas"]["NewsMarketRunResponse"]
+            | components["schemas"]["MacroDashboardRunResponse"]
         }
       }
       /** @description An operation class is already active. */
@@ -3089,7 +3170,55 @@ export interface operations {
             | components["schemas"]["InstitutionalTwseRunResponse"]
             | components["schemas"]["NewsAllRunResponse"]
             | components["schemas"]["NewsMarketRunResponse"]
+            | components["schemas"]["MacroDashboardRunResponse"]
         }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  cancel_existing_run_api_admin_data_management_runs__run_id__cancel_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        run_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json":
+            | components["schemas"]["MorningAllRunResponse"]
+            | components["schemas"]["MorningMarketRunResponse"]
+            | components["schemas"]["IndexYahooRunResponse"]
+            | components["schemas"]["InstitutionalTwseRunResponse"]
+            | components["schemas"]["NewsAllRunResponse"]
+            | components["schemas"]["NewsMarketRunResponse"]
+            | components["schemas"]["MacroDashboardRunResponse"]
+        }
+      }
+      /** @description Run is terminal already or no longer exists. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
       }
       /** @description Validation Error */
       422: {

@@ -25,12 +25,12 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
         CheckConstraint(
             (
                 "operation IN ('morning_all', 'morning_market', 'index_yahoo', "
-                "'institutional_twse', 'news_all', 'news_market')"
+                "'institutional_twse', 'news_all', 'news_market', 'macro_dashboard')"
             ),
             name="operation_valid",
         ),
         CheckConstraint(
-            "status IN ('pending', 'running', 'succeeded', 'partial', 'failed')",
+            "status IN ('pending', 'running', 'succeeded', 'partial', 'failed', 'cancelled')",
             name="status_valid",
         ),
         CheckConstraint(
@@ -39,7 +39,8 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
             "('global_macro_bonds', 'crypto', 'us_equity')) OR "
             "(operation = 'news_market' AND market_code IN "
             "('global', 'tw_equity', 'us_equity')) OR "
-            "(operation IN ('morning_all', 'index_yahoo', 'institutional_twse', 'news_all') "
+            "(operation IN ('morning_all', 'index_yahoo', 'institutional_twse', 'news_all', "
+            "'macro_dashboard') "
             "AND market_code IS NULL)"
             ")",
             name="market_code_valid_for_operation",
@@ -74,6 +75,29 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
             postgresql_where=text(
                 "status IN ('pending', 'running') AND operation IN ('news_all', 'news_market')"
             ),
+        ),
+        Index(
+            "uq_data_management_runs_active_manual_macro_dashboard",
+            text("(1)"),
+            unique=True,
+            postgresql_where=text(
+                "status IN ('pending', 'running') AND operation = 'macro_dashboard' "
+                "AND requested_by_user_id IS NOT NULL"
+            ),
+        ),
+        Index(
+            "uq_data_management_runs_running_macro_dashboard",
+            text("(1)"),
+            unique=True,
+            postgresql_where=text("status = 'running' AND operation = 'macro_dashboard'"),
+        ),
+        # Scheduled macro work is an edition record, not a retry mechanism.
+        # Manual rows retain their history and are deliberately not covered.
+        Index(
+            "uq_data_management_runs_automatic_macro_dashboard_edition",
+            "edition_date",
+            unique=True,
+            postgresql_where=text("operation = 'macro_dashboard' AND requested_by_user_id IS NULL"),
         ),
         Index("ix_data_management_runs_created_at", "created_at"),
     )

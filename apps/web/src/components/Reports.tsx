@@ -14,7 +14,7 @@ import {
   unitLabel,
   type Direction,
 } from "#/lib/format"
-import type { NavMarket } from "#/lib/markets"
+import { marketTabLabel, type NavMarket } from "#/lib/markets"
 import { useChartColors } from "#/lib/chart"
 import {
   type MarketCode,
@@ -105,7 +105,7 @@ function ReportMarketNav({
   markets: ReadonlyArray<NavMarket>
   activeMarket?: MarketCode | undefined
 }) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const linkClass = (active: boolean) =>
     `shrink-0 border-b-2 border-transparent px-4 py-3 text-xs font-extrabold no-underline transition-colors ${active ? "text-lagoon" : "text-sea-ink-soft hover:text-sea-ink"}`
   return (
@@ -139,9 +139,7 @@ function ReportMarketNav({
             params={{ locale, marketCode: market.code }}
             className={linkClass(activeMarket === market.code)}
           >
-            {i18n.exists(`reportMarketShort_${market.code}`)
-              ? t(`reportMarketShort_${market.code}`)
-              : market.name}
+            {marketTabLabel(t, market)}
           </Link>
         ))}
     </nav>

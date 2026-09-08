@@ -167,6 +167,7 @@ export const dataManagementOperationSchema = z.enum([
   "institutional_twse",
   "news_all",
   "news_market",
+  "macro_dashboard",
 ])
 export const dataManagementRunOperationGroupSchema = z.enum(["news"])
 export type DataManagementRunOperationGroup = z.infer<
@@ -183,6 +184,7 @@ export const dataManagementRunStatusSchema = z.enum([
   "succeeded",
   "partial",
   "failed",
+  "cancelled",
 ])
 export const dataManagementRunCreateSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("morning_all") }),
@@ -197,6 +199,7 @@ export const dataManagementRunCreateSchema = z.discriminatedUnion("operation", [
     operation: z.literal("news_market"),
     market_code: dataManagementNewsMarketCodeSchema,
   }),
+  z.object({ operation: z.literal("macro_dashboard") }),
 ])
 export type DataManagementRunCreateInput = z.infer<
   typeof dataManagementRunCreateSchema
@@ -209,6 +212,7 @@ export const dataManagementCatalogSchema = z.object({
   markets: z.array(launchMarketCodeSchema),
   daily_news_enabled: z.boolean(),
   news_markets: z.array(dataManagementNewsMarketCodeSchema),
+  macro_dashboard_enabled: z.boolean(),
 })
 export type DataManagementCatalog = z.infer<typeof dataManagementCatalogSchema>
 const dataManagementRunBaseSchema = z.object({
@@ -226,6 +230,10 @@ const dataManagementRunBaseSchema = z.object({
 export const dataManagementRunSchema = z.discriminatedUnion("operation", [
   dataManagementRunBaseSchema.extend({
     operation: z.literal("morning_all"),
+    market_code: z.null(),
+  }),
+  dataManagementRunBaseSchema.extend({
+    operation: z.literal("macro_dashboard"),
     market_code: z.null(),
   }),
   dataManagementRunBaseSchema.extend({

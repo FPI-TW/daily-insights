@@ -5,11 +5,12 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
-from typing import Protocol, cast
+from typing import Literal, Protocol, cast
 from zoneinfo import ZoneInfo
 
 from anyio import Path
 from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -46,7 +47,10 @@ from daily_insights_api.modules.operations.api import sanitize_error_code
 from daily_insights_api.modules.reports.api import (
     ACTIVE_LAUNCH_MANIFEST,
     LaunchMarketCode,
+    MacroDashboard,
+    MacroDashboardSnapshot,
     MorningMarketExecution,
+    refresh_macro_dashboard,
     run_morning_report_edition,
 )
 
@@ -88,14 +92,24 @@ def execution_lock_key(run_id: uuid.UUID) -> int:
     return int.from_bytes(run_id.bytes[:8], byteorder="big", signed=True)
 
 
+# A run lock prevents duplicate ownership of one row. This group lock spans the
+# provider call itself, so cancelling a run cannot free the DB `running` slot
+# and let another macro fetch start before the cancelled task has unwound.
+MACRO_EXECUTION_LOCK_KEY = 5_239_842_371_114_209
+
+
 ACTIVE_RUN_UNIQUE_CONSTRAINTS = frozenset(
     {
         "uq_data_management_runs_active_morning",
         "uq_data_management_runs_active_index",
         "uq_data_management_runs_active_institutional",
         "uq_data_management_runs_active_news",
+        "uq_data_management_runs_active_manual_macro_dashboard",
+        "uq_data_management_runs_running_macro_dashboard",
     }
 )
+AUTOMATIC_MACRO_EDITION_CONSTRAINT = "uq_data_management_runs_automatic_macro_dashboard_edition"
+AutomaticMacroEnqueueResult = Literal["queued", "already_recorded"]
 
 
 def is_active_run_conflict(error: IntegrityError) -> bool:
@@ -107,6 +121,14 @@ def is_active_run_conflict(error: IntegrityError) -> bool:
     )
 
 
+def is_automatic_macro_edition_conflict(error: IntegrityError) -> bool:
+    diagnostic = getattr(error.orig, "diag", None)
+    return (
+        getattr(error.orig, "sqlstate", None) == "23505"
+        and getattr(diagnostic, "constraint_name", None) == AUTOMATIC_MACRO_EDITION_CONSTRAINT
+    )
+
+
 async def enqueue_run(
     database: AsyncSession,
     *,
@@ -114,6 +136,7 @@ async def enqueue_run(
     market_code: str | None,
     requester_id: uuid.UUID | None,
     request_id: str | None,
+    edition_date: date | None = None,
 ) -> DataManagementRun:
     if operation == "morning_market" and market_code not in {
         market.market_code for market in ACTIVE_LAUNCH_MANIFEST.markets
@@ -126,7 +149,7 @@ async def enqueue_run(
     run = DataManagementRun(
         operation=operation,
         market_code=market_code,
-        edition_date=taipei_today(),
+        edition_date=edition_date or taipei_today(),
         status="pending",
         requested_by_user_id=requester_id,
     )
@@ -155,47 +178,150 @@ async def enqueue_run(
     return run
 
 
+async def enqueue_automatic_macro_run(
+    session_factory: async_sessionmaker[AsyncSession], *, edition_date: date
+) -> AutomaticMacroEnqueueResult:
+    """Queue at most one scheduler-created macro run for a Taipei edition."""
+    async with session_factory() as database:
+        existing = await database.scalar(
+            select(DataManagementRun.id)
+            .where(
+                DataManagementRun.operation == "macro_dashboard",
+                DataManagementRun.requested_by_user_id.is_(None),
+                DataManagementRun.edition_date == edition_date,
+            )
+            .limit(1)
+        )
+        if existing is not None:
+            return "already_recorded"
+        try:
+            await enqueue_run(
+                database,
+                operation="macro_dashboard",
+                market_code=None,
+                requester_id=None,
+                request_id=None,
+                edition_date=edition_date,
+            )
+        except (RunAlreadyActiveError, IntegrityError) as error:
+            if isinstance(error, IntegrityError) and is_automatic_macro_edition_conflict(error):
+                # The edition uniqueness index covers every terminal status, so
+                # a restart must never create another automatic retry row.
+                return "already_recorded"
+            raise
+    return "queued"
+
+
+async def cancel_run(
+    database: AsyncSession,
+    *,
+    run_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    request_id: str | None,
+) -> DataManagementRun | None:
+    """Atomically terminalize queued/in-flight work and revoke its lease."""
+    run = await database.scalar(
+        select(DataManagementRun).where(DataManagementRun.id == run_id).with_for_update()
+    )
+    if run is None or run.status not in {"pending", "running"}:
+        await database.rollback()
+        return None
+    now = datetime.now(UTC)
+    run.status = "cancelled"
+    run.completed_at = now
+    run.lease_owner = None
+    run.lease_expires_at = None
+    run.result = {
+        "cancelled": True,
+        "cancelled_at": now.isoformat(),
+        "cancelled_by_user_id": str(actor_user_id),
+    }
+    run.error = "cancelled"
+    record_audit_event(
+        database,
+        actor_user_id=actor_user_id,
+        action="data_management.run_cancelled",
+        target_type="data_management_run",
+        target_id=str(run.id),
+        after={"status": "cancelled", "operation": run.operation},
+        request_id=request_id,
+    )
+    await database.commit()
+    return run
+
+
 async def claim_next_run(
     session_factory: async_sessionmaker[AsyncSession], owner: str
 ) -> DataManagementRun | None:
     now = datetime.now(UTC)
-    async with session_factory.begin() as database:
-        # An expired lease alone is not proof that the provider call stopped.
-        # A live worker holds the session-scoped execution lock until it exits,
-        # so only reclaim an expired row when an xact-scoped probe proves that
-        # no execution session still owns the same lock.
-        expired = (
-            await database.scalars(
+    try:
+        async with session_factory.begin() as database:
+            # An expired lease alone is not proof that the provider call stopped.
+            # A live worker holds the session-scoped execution lock until it exits,
+            # so only reclaim an expired row when an xact-scoped probe proves that
+            # no execution session still owns the same lock.
+            expired = (
+                await database.scalars(
+                    select(DataManagementRun)
+                    .where(
+                        DataManagementRun.status == "running",
+                        DataManagementRun.lease_expires_at < now,
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            ).all()
+            for expired_run in expired:
+                available = await database.scalar(
+                    select(func.pg_try_advisory_xact_lock(execution_lock_key(expired_run.id)))
+                )
+                if available:
+                    expired_run.status = "pending"
+                    expired_run.lease_owner = None
+                    expired_run.lease_expires_at = None
+            manual_macro_active = select(DataManagementRun.id).where(
+                DataManagementRun.operation == "macro_dashboard",
+                DataManagementRun.requested_by_user_id.is_not(None),
+                DataManagementRun.status.in_(("pending", "running")),
+            )
+            macro_running = select(DataManagementRun.id).where(
+                DataManagementRun.operation == "macro_dashboard",
+                DataManagementRun.status == "running",
+            )
+            run = await database.scalar(
                 select(DataManagementRun)
                 .where(
-                    DataManagementRun.status == "running",
-                    DataManagementRun.lease_expires_at < now,
+                    DataManagementRun.status == "pending",
+                    # Automatic macro editions queue behind an active manual
+                    # run. Any macro claim also waits for the one running
+                    # execution; the DB unique index handles races between
+                    # workers without losing the pending row.
+                    (
+                        (DataManagementRun.operation != "macro_dashboard")
+                        | (DataManagementRun.requested_by_user_id.is_not(None))
+                        | ~manual_macro_active.exists()
+                    ),
+                    ((DataManagementRun.operation != "macro_dashboard") | ~macro_running.exists()),
+                )
+                .order_by(
+                    # Prefer a manual macro run over its scheduled companion.
+                    (DataManagementRun.operation == "macro_dashboard").desc(),
+                    DataManagementRun.requested_by_user_id.is_(None),
+                    DataManagementRun.created_at,
                 )
                 .with_for_update(skip_locked=True)
+                .limit(1)
             )
-        ).all()
-        for expired_run in expired:
-            available = await database.scalar(
-                select(func.pg_try_advisory_xact_lock(execution_lock_key(expired_run.id)))
-            )
-            if available:
-                expired_run.status = "pending"
-                expired_run.lease_owner = None
-                expired_run.lease_expires_at = None
-        run = await database.scalar(
-            select(DataManagementRun)
-            .where(DataManagementRun.status == "pending")
-            .order_by(DataManagementRun.created_at)
-            .with_for_update(skip_locked=True)
-            .limit(1)
-        )
-        if run is None:
+            if run is None:
+                return None
+            run.status = "running"
+            run.lease_owner = owner
+            run.lease_expires_at = now + LEASE_FOR
+            run.started_at = run.started_at or now
+            return run
+    except IntegrityError as error:
+        if is_active_run_conflict(error):
             return None
-        run.status = "running"
-        run.lease_owner = owner
-        run.lease_expires_at = now + LEASE_FOR
-        run.started_at = run.started_at or now
-        return run
+        raise
 
 
 async def heartbeat_run(
@@ -231,6 +357,59 @@ async def complete_run(
         )
         if current is None or current.lease_owner != owner or current.status != "running":
             return
+        current.status = status
+        current.result = result
+        current.error = error
+        current.completed_at = now
+        current.lease_owner = None
+        current.lease_expires_at = None
+        record_audit_event(
+            database,
+            actor_user_id=run.requested_by_user_id,
+            action="data_management.run_completed",
+            target_type="data_management_run",
+            target_id=str(run.id),
+            after={"status": status, "operation": run.operation},
+        )
+
+
+async def complete_macro_run(
+    session_factory: async_sessionmaker[AsyncSession],
+    run: DataManagementRun,
+    owner: str,
+    *,
+    status: str,
+    result: dict[str, object],
+    error: str | None,
+    dashboard: MacroDashboard,
+) -> None:
+    """Publish snapshot and terminal status together after ownership verification."""
+    now = datetime.now(UTC)
+    payload = dashboard.model_dump(mode="json")
+    async with session_factory.begin() as database:
+        current = await database.scalar(
+            select(DataManagementRun).where(DataManagementRun.id == run.id).with_for_update()
+        )
+        if current is None or current.status != "running" or current.lease_owner != owner:
+            return
+        await database.execute(
+            insert(MacroDashboardSnapshot)
+            .values(
+                scope_key="global_macro_bonds",
+                fetched_at=dashboard.fetched_at,
+                edition_date=run.edition_date,
+                payload=payload,
+            )
+            .on_conflict_do_update(
+                index_elements=[MacroDashboardSnapshot.scope_key],
+                set_={
+                    "fetched_at": dashboard.fetched_at,
+                    "edition_date": run.edition_date,
+                    "payload": payload,
+                    "updated_at": now,
+                },
+            )
+        )
         current.status = status
         current.result = result
         current.error = error
@@ -581,6 +760,25 @@ async def _execute_news(
     return status, {"outcome": outcome}, None if status == "succeeded" else f"news_{outcome}"
 
 
+async def _execute_macro(
+    settings: Settings,
+) -> tuple[str, dict[str, object], str | None, MacroDashboard]:
+    dashboard = await refresh_macro_dashboard(settings)
+    degraded = dashboard.calendar.status != "ok" or any(
+        history.status != "ok" for history in dashboard.histories
+    )
+    status = "partial" if degraded else "succeeded"
+    return (
+        status,
+        {
+            "fetched_at": dashboard.fetched_at.isoformat(),
+            "edition_date": dashboard.calendar.date.isoformat(),
+        },
+        "macro_sources_unavailable" if degraded else None,
+        dashboard,
+    )
+
+
 async def execute_run(
     run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
 ) -> tuple[str, dict[str, object], str | None]:
@@ -617,7 +815,13 @@ async def worker_loop(
         async with session_factory() as execution_database:
             key = execution_lock_key(run_id)
             await execution_database.execute(select(func.pg_advisory_lock(key)))
+            macro_lock_held = False
             try:
+                if claimed_run.operation == "macro_dashboard":
+                    await execution_database.execute(
+                        select(func.pg_advisory_lock(MACRO_EXECUTION_LOCK_KEY))
+                    )
+                    macro_lock_held = True
                 still_owned = await execution_database.scalar(
                     select(DataManagementRun.id).where(
                         DataManagementRun.id == run_id,
@@ -628,38 +832,85 @@ async def worker_loop(
                 if still_owned is None:
                     continue
                 stop = asyncio.Event()
+                ownership_lost = asyncio.Event()
 
                 async def heartbeater(
-                    stopped: asyncio.Event = stop, claimed_run_id: uuid.UUID = run_id
+                    stopped: asyncio.Event = stop,
+                    claimed_run_id: uuid.UUID = run_id,
+                    lost: asyncio.Event = ownership_lost,
                 ) -> None:
                     while not stopped.is_set():
                         try:
                             await asyncio.wait_for(stopped.wait(), timeout=heartbeat_seconds)
                         except TimeoutError:
                             if not await heartbeat_run(session_factory, claimed_run_id, owner):
+                                lost.set()
                                 return
                             if heartbeat_path is not None:
                                 await heartbeat_path.touch()
 
                 task = asyncio.create_task(heartbeater())
+                dashboard: MacroDashboard | None = None
+                execution_task = asyncio.create_task(
+                    _execute_macro(settings)
+                    if claimed_run.operation == "macro_dashboard"
+                    else execute_run(claimed_run, session_factory, settings)
+                )
+                ownership_task = asyncio.create_task(ownership_lost.wait())
                 try:
-                    outcome, result, error = await execute_run(
-                        claimed_run, session_factory, settings
+                    # Heartbeat failure includes durable cancellation. Stop the
+                    # provider task promptly; incrementally committing work may
+                    # retain prior commits but performs no further work.
+                    await asyncio.wait(
+                        {execution_task, ownership_task}, return_when=asyncio.FIRST_COMPLETED
                     )
+                    if ownership_lost.is_set() and not execution_task.done():
+                        execution_task.cancel()
+                        try:
+                            await execution_task
+                        except asyncio.CancelledError:
+                            pass
+                    if execution_task.cancelled():
+                        continue
+                    execution = await execution_task
+                    if claimed_run.operation == "macro_dashboard":
+                        outcome, result, error, dashboard = cast(
+                            tuple[str, dict[str, object], str | None, MacroDashboard], execution
+                        )
+                    else:
+                        outcome, result, error = cast(
+                            tuple[str, dict[str, object], str | None], execution
+                        )
                 except Exception as caught:
                     outcome, result, error = "failed", {}, sanitize_error(caught)
                 finally:
                     stop.set()
                     await task
-                await complete_run(
-                    session_factory,
-                    claimed_run,
-                    owner,
-                    status=outcome,
-                    result=result,
-                    error=error,
-                )
+                    ownership_task.cancel()
+                if claimed_run.operation == "macro_dashboard" and dashboard is not None:
+                    await complete_macro_run(
+                        session_factory,
+                        claimed_run,
+                        owner,
+                        status=outcome,
+                        result=result,
+                        error=error,
+                        dashboard=dashboard,
+                    )
+                else:
+                    await complete_run(
+                        session_factory,
+                        claimed_run,
+                        owner,
+                        status=outcome,
+                        result=result,
+                        error=error,
+                    )
             finally:
+                if macro_lock_held:
+                    await execution_database.execute(
+                        select(func.pg_advisory_unlock(MACRO_EXECUTION_LOCK_KEY))
+                    )
                 await execution_database.execute(select(func.pg_advisory_unlock(key)))
                 await execution_database.rollback()
         if once:

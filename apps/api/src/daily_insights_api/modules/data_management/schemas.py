@@ -14,9 +14,10 @@ RunOperation = Literal[
     "institutional_twse",
     "news_all",
     "news_market",
+    "macro_dashboard",
 ]
 RunOperationGroup = Literal["news"]
-RunStatus = Literal["pending", "running", "succeeded", "partial", "failed"]
+RunStatus = Literal["pending", "running", "succeeded", "partial", "failed", "cancelled"]
 
 
 class _DataManagementRunCreate(BaseModel):
@@ -56,13 +57,19 @@ class NewsMarketRunCreate(_DataManagementRunCreate):
     market_code: NewsMarketCode
 
 
+class MacroDashboardRunCreate(_DataManagementRunCreate):
+    operation: Literal["macro_dashboard"]
+    market_code: None = None
+
+
 DataManagementRunCreate = Annotated[
     MorningAllRunCreate
     | MorningMarketRunCreate
     | IndexYahooRunCreate
     | InstitutionalTwseRunCreate
     | NewsAllRunCreate
-    | NewsMarketRunCreate,
+    | NewsMarketRunCreate
+    | MacroDashboardRunCreate,
     Field(discriminator="operation"),
 ]
 
@@ -75,6 +82,7 @@ class DataManagementCatalog(BaseModel):
     markets: list[LaunchMarketCode]
     daily_news_enabled: bool
     news_markets: list[NewsMarketCode]
+    macro_dashboard_enabled: bool
 
 
 class _DataManagementRunResponse(BaseModel):
@@ -119,13 +127,19 @@ class NewsMarketRunResponse(_DataManagementRunResponse):
     market_code: NewsMarketCode
 
 
+class MacroDashboardRunResponse(_DataManagementRunResponse):
+    operation: Literal["macro_dashboard"]
+    market_code: None
+
+
 DataManagementRunResponse = Annotated[
     MorningAllRunResponse
     | MorningMarketRunResponse
     | IndexYahooRunResponse
     | InstitutionalTwseRunResponse
     | NewsAllRunResponse
-    | NewsMarketRunResponse,
+    | NewsMarketRunResponse
+    | MacroDashboardRunResponse,
     Field(discriminator="operation"),
 ]
 

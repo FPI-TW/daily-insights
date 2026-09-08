@@ -125,10 +125,7 @@ def create_app(
 
     app = FastAPI(title=resolved_settings.app_name, lifespan=lifespan)
     app.state.password_work = PasswordWork(resolved_settings.login_password_workers)
-    from daily_insights_api.modules.reports.macro_dashboard import MacroDashboardService
-
     app.state.settings = resolved_settings
-    app.state.macro_dashboard = MacroDashboardService(resolved_settings)
     app.state.session_factory = session_factory
     app.state.object_store = object_store
     if (

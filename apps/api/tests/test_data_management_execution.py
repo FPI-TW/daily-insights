@@ -14,6 +14,7 @@ from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.data_management.models import DataManagementRun
 from daily_insights_api.modules.data_management.service import (
     RunAlreadyActiveError,
+    cancel_run,
     enqueue_run,
     execute_run,
     worker_loop,
@@ -112,6 +113,36 @@ async def test_enqueue_only_maps_named_active_run_unique_conflicts_to_409_error(
         )
     assert raised.value is other_error
     other_database.rollback.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_terminalizes_pending_or_running_work_without_a_lease() -> None:
+    run = _run("macro_dashboard")
+
+    class Database:
+        async def scalar(self, _: object) -> DataManagementRun:
+            return run
+
+        def add(self, _: object) -> None:
+            pass
+
+        async def commit(self) -> None:
+            pass
+
+        async def rollback(self) -> None:
+            raise AssertionError("a cancellable run must not be rolled back")
+
+    cancelled = await cancel_run(
+        cast(Any, Database()),
+        run_id=run.id,
+        actor_user_id=uuid.uuid4(),
+        request_id="test-request",
+    )
+    assert cancelled is run
+    assert run.status == "cancelled"
+    assert run.lease_owner is None and run.lease_expires_at is None
+    assert run.completed_at is not None
+    assert run.result is not None and run.result["cancelled"] is True
 
 
 @pytest.mark.asyncio

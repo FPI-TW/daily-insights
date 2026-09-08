@@ -73,7 +73,8 @@ describe("DataManagementPage", () => {
       taipei_date: "2026-09-07",
       morning_reports_enabled: true,
       yfinance_enabled: true,
-      markets: ["crypto"],
+      macro_dashboard_enabled: true,
+      markets: ["global_macro_bonds", "crypto"],
     })
     listRuns.mockResolvedValue({ items: [] })
     renderPage()
@@ -84,6 +85,74 @@ describe("DataManagementPage", () => {
     expect(screen.getByRole("alertdialog")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
     expect(createRun).not.toHaveBeenCalled()
+  })
+
+  it("keeps macro refresh enabled while only an automatic macro run is active", async () => {
+    catalog.mockResolvedValue({
+      taipei_date: "2026-09-07",
+      morning_reports_enabled: true,
+      yfinance_enabled: true,
+      twse_enabled: true,
+      daily_news_enabled: true,
+      markets: ["global_macro_bonds", "crypto"],
+      news_markets: ["global"],
+      macro_dashboard_enabled: true,
+    })
+    listRuns.mockResolvedValue({
+      items: [
+        {
+          id: "08a70c25-7e41-4dce-a576-fc56589e1db3",
+          operation: "macro_dashboard",
+          market_code: null,
+          edition_date: "2026-09-07",
+          status: "pending",
+          requested_by_user_id: null,
+          created_at: "2026-09-07T00:00:00Z",
+          started_at: null,
+          completed_at: null,
+          result: null,
+          error: null,
+        },
+      ],
+    })
+    renderPage()
+    expect(
+      await screen.findByRole("button", { name: "Global macro" })
+    ).toBeEnabled()
+  })
+
+  it("disables macro refresh while a manually requested macro run is active", async () => {
+    catalog.mockResolvedValue({
+      taipei_date: "2026-09-07",
+      morning_reports_enabled: true,
+      yfinance_enabled: true,
+      twse_enabled: true,
+      daily_news_enabled: true,
+      markets: ["global_macro_bonds", "crypto"],
+      news_markets: ["global"],
+      macro_dashboard_enabled: true,
+    })
+    listRuns.mockResolvedValue({
+      items: [
+        {
+          id: "08a70c25-7e41-4dce-a576-fc56589e1db3",
+          operation: "macro_dashboard",
+          market_code: null,
+          edition_date: "2026-09-07",
+          status: "running",
+          requested_by_user_id: "ee77eab0-3910-4706-803c-ffaf979f1ff7",
+          created_at: "2026-09-07T00:00:00Z",
+          started_at: "2026-09-07T00:01:00Z",
+          completed_at: null,
+          result: null,
+          error: null,
+        },
+      ],
+    })
+    renderPage()
+    expect(
+      await screen.findByRole("button", { name: "Global macro" })
+    ).toBeDisabled()
   })
 
   it("does not enqueue when confirmation is escaped or its backdrop is clicked", async () => {
@@ -132,16 +201,24 @@ describe("DataManagementPage", () => {
     resolve({})
   })
 
-  it("submits single-market and Yahoo operations directly", async () => {
+  it("routes the global macro market to its dashboard refresh and other markets to reports", async () => {
     catalog.mockResolvedValue({
       taipei_date: "2026-09-07",
       morning_reports_enabled: true,
       yfinance_enabled: true,
-      markets: ["crypto"],
+      macro_dashboard_enabled: true,
+      markets: ["global_macro_bonds", "crypto"],
     })
     listRuns.mockResolvedValue({ items: [] })
     createRun.mockResolvedValue({})
     renderPage()
+    fireEvent.click(await screen.findByRole("button", { name: "Global macro" }))
+    await waitFor(() =>
+      expect(createRun).toHaveBeenCalledWith(
+        { operation: "macro_dashboard" },
+        "csrf"
+      )
+    )
     fireEvent.click(await screen.findByRole("button", { name: "Crypto" }))
     await waitFor(() =>
       expect(createRun).toHaveBeenCalledWith(

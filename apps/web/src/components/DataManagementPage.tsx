@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next"
 import { Dialog } from "#/components/Dialog"
 import { browserAdministrationClient } from "#/lib/admin-members"
 import { requireCsrfToken } from "#/lib/auth"
+import { marketTabLabel } from "#/lib/markets"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
 
 const catalogKey = ["data-management", "catalog"] as const
@@ -23,6 +24,7 @@ type RunInput =
     }
   | { operation: "index_yahoo" }
   | { operation: "institutional_twse" }
+  | { operation: "macro_dashboard" }
 
 export function DataManagementPage({ locale }: { locale: Locale }) {
   const { t } = useTranslation()
@@ -59,6 +61,14 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
       void queryClient.invalidateQueries({ queryKey: runsKey })
       setConfirmOpen(false)
     },
+  })
+  const cancelRun = useMutation({
+    mutationFn: async (runId: string) =>
+      browserAdministrationClient().cancelDataManagementRun(
+        runId,
+        await requireCsrfToken()
+      ),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: runsKey }),
   })
 
   const error = enqueue.error
@@ -97,6 +107,12 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
   const activeMorning = active(MORNING_OPERATIONS)
   const activeIndex = active(["index_yahoo"])
   const activeInstitutional = active(["institutional_twse"])
+  const activeManualMacro = runs.data?.items.some(
+    run =>
+      run.operation === "macro_dashboard" &&
+      run.requested_by_user_id !== null &&
+      ACTIVE_STATUSES.includes(run.status)
+  )
   return (
     <main className="page-shell">
       <header className="mb-8 max-w-3xl">
@@ -146,26 +162,34 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
             {t("dataManagementMarket")}
           </h2>
           <div className="mt-4 grid gap-2">
-            {catalog.data?.markets.map(market => (
-              <button
-                key={market}
-                type="button"
-                className="secondary-action text-left"
-                disabled={
-                  Boolean(activeMorning) ||
-                  enqueue.isPending ||
-                  !catalog.data?.morning_reports_enabled
-                }
-                onClick={() =>
-                  void submit({
-                    operation: "morning_market",
-                    market_code: market,
-                  })
-                }
-              >
-                {t(`reportMarket_${market}`)}
-              </button>
-            ))}
+            {catalog.data?.markets.map(market => {
+              const isMacroDashboard = market === "global_macro_bonds"
+              return (
+                <button
+                  key={market}
+                  type="button"
+                  className="secondary-action text-left"
+                  disabled={
+                    isMacroDashboard
+                      ? Boolean(activeManualMacro) ||
+                        enqueue.isPending ||
+                        !catalog.data?.macro_dashboard_enabled
+                      : Boolean(activeMorning) ||
+                        enqueue.isPending ||
+                        !catalog.data?.morning_reports_enabled
+                  }
+                  onClick={() =>
+                    void submit(
+                      isMacroDashboard
+                        ? { operation: "macro_dashboard" }
+                        : { operation: "morning_market", market_code: market }
+                    )
+                  }
+                >
+                  {marketTabLabel(t, { code: market, name: market })}
+                </button>
+              )
+            })}
           </div>
         </section>
         <section
@@ -249,6 +273,18 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
                   : ""}
               </summary>
               <RunDetail result={run.result} error={run.error} />
+              {ACTIVE_STATUSES.includes(run.status) ? (
+                <button
+                  type="button"
+                  className="secondary-action mt-3"
+                  disabled={cancelRun.isPending}
+                  onClick={() =>
+                    void cancelRun.mutateAsync(run.id).catch(redirectExpired)
+                  }
+                >
+                  {t("dataManagementCancel")}
+                </button>
+              ) : null}
             </details>
           ))}
         </div>
@@ -267,7 +303,7 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
           {t("dataManagementConfirmWarning", {
             date: catalog.data?.taipei_date,
             markets: catalog.data?.markets
-              .map(market => t(`reportMarket_${market}`))
+              .map(market => marketTabLabel(t, { code: market, name: market }))
               .join(", "),
           })}
         </p>

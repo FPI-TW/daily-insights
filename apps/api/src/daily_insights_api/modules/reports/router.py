@@ -13,7 +13,8 @@ from daily_insights_api.modules.reports.contracts import (
     PublicationContent,
 )
 from daily_insights_api.modules.reports.launch_manifest import LAUNCH_MARKET_ORDER
-from daily_insights_api.modules.reports.macro_dashboard import MacroDashboard, MacroDashboardService
+from daily_insights_api.modules.reports.macro_dashboard import MacroDashboard
+from daily_insights_api.modules.reports.macro_dashboard_models import MacroDashboardSnapshot
 from daily_insights_api.modules.reports.schemas import ReportDetailResponse, ReportSummaryResponse
 from daily_insights_api.web.dependencies import get_database_session
 
@@ -142,5 +143,14 @@ async def get_macro_dashboard(
     visible = await visible_report_market_codes(database, context)
     if "global_macro_bonds" not in visible:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "report not found")
-    service: MacroDashboardService = request.app.state.macro_dashboard
-    return await service.get()
+    snapshot = await database.get(MacroDashboardSnapshot, "global_macro_bonds")
+    if snapshot is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "macro dashboard is not available")
+    try:
+        return MacroDashboard.model_validate(snapshot.payload)
+    except Exception as error:
+        # A corrupt snapshot must not leak as a fabricated or live-fetched
+        # dashboard. Operators can repair it through the durable refresh run.
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "macro dashboard is not available"
+        ) from error

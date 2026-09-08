@@ -90,6 +90,40 @@ services:
       - app
       - data
 
+  macro-dashboard-scheduler:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: apps/api/.env
+        required: false
+    environment:
+      DAILY_INSIGHTS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-daily_insights}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-daily_insights}
+    command:
+      [
+        "python",
+        "-m",
+        "daily_insights_api.scripts.run_macro_dashboard_scheduler",
+      ]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import time; from pathlib import Path; p = Path('/tmp/macro-dashboard-scheduler-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 93600",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - app
+      - data
+
   web:
     build:
       context: .

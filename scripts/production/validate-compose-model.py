@@ -18,6 +18,7 @@ SERVICES = (
     "index-daily-bars-scheduler",
     "institutional-flows-scheduler",
     "data-management-worker",
+    "macro-dashboard-scheduler",
 )
 API_ENVIRONMENT_KEYS = {
     "DAILY_INSIGHTS_DAILY_NEWS_ENABLED",
@@ -157,6 +158,22 @@ def main() -> None:
             "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS",
         }.issubset(analyst_scheduler_environment),
         "analyst-viewpoints-scheduler must receive its upstream URL and timeout",
+    )
+    macro_scheduler_environment = services["macro-dashboard-scheduler"].get("environment", {})
+    require(
+        {
+            "DAILY_INSIGHTS_ENVIRONMENT",
+            "DAILY_INSIGHTS_DATABASE_URL",
+        }.issubset(macro_scheduler_environment),
+        "macro-dashboard-scheduler must receive production database settings",
+    )
+    require(
+        macro_scheduler_environment.get("DAILY_INSIGHTS_ENVIRONMENT") == "production",
+        "macro-dashboard-scheduler environment must be production",
+    )
+    require(
+        not services["macro-dashboard-scheduler"].get("ports"),
+        "macro-dashboard-scheduler must not publish a host port",
     )
     web_environment = services["web"].get("environment", {})
     require(web_environment.get("APP_ENV") == "production", "Web environment must be production")

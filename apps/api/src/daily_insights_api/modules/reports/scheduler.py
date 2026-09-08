@@ -43,19 +43,27 @@ class SameDayRetry:
         return attempt if attempt <= deadline else None
 
 
-def due_edition(now: datetime, *, run_at: time = DEFAULT_RUN_AT) -> date | None:
+def due_edition(
+    now: datetime, *, run_at: time = DEFAULT_RUN_AT, weekdays_only: bool = False
+) -> date | None:
     if now.tzinfo is None:
         raise ValueError("now must include a timezone")
     local = now.astimezone(TAIPEI)
+    if weekdays_only and local.weekday() >= 5:
+        return None
     return local.date() if local.time().replace(tzinfo=None) >= run_at else None
 
 
-def next_run(now: datetime, *, run_at: time = DEFAULT_RUN_AT) -> datetime:
+def next_run(
+    now: datetime, *, run_at: time = DEFAULT_RUN_AT, weekdays_only: bool = False
+) -> datetime:
     if now.tzinfo is None:
         raise ValueError("now must include a timezone")
     local = now.astimezone(TAIPEI)
     candidate = datetime.combine(local.date(), run_at, TAIPEI)
     if candidate <= local:
+        candidate += timedelta(days=1)
+    while weekdays_only and candidate.weekday() >= 5:
         candidate += timedelta(days=1)
     return candidate
 
@@ -87,6 +95,7 @@ async def run_scheduler(
     sleep: Sleeper = asyncio.sleep,
     retry: SameDayRetry | None = None,
     run_at: time = DEFAULT_RUN_AT,
+    weekdays_only: bool = False,
 ) -> None:
     """Run `runner` once per Taipei day, from `run_at` onwards.
 
@@ -98,7 +107,7 @@ async def run_scheduler(
     retry_due: datetime | None = None
     while True:
         current = now()
-        edition = due_edition(current, run_at=run_at)
+        edition = due_edition(current, run_at=run_at, weekdays_only=weekdays_only)
         if retry_due is not None and edition != retry_edition:
             retry_edition = retry_due = None
         if edition is not None and (edition != last_requested or retry_due is not None):
@@ -122,7 +131,11 @@ async def run_scheduler(
                         outcome=outcome,
                         retry_at=retry_due.isoformat(),
                     )
-        target = retry_due if retry_due is not None else next_run(current, run_at=run_at)
+        target = (
+            retry_due
+            if retry_due is not None
+            else next_run(current, run_at=run_at, weekdays_only=weekdays_only)
+        )
         await sleep(max(1.0, (target - current.astimezone(TAIPEI)).total_seconds()))
 
 
@@ -134,6 +147,25 @@ async def maintain_disabled_heartbeat(
     while True:
         await heartbeat.touch()
         await sleep(60)
+
+
+async def maintain_scheduler_heartbeat(
+    heartbeat: Path,
+    stopped: asyncio.Event,
+    *,
+    interval_seconds: float = 60,
+) -> None:
+    """Keep a long-sleeping scheduler healthy between due editions.
+
+    Weekday-only schedulers can legitimately wait across an entire weekend;
+    their container healthcheck must distinguish that from a stalled process.
+    """
+    while not stopped.is_set():
+        await heartbeat.touch()
+        try:
+            await asyncio.wait_for(stopped.wait(), timeout=interval_seconds)
+        except TimeoutError:
+            continue
 
 
 async def run_with_heartbeat(

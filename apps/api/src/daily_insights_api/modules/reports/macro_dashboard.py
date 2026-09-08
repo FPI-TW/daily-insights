@@ -8,7 +8,6 @@ remain explicit and never borrow a value from another instrument.
 import asyncio
 import html
 import re
-import time
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
@@ -494,35 +493,40 @@ async def load_fx_histories(settings: Settings) -> list[History]:
     return list(await asyncio.gather(*(fetch(*instrument) for instrument in INSTRUMENTS)))
 
 
+async def refresh_macro_dashboard(settings: Settings) -> MacroDashboard:
+    """Fetch a complete dashboard payload for durable queue publication.
+
+    This is deliberately not used by an HTTP handler.  A dashboard request is
+    served only from the last transactionally published snapshot.
+    """
+    now = datetime.now(UTC)
+    today = now.astimezone(ZoneInfo("Asia/Taipei")).date()
+    async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
+        markets, treasury, sofr, calendar = await asyncio.gather(
+            load_market_histories(settings),
+            load_treasury(client, today),
+            load_sofr(client, today),
+            load_calendar(client, now),
+        )
+    return MacroDashboard(
+        fetched_at=datetime.now(UTC), histories=[*markets, *treasury, sofr], calendar=calendar
+    )
+
+
 class MacroDashboardService:
+    """Compatibility wrapper for non-HTTP callers.
+
+    The application no longer registers this service: production refreshes are
+    invoked by the durable data-management worker and HTTP always reads DB.
+    """
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._lock = asyncio.Lock()
         self._cached: MacroDashboard | None = None
-        self._expires = 0.0
 
     async def get(self) -> MacroDashboard:
         async with self._lock:
-            now = datetime.now(UTC)
-            today = now.astimezone(ZoneInfo("Asia/Taipei")).date()
-            if (
-                self._cached is not None
-                and time.monotonic() < self._expires
-                and self._cached.calendar.date == today
-            ):
-                return self._cached
-            async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
-                markets, treasury, sofr, calendar = await asyncio.gather(
-                    load_market_histories(self.settings),
-                    load_treasury(client, today),
-                    load_sofr(client, today),
-                    load_calendar(client, now),
-                )
-            result = MacroDashboard(
-                fetched_at=datetime.now(UTC),
-                histories=[*markets, *treasury, sofr],
-                calendar=calendar,
-            )
-            self._cached = result
-            self._expires = time.monotonic() + 300
-            return result
+            if self._cached is None:
+                self._cached = await refresh_macro_dashboard(self.settings)
+            return self._cached
