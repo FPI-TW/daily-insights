@@ -168,6 +168,18 @@ def main() -> None:
         "macro-dashboard-scheduler must receive production database settings",
     )
     require(
+        not {
+            "DAILY_INSIGHTS_SESSION_SECRET",
+            "DAILY_INSIGHTS_PASSWORD_PEPPER",
+            "DAILY_INSIGHTS_R2_ENDPOINT_URL",
+            "DAILY_INSIGHTS_R2_BUCKET_NAME",
+            "DAILY_INSIGHTS_R2_ACCESS_KEY_ID",
+            "DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY",
+            "DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS",
+        }.intersection(macro_scheduler_environment),
+        "macro-dashboard-scheduler must not receive unrelated credentials",
+    )
+    require(
         macro_scheduler_environment.get("DAILY_INSIGHTS_ENVIRONMENT") == "production",
         "macro-dashboard-scheduler environment must be production",
     )

@@ -7,7 +7,7 @@ from datetime import date, datetime
 from anyio import Path
 
 from daily_insights_api import models as registered_models  # noqa: F401
-from daily_insights_api.core.config import get_settings
+from daily_insights_api.core.config import get_macro_dashboard_scheduler_settings
 from daily_insights_api.core.database import create_engine, create_session_factory
 from daily_insights_api.core.logging import configure_logging
 from daily_insights_api.modules.data_management.service import enqueue_automatic_macro_run
@@ -22,7 +22,7 @@ from daily_insights_api.modules.reports.scheduler import (
 async def main() -> None:
     configure_logging()
     args = parse_args(description="Run the macro dashboard queue scheduler")
-    settings = get_settings()
+    settings = get_macro_dashboard_scheduler_settings()
     engine = create_engine(settings)
     sessions = create_session_factory(engine)
     heartbeat = Path("/tmp/macro-dashboard-scheduler-heartbeat")
