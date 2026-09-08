@@ -83,7 +83,10 @@ export function AppShell({
       rememberCsrfToken(null)
       await router.invalidate()
       await router.navigate({
-        to: surface === "customer" ? "/$locale/login" : "/$locale/admin/login",
+        to:
+          surface === "customer"
+            ? "/{-$locale}/login"
+            : "/{-$locale}/admin/login",
         params: { locale },
       })
     } catch (caught) {
@@ -123,12 +126,12 @@ export function AppShell({
         data-surface={surface}
         layoutRoot
       >
-        <div className="mx-auto flex min-h-[68px] w-full max-w-[1240px] items-center justify-between gap-4 px-6 py-3 max-sm:flex-wrap max-sm:gap-x-2 max-sm:gap-y-1 max-sm:px-4 max-sm:py-2.5">
+        <div className="mx-auto flex min-h-17 w-full max-w-[1240px] items-center justify-between gap-4 px-6 py-3 max-sm:flex-wrap max-sm:gap-x-2 max-sm:gap-y-1 max-sm:px-4 max-sm:py-2.5">
           <Link
             to={
               surface === "customer"
-                ? "/$locale/reports"
-                : "/$locale/admin/audio"
+                ? "/{-$locale}/reports"
+                : "/{-$locale}/admin/audio"
             }
             params={{ locale }}
             className="flex min-w-0 items-center gap-3 text-sea-ink no-underline max-sm:flex-1"
@@ -158,14 +161,14 @@ export function AppShell({
                   variant="pill"
                 />
                 <Link
-                  to="/$locale/reports"
+                  to="/{-$locale}/reports"
                   params={{ locale }}
                   className={customerNavLinkClass}
                 >
                   {t("reportsNav")}
                 </Link>
                 <Link
-                  to="/$locale/podcasts"
+                  to="/{-$locale}/podcasts"
                   params={{ locale }}
                   className={customerNavLinkClass}
                 >
@@ -180,7 +183,7 @@ export function AppShell({
                   {t("aiDailyNewsNav")}
                 </a>
                 <Link
-                  to="/$locale/account"
+                  to="/{-$locale}/account"
                   params={{ locale }}
                   className={customerNavLinkClass}
                 >
@@ -188,9 +191,18 @@ export function AppShell({
                 </Link>
               </nav>
             ) : (
-              <span className="hidden text-right text-[11px] font-semibold text-sea-ink-soft lg:block">
-                {displayDate}
-              </span>
+              <div className="flex items-center gap-2 max-sm:order-3 max-sm:w-full max-sm:justify-end">
+                <Link
+                  to="/{-$locale}/reports"
+                  params={{ locale }}
+                  className="rounded-md border border-chip-line px-3 py-1.5 text-xs font-extrabold text-sea-ink-soft no-underline transition-colors hover:bg-link-hover hover:text-sea-ink"
+                >
+                  {t("viewReports")}
+                </Link>
+                <span className="hidden text-right text-[11px] font-semibold text-sea-ink-soft lg:block">
+                  {displayDate}
+                </span>
+              </div>
             )}
             <button
               className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-md px-2 text-sea-ink-soft transition-colors hover:bg-link-hover hover:text-sea-ink max-sm:order-2"
@@ -215,7 +227,7 @@ export function AppShell({
                 variant="underline"
               />
               <Link
-                to="/$locale/admin/audio"
+                to="/{-$locale}/admin/audio"
                 params={{ locale }}
                 className={adminNavLinkClass}
               >
@@ -224,35 +236,35 @@ export function AppShell({
               {user.system_role === "admin" ? (
                 <>
                   <Link
-                    to="/$locale/admin/members"
+                    to="/{-$locale}/admin/members"
                     params={{ locale }}
                     className={adminNavLinkClass}
                   >
                     {t("memberManagementNav")}
                   </Link>
                   <Link
-                    to="/$locale/admin/data-management"
+                    to="/{-$locale}/admin/data-management"
                     params={{ locale }}
                     className={adminNavLinkClass}
                   >
                     {t("dataManagementNav")}
                   </Link>
                   <Link
-                    to="/$locale/admin/news-management"
+                    to="/{-$locale}/admin/news-management"
                     params={{ locale }}
                     className={adminNavLinkClass}
                   >
                     {t("newsManagementNav")}
                   </Link>
                   <Link
-                    to="/$locale/admin/analyst-viewpoints"
+                    to="/{-$locale}/admin/analyst-viewpoints"
                     params={{ locale }}
                     className="shrink-0 border-b-2 border-transparent px-4 py-3 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&[aria-current=page]]:border-lagoon [&[aria-current=page]]:text-lagoon"
                   >
                     {t("analystViewpointsAdminNav")}
                   </Link>
                   <Link
-                    to="/$locale/admin/conversations"
+                    to="/{-$locale}/admin/conversations"
                     params={{ locale }}
                     search={{ history: [] }}
                     className={adminNavLinkClass}
@@ -288,7 +300,7 @@ export function AppShell({
             <X className="size-4" aria-hidden="true" />
           </button>
         </div>
-        <div className="mt-5 grid gap-[18px]">
+        <div className="mt-5 grid gap-4.5">
           <div className="grid gap-2">
             <p className="eyebrow tracking-[0.08em] text-sea-ink-soft">
               {t("language")}
@@ -311,7 +323,7 @@ export function AppShell({
               {t("signedInAs", { email: user.email })}
             </p>
             <button
-              className="min-h-[38px] w-full rounded-lg border border-market-up/40 bg-surface px-3.5 py-2 text-[12.5px] font-extrabold text-market-up hover:bg-market-up/8"
+              className="min-h-9.5 w-full rounded-lg border border-market-up/40 bg-surface px-3.5 py-2 text-[12.5px] font-extrabold text-market-up hover:bg-market-up/8"
               type="button"
               disabled={pending}
               onClick={() => void signOut()}

@@ -1,12 +1,39 @@
 import type { User } from "@daily-insights/api-client"
 
-export type Destination = "login" | "change-password" | "customer" | "admin"
+export type CustomerEntryDestination =
+  | "customer-login"
+  | "customer-change-password"
+  | "admin-change-password"
+  | "reports"
+export type AdminEntryDestination =
+  | "admin-login"
+  | "admin-change-password"
+  | "admin-audio"
+  | "customer-change-password"
+  | "reports"
 export const INTERNAL_CUSTOMER_ORGANIZATION = "admin"
 
-export function destinationFor(user: User | null): Destination {
-  if (!user) return "login"
-  if (user.must_change_password) return "change-password"
-  return user.system_role === "org_member" ? "customer" : "admin"
+export function customerEntryDestination(
+  user: User | null
+): CustomerEntryDestination {
+  if (!user || !canEnterCustomer(user)) return "customer-login"
+  if (!user.must_change_password) return "reports"
+  return canEnterBackOffice(user)
+    ? "admin-change-password"
+    : "customer-change-password"
+}
+
+export function adminEntryDestination(
+  user: User | null
+): AdminEntryDestination {
+  if (!user) return "admin-login"
+  if (canEnterBackOffice(user)) {
+    return user.must_change_password ? "admin-change-password" : "admin-audio"
+  }
+  if (canEnterCustomer(user)) {
+    return user.must_change_password ? "customer-change-password" : "reports"
+  }
+  return "admin-login"
 }
 
 export function canEnterCustomer(user: User) {

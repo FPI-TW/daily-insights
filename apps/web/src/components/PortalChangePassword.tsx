@@ -32,14 +32,20 @@ export function PortalChangePassword({
       )
       await router.invalidate()
       await router.navigate({
-        to: portal === "customer" ? "/$locale/reports" : "/$locale/admin/audio",
+        to:
+          portal === "customer"
+            ? "/{-$locale}/reports"
+            : "/{-$locale}/admin/audio",
         params: { locale },
       })
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) {
         rememberCsrfToken(null)
         await router.navigate({
-          to: portal === "customer" ? "/$locale/login" : "/$locale/admin/login",
+          to:
+            portal === "customer"
+              ? "/{-$locale}/login"
+              : "/{-$locale}/admin/login",
           params: { locale },
         })
         return

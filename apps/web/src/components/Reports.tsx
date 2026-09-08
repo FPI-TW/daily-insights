@@ -118,7 +118,7 @@ function ReportMarketNav({
         variant="underline"
       />
       <Link
-        to="/$locale/reports"
+        to="/{-$locale}/reports"
         params={{ locale }}
         activeOptions={{ exact: true }}
         className={linkClass(activeMarket === undefined)}
@@ -135,7 +135,7 @@ function ReportMarketNav({
         .map(market => (
           <Link
             key={market.code}
-            to="/$locale/reports/$marketCode"
+            to="/{-$locale}/reports/$marketCode"
             params={{ locale, marketCode: market.code }}
             className={linkClass(activeMarket === market.code)}
           >

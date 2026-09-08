@@ -29,6 +29,7 @@ const indexSymbols = new Set([
   "^VIX",
   "^TWII",
 ])
+const reportViewerRoles = ["admin", "asset_manager", "org_member"]
 const port = Number(process.argv[process.argv.indexOf("--port") + 1] || 3311)
 
 let state
@@ -504,14 +505,14 @@ const server = createServer(async (request, response) => {
     url.pathname === "/api/analyst-viewpoints/today" &&
     request.method === "GET"
   ) {
-    const role = requireRole(request, response, ["org_member"])
+    const role = requireRole(request, response, reportViewerRoles)
     if (!role) return
     sendJson(response, 200, [])
     return
   }
 
   if (url.pathname === "/api/reports" && request.method === "GET") {
-    const role = requireRole(request, response, ["org_member"])
+    const role = requireRole(request, response, reportViewerRoles)
     if (!role) return
     const locale = url.searchParams.get("locale") || "zh-hant"
     recordRequest(request, url, role)
@@ -527,7 +528,7 @@ const server = createServer(async (request, response) => {
     url.pathname === "/api/reports/global_macro_bonds/dashboard" &&
     request.method === "GET"
   ) {
-    const role = requireRole(request, response, ["org_member"])
+    const role = requireRole(request, response, reportViewerRoles)
     if (!role) return
     // Deterministic test-only histories; production always calls provider adapters.
     const assets = [
@@ -607,7 +608,7 @@ const server = createServer(async (request, response) => {
     url.pathname === "/api/markets/tw/institutional-flows" &&
     request.method === "GET"
   ) {
-    const role = requireRole(request, response, ["org_member"])
+    const role = requireRole(request, response, reportViewerRoles)
     if (!role) return
     recordRequest(request, url, role)
     const dates = Array.from(
@@ -639,7 +640,7 @@ const server = createServer(async (request, response) => {
     url.pathname === "/api/markets/tw/institutional-stocks" &&
     request.method === "GET"
   ) {
-    const role = requireRole(request, response, ["org_member"])
+    const role = requireRole(request, response, reportViewerRoles)
     if (!role) return
     recordRequest(request, url, role)
     const locale = url.searchParams.get("locale") || "zh-hant"
@@ -694,7 +695,7 @@ const server = createServer(async (request, response) => {
       url.pathname
     )
   if (indexMatch && request.method === "GET") {
-    const role = requireRole(request, response, ["org_member"])
+    const role = requireRole(request, response, reportViewerRoles)
     if (!role) return
     const symbol = decodeURIComponent(indexMatch[1])
     if (!indexSymbols.has(symbol)) {
@@ -764,7 +765,7 @@ const server = createServer(async (request, response) => {
 
   const reportMatch = /^\/api\/reports\/([^/]+)\/latest$/.exec(url.pathname)
   if (reportMatch && request.method === "GET") {
-    const role = requireRole(request, response, ["org_member"])
+    const role = requireRole(request, response, reportViewerRoles)
     if (!role) return
     const marketCode = reportMatch[1]
     if (!reportMarkets.includes(marketCode)) {
