@@ -133,10 +133,17 @@ test("US market renders a dedicated responsive VIX chart", async ({
     .toBe(true)
 })
 
-for (const [locale, heading, cumulative, foreign, days60] of [
-  ["zh-hant", "三大法人每日買賣超", "累積", "外資", "近 60 日"],
-  ["zh-hans", "三大法人每日买卖超", "累积", "外资", "近 60 日"],
-  ["en", "Daily institutional net buying", "Cumulative", "Foreign", "Last 60d"],
+for (const [locale, heading, cumulative, foreign, days60, bias] of [
+  ["zh-hant", "三大法人每日買賣超", "累積", "外資", "近 60 日", "台股乖離率"],
+  ["zh-hans", "三大法人每日买卖超", "累积", "外资", "近 60 日", "台股乖离率"],
+  [
+    "en",
+    "Daily institutional net buying",
+    "Cumulative",
+    "Foreign",
+    "Last 60d",
+    "TAIEX bias",
+  ],
 ] as const) {
   test(`Taiwan institutional flows render correctly in ${locale}`, async ({
     context,
@@ -163,7 +170,11 @@ for (const [locale, heading, cumulative, foreign, days60] of [
       .getByRole("heading", { name: heading, level: 3 })
       .locator("xpath=ancestor::section[2]")
     await expect(section).toBeVisible()
-    await expect(section.getByText("2026-09-04").first()).toBeVisible()
+    // The stock tables no longer carry a dated closing note; the latest net
+    // flow figure is the panel's own "data arrived" signal.
+    await expect(
+      section.getByText(locale === "en" ? "Latest" : "最新", { exact: true })
+    ).toBeVisible()
     await expect(section.getByRole("button", { pressed: true })).toHaveCount(3)
     await expect(
       section.getByText(locale === "en" ? "TSMC" : "台積電")
@@ -179,6 +190,14 @@ for (const [locale, heading, cumulative, foreign, days60] of [
     await expect(section.getByText(/layout placeholder|版面示意/)).toHaveCount(
       0
     )
+    // The institutional panels read before the bias chart.
+    const biasHeading = page.getByRole("heading", { name: bias, exact: true })
+    await expect(biasHeading).toBeVisible()
+    const sectionBox = await section.boundingBox()
+    const biasBox = await biasHeading.boundingBox()
+    expect(sectionBox).not.toBeNull()
+    expect(biasBox).not.toBeNull()
+    expect(sectionBox!.y).toBeLessThan(biasBox!.y)
     await page.setViewportSize({ width: 375, height: 720 })
     await expect
       .poll(() =>
