@@ -377,6 +377,9 @@ async def test_market_edition_is_independent_from_the_global_digest(
     from daily_insights_api.modules.news.service import run_all_editions
 
     candidates = _five_candidates()
+    # The pool grows between runs so the Taiwan edition is first partial and
+    # then, with fresh inputs, regenerated as complete.
+    pool: list[FetchedCandidate] = candidates[:4]
     feed_markets: list[str] = []
 
     async def feeds(
@@ -389,11 +392,11 @@ async def test_market_edition_is_independent_from_the_global_digest(
     ) -> list[Candidate]:
         del http, allowed, now, bodies
         feed_markets.append(market)
-        return [item.candidate for item in candidates]
+        return [item.candidate for item in pool]
 
     async def fetch(*args: object, **kwargs: object) -> list[FetchedCandidate]:
         del args, kwargs
-        return candidates
+        return list(pool)
 
     monkeypatch.setattr("daily_insights_api.modules.news.service.discover_feed_candidates", feeds)
     monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
@@ -406,18 +409,21 @@ async def test_market_edition_is_independent_from_the_global_digest(
     status = await run_news_edition(
         news_database, client, edition_date, allowed_hostnames=allowed, spec=TW_EQUITY_SPEC
     )
-    # Five stories against a target of eight is a partial market edition.
+    # Four stories against a target of five is a partial market edition.
     assert status == "partial"
     assert feed_markets == ["tw_equity"]
 
     # The global digest still starts at revision 1 with its own idempotency.
+    pool.append(candidates[4])
     assert (
         await run_news_edition(news_database, client, edition_date, allowed_hostnames=allowed)
         == "complete"
     )
+    # Running every edition leaves the complete digest alone, regenerates the
+    # partial Taiwan edition from its new inputs and produces the US edition.
     assert (
         await run_all_editions(news_database, client, edition_date, allowed_hostnames=allowed)
-        == "partial"
+        == "idempotent"
     )
 
     async with news_database() as database:
@@ -428,9 +434,9 @@ async def test_market_edition_is_independent_from_the_global_digest(
         )
         assert [(row.market_code, row.revision, row.status, row.caveat) for row in rows] == [
             ("global", 1, "complete", "5/5 stories completed"),
-            ("tw_equity", 1, "partial", "5/8 stories completed"),
-            ("tw_equity", 2, "partial", "5/8 stories completed"),
-            ("us_equity", 1, "partial", "5/8 stories completed"),
+            ("tw_equity", 1, "partial", "4/5 stories completed"),
+            ("tw_equity", 2, "complete", "5/5 stories completed"),
+            ("us_equity", 1, "complete", "5/5 stories completed"),
         ]
 
 

@@ -47,7 +47,7 @@ const {
 
 const news = {
   market_code: "us_equity",
-  target_items: 8,
+  target_items: 5,
   edition_date: "2026-09-02",
   revision: 1,
   status: "complete",

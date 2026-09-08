@@ -5,7 +5,12 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary, SelectedCandidate
+from daily_insights_api.modules.news.contracts import (
+    Candidate,
+    LocalizedSummary,
+    SelectedCandidate,
+    Selection,
+)
 from daily_insights_api.modules.news.extraction import FetchedCandidate
 from daily_insights_api.modules.news.llm import (
     DeepSeekClient,
@@ -82,15 +87,18 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
     assert "do not count as independent confirmation" in task
     assert "Fill all available slots" in task
     assert "the first 5 form the edition" in task
+    # Relevance is a fixed gate ahead of ranking, so the deploy-time criteria
+    # cannot talk the model into filling a slot with an off-market story.
+    assert "Relevance to this edition is a hard gate" in task
     contract = captured["OUTPUT_CONTRACT"]
     assert isinstance(contract, dict)
     # The closed vocabularies shown to the model must match the validated contract.
     fields = SelectedCandidate.model_fields
     assert set(contract["topic"]) == set(get_args(fields["topic"].annotation))
-    # The default (global) policy narrows the market vocabulary to its own tag,
-    # which must still be one of the validated contract's values.
-    assert set(contract["market"]) == {"global"}
-    assert set(contract["market"]) <= set(get_args(fields["market"].annotation))
+    # Every policy offers the full market vocabulary so the model classifies
+    # each story honestly; the rule then names the only tag published.
+    assert set(contract["market"]) == set(get_args(fields["market"].annotation))
+    assert "publishes only selections tagged 'global'" in contract["market_rule"]
     prompt_candidates = captured["CANDIDATES"]
     assert isinstance(prompt_candidates, list)
     assert [item["headline"] for item in prompt_candidates] == [value[1] for value in values]
@@ -417,4 +425,88 @@ async def test_refill_prompt_provides_covered_events_without_relaxing_market_pol
         }
     ]
     assert "different event_key" in prompt["REFILL_GUIDANCE"]
-    assert prompt["OUTPUT_CONTRACT"]["market"] == ["global"]
+    assert "relevance" in prompt["REFILL_GUIDANCE"]
+    assert "publishes only selections tagged 'global'" in prompt["OUTPUT_CONTRACT"]["market_rule"]
+
+
+async def test_market_edition_prompt_gates_relevance_and_publishes_only_its_tag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.modules.news.editions import TW_EQUITY_SPEC, US_EQUITY_SPEC
+    from daily_insights_api.modules.news.llm import MARKET_VALUES
+
+    client = DeepSeekClient(base_url="https://api.deepseek.com", api_key="secret", model="test")
+    complete = AsyncMock(return_value=({"selections": []}, None, None, None, 1, "a" * 64))
+    monkeypatch.setattr(client, "_complete", complete)
+    for spec, tag in ((TW_EQUITY_SPEC, "taiwan"), (US_EQUITY_SPEC, "us")):
+        await client.select([], policy=spec.selection)
+        prompt = complete.call_args.args[0]
+        focus = prompt["MARKET_FOCUS"]
+        assert focus.startswith("This edition covers one market only")
+        assert "strong, direct link" in focus
+        assert "relevance gate" in focus
+        assert "empty slot is always better" in focus
+        assert "Fill all 5 slots" in focus
+        assert "hard gate" in prompt["task"]
+        contract = prompt["OUTPUT_CONTRACT"]
+        assert contract["market"] == MARKET_VALUES
+        assert f"publishes only selections tagged '{tag}'" in contract["market_rule"]
+        assert contract["example"]["selections"][0]["market"] == tag
+
+
+async def test_select_drops_picks_the_model_tags_for_another_market(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.modules.news.editions import TW_EQUITY_SPEC
+
+    client = DeepSeekClient(base_url="https://api.deepseek.com", api_key="secret", model="test")
+    candidates = [
+        FetchedCandidate(
+            Candidate(
+                id=character * 64,
+                url=f"https://news.cnyes.com/{character}",
+                hostname="news.cnyes.com",
+                source_name="鉅亨",
+                headline=headline,
+            ),
+            f"https://news.cnyes.com/{character}",
+            "Source body",
+            character * 64,
+        )
+        for character, headline in (("a", "台積電上修全年展望"), ("b", "Fed 維持利率不變"))
+    ]
+    monkeypatch.setattr(
+        client,
+        "_complete",
+        AsyncMock(
+            return_value=(
+                {
+                    "selections": [
+                        {
+                            "id": "a" * 64,
+                            "topic": "companies",
+                            "event_key": "tsmc-guidance",
+                            "market": "taiwan",
+                            "importance": 5,
+                        },
+                        {
+                            "id": "b" * 64,
+                            "topic": "policy",
+                            "event_key": "fed-decision",
+                            "market": "us",
+                            "importance": 4,
+                        },
+                    ]
+                },
+                None,
+                None,
+                None,
+                1,
+                "a" * 64,
+            )
+        ),
+    )
+    call = await client.select(candidates, policy=TW_EQUITY_SPEC.selection)
+    assert isinstance(call.value, Selection)
+    # The honest "us" tag costs that pick its slot; the Taiwan story stays.
+    assert [item.event_key for item in call.value.selections] == ["tsmc-guidance"]

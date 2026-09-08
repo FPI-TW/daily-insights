@@ -185,7 +185,7 @@ describe("DailyNews", () => {
         <DailyNews
           news={{
             market_code: "tw_equity",
-            target_items: 8,
+            target_items: 5,
             edition_id: "00000000-0000-4000-8000-000000000003",
             edition_date: "2026-09-04",
             revision: 1,
