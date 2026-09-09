@@ -21,7 +21,7 @@ import {
 import { getMacroDashboard } from "#/lib/macro-dashboard.functions"
 import type { MacroDashboardData } from "#/lib/macro-dashboard"
 import { getVisibleMarkets } from "#/lib/markets"
-import { DailyNews } from "#/components/DailyNews"
+import { DailyNews, DailyNewsLoading } from "#/components/DailyNews"
 import {
   IndexHistoryChart,
   IndexHistoryLoading,
@@ -303,6 +303,14 @@ function ReportPage() {
   )
   return (
     <>
+      {news ? (
+        <DailyNews
+          news={news.latest}
+          eyebrowKey="marketNewsEyebrow"
+          titleKey={`marketNewsTitle_${news.marketCode}`}
+          groupByMarket={false}
+        />
+      ) : null}
       {(report.kind !== "report" || macroDashboard) && viewpoint ? (
         <MarketViewpoint viewpoint={viewpoint} />
       ) : null}
@@ -395,14 +403,6 @@ function ReportPage() {
           </Await>
         </Suspense>
       ) : null}
-      {news ? (
-        <DailyNews
-          news={news.latest}
-          eyebrowKey="marketNewsEyebrow"
-          titleKey={`marketNewsTitle_${news.marketCode}`}
-          groupByMarket={false}
-        />
-      ) : null}
     </>
   )
 }
@@ -411,6 +411,7 @@ function MarketPageLoading() {
   const { marketCode } = Route.useParams()
   return (
     <>
+      {isNewsMarketCode(marketCode) ? <DailyNewsLoading /> : null}
       <ReportLoadingScreen />
       {marketCode === "us_equity" ? (
         <div className="mt-6">

@@ -35,6 +35,15 @@ const HIDDEN_REPORT_NAV_MARKETS = new Set<MarketCode>([
   "tw_index_derivatives",
 ])
 
+function reportNavMarkets(markets: ReadonlyArray<NavMarket>) {
+  return markets.filter(
+    market =>
+      !HIDDEN_REPORT_NAV_MARKETS.has(market.code) &&
+      (market.code !== "forex" ||
+        !markets.some(item => item.code === "global_macro_bonds"))
+  )
+}
+
 /** Display text for a value that is not a number: translation keys and
  * pre-formatted literals. Numbers go through `formatNumber`/`formatChange`. */
 function valueText(value: ReportValue | null, t: Translate) {
@@ -125,23 +134,16 @@ function ReportMarketNav({
       >
         {t("reportAllMarkets")}
       </Link>
-      {markets
-        .filter(
-          market =>
-            !HIDDEN_REPORT_NAV_MARKETS.has(market.code) &&
-            (market.code !== "forex" ||
-              !markets.some(item => item.code === "global_macro_bonds"))
-        )
-        .map(market => (
-          <Link
-            key={market.code}
-            to="/{-$locale}/reports/$marketCode"
-            params={{ locale, marketCode: market.code }}
-            className={linkClass(activeMarket === market.code)}
-          >
-            {marketTabLabel(t, market)}
-          </Link>
-        ))}
+      {reportNavMarkets(markets).map(market => (
+        <Link
+          key={market.code}
+          to="/{-$locale}/reports/$marketCode"
+          params={{ locale, marketCode: market.code }}
+          className={linkClass(activeMarket === market.code)}
+        >
+          {marketTabLabel(t, market)}
+        </Link>
+      ))}
     </nav>
   )
 }
@@ -230,7 +232,7 @@ function AnalystViewpoints({
   // Viewpoints follow navigation order and only cover navigable markets when
   // the market list is known; otherwise they are shown as delivered.
   const visibleViewpoints = markets
-    ? markets.flatMap(market => {
+    ? reportNavMarkets(markets).flatMap(market => {
         const viewpoint = viewpoints.find(v => v.market_code === market.code)
         return viewpoint ? [viewpoint] : []
       })

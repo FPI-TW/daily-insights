@@ -49,10 +49,8 @@ export async function loadReportsAndNews({
 function ReportsAndNewsLoading() {
   return (
     <>
+      <DailyNewsLoading />
       <ReportLoadingScreen />
-      <main className="page-shell pt-0">
-        <DailyNewsLoading />
-      </main>
     </>
   )
 }
@@ -75,8 +73,8 @@ function ReportsPage() {
   )
   return (
     <>
-      <ReportList viewpoints={viewpoints} markets={markets} />
       <DailyNews news={news} />
+      <ReportList viewpoints={viewpoints} markets={markets} />
     </>
   )
 }

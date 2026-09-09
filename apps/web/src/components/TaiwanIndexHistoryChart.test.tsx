@@ -85,7 +85,7 @@ function show(ui: React.ReactNode) {
 }
 function candles() {
   return screen
-    .getByRole("heading", { name: "TAIEX — daily candles + MA + volume" })
+    .getByRole("heading", { name: "Taiwan Weighted Index" })
     .closest("section")!
 }
 
@@ -131,15 +131,25 @@ describe("TaiwanIndexHistoryChart", () => {
     expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
       '"xAxisIndex":[0,1]'
     )
-    expect(within(candles()).getByText("2025-02-01 – 2026-09-04")).toBeVisible()
+    expect(
+      within(candles()).queryByText("Last 2 years · daily OHLC")
+    ).toBeNull()
+    expect(within(candles()).queryByText("Visible date range")).toBeNull()
     fireEvent.click(
       within(candles()).getByRole("button", {
-        name: "Zoom TAIEX — daily candles + MA + volume",
+        name: "Zoom Taiwan Weighted Index",
       })
     )
-    expect(within(candles()).getByText("2025-02-01 – 2026-01-01")).toBeVisible()
+    expect(within(candles()).queryByText("2025-02-01 – 2026-01-01")).toBeNull()
     expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
       '"height":26'
+    )
+    const candleHeading = screen.getByRole("heading", {
+      name: "Taiwan Weighted Index",
+    })
+    const biasHeading = screen.getByRole("heading", { name: "TAIEX bias" })
+    expect(candleHeading.compareDocumentPosition(biasHeading)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
     )
   })
   it("keeps the initial averages request pending while showing available candles", async () => {
