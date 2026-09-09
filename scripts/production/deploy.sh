@@ -13,6 +13,78 @@ compose() {
     "$@"
 }
 
+diagnose_cutover_failure() {
+  message=$1
+  echo "$message" >&2
+  if quiesce_automatic_news; then
+    echo "Automatic news is confirmed quiescent. Inspect the diagnostics, correct the failure, then rerun deploy.sh; do not start daily-news-scheduler before data-management-worker is healthy." >&2
+  else
+    echo "Automatic news could not be confirmed quiescent. Keep the deployment halted, stop daily-news-scheduler and data-management-worker manually, inspect the diagnostics, then rerun deploy.sh." >&2
+  fi
+  "$script_dir/diagnose.sh" >&2 || true
+  exit 1
+}
+
+confirm_stopped() {
+  container=$1
+  state=$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || true)
+  case "$state" in
+    '' | created | dead | exited) return 0 ;;
+    *)
+      echo "$container did not stop: $state" >&2
+      return 1
+      ;;
+  esac
+}
+
+quiesce_automatic_news() {
+  quiesce_failed=false
+  if ! compose stop daily-news-scheduler data-management-worker; then
+    echo "failed to stop automatic news services" >&2
+    quiesce_failed=true
+  fi
+  if ! confirm_stopped daily-insights-daily-news-scheduler; then
+    quiesce_failed=true
+  fi
+  if ! confirm_stopped daily-insights-data-management-worker; then
+    quiesce_failed=true
+  fi
+  [ "$quiesce_failed" = false ]
+}
+
+wait_for_healthy_container() {
+  container=$1
+  timeout_seconds=${DAILY_INSIGHTS_HEALTH_TIMEOUT_SECONDS:-240}
+  case "$timeout_seconds" in
+    '' | *[!0-9]*)
+      echo "DAILY_INSIGHTS_HEALTH_TIMEOUT_SECONDS must be a positive integer" >&2
+      return 1
+      ;;
+  esac
+  if [ "$timeout_seconds" -lt 1 ] || [ "$timeout_seconds" -gt 900 ]; then
+    echo "health timeout must be between 1 and 900 seconds" >&2
+    return 1
+  fi
+  deadline=$(( $(date +%s) + timeout_seconds ))
+  while [ "$(date +%s)" -le "$deadline" ]; do
+    state=$(
+      docker inspect \
+        --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+        "$container" 2>/dev/null || true
+    )
+    runtime_status=${state%% *}
+    health_status=${state#* }
+    case "$runtime_status" in
+      dead | exited | paused | removing | restarting) return 1 ;;
+    esac
+    if [ "$runtime_status" = "running" ] && [ "$health_status" = "healthy" ]; then
+      return 0
+    fi
+    sleep 5
+  done
+  return 1
+}
+
 required_environment="
 API_IMAGE
 WEB_IMAGE
@@ -64,14 +136,8 @@ case "$DAILY_INSIGHTS_DAILY_NEWS_ENABLED" in
 esac
 
 if [ "$DAILY_INSIGHTS_DAILY_NEWS_ENABLED" = true ] &&
-  [ -z "$(printenv DAILY_INSIGHTS_MODEL_API_KEY 2>/dev/null || true)" ]; then
-  echo "enabled daily news requires deployment environment: DAILY_INSIGHTS_MODEL_API_KEY" >&2
-  exit 1
-fi
-if [ "${DAILY_INSIGHTS_PODCAST_ANALYSIS_ENABLED:-false}" = true ] &&
-  { [ -z "$(printenv DAILY_INSIGHTS_OPENAI_API_KEY 2>/dev/null || true)" ] ||
-    [ -z "$(printenv DAILY_INSIGHTS_MODEL_API_KEY 2>/dev/null || true)" ]; }; then
-  echo "enabled podcast analysis requires deployment environment: DAILY_INSIGHTS_OPENAI_API_KEY and DAILY_INSIGHTS_MODEL_API_KEY" >&2
+  [ -z "$(printenv DAILY_INSIGHTS_NEWS_MODEL_API_KEY 2>/dev/null || true)" ]; then
+  echo "enabled daily news requires deployment environment: DAILY_INSIGHTS_NEWS_MODEL_API_KEY" >&2
   exit 1
 fi
 
@@ -121,18 +187,31 @@ compose pull
 compose run --rm --no-deps nginx nginx -t
 compose up -d --no-build --force-recreate --no-deps nginx
 
-# Migrations must remain forward-compatible with the containers serving the
-# previous application version during rollout.
-compose run --rm --no-deps api alembic upgrade head
+# The old direct-fetch scheduler and old queue worker must not cross the schema
+# boundary: either could execute new automatic rows with predecessor semantics.
+if ! quiesce_automatic_news; then
+  diagnose_cutover_failure "automatic news could not be confirmed quiescent; migration was not attempted"
+fi
 
-if ! compose up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler institutional-flows-scheduler data-management-worker macro-dashboard-scheduler; then
-  "$script_dir/diagnose.sh" >&2
-  exit 1
+if ! compose run --rm --no-deps api alembic upgrade head; then
+  diagnose_cutover_failure "database migration failed after automatic news was stopped"
+fi
+
+# Only the replacement worker may observe rows created under the new schema.
+# Keep the scheduler stopped until that worker is confirmed healthy.
+if ! compose up -d --no-build --force-recreate --no-deps data-management-worker; then
+  diagnose_cutover_failure "replacement data-management-worker failed to start"
+fi
+if ! wait_for_healthy_container daily-insights-data-management-worker; then
+  diagnose_cutover_failure "replacement data-management-worker did not become healthy"
+fi
+
+if ! compose up -d --no-build --remove-orphans api web morning-report-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler institutional-flows-scheduler macro-dashboard-scheduler daily-news-scheduler; then
+  diagnose_cutover_failure "final service convergence failed after the replacement worker started"
 fi
 
 if ! "$script_dir/health.sh"; then
-  "$script_dir/diagnose.sh" >&2
-  exit 1
+  diagnose_cutover_failure "final production health check failed"
 fi
 
 echo "deployment completed"

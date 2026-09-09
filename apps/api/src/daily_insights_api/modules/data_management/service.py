@@ -4,12 +4,12 @@ import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal, Protocol, cast
 from zoneinfo import ZoneInfo
 
 from anyio import Path
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -40,7 +40,7 @@ from daily_insights_api.modules.news.api import (
     create_news_client,
     edition_spec,
     effective_hostnames,
-    run_all_editions,
+    run_all_editions_with_outcomes,
     run_news_edition,
 )
 from daily_insights_api.modules.operations.api import sanitize_error_code
@@ -110,6 +110,11 @@ ACTIVE_RUN_UNIQUE_CONSTRAINTS = frozenset(
 )
 AUTOMATIC_MACRO_EDITION_CONSTRAINT = "uq_data_management_runs_automatic_macro_dashboard_edition"
 AutomaticMacroEnqueueResult = Literal["queued", "already_recorded"]
+AUTOMATIC_NEWS_ALL_EDITION_CONSTRAINT = "uq_data_management_runs_automatic_news_all_edition"
+AutomaticNewsEnqueueResult = Literal["queued", "already_recorded"]
+NEWS_RETRY_OUTCOMES = frozenset({"partial", "unavailable", "failed"})
+NEWS_RETRY_INTERVAL = timedelta(minutes=30)
+NEWS_RETRY_UNTIL = time(hour=12)
 
 
 def is_active_run_conflict(error: IntegrityError) -> bool:
@@ -126,6 +131,14 @@ def is_automatic_macro_edition_conflict(error: IntegrityError) -> bool:
     return (
         getattr(error.orig, "sqlstate", None) == "23505"
         and getattr(diagnostic, "constraint_name", None) == AUTOMATIC_MACRO_EDITION_CONSTRAINT
+    )
+
+
+def is_automatic_news_all_edition_conflict(error: IntegrityError) -> bool:
+    diagnostic = getattr(error.orig, "diag", None)
+    return (
+        getattr(error.orig, "sqlstate", None) == "23505"
+        and getattr(diagnostic, "constraint_name", None) == AUTOMATIC_NEWS_ALL_EDITION_CONSTRAINT
     )
 
 
@@ -212,6 +225,32 @@ async def enqueue_automatic_macro_run(
     return "queued"
 
 
+async def enqueue_automatic_news_all_run(
+    session_factory: async_sessionmaker[AsyncSession], *, edition_date: date
+) -> AutomaticNewsEnqueueResult:
+    """Persist the one automatic 08:00 news obligation for an edition.
+
+    This deliberately does not share the manual-news active-run slot: a manual
+    request must not make the scheduler forget an edition just because a
+    deployment happens while that request is executing.
+    """
+    async with session_factory.begin() as database:
+        queued = await database.scalar(
+            insert(DataManagementRun)
+            .values(
+                operation="news_all",
+                market_code=None,
+                edition_date=edition_date,
+                status="pending",
+                requested_by_user_id=None,
+                scheduled_for=datetime.combine(edition_date, time(hour=8), TAIPEI),
+            )
+            .on_conflict_do_nothing()
+            .returning(DataManagementRun.id)
+        )
+    return "queued" if queued is not None else "already_recorded"
+
+
 async def cancel_run(
     database: AsyncSession,
     *,
@@ -251,9 +290,9 @@ async def cancel_run(
 
 
 async def claim_next_run(
-    session_factory: async_sessionmaker[AsyncSession], owner: str
+    session_factory: async_sessionmaker[AsyncSession], owner: str, *, now: datetime | None = None
 ) -> DataManagementRun | None:
-    now = datetime.now(UTC)
+    now = now or datetime.now(UTC)
     try:
         async with session_factory.begin() as database:
             # An expired lease alone is not proof that the provider call stopped.
@@ -278,6 +317,41 @@ async def claim_next_run(
                     expired_run.status = "pending"
                     expired_run.lease_owner = None
                     expired_run.lease_expires_at = None
+            local_now = now.astimezone(TAIPEI)
+            expired_through = (
+                local_now.date()
+                if local_now.time().replace(tzinfo=None) > NEWS_RETRY_UNTIL
+                else local_now.date() - timedelta(days=1)
+            )
+            expired_news_runs = (
+                await database.scalars(
+                    select(DataManagementRun)
+                    .where(
+                        DataManagementRun.status == "pending",
+                        DataManagementRun.operation.in_(("news_all", "news_market")),
+                        DataManagementRun.requested_by_user_id.is_(None),
+                        DataManagementRun.scheduled_for.is_not(None),
+                        DataManagementRun.edition_date <= expired_through,
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            ).all()
+            for expired_run in expired_news_runs:
+                expired_run.status = "cancelled"
+                expired_run.completed_at = now
+                expired_run.lease_owner = None
+                expired_run.lease_expires_at = None
+                expired_run.error = "news_window_expired"
+                expired_run.result = {
+                    "outcome": "expired",
+                    "reason": "news_window_expired",
+                    "expired_at": now.isoformat(),
+                    "scheduled_for": (
+                        expired_run.scheduled_for.isoformat()
+                        if expired_run.scheduled_for is not None
+                        else None
+                    ),
+                }
             manual_macro_active = select(DataManagementRun.id).where(
                 DataManagementRun.operation == "macro_dashboard",
                 DataManagementRun.requested_by_user_id.is_not(None),
@@ -287,10 +361,19 @@ async def claim_next_run(
                 DataManagementRun.operation == "macro_dashboard",
                 DataManagementRun.status == "running",
             )
+            due_automatic_news = (
+                DataManagementRun.operation.in_(("news_all", "news_market"))
+                & DataManagementRun.requested_by_user_id.is_(None)
+                & (DataManagementRun.scheduled_for <= now)
+            )
             run = await database.scalar(
                 select(DataManagementRun)
                 .where(
                     DataManagementRun.status == "pending",
+                    or_(
+                        DataManagementRun.scheduled_for.is_(None),
+                        DataManagementRun.scheduled_for <= now,
+                    ),
                     # Automatic macro editions queue behind an active manual
                     # run. Any macro claim also waits for the one running
                     # execution; the DB unique index handles races between
@@ -303,6 +386,11 @@ async def claim_next_run(
                     ((DataManagementRun.operation != "macro_dashboard") | ~macro_running.exists()),
                 )
                 .order_by(
+                    # The automatic news chain has a hard noon deadline, so
+                    # already-due work cannot sit behind sustained manual
+                    # enqueueing. Existing macro/manual priority remains the
+                    # tie-breaker for every other claimable run.
+                    due_automatic_news.desc(),
                     # Prefer a manual macro run over its scheduled companion.
                     (DataManagementRun.operation == "macro_dashboard").desc(),
                     DataManagementRun.requested_by_user_id.is_(None),
@@ -357,6 +445,98 @@ async def complete_run(
         )
         if current is None or current.lease_owner != owner or current.status != "running":
             return
+        current.status = status
+        current.result = result
+        current.error = error
+        current.completed_at = now
+        current.lease_owner = None
+        current.lease_expires_at = None
+        record_audit_event(
+            database,
+            actor_user_id=run.requested_by_user_id,
+            action="data_management.run_completed",
+            target_type="data_management_run",
+            target_id=str(run.id),
+            after={"status": status, "operation": run.operation},
+        )
+
+
+def _news_outcomes(run: DataManagementRun, result: dict[str, object]) -> dict[str, str]:
+    """Normalize result data before deciding which automatic markets retry."""
+    raw_outcomes = result.get("outcomes")
+    if isinstance(raw_outcomes, dict) and all(
+        isinstance(market, str) and isinstance(outcome, str)
+        for market, outcome in raw_outcomes.items()
+    ):
+        return cast(dict[str, str], raw_outcomes)
+    outcome = result.get("outcome")
+    if not isinstance(outcome, str):
+        outcome = "failed"
+    markets = (
+        (run.market_code,)
+        if run.operation == "news_market" and run.market_code is not None
+        else EDITION_ORDER
+    )
+    return {market: outcome for market in markets}
+
+
+async def _enqueue_automatic_news_retries(
+    database: AsyncSession,
+    run: DataManagementRun,
+    result: dict[str, object],
+    *,
+    now: datetime,
+) -> None:
+    """Add future-due retries while the completed row remains locked.
+
+    The surrounding completion transaction verifies worker ownership first,
+    terminalizes the current row, and inserts its successors as one atomic
+    state transition.  PostgreSQL's historical uniqueness key provides an
+    additional fence for lease recovery or concurrent scheduler processes.
+    """
+    if run.requested_by_user_id is not None or run.operation not in {"news_all", "news_market"}:
+        return
+    retry_at = now.astimezone(TAIPEI) + NEWS_RETRY_INTERVAL
+    deadline = datetime.combine(run.edition_date, NEWS_RETRY_UNTIL, TAIPEI)
+    if retry_at > deadline:
+        return
+    outcomes = _news_outcomes(run, result)
+    for market_code, outcome in outcomes.items():
+        if outcome not in NEWS_RETRY_OUTCOMES:
+            continue
+        await database.execute(
+            insert(DataManagementRun)
+            .values(
+                operation="news_market",
+                market_code=market_code,
+                edition_date=run.edition_date,
+                status="pending",
+                requested_by_user_id=None,
+                scheduled_for=retry_at,
+            )
+            .on_conflict_do_nothing()
+        )
+
+
+async def complete_news_run(
+    session_factory: async_sessionmaker[AsyncSession],
+    run: DataManagementRun,
+    owner: str,
+    *,
+    status: str,
+    result: dict[str, object],
+    error: str | None = None,
+    now: datetime | None = None,
+) -> None:
+    """Complete a news run and atomically persist only its needed retries."""
+    now = now or datetime.now(UTC)
+    async with session_factory.begin() as database:
+        current = await database.scalar(
+            select(DataManagementRun).where(DataManagementRun.id == run.id).with_for_update()
+        )
+        if current is None or current.lease_owner != owner or current.status != "running":
+            return
+        await _enqueue_automatic_news_retries(database, current, result, now=now)
         current.status = status
         current.result = result
         current.error = error
@@ -709,14 +889,20 @@ async def _execute_institutional_twse(
 async def _execute_news(
     run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
 ) -> tuple[str, dict[str, object], str | None]:
-    api_key = settings.model_api_key
+    api_key = settings.news_model_api_key
     if (
         not settings.daily_news_enabled
         or api_key is None
         or not api_key.get_secret_value().strip()
         or is_placeholder_value(api_key.get_secret_value())
     ):
-        return "failed", {"outcome": "unavailable"}, "daily_news_unavailable"
+        outcomes = {
+            market: "unavailable"
+            for market in (
+                (cast(str, run.market_code),) if run.operation == "news_market" else EDITION_ORDER
+            )
+        }
+        return "failed", {"outcome": "unavailable", "outcomes": outcomes}, "daily_news_unavailable"
     client = create_news_client(
         base_url=settings.model_api_base_url,
         api_key=api_key.get_secret_value(),
@@ -737,8 +923,9 @@ async def _execute_news(
                 discovery_timeout_seconds=settings.news_discovery_timeout_seconds,
                 spec=edition_spec(cast(str, run.market_code)),
             )
+            outcomes = {cast(str, run.market_code): outcome}
         else:
-            outcome = await run_all_editions(
+            outcome, outcomes = await run_all_editions_with_outcomes(
                 session_factory,
                 client,
                 run.edition_date,
@@ -747,7 +934,13 @@ async def _execute_news(
                 discovery_timeout_seconds=settings.news_discovery_timeout_seconds,
             )
     except Exception as error:
-        return "failed", {}, sanitize_error(error)
+        outcomes = {
+            market: "failed"
+            for market in (
+                (cast(str, run.market_code),) if run.operation == "news_market" else EDITION_ORDER
+            )
+        }
+        return "failed", {"outcome": "failed", "outcomes": outcomes}, sanitize_error(error)
     finally:
         await client.aclose()
     status = (
@@ -757,7 +950,11 @@ async def _execute_news(
         if outcome == "partial"
         else "failed"
     )
-    return status, {"outcome": outcome}, None if status == "succeeded" else f"news_{outcome}"
+    return (
+        status,
+        {"outcome": outcome, "outcomes": outcomes},
+        None if status == "succeeded" else f"news_{outcome}",
+    )
 
 
 async def _execute_macro(
@@ -896,6 +1093,15 @@ async def worker_loop(
                         result=result,
                         error=error,
                         dashboard=dashboard,
+                    )
+                elif claimed_run.operation.startswith("news"):
+                    await complete_news_run(
+                        session_factory,
+                        claimed_run,
+                        owner,
+                        status=outcome,
+                        result=result,
+                        error=error,
                     )
                 else:
                     await complete_run(

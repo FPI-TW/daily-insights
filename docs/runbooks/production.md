@@ -15,9 +15,11 @@ The repository now includes an offline-verifiable deployment foundation and an
 Cloudflare, RDS, or R2 resources:
 
 - [`compose.production.yaml`](../../compose.production.yaml) runs only externally
-  built API, Web, and nginx images pinned by digest, plus the morning-report
-  and daily-news scheduler containers that reuse the API image; PostgreSQL is
-  deliberately absent because production uses RDS;
+  built images pinned by digest across 10 containers: API, Web, nginx, six
+  schedulers (`morning-report`, `daily-news`, `analyst-viewpoints`,
+  `index-daily-bars`, `institutional-flows`, and `macro-dashboard`), and
+  `data-management-worker`; PostgreSQL is deliberately absent because
+  production uses RDS;
 - [`deploy.sh`](../../scripts/production/deploy.sh),
   [`preflight.sh`](../../scripts/production/preflight.sh),
   [`health.sh`](../../scripts/production/health.sh), and
@@ -39,7 +41,13 @@ files.
 ## Recommended topology
 
 - One x86_64 EC2 application instance in a private or tightly restricted subnet
-  runs nginx, web, and API containers. Size from measured SSE memory and CPU,
+  runs the 10 production containers: `api`, `web`, `nginx`,
+  `morning-report-scheduler`, `daily-news-scheduler`,
+  `analyst-viewpoints-scheduler`, `index-daily-bars-scheduler`,
+  `institutional-flows-scheduler`, `macro-dashboard-scheduler`, and
+  `data-management-worker`. The daily-news scheduler persists the automatic
+  `news_all` obligation in the durable queue; the worker claims it and executes
+  provider work and targeted retries. Size from measured SSE memory and CPU,
   not user count alone.
 - RDS PostgreSQL in private subnets is the durable store. A Single-AZ instance
   is compatible with accepted downtime and lower cost; Multi-AZ is the
@@ -110,8 +118,10 @@ CloudWatch, security-group control, and future scaling are clearer with EC2.
   production.
 - Enable storage encryption, deletion protection, and final snapshots.
 - Take a manual snapshot before migrations with material data-shape risk.
-- Migrations are forward-compatible with the currently deployed application
-  during rollout; destructive cleanup is a later, separately approved change.
+- Migrations are normally forward-compatible with the serving application
+  during rollout. Migration `20260909_0022` is an explicit worker/scheduler
+  compatibility fence, so those old processes are quiesced before it runs.
+  Destructive cleanup is a later, separately approved change.
 - At least quarterly, restore a backup to an isolated RDS instance, run
   integrity/application smoke checks, record achieved recovery point and
   recovery time, then destroy the test resource through the approved process.
@@ -194,8 +204,12 @@ Compose while retaining immutable deployment inputs.
    `/opt/daily-insights/scripts/production/deploy.sh`. The script validates and
    pulls pinned images, renders and tests the nginx template in a disposable
    container, then recreates only nginx with Docker DNS re-resolution enabled
-   while the previous API/Web containers are still available. It next runs the
-   compatible migration and converges only API, Web, and the two schedulers.
+   while the previous API/Web containers are still available. It then stops
+   the old `daily-news-scheduler` and `data-management-worker` and confirms both
+   are stopped before running `alembic upgrade head`. After migration, it
+   force-recreates only the replacement worker and waits until that container
+   is healthy. Only then does it start the daily-news scheduler and converge
+   API, Web, and the remaining schedulers without recreating nginx again.
 5. Require container health plus active API-readiness and Web-login probes
    through nginx before reporting deployment success. Replaced upstream
    addresses may take up to two seconds to re-resolve; a deployment remains
@@ -205,14 +219,26 @@ Compose while retaining immutable deployment inputs.
    playback, including locale fallback and browser-local progress restoration.
    Add report and SSE chat smoke tests only when those surfaces enter the
    deployed release.
-7. Roll back by rerunning the protected workflow for the prior compatible
-   commit/image digest with the same GitHub Environment values. Database restore
-   is an incident action, not a routine code rollback.
+7. For routine recovery after migration `20260909_0022`, keep
+   `daily-news-scheduler` and `data-management-worker` quiesced, apply a forward
+   fix, and rerun `deploy.sh`. A prior image may be redeployed only when it is
+   schema-compatible with the current database; never run a pre-0022 worker or
+   scheduler against a post-0022 database.
 
 The host does not save rollback env files because they would duplicate GitHub
-Secrets. A failed deployment emits container state and recent logs. Migrations
-must remain backward-compatible with the previous image because application
-rollback never reverses or restores the database.
+Secrets. If migration, replacement-worker startup or health, final convergence,
+or final health fails, deployment re-stops `daily-news-scheduler` and
+`data-management-worker` and confirms both are quiescent when Docker is able to
+do so. The operator uses the emitted container state and recent logs to correct
+the failure, then reruns `deploy.sh`; the deployment does not downgrade or roll
+back the migration. If Docker cannot confirm quiescence, the operator must stop
+and verify both containers manually before recovery.
+
+Migration `20260909_0022` is a rollback fence. A true rollback across that fence
+is an incident procedure that restores a compatible pre-migration database
+snapshot together with the prior images. Do not run the migration downgrade
+against production data: it explicitly refuses once automatic scheduling
+history exists.
 
 nginx uses Docker's embedded DNS resolver for the `api` and `web` Compose
 aliases. Do not replace the targeted backend convergence with an unscoped

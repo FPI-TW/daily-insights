@@ -33,7 +33,6 @@ from daily_insights_api.modules.identity.api import (
     require_csrf_roles,
     require_roles,
 )
-from daily_insights_api.modules.podcasts.analysis import PodcastAnalyzer
 from daily_insights_api.modules.podcasts.api import (
     Locale,
     PodcastAudioImportRequest,
@@ -47,7 +46,7 @@ from daily_insights_api.modules.podcasts.api import (
     PodcastPublicationRequest,
     PodcastUploadReason,
 )
-from daily_insights_api.modules.podcasts.models import PodcastEpisode, PodcastEpisodeAudioVariant
+from daily_insights_api.modules.podcasts.models import PodcastEpisode
 from daily_insights_api.modules.podcasts.service import (
     PodcastAudioUpload,
     PodcastChaptersError,
@@ -100,26 +99,6 @@ INTERNAL_CUSTOMER_ORGANIZATION: Literal["admin"] = "admin"
 
 def _not_found() -> HTTPException:
     return HTTPException(status.HTTP_404_NOT_FOUND, "Podcast episode not found")
-
-
-def _analyzer(request: Request) -> PodcastAnalyzer | None:
-    analyzer = getattr(request.app.state, "podcast_analyzer", None)
-    return analyzer if isinstance(analyzer, PodcastAnalyzer) else None
-
-
-def _schedule_analysis(
-    request: Request,
-    variants: tuple[PodcastEpisodeAudioVariant, ...],
-    *,
-    actor_user_id: uuid.UUID,
-) -> None:
-    analyzer = _analyzer(request)
-    if analyzer is None:
-        return
-    for variant in variants:
-        analyzer.schedule(
-            variant.id, actor_user_id=actor_user_id, request_id=request.state.request_id
-        )
 
 
 def _require_customer_organization(
@@ -614,55 +593,6 @@ async def admin_upload(
         request_id=request.state.request_id,
     )
     await database.commit()
-    _schedule_analysis(request, variants, actor_user_id=actor.user.id)
-    return await episode_admin_response(database, episode)
-
-
-@router.post(
-    "/api/admin/podcasts/{episode_id}/audio/{locale}/analyze",
-    response_model=PodcastEpisodeAdminResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-    operation_id="admin_podcasts_analyze_audio",
-)
-async def admin_analyze_audio(
-    episode_id: uuid.UUID,
-    locale: Locale,
-    request: Request,
-    actor: AssetWrite,
-    database: Database,
-) -> PodcastEpisodeAdminResponse:
-    """Start (or retry) transcription and AI titling for one audio file."""
-    analyzer = _analyzer(request)
-    if analyzer is None:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            detail={"code": "podcast_analysis_disabled"},
-        )
-    try:
-        episode = await get_episode(database, episode_id)
-    except PodcastNotFoundError as error:
-        raise _not_found() from error
-    variant = await database.scalar(
-        select(PodcastEpisodeAudioVariant).where(
-            PodcastEpisodeAudioVariant.episode_id == episode.id,
-            PodcastEpisodeAudioVariant.locale == locale,
-            PodcastEpisodeAudioVariant.is_active.is_(True),
-        )
-    )
-    if variant is None:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            detail={"code": "audio_variant_does_not_exist"},
-        )
-    if variant.analysis_status == "pending":
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            detail={"code": "podcast_analysis_in_progress"},
-        )
-    variant.analysis_status = "pending"
-    variant.analysis_error = None
-    await database.commit()
-    analyzer.schedule(variant.id, actor_user_id=actor.user.id, request_id=request.state.request_id)
     return await episode_admin_response(database, episode)
 
 
@@ -716,5 +646,4 @@ async def admin_import_audio(
         request_id=request.state.request_id,
     )
     await database.commit()
-    _schedule_analysis(request, (variant,), actor_user_id=actor.user.id)
     return await episode_admin_response(database, episode)

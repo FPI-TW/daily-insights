@@ -376,9 +376,6 @@ async def episode_admin_response(
                 duration_seconds=item.duration_seconds,
                 chapters=parsed_chapters(item.chapters),
                 chapters_source=cast(Any, item.chapters_source),
-                analysis_status=cast(Any, item.analysis_status),
-                analysis_error=item.analysis_error,
-                analyzed_at=item.analyzed_at,
             )
             for item in variants
         ),
@@ -586,13 +583,9 @@ async def upload_audio_batch(
             current.activated_by_user_id = actor_user_id
             current.replaced_at = None
             current.duration_seconds = duration_seconds
-            # A new recording invalidates the old markers and analysis.
+            # A new recording replaces the old chapter markers.
             current.chapters = chapters
             current.chapters_source = "file" if chapters else "none"
-            current.analysis_status = "none"
-            current.analysis_error = None
-            current.analyzed_at = None
-            current.transcript = None
             variant = current
         else:
             variant = PodcastEpisodeAudioVariant(

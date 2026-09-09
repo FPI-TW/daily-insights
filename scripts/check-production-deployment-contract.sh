@@ -66,8 +66,7 @@ done
 grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_BASE_URL: ${DAILY_INSIGHTS_TWELVE_DATA_BASE_URL:-https://api.twelvedata.com}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_API_KEY: ${DAILY_INSIGHTS_TWELVE_DATA_API_KEY:-}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_DAILY_NEWS_ENABLED: ${DAILY_INSIGHTS_DAILY_NEWS_ENABLED:-false}' "$compose_file"
-grep -Fq 'DAILY_INSIGHTS_MODEL_API_KEY: ${DAILY_INSIGHTS_MODEL_API_KEY:-}' "$compose_file"
-grep -Fq 'daily_insights_api.scripts.run_daily_news' "$compose_file"
+grep -Fq 'daily_insights_api.scripts.run_daily_news_scheduler' "$compose_file"
 grep -Fq '/tmp/daily-news-heartbeat' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED:-false}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL:-https://analyst-viewpoints.invalid}' "$compose_file"
@@ -91,9 +90,7 @@ grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_NAME: ${DAILY_INSIGHTS_CHAT_MODEL_NAME:-deep
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL: ${DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL:-https://api.deepseek.com}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_KEY: ${DAILY_INSIGHTS_CHAT_MODEL_API_KEY:-}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS:-90}' "$compose_file"
-grep -Fq 'DAILY_INSIGHTS_PODCAST_ANALYSIS_ENABLED: ${DAILY_INSIGHTS_PODCAST_ANALYSIS_ENABLED:-false}' "$compose_file"
-grep -Fq 'DAILY_INSIGHTS_OPENAI_API_KEY: ${DAILY_INSIGHTS_OPENAI_API_KEY:-}' "$compose_file"
-grep -Fq 'DAILY_INSIGHTS_TRANSCRIPTION_MODEL: ${DAILY_INSIGHTS_TRANSCRIPTION_MODEL:-whisper-1}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_NEWS_MODEL_API_KEY: ${DAILY_INSIGHTS_NEWS_MODEL_API_KEY:-}' "$compose_file"
 
 grep -Fq '/etc/daily-insights/cloudflare-realip.conf:/etc/nginx/cloudflare-realip.conf:ro' "$compose_file"
 grep -Fq '/etc/daily-insights/tls/origin.crt:/etc/nginx/tls/origin.crt:ro' "$compose_file"
@@ -176,10 +173,8 @@ done
 grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY: ${{ secrets.DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY }}' "$workflow_file"
 grep -Fq ',DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY' "$workflow_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_KEY: ${{ secrets.DAILY_INSIGHTS_CHAT_MODEL_API_KEY }}' "$workflow_file"
-grep -Fq 'DAILY_INSIGHTS_OPENAI_API_KEY: ${{ secrets.DAILY_INSIGHTS_OPENAI_API_KEY }}' "$workflow_file"
-grep -Fq ',DAILY_INSIGHTS_OPENAI_API_KEY' "$workflow_file"
-grep -Fq 'DAILY_INSIGHTS_PODCAST_ANALYSIS_ENABLED: ${{ vars.DAILY_INSIGHTS_PODCAST_ANALYSIS_ENABLED }}' "$workflow_file"
-grep -Fq ',DAILY_INSIGHTS_PODCAST_ANALYSIS_ENABLED' "$workflow_file"
+grep -Fq 'DAILY_INSIGHTS_NEWS_MODEL_API_KEY: ${{ secrets.DAILY_INSIGHTS_NEWS_MODEL_API_KEY }}' "$workflow_file"
+grep -Fq ',DAILY_INSIGHTS_NEWS_MODEL_API_KEY' "$workflow_file"
 grep -Fq ',DAILY_INSIGHTS_CHAT_MODEL_API_KEY' "$workflow_file"
 grep -Fq '/opt/daily-insights/scripts/production/deploy.sh' "$workflow_file"
 
@@ -267,7 +262,7 @@ export DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS=90
 export DAILY_INSIGHTS_TWELVE_DATA_BASE_URL=
 export DAILY_INSIGHTS_TWELVE_DATA_API_KEY=
 export DAILY_INSIGHTS_DAILY_NEWS_ENABLED=false
-export DAILY_INSIGHTS_MODEL_API_KEY=
+export DAILY_INSIGHTS_NEWS_MODEL_API_KEY=
 export DAILY_INSIGHTS_R2_ENDPOINT_URL=https://tenant.r2.cloudflarestorage.com
 export DAILY_INSIGHTS_R2_BUCKET_NAME=production-podcast-assets
 export DAILY_INSIGHTS_R2_ACCESS_KEY_ID=contract-r2-access
@@ -288,8 +283,16 @@ scripts/test-production-nginx-dns.sh "$nginx_image"
 cat >"$temporary_dir/stubs/docker" <<'EOF'
 #!/bin/sh
 echo "docker $*" >>"$DEPLOYMENT_LOG"
+if [ -n "${DOCKER_FAIL_MATCH:-}" ]; then
+  case "$*" in
+    *"$DOCKER_FAIL_MATCH"*) exit 1 ;;
+  esac
+fi
 if [ "${1:-}" = "inspect" ]; then
-  echo "${DOCKER_INSPECT_STATE:-running healthy}"
+  case "${3:-}" in
+    '{{.State.Status}}') echo "${DOCKER_STOPPED_STATE:-exited}" ;;
+    *) echo "${DOCKER_INSPECT_STATE:-running healthy}" ;;
+  esac
 fi
 exit 0
 EOF
@@ -312,19 +315,35 @@ grep -q 'compose .* config --quiet' "$temporary_dir/deployment.log"
 grep -q 'compose .* pull' "$temporary_dir/deployment.log"
 grep -q 'compose .* run --rm --no-deps nginx nginx -t' "$temporary_dir/deployment.log"
 grep -q 'compose .* up -d --no-build --force-recreate --no-deps nginx' "$temporary_dir/deployment.log"
+grep -q 'compose .* stop daily-news-scheduler data-management-worker' "$temporary_dir/deployment.log"
+grep -q 'inspect --format {{.State.Status}} daily-insights-daily-news-scheduler' "$temporary_dir/deployment.log"
+grep -q 'inspect --format {{.State.Status}} daily-insights-data-management-worker' "$temporary_dir/deployment.log"
 grep -q 'compose .* run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log"
-grep -q 'compose .* up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler institutional-flows-scheduler data-management-worker macro-dashboard-scheduler' "$temporary_dir/deployment.log"
+grep -q 'compose .* up -d --no-build --force-recreate --no-deps data-management-worker' "$temporary_dir/deployment.log"
+grep -q 'inspect --format {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} daily-insights-data-management-worker' "$temporary_dir/deployment.log"
+grep -q 'compose .* up -d --no-build --remove-orphans api web morning-report-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler institutional-flows-scheduler macro-dashboard-scheduler daily-news-scheduler' "$temporary_dir/deployment.log"
 grep -q 'exec daily-insights-nginx wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/api' "$temporary_dir/deployment.log"
 grep -q 'exec daily-insights-nginx wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/web' "$temporary_dir/deployment.log"
 
 nginx_validate_line=$(grep -n 'run --rm --no-deps nginx nginx -t' "$temporary_dir/deployment.log" | cut -d: -f1)
 nginx_recreate_line=$(grep -n 'up -d --no-build --force-recreate --no-deps nginx' "$temporary_dir/deployment.log" | cut -d: -f1)
+news_stop_line=$(grep -n 'stop daily-news-scheduler data-management-worker' "$temporary_dir/deployment.log" | cut -d: -f1)
+scheduler_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-daily-news-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
+worker_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-data-management-worker' "$temporary_dir/deployment.log" | cut -d: -f1)
 migration_line=$(grep -n 'run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log" | cut -d: -f1)
-backend_converge_line=$(grep -n 'up -d --no-build --remove-orphans api web morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler institutional-flows-scheduler data-management-worker macro-dashboard-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
+worker_start_line=$(grep -n 'up -d --no-build --force-recreate --no-deps data-management-worker' "$temporary_dir/deployment.log" | cut -d: -f1)
+worker_healthy_line=$(grep -n 'inspect --format {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} daily-insights-data-management-worker' "$temporary_dir/deployment.log" | head -n 1 | cut -d: -f1)
+backend_converge_line=$(grep -n 'up -d --no-build --remove-orphans api web morning-report-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler institutional-flows-scheduler macro-dashboard-scheduler daily-news-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
 if [ "$nginx_validate_line" -ge "$nginx_recreate_line" ] ||
-  [ "$nginx_recreate_line" -ge "$migration_line" ] ||
-  [ "$migration_line" -ge "$backend_converge_line" ]; then
-  echo "deployment must validate/recreate nginx before migrating and replacing backends" >&2
+  [ "$nginx_recreate_line" -ge "$news_stop_line" ] ||
+  [ "$news_stop_line" -ge "$scheduler_stopped_line" ] ||
+  [ "$news_stop_line" -ge "$worker_stopped_line" ] ||
+  [ "$scheduler_stopped_line" -ge "$migration_line" ] ||
+  [ "$worker_stopped_line" -ge "$migration_line" ] ||
+  [ "$migration_line" -ge "$worker_start_line" ] ||
+  [ "$worker_start_line" -ge "$worker_healthy_line" ] ||
+  [ "$worker_healthy_line" -ge "$backend_converge_line" ]; then
+  echo "deployment must quiesce news before migration and verify the new worker before restarting the scheduler" >&2
   exit 1
 fi
 if grep -Eq -- '--env-file|systemctl|daily-insights[.]service' "$temporary_dir/deployment.log"; then
@@ -339,6 +358,73 @@ if PATH="$temporary_dir/stubs:$PATH" \
   echo "enabled morning reports must require Twelve Data launch configuration" >&2
   exit 1
 fi
+
+: >"$temporary_dir/deployment.log"
+if PATH="$temporary_dir/stubs:$PATH" \
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  DOCKER_FAIL_MATCH='run --rm --no-deps api alembic upgrade head' \
+  scripts/production/deploy.sh >"$temporary_dir/migration-failure.out" 2>"$temporary_dir/migration-failure.err"; then
+  echo "deployment must fail when migration fails after quiescing automatic news" >&2
+  exit 1
+fi
+grep -q 'Automatic news is confirmed quiescent' "$temporary_dir/migration-failure.err"
+if grep -q 'up -d --no-build --force-recreate --no-deps data-management-worker' "$temporary_dir/deployment.log" ||
+  grep -q 'up -d --no-build --remove-orphans .*daily-news-scheduler' "$temporary_dir/deployment.log"; then
+  echo "migration failure must not restart the worker or scheduler" >&2
+  exit 1
+fi
+
+: >"$temporary_dir/deployment.log"
+if PATH="$temporary_dir/stubs:$PATH" \
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  DOCKER_FAIL_MATCH='up -d --no-build --force-recreate --no-deps data-management-worker' \
+  scripts/production/deploy.sh >"$temporary_dir/worker-failure.out" 2>"$temporary_dir/worker-failure.err"; then
+  echo "deployment must fail when the replacement worker cannot start" >&2
+  exit 1
+fi
+grep -q 'Automatic news is confirmed quiescent' "$temporary_dir/worker-failure.err"
+if grep -q 'up -d --no-build --remove-orphans .*daily-news-scheduler' "$temporary_dir/deployment.log"; then
+  echo "worker startup failure must not restart the daily-news scheduler" >&2
+  exit 1
+fi
+
+assert_requiesced_after_scheduler_attempt() {
+  deployment_log=$1
+  scheduler_attempt_line=$(grep -n 'up -d --no-build --remove-orphans .*daily-news-scheduler' "$deployment_log" | tail -n 1 | cut -d: -f1)
+  post_attempt_log="$temporary_dir/post-scheduler-attempt.log"
+  tail -n "+$((scheduler_attempt_line + 1))" "$deployment_log" >"$post_attempt_log"
+  stop_line=$(grep -n 'compose .* stop daily-news-scheduler data-management-worker' "$post_attempt_log" | head -n 1 | cut -d: -f1)
+  scheduler_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-daily-news-scheduler' "$post_attempt_log" | head -n 1 | cut -d: -f1)
+  worker_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-data-management-worker' "$post_attempt_log" | head -n 1 | cut -d: -f1)
+  if [ "$stop_line" -ge "$scheduler_confirmed_line" ] ||
+    [ "$stop_line" -ge "$worker_confirmed_line" ]; then
+    echo "failed deployment must confirm both automatic news services after stopping them" >&2
+    exit 1
+  fi
+}
+
+: >"$temporary_dir/deployment.log"
+if PATH="$temporary_dir/stubs:$PATH" \
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  DOCKER_FAIL_MATCH='up -d --no-build --remove-orphans api web morning-report-scheduler' \
+  scripts/production/deploy.sh >"$temporary_dir/convergence-failure.out" 2>"$temporary_dir/convergence-failure.err"; then
+  echo "deployment must fail when final service convergence fails" >&2
+  exit 1
+fi
+grep -q 'Automatic news is confirmed quiescent' "$temporary_dir/convergence-failure.err"
+assert_requiesced_after_scheduler_attempt "$temporary_dir/deployment.log"
+
+: >"$temporary_dir/deployment.log"
+if PATH="$temporary_dir/stubs:$PATH" \
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  DOCKER_FAIL_MATCH='exec daily-insights-nginx wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/api' \
+  DAILY_INSIGHTS_HEALTH_TIMEOUT_SECONDS=1 \
+  scripts/production/deploy.sh >"$temporary_dir/deployment-health-failure.out" 2>"$temporary_dir/deployment-health-failure.err"; then
+  echo "deployment must fail when the final health check fails" >&2
+  exit 1
+fi
+grep -q 'Automatic news is confirmed quiescent' "$temporary_dir/deployment-health-failure.err"
+assert_requiesced_after_scheduler_attempt "$temporary_dir/deployment.log"
 
 if PATH="$temporary_dir/stubs:$PATH" \
   DEPLOYMENT_LOG="$temporary_dir/deployment.log" \

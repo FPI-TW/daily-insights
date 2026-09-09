@@ -29,7 +29,7 @@ API_ENVIRONMENT_KEYS = {
     "DAILY_INSIGHTS_DATABASE_URL",
     "DAILY_INSIGHTS_ENVIRONMENT",
     "DAILY_INSIGHTS_MODEL_API_BASE_URL",
-    "DAILY_INSIGHTS_MODEL_API_KEY",
+    "DAILY_INSIGHTS_NEWS_MODEL_API_KEY",
     "DAILY_INSIGHTS_MODEL_NAME",
     "DAILY_INSIGHTS_MODEL_PROVIDER",
     "DAILY_INSIGHTS_MORNING_REPORTS_ENABLED",
@@ -112,7 +112,7 @@ def main() -> None:
         (
             "daily-news-scheduler",
             "DAILY_INSIGHTS_DAILY_NEWS_ENABLED",
-            "DAILY_INSIGHTS_MODEL_API_KEY",
+            None,
         ),
         (
             "analyst-viewpoints-scheduler",
@@ -186,6 +186,19 @@ def main() -> None:
     require(
         not services["macro-dashboard-scheduler"].get("ports"),
         "macro-dashboard-scheduler must not publish a host port",
+    )
+    news_scheduler_environment = services["daily-news-scheduler"].get("environment", {})
+    require(
+        not {
+            "DAILY_INSIGHTS_SESSION_SECRET",
+            "DAILY_INSIGHTS_PASSWORD_PEPPER",
+            "DAILY_INSIGHTS_NEWS_MODEL_API_KEY",
+            "DAILY_INSIGHTS_R2_ENDPOINT_URL",
+            "DAILY_INSIGHTS_R2_BUCKET_NAME",
+            "DAILY_INSIGHTS_R2_ACCESS_KEY_ID",
+            "DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY",
+        }.intersection(news_scheduler_environment),
+        "daily-news-scheduler must only receive queueing configuration",
     )
     web_environment = services["web"].get("environment", {})
     require(web_environment.get("APP_ENV") == "production", "Web environment must be production")

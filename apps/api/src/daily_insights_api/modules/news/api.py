@@ -12,7 +12,11 @@ from daily_insights_api.modules.news.feeds import effective_hostnames
 from daily_insights_api.modules.news.llm import DeepSeekClient
 from daily_insights_api.modules.news.models import NewsEdition, NewsItem, NewsPresentation
 from daily_insights_api.modules.news.prompts import load_selection_criteria
-from daily_insights_api.modules.news.service import run_all_editions, run_news_edition
+from daily_insights_api.modules.news.service import (
+    run_all_editions,
+    run_all_editions_with_outcomes,
+    run_news_edition,
+)
 
 
 def create_news_client(
@@ -45,6 +49,7 @@ __all__ = [
     "edition_spec",
     "effective_hostnames",
     "run_all_editions",
+    "run_all_editions_with_outcomes",
     "run_news_edition",
     "visible_news_market_codes",
 ]

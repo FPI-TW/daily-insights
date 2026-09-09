@@ -73,7 +73,31 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
             text("(1)"),
             unique=True,
             postgresql_where=text(
-                "status IN ('pending', 'running') AND operation IN ('news_all', 'news_market')"
+                "status IN ('pending', 'running') AND operation IN ('news_all', 'news_market') "
+                "AND requested_by_user_id IS NOT NULL"
+            ),
+        ),
+        # The 08:00 obligation is durable history, rather than an in-memory
+        # scheduler marker.  Retrying a terminal automatic row must therefore
+        # never create another automatic all-market run for that edition.
+        Index(
+            "uq_data_management_runs_automatic_news_all_edition",
+            "edition_date",
+            unique=True,
+            postgresql_where=text("operation = 'news_all' AND requested_by_user_id IS NULL"),
+        ),
+        # A retry is an independently durable, future-due market operation.
+        # Keeping historical rows in the key makes a worker crash/recovery
+        # unable to enqueue the same scheduled retry twice.
+        Index(
+            "uq_data_management_runs_automatic_news_market_retry",
+            "edition_date",
+            "market_code",
+            "scheduled_for",
+            unique=True,
+            postgresql_where=text(
+                "operation = 'news_market' AND requested_by_user_id IS NULL "
+                "AND scheduled_for IS NOT NULL"
             ),
         ),
         Index(
@@ -115,6 +139,10 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
     )
     lease_owner: Mapped[str | None] = mapped_column(String(200))
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Manual work and the initial automatic all-market edition are eligible as
+    # soon as they are queued.  Automatic market retry rows are not claimable
+    # until this durable Taipei-time timestamp.
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)

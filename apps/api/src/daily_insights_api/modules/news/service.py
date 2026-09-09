@@ -630,11 +630,39 @@ async def run_all_editions(
 ) -> str:
     """Run every configured edition in order and return the worst outcome.
 
+    This stable scalar contract is retained for command-line callers.  Queue
+    executions that need targeted retries use ``run_all_editions_with_outcomes``.
+    """
+    outcome, _ = await run_all_editions_with_outcomes(
+        session_factory,
+        client,
+        edition_date,
+        allowed_hostnames=allowed_hostnames,
+        fetch_timeout_seconds=fetch_timeout_seconds,
+        discovery_timeout_seconds=discovery_timeout_seconds,
+        markets=markets,
+    )
+    return outcome
+
+
+async def run_all_editions_with_outcomes(
+    session_factory: async_sessionmaker[AsyncSession],
+    client: DeepSeekClient,
+    edition_date: date,
+    *,
+    allowed_hostnames: frozenset[str],
+    fetch_timeout_seconds: float = 25,
+    discovery_timeout_seconds: float = 30,
+    markets: tuple[str, ...] = EDITION_ORDER,
+) -> tuple[str, dict[str, str]]:
+    """Run every edition and retain each market's terminal outcome.
+
     One edition's exception does not stop the others; it is reported as
-    ``failed`` so the scheduler's same-day retry re-attempts the whole set,
-    where complete editions are idempotent no-ops.
+    ``failed`` so the durable queue can retry only that market.  The returned
+    aggregate keeps the historical ``failed -> unavailable`` normalization.
     """
     worst = "complete"
+    outcomes: dict[str, str] = {}
     for market_code in markets:
         spec = edition_spec(market_code)
         try:
@@ -650,6 +678,7 @@ async def run_all_editions(
         except Exception as error:
             emit_event("news.edition.failed", market=market_code, error_code=type(error).__name__)
             outcome = "failed"
+        outcomes[market_code] = outcome
         if OUTCOME_SEVERITY[outcome] > OUTCOME_SEVERITY[worst]:
             worst = outcome
-    return "unavailable" if worst == "failed" else worst
+    return ("unavailable" if worst == "failed" else worst), outcomes

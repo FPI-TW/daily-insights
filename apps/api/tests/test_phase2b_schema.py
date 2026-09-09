@@ -31,6 +31,22 @@ def test_only_one_active_audio_variant_per_episode_locale() -> None:
     assert str(index.dialect_options["postgresql"]["where"]) == "is_active"
 
 
+def test_podcast_audio_schema_has_no_analysis_or_transcript_state() -> None:
+    table = Base.metadata.tables["podcast_episode_audio_variants"]
+    assert {
+        "analysis_status",
+        "analysis_error",
+        "analyzed_at",
+        "transcript",
+    }.isdisjoint(table.columns)
+    constraints = {
+        str(constraint.sqltext)
+        for constraint in table.constraints
+        if hasattr(constraint, "sqltext")
+    }
+    assert "chapters_source IN ('none', 'file', 'manual')" in constraints
+
+
 def test_retained_chat_and_generation_foreign_keys_do_not_cascade() -> None:
     messages = Base.metadata.tables["messages"]
     generations = Base.metadata.tables["generation_records"]

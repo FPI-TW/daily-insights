@@ -71,10 +71,10 @@ describe("AppShell customer navigation", () => {
       within(navigation)
         .getAllByRole("link")
         .map(link => link.textContent)
-    ).toEqual(["晨間報告", "Podcast", "AI金融日報", "帳戶"])
+    ).toEqual(["晨間報告", "Podcast", "AI科技日報", "帳戶"])
 
     const aiNewsLink = within(navigation).getByRole("link", {
-      name: "AI金融日報",
+      name: "AI科技日報",
     })
     expect(aiNewsLink).toHaveAttribute(
       "href",

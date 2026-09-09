@@ -2,7 +2,7 @@ import asyncio
 from argparse import Namespace
 from datetime import date
 from pathlib import Path as FileSystemPath
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from anyio import Path
@@ -13,7 +13,7 @@ from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.news.feeds import effective_hostnames
 from daily_insights_api.modules.news.llm import DeepSeekClient
 from daily_insights_api.modules.reports.scheduler import parse_args
-from daily_insights_api.scripts import run_daily_news
+from daily_insights_api.scripts import run_daily_news, run_daily_news_scheduler
 
 
 def _settings(**overrides: object) -> Settings:
@@ -42,13 +42,13 @@ def test_daily_news_cli_shares_the_scheduler_argument_contract() -> None:
     assert run_daily_news.RETRY_POLICY.retries("partial")
 
 
-@pytest.mark.parametrize("key", ["CHANGE_ME_MODEL_API_KEY", "   \t", None])
+@pytest.mark.parametrize("key", ["CHANGE_ME_NEWS_MODEL_API_KEY", "   \t", None])
 async def test_daily_news_cli_rejects_unusable_key_before_building_client(
     monkeypatch: pytest.MonkeyPatch, key: str | None, tmp_path: FileSystemPath
 ) -> None:
     settings = _settings(
         daily_news_enabled=True,
-        model_api_key=SecretStr(key) if key is not None else None,
+        news_model_api_key=SecretStr(key) if key is not None else None,
     )
     monkeypatch.setattr(run_daily_news, "get_settings", lambda: settings)
     monkeypatch.setattr(run_daily_news, "HEARTBEAT_PATH", str(tmp_path / "heartbeat"))
@@ -73,7 +73,7 @@ async def test_daily_news_cli_builds_the_model_client_with_the_configured_timeou
 ) -> None:
     settings = _settings(
         daily_news_enabled=True,
-        model_api_key=SecretStr("real-model-key"),
+        news_model_api_key=SecretStr("real-model-key"),
         model_timeout_seconds=90,
     )
     monkeypatch.setattr(run_daily_news, "get_settings", lambda: settings)
@@ -215,3 +215,49 @@ async def test_runner_returns_edition_status_and_refreshes_heartbeat(
     ]
     assert settings.news_discovery_timeout_seconds == 30
     assert await heartbeat.exists()
+
+
+async def test_queue_scheduler_uses_the_no_catchup_schedule_and_enqueues_once(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: FileSystemPath
+) -> None:
+    scheduled: list[date] = []
+    scheduler_options: dict[str, object] = {}
+
+    class Engine:
+        async def dispose(self) -> None:
+            return None
+
+    async def enqueue(_: object, *, edition_date: date) -> str:
+        scheduled.append(edition_date)
+        return "queued"
+
+    async def drive(runner: object, **kwargs: object) -> None:
+        scheduler_options.update(kwargs)
+        await cast(Any, runner)(date(2026, 9, 8))
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(
+        run_daily_news_scheduler,
+        "get_daily_news_scheduler_settings",
+        lambda: _settings(daily_news_enabled=True),
+    )
+    monkeypatch.setattr(run_daily_news_scheduler, "HEARTBEAT_PATH", str(tmp_path / "heartbeat"))
+    monkeypatch.setattr(
+        run_daily_news_scheduler,
+        "parse_args",
+        lambda **_: Namespace(once=False, edition_date=None),
+    )
+    monkeypatch.setattr(run_daily_news_scheduler, "create_engine", lambda _: Engine())
+    monkeypatch.setattr(run_daily_news_scheduler, "create_session_factory", lambda _: object())
+    monkeypatch.setattr(run_daily_news_scheduler, "enqueue_automatic_news_all_run", enqueue)
+    monkeypatch.setattr(run_daily_news_scheduler, "run_scheduler", drive)
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_daily_news_scheduler.main()
+
+    assert scheduled == [date(2026, 9, 8)]
+    assert scheduler_options["catch_up_on_start"] is False
+    assert callable(scheduler_options["now"])
+    retry = cast(Any, scheduler_options["retry"])
+    assert retry.interval.total_seconds() == 30 * 60
+    assert retry.retries("failed")

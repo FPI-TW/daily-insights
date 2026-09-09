@@ -1,7 +1,11 @@
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from daily_insights_api.core.config import MacroDashboardSchedulerSettings, Settings
+from daily_insights_api.core.config import (
+    DailyNewsSchedulerSettings,
+    MacroDashboardSchedulerSettings,
+    Settings,
+)
 from daily_insights_api.modules.assets.r2.store import R2ObjectStore
 from daily_insights_api.web.app import create_app
 
@@ -42,6 +46,39 @@ def test_macro_scheduler_requires_only_a_production_database_url() -> None:
 
     with pytest.raises(ValidationError, match="database_url is required"):
         MacroDashboardSchedulerSettings(environment="production", database_url=None)
+
+
+def test_daily_news_scheduler_requires_only_database_and_feature_flag() -> None:
+    settings = DailyNewsSchedulerSettings.model_validate(
+        {
+            "environment": "production",
+            "database_url": "postgresql+psycopg://app:secret@example.invalid/app",
+            "daily_news_enabled": True,
+        }
+    )
+    assert settings.daily_news_enabled is True
+
+    with pytest.raises(ValidationError, match="database_url is required"):
+        DailyNewsSchedulerSettings(environment="production", database_url=None)
+
+
+def test_daily_news_uses_news_specific_model_key() -> None:
+    settings = Settings.model_validate(
+        production_settings(
+            daily_news_enabled=True,
+            news_model_api_key=SecretStr("news-production-key"),
+        )
+    )
+    assert settings.news_model_api_key is not None
+
+    with pytest.raises(ValidationError, match="news_model_api_key"):
+        Settings.model_validate(
+            production_settings(
+                daily_news_enabled=True,
+                news_model_api_key=None,
+                model_api_key=SecretStr("legacy-key-name"),
+            )
+        )
 
 
 @pytest.mark.parametrize(

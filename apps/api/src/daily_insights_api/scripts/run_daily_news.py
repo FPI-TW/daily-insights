@@ -82,7 +82,7 @@ async def main() -> None:
     await heartbeat.touch()
     if not settings.daily_news_enabled and not args.once:
         await maintain_disabled_heartbeat(heartbeat)
-    api_key = settings.model_api_key
+    api_key = settings.news_model_api_key
     if (
         api_key is None
         or not api_key.get_secret_value().strip()
