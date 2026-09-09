@@ -1,4 +1,4 @@
-from typing import Annotated, cast
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
@@ -11,14 +11,8 @@ from daily_insights_api.modules.data_management.schemas import (
     DataManagementRunCreate,
     DataManagementRunList,
     DataManagementRunResponse,
-    IndexYahooRunResponse,
-    InstitutionalTwseRunResponse,
-    MacroDashboardRunResponse,
-    MorningAllRunResponse,
-    MorningMarketRunResponse,
-    NewsAllRunResponse,
-    NewsMarketRunResponse,
     RunOperationGroup,
+    run_response,
 )
 from daily_insights_api.modules.data_management.service import (
     RunAlreadyActiveError,
@@ -36,39 +30,7 @@ AdminRead = Annotated[AuthContext, Depends(require_roles(SystemRole.ADMIN))]
 AdminWrite = Annotated[AuthContext, Depends(require_csrf_roles(SystemRole.ADMIN))]
 
 
-def response(run: DataManagementRun) -> DataManagementRunResponse:
-    values = dict(
-        id=run.id,
-        edition_date=run.edition_date,
-        status=run.status,
-        requested_by_user_id=run.requested_by_user_id,
-        created_at=run.created_at,
-        started_at=run.started_at,
-        completed_at=run.completed_at,
-        result=run.result,
-        error=run.error,
-    )
-    if run.operation == "morning_all":
-        return MorningAllRunResponse(operation="morning_all", market_code=None, **values)
-    if run.operation == "morning_market":
-        return MorningMarketRunResponse(
-            operation="morning_market",
-            market_code=cast(str, run.market_code),
-            **values,
-        )
-    if run.operation == "institutional_twse":
-        return InstitutionalTwseRunResponse(
-            operation="institutional_twse", market_code=None, **values
-        )
-    if run.operation == "news_all":
-        return NewsAllRunResponse(operation="news_all", market_code=None, **values)
-    if run.operation == "news_market":
-        return NewsMarketRunResponse(
-            operation="news_market", market_code=cast(str, run.market_code), **values
-        )
-    if run.operation == "macro_dashboard":
-        return MacroDashboardRunResponse(operation="macro_dashboard", market_code=None, **values)
-    return IndexYahooRunResponse(operation="index_yahoo", market_code=None, **values)
+response = run_response
 
 
 @router.get("/catalog", response_model=DataManagementCatalog)
@@ -172,7 +134,9 @@ async def list_runs(
 ) -> DataManagementRunList:
     statement = select(DataManagementRun)
     if operation_group == "news":
-        statement = statement.where(DataManagementRun.operation.in_(("news_all", "news_market")))
+        statement = statement.where(
+            DataManagementRun.operation.in_(("news_all", "news_market", "news_publish"))
+        )
     runs = (
         await database.scalars(statement.order_by(DataManagementRun.created_at.desc()).limit(limit))
     ).all()

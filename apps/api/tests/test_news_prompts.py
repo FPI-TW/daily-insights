@@ -21,8 +21,14 @@ def test_packaged_selection_criteria_loads_with_version_and_digest() -> None:
     assert "來源可信度" in criteria.text
     assert "OUTPUT_CONTRACT" in criteria.text
     assert "5 則" not in criteria.text
+    # Market relevance is a gate ahead of ranking, and the market tag must be
+    # honest so the edition's own filter can drop off-market picks.
+    assert "市場相關性是硬性門檻" in criteria.text
+    assert "market_rule" in criteria.text
+    # Five-star stories come first; lower ratings only fill what is left.
+    assert "重要性是排序的第一鍵" in criteria.text
     assert len(criteria.digest) == 64
-    assert criteria.version == f"selection-v6:{criteria.digest[:12]}"
+    assert criteria.version == f"selection-v8:{criteria.digest[:12]}"
 
 
 @pytest.mark.parametrize("content", ["", "   \n\t"])

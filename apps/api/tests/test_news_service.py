@@ -134,3 +134,64 @@ def test_interleaving_spreads_slots_across_sources_while_keeping_each_newest_fir
         "wire-b.example",
         "flash.example",
     ]
+
+
+def test_candidate_ledger_records_the_furthest_stage_each_candidate_reached() -> None:
+    import uuid
+
+    from daily_insights_api.modules.news.contracts import SelectedCandidate, Selection
+    from daily_insights_api.modules.news.llm import ModelCall
+    from daily_insights_api.modules.news.service import _CandidateLedger
+
+    fetched = [_fetched(index, f"host{index}.example", None) for index in range(1, 8)]
+    discovered = [item.candidate for item in fetched]
+    ledger = _CandidateLedger(discovered)
+    # Candidate 7 is cut before extraction, 6 fails extraction, 5 is extracted
+    # but never reaches a prompt.
+    ledger.fetching(discovered[:6])
+    ledger.extracted(fetched[:5])
+    ledger.reviewed(fetched[:4])
+
+    def pick(index: int, market: str = "global") -> SelectedCandidate:
+        return SelectedCandidate(
+            id=fetched[index - 1].candidate.id,
+            topic="markets",
+            event_key=f"event-{index}",
+            market=market,
+            importance=3,
+        )
+
+    returned = (pick(1), pick(2, "asia"), pick(3))
+    ledger.returned(
+        ModelCall(
+            Selection(selections=(pick(1), pick(3))),
+            None,
+            None,
+            None,
+            1,
+            "a" * 64,
+            rejected=((pick(2, "asia"), "off_market"),),
+            returned=returned,
+        )
+    )
+    ledger.drop(fetched[2].candidate.id, "summary_failed")
+    item_id = uuid.uuid4()
+    ledger.published(fetched[0].candidate.id, item_id)
+    edition_id = uuid.uuid4()
+    rows = {row.candidate_id: row for row in ledger.rows(edition_id)}
+    assert all(row.edition_id == edition_id for row in rows.values())
+    by_index = {index: rows[fetched[index - 1].candidate.id] for index in range(1, 8)}
+    assert [(by_index[i].stage, by_index[i].drop_reason) for i in range(1, 8)] == [
+        ("published", None),
+        ("dropped", "off_market"),
+        ("dropped", "summary_failed"),
+        ("reviewed", None),
+        ("unused", None),
+        ("fetch_failed", None),
+        ("discovered", None),
+    ]
+    assert by_index[1].item_id == item_id
+    # The model's original order survives filtering: "asia" was second.
+    assert [by_index[i].ai_rank for i in (1, 2, 3, 4)] == [1, 2, 3, None]
+    assert by_index[2].ai_market == "asia" and by_index[5].content_digest is not None
+    assert by_index[6].content_digest is None and by_index[7].seen_at is None

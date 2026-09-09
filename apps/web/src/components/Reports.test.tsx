@@ -234,8 +234,6 @@ describe("three-market report presentation", () => {
       status: "complete",
       editionDate: "2026-09-03",
       sourceDate: "2026-09-02",
-      stale: true,
-      staleReason: "Provider closed for a holiday.",
       caveatKey: "reportCaveatLive",
       summaryKey: "reportSummary_global_macro_bonds",
       blocks: [
@@ -282,8 +280,53 @@ describe("three-market report presentation", () => {
     )
     expect(screen.getByText("Flat")).toHaveClass("text-sea-ink-soft")
     expect(screen.queryByText(/Data as of/)).toBeNull()
-    expect(screen.getByText("Possibly stale")).toBeVisible()
-    expect(screen.getByText("Provider closed for a holiday.")).toBeVisible()
+    // Source freshness is not a reader-facing notice.
+    expect(screen.queryByText("Possibly stale")).toBeNull()
+  })
+
+  it("never shows the API's stale flag or its reason code", async () => {
+    const { mapReportDetail } = await import("#/lib/reports")
+    const report = mapReportDetail({
+      publication_id: "00000000-0000-4000-8000-000000000007",
+      report_key: "daily-market",
+      market_code: "global_macro_bonds",
+      edition_date: "2026-09-03",
+      revision: 1,
+      source_as_of: "2026-08-28",
+      published_at: "2026-09-03T08:00:00+08:00",
+      stale: true,
+      stale_reason: "source_too_old",
+      status: "complete",
+      title: "Macro",
+      summary: "Macro report",
+      locale: "en",
+      manifest_version: "1",
+      manifest_hash: "a".repeat(64),
+      content: {
+        schema_version: "1",
+        market_code: "global_macro_bonds",
+        as_of: "2026-08-28",
+        status: "complete",
+        caveat: null,
+        blocks: [],
+        metrics: [],
+        charts: [],
+      },
+      presentation: {
+        schema_version: "1",
+        locale: "en",
+        title: "Macro",
+        summary: "Macro report",
+        labels: {},
+      },
+    })
+    expect(report).not.toHaveProperty("stale")
+    expect(report).not.toHaveProperty("staleReason")
+
+    await renderLocalized(<ReportDetail locale="en" report={report} />, "en")
+
+    expect(screen.queryByText("Possibly stale")).toBeNull()
+    expect(screen.queryByText("source_too_old")).toBeNull()
   })
 
   it("labels table columns with their units and colours percent cells", async () => {
@@ -931,6 +974,37 @@ describe("three-market report presentation", () => {
     expect(block).toHaveClass("xl:col-span-2")
     expect(
       viewpoint.compareDocumentPosition(block as Element) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+
+    // The after-viewpoint slot (the US page's news) sits between the
+    // analyst's bullets and the first block.
+    cleanup()
+    await renderLocalized(
+      <ReportDetail
+        locale="en"
+        report={report}
+        viewpoint={{
+          viewpoint_date: "2026-09-04",
+          market_code: "crypto",
+          source_market_code: "crypto",
+          points: ["BTC dominance held near 60%."],
+          fetched_at: "2026-09-04T02:22:00+00:00",
+        }}
+        afterViewpoint={<section aria-label="Market news">Top stories</section>}
+      />,
+      "en"
+    )
+    const bullets = screen.getByRole("region", { name: "Analyst viewpoint" })
+    const slot = screen.getByRole("region", { name: "Market news" })
+    const firstBlock = screen
+      .getByRole("heading", { name: "Crypto market snapshot" })
+      .closest("section") as Element
+    expect(
+      bullets.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      slot.compareDocumentPosition(firstBlock) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
 

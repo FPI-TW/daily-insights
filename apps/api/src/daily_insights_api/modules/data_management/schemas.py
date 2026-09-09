@@ -1,9 +1,10 @@
 import uuid
 from datetime import date, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from daily_insights_api.modules.data_management.models import DataManagementRun
 from daily_insights_api.modules.reports.api import LaunchMarketCode
 
 NewsMarketCode = Literal["global", "tw_equity", "us_equity"]
@@ -14,6 +15,7 @@ RunOperation = Literal[
     "institutional_twse",
     "news_all",
     "news_market",
+    "news_publish",
     "macro_dashboard",
 ]
 RunOperationGroup = Literal["news"]
@@ -127,6 +129,14 @@ class NewsMarketRunResponse(_DataManagementRunResponse):
     market_code: NewsMarketCode
 
 
+class NewsPublishRunResponse(_DataManagementRunResponse):
+    """A manual publish of admin-chosen news candidates; created only through
+    the news management API, never through the generic run endpoint."""
+
+    operation: Literal["news_publish"]
+    market_code: None
+
+
 class MacroDashboardRunResponse(_DataManagementRunResponse):
     operation: Literal["macro_dashboard"]
     market_code: None
@@ -139,6 +149,7 @@ DataManagementRunResponse = Annotated[
     | InstitutionalTwseRunResponse
     | NewsAllRunResponse
     | NewsMarketRunResponse
+    | NewsPublishRunResponse
     | MacroDashboardRunResponse,
     Field(discriminator="operation"),
 ]
@@ -146,3 +157,40 @@ DataManagementRunResponse = Annotated[
 
 class DataManagementRunList(BaseModel):
     items: list[DataManagementRunResponse]
+
+
+def run_response(run: DataManagementRun) -> DataManagementRunResponse:
+    values = dict(
+        id=run.id,
+        edition_date=run.edition_date,
+        status=run.status,
+        requested_by_user_id=run.requested_by_user_id,
+        created_at=run.created_at,
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        result=run.result,
+        error=run.error,
+    )
+    if run.operation == "morning_all":
+        return MorningAllRunResponse(operation="morning_all", market_code=None, **values)
+    if run.operation == "morning_market":
+        return MorningMarketRunResponse(
+            operation="morning_market",
+            market_code=cast(str, run.market_code),
+            **values,
+        )
+    if run.operation == "institutional_twse":
+        return InstitutionalTwseRunResponse(
+            operation="institutional_twse", market_code=None, **values
+        )
+    if run.operation == "news_all":
+        return NewsAllRunResponse(operation="news_all", market_code=None, **values)
+    if run.operation == "news_market":
+        return NewsMarketRunResponse(
+            operation="news_market", market_code=cast(str, run.market_code), **values
+        )
+    if run.operation == "news_publish":
+        return NewsPublishRunResponse(operation="news_publish", market_code=None, **values)
+    if run.operation == "macro_dashboard":
+        return MacroDashboardRunResponse(operation="macro_dashboard", market_code=None, **values)
+    return IndexYahooRunResponse(operation="index_yahoo", market_code=None, **values)

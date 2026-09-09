@@ -5,7 +5,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Literal, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 from zoneinfo import ZoneInfo
 
 from anyio import Path
@@ -40,6 +40,7 @@ from daily_insights_api.modules.news.api import (
     create_news_client,
     edition_spec,
     effective_hostnames,
+    publish_candidates,
     run_all_editions_with_outcomes,
     run_news_edition,
 )
@@ -104,6 +105,7 @@ ACTIVE_RUN_UNIQUE_CONSTRAINTS = frozenset(
         "uq_data_management_runs_active_index",
         "uq_data_management_runs_active_institutional",
         "uq_data_management_runs_active_news",
+        "uq_data_management_runs_active_news_publish",
         "uq_data_management_runs_active_manual_macro_dashboard",
         "uq_data_management_runs_running_macro_dashboard",
     }
@@ -126,12 +128,16 @@ def is_active_run_conflict(error: IntegrityError) -> bool:
     )
 
 
-def is_automatic_macro_edition_conflict(error: IntegrityError) -> bool:
+def _is_unique_conflict(error: IntegrityError, constraint_name: str) -> bool:
     diagnostic = getattr(error.orig, "diag", None)
     return (
         getattr(error.orig, "sqlstate", None) == "23505"
-        and getattr(diagnostic, "constraint_name", None) == AUTOMATIC_MACRO_EDITION_CONSTRAINT
+        and getattr(diagnostic, "constraint_name", None) == constraint_name
     )
+
+
+def is_automatic_macro_edition_conflict(error: IntegrityError) -> bool:
+    return _is_unique_conflict(error, AUTOMATIC_MACRO_EDITION_CONSTRAINT)
 
 
 def is_automatic_news_all_edition_conflict(error: IntegrityError) -> bool:
@@ -150,6 +156,7 @@ async def enqueue_run(
     requester_id: uuid.UUID | None,
     request_id: str | None,
     edition_date: date | None = None,
+    payload: dict[str, Any] | None = None,
 ) -> DataManagementRun:
     if operation == "morning_market" and market_code not in {
         market.market_code for market in ACTIVE_LAUNCH_MANIFEST.markets
@@ -159,12 +166,15 @@ async def enqueue_run(
         raise ValueError("market_code is not a configured news edition")
     if operation not in {"morning_market", "news_market"} and market_code is not None:
         raise ValueError("market_code is only allowed for market operations")
+    if (operation == "news_publish") != (payload is not None):
+        raise ValueError("payload is required for, and only for, news_publish")
     run = DataManagementRun(
         operation=operation,
         market_code=market_code,
         edition_date=edition_date or taipei_today(),
         status="pending",
         requested_by_user_id=requester_id,
+        payload=payload,
     )
     database.add(run)
     try:
@@ -932,6 +942,10 @@ async def _execute_news(
                 allowed_hostnames=allowed,
                 fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
                 discovery_timeout_seconds=settings.news_discovery_timeout_seconds,
+                # The scheduled run generates each market once: a reclaimed
+                # row after a worker restart only fills in the markets it
+                # never reached. Manual reruns regenerate on purpose.
+                only_missing=run.requested_by_user_id is None,
             )
     except Exception as error:
         outcomes = {
@@ -955,6 +969,54 @@ async def _execute_news(
         {"outcome": outcome, "outcomes": outcomes},
         None if status == "succeeded" else f"news_{outcome}",
     )
+
+
+def _news_unavailable(settings: Settings) -> bool:
+    api_key = settings.news_model_api_key
+    return (
+        not settings.daily_news_enabled
+        or api_key is None
+        or not api_key.get_secret_value().strip()
+        or is_placeholder_value(api_key.get_secret_value())
+    )
+
+
+async def _execute_news_publish(
+    run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
+) -> tuple[str, dict[str, object], str | None]:
+    """Publish admin-chosen candidates into their edition with the news client."""
+    if _news_unavailable(settings):
+        return "failed", {"outcome": "unavailable"}, "daily_news_unavailable"
+    payload = run.payload or {}
+    try:
+        edition_id = uuid.UUID(str(payload["edition_id"]))
+        candidate_ids = [uuid.UUID(str(value)) for value in payload["candidate_ids"]]
+    except (KeyError, TypeError, ValueError):
+        return "failed", {}, "news_publish_payload_invalid"
+    assert settings.news_model_api_key is not None
+    client = create_news_client(
+        base_url=settings.model_api_base_url,
+        api_key=settings.news_model_api_key.get_secret_value(),
+        model=settings.model_name,
+        timeout_seconds=settings.model_timeout_seconds,
+    )
+    try:
+        return await publish_candidates(
+            session_factory,
+            client,
+            run_id=run.id,
+            edition_id=edition_id,
+            candidate_ids=candidate_ids,
+            actor_user_id=run.requested_by_user_id,
+            allowed_hostnames=effective_hostnames(
+                settings.news_extra_hostnames, settings.news_blocked_hostnames
+            ),
+            fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
+        )
+    except Exception as error:
+        return "failed", {}, sanitize_error(error)
+    finally:
+        await client.aclose()
 
 
 async def _execute_macro(
@@ -983,6 +1045,8 @@ async def execute_run(
         return await _execute_yahoo(run, session_factory, settings)
     if run.operation == "institutional_twse":
         return await _execute_institutional_twse(run, session_factory, settings)
+    if run.operation == "news_publish":
+        return await _execute_news_publish(run, session_factory, settings)
     if run.operation.startswith("news"):
         return await _execute_news(run, session_factory, settings)
     return await _execute_morning(run, session_factory, settings)

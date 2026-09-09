@@ -53,9 +53,11 @@ describe("DailyNews", () => {
         />
       </I18nextProvider>
     )
+    // The pipeline's fallback notice and the edition status are never shown.
     expect(
-      screen.getByText("Showing the latest available news from 2026-09-01.")
-    ).toBeInTheDocument()
+      screen.queryByText("Showing the latest available news from 2026-09-01.")
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText("Complete")).not.toBeInTheDocument()
     const link = screen.getByRole("link", { name: "Read source" })
     expect(link).toHaveAttribute("rel", "noopener noreferrer")
     expect(screen.getByLabelText("Importance 4 stars")).toHaveTextContent(
@@ -185,7 +187,7 @@ describe("DailyNews", () => {
         <DailyNews
           news={{
             market_code: "tw_equity",
-            target_items: 8,
+            target_items: 5,
             edition_id: "00000000-0000-4000-8000-000000000003",
             edition_date: "2026-09-04",
             revision: 1,

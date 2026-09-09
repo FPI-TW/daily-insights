@@ -17,7 +17,9 @@
   落地，只保存來源中繼資料、摘要與 SHA-256 內容摘要。
 - 顯示在客戶報告首頁的清單下方；所有已驗證組織共用同一版，不受市場可見性政策
   影響。
-- 不提供後台編輯、人工覆核或客戶端篩選。
+- 後台「新聞管理」頁提供人工覆核：可看到每個版本探索到的全部候選與 AI 的處置結果，
+  可隱藏 AI 選入但不相關的新聞，也可把 AI 未選的候選人工上架（見
+  [後台候選監控與人工上架](#後台候選監控與人工上架)）。客戶端仍不提供篩選。
 
 ## 流程
 
@@ -26,6 +28,7 @@ flowchart LR
     S["daily-news-scheduler<br/>08:00 Asia/Taipei"] --> Q["data_management_runs<br/>automatic news_all"]
     Q --> W["data-management-worker"]
     W --> G["News generation service<br/>run_news_edition"]
+    M["後台新聞管理頁<br/>手動重跑 / 人工上架"] --> Q
     G --> F["feed 註冊表<br/>RSS / Atom / news sitemap / JSON 清單<br/>台灣、中港、日韓、英文與新聞稿約 50 支"]
     G --> X["安全正文擷取<br/>DNS pinning / robots / HTTPS 443<br/>feed 已帶全文者略過"]
     X --> W["白名單文章主機<br/>由註冊表推導"]
@@ -51,24 +54,41 @@ flowchart LR
    不執行 provider。
    唯一鍵為 edition date、market 與 scheduled retry time，因此重啟或 lease recovery
    不會產生重複重試。
+   worker 執行自動 `news_all` 時帶 `only_missing`：已有版本（不論 `complete`、`partial`
+   或 `unavailable`）的市場一律跳過，只產生尚未有版本的市場，因此 worker 在執行中被重新
+   部署、租約過期後由另一個 worker 接手時，已完成的市場不會被重做第二次；手動重跑不帶
+   此旗標。
 3. `discover_feed_candidates` 依序讀取標記給該市場、且文章主機在白名單內的 feed，
    只保留符合各來源 `link_pattern` 的連結，並以 URL 與標題去重；任一 feed 失敗只
    影響該來源，事件為 `news.feed.failed`。需要金鑰或聯絡信箱的來源在設定缺漏時發
    `news.feed.skipped` 並略過。標記 `language_filter` 的新聞稿 feed 以 `langdetect`
    丟棄中、英、日、韓以外的稿件。
 4. 候選先排 feed 已帶全文者（不需擷取），其餘依發佈時間新到舊，每個來源最多
-   `max_discovery_per_source` 筆（全球 5、台股與美股 8），總數上限 80 筆。
+   `max_discovery_per_source` 筆（全球 5、台股與美股 10），總數上限全球 80 筆、台股與美股
+   100 筆：市場版只發布 5 則，但篩選的候選池比全球版更寬。
 5. 每筆候選以 SSRF 安全的 client 擷取正文：只允許白名單主機的 443 連接埠、DNS
    解析結果必須全部為公網 IP 且連線固定在該 IP、redirect 逐跳重新驗證、遵守
    `robots.txt`、限制位元組數與內容型別，不帶 cookie 也不讀環境代理設定。feed 已
    帶全文（`provides_full_text`）的候選直接以 feed 內文組成擷取結果，不再請求文章頁。
-6. DeepSeek 以 JSON mode 依重要性選出目標則數加兩則備選（每個網域至多兩則），
-   再依序對每則產生 `zh-hant`、`zh-hans`、`en` 三語摘要，達到目標則數即停止；某則摘要
-   驗證失敗時由備選遞補。摘要中的數字必須能在原文找到：比對以數值為準，千分位、全形
+6. 選題分兩段。先「整池篩選」：可用候選池依每輪上限（全球 20、台股與美股 30）切成
+   最多兩批，每一批都送 DeepSeek 以 JSON mode 評分並排序，第二批會附上第一批已選的事
+   件避免重複；即使第一批已足以填滿版本，第二批仍會被審閱，因為五星新聞可能就在其中。
+   兩批結果合併後依重要性由高到低取用：先取所有五星，五星不足才依序取四星、三星，
+   同一星等內維持模型原本的排序。合併時不做跨批去重：同一事件的第二則報導會保留，只有
+   在前一則摘要成功並採用後才記為 `duplicate_event`，因此前一則摘要失敗時仍有替代報導；
+   星等較高的同事件報導也會排在前面。摘要前先檢查每網域上限，某網域已有足額摘要成功
+   的新聞時，後面同網域的候選直接以 `policy` 略過，不再花費摘要呼叫。接著依序對每則
+   產生 `zh-hant`、`zh-hans`、`en` 三語摘要，達到目標則數即停止；某則摘要驗證失敗時由
+   後面的候選遞補。整池篩選讓候選池跨兩個提示視窗的版本多一次選題呼叫（每版最多兩次
+   篩選呼叫），這是為了不漏掉第二批裡的五星新聞所付的成本。重要性採絕對尺度
+   （5 為對本版市場有立即且廣泛影響的事件、4 為對多數投資人重要、3 為值得注意但範圍
+   窄、2 為次要、1 為瑣碎），prompt 明確要求不得為了填滿名額抬高評分。摘要中的數字必
+   須能在原文找到：比對以數值為準，千分位、全形
    數字與 million／億 這類量詞差異不算捏造，原文沒有的數字才算；每次呼叫失敗最多重
    試一次並記錄 audit。
 7. 結果以不可變的 `news_editions` revision 寫入，狀態為 `complete`（5/5）、
-   `partial`（1 到 4）或 `unavailable`（0）。
+   `partial`（1 到 4）或 `unavailable`（0）。同一交易內，該版本看過的每個 feed 候選
+   都寫成一列 `news_candidates`，記錄它走到哪個階段（見下方候選階段）。
 
 ## 版本規格
 
@@ -77,14 +97,14 @@ flowchart LR
 | 版本         | `market_code` | 目標則數 | 探索路徑                                                      | 選題限制                                                 |
 | ------------ | ------------- | -------- | ------------------------------------------------------------- | -------------------------------------------------------- |
 | 本日重大新聞 | `global`      | 5        | 英文財經媒體、央行新聞稿、企業新聞稿                          | 每網域至多 2 則，至少 2 個主題，選滿 5 則時至少 3 個網域 |
-| 台股重點新聞 | `tw_equity`   | 8        | 台灣媒體 15 支 feed（鉅亨台股、經濟日報、中央社、工商時報等） | 單一來源與市場皆可，至少 2 個主題                        |
-| 美股重點新聞 | `us_equity`   | 8        | 英文綜合與新聞稿、Guardian 商業、鉅亨國際股市、SEC 8-K        | 每網域至多 4 則，至少 2 個主題，選滿 8 則時至少 3 個網域 |
+| 台股重點新聞 | `tw_equity`   | 5        | 台灣媒體 15 支 feed（鉅亨台股、經濟日報、中央社、工商時報等） | 單一來源與市場皆可，至少 2 個主題                        |
+| 美股重點新聞 | `us_equity`   | 5        | 英文綜合與新聞稿、Guardian 商業、鉅亨國際股市、SEC 8-K        | 每網域至多 3 則，至少 2 個主題，選滿 5 則時至少 3 個網域 |
 
-選題 prompt 由三層組成：固定的 `task`（去重、交叉比對、來源分散、填滿名額與輸出格式等不可被覆寫的規則）、`OUTPUT_CONTRACT`（依各版本 `SelectionPolicy` 產生的封閉詞彙與數量限制），以及部署時可調整的 `CUSTOM_SELECTION_CRITERIA`（`modules/news/prompts/selection_criteria.txt`，中文撰寫的排序準則與來源可信度判斷標準）。準則檔只影響排序與取捨，所有則數、每網域上限與多樣性門檻都寫在 `OUTPUT_CONTRACT`，因此同一份準則可服務三個版本；同一核心事件不論幾家媒體報導都只能選一則並共用 `event_key`，多家報導只用於交叉驗證。固定指令或準則檔任一變動都會改變 `prompt_version`（`selection-v6:<準則摘要>`）。
+選題 prompt 由三層組成：固定的 `task`（去重、交叉比對、來源分散、填滿名額與輸出格式等不可被覆寫的規則）、`OUTPUT_CONTRACT`（依各版本 `SelectionPolicy` 產生的封閉詞彙與數量限制），以及部署時可調整的 `CUSTOM_SELECTION_CRITERIA`（`modules/news/prompts/selection_criteria.txt`，中文撰寫的排序準則與來源可信度判斷標準）。準則檔只影響排序與取捨，所有則數、每網域上限與多樣性門檻都寫在 `OUTPUT_CONTRACT`，因此同一份準則可服務三個版本；同一核心事件不論幾家媒體報導都只能選一則並共用 `event_key`，多家報導只用於交叉驗證。固定指令或準則檔任一變動都會改變 `prompt_version`（`selection-v8:<準則摘要>`）。
 
-各版本只讀取標記給該市場的 feed，選題 prompt 附帶該版本的 `MARKET_FOCUS` 提示：全球版以總經（央行、利率、匯率、商品、跨市場風險）為主且只接受 `market` 為 `global` 的選項，避免偏向任一區域；台股與美股版只接受 `taiwan`／`us`，模型標成其他市場的稿件會在限制檢查前被剔除並記錄 `news.selection.dropped_market`。市場頁的新聞不依市場分組，只有首頁的全球版分組顯示。排程器依序執行三個版本，任一版本例外不影響其他版本，最差
-結果決定是否同日重試。`make generate-daily-news MARKET=tw_equity` 可單獨產生一
-個版本。
+各版本只讀取標記給該市場的 feed，選題 prompt 附帶該版本的 `MARKET_FOCUS` 提示，內容是該版的硬性相關性門檻：每則候選先過門檻再排序，全球版只收影響跨區域投資人的總經事件（央行、利率、匯率、商品、跨市場風險），台股版只收主體為上市櫃公司、加權指數與期貨、三大法人、台灣政策、半導體供應鏈或報導本身點明台股影響的海外事件，美股版同理只收與美股指數、美國上市公司、聯準會、美國總經數據直接相關者；門檻明列不得入選的類型（他國市場、無台股／美股影響的總經新聞、政治、天氣、娛樂、生活等），且寧可留空也不得以弱關聯新聞填滿名額。`OUTPUT_CONTRACT` 對每個版本都提供完整的 `market` 詞彙，並以 `market_rule` 說明本版只發布 `global`／`taiwan`／`us` 其中一個標記，模型必須依報導主要談論的市場誠實標記、不得改標遷就本版；標成其他市場的稿件會在限制檢查前被剔除並記錄 `news.selection.dropped_market`，因此模型自己判定為他國市場的新聞不會進入該版。市場頁的新聞不依市場分組，只有首頁的全球版分組顯示。worker 依序執行三個版本，任一版本例外不影響其他版本，最差結果決定
+執行紀錄的狀態（`succeeded`／`partial`／`failed`），不會觸發同日重試。
+`make generate-daily-news MARKET=tw_equity` 可單獨產生一個版本。
 
 市場版本顯示在各市場報告頁下方，並受組織的市場可見性政策限制：
 `GET /api/news/{market_code}/latest` 對不可見或未定義的市場回 404，內部角色可
@@ -141,25 +161,75 @@ JSON 清單（dot-notation 欄位、`unix_s`／`unix_ms`／`iso`／`datetime_str
 
 ## 版本與重試語意
 
+- 每天恰好一次自動執行：排程器只在 08:00 記錄一列自動 `news_all`，由 worker 執行。
+  沒有同日重試；重新部署或重啟後，排程器看到當日已有紀錄就不再排入。
 - 每個 `edition_date` 可有多個 `revision`，舊版本不會被修改或刪除。
 - `input_digest` 由候選集合、模型名稱與選題準則摘要計算。若最新版本為
   `complete` 且 `input_digest` 相同，重跑為 no-op；`partial` 與 `unavailable`
-  允許以相同輸入建立新版本。
-- 讀取 API 永遠回傳當日最新 revision；沒有當日版本時回傳 `unavailable`。
-- 手動重跑：`make generate-daily-news` 在開發環境以 `--once` 產生一次，可傳
+  允許以相同輸入建立新版本。這個判定不變，因此手動重跑一個已完成的版本是安全的。
+- 讀取 API 永遠回傳當日最新 revision（排除被隱藏的新聞）；沒有當日版本時回傳
+  `unavailable`。
+- 手動重跑只從後台新聞管理頁發起（`POST /api/admin/data-management/runs`，
+  `news_all` 或 `news_market`），與自動執行共用「同時只有一個新聞執行」的佇列限制。
+  開發環境另可用 `make generate-daily-news`（`--once`）直接產生一次，可傳
   `EDITION_DATE=YYYY-MM-DD`，但服務只允許產生台北時間的當日版本。
 
 ## 資料表
 
-| 資料表                   | 內容                                                                                                                                 |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `news_editions`          | 每日版本、`market_code`、revision、`input_digest`、模型與 prompt 版本、狀態、警語                                                    |
-| `news_items`             | 入選新聞的來源中繼資料、主題、重要性、內容摘要、數值事實，以及選稿階段的 `market` 與 `event_key`（migration 0012 之前的版本為 null） |
-| `news_presentations`     | 每則新聞的三語標題與摘要                                                                                                             |
-| `news_generation_audits` | 每次模型呼叫的 stage、locale、token、延遲、request id 與失敗代碼                                                                     |
-| `data_management_runs`   | automatic `news_all` edition obligation 與 market retry 的 `scheduled_for`、lease、結果與歷史唯一鍵                                  |
+| 資料表                   | 內容                                                                                                                                                                                                                                                                              |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `news_editions`          | 每日版本、`market_code`、revision、`input_digest`、模型與 prompt 版本、狀態、警語                                                                                                                                                                                                 |
+| `news_items`             | 入選新聞的來源中繼資料、主題、重要性、內容摘要、數值事實，以及選稿階段的 `market` 與 `event_key`（migration 0012 之前的版本為 null）                                                                                                                                              |
+| `news_presentations`     | 每則新聞的三語標題與摘要                                                                                                                                                                                                                                                          |
+| `news_generation_audits` | 每次模型呼叫的 stage、locale、token、延遲、request id 與失敗代碼（人工上架的摘要呼叫也記在這裡）                                                                                                                                                                                  |
+| `news_candidates`        | 版本看過的每個 feed 候選：來源、URL、標題、`seen_at`、擷取後的 `content_digest` 與發佈時間、`stage`、`drop_reason`、模型回傳的 `ai_*` 欄位、對應的 `item_id`，以及人工上架的請求資訊（`publish_run_id`、`publish_requested_at`、`publish_requested_by_user_id`、`publish_error`） |
+| `data_management_runs`   | automatic `news_all` edition obligation 與 market retry 的 `scheduled_for`、lease、結果與歷史唯一鍵；`news_publish` 人工上架作業的 `payload`（版本與候選 id）                                                                                                                     |
 
-文章正文與 prompt 內容不寫入任何資料表。
+`news_items` 另有 `origin`（`model`／`manual`）、`hidden_at`、`hidden_by_user_id` 與
+`published_by_user_id`。`data_management_runs` 多了 `news_publish` 操作與 `payload`
+（JSONB，只有 `news_publish` 使用：`{"edition_id", "candidate_ids"}`）。文章正文與
+prompt 內容不寫入任何資料表；人工上架時會重新擷取文章。
+
+## 後台候選監控與人工上架
+
+`GET /api/admin/news/editions?date=YYYY-MM-DD`（預設台北今天）回傳三個市場的最新
+revision、已上架新聞（含 zh-hant 標題、`origin`、`hidden`）與全部候選；候選排序為
+已上架（依 rank）、模型回傳但剔除（依 `ai_rank`）、送審未選、其餘。
+
+候選 `stage` 以走到的最遠階段為準：
+
+| `stage`        | 意義                                                                                                                                                                                                                                                      |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `discovered`   | feed 有列出，但被探索上限（`_cap_discovery`）截掉，未擷取                                                                                                                                                                                                 |
+| `fetch_failed` | 已送擷取，沒有可用正文                                                                                                                                                                                                                                    |
+| `unused`       | 擷取成功，但未進入任何一輪選題（被 `_limit_candidates` 截掉或輪次已結束）                                                                                                                                                                                 |
+| `reviewed`     | 曾送進模型，模型未回傳                                                                                                                                                                                                                                    |
+| `dropped`      | 模型有回傳但未發布，`drop_reason` 為 `off_market`（標成他市場）、`policy`（來源／多樣性規則剔除或最終組合未納入）、`duplicate_event`（同一事件已有另一則報導摘要成功並採用）、`summary_failed`（某語系摘要失敗）、`reserve`（超出目標則數的備選，未用到） |
+| `published`    | 進入最終發布，`item_id` 指向 `news_items`                                                                                                                                                                                                                 |
+
+模型回傳過的候選（任一輪）都會填 `ai_rank`（在模型原始清單中的位置，取第一次回傳的那輪）、
+`ai_topic`、`ai_market`、`ai_importance`、`ai_event_key`；來源是過濾與修復前的原始清單，
+所以被 `off_market`／`policy` 剔除的稿件也看得到模型的判斷。
+
+人工操作：
+
+- `POST /api/admin/news/items/{item_id}/hide`、`/unhide`：隱藏或恢復一則新聞。隱藏的
+  新聞留在不可變的版本內，但 `GET /api/news/latest` 與市場版讀取 API 不再回傳；操作可
+  重複、記錄 `news.item_hidden`／`news.item_unhidden` audit。
+- `POST /api/admin/news/candidates/publish`，body `{"edition_id", "candidate_ids": [1 到 10 個]}`：
+  建立一個 `news_publish` 執行（202，回傳執行紀錄）。同一時間只能有一個 `news_publish`
+  在佇列中，且它不與新聞重跑互相阻擋。版本不是該日該市場的最新 revision 時回 409、
+  候選不屬於該版本或已上架回 422、旗標關閉回 503。請求成功時候選寫入 `publish_run_id`
+  等欄位並記錄 `news.candidate_publish_requested` audit。
+- worker 執行 `news_publish`（`publish_candidates`）：逐一重新擷取文章、產生三語摘要、
+  以「目前最大 rank + 1」建立 `origin='manual'` 的 `news_items` 與三語
+  `news_presentations`，候選改為 `published` 並連結 `item_id`，記錄
+  `news.candidate_published` audit；每則各自 commit，失敗的候選只寫入 `publish_error`
+  （`edition_superseded`、`already_published`、`url_already_published`、`fetch_failed`、
+  `summary_failed`）且階段不變。執行結果為 `succeeded`／`partial`／`failed`，`result`
+  含各候選的結果代碼。模型未分類的候選以 `topic=markets`、`importance=3`、
+  該版本自己的市場標記（`global`／`taiwan`／`us`）上架，`event_key` 保留模型的判斷
+  （可能為空）。
 
 ## 設定
 
@@ -222,6 +292,8 @@ Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主�
 - 旗標為 `false` 時排程器容器維持健康且不呼叫任何外部服務。
 - 相同輸入下 `complete` 版本不會重複產生；`unavailable` 版本可以重新生成。
 - 08:00 後啟動的排程器不補抓；已 queue 的失敗市場在當日視窗內以 durable retry 重試。
+- 後台可看到版本的全部候選與階段，隱藏的新聞不出現在讀取 API，人工上架的新聞與
+  模型選入的新聞在客戶端無差別。
 - 報告頁在新聞 API 失敗時仍顯示報告清單，新聞區塊顯示 unavailable。
 - 非白名單主機、非 443 連接埠、私有 IP 與 redirect 到未核准目標都被拒絕。
 - 摘要中的數字與原文不符時該則新聞不入選。
@@ -237,14 +309,18 @@ Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主�
 - Reuters 對非瀏覽器請求回應 `401`，CNBC、BBC 與 AP 封鎖爬蟲，均不在註冊表內。
 - 日經的文章頁有付費牆，候選會在擷取階段以 `news.source.failed` 記錄；WSJ、MarketWatch、Investing.com、Forbes 已因同樣原因移出註冊表。SEC 8-K 的連結是申報索引頁，摘要品質取決於索引頁文字。
 - `langdetect` 對短標題的判斷不穩定，因此只在新聞稿 feed 啟用語言過濾。
-- 沒有人工覆核流程；若模型選題或摘要品質不佳，只能調整
-  `modules/news/prompts` 中的選題準則後重新產生。
+- 人工覆核只到隱藏與上架：無法編輯標題或摘要；若模型選題或摘要品質整體不佳，仍需
+  調整 `modules/news/prompts` 中的選題準則後手動重跑。
+- 若 08:00 當下正好有手動新聞執行在佇列中，自動執行的記錄會被「同時只有一個新聞
+  執行」的限制拒絕，排程器會每 30 分鐘重試記錄直到 12:00；記錄成功後 worker 仍會執行
+  一次自動 `news_all`，即使人工執行已在稍早完成（輸入相同時為 idempotent，否則產生
+  新 revision）。若要避免，可在後台取消該筆待執行的自動作業。
 
 ## 新聞可用性與失敗處理
 
 新聞 API 依市場與語系，回傳今天或更早「實際有該語系新聞」的最新 complete／partial
 版本。新的 unavailable 或空版本不會取代已發布內容；跨日、週末或持續產生失敗時，
-沿用最近可用版本並顯示原始日期。從未產生過內容的市場仍回 unavailable，不編造新聞。
+沿用最近可用版本，不另行提示版本日期；客戶端也不顯示完整或不完整的狀態標記。從未產生過內容的市場仍回 unavailable，不編造新聞。
 此保留策略需要 API 與資料庫可正常存取，不代表基礎設施故障時仍能提供新頁面。
 
 選題若違反來源上限或多樣性規則，從模型原有排名中選出符合全部規則的最大子集；
@@ -259,16 +335,19 @@ provider_invalid_json、provider_request_failed，不記錄 prompt、正文或�
 
 ## 不足額補選
 
-每次執行最多三輪選題。正文仍只擷取一次且最多 80 筆；擷取後的可用候選池擴為原本
-兩倍（全球最多 40 筆、台股／美股最多 48 筆），每輪送入模型的候選上限仍為 20／24。
-補選排除已嘗試文章，並提供成功摘要事件的標題、event key、來源及主題，要求不同事件
+每次執行最多三次選題呼叫，整池篩選與補選合計。正文仍只擷取一次且最多 80 筆（台股／美股
+100 筆）；擷取後的可用候選池擴為原本兩倍（全球最多 40 筆、台股／美股最多 60 筆），每次
+送入模型的候選上限仍為 20／30，因此整池篩選最多用掉兩次呼叫，剩下至少一次留給補選。
+補選只在篩選後版本仍不足時進行，排除已嘗試文章，並提供成功摘要事件的標題、event key、來源及主題，要求不同事件
 與不足的來源／主題；同一 event key 跨輪只摘要並採用一次，摘要失敗的文章不重複消耗
 後續輪次。每則摘要仍最多兩次嘗試，三語系全部驗證通過才可發布。
 
 全份新聞的來源上限、主題與來源多樣性在摘要完成後重新驗證。成功但暫時無法組成
-合格版本的候選會留在該次執行的記憶體中，供下一輪補齊組合；達全球 5 則、台股／美股
-各 8 則即停止。三輪用盡、候選耗盡或補選服務失敗時，發布已完成的合格部分，既有
+合格版本的候選會留在該次執行的記憶體中，供下一輪補齊組合；每個版本達 5 則即停止。三輪用盡、候選耗盡或補選服務失敗時，發布已完成的合格部分，既有
 最近可用新聞回退策略不變。news.refill.round 記錄輪次、可發布則數與已嘗試文章數。
 
-不足額版本亦在既有 08:00–12:00 晨間視窗每 30 分鐘重試；不擴大時段、不無限呼叫
-模型，也不以不相關文章、重複事件或未驗證數字硬湊則數。
+不足額版本的自動重試由佇列負責：08:00 的自動執行完成後，結果為 `partial`、`unavailable`
+或失敗的市場會各自排入一筆 automatic `news_market`，每 30 分鐘一次、最晚 12:00（見上方
+執行順序）；12:00 之後不再有自動動作，只能從後台手動重跑，或把後台候選表中合格的候選
+人工上架。無論哪一種路徑都不無限呼叫模型，也不以不相關文章、重複事件或未驗證數字硬湊
+則數。

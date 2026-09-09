@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import httpx
@@ -21,6 +22,7 @@ from daily_insights_api.modules.news.feeds import (
     effective_hostnames,
 )
 from daily_insights_api.modules.news.llm import (
+    MARKET_VALUES,
     enforce_selection_policy,
     filter_selection_markets,
     selection_output_contract,
@@ -66,17 +68,23 @@ def test_edition_registry_is_ordered_global_first_and_targets_match_policies() -
     assert EDITION_ORDER == ("global", "tw_equity", "us_equity")
     assert MARKET_NEWS_CODES == ("tw_equity", "us_equity")
     for spec in EDITION_SPECS.values():
-        assert spec.target_items == spec.selection.max_items
+        # Every edition shows five stories; the difference is how wide a pool
+        # it screens to find them.
+        assert spec.target_items == spec.selection.max_items == 5
         assert spec.max_candidates >= spec.target_items
         assert spec.max_per_source >= 1
+    for spec in (TW_EQUITY_SPEC, US_EQUITY_SPEC):
+        assert spec.max_candidates > GLOBAL_SPEC.max_candidates
+        assert spec.max_discovery_per_source > GLOBAL_SPEC.max_discovery_per_source
+        assert spec.max_discovery_total > GLOBAL_SPEC.max_discovery_total
     assert edition_spec("us_equity") is US_EQUITY_SPEC
     with pytest.raises(ValueError, match="unknown news edition market"):
         edition_spec("fx")
 
 
 def test_market_policies_allow_a_single_source_and_single_market() -> None:
-    candidates = [_fetched(index, "news.cnyes.com") for index in range(1, 9)]
-    same_topic = _selection(list(range(1, 9)))
+    candidates = [_fetched(index, "news.cnyes.com") for index in range(1, 6)]
+    same_topic = _selection(list(range(1, 6)))
     with pytest.raises(ValueError, match="2 topics"):
         enforce_selection_policy(same_topic, candidates, TW_EQUITY_SPEC.selection)
 
@@ -88,18 +96,18 @@ def test_market_policies_allow_a_single_source_and_single_market() -> None:
             ]
         }
     )
-    # Eight Taiwan stories from one domain and one market satisfy the market policy...
+    # Five Taiwan stories from one domain and one market satisfy the market policy...
     enforce_selection_policy(diverse, candidates, TW_EQUITY_SPEC.selection)
-    # ...but the global digest keeps its two-per-domain and two-market rules.
-    with pytest.raises(ValueError, match="exceeds 7 stories"):
-        enforce_selection_policy(diverse, candidates, GLOBAL_SPEC.selection)
-    three = Selection.model_validate(
-        {"selections": [item.model_dump() for item in diverse.selections[:3]]}
-    )
+    # ...but the global digest keeps its two-per-domain rule and the US edition
+    # its three-per-domain rule.
     with pytest.raises(ValueError, match="2 stories per domain"):
-        enforce_selection_policy(three, candidates, GLOBAL_SPEC.selection)
-    with pytest.raises(ValueError, match="4 stories per domain"):
+        enforce_selection_policy(diverse, candidates, GLOBAL_SPEC.selection)
+    with pytest.raises(ValueError, match="3 stories per domain"):
         enforce_selection_policy(diverse, candidates, US_EQUITY_SPEC.selection)
+    # Five slots plus two reserves is the most any edition may return.
+    eight = [_fetched(index, "news.cnyes.com") for index in range(1, 9)]
+    with pytest.raises(ValueError, match="exceeds 7 stories"):
+        enforce_selection_policy(_selection(list(range(1, 9))), eight, TW_EQUITY_SPEC.selection)
     with pytest.raises(ValueError, match="unknown candidate ID"):
         enforce_selection_policy(diverse, candidates[:2], TW_EQUITY_SPEC.selection)
 
@@ -122,24 +130,24 @@ def _global_or_us_selection(ids: list[int]) -> Selection:
 
 
 def test_full_edition_must_spread_across_three_source_domains() -> None:
-    # The US edition allows four per domain, so eight picks could come from
+    # The US edition allows three per domain, so five picks could come from
     # two outlets; the full-edition rule requires a third.
-    hosts = ["a.example"] * 4 + ["b.example"] * 4 + ["c.example"] * 2
+    hosts = ["a.example"] * 3 + ["b.example"] * 3 + ["c.example"] * 2
     candidates = [_fetched(index, host) for index, host in enumerate(hosts, start=1)]
-    two_domains = _global_or_us_selection(list(range(1, 9)))
+    two_domains = _global_or_us_selection([1, 2, 3, 4, 5])
     with pytest.raises(ValueError, match="at least 3 source domains"):
         enforce_selection_policy(two_domains, candidates, US_EQUITY_SPEC.selection)
     # A reserve from a third domain does not rescue the edition set.
     with pytest.raises(ValueError, match="at least 3 source domains"):
         enforce_selection_policy(
-            _global_or_us_selection([*range(1, 9), 9]), candidates, US_EQUITY_SPEC.selection
+            _global_or_us_selection([1, 2, 3, 4, 5, 7]), candidates, US_EQUITY_SPEC.selection
         )
-    # Seven picks never trigger the rule; a full edition with c.example passes.
+    # Four picks never trigger the rule; a full edition with c.example passes.
     enforce_selection_policy(
-        _global_or_us_selection(list(range(1, 8))), candidates, US_EQUITY_SPEC.selection
+        _global_or_us_selection([1, 2, 3, 4]), candidates, US_EQUITY_SPEC.selection
     )
     enforce_selection_policy(
-        _global_or_us_selection([1, 2, 3, 4, 5, 6, 7, 9]), candidates, US_EQUITY_SPEC.selection
+        _global_or_us_selection([1, 2, 3, 4, 7]), candidates, US_EQUITY_SPEC.selection
     )
     # The global digest's two-per-domain cap already implies three domains;
     # Taiwan deliberately allows a single source even when full.
@@ -155,12 +163,18 @@ def test_output_contract_reflects_each_policy() -> None:
     assert "event_keys unique" in global_contract["selections"]
     assert "span at least 3 distinct source domains" in global_contract["selections"]
     assert "source domains" not in market_contract["selections"].split("topics")[-1]
-    # Region-neutral by construction: only the global tag is offered.
+    # Every edition offers the full market vocabulary so the model classifies
+    # each story by the market it is really about; the rule then names the
+    # only tag the edition publishes.
     assert "distinct markets" not in global_contract["selections"]
-    assert global_contract["market"] == ["global"]
-    assert "0 to 10 objects" in market_contract["selections"]
+    assert global_contract["market"] == MARKET_VALUES
+    assert "publishes only selections tagged 'global'" in global_contract["market_rule"]
+    assert "0 to 7 objects" in market_contract["selections"]
+    assert "the first 5 form the edition" in market_contract["selections"]
     assert "distinct markets" not in market_contract["selections"]
-    assert "taiwan" in market_contract["market"]
+    assert market_contract["market"] == MARKET_VALUES
+    assert "publishes only selections tagged 'taiwan'" in market_contract["market_rule"]
+    assert "never relabel a story to fit" in market_contract["market_rule"]
 
 
 def test_feed_sources_are_tagged_per_market() -> None:
@@ -248,30 +262,42 @@ def test_market_editions_drop_stories_tagged_for_other_markets() -> None:
     assert [item.market for item in global_dropped] == ["taiwan", "taiwan"]
 
 
-def test_output_contract_restricts_market_tags_for_market_editions() -> None:
-    assert selection_output_contract(TW_EQUITY_SPEC.selection)["market"] == ["taiwan"]
-    assert selection_output_contract(US_EQUITY_SPEC.selection)["market"] == ["us"]
-    assert selection_output_contract(GLOBAL_SPEC.selection)["market"] == ["global"]
-    assert GLOBAL_SPEC.selection.market_focus is not None
-    assert "macro" in GLOBAL_SPEC.selection.market_focus
+def test_output_contract_names_the_published_tag_and_gate_for_each_edition() -> None:
+    focus_by_tag: dict[str, str] = {}
+    for spec, tag in ((TW_EQUITY_SPEC, "taiwan"), (US_EQUITY_SPEC, "us"), (GLOBAL_SPEC, "global")):
+        contract = selection_output_contract(spec.selection)
+        assert contract["market"] == MARKET_VALUES
+        assert f"tagged '{tag}'" in contract["market_rule"]
+        assert contract["example"]["selections"][0]["market"] == tag
+        focus = spec.selection.market_focus
+        assert focus is not None
+        focus_by_tag[tag] = focus
+        # Each edition spells out its relevance gate and tells the model to
+        # tag off-market stories honestly rather than force its own tag.
+        assert "relevance gate" in focus
+        assert f"only '{tag}' stories are published" in focus.lower()
+    assert "macro" in focus_by_tag["global"]
+    assert "TWSE or TPEx listed company" in focus_by_tag["taiwan"]
+    assert "US-listed company" in focus_by_tag["us"]
+    # Without a published set there is nothing to enforce, so no rule is shown.
+    open_policy = replace(GLOBAL_SPEC.selection, allowed_markets=None)
+    assert "market_rule" not in selection_output_contract(open_policy)
 
 
 def test_repair_promotes_diverse_reserve_without_relaxing_full_edition_policy() -> None:
     from daily_insights_api.modules.news.llm import repair_selection_policy
 
-    hosts = ["a.example"] * 4 + ["b.example"] * 4 + ["c.example"]
+    hosts = ["a.example"] * 3 + ["b.example"] * 3 + ["c.example"]
     candidates = [_fetched(index, host) for index, host in enumerate(hosts, start=1)]
-    original = _global_or_us_selection(list(range(1, 10)))
+    original = _global_or_us_selection(list(range(1, 8)))
     repaired = repair_selection_policy(original, candidates, US_EQUITY_SPEC.selection)
-    assert [item.id for item in repaired.selections] == [
-        f"{i:064x}" for i in [1, 2, 3, 4, 5, 6, 7, 9]
-    ]
+    assert [item.id for item in repaired.selections] == [f"{i:064x}" for i in [1, 2, 3, 4, 7]]
     enforce_selection_policy(repaired, candidates, US_EQUITY_SPEC.selection)
     # With no diverse reserve, a valid partial remains preferable to no news.
     partial = repair_selection_policy(
-        _global_or_us_selection(list(range(1, 9))), candidates, US_EQUITY_SPEC.selection
+        _global_or_us_selection(list(range(1, 7))), candidates, US_EQUITY_SPEC.selection
     )
-    assert len(partial.selections) == 7
+    assert len(partial.selections) == 4
     enforce_selection_policy(partial, candidates, US_EQUITY_SPEC.selection)
 
 
@@ -299,5 +325,8 @@ def test_publication_enforces_domain_cap_across_more_than_one_selection_batch() 
     ranked = list(_global_or_us_selection(list(range(1, 9))).selections)
     ranked += list(_global_or_us_selection(list(range(9, 13))).selections)
     publication = publishable_selection(ranked, candidates, US_EQUITY_SPEC.selection)
-    assert len(publication.selections) == 8
+    assert len(publication.selections) == 5
+    # Three from the first domain, then the earliest picks that reach a
+    # third domain so the full edition satisfies the spread rule.
+    assert [item.id for item in publication.selections] == [f"{i:064x}" for i in [1, 2, 3, 9, 12]]
     enforce_selection_policy(publication, candidates, US_EQUITY_SPEC.selection)

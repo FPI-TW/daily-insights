@@ -10,9 +10,15 @@ from daily_insights_api.modules.news.editions import (
 )
 from daily_insights_api.modules.news.feeds import effective_hostnames
 from daily_insights_api.modules.news.llm import DeepSeekClient
-from daily_insights_api.modules.news.models import NewsEdition, NewsItem, NewsPresentation
+from daily_insights_api.modules.news.models import (
+    NewsCandidate,
+    NewsEdition,
+    NewsItem,
+    NewsPresentation,
+)
 from daily_insights_api.modules.news.prompts import load_selection_criteria
 from daily_insights_api.modules.news.service import (
+    publish_candidates,
     run_all_editions,
     run_all_editions_with_outcomes,
     run_news_edition,
@@ -41,6 +47,7 @@ __all__ = [
     "GLOBAL_MARKET",
     "EditionSpec",
     "Locale",
+    "NewsCandidate",
     "NewsEdition",
     "NewsItem",
     "NewsPresentation",
@@ -48,6 +55,7 @@ __all__ = [
     "create_news_client",
     "edition_spec",
     "effective_hostnames",
+    "publish_candidates",
     "run_all_editions",
     "run_all_editions_with_outcomes",
     "run_news_edition",

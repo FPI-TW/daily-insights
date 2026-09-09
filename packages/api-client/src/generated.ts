@@ -196,6 +196,80 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/admin/news/candidates/publish": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Publish Candidates
+     * @description Queue a manual publish; the worker fetches, summarises and publishes.
+     */
+    post: operations["publish_candidates_api_admin_news_candidates_publish_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/news/editions": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * List Editions
+     * @description Latest revision of every market edition for one Taipei date.
+     */
+    get: operations["list_editions_api_admin_news_editions_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/news/items/{item_id}/hide": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Hide Item */
+    post: operations["hide_item_api_admin_news_items__item_id__hide_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/news/items/{item_id}/unhide": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Unhide Item */
+    post: operations["unhide_item_api_admin_news_items__item_id__unhide_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/admin/organizations": {
     parameters: {
       query?: never
@@ -1221,6 +1295,7 @@ export interface components {
         | components["schemas"]["InstitutionalTwseRunResponse"]
         | components["schemas"]["NewsAllRunResponse"]
         | components["schemas"]["NewsMarketRunResponse"]
+        | components["schemas"]["NewsPublishRunResponse"]
         | components["schemas"]["MacroDashboardRunResponse"]
       )[]
     }
@@ -1950,6 +2025,171 @@ export interface components {
       status:
         "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
     }
+    /** NewsAdminCandidate */
+    NewsAdminCandidate: {
+      /** Ai Event Key */
+      ai_event_key: string | null
+      /** Ai Importance */
+      ai_importance: number | null
+      /** Ai Market */
+      ai_market: string | null
+      /** Ai Rank */
+      ai_rank: number | null
+      /** Ai Topic */
+      ai_topic: string | null
+      /** Drop Reason */
+      drop_reason:
+        | (
+            | "off_market"
+            | "policy"
+            | "duplicate_event"
+            | "summary_failed"
+            | "reserve"
+          )
+        | null
+      /** Headline */
+      headline: string
+      /** Hostname */
+      hostname: string
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Item Id */
+      item_id: string | null
+      /** Publish Error */
+      publish_error: string | null
+      /** Publish Requested At */
+      publish_requested_at: string | null
+      /** Publish Run Id */
+      publish_run_id: string | null
+      /** Seen At */
+      seen_at: string | null
+      /** Source Name */
+      source_name: string
+      /** Source Published At */
+      source_published_at: string | null
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage:
+        | "discovered"
+        | "fetch_failed"
+        | "unused"
+        | "reviewed"
+        | "dropped"
+        | "published"
+      /** Url */
+      url: string
+    }
+    /**
+     * NewsAdminCounts
+     * @description Candidate stage totals for one edition, plus the hidden item count.
+     */
+    NewsAdminCounts: {
+      /** Discovered */
+      discovered: number
+      /** Dropped */
+      dropped: number
+      /** Fetch Failed */
+      fetch_failed: number
+      /** Hidden */
+      hidden: number
+      /** Published */
+      published: number
+      /** Reviewed */
+      reviewed: number
+      /** Unused */
+      unused: number
+    }
+    /** NewsAdminEdition */
+    NewsAdminEdition: {
+      counts: components["schemas"]["NewsAdminCounts"]
+      /**
+       * Generated At
+       * Format: date-time
+       */
+      generated_at: string
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Prompt Version */
+      prompt_version: string
+      /** Revision */
+      revision: number
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "complete" | "partial" | "unavailable"
+      /** Target Items */
+      target_items: number
+    }
+    /** NewsAdminEditionEntry */
+    NewsAdminEditionEntry: {
+      /** Candidates */
+      candidates: components["schemas"]["NewsAdminCandidate"][]
+      edition: components["schemas"]["NewsAdminEdition"] | null
+      /** Items */
+      items: components["schemas"]["NewsAdminItem"][]
+      /** Market Code */
+      market_code: string
+    }
+    /** NewsAdminEditionsResponse */
+    NewsAdminEditionsResponse: {
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /** Editions */
+      editions: components["schemas"]["NewsAdminEditionEntry"][]
+    }
+    /** NewsAdminItem */
+    NewsAdminItem: {
+      /** Candidate Id */
+      candidate_id: string | null
+      /** Event Key */
+      event_key: string | null
+      /** Headline */
+      headline: string
+      /** Hidden */
+      hidden: boolean
+      /** Hidden At */
+      hidden_at: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Importance */
+      importance: number
+      /** Market */
+      market: string | null
+      /**
+       * Origin
+       * @enum {string}
+       */
+      origin: "model" | "manual"
+      /** Rank */
+      rank: number
+      /** Source Headline */
+      source_headline: string
+      /** Source Hostname */
+      source_hostname: string
+      /** Source Name */
+      source_name: string
+      /** Source Published At */
+      source_published_at: string | null
+      /** Source Url */
+      source_url: string
+      /** Topic */
+      topic: string
+    }
     /** NewsAllRunCreate */
     NewsAllRunCreate: {
       /** Market Code */
@@ -2002,6 +2242,16 @@ export interface components {
        */
       status:
         "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
+    }
+    /** NewsCandidatePublishRequest */
+    NewsCandidatePublishRequest: {
+      /** Candidate Ids */
+      candidate_ids: string[]
+      /**
+       * Edition Id
+       * Format: uuid
+       */
+      edition_id: string
     }
     /** NewsItemResponse */
     NewsItemResponse: {
@@ -2082,6 +2332,53 @@ export interface components {
        * @enum {string}
        */
       operation: "news_market"
+      /** Requested By User Id */
+      requested_by_user_id: string | null
+      /** Result */
+      result: {
+        [key: string]: unknown
+      } | null
+      /** Started At */
+      started_at: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status:
+        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
+    }
+    /**
+     * NewsPublishRunResponse
+     * @description A manual publish of admin-chosen news candidates; created only through
+     *     the news management API, never through the generic run endpoint.
+     */
+    NewsPublishRunResponse: {
+      /** Completed At */
+      completed_at: string | null
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /** Error */
+      error: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Market Code */
+      market_code: null
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      operation: "news_publish"
       /** Requested By User Id */
       requested_by_user_id: string | null
       /** Result */
@@ -3088,6 +3385,7 @@ export interface operations {
             | components["schemas"]["InstitutionalTwseRunResponse"]
             | components["schemas"]["NewsAllRunResponse"]
             | components["schemas"]["NewsMarketRunResponse"]
+            | components["schemas"]["NewsPublishRunResponse"]
             | components["schemas"]["MacroDashboardRunResponse"]
         }
       }
@@ -3140,6 +3438,7 @@ export interface operations {
             | components["schemas"]["InstitutionalTwseRunResponse"]
             | components["schemas"]["NewsAllRunResponse"]
             | components["schemas"]["NewsMarketRunResponse"]
+            | components["schemas"]["NewsPublishRunResponse"]
             | components["schemas"]["MacroDashboardRunResponse"]
         }
       }
@@ -3180,6 +3479,7 @@ export interface operations {
             | components["schemas"]["InstitutionalTwseRunResponse"]
             | components["schemas"]["NewsAllRunResponse"]
             | components["schemas"]["NewsMarketRunResponse"]
+            | components["schemas"]["NewsPublishRunResponse"]
             | components["schemas"]["MacroDashboardRunResponse"]
         }
       }
@@ -3278,6 +3578,165 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ProvisionedInternalUserResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  publish_candidates_api_admin_news_candidates_publish_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NewsCandidatePublishRequest"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json":
+            | components["schemas"]["MorningAllRunResponse"]
+            | components["schemas"]["MorningMarketRunResponse"]
+            | components["schemas"]["IndexYahooRunResponse"]
+            | components["schemas"]["InstitutionalTwseRunResponse"]
+            | components["schemas"]["NewsAllRunResponse"]
+            | components["schemas"]["NewsMarketRunResponse"]
+            | components["schemas"]["NewsPublishRunResponse"]
+            | components["schemas"]["MacroDashboardRunResponse"]
+        }
+      }
+      /** @description Edition not found. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Edition superseded or a manual publish is already active. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description A candidate is not in the edition or is already published. */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Daily news is disabled. */
+      503: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+    }
+  }
+  list_editions_api_admin_news_editions_get: {
+    parameters: {
+      query?: {
+        date?: string | null
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["NewsAdminEditionsResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  hide_item_api_admin_news_items__item_id__hide_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        item_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["NewsAdminItem"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  unhide_item_api_admin_news_items__item_id__unhide_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        item_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["NewsAdminItem"]
         }
       }
       /** @description Validation Error */

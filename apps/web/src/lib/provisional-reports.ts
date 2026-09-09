@@ -70,8 +70,6 @@ export type ProvisionalReport = {
   status: ReportStatus
   editionDate: string
   sourceDate: string | null
-  stale?: boolean
-  staleReason?: string | null
   caveat?: string | null
   caveatKey: string
   summaryKey: string

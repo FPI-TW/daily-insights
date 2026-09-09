@@ -47,6 +47,7 @@ TABLE_OWNERS = {
     "memberships": "tenancy",
     "messages": "chat",
     "model_configurations": "model_runtime",
+    "news_candidates": "news",
     "news_editions": "news",
     "news_generation_audits": "news",
     "news_items": "news",
