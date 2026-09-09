@@ -173,7 +173,7 @@ describe("three-market report presentation", () => {
     await renderLocalized(
       <ReportShell locale="en" markets={markets}>
         <ReportList
-          markets={markets.filter(market => market.code !== "crypto")}
+          markets={markets}
           viewpoints={[
             {
               viewpoint_date: "2026-09-02",

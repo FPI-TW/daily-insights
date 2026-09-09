@@ -14,7 +14,7 @@ export function DailyNewsLoading() {
   const animate = useEnterAnimation()
   return (
     <motion.section
-      className="surface-panel animate-pulse p-5"
+      className="surface-panel mb-6 animate-pulse p-5"
       role="status"
       aria-live="polite"
       variants={fadeIn}
@@ -48,7 +48,7 @@ export function DailyNews({
   const animate = useEnterAnimation()
   const status = news?.status ?? "unavailable"
   return (
-    <section className="mt-7" aria-labelledby="daily-news-title">
+    <section className="mt-7 mb-6" aria-labelledby="daily-news-title">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="eyebrow">{t(eyebrowKey)}</p>
@@ -59,15 +59,11 @@ export function DailyNews({
             {t(titleKey)}
           </h2>
         </div>
-        {status === "partial" ? null : (
-          // A partial edition is shown as a plain list: the story count speaks
-          // for itself and a shortfall badge was judged noise.
-          <span
-            className={`rounded-full border px-2.5 py-1 text-xs font-bold ${status === "complete" ? "border-line text-sea-ink-soft" : "border-market-caution/50 bg-market-caution/10 text-market-caution"}`}
-          >
-            {t(`dailyNewsStatus_${status}`)}
+        {status === "complete" ? (
+          <span className="rounded-full border border-line px-2.5 py-1 text-xs font-bold text-sea-ink-soft">
+            {t("dailyNewsStatus_complete")}
           </span>
-        )}
+        ) : null}
       </div>
       {news !== null && news.status !== "unavailable" && news.caveat ? (
         // Only the pipeline's own caveat (e.g. a stale edition) is surfaced.

@@ -13,7 +13,7 @@ describe("DailyNews", () => {
         <DailyNewsLoading />
       </I18nextProvider>
     )
-    expect(screen.getByRole("status")).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveClass("mb-6")
   })
 
   it("shows source metadata, importance, and a hardened external link", async () => {
@@ -220,7 +220,8 @@ describe("DailyNews", () => {
     expect(
       panel.getByText(/Today’s major news could not be loaded right now/)
     ).toHaveAttribute("role", "status")
-    expect(panel.getByText("Unavailable")).toBeInTheDocument()
+    expect(panel.queryByText("Unavailable")).not.toBeInTheDocument()
+    expect(container.querySelector("section")).toHaveClass("mt-7", "mb-6")
     expect(panel.queryByRole("link")).not.toBeInTheDocument()
   })
 })

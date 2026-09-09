@@ -792,15 +792,15 @@ export function TaiwanIndexHistoryChart({
           </p>
         ) : null}
         <div className="space-y-4">
-          <BiasPanel
-            key={selected.symbol}
+          <CandlesPanel
+            key={`candles-${selected.symbol}`}
             selected={selected}
             averages={averages}
             pending={pending}
             locale={locale}
           />
-          <CandlesPanel
-            key={`candles-${selected.symbol}`}
+          <BiasPanel
+            key={selected.symbol}
             selected={selected}
             averages={averages}
             pending={pending}

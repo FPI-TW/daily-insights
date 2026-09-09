@@ -708,7 +708,6 @@ const resources: Resource = {
       dailyNewsEyebrow: "每日精選",
       dailyNewsTitle: "本日重大新聞",
       dailyNewsStatus_complete: "完整",
-      dailyNewsStatus_unavailable: "暫不可用",
       dailyNewsUnavailable: "本日重大新聞尚未產生，請稍後再試。",
       dailyNewsLoadFailed: "本日重大新聞暫時無法載入，報告內容不受影響。",
       marketNewsEyebrow: "市場新聞",
@@ -1434,7 +1433,6 @@ const resources: Resource = {
       dailyNewsEyebrow: "每日精选",
       dailyNewsTitle: "本日重大新闻",
       dailyNewsStatus_complete: "完整",
-      dailyNewsStatus_unavailable: "暂不可用",
       dailyNewsUnavailable: "本日重大新闻尚未生成，请稍后再试。",
       dailyNewsLoadFailed: "本日重大新闻暂时无法加载，报告内容不受影响。",
       marketNewsEyebrow: "市场新闻",
@@ -2195,7 +2193,6 @@ const resources: Resource = {
       dailyNewsEyebrow: "DAILY SELECTION",
       dailyNewsTitle: "Today’s major news",
       dailyNewsStatus_complete: "Complete",
-      dailyNewsStatus_unavailable: "Unavailable",
       dailyNewsUnavailable:
         "Today’s major news has not been generated yet. Please try again later.",
       dailyNewsLoadFailed:

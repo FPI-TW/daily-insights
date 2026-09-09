@@ -144,6 +144,13 @@ describe("TaiwanIndexHistoryChart", () => {
     expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
       '"height":26'
     )
+    const candleHeading = screen.getByRole("heading", {
+      name: "Taiwan Weighted Index",
+    })
+    const biasHeading = screen.getByRole("heading", { name: "TAIEX bias" })
+    expect(candleHeading.compareDocumentPosition(biasHeading)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
   })
   it("keeps the initial averages request pending while showing available candles", async () => {
     let resolve!: (value: IndexMovingAverageMap) => void
