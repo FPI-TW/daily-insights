@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next"
 import { z } from "zod"
 import type { IndexMovingAverages, Locale } from "@daily-insights/api-client"
 import { useChartColors } from "#/lib/chart"
-import { formatDateStamp, formatNumber, numberLocales } from "#/lib/format"
+import { formatNumber, numberLocales } from "#/lib/format"
 import {
   biasSeries,
   indexNameKey,
@@ -394,9 +394,6 @@ function CandlesPanel({
     ? (Number(latest.close) / Number(previous.close) - 1) * 100
     : null
   const dates = bars.map(bar => bar.trade_date)
-  const lastDateIndex = dates.length - 1
-  const visibleStart = dates[Math.round((lastDateIndex * zoom.start) / 100)]
-  const visibleEnd = dates[Math.round((lastDateIndex * zoom.end) / 100)]
   const missing = bars.filter(
     bar => bar.open === null || bar.high === null || bar.low === null
   ).length
@@ -474,7 +471,6 @@ function CandlesPanel({
         </div>
       }
     >
-      <p className="mt-1 mb-0 text-xs text-sea-ink-soft">{t("kSub")}</p>
       {missing ? (
         <p className="mt-2 mb-0 text-xs text-sea-ink-soft" role="status">
           {t("kMissingOhlc", { count: missing })}
@@ -493,14 +489,6 @@ function CandlesPanel({
         <Unavailable />
       ) : (
         <div className="mt-3" role="img" aria-label={title}>
-          <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-[11px] text-sea-ink-soft">
-            <span>{t("kVisibleRange")}</span>
-            <span className="font-mono tabular-nums">
-              {visibleStart && visibleEnd
-                ? `${formatDateStamp(visibleStart)} – ${formatDateStamp(visibleEnd)}`
-                : "—"}
-            </span>
-          </div>
           <ClientOnly fallback={<ChartSkeleton candles />}>
             <ReactECharts
               notMerge
