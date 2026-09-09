@@ -503,6 +503,330 @@ async def test_only_missing_run_leaves_existing_editions_alone_and_fills_the_res
     assert generated == ["global", "tw_equity", "us_equity"]
 
 
+class _ImportanceNewsClient(_CompleteNewsClient):
+    """Rates every story four stars except candidate 6, the only five-star one."""
+
+    def __init__(self) -> None:
+        super().__init__("a")
+        self.batches: list[list[int]] = []
+
+    async def select(self, candidates: list[FetchedCandidate], **kwargs: object) -> ModelCall:
+        del kwargs
+        indexes = [int(item.candidate.id[:1]) for item in candidates]
+        self.batches.append(indexes)
+        return ModelCall(
+            Selection.model_validate(
+                {
+                    "selections": [
+                        {
+                            "id": item.candidate.id,
+                            "topic": "markets" if index % 2 else "companies",
+                            "event_key": f"story-{index}",
+                            "market": "global",
+                            "importance": 5 if index == 6 else 4,
+                        }
+                        for index, item in zip(indexes, candidates, strict=True)
+                    ]
+                }
+            ),
+            "selection-request",
+            10,
+            5,
+            1,
+            self.selection_prompt_digest,
+        )
+
+
+async def test_screening_rates_the_whole_pool_and_publishes_five_star_stories_first(
+    news_database: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The five-star story sits in the second prompt window; it must still lead."""
+    from dataclasses import replace
+
+    from daily_insights_api.modules.news.editions import GLOBAL_SPEC
+
+    hosts, candidates = _six_candidates()
+
+    async def feeds(*args: object, **kwargs: object) -> list[Candidate]:
+        del args, kwargs
+        return [item.candidate for item in candidates]
+
+    async def fetch(*args: object, **kwargs: object) -> list[FetchedCandidate]:
+        del args, kwargs
+        return candidates
+
+    monkeypatch.setattr("daily_insights_api.modules.news.service.discover_feed_candidates", feeds)
+    monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
+    client = _ImportanceNewsClient()
+    status = await run_news_edition(
+        news_database,
+        cast(DeepSeekClient, client),
+        datetime.now(TAIPEI).date(),
+        allowed_hostnames=frozenset(hosts),
+        spec=replace(GLOBAL_SPEC, max_candidates=3),
+    )
+    assert status == "complete"
+    # Both windows were rated before any story was summarised, even though
+    # the first window alone held enough four-star stories.
+    assert client.batches == [[1, 2, 3], [4, 5, 6]]
+    async with news_database() as database:
+        edition = (await database.scalars(select(NewsEdition))).one()
+        items = list(
+            await database.scalars(
+                select(NewsItem).where(NewsItem.edition_id == edition.id).order_by(NewsItem.rank)
+            )
+        )
+        rows = {
+            int(row.candidate_id[:1]): row
+            for row in await database.scalars(
+                select(NewsCandidate).where(NewsCandidate.edition_id == edition.id)
+            )
+        }
+    assert [item.source_hostname for item in items] == [
+        "source6.example",
+        "source1.example",
+        "source2.example",
+        "source3.example",
+        "source4.example",
+    ]
+    assert [item.importance for item in items] == [5, 4, 4, 4, 4]
+    assert (rows[5].stage, rows[5].drop_reason) == ("dropped", "reserve")
+
+
+class _DuplicateEventNewsClient(_ImportanceNewsClient):
+    """Candidates 1 and 4 report the same five-star event; candidate 1 cannot be summarised."""
+
+    async def select(self, candidates: list[FetchedCandidate], **kwargs: object) -> ModelCall:
+        del kwargs
+        indexes = [int(item.candidate.id[:1]) for item in candidates]
+        self.batches.append(indexes)
+        return ModelCall(
+            Selection.model_validate(
+                {
+                    "selections": [
+                        {
+                            "id": item.candidate.id,
+                            "topic": "markets" if index % 2 else "companies",
+                            "event_key": "story-1" if index in {1, 4} else f"story-{index}",
+                            "market": "global",
+                            "importance": 5 if index in {1, 4} else 4,
+                        }
+                        for index, item in zip(indexes, candidates, strict=True)
+                    ]
+                }
+            ),
+            "selection-request",
+            10,
+            5,
+            1,
+            self.selection_prompt_digest,
+        )
+
+    async def summarize(
+        self,
+        candidate: Candidate,
+        article_text: str,
+        locale: str,
+        *,
+        retry_feedback: str | None = None,
+    ) -> ModelCall:
+        if candidate.id[:1] == "1":
+            raise ModelCallError(
+                "unsupported number",
+                input_digest="f" * 64,
+                latency_ms=1,
+                error_code="summary_ungrounded_number",
+            )
+        return await super().summarize(
+            candidate, article_text, locale, retry_feedback=retry_feedback
+        )
+
+
+def _six_candidates() -> tuple[list[str], list[FetchedCandidate]]:
+    hosts = [f"source{index}.example" for index in range(1, 7)]
+    return hosts, [
+        FetchedCandidate(
+            Candidate(
+                id=str(index) * 64,
+                url=f"https://{host}/story-{index}",
+                hostname=host,
+                source_name=host,
+                headline=f"Story {index}",
+                seen_at=datetime(2026, 9, 8, tzinfo=UTC),
+            ),
+            f"https://{host}/story-{index}",
+            f"Body {index}",
+            str(index) * 64,
+            datetime(2026, 9, 8, tzinfo=UTC),
+        )
+        for index, host in enumerate(hosts, start=1)
+    ]
+
+
+async def test_second_window_report_of_an_event_replaces_a_first_window_summary_failure(
+    news_database: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import replace
+
+    from daily_insights_api.modules.news.editions import GLOBAL_SPEC
+
+    hosts, candidates = _six_candidates()
+
+    async def feeds(*args: object, **kwargs: object) -> list[Candidate]:
+        del args, kwargs
+        return [item.candidate for item in candidates]
+
+    async def fetch(*args: object, **kwargs: object) -> list[FetchedCandidate]:
+        del args, kwargs
+        return candidates
+
+    monkeypatch.setattr("daily_insights_api.modules.news.service.discover_feed_candidates", feeds)
+    monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
+    status = await run_news_edition(
+        news_database,
+        cast(DeepSeekClient, _DuplicateEventNewsClient()),
+        datetime.now(TAIPEI).date(),
+        allowed_hostnames=frozenset(hosts),
+        spec=replace(GLOBAL_SPEC, max_candidates=3),
+    )
+    assert status == "complete"
+    async with news_database() as database:
+        edition = (await database.scalars(select(NewsEdition))).one()
+        items = list(
+            await database.scalars(
+                select(NewsItem).where(NewsItem.edition_id == edition.id).order_by(NewsItem.rank)
+            )
+        )
+        rows = {
+            int(row.candidate_id[:1]): row
+            for row in await database.scalars(
+                select(NewsCandidate).where(NewsCandidate.edition_id == edition.id)
+            )
+        }
+    # The five-star event still leads through its second-window report.
+    assert [item.source_hostname for item in items][:1] == ["source4.example"]
+    assert items[0].event_key == "story-1" and items[0].importance == 5
+    assert (rows[1].stage, rows[1].drop_reason) == ("dropped", "summary_failed")
+    assert rows[4].stage == "published"
+
+
+class _SameDomainNewsClient(_ImportanceNewsClient):
+    """Every window returns five-star stories from one domain plus four-star fillers."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.summarized: list[str] = []
+
+    async def select(self, candidates: list[FetchedCandidate], **kwargs: object) -> ModelCall:
+        del kwargs
+        indexes = [int(item.candidate.id[:1]) for item in candidates]
+        self.batches.append(indexes)
+        return ModelCall(
+            Selection.model_validate(
+                {
+                    "selections": [
+                        {
+                            "id": item.candidate.id,
+                            "topic": "markets" if index % 2 else "companies",
+                            "event_key": f"story-{index}",
+                            "market": "global",
+                            "importance": 5 if item.candidate.hostname == "wire.example" else 4,
+                        }
+                        for index, item in zip(indexes, candidates, strict=True)
+                    ]
+                }
+            ),
+            "selection-request",
+            10,
+            5,
+            1,
+            self.selection_prompt_digest,
+        )
+
+    async def summarize(
+        self,
+        candidate: Candidate,
+        article_text: str,
+        locale: str,
+        *,
+        retry_feedback: str | None = None,
+    ) -> ModelCall:
+        self.summarized.append(candidate.id[:1])
+        return await super().summarize(
+            candidate, article_text, locale, retry_feedback=retry_feedback
+        )
+
+
+async def test_domain_quota_is_settled_before_summaries_are_paid_for(
+    news_database: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Three five-star wire stories across two windows; the global cap is two per domain."""
+    from dataclasses import replace
+
+    from daily_insights_api.modules.news.editions import GLOBAL_SPEC
+
+    hosts, candidates = _six_candidates()
+    # Candidates 1, 2 (window one) and 4 (window two) come from the same wire.
+    wire = {1, 2, 4}
+    candidates = [
+        FetchedCandidate(
+            Candidate(
+                id=item.candidate.id,
+                url=item.candidate.url,
+                hostname="wire.example"
+                if int(item.candidate.id[:1]) in wire
+                else item.candidate.hostname,
+                source_name=item.candidate.source_name,
+                headline=item.candidate.headline,
+                seen_at=item.candidate.seen_at,
+            ),
+            item.source_url,
+            item.body,
+            item.content_digest,
+            item.source_published_at,
+        )
+        for item in candidates
+    ]
+
+    async def feeds(*args: object, **kwargs: object) -> list[Candidate]:
+        del args, kwargs
+        return [item.candidate for item in candidates]
+
+    async def fetch(*args: object, **kwargs: object) -> list[FetchedCandidate]:
+        del args, kwargs
+        return candidates
+
+    monkeypatch.setattr("daily_insights_api.modules.news.service.discover_feed_candidates", feeds)
+    monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
+    client = _SameDomainNewsClient()
+    status = await run_news_edition(
+        news_database,
+        cast(DeepSeekClient, client),
+        datetime.now(TAIPEI).date(),
+        allowed_hostnames=frozenset([*hosts, "wire.example"]),
+        spec=replace(GLOBAL_SPEC, max_candidates=3),
+    )
+    assert status == "complete"
+    # Candidate 4 is the third wire story: skipped without a single summary call.
+    assert "4" not in client.summarized
+    assert len(client.summarized) == 15
+    async with news_database() as database:
+        edition = (await database.scalars(select(NewsEdition))).one()
+        items = list(
+            await database.scalars(
+                select(NewsItem).where(NewsItem.edition_id == edition.id).order_by(NewsItem.rank)
+            )
+        )
+        rows = {
+            int(row.candidate_id[:1]): row
+            for row in await database.scalars(
+                select(NewsCandidate).where(NewsCandidate.edition_id == edition.id)
+            )
+        }
+    assert [item.importance for item in items] == [5, 5, 4, 4, 4]
+    assert (rows[4].stage, rows[4].drop_reason) == ("dropped", "policy")
+
+
 async def test_thin_discovery_reports_the_candidate_floor(
     news_database: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:

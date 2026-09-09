@@ -58,6 +58,8 @@ TAIPEI = ZoneInfo("Asia/Taipei")
 # regenerated from identical inputs so a transient provider failure cannot
 # freeze the day's news.
 IDEMPOTENT_STATUS = "complete"
+# Selection calls per edition, screening and refill together: the pool is at
+# most two prompt windows, which leaves one call to refill a short edition.
 MAX_SELECTION_ROUNDS = 3
 MAX_CANDIDATES = 20
 MAX_CANDIDATES_PER_SOURCE = 5
@@ -601,43 +603,36 @@ async def run_news_edition(
         successful: list[SelectedCandidate] = []
         localized: dict[str, dict[str, LocalizedSummary]] = {}
         publication = Selection(selections=())
-        for round_index in range(MAX_SELECTION_ROUNDS):
-            covered_sources = Counter(selected[item.id].candidate.hostname for item in successful)
-            remaining = [fetched for fetched in usable if fetched.candidate.id not in attempted]
-            # Explore the expanded pool before recycling unselected articles;
-            # within each group prefer underrepresented sources, then freshness.
-            remaining.sort(
-                key=lambda fetched: (
-                    fetched.candidate.id in reviewed,
-                    covered_sources[fetched.candidate.hostname],
-                )
-            )
-            batch = remaining[: spec.max_candidates]
-            if not batch or len(publication.selections) >= spec.target_items:
-                break
-            reviewed.update(fetched.candidate.id for fetched in batch)
-            ledger.reviewed(batch)
-            previous_events = tuple(
+        selection_calls = 0
+
+        def covered(items: list[SelectedCandidate]) -> tuple[CoveredEvent, ...]:
+            return tuple(
                 CoveredEvent(
                     item.event_key,
                     selected[item.id].candidate.headline,
                     selected[item.id].candidate.hostname,
                     item.topic,
                 )
-                for item in successful
+                for item in items
             )
 
-            async def select_batch(
-                batch: list[FetchedCandidate] = batch,
-                previous_events: tuple[CoveredEvent, ...] = previous_events,
-            ) -> ModelCall:
+        async def select_batch(
+            batch: list[FetchedCandidate], previous_events: tuple[CoveredEvent, ...]
+        ) -> Selection | None:
+            """One rated selection call; None when the provider failed twice."""
+            nonlocal selection_calls
+            selection_calls += 1
+            reviewed.update(fetched.candidate.id for fetched in batch)
+            ledger.reviewed(batch)
+
+            async def attempt() -> ModelCall:
                 return await client.select(
                     batch, policy=spec.selection, previous_events=previous_events
                 )
 
             try:
-                selection_call = await _retry(
-                    select_batch,
+                call = await _retry(
+                    attempt,
                     lambda error: database.add(
                         _failed_audit(
                             edition.id,
@@ -650,15 +645,10 @@ async def run_news_edition(
                         )
                     ),
                 )
-                assert isinstance(selection_call.value, Selection)
+                assert isinstance(call.value, Selection)
                 database.add(
                     _audit(
-                        edition.id,
-                        "selection",
-                        None,
-                        selection_call,
-                        model_name,
-                        selection_prompt_version,
+                        edition.id, "selection", None, call, model_name, selection_prompt_version
                     )
                 )
             except Exception as error:
@@ -669,11 +659,18 @@ async def run_news_edition(
                     if isinstance(error, ModelCallError)
                     else type(error).__name__,
                 )
-                break
-            ledger.returned(selection_call)
-            if not selection_call.value.selections:
+                return None
+            ledger.returned(call)
+            selection = call.value
+            assert isinstance(selection, Selection)
+            if not selection.selections:
                 attempted.update(fetched.candidate.id for fetched in batch)
-            for selected_item in selection_call.value.selections:
+            return selection
+
+        async def summarise(picks: list[SelectedCandidate]) -> None:
+            """Summarise picks in the given order until the edition is full."""
+            nonlocal publication
+            for selected_item in picks:
                 if len(publication.selections) >= spec.target_items:
                     break
                 attempted.add(selected_item.id)
@@ -681,6 +678,18 @@ async def run_news_edition(
                     ledger.drop(selected_item.id, "duplicate_event")
                     continue
                 fetched = selected[selected_item.id]
+                # The per-domain cap is settled before any summary is paid
+                # for: importance ordering merges windows that each obeyed
+                # the cap on their own, so a third story from a domain that
+                # already holds two summarised ones can never be published.
+                domain_count = sum(
+                    1
+                    for item in successful
+                    if selected[item.id].candidate.hostname == fetched.candidate.hostname
+                )
+                if domain_count >= spec.selection.max_per_domain:
+                    ledger.drop(selected_item.id, "policy")
+                    continue
                 audits: list[NewsGenerationAudit] = []
                 try:
                     summaries = await _summarize_locales(
@@ -702,10 +711,64 @@ async def run_news_edition(
                     )
                 finally:
                     database.add_all(audits)
+
+        # Screening: every batch of the pool is rated before anything is
+        # summarised, so a five-star story in the second batch is seen even
+        # when the first batch alone could fill the edition. The batches are
+        # then merged and taken by importance, five stars before four and so
+        # on; within one rating the model's own order stands.
+        picks: list[SelectedCandidate] = []
+        for start in range(0, len(usable), spec.max_candidates):
+            if selection_calls >= MAX_SELECTION_ROUNDS:
+                break
+            batch = usable[start : start + spec.max_candidates]
+            selection = await select_batch(batch, covered(picks))
+            if selection is None:
+                break
+            # A second report of an event already picked from an earlier
+            # window is kept: it only counts as a duplicate once the earlier
+            # report has actually been published, and a higher-rated report
+            # of the same event may lead after the sort.
+            picks.extend(selection.selections)
+            emit_event(
+                "news.screening.batch",
+                market=market_code,
+                batch=selection_calls,
+                candidates=len(batch),
+                returned=len(selection.selections),
+            )
+        picks.sort(key=lambda item: -item.importance)
+        await summarise(picks)
+
+        # Refill: only while the edition is still short and calls remain,
+        # recycling articles the model has not picked, with the published
+        # events named so they are not chosen twice.
+        refill_round = 0
+        while (
+            len(publication.selections) < spec.target_items
+            and selection_calls < MAX_SELECTION_ROUNDS
+        ):
+            covered_sources = Counter(selected[item.id].candidate.hostname for item in successful)
+            remaining = [fetched for fetched in usable if fetched.candidate.id not in attempted]
+            # Unreviewed articles first, then underrepresented sources.
+            remaining.sort(
+                key=lambda fetched: (
+                    fetched.candidate.id in reviewed,
+                    covered_sources[fetched.candidate.hostname],
+                )
+            )
+            batch = remaining[: spec.max_candidates]
+            if not batch:
+                break
+            selection = await select_batch(batch, covered(successful))
+            if selection is None:
+                break
+            await summarise(sorted(selection.selections, key=lambda item: -item.importance))
+            refill_round += 1
             emit_event(
                 "news.refill.round",
                 market=market_code,
-                round=round_index + 1,
+                round=refill_round,
                 published_count=len(publication.selections),
                 attempted_count=len(attempted),
             )

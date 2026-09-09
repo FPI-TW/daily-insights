@@ -91,8 +91,13 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
     # Relevance is a fixed gate ahead of ranking, so the deploy-time criteria
     # cannot talk the model into filling a slot with an off-market story.
     assert "Relevance to this edition is a hard gate" in task
+    # Importance ranks first: every 5 before any 4, honestly rated.
+    assert "Importance is the primary ranking key" in task
+    assert "every 5 precedes every 4" in task
     contract = captured["OUTPUT_CONTRACT"]
     assert isinstance(contract, dict)
+    assert "ordered by importance from 5 down to 1" in contract["selections"]
+    assert "absolute scale" in contract["importance"]
     # The closed vocabularies shown to the model must match the validated contract.
     fields = SelectedCandidate.model_fields
     assert set(contract["topic"]) == set(get_args(fields["topic"].annotation))
@@ -427,6 +432,7 @@ async def test_refill_prompt_provides_covered_events_without_relaxing_market_pol
     ]
     assert "different event_key" in prompt["REFILL_GUIDANCE"]
     assert "relevance" in prompt["REFILL_GUIDANCE"]
+    assert "same absolute scale" in prompt["REFILL_GUIDANCE"]
     assert "publishes only selections tagged 'global'" in prompt["OUTPUT_CONTRACT"]["market_rule"]
 
 
