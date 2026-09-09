@@ -22,12 +22,6 @@ from daily_insights_api.modules.assets.models import Asset
 from daily_insights_api.modules.assets.object_store import ObjectMetadata, ObjectRef
 from daily_insights_api.modules.audit.models import AuditEvent
 from daily_insights_api.modules.identity.models import User
-from daily_insights_api.modules.podcasts.analysis import (
-    PodcastAnalysisError,
-    PodcastAnalyzer,
-    Transcript,
-    TranscriptSegment,
-)
 from daily_insights_api.modules.podcasts.models import PodcastEpisodeAudioVariant
 from daily_insights_api.modules.tenancy.models import Membership, Organization
 from daily_insights_api.web.app import create_app
@@ -118,57 +112,6 @@ class FakeObjectStore:
         return f"https://media.example.invalid/{ref.key}"
 
 
-class FakeTranscriber:
-    """Returns a fixed four-block transcript regardless of the audio bytes."""
-
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str, str | None]] = []
-
-    async def transcribe(
-        self,
-        content: bytes,
-        *,
-        filename: str,
-        mime_type: str,
-        language: str | None,
-        prompt: str | None = None,
-    ) -> Transcript:
-        assert prompt, "the locale prompt steers script and vocabulary"
-        self.calls.append((filename, mime_type, language))
-        return Transcript(
-            language="chinese",
-            duration=100.0,
-            text="開場 外資 匯率 清單",
-            segments=tuple(
-                TranscriptSegment(start=index * 25, end=index * 25 + 25, text=text)
-                for index, text in enumerate(["開場", "外資", "匯率", "清單"])
-            ),
-        )
-
-
-class FakeAnalysisModel:
-    """Fails unless a test opts in, so uploads in unrelated tests keep their
-    derived titles while the background analysis records a failure."""
-
-    def __init__(self) -> None:
-        self.prompts: list[dict[str, object]] = []
-        self.succeed = False
-
-    async def complete_json(self, prompt: dict[str, object]) -> dict[str, object]:
-        self.prompts.append(prompt)
-        if not self.succeed:
-            raise PodcastAnalysisError("analysis disabled in this test")
-        return {
-            "title": {"zh-hant": "AI 標題", "zh-hans": "AI 标题", "en": "AI title"},
-            "summary": {"zh-hant": "AI 摘要", "zh-hans": "AI 摘要", "en": "AI summary"},
-            "chapters": [
-                {"block": 0, "title": {"zh-hant": "開場", "zh-hans": "开场", "en": "Open"}},
-                {"block": 2, "title": {"zh-hant": "匯率", "zh-hans": "汇率", "en": "FX"}},
-                {"block": 3, "title": {"zh-hant": "清單", "zh-hans": "清单", "en": "List"}},
-            ],
-        }
-
-
 @dataclass
 class PodcastHarness:
     admin: AsyncClient
@@ -178,9 +121,6 @@ class PodcastHarness:
     anonymous: AsyncClient
     session_factory: async_sessionmaker[AsyncSession]
     store: FakeObjectStore
-    analyzer: PodcastAnalyzer
-    transcriber: FakeTranscriber
-    model: FakeAnalysisModel
 
 
 async def ready() -> bool:
@@ -283,15 +223,7 @@ async def podcast_harness() -> AsyncIterator[PodcastHarness]:
         )
 
     store = FakeObjectStore()
-    transcriber = FakeTranscriber()
-    model = FakeAnalysisModel()
-    analyzer = PodcastAnalyzer(
-        session_factory=session_factory,
-        store=store,
-        transcriber=transcriber,
-        model=model,
-    )
-    app = create_app(settings, ready, session_factory, store, podcast_analyzer=analyzer)
+    app = create_app(settings, ready, session_factory, store)
     clients = [
         AsyncClient(transport=ASGITransport(app=app), base_url="http://test") for _ in range(5)
     ]
@@ -304,12 +236,8 @@ async def podcast_harness() -> AsyncIterator[PodcastHarness]:
             anonymous=clients[4],
             session_factory=session_factory,
             store=store,
-            analyzer=analyzer,
-            transcriber=transcriber,
-            model=model,
         )
     finally:
-        await analyzer.wait_for_scheduled()
         for client in clients:
             await client.aclose()
         async with engine.begin() as connection:
@@ -631,15 +559,8 @@ async def test_browser_upload_uses_fixed_filename_and_any_locale_fallback(
     assert playback.json()["resolved_locale"] == "zh-hans"
 
     # Fixture bytes carry no chapter tags, so the catalog starts without any;
-    # an asset manager can then add markers to the active audio. The
-    # background analysis fails in this harness and leaves everything as is.
-    await podcast_harness.analyzer.wait_for_scheduled()
+    # an asset manager can then add markers to the active audio.
     assert catalog.json()[0]["chapters"] == []
-    failed_variant = (await podcast_harness.admin.get("/api/admin/podcasts")).json()[0][
-        "audio_variants"
-    ][0]
-    assert failed_variant["analysis_status"] == "failed"
-    assert failed_variant["analysis_error"] == "analysis disabled in this test"
     chapters_url = f"/api/admin/podcasts/{episode['id']}/audio/zh-hans/chapters"
     disordered = await podcast_harness.asset_manager.put(
         chapters_url,
@@ -798,108 +719,3 @@ async def test_browser_upload_uses_fixed_filename_and_any_locale_fallback(
     )
     assert unchanged_draft["status"] == "draft"
     assert unchanged_draft["published_at"] is None
-
-
-async def test_upload_triggers_analysis_that_titles_and_chapters_the_episode(
-    podcast_harness: PodcastHarness,
-) -> None:
-    admin_csrf = await _login(
-        podcast_harness.admin,
-        "admin@podcast.test",
-        "AdminPassword123!",
-    )
-    await _login(
-        podcast_harness.customer,
-        "member@podcast.test",
-        "MemberPassword123!",
-    )
-    podcast_harness.model.succeed = True
-
-    uploaded = await podcast_harness.admin.post(
-        "/api/admin/podcasts/uploads",
-        headers={"X-CSRF-Token": admin_csrf},
-        data={"trading_date": "2026-09-05", "reason": "initial_upload"},
-        files={"zh_hant": ("podcast.mp3", b"traditional-chinese-podcast", "audio/mpeg")},
-    )
-    assert uploaded.status_code == 200, uploaded.text
-    episode_id = uploaded.json()["id"]
-    assert uploaded.json()["metadata_source"] == "derived"
-    assert uploaded.json()["audio_variants"][0]["analysis_status"] == "none"
-
-    # The upload response returns before the background analysis finishes.
-    await podcast_harness.analyzer.wait_for_scheduled()
-    assert podcast_harness.transcriber.calls == [("podcast.mp3", "audio/mpeg", "zh")]
-
-    listed = await podcast_harness.admin.get("/api/admin/podcasts")
-    episode = next(item for item in listed.json() if item["id"] == episode_id)
-    assert episode["metadata_source"] == "ai"
-    # Analysis is not an editorial action, so the version the admin loaded
-    # right after uploading still works for their next save.
-    assert episode["version"] == uploaded.json()["version"]
-    assert episode["metadata"][0] == {
-        "locale": "zh-hant",
-        "title": "AI 標題",
-        "summary": "AI 摘要",
-    }
-    variant = episode["audio_variants"][0]
-    assert variant["analysis_status"] == "succeeded"
-    assert variant["analyzed_at"] is not None
-    assert variant["chapters_source"] == "ai"
-    assert variant["chapters"] == [
-        {"start_seconds": 0, "title": "開場"},
-        {"start_seconds": 50, "title": "匯率"},
-        {"start_seconds": 75, "title": "清單"},
-    ]
-    catalog = await podcast_harness.customer.get("/api/podcasts", params={"locale": "en"})
-    assert catalog.json()[0]["title"] == "AI title"
-    assert catalog.json()[0]["summary"] == "AI summary"
-    assert catalog.json()[0]["chapters"][1] == {"start_seconds": 50, "title": "匯率"}
-
-    async with podcast_harness.session_factory() as database:
-        analysis_audit = await database.scalar(
-            select(AuditEvent).where(AuditEvent.action == "podcast.audio_analyzed")
-        )
-        assert analysis_audit is not None
-        assert analysis_audit.after is not None
-        assert analysis_audit.after["metadata_written"] is True
-        stored = await database.scalar(
-            select(PodcastEpisodeAudioVariant).where(
-                PodcastEpisodeAudioVariant.episode_id == uuid.UUID(episode_id)
-            )
-        )
-        assert stored is not None
-        assert stored.transcript is not None
-        assert stored.transcript["segments"][1]["start"] == 25
-
-    # A manual title survives a re-analysis; the analyze endpoint is async.
-    edited = await podcast_harness.admin.put(
-        f"/api/admin/podcasts/{episode_id}",
-        headers={"X-CSRF-Token": admin_csrf},
-        json={
-            "expected_version": episode["version"],
-            "metadata": {"values": _metadata()},
-            "reason": "editor title",
-        },
-    )
-    assert edited.status_code == 200, edited.text
-    assert edited.json()["metadata_source"] == "manual"
-    reanalysis = await podcast_harness.admin.post(
-        f"/api/admin/podcasts/{episode_id}/audio/zh-hant/analyze",
-        headers={"X-CSRF-Token": admin_csrf},
-    )
-    assert reanalysis.status_code == 202, reanalysis.text
-    assert reanalysis.json()["audio_variants"][0]["analysis_status"] == "pending"
-    await podcast_harness.analyzer.wait_for_scheduled()
-    final = next(
-        item
-        for item in (await podcast_harness.admin.get("/api/admin/podcasts")).json()
-        if item["id"] == episode_id
-    )
-    assert final["metadata_source"] == "manual"
-    assert final["metadata"][2]["title"] == "Market Brief"
-    assert final["audio_variants"][0]["analysis_status"] == "succeeded"
-    missing = await podcast_harness.admin.post(
-        f"/api/admin/podcasts/{episode_id}/audio/en/analyze",
-        headers={"X-CSRF-Token": admin_csrf},
-    )
-    assert missing.status_code == 404

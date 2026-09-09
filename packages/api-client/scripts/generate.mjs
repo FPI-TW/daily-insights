@@ -36,25 +36,13 @@ try {
     }
   )
   execFileSync(
-    "pnpm",
-    [
-      "--dir",
-      packageDirectory,
-      "exec",
-      "openapi-typescript",
-      openapiPath,
-      "--output",
-      generatedPath,
-    ],
+    join(packageDirectory, "node_modules/.bin/openapi-typescript"),
+    [openapiPath, "--output", generatedPath],
     { cwd: workspaceDirectory, stdio: "inherit" }
   )
   execFileSync(
-    "pnpm",
+    join(workspaceDirectory, "apps/web/node_modules/.bin/prettier"),
     [
-      "--dir",
-      join(workspaceDirectory, "apps/web"),
-      "exec",
-      "prettier",
       "--write",
       "--config",
       join(workspaceDirectory, ".prettierrc.json"),

@@ -312,7 +312,7 @@ async def test_news_execution_routes_market_and_all_runs_and_closes_client(
     monkeypatch.setattr(service, "create_news_client", lambda **_: Client())
     monkeypatch.setattr(service, "run_news_edition", market)
     monkeypatch.setattr(service, "run_all_editions_with_outcomes", all_editions)
-    settings = Settings(environment="test", daily_news_enabled=True, model_api_key="key")
+    settings = Settings(environment="test", daily_news_enabled=True, news_model_api_key="key")
     market_status, market_result, market_error = await execute_run(
         _run("news_market", "tw_equity"), cast(Any, None), settings
     )

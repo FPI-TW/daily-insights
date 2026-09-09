@@ -62,6 +62,25 @@ def test_daily_news_scheduler_requires_only_database_and_feature_flag() -> None:
         DailyNewsSchedulerSettings(environment="production", database_url=None)
 
 
+def test_daily_news_uses_news_specific_model_key() -> None:
+    settings = Settings.model_validate(
+        production_settings(
+            daily_news_enabled=True,
+            news_model_api_key=SecretStr("news-production-key"),
+        )
+    )
+    assert settings.news_model_api_key is not None
+
+    with pytest.raises(ValidationError, match="news_model_api_key"):
+        Settings.model_validate(
+            production_settings(
+                daily_news_enabled=True,
+                news_model_api_key=None,
+                model_api_key=SecretStr("legacy-key-name"),
+            )
+        )
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

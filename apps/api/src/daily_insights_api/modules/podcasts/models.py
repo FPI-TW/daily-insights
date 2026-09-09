@@ -43,8 +43,7 @@ class PodcastEpisode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         String(20), nullable=False, default="draft", server_default="draft"
     )
     # Where the localized title/summary came from: "derived" (fixed filename
-    # plus trading date), "ai" (podcast analysis) or "manual" (back office).
-    # Analysis never overwrites manual text.
+    # plus trading date) or "manual" (back office).
     metadata_source: Mapped[str] = mapped_column(
         String(20), nullable=False, default="derived", server_default="derived"
     )
@@ -88,11 +87,7 @@ class PodcastEpisodeAudioVariant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "duration_seconds IS NULL OR duration_seconds > 0", name="duration_positive"
         ),
         CheckConstraint(
-            "chapters_source IN ('none', 'file', 'ai', 'manual')", name="chapters_source_valid"
-        ),
-        CheckConstraint(
-            "analysis_status IN ('none', 'pending', 'succeeded', 'failed')",
-            name="analysis_status_valid",
+            "chapters_source IN ('none', 'file', 'manual')", name="chapters_source_valid"
         ),
         UniqueConstraint(
             "episode_id",
@@ -139,12 +134,3 @@ class PodcastEpisodeAudioVariant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     chapters_source: Mapped[str] = mapped_column(
         String(20), nullable=False, default="none", server_default="none"
     )
-    # Podcast analysis (transcription + language model) bookkeeping. The
-    # transcript keeps the timed segments so chapters can be re-derived
-    # without paying for transcription again.
-    analysis_status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="none", server_default="none"
-    )
-    analysis_error: Mapped[str | None] = mapped_column(Text)
-    analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    transcript: Mapped[dict[str, Any] | None] = mapped_column(JSONB)

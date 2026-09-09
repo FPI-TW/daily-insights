@@ -597,19 +597,8 @@ export const podcastMetadataSchema = z.object({
 })
 export type PodcastMetadata = z.infer<typeof podcastMetadataSchema>
 
-export const podcastChaptersSourceSchema = z.enum([
-  "none",
-  "file",
-  "ai",
-  "manual",
-])
-export const podcastAnalysisStatusSchema = z.enum([
-  "none",
-  "pending",
-  "succeeded",
-  "failed",
-])
-export const podcastMetadataSourceSchema = z.enum(["derived", "ai", "manual"])
+export const podcastChaptersSourceSchema = z.enum(["none", "file", "manual"])
+export const podcastMetadataSourceSchema = z.enum(["derived", "manual"])
 
 export const podcastAudioVariantResponseSchema = z.object({
   asset_id: z.uuid(),
@@ -619,10 +608,6 @@ export const podcastAudioVariantResponseSchema = z.object({
   duration_seconds: z.number().int().positive().nullable().default(null),
   chapters: z.array(podcastChapterSchema).default([]),
   chapters_source: podcastChaptersSourceSchema.default("none"),
-  // Transcription + language-model analysis state for this file.
-  analysis_status: podcastAnalysisStatusSchema.default("none"),
-  analysis_error: z.string().nullable().default(null),
-  analyzed_at: z.iso.datetime({ offset: true }).nullable().default(null),
 })
 export type PodcastAudioVariantResponse = z.infer<
   typeof podcastAudioVariantResponseSchema

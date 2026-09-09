@@ -172,7 +172,7 @@ JSON 清單（dot-notation 欄位、`unix_s`／`unix_ms`／`iso`／`datetime_str
 | `DAILY_INSIGHTS_SEC_CONTACT_EMAIL`              | SEC EDGAR 要求的聯絡信箱，寫入 User-Agent；未設定時 8-K feed 略過           | GitHub Variables，可省略 |
 | `DAILY_INSIGHTS_MODEL_NAME`                     | DeepSeek 模型名稱，預設 `deepseek-chat`                                     | GitHub Variables，可省略 |
 | `DAILY_INSIGHTS_MODEL_API_BASE_URL`             | 必須是 HTTPS 絕對 URL，預設 `https://api.deepseek.com`                      | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_MODEL_API_KEY`                  | 啟用時必填，不得為 placeholder                                              | GitHub Secrets           |
+| `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`             | 啟用時必填，不得為 placeholder                                              | GitHub Secrets           |
 | `DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS`          | 單次模型呼叫逾時，預設 120 秒；選題 prompt 約 28k token，實測需 30 到 45 秒 | 開發環境                 |
 | `DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS`     | 正文擷取逾時，預設 25 秒                                                    | 開發環境                 |
 | `DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS` | 讀取單一 feed 的逾時，預設 30 秒                                            | 開發環境                 |
@@ -187,7 +187,7 @@ Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主�
   時間判斷。它只持有 database URL 與 feature flag；模型與 feed credential 只由
   `data-management-worker` 持有。
 - `scripts/production/deploy.sh` 與晨報一致：旗標必須是 `true` 或 `false`，為
-  `true` 時要求 `DAILY_INSIGHTS_MODEL_API_KEY`；收斂時同時啟動 `api`、`web`、
+  `true` 時要求 `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`；收斂時同時啟動 `api`、`web`、
   `morning-report-scheduler`、`daily-news-scheduler`。
 - `release.yml` 從 production 環境傳遞上述變數；`DAILY_INSIGHTS_DAILY_NEWS_ENABLED`
   是必填變數，缺少時部署驗證失敗。
@@ -196,7 +196,7 @@ Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主�
 
 1. 在開發環境的 `apps/api/.env` 設定 DeepSeek key，執行
    `make generate-daily-news`，確認候選、擷取與三語摘要都正常。
-2. 在 GitHub production 環境新增 `DAILY_INSIGHTS_MODEL_API_KEY` secret。
+2. 在 GitHub production 環境新增 `DAILY_INSIGHTS_NEWS_MODEL_API_KEY` secret。
 3. 把 `DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 改為 `true`，以 `workflow_dispatch`
    重新部署。
 4. 隔日 08:00 後檢查 `docker logs daily-insights-daily-news-scheduler`、後台 data

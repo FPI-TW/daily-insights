@@ -889,7 +889,7 @@ async def _execute_institutional_twse(
 async def _execute_news(
     run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
 ) -> tuple[str, dict[str, object], str | None]:
-    api_key = settings.model_api_key
+    api_key = settings.news_model_api_key
     if (
         not settings.daily_news_enabled
         or api_key is None

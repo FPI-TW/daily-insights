@@ -90,9 +90,7 @@ grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_NAME: ${DAILY_INSIGHTS_CHAT_MODEL_NAME:-deep
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL: ${DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL:-https://api.deepseek.com}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_KEY: ${DAILY_INSIGHTS_CHAT_MODEL_API_KEY:-}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS:-90}' "$compose_file"
-grep -Fq 'DAILY_INSIGHTS_PODCAST_ANALYSIS_ENABLED: ${DAILY_INSIGHTS_PODCAST_ANALYSIS_ENABLED:-false}' "$compose_file"
-grep -Fq 'DAILY_INSIGHTS_OPENAI_API_KEY: ${DAILY_INSIGHTS_OPENAI_API_KEY:-}' "$compose_file"
-grep -Fq 'DAILY_INSIGHTS_TRANSCRIPTION_MODEL: ${DAILY_INSIGHTS_TRANSCRIPTION_MODEL:-whisper-1}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_NEWS_MODEL_API_KEY: ${DAILY_INSIGHTS_NEWS_MODEL_API_KEY:-}' "$compose_file"
 
 grep -Fq '/etc/daily-insights/cloudflare-realip.conf:/etc/nginx/cloudflare-realip.conf:ro' "$compose_file"
 grep -Fq '/etc/daily-insights/tls/origin.crt:/etc/nginx/tls/origin.crt:ro' "$compose_file"
@@ -175,10 +173,8 @@ done
 grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY: ${{ secrets.DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY }}' "$workflow_file"
 grep -Fq ',DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY' "$workflow_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_KEY: ${{ secrets.DAILY_INSIGHTS_CHAT_MODEL_API_KEY }}' "$workflow_file"
-grep -Fq 'DAILY_INSIGHTS_OPENAI_API_KEY: ${{ secrets.DAILY_INSIGHTS_OPENAI_API_KEY }}' "$workflow_file"
-grep -Fq ',DAILY_INSIGHTS_OPENAI_API_KEY' "$workflow_file"
-grep -Fq 'DAILY_INSIGHTS_PODCAST_ANALYSIS_ENABLED: ${{ vars.DAILY_INSIGHTS_PODCAST_ANALYSIS_ENABLED }}' "$workflow_file"
-grep -Fq ',DAILY_INSIGHTS_PODCAST_ANALYSIS_ENABLED' "$workflow_file"
+grep -Fq 'DAILY_INSIGHTS_NEWS_MODEL_API_KEY: ${{ secrets.DAILY_INSIGHTS_NEWS_MODEL_API_KEY }}' "$workflow_file"
+grep -Fq ',DAILY_INSIGHTS_NEWS_MODEL_API_KEY' "$workflow_file"
 grep -Fq ',DAILY_INSIGHTS_CHAT_MODEL_API_KEY' "$workflow_file"
 grep -Fq '/opt/daily-insights/scripts/production/deploy.sh' "$workflow_file"
 
@@ -266,7 +262,7 @@ export DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS=90
 export DAILY_INSIGHTS_TWELVE_DATA_BASE_URL=
 export DAILY_INSIGHTS_TWELVE_DATA_API_KEY=
 export DAILY_INSIGHTS_DAILY_NEWS_ENABLED=false
-export DAILY_INSIGHTS_MODEL_API_KEY=
+export DAILY_INSIGHTS_NEWS_MODEL_API_KEY=
 export DAILY_INSIGHTS_R2_ENDPOINT_URL=https://tenant.r2.cloudflarestorage.com
 export DAILY_INSIGHTS_R2_BUCKET_NAME=production-podcast-assets
 export DAILY_INSIGHTS_R2_ACCESS_KEY_ID=contract-r2-access

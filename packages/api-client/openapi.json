@@ -3462,35 +3462,6 @@
       "PodcastAudioVariantResponse": {
         "additionalProperties": false,
         "properties": {
-          "analysis_error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Analysis Error"
-          },
-          "analysis_status": {
-            "default": "none",
-            "enum": ["none", "pending", "succeeded", "failed"],
-            "title": "Analysis Status",
-            "type": "string"
-          },
-          "analyzed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Analyzed At"
-          },
           "asset_id": {
             "format": "uuid",
             "title": "Asset Id",
@@ -3506,7 +3477,7 @@
           },
           "chapters_source": {
             "default": "none",
-            "enum": ["none", "file", "ai", "manual"],
+            "enum": ["none", "file", "manual"],
             "title": "Chapters Source",
             "type": "string"
           },
@@ -3621,7 +3592,7 @@
           },
           "metadata_source": {
             "default": "derived",
-            "enum": ["derived", "ai", "manual"],
+            "enum": ["derived", "manual"],
             "title": "Metadata Source",
             "type": "string"
           },
@@ -6607,74 +6578,6 @@
           }
         },
         "summary": "Admin Import Audio",
-        "tags": ["podcasts"]
-      }
-    },
-    "/api/admin/podcasts/{episode_id}/audio/{locale}/analyze": {
-      "post": {
-        "description": "Start (or retry) transcription and AI titling for one audio file.",
-        "operationId": "admin_podcasts_analyze_audio",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "episode_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Episode Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "locale",
-            "required": true,
-            "schema": {
-              "enum": ["zh-hant", "zh-hans", "en"],
-              "title": "Locale",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-CSRF-Token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Csrf-Token"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PodcastEpisodeAdminResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Admin Analyze Audio",
         "tags": ["podcasts"]
       }
     },

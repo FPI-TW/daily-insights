@@ -7,11 +7,14 @@ from daily_insights_api.web.app import create_app
 
 def main() -> None:
     target = Path(sys.argv[1])
-    target.write_text(
-        json.dumps(create_app().openapi(), ensure_ascii=False, indent=2, sort_keys=True)
-        + "\n",
-        encoding="utf-8",
-    )
+    app = create_app()
+    try:
+        target.write_text(
+            json.dumps(app.openapi(), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    finally:
+        app.state.password_work.close()
 
 
 if __name__ == "__main__":

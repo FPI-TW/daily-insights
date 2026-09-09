@@ -9,7 +9,7 @@ import {
 import { useForm } from "@tanstack/react-form"
 import { useRouter } from "@tanstack/react-router"
 import { motion } from "motion/react"
-import { useEffect, useState, type DragEvent } from "react"
+import { useState, type DragEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { browserPodcastAdminClient } from "#/lib/admin-podcasts"
 import { requireCsrfToken } from "#/lib/auth"
@@ -396,18 +396,6 @@ function EpisodeManager({
   const redirectExpiredSession = useSessionExpiryRedirect(locale, "admin")
   const [error, setError] = useState("")
   const [pending, setPending] = useState(false)
-  const analysisRunning = episode.audio_variants.some(
-    item => item.is_active && item.analysis_status === "pending"
-  )
-  // A background analysis finishes on its own; refresh until it does so the
-  // AI title and chapters appear without a manual reload.
-  useEffect(() => {
-    if (!analysisRunning) return
-    const timer = window.setInterval(() => {
-      void router.invalidate({ sync: true })
-    }, 4000)
-    return () => window.clearInterval(timer)
-  }, [analysisRunning, router])
   const available = new Set(
     episode.audio_variants
       .filter(item => item.is_active)
@@ -478,7 +466,6 @@ function EpisodeManager({
       </p>
       {canEditMetadata && (
         <MetadataEditor
-          // Remount when analysis or a save replaces the stored text.
           key={`${episode.metadata_source}:${episode.metadata.map(item => item.title).join("|")}`}
           episode={episode}
           locale={locale}
@@ -497,9 +484,7 @@ function EpisodeManager({
           .filter(item => item.is_active)
           .map(variant => (
             <ChapterEditor
-              // Remount when a new file or a finished analysis replaces the
-              // markers so the editor shows the current list.
-              key={`${variant.locale}:${variant.version}:${variant.chapters_source}:${variant.analyzed_at ?? ""}`}
+              key={`${variant.locale}:${variant.version}:${variant.chapters_source}`}
               episode={episode}
               variant={variant}
               locale={locale}
@@ -547,40 +532,9 @@ function ChapterEditor({
   const [reason, setReason] = useState("")
   const [error, setError] = useState("")
   const [pending, setPending] = useState(false)
-  const [analyzing, setAnalyzing] = useState(false)
   const fieldId = `podcast-chapters-${episode.id}-${variant.locale}`
   const reasonId = `${fieldId}-reason`
   const dirty = text.trim() !== formatChapterText(variant.chapters).trim()
-
-  async function analyze() {
-    setAnalyzing(true)
-    setError("")
-    try {
-      await browserPodcastAdminClient().analyzeAudio(
-        episode.id,
-        variant.locale,
-        await requireCsrfToken()
-      )
-      await router.invalidate({ sync: true })
-    } catch (caught) {
-      if (await redirectExpiredSession(caught)) return
-      if (
-        caught instanceof ApiError &&
-        typeof caught.detail === "object" &&
-        caught.detail !== null &&
-        "code" in caught.detail &&
-        caught.detail.code === "podcast_analysis_disabled"
-      ) {
-        setError(t("podcastAnalysisDisabled"))
-      } else {
-        setError(
-          caught instanceof Error ? caught.message : t("unexpectedError")
-        )
-      }
-    } finally {
-      setAnalyzing(false)
-    }
-  }
 
   async function save() {
     const parsed = parseChapterText(text, variant.duration_seconds)
@@ -640,20 +594,7 @@ function ChapterEditor({
         {t("podcastChaptersHint")}
       </p>
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-sea-ink-soft">
-        <span data-analysis-status={variant.analysis_status}>
-          {t(`podcastChaptersSource_${variant.chapters_source}`)} ·{" "}
-          <AnalysisStatus variant={variant} locale={locale} />
-        </span>
-        <button
-          className="px-3 py-1.5 text-xs font-bold"
-          type="button"
-          disabled={analyzing || variant.analysis_status === "pending"}
-          onClick={() => void analyze()}
-        >
-          {variant.analysis_status === "pending"
-            ? t("podcastAnalyzing")
-            : t("podcastAnalyze")}
-        </button>
+        <span>{t(`podcastChaptersSource_${variant.chapters_source}`)}</span>
       </div>
       <div className="flex flex-wrap items-end gap-3">
         <label className="min-w-48 flex-1" htmlFor={reasonId}>
@@ -682,37 +623,7 @@ function ChapterEditor({
   )
 }
 
-function AnalysisStatus({
-  variant,
-  locale,
-}: {
-  variant: PodcastAudioVariantResponse
-  locale: Locale
-}) {
-  const { t } = useTranslation()
-  if (variant.analysis_status === "succeeded") {
-    return t("podcastAnalysisStatus_succeeded", {
-      // Pinned to Taiwan time so the server-rendered label matches the
-      // client's (a viewer-zone label would mismatch at hydration).
-      time: variant.analyzed_at
-        ? new Intl.DateTimeFormat(locale, {
-            dateStyle: "short",
-            timeStyle: "short",
-            timeZone: "Asia/Taipei",
-          }).format(new Date(variant.analyzed_at))
-        : "",
-    })
-  }
-  if (variant.analysis_status === "failed") {
-    return t("podcastAnalysisStatus_failed", {
-      error: variant.analysis_error ?? "",
-    })
-  }
-  return t(`podcastAnalysisStatus_${variant.analysis_status}`)
-}
-
-// Localized title and summary for all three languages; saving marks the
-// episode as manually titled so AI analysis leaves it alone.
+// Localized title and summary for all three languages.
 function MetadataEditor({
   episode,
   locale,

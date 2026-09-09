@@ -42,13 +42,13 @@ def test_daily_news_cli_shares_the_scheduler_argument_contract() -> None:
     assert run_daily_news.RETRY_POLICY.retries("partial")
 
 
-@pytest.mark.parametrize("key", ["CHANGE_ME_MODEL_API_KEY", "   \t", None])
+@pytest.mark.parametrize("key", ["CHANGE_ME_NEWS_MODEL_API_KEY", "   \t", None])
 async def test_daily_news_cli_rejects_unusable_key_before_building_client(
     monkeypatch: pytest.MonkeyPatch, key: str | None, tmp_path: FileSystemPath
 ) -> None:
     settings = _settings(
         daily_news_enabled=True,
-        model_api_key=SecretStr(key) if key is not None else None,
+        news_model_api_key=SecretStr(key) if key is not None else None,
     )
     monkeypatch.setattr(run_daily_news, "get_settings", lambda: settings)
     monkeypatch.setattr(run_daily_news, "HEARTBEAT_PATH", str(tmp_path / "heartbeat"))
@@ -73,7 +73,7 @@ async def test_daily_news_cli_builds_the_model_client_with_the_configured_timeou
 ) -> None:
     settings = _settings(
         daily_news_enabled=True,
-        model_api_key=SecretStr("real-model-key"),
+        news_model_api_key=SecretStr("real-model-key"),
         model_timeout_seconds=90,
     )
     monkeypatch.setattr(run_daily_news, "get_settings", lambda: settings)
