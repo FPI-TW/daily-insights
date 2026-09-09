@@ -952,8 +952,8 @@ async def test_latest_news_preserves_last_publishable_edition(
         assert result.edition_id == good_id
         assert result.items
         assert result.edition_date == today - timedelta(days=age_days)
-        if age_days:
-            assert result.caveat and str(result.edition_date) in result.caveat
+        # Falling back to an older edition is silent: no date notice is shown.
+        assert result.caveat is None
 
 
 class _RefillNewsClient(_CompleteNewsClient):

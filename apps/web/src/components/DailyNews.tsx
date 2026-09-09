@@ -46,29 +46,20 @@ export function DailyNews({
 }) {
   const { t } = useTranslation()
   const animate = useEnterAnimation()
-  const status = news?.status ?? "unavailable"
+  // The edition status and the pipeline's fallback notice are not shown:
+  // readers get the stories or the unavailable panel, nothing about
+  // completeness or which day the edition came from.
   return (
     <section className="mt-7 mb-6" aria-labelledby="daily-news-title">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="eyebrow">{t(eyebrowKey)}</p>
-          <h2
-            id="daily-news-title"
-            className="mt-1 mb-0 text-2xl font-extrabold tracking-[-0.03em] text-sea-ink"
-          >
-            {t(titleKey)}
-          </h2>
-        </div>
-        {status === "complete" ? (
-          <span className="rounded-full border border-line px-2.5 py-1 text-xs font-bold text-sea-ink-soft">
-            {t("dailyNewsStatus_complete")}
-          </span>
-        ) : null}
+      <div className="mb-4">
+        <p className="eyebrow">{t(eyebrowKey)}</p>
+        <h2
+          id="daily-news-title"
+          className="mt-1 mb-0 text-2xl font-extrabold tracking-[-0.03em] text-sea-ink"
+        >
+          {t(titleKey)}
+        </h2>
       </div>
-      {news !== null && news.status !== "unavailable" && news.caveat ? (
-        // Only the pipeline's own caveat (e.g. a stale edition) is surfaced.
-        <p className="mt-0 mb-4 text-xs text-sea-ink-soft">{news.caveat}</p>
-      ) : null}
       {news === null ? (
         <div
           className="surface-panel p-5 text-sm text-sea-ink-soft"

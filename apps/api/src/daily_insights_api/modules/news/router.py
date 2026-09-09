@@ -112,15 +112,9 @@ async def _latest_response(
         generated_at=edition.generated_at,
         status=edition.status,
         locale=locale,
-        caveat=(
-            {
-                "zh-hant": f"顯示 {edition.edition_date} 最近可用的新聞；尚無較新的新聞。",  # noqa: RUF001
-                "zh-hans": f"显示 {edition.edition_date} 最近可用的新闻；暂无更新的新闻。",  # noqa: RUF001
-                "en": f"Showing the latest available news from {edition.edition_date}.",
-            }[locale]
-            if edition.edition_date < today
-            else _localized_caveat(edition.status, len(items), locale, spec.target_items)
-        ),
+        # A reader sees the newest publishable edition as the day's news even
+        # when it is older than today; the fallback is not announced.
+        caveat=_localized_caveat(edition.status, len(items), locale, spec.target_items),
         items=items,
     )
 
