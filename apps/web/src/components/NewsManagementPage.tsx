@@ -42,8 +42,10 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
   }, [redirectExpired, runs.error])
   const newsRuns =
     runs.data?.items.filter(run => run.operation.startsWith("news")) ?? []
-  const active = newsRuns.some(run =>
-    ["pending", "running"].includes(run.status)
+  const manualActive = newsRuns.some(
+    run =>
+      run.requested_by_user_id !== null &&
+      ["pending", "running"].includes(run.status)
   )
   const enqueue = useMutation({
     mutationFn: async (
@@ -147,7 +149,9 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
             type="button"
             className="primary-action mt-4"
             disabled={
-              active || enqueue.isPending || !catalog.data?.daily_news_enabled
+              manualActive ||
+              enqueue.isPending ||
+              !catalog.data?.daily_news_enabled
             }
             onClick={() => setConfirmOpen(true)}
           >
@@ -168,7 +172,7 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
                 type="button"
                 className="secondary-action text-left"
                 disabled={
-                  active ||
+                  manualActive ||
                   enqueue.isPending ||
                   !catalog.data?.daily_news_enabled
                 }

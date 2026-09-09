@@ -305,20 +305,27 @@ async def test_news_execution_routes_market_and_all_runs_and_closes_client(
         calls.append(f"market:{cast(Any, kwargs['spec']).market_code}")
         return "complete"
 
-    async def all_editions(*_: object, **__: object) -> str:
+    async def all_editions(*_: object, **__: object) -> tuple[str, dict[str, str]]:
         calls.append("all")
-        return "partial"
+        return "partial", {"global": "complete", "tw_equity": "partial", "us_equity": "failed"}
 
     monkeypatch.setattr(service, "create_news_client", lambda **_: Client())
     monkeypatch.setattr(service, "run_news_edition", market)
-    monkeypatch.setattr(service, "run_all_editions", all_editions)
+    monkeypatch.setattr(service, "run_all_editions_with_outcomes", all_editions)
     settings = Settings(environment="test", daily_news_enabled=True, model_api_key="key")
-    market_status, _, market_error = await execute_run(
+    market_status, market_result, market_error = await execute_run(
         _run("news_market", "tw_equity"), cast(Any, None), settings
     )
-    all_status, _, all_error = await execute_run(_run("news_all"), cast(Any, None), settings)
+    all_status, all_result, all_error = await execute_run(
+        _run("news_all"), cast(Any, None), settings
+    )
     assert (market_status, market_error) == ("succeeded", None)
     assert (all_status, all_error) == ("partial", "news_partial")
+    assert market_result == {"outcome": "complete", "outcomes": {"tw_equity": "complete"}}
+    assert all_result == {
+        "outcome": "partial",
+        "outcomes": {"global": "complete", "tw_equity": "partial", "us_equity": "failed"},
+    }
     assert calls == ["market:tw_equity", "closed", "all", "closed"]
 
 
@@ -331,7 +338,14 @@ async def test_news_execution_rejects_disabled_or_missing_model_key() -> None:
     )
     assert (status, result, error) == (
         "failed",
-        {"outcome": "unavailable"},
+        {
+            "outcome": "unavailable",
+            "outcomes": {
+                "global": "unavailable",
+                "tw_equity": "unavailable",
+                "us_equity": "unavailable",
+            },
+        },
         "daily_news_unavailable",
     )
 

@@ -96,6 +96,7 @@ async def run_scheduler(
     retry: SameDayRetry | None = None,
     run_at: time = DEFAULT_RUN_AT,
     weekdays_only: bool = False,
+    catch_up_on_start: bool = True,
 ) -> None:
     """Run `runner` once per Taipei day, from `run_at` onwards.
 
@@ -105,9 +106,19 @@ async def run_scheduler(
     last_requested: date | None = None
     retry_edition: date | None = None
     retry_due: datetime | None = None
+    started = False
     while True:
         current = now()
         edition = due_edition(current, run_at=run_at, weekdays_only=weekdays_only)
+        # A queue scheduler started by a deployment after its daily boundary
+        # must wait for tomorrow.  It did not observe today's 08:00 trigger,
+        # so treating the current date as due would make deployments fetch
+        # news unexpectedly.  Existing direct schedulers retain catch-up.
+        if not started and not catch_up_on_start and edition is not None:
+            local_time = current.astimezone(TAIPEI).time().replace(tzinfo=None)
+            if local_time > run_at:
+                last_requested = edition
+        started = True
         if retry_due is not None and edition != retry_edition:
             retry_edition = retry_due = None
         if edition is not None and (edition != last_requested or retry_due is not None):

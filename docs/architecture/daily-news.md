@@ -23,7 +23,9 @@
 
 ```mermaid
 flowchart LR
-    S["daily-news-scheduler<br/>08:00 Asia/Taipei"] --> G["News generation service<br/>run_news_edition"]
+    S["daily-news-scheduler<br/>08:00 Asia/Taipei"] --> Q["data_management_runs<br/>automatic news_all"]
+    Q --> W["data-management-worker"]
+    W --> G["News generation service<br/>run_news_edition"]
     G --> F["feed 註冊表<br/>RSS / Atom / news sitemap / JSON 清單<br/>台灣、中港、日韓、英文與新聞稿約 50 支"]
     G --> X["安全正文擷取<br/>DNS pinning / robots / HTTPS 443<br/>feed 已帶全文者略過"]
     X --> W["白名單文章主機<br/>由註冊表推導"]
@@ -36,25 +38,36 @@ flowchart LR
 
 執行順序：
 
-1. 排程器在台北時間 08:00 觸發當日版本。若當日結果為 `unavailable` 或執行時拋出
-   例外，每 30 分鐘重試一次，直到 12:00 為止；`partial` 也會在相同時段內重試，補入稍後出現的合格新聞。
-2. `discover_feed_candidates` 依序讀取標記給該市場、且文章主機在白名單內的 feed，
+1. 排程器只在它實際觀察到的台北時間 08:00（每日包含週末與假日）寫入一筆 automatic
+   `news_all` durable run。程序在 08:00 後才因部署啟動／重啟時，會等到隔日，不會補抓
+   當日；08:00 當下若資料庫暫時無法寫入，仍存活的同一排程器會每 30 分鐘重試 enqueue
+   到 12:00。同一 edition date 的 automatic `news_all` 由資料庫歷史唯一鍵保證僅一筆。
+2. data-management worker 執行 initial run，將 aggregate `result.outcome` 與逐市場
+   `result.outcomes` 一併保存。`complete`／`idempotent` 市場結束；`partial`、`unavailable`
+   或 `failed` 市場才各自排入一筆 automatic `news_market`，每 30 分鐘一次且最晚 12:00。
+   completion、ownership 驗證與下一筆 retry 的寫入在同一交易完成；retry 帶有
+   `scheduled_for`，worker 在該時間前不得 claim，12:00:00 可 claim，但嚴格晚於 12:00
+   時會先以 `news_window_expired` 取消仍 pending 的 automatic initial run 與 retry，
+   不執行 provider。
+   唯一鍵為 edition date、market 與 scheduled retry time，因此重啟或 lease recovery
+   不會產生重複重試。
+3. `discover_feed_candidates` 依序讀取標記給該市場、且文章主機在白名單內的 feed，
    只保留符合各來源 `link_pattern` 的連結，並以 URL 與標題去重；任一 feed 失敗只
    影響該來源，事件為 `news.feed.failed`。需要金鑰或聯絡信箱的來源在設定缺漏時發
    `news.feed.skipped` 並略過。標記 `language_filter` 的新聞稿 feed 以 `langdetect`
    丟棄中、英、日、韓以外的稿件。
-3. 候選先排 feed 已帶全文者（不需擷取），其餘依發佈時間新到舊，每個來源最多
+4. 候選先排 feed 已帶全文者（不需擷取），其餘依發佈時間新到舊，每個來源最多
    `max_discovery_per_source` 筆（全球 5、台股與美股 8），總數上限 80 筆。
-4. 每筆候選以 SSRF 安全的 client 擷取正文：只允許白名單主機的 443 連接埠、DNS
+5. 每筆候選以 SSRF 安全的 client 擷取正文：只允許白名單主機的 443 連接埠、DNS
    解析結果必須全部為公網 IP 且連線固定在該 IP、redirect 逐跳重新驗證、遵守
    `robots.txt`、限制位元組數與內容型別，不帶 cookie 也不讀環境代理設定。feed 已
    帶全文（`provides_full_text`）的候選直接以 feed 內文組成擷取結果，不再請求文章頁。
-5. DeepSeek 以 JSON mode 依重要性選出目標則數加兩則備選（每個網域至多兩則），
+6. DeepSeek 以 JSON mode 依重要性選出目標則數加兩則備選（每個網域至多兩則），
    再依序對每則產生 `zh-hant`、`zh-hans`、`en` 三語摘要，達到目標則數即停止；某則摘要
    驗證失敗時由備選遞補。摘要中的數字必須能在原文找到：比對以數值為準，千分位、全形
    數字與 million／億 這類量詞差異不算捏造，原文沒有的數字才算；每次呼叫失敗最多重
    試一次並記錄 audit。
-6. 結果以不可變的 `news_editions` revision 寫入，狀態為 `complete`（5/5）、
+7. 結果以不可變的 `news_editions` revision 寫入，狀態為 `complete`（5/5）、
    `partial`（1 到 4）或 `unavailable`（0）。
 
 ## 版本規格
@@ -144,6 +157,7 @@ JSON 清單（dot-notation 欄位、`unix_s`／`unix_ms`／`iso`／`datetime_str
 | `news_items`             | 入選新聞的來源中繼資料、主題、重要性、內容摘要、數值事實，以及選稿階段的 `market` 與 `event_key`（migration 0012 之前的版本為 null） |
 | `news_presentations`     | 每則新聞的三語標題與摘要                                                                                                             |
 | `news_generation_audits` | 每次模型呼叫的 stage、locale、token、延遲、request id 與失敗代碼                                                                     |
+| `data_management_runs`   | automatic `news_all` edition obligation 與 market retry 的 `scheduled_for`、lease、結果與歷史唯一鍵                                  |
 
 文章正文與 prompt 內容不寫入任何資料表。
 
@@ -170,7 +184,8 @@ Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主�
 
 - `compose.production.yaml` 的 `daily-news-scheduler` 與 API 使用相同映像，唯讀
   檔案系統、`cap_drop: ALL`，healthcheck 以 `/tmp/daily-news-heartbeat` 的更新
-  時間判斷。
+  時間判斷。它只持有 database URL 與 feature flag；模型與 feed credential 只由
+  `data-management-worker` 持有。
 - `scripts/production/deploy.sh` 與晨報一致：旗標必須是 `true` 或 `false`，為
   `true` 時要求 `DAILY_INSIGHTS_MODEL_API_KEY`；收斂時同時啟動 `api`、`web`、
   `morning-report-scheduler`、`daily-news-scheduler`。
@@ -184,8 +199,8 @@ Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主�
 2. 在 GitHub production 環境新增 `DAILY_INSIGHTS_MODEL_API_KEY` secret。
 3. 把 `DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 改為 `true`，以 `workflow_dispatch`
    重新部署。
-4. 隔日 08:00 後檢查 `docker logs daily-insights-daily-news-scheduler` 與
-   `/api/news/latest`。
+4. 隔日 08:00 後檢查 `docker logs daily-insights-daily-news-scheduler`、後台 data
+   management news run 的 `result.outcomes`，以及 `/api/news/latest`。
 
 ## 畫面
 
@@ -203,18 +218,18 @@ Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主�
 
 ## 驗收條件
 
-- 契約腳本、compose 模型驗證與部署腳本都認得五個服務。
+- 契約腳本、compose 模型驗證與部署腳本都認得排程器與 data-management worker。
 - 旗標為 `false` 時排程器容器維持健康且不呼叫任何外部服務。
 - 相同輸入下 `complete` 版本不會重複產生；`unavailable` 版本可以重新生成。
-- 排程器在 runner 拋出例外時不會結束程序，並在當日視窗內重試。
+- 08:00 後啟動的排程器不補抓；已 queue 的失敗市場在當日視窗內以 durable retry 重試。
 - 報告頁在新聞 API 失敗時仍顯示報告清單，新聞區塊顯示 unavailable。
 - 非白名單主機、非 443 連接埠、私有 IP 與 redirect 到未核准目標都被拒絕。
 - 摘要中的數字與原文不符時該則新聞不入選。
 
 ## 已知限制
 
-- 只有一個排程器實例；多實例同時執行時依賴 PostgreSQL advisory lock 避免重複
-  寫入，但候選探索與擷取仍會重複執行。
+- 多個排程器實例可同時嘗試 enqueue，但 automatic edition/retry 歷史唯一鍵會收斂為
+  一筆工作；worker lease 與新聞 edition lock 處理執行期 recovery。
 - 探索一律讀全部 feed，`poll_group` 只是給未來常駐 poller 的建議頻率；Benzinga 這類
   一次只回兩則的來源目前沒有納入。
 - Twelve Data 的 `/press_releases` 已評估不採用：必須帶 symbol 查詢、沒有原文

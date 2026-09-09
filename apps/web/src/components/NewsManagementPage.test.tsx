@@ -84,7 +84,7 @@ describe("NewsManagementPage", () => {
     expect(listRuns).not.toHaveBeenCalled()
   })
 
-  it("keeps refresh controls disabled while a filtered news run is active", async () => {
+  it("keeps refresh controls enabled while an automatic news run is active", async () => {
     catalog.mockResolvedValue({
       taipei_date: "2026-09-07",
       daily_news_enabled: true,
@@ -97,6 +97,37 @@ describe("NewsManagementPage", () => {
           operation: "news_all",
           status: "running",
           edition_date: "2026-09-07",
+          requested_by_user_id: null,
+          error: null,
+          result: null,
+        },
+      ],
+    })
+    renderPage()
+
+    expect(
+      await screen.findByRole("button", { name: "Refresh all markets" })
+    ).toBeEnabled()
+    expect(
+      screen.getByRole("button", { name: "Taiwan equities" })
+    ).toBeEnabled()
+  })
+
+  it("keeps refresh controls disabled while a manual news run is active", async () => {
+    catalog.mockResolvedValue({
+      taipei_date: "2026-09-07",
+      daily_news_enabled: true,
+      news_markets: ["global", "tw_equity", "us_equity"],
+    })
+    listNewsRuns.mockResolvedValue({
+      items: [
+        {
+          id: "c744cb20-bf7c-4f4a-8e7b-1e0c69a91adf",
+          operation: "news_market",
+          market_code: "global",
+          status: "pending",
+          edition_date: "2026-09-07",
+          requested_by_user_id: "ee77eab0-3910-4706-803c-ffaf979f1ff7",
           error: null,
           result: null,
         },

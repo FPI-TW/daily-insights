@@ -139,6 +139,28 @@ def test_macro_snapshot_and_automatic_edition_indexes_are_registered() -> None:
     assert "EXISTS (SELECT 1 FROM macro_dashboard_snapshots)" in downgrade
 
 
+def test_news_scheduler_state_is_durable_and_has_historical_uniqueness() -> None:
+    run_table = Base.metadata.tables["data_management_runs"]
+    assert "scheduled_for" in run_table.columns
+    index_names = {index.name for index in run_table.indexes}
+    assert "uq_data_management_runs_automatic_news_all_edition" in index_names
+    assert "uq_data_management_runs_automatic_news_market_retry" in index_names
+    active_news = next(
+        index for index in run_table.indexes if index.name == "uq_data_management_runs_active_news"
+    )
+    assert "requested_by_user_id IS NOT NULL" in str(
+        active_news.dialect_options["postgresql"]["where"]
+    )
+    migration = (
+        Path(__file__).parents[1] / "migrations/versions/20260909_0022_daily_news_queue_schedule.py"
+    ).read_text()
+    assert "scheduled_for" in migration
+    assert "automatic_news_all_edition" in migration
+    assert "automatic_news_market_retry" in migration
+    downgrade = migration[migration.index("def downgrade()") :]
+    assert "cannot downgrade while automatic daily-news scheduling history exists" in downgrade
+
+
 def test_news_migration_downgrade_preflights_without_deleting_runs() -> None:
     migration = (
         Path(__file__).parents[1] / "migrations/versions/20260907_0020_data_management_news_runs.py"

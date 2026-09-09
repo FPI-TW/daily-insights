@@ -276,6 +276,28 @@ class MacroDashboardSchedulerSettings(BaseSettings):
         return self
 
 
+class DailyNewsSchedulerSettings(BaseSettings):
+    """Minimal runtime configuration for the database-only news scheduler."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="DAILY_INSIGHTS_",
+        env_file=API_ENV_FILE,
+        extra="ignore",
+    )
+
+    environment: Environment = "development"
+    database_url: str | None = None
+    daily_news_enabled: bool = False
+
+    @model_validator(mode="after")
+    def require_database_url(self) -> Self:
+        if self.database_url is None:
+            if self.environment not in {"development", "test"}:
+                raise ValueError("database_url is required outside development and test")
+            self.database_url = LOCAL_DATABASE_URL
+        return self
+
+
 def is_placeholder_value(value: str) -> bool:
     lowered = value.lower()
     return any(marker in lowered for marker in PLACEHOLDER_MARKERS)
@@ -289,3 +311,8 @@ def get_settings() -> Settings:
 @lru_cache
 def get_macro_dashboard_scheduler_settings() -> MacroDashboardSchedulerSettings:
     return MacroDashboardSchedulerSettings()
+
+
+@lru_cache
+def get_daily_news_scheduler_settings() -> DailyNewsSchedulerSettings:
+    return DailyNewsSchedulerSettings()

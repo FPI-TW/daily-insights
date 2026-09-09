@@ -1,7 +1,9 @@
+import asyncio
 import os
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 import pytest_asyncio
@@ -22,8 +24,10 @@ from daily_insights_api.modules.data_management.service import (
     RunAlreadyActiveError,
     cancel_run,
     claim_next_run,
+    complete_news_run,
     complete_run,
     enqueue_automatic_macro_run,
+    enqueue_automatic_news_all_run,
     enqueue_run,
     execution_lock_key,
     heartbeat_run,
@@ -217,6 +221,248 @@ async def test_automatic_macro_persists_behind_manual_run_and_executes_once(
             )
         ).all()
     assert len(automatic) == 1
+
+
+async def test_automatic_news_retries_only_unsuccessful_markets_when_due(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    edition = date(2026, 9, 8)
+    initial_at = datetime(2026, 9, 8, 8, tzinfo=ZoneInfo("Asia/Taipei"))
+    concurrent_results = await asyncio.gather(
+        enqueue_automatic_news_all_run(data_management_database, edition_date=edition),
+        enqueue_automatic_news_all_run(data_management_database, edition_date=edition),
+    )
+    assert sorted(concurrent_results) == ["already_recorded", "queued"]
+    assert (
+        await enqueue_automatic_news_all_run(data_management_database, edition_date=edition)
+        == "already_recorded"
+    )
+    claimed = await claim_next_run(data_management_database, "news-worker", now=initial_at)
+    assert claimed is not None and claimed.operation == "news_all"
+    await complete_news_run(
+        data_management_database,
+        claimed,
+        "news-worker",
+        status="partial",
+        result={
+            "outcome": "partial",
+            "outcomes": {
+                "global": "complete",
+                "tw_equity": "partial",
+                "us_equity": "unavailable",
+            },
+        },
+        error="news_partial",
+        now=initial_at,
+    )
+    async with data_management_database() as database:
+        retries = (
+            await database.scalars(
+                select(DataManagementRun)
+                .where(
+                    DataManagementRun.operation == "news_market",
+                    DataManagementRun.requested_by_user_id.is_(None),
+                )
+                .order_by(DataManagementRun.market_code)
+            )
+        ).all()
+    assert [(retry.market_code, retry.scheduled_for) for retry in retries] == [
+        ("tw_equity", datetime(2026, 9, 8, 8, 30, tzinfo=ZoneInfo("Asia/Taipei"))),
+        ("us_equity", datetime(2026, 9, 8, 8, 30, tzinfo=ZoneInfo("Asia/Taipei"))),
+    ]
+    assert (
+        await claim_next_run(
+            data_management_database,
+            "early-worker",
+            now=datetime(2026, 9, 8, 8, 29, tzinfo=ZoneInfo("Asia/Taipei")),
+        )
+        is None
+    )
+    retry = await claim_next_run(
+        data_management_database,
+        "retry-worker",
+        now=datetime(2026, 9, 8, 8, 30, tzinfo=ZoneInfo("Asia/Taipei")),
+    )
+    assert retry is not None and retry.market_code == "tw_equity"
+    await complete_news_run(
+        data_management_database,
+        retry,
+        "retry-worker",
+        status="partial",
+        result={"outcome": "partial", "outcomes": {"tw_equity": "partial"}},
+        error="news_partial",
+        now=datetime(2026, 9, 8, 11, 31, tzinfo=ZoneInfo("Asia/Taipei")),
+    )
+    async with data_management_database() as database:
+        next_tw_retry = await database.scalar(
+            select(DataManagementRun.id).where(
+                DataManagementRun.operation == "news_market",
+                DataManagementRun.market_code == "tw_equity",
+                DataManagementRun.status == "pending",
+            )
+        )
+        automatic_all = (
+            await database.scalars(
+                select(DataManagementRun).where(
+                    DataManagementRun.operation == "news_all",
+                    DataManagementRun.requested_by_user_id.is_(None),
+                    DataManagementRun.edition_date == edition,
+                )
+            )
+        ).all()
+    assert next_tw_retry is None
+    assert len(automatic_all) == 1
+
+
+async def test_automatic_news_retry_is_cancelled_instead_of_claimed_after_deadline(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    edition = date(2026, 9, 8)
+    scheduled_for = datetime(2026, 9, 8, 12, tzinfo=ZoneInfo("Asia/Taipei"))
+    async with data_management_database.begin() as database:
+        retry = DataManagementRun(
+            operation="news_market",
+            market_code="global",
+            edition_date=edition,
+            status="pending",
+            requested_by_user_id=None,
+            scheduled_for=scheduled_for,
+        )
+        database.add(retry)
+
+    after_deadline = datetime(2026, 9, 8, 12, 0, 1, tzinfo=ZoneInfo("Asia/Taipei"))
+    claimed = await claim_next_run(
+        data_management_database,
+        "late-worker",
+        now=after_deadline,
+    )
+    assert claimed is None
+    async with data_management_database() as database:
+        expired = await database.get(DataManagementRun, retry.id)
+    assert expired is not None
+    assert expired.status == "cancelled"
+    assert expired.completed_at == after_deadline
+    assert expired.error == "news_window_expired"
+    assert expired.result == {
+        "outcome": "expired",
+        "reason": "news_window_expired",
+        "expired_at": after_deadline.isoformat(),
+        "scheduled_for": scheduled_for.astimezone(UTC).isoformat(),
+    }
+
+
+async def test_automatic_news_retry_is_claimable_at_exact_deadline(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    deadline = datetime(2026, 9, 8, 12, tzinfo=ZoneInfo("Asia/Taipei"))
+    async with data_management_database.begin() as database:
+        retry = DataManagementRun(
+            operation="news_market",
+            market_code="global",
+            edition_date=deadline.date(),
+            status="pending",
+            requested_by_user_id=None,
+            scheduled_for=deadline,
+        )
+        database.add(retry)
+
+    claimed = await claim_next_run(
+        data_management_database,
+        "deadline-worker",
+        now=deadline,
+    )
+    assert claimed is not None
+    assert claimed.id == retry.id
+    assert claimed.status == "running"
+    assert claimed.error is None
+
+
+async def test_automatic_news_all_is_cancelled_instead_of_claimed_after_deadline(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    edition = date(2026, 9, 8)
+    assert (
+        await enqueue_automatic_news_all_run(data_management_database, edition_date=edition)
+        == "queued"
+    )
+
+    after_deadline = datetime(2026, 9, 8, 12, 0, 1, tzinfo=ZoneInfo("Asia/Taipei"))
+    claimed = await claim_next_run(data_management_database, "late-worker", now=after_deadline)
+
+    assert claimed is None
+    async with data_management_database() as database:
+        expired = await database.scalar(
+            select(DataManagementRun).where(
+                DataManagementRun.operation == "news_all",
+                DataManagementRun.edition_date == edition,
+                DataManagementRun.requested_by_user_id.is_(None),
+            )
+        )
+    assert expired is not None
+    assert expired.status == "cancelled"
+    assert expired.completed_at == after_deadline
+    assert expired.error == "news_window_expired"
+    assert expired.result == {
+        "outcome": "expired",
+        "reason": "news_window_expired",
+        "expired_at": after_deadline.isoformat(),
+        "scheduled_for": datetime(2026, 9, 8, 8, tzinfo=ZoneInfo("Asia/Taipei"))
+        .astimezone(UTC)
+        .isoformat(),
+    }
+
+
+async def test_automatic_news_all_is_claimable_at_exact_deadline(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    edition = date(2026, 9, 8)
+    assert (
+        await enqueue_automatic_news_all_run(data_management_database, edition_date=edition)
+        == "queued"
+    )
+
+    deadline = datetime(2026, 9, 8, 12, tzinfo=ZoneInfo("Asia/Taipei"))
+    claimed = await claim_next_run(data_management_database, "deadline-worker", now=deadline)
+
+    assert claimed is not None
+    assert claimed.operation == "news_all"
+    assert claimed.edition_date == edition
+    assert claimed.status == "running"
+    assert claimed.error is None
+
+
+async def test_due_automatic_news_retry_is_claimed_ahead_of_pending_manual_work(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(data_management_database)
+    due_at = datetime(2026, 9, 8, 9, tzinfo=ZoneInfo("Asia/Taipei"))
+    async with data_management_database() as database:
+        manual = await enqueue_run(
+            database,
+            operation="index_yahoo",
+            market_code=None,
+            requester_id=user.id,
+            request_id="manual-ahead-of-news",
+        )
+    async with data_management_database.begin() as database:
+        retry = DataManagementRun(
+            operation="news_market",
+            market_code="global",
+            edition_date=due_at.date(),
+            status="pending",
+            requested_by_user_id=None,
+            scheduled_for=due_at,
+        )
+        database.add(retry)
+
+    claimed = await claim_next_run(data_management_database, "news-worker", now=due_at)
+
+    assert claimed is not None
+    assert claimed.id == retry.id
+    async with data_management_database() as database:
+        pending_manual = await database.get(DataManagementRun, manual.id)
+    assert pending_manual is not None
+    assert pending_manual.status == "pending"
 
 
 async def test_cancelled_macro_cannot_overlap_another_macro_execution(

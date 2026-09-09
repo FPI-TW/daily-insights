@@ -297,6 +297,95 @@ async def test_scheduler_without_retry_policy_logs_failure_and_waits_for_next_da
     assert clock.sleeps == [24 * 3600]
 
 
+@pytest.mark.parametrize(
+    "started_at",
+    [
+        datetime(2026, 8, 29, 8, 1, tzinfo=TAIPEI),
+        datetime(2026, 8, 30, 8, 1, tzinfo=TAIPEI),
+    ],
+)
+async def test_no_catchup_scheduler_waits_after_the_0800_boundary(started_at: datetime) -> None:
+    clock = _Clock(started_at, stop_after_sleeps=1)
+    calls: list[date] = []
+
+    async def runner(edition: date) -> str:
+        calls.append(edition)
+        return "complete"
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_scheduler(
+            runner,
+            now=clock.now,
+            sleep=clock.sleep,
+            catch_up_on_start=False,
+        )
+
+    assert calls == []
+    assert clock.sleeps == [23 * 3600 + 59 * 60]
+
+
+async def test_no_catchup_scheduler_still_runs_when_it_observes_0800() -> None:
+    clock = _Clock(datetime(2026, 8, 30, 7, 59, tzinfo=TAIPEI), stop_after_sleeps=2)
+    calls: list[date] = []
+
+    async def runner(edition: date) -> str:
+        calls.append(edition)
+        return "complete"
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_scheduler(
+            runner,
+            now=clock.now,
+            sleep=clock.sleep,
+            catch_up_on_start=False,
+        )
+
+    assert calls == [date(2026, 8, 30)]
+
+
+async def test_no_catchup_scheduler_runs_on_an_exact_0800_first_observation() -> None:
+    clock = _Clock(_START, stop_after_sleeps=1)
+    calls: list[date] = []
+
+    async def runner(edition: date) -> str:
+        calls.append(edition)
+        return "complete"
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_scheduler(
+            runner,
+            now=clock.now,
+            sleep=clock.sleep,
+            catch_up_on_start=False,
+        )
+
+    assert calls == [date(2026, 8, 30)]
+    assert clock.sleeps == [24 * 3600]
+
+
+async def test_no_catchup_scheduler_retries_a_failed_boundary_enqueue() -> None:
+    clock = _Clock(datetime(2026, 8, 30, 7, 59, tzinfo=TAIPEI), stop_after_sleeps=3)
+    calls: list[date] = []
+
+    async def runner(edition: date) -> str:
+        calls.append(edition)
+        if len(calls) == 1:
+            raise RuntimeError("database unavailable")
+        return "complete"
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_scheduler(
+            runner,
+            now=clock.now,
+            sleep=clock.sleep,
+            retry=SameDayRetry(),
+            catch_up_on_start=False,
+        )
+
+    assert calls == [date(2026, 8, 30), date(2026, 8, 30)]
+    assert clock.sleeps == [60, 30 * 60, _SECONDS_TO_NEXT_DAY_FROM_0830]
+
+
 async def test_unavailable_outcome_is_retried_only_when_policy_opts_in() -> None:
     async def unavailable(edition: date) -> str | None:
         return "unavailable"

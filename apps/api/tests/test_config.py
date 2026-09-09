@@ -1,7 +1,11 @@
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from daily_insights_api.core.config import MacroDashboardSchedulerSettings, Settings
+from daily_insights_api.core.config import (
+    DailyNewsSchedulerSettings,
+    MacroDashboardSchedulerSettings,
+    Settings,
+)
 from daily_insights_api.modules.assets.r2.store import R2ObjectStore
 from daily_insights_api.web.app import create_app
 
@@ -42,6 +46,20 @@ def test_macro_scheduler_requires_only_a_production_database_url() -> None:
 
     with pytest.raises(ValidationError, match="database_url is required"):
         MacroDashboardSchedulerSettings(environment="production", database_url=None)
+
+
+def test_daily_news_scheduler_requires_only_database_and_feature_flag() -> None:
+    settings = DailyNewsSchedulerSettings.model_validate(
+        {
+            "environment": "production",
+            "database_url": "postgresql+psycopg://app:secret@example.invalid/app",
+            "daily_news_enabled": True,
+        }
+    )
+    assert settings.daily_news_enabled is True
+
+    with pytest.raises(ValidationError, match="database_url is required"):
+        DailyNewsSchedulerSettings(environment="production", database_url=None)
 
 
 @pytest.mark.parametrize(
