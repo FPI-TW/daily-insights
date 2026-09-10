@@ -1,9 +1,12 @@
 import { formatTimestamp } from "#/lib/format"
 import type { LatestNews, NewsItem } from "@daily-insights/api-client"
-import { motion } from "motion/react"
+import { ChevronLeft, ChevronRight } from "lucide-react"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
   fadeIn,
+  horizontalPageSlide,
   hoverLift,
   reveal,
   springs,
@@ -72,9 +75,100 @@ export function DailyNews({
           {news.caveat ?? t("dailyNewsUnavailable")}
         </div>
       ) : (
-        <NewsGroups news={news} animate={animate} grouped={groupByMarket} />
+        <PaginatedNewsGroups
+          key={`${news.edition_id}:${news.revision}`}
+          news={news}
+          animate={animate}
+          grouped={groupByMarket}
+        />
       )}
     </section>
+  )
+}
+
+const NEWS_PAGE_SIZE = 6
+
+function PaginatedNewsGroups({
+  news,
+  animate,
+  grouped,
+}: {
+  news: LatestNews
+  animate: boolean
+  grouped: boolean
+}) {
+  const { t } = useTranslation()
+  const [pageIndex, setPageIndex] = useState(0)
+  const [direction, setDirection] = useState<1 | -1>(1)
+  const [hasPaginated, setHasPaginated] = useState(false)
+  const reduceMotion = useReducedMotion()
+  const totalPages = Math.max(1, Math.ceil(news.items.length / NEWS_PAGE_SIZE))
+  const currentPageIndex = Math.min(pageIndex, totalPages - 1)
+  const pageStart = currentPageIndex * NEWS_PAGE_SIZE
+  const pageNews = {
+    ...news,
+    items: news.items.slice(pageStart, pageStart + NEWS_PAGE_SIZE),
+  }
+
+  return (
+    <>
+      <div className="relative">
+        <div className="grid overflow-hidden">
+          <AnimatePresence initial={false} custom={direction} mode="sync">
+            <motion.div
+              key={currentPageIndex}
+              className="col-start-1 row-start-1 w-full"
+              custom={direction}
+              variants={horizontalPageSlide}
+              {...(reduceMotion
+                ? { initial: false }
+                : {
+                    initial: "enter" as const,
+                    animate: "visible" as const,
+                    exit: "exit" as const,
+                  })}
+            >
+              <NewsGroups
+                news={pageNews}
+                animate={animate && !hasPaginated}
+                grouped={grouped}
+              />
+            </motion.div>
+          </AnimatePresence>
+        </div>
+        {totalPages > 1 ? (
+          <nav
+            className="pointer-events-none absolute inset-y-0 right-0 left-0"
+            aria-label={t("dailyNewsPagination")}
+          >
+            <button
+              type="button"
+              className="pointer-events-auto absolute top-1/2 left-2 z-10 flex size-11 -translate-y-1/2 items-center justify-center rounded-full border border-line bg-surface/95 text-sea-ink shadow-lg backdrop-blur-sm transition-[color,border-color,transform] hover:scale-105 hover:border-lagoon hover:text-lagoon lg:-left-5"
+              aria-label={t("dailyNewsPreviousPage")}
+              onClick={() => {
+                setHasPaginated(true)
+                setDirection(-1)
+                setPageIndex(index => (index - 1 + totalPages) % totalPages)
+              }}
+            >
+              <ChevronLeft aria-hidden="true" className="size-5" />
+            </button>
+            <button
+              type="button"
+              className="pointer-events-auto absolute top-1/2 right-2 z-10 flex size-11 -translate-y-1/2 items-center justify-center rounded-full border border-line bg-surface/95 text-sea-ink shadow-lg backdrop-blur-sm transition-[color,border-color,transform] hover:scale-105 hover:border-lagoon hover:text-lagoon lg:-right-5"
+              aria-label={t("dailyNewsNextPage")}
+              onClick={() => {
+                setHasPaginated(true)
+                setDirection(1)
+                setPageIndex(index => (index + 1) % totalPages)
+              }}
+            >
+              <ChevronRight aria-hidden="true" className="size-5" />
+            </button>
+          </nav>
+        ) : null}
+      </div>
+    </>
   )
 }
 

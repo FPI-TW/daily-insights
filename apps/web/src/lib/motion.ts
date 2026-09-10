@@ -56,6 +56,23 @@ export const fadeIn: Variants = {
   },
 }
 
+// Horizontal page transition for compact carousels and paginated card sets.
+// Positive direction moves forward (old content exits left); negative moves
+// backward. Keeping it here preserves one timing language across the app.
+export const horizontalPageSlide: Variants = {
+  enter: (direction: number = 1) => ({
+    x: direction > 0 ? "100%" : "-100%",
+  }),
+  visible: {
+    x: 0,
+    transition: { duration: durations.base, ease: easings.out },
+  },
+  exit: (direction: number = 1) => ({
+    x: direction > 0 ? "-100%" : "100%",
+    transition: { duration: durations.base, ease: easings.out },
+  }),
+}
+
 // Overlay/dialog presets used with AnimatePresence.
 export const backdrop: Variants = {
   hidden: { opacity: 0, transition: { duration: durations.fast } },

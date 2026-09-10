@@ -758,6 +758,9 @@ const resources: Resource = {
       reportNotLaunchedDescription:
         "此市場的正式晨間報告仍在準備中，目前先提供分析師觀點與市場新聞。",
       dailyNewsImportance: "重要性 {{count}} 星",
+      dailyNewsPagination: "新聞分頁",
+      dailyNewsPreviousPage: "上一頁新聞",
+      dailyNewsNextPage: "下一頁新聞",
       newsMarket_global: "全球",
       newsMarket_us: "美國",
       newsMarket_asia: "亞洲",
@@ -1524,6 +1527,9 @@ const resources: Resource = {
       reportNotLaunchedDescription:
         "该市场的正式晨间报告仍在准备中，目前先提供分析师观点与市场新闻。",
       dailyNewsImportance: "重要性 {{count}} 星",
+      dailyNewsPagination: "新闻分页",
+      dailyNewsPreviousPage: "上一页新闻",
+      dailyNewsNextPage: "下一页新闻",
       newsMarket_global: "全球",
       newsMarket_us: "美国",
       newsMarket_asia: "亚洲",
@@ -2327,6 +2333,9 @@ const resources: Resource = {
       reportNotLaunchedDescription:
         "The formal morning report for this market is still in preparation; the analyst viewpoint and market news are available now.",
       dailyNewsImportance: "Importance {{count}} stars",
+      dailyNewsPagination: "News pagination",
+      dailyNewsPreviousPage: "Previous news page",
+      dailyNewsNextPage: "Next news page",
       newsMarket_global: "Global",
       newsMarket_us: "United States",
       newsMarket_asia: "Asia",
