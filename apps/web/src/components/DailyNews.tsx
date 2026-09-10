@@ -2,7 +2,8 @@ import { formatTimestamp } from "#/lib/format"
 import type { LatestNews, NewsItem } from "@daily-insights/api-client"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { useLayoutEffect, useRef, useState } from "react"
+import type { ReactNode } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
   fadeIn,
@@ -54,7 +55,51 @@ export function DailyNews({
   // completeness or which day the edition came from.
   return (
     <section className="mt-7 mb-6" aria-labelledby="daily-news-title">
-      <div className="mb-4">
+      {news !== null && news.status !== "unavailable" ? (
+        <PaginatedNewsGroups
+          key={`${news.edition_id}:${news.revision}`}
+          news={news}
+          animate={animate}
+          grouped={groupByMarket}
+          eyebrowKey={eyebrowKey}
+          titleKey={titleKey}
+        />
+      ) : (
+        <>
+          <DailyNewsHeader eyebrowKey={eyebrowKey} titleKey={titleKey} />
+          {news === null ? (
+            <div
+              className="surface-panel p-5 text-sm text-sea-ink-soft"
+              role="status"
+            >
+              {t("dailyNewsLoadFailed")}
+            </div>
+          ) : (
+            <div className="surface-panel p-5 text-sm text-sea-ink-soft">
+              {news.caveat ?? t("dailyNewsUnavailable")}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  )
+}
+
+const NEWS_PAGE_SIZE = 6
+
+function DailyNewsHeader({
+  eyebrowKey,
+  titleKey,
+  children,
+}: {
+  eyebrowKey: string
+  titleKey: string
+  children?: ReactNode
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="mb-4 flex items-end justify-between gap-4">
+      <div className="min-w-0">
         <p className="eyebrow">{t(eyebrowKey)}</p>
         <h2
           id="daily-news-title"
@@ -63,46 +108,28 @@ export function DailyNews({
           {t(titleKey)}
         </h2>
       </div>
-      {news === null ? (
-        <div
-          className="surface-panel p-5 text-sm text-sea-ink-soft"
-          role="status"
-        >
-          {t("dailyNewsLoadFailed")}
-        </div>
-      ) : news.status === "unavailable" ? (
-        <div className="surface-panel p-5 text-sm text-sea-ink-soft">
-          {news.caveat ?? t("dailyNewsUnavailable")}
-        </div>
-      ) : (
-        <PaginatedNewsGroups
-          key={`${news.edition_id}:${news.revision}`}
-          news={news}
-          animate={animate}
-          grouped={groupByMarket}
-        />
-      )}
-    </section>
+      {children}
+    </div>
   )
 }
-
-const NEWS_PAGE_SIZE = 6
 
 function PaginatedNewsGroups({
   news,
   animate,
   grouped,
+  eyebrowKey,
+  titleKey,
 }: {
   news: LatestNews
   animate: boolean
   grouped: boolean
+  eyebrowKey: string
+  titleKey: string
 }) {
   const { t } = useTranslation()
   const [pageIndex, setPageIndex] = useState(0)
   const [direction, setDirection] = useState<1 | -1>(1)
   const [hasPaginated, setHasPaginated] = useState(false)
-  const [viewportHeight, setViewportHeight] = useState<number>()
-  const pageRef = useRef<HTMLDivElement>(null)
   const reduceMotion = useReducedMotion()
   const totalPages = Math.max(1, Math.ceil(news.items.length / NEWS_PAGE_SIZE))
   const currentPageIndex = Math.min(pageIndex, totalPages - 1)
@@ -112,70 +139,17 @@ function PaginatedNewsGroups({
     items: news.items.slice(pageStart, pageStart + NEWS_PAGE_SIZE),
   }
 
-  useLayoutEffect(() => {
-    const page = pageRef.current
-    if (!page) return
-
-    const preserveTallestPage = () => {
-      const measuredHeight = Math.ceil(page.getBoundingClientRect().height)
-      if (measuredHeight > 0) {
-        setViewportHeight(current =>
-          current === undefined
-            ? measuredHeight
-            : Math.max(current, measuredHeight)
-        )
-      }
-    }
-
-    preserveTallestPage()
-    if (typeof ResizeObserver === "undefined") return
-    const observer = new ResizeObserver(preserveTallestPage)
-    observer.observe(page)
-    return () => observer.disconnect()
-  }, [currentPageIndex])
-
   return (
     <>
-      <div className="relative">
-        <div
-          className="grid overflow-hidden"
-          style={
-            viewportHeight === undefined
-              ? undefined
-              : { height: viewportHeight }
-          }
-        >
-          <AnimatePresence initial={false} custom={direction} mode="sync">
-            <motion.div
-              key={currentPageIndex}
-              ref={pageRef}
-              className="col-start-1 row-start-1 w-full"
-              custom={direction}
-              variants={horizontalPageSlide}
-              {...(reduceMotion
-                ? { initial: false }
-                : {
-                    initial: "enter" as const,
-                    animate: "visible" as const,
-                    exit: "exit" as const,
-                  })}
-            >
-              <NewsGroups
-                news={pageNews}
-                animate={animate && !hasPaginated}
-                grouped={grouped}
-              />
-            </motion.div>
-          </AnimatePresence>
-        </div>
+      <DailyNewsHeader eyebrowKey={eyebrowKey} titleKey={titleKey}>
         {totalPages > 1 ? (
           <nav
-            className="pointer-events-none absolute inset-y-0 right-0 left-0"
+            className="flex shrink-0 gap-2"
             aria-label={t("dailyNewsPagination")}
           >
             <button
               type="button"
-              className="pointer-events-auto absolute top-1/2 left-2 z-10 flex size-11 -translate-y-1/2 items-center justify-center rounded-full border border-line bg-surface/95 text-sea-ink shadow-lg backdrop-blur-sm transition-[color,border-color,transform] hover:scale-105 hover:border-lagoon hover:text-lagoon lg:-left-5"
+              className="flex size-10 items-center justify-center rounded-full border border-line bg-surface text-sea-ink shadow-sm transition-[color,border-color,transform] hover:scale-105 hover:border-lagoon hover:text-lagoon"
               aria-label={t("dailyNewsPreviousPage")}
               onClick={() => {
                 setHasPaginated(true)
@@ -187,7 +161,7 @@ function PaginatedNewsGroups({
             </button>
             <button
               type="button"
-              className="pointer-events-auto absolute top-1/2 right-2 z-10 flex size-11 -translate-y-1/2 items-center justify-center rounded-full border border-line bg-surface/95 text-sea-ink shadow-lg backdrop-blur-sm transition-[color,border-color,transform] hover:scale-105 hover:border-lagoon hover:text-lagoon lg:-right-5"
+              className="flex size-10 items-center justify-center rounded-full border border-line bg-surface text-sea-ink shadow-sm transition-[color,border-color,transform] hover:scale-105 hover:border-lagoon hover:text-lagoon"
               aria-label={t("dailyNewsNextPage")}
               onClick={() => {
                 setHasPaginated(true)
@@ -199,6 +173,29 @@ function PaginatedNewsGroups({
             </button>
           </nav>
         ) : null}
+      </DailyNewsHeader>
+      <div className="grid overflow-hidden">
+        <AnimatePresence initial={false} custom={direction} mode="sync">
+          <motion.div
+            key={currentPageIndex}
+            className="col-start-1 row-start-1 w-full"
+            custom={direction}
+            variants={horizontalPageSlide}
+            {...(reduceMotion
+              ? { initial: false }
+              : {
+                  initial: "enter" as const,
+                  animate: "visible" as const,
+                  exit: "exit" as const,
+                })}
+          >
+            <NewsGroups
+              news={pageNews}
+              animate={animate && !hasPaginated}
+              grouped={grouped}
+            />
+          </motion.div>
+        </AnimatePresence>
       </div>
     </>
   )

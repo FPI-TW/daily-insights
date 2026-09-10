@@ -6,7 +6,7 @@ import {
   within,
 } from "@testing-library/react"
 import { I18nextProvider } from "react-i18next"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import { createI18n } from "#/lib/i18n"
 import { DailyNews, DailyNewsLoading } from "./DailyNews"
 
@@ -219,22 +219,6 @@ describe("DailyNews", () => {
   it("paginates news into at most six cards with looping arrow navigation", async () => {
     const i18n = createI18n("en")
     await i18n.changeLanguage("en")
-    const measuredHeights = vi
-      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockImplementation(function (this: HTMLElement) {
-        const height = this.textContent?.includes("Story 13") ? 140 : 620
-        return {
-          bottom: height,
-          height,
-          left: 0,
-          right: 0,
-          top: 0,
-          width: 1000,
-          x: 0,
-          y: 0,
-          toJSON: () => ({}),
-        }
-      })
     const item = (index: number) => ({
       id: `00000000-0000-4000-8000-0000000001${index.toString().padStart(2, "0")}`,
       rank: index,
@@ -280,22 +264,30 @@ describe("DailyNews", () => {
       name: "Previous news page",
     })
     const next = panel.getByRole("button", { name: "Next news page" })
-    expect(
-      panel.getByRole("navigation", { name: "News pagination" })
-    ).toHaveClass("absolute", "inset-y-0")
-    expect(previous).toHaveClass("absolute", "left-2", "lg:-left-5")
-    expect(next).toHaveClass("absolute", "right-2", "lg:-right-5")
+    const pagination = panel.getByRole("navigation", {
+      name: "News pagination",
+    })
+    expect(pagination).toHaveClass("flex", "shrink-0", "gap-2")
+    expect(pagination).not.toHaveClass("absolute")
+    expect(pagination.parentElement).toHaveClass(
+      "flex",
+      "items-end",
+      "justify-between"
+    )
+    expect(previous).toHaveClass("flex", "size-10")
+    expect(next).toHaveClass("flex", "size-10")
     expect(previous).toBeEnabled()
     expect(next).toBeEnabled()
-    const viewport = container.querySelector(".grid.overflow-hidden")
-    await waitFor(() => expect(viewport).toHaveStyle({ height: "620px" }))
 
     fireEvent.click(previous)
     await waitFor(() =>
       expect(container.querySelectorAll("article")).toHaveLength(1)
     )
     expect(panel.getByText("Story 13")).toBeInTheDocument()
-    expect(viewport).toHaveStyle({ height: "620px" })
+    expect(panel.getByRole("button", { name: "Previous news page" })).toBe(
+      previous
+    )
+    expect(panel.getByRole("button", { name: "Next news page" })).toBe(next)
 
     fireEvent.click(next)
     await waitFor(() => expect(panel.getByText("Story 1")).toBeInTheDocument())
@@ -312,7 +304,6 @@ describe("DailyNews", () => {
 
     fireEvent.click(next)
     await waitFor(() => expect(panel.getByText("Story 1")).toBeInTheDocument())
-    measuredHeights.mockRestore()
   })
 
   it("hides pagination controls when all news fits on one page", async () => {
