@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import uuid
 from collections import Counter
 from collections.abc import Awaitable, Callable
@@ -25,6 +26,7 @@ from daily_insights_api.modules.news.editions import (
     EDITION_ORDER,
     GLOBAL_SPEC,
     EditionSpec,
+    SelectionPolicy,
     edition_spec,
 )
 from daily_insights_api.modules.news.extraction import (
@@ -50,7 +52,7 @@ from daily_insights_api.modules.news.models import (
 from daily_insights_api.modules.operations.api import sanitize_error_code
 
 logger = logging.getLogger("daily_insights")
-DERIVATION_VERSION = "feeds-deepseek-news.v6"
+DERIVATION_VERSION = "feeds-deepseek-news.v12"
 SUMMARY_PROMPT_VERSION = "summary-v3"
 LOCALES = ("zh-hant", "zh-hans", "en")
 TAIPEI = ZoneInfo("Asia/Taipei")
@@ -69,6 +71,11 @@ MAX_DISCOVERY_PER_SOURCE = 10
 # Market tag a manually published story receives when the model never
 # classified it: the edition's own tag, which is the only one it publishes.
 MANUAL_MARKET_BY_EDITION = {"global": "global", "tw_equity": "taiwan", "us_equity": "us"}
+
+
+def _market_impact_score(headline: str, patterns: tuple[str, ...]) -> int:
+    """Count independent, edition-owned impact signals in one headline."""
+    return sum(re.search(pattern, headline, re.IGNORECASE) is not None for pattern in patterns)
 
 
 async def _retry[T](
@@ -112,11 +119,30 @@ def _digest(
     model_name: str,
     selection_prompt_digest: str,
     market_code: str = GLOBAL_SPEC.market_code,
+    policy: SelectionPolicy | None = None,
 ) -> str:
     payload = {
         "derivation": DERIVATION_VERSION,
         "market": market_code,
         "selection_prompt_digest": selection_prompt_digest,
+        "selection_policy": (
+            {
+                "max_items": policy.max_items,
+                "max_returned_items": policy.max_returned_items,
+                "max_per_domain": policy.max_per_domain,
+                "min_topics": policy.min_topics,
+                "min_markets": policy.min_markets,
+                "min_four_star_items": policy.min_four_star_items,
+                "max_four_star_items": policy.max_four_star_items,
+                "max_low_importance_items": policy.max_low_importance_items,
+                "market_focus": policy.market_focus,
+                "allowed_markets": sorted(policy.allowed_markets or ()),
+                "min_domains_full": policy.min_domains_full,
+                "importance_guidance": policy.importance_guidance,
+            }
+            if policy is not None
+            else None
+        ),
         "summary_prompt": SUMMARY_PROMPT_VERSION,
         "model": model_name,
         "candidates": [
@@ -362,6 +388,7 @@ def _cap_discovery(
     total: int | None = None,
     full_text_ids: frozenset[str] = frozenset(),
     interleave: bool = False,
+    impact_patterns: tuple[str, ...] = (),
 ) -> list[Candidate]:
     """Bound the articles fetched per source and in total, newest first.
 
@@ -372,6 +399,7 @@ def _cap_discovery(
     ordered = sorted(
         candidates,
         key=lambda candidate: (
+            -_market_impact_score(candidate.headline, impact_patterns),
             candidate.id not in full_text_ids,
             candidate.seen_at is None,
             -(candidate.seen_at.timestamp() if candidate.seen_at else 0.0),
@@ -398,6 +426,7 @@ def _limit_candidates(
     total: int = MAX_CANDIDATES,
     per_source: int = MAX_CANDIDATES_PER_SOURCE,
     interleave: bool = False,
+    impact_patterns: tuple[str, ...] = (),
 ) -> list[FetchedCandidate]:
     """Keep the freshest candidates while bounding any single source.
 
@@ -407,9 +436,10 @@ def _limit_candidates(
     are reproducible for identical discovery results.
     """
 
-    def sort_key(fetched: FetchedCandidate) -> tuple[bool, float, str]:
+    def sort_key(fetched: FetchedCandidate) -> tuple[int, bool, float, str]:
         freshness = fetched.source_published_at or fetched.candidate.seen_at
         return (
+            -_market_impact_score(fetched.candidate.headline, impact_patterns),
             freshness is None,
             -(freshness.timestamp() if freshness is not None else 0.0),
             fetched.source_url,
@@ -533,6 +563,7 @@ async def run_news_edition(
         total=spec.max_discovery_total,
         full_text_ids=frozenset(bodies),
         interleave=spec.interleave_sources,
+        impact_patterns=spec.headline_impact_patterns,
     )
     emit_event("news.candidates.merged", market=market_code, total=len(candidates))
     ledger.fetching(candidates)
@@ -547,13 +578,20 @@ async def run_news_edition(
         total=spec.max_candidates * 2,
         per_source=spec.max_per_source,
         interleave=spec.interleave_sources,
+        impact_patterns=spec.headline_impact_patterns,
     )
     emit_event("news.sources.usable", market=market_code, count=len(usable))
     model_name = client.model_name
     selection_prompt_digest = client.selection_prompt_digest
     selection_prompt_version = client.selection_prompt_version
     edition_prompt_version = f"{selection_prompt_version}+{SUMMARY_PROMPT_VERSION}"
-    input_digest = _digest(usable, model_name, selection_prompt_digest, market_code)
+    input_digest = _digest(
+        usable,
+        model_name,
+        selection_prompt_digest,
+        market_code,
+        spec.selection,
+    )
     async with session_factory() as database:
         await database.execute(
             select(func.pg_advisory_xact_lock(_lock_key(edition_date, market_code)))
@@ -668,11 +706,22 @@ async def run_news_edition(
             return selection
 
         async def summarise(picks: list[SelectedCandidate]) -> None:
-            """Summarise picks in the given order until the edition is full."""
+            """Summarise ranked picks until each importance tier reaches its quota."""
             nonlocal publication
             for selected_item in picks:
-                if len(publication.selections) >= spec.target_items:
-                    break
+                published_four_star = sum(item.importance == 4 for item in publication.selections)
+                published_low_importance = sum(
+                    item.importance <= 3 for item in publication.selections
+                )
+                if (
+                    selected_item.importance == 4
+                    and published_four_star >= spec.selection.max_four_star_items
+                ) or (
+                    selected_item.importance <= 3
+                    and published_low_importance >= spec.selection.max_low_importance_items
+                ):
+                    ledger.drop(selected_item.id, "reserve")
+                    continue
                 attempted.add(selected_item.id)
                 if selected_item.event_key in event_keys:
                     ledger.drop(selected_item.id, "duplicate_event")
@@ -685,9 +734,10 @@ async def run_news_edition(
                 domain_count = sum(
                     1
                     for item in successful
-                    if selected[item.id].candidate.hostname == fetched.candidate.hostname
+                    if item.importance < 5
+                    and selected[item.id].candidate.hostname == fetched.candidate.hostname
                 )
-                if domain_count >= spec.selection.max_per_domain:
+                if selected_item.importance < 5 and domain_count >= spec.selection.max_per_domain:
                     ledger.drop(selected_item.id, "policy")
                     continue
                 audits: list[NewsGenerationAudit] = []
@@ -746,8 +796,9 @@ async def run_news_edition(
         refill_round = 0
         while (
             len(publication.selections) < spec.target_items
-            and selection_calls < MAX_SELECTION_ROUNDS
-        ):
+            or sum(item.importance == 4 for item in publication.selections)
+            < spec.selection.min_four_star_items
+        ) and selection_calls < MAX_SELECTION_ROUNDS:
             covered_sources = Counter(selected[item.id].candidate.hostname for item in successful)
             remaining = [fetched for fetched in usable if fetched.candidate.id not in attempted]
             # Unreviewed articles first, then underrepresented sources.

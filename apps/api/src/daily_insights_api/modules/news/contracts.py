@@ -31,7 +31,9 @@ class SelectedCandidate(StrictModel):
 class Selection(StrictModel):
     """Structural contract only; per-edition limits live in SelectionPolicy."""
 
-    selections: tuple[SelectedCandidate, ...] = Field(max_length=10)
+    # One model call can inspect a full market batch. Publication applies the
+    # stricter per-importance quotas after all batches have been merged.
+    selections: tuple[SelectedCandidate, ...] = Field(max_length=100)
 
     @model_validator(mode="after")
     def unique_ids_and_event_keys(self) -> "Selection":

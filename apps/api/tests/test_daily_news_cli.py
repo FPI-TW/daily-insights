@@ -1,4 +1,6 @@
 import asyncio
+import subprocess
+import sys
 from argparse import Namespace
 from datetime import date
 from pathlib import Path as FileSystemPath
@@ -40,6 +42,28 @@ def test_daily_news_cli_shares_the_scheduler_argument_contract() -> None:
     assert run_daily_news.RETRY_POLICY.retries("unavailable")
     assert run_daily_news.RETRY_POLICY.retries("failed")
     assert run_daily_news.RETRY_POLICY.retries("partial")
+
+
+def test_daily_news_cli_registers_every_referenced_orm_table() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from daily_insights_api.core.models import Base; "
+                "import daily_insights_api.scripts.run_daily_news; "
+                "print(','.join(table.name for table in Base.metadata.sorted_tables))"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "users" in result.stdout.split(",")
+    assert "audit_events" in result.stdout.split(",")
+    assert "news_candidates" in result.stdout.split(",")
 
 
 @pytest.mark.parametrize("key", ["CHANGE_ME_NEWS_MODEL_API_KEY", "   \t", None])

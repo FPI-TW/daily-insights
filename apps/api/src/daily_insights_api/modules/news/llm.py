@@ -5,9 +5,9 @@ import json
 import re
 import time
 import unicodedata
+from collections import Counter
 from dataclasses import asdict, dataclass
 from decimal import Decimal, InvalidOperation
-from itertools import combinations
 from typing import Any
 
 import httpx
@@ -67,13 +67,17 @@ def selection_output_contract(policy: SelectionPolicy) -> dict[str, Any]:
         diversity += f" and {policy.min_markets} distinct markets"
     selections = (
         f"array of 0 to {policy.selection_limit} objects ordered by importance from 5 "
-        "down to 1, ties broken by credibility, completeness and timeliness; the first "
-        f"{policy.max_items} form the edition and any after them are reserves used only "
-        "when an earlier story fails verification; a story from a source domain that "
+        "down to 1, ties broken by credibility, completeness and timeliness; return every "
+        "qualifying 5-star story with no publication quota, then qualifying 4-star stories "
+        f"(the edition publishes at least {policy.min_four_star_items} when available and "
+        f"at most {policy.max_four_star_items}), then at most "
+        f"{policy.max_low_importance_items} stories rated 1 to 3 in total; a story from a "
+        "source domain that "
         "already holds its limit among higher-rated stories is listed after the edition "
         "slots or omitted, never ranked above a lower-rated story; ids unique; "
         "event_keys unique; "
-        f"at most {policy.max_per_domain} per source domain; when 3 or more are "
+        f"for stories rated below 5, at most {policy.max_per_domain} per source domain; "
+        "5-star stories are exempt from that source cap; when 3 or more are "
         f"selected they must span {diversity}"
     )
     if policy.min_domains_full > 1:
@@ -82,6 +86,18 @@ def selection_output_contract(policy: SelectionPolicy) -> dict[str, Any]:
             f"{policy.max_items} must span at least {policy.min_domains_full} distinct "
             "source domains"
         )
+    importance = (
+        "integer on an absolute scale, the same on every day and in every batch: 5 = "
+        "market-moving for this edition's market (a central bank decision, a large "
+        "index move, results or guidance of a leading company, a shock with immediate "
+        "broad price impact); 4 = significant for many investors in the market; 3 = "
+        "notable but narrow; 2 = minor; 1 = trivial. Rate honestly: a story never "
+        "earns a higher rating because slots are empty, and most days have few or no "
+        "5s"
+    )
+    if policy.importance_guidance is not None:
+        importance = policy.importance_guidance
+
     contract: dict[str, Any] = {
         "selections": selections,
         "id": "exactly a CANDIDATES[].id value",
@@ -95,15 +111,7 @@ def selection_output_contract(policy: SelectionPolicy) -> dict[str, Any]:
         # story by the market it is really about; the edition then keeps only
         # its own tag (market_rule), which is how off-market picks are caught.
         "market": MARKET_VALUES,
-        "importance": (
-            "integer on an absolute scale, the same on every day and in every batch: 5 = "
-            "market-moving for this edition's market (a central bank decision, a large "
-            "index move, results or guidance of a leading company, a shock with immediate "
-            "broad price impact); 4 = significant for many investors in the market; 3 = "
-            "notable but narrow; 2 = minor; 1 = trivial. Rate honestly: a story never "
-            "earns a higher rating because slots are empty, and most days have few or no "
-            "5s"
-        ),
+        "importance": importance,
         "example": {
             "selections": [
                 {
@@ -243,14 +251,21 @@ class DeepSeekClient:
                 {
                     **fetched.candidate.model_dump(mode="json"),
                     "content_digest": fetched.content_digest,
+                    "source_published_at": (
+                        fetched.source_published_at.isoformat()
+                        if fetched.source_published_at is not None
+                        else None
+                    ),
                     "source_text": excerpt,
                 }
             )
         prompt: dict[str, Any] = {
             "task": (
                 f"Choose up to {policy.selection_limit} business/markets stories, best "
-                f"first; the first {policy.max_items} form the edition and the rest are "
-                "reserves. Importance is the primary ranking key: rate each story on the "
+                "first. Return every qualifying 5-star story; 5-star publication has no "
+                f"quantity cap. Then return up to {policy.max_four_star_items} qualifying "
+                f"4-star stories and at most {policy.max_low_importance_items} stories rated "
+                "1 to 3 combined. Importance is the primary ranking key: rate each story on the "
                 "absolute scale in OUTPUT_CONTRACT and order the list from 5 down to 1, so "
                 "every 5 precedes every 4 and every 4 precedes every 3; only when the "
                 "candidates hold fewer 5s than slots do 4s follow, then 3s. Break ties by "
@@ -311,10 +326,12 @@ class DeepSeekClient:
             )
             prompt["MARKET_FOCUS"] = (
                 f"{scope} Apply the relevance gate to each candidate first and rank only "
-                f"the stories that pass it. Fill all {policy.max_items} slots whenever the "
-                "candidates contain that many distinct, credible events that pass the "
-                "gate; an empty slot is always better than a story with only a weak or "
-                "indirect link to this market. Return fewer only when the remaining "
+                f"the stories that pass it. Aim for at least {policy.min_four_star_items} "
+                "4-star stories when the candidates genuinely contain that many, while "
+                "returning every qualifying 5-star story. The lower tiers are optional; "
+                "use their caps rather than raising importance to fill them. An empty "
+                "quota is always better than a story with only a weak or indirect link "
+                "to this market. Return fewer when the "
                 "candidates are duplicates, insufficiently credible, low-impact, or fail "
                 "the gate. Maintain source diversity without displacing clearly more "
                 "important stories."
@@ -477,99 +494,127 @@ def filter_selection_markets(
 def repair_selection_policy(
     value: Selection, candidates: list[FetchedCandidate], policy: SelectionPolicy
 ) -> Selection:
-    """Keep the largest compliant ranked subset; never invent or reclassify a story.
-
-    Structural validation limits this search to ten selections (1024 subsets).
-    Combinations preserve rank and prefer earlier picks on equal-sized results.
-    Unknown IDs remain errors rather than being silently accepted or discarded.
-    """
+    """Keep the compliant ranked stories; never invent or reclassify a story."""
     known_ids = {fetched.candidate.id for fetched in candidates}
     if any(item.id not in known_ids for item in value.selections):
         raise ValueError("selection has unknown candidate ID")
-    for count in range(min(len(value.selections), policy.selection_limit), -1, -1):
-        for items in combinations(value.selections, count):
-            subset = Selection(selections=items)
-            try:
-                enforce_selection_policy(subset, candidates, policy)
-            except ValueError:
-                continue
-            if subset != value:
-                emit_event(
-                    "news.selection.repaired",
-                    original_count=len(value.selections),
-                    retained_count=len(subset.selections),
-                )
-            return subset
-    raise AssertionError("empty selection must satisfy selection policy")
+    subset = publishable_selection(
+        list(value.selections[: policy.selection_limit]), candidates, policy
+    )
+    if subset != value:
+        emit_event(
+            "news.selection.repaired",
+            original_count=len(value.selections),
+            retained_count=len(subset.selections),
+        )
+    return subset
 
 
 def publishable_selection(
     ranked: list[SelectedCandidate], candidates: list[FetchedCandidate], policy: SelectionPolicy
 ) -> Selection:
-    """Validate the publication across refill rounds, after summary failures.
+    """Apply importance quotas across merged batches and refill rounds.
 
-    Bound enumeration by domain/topic feasibility before looking for the first
-    largest ranked subset. No invented IDs, events or market classifications.
+    Five-star stories deliberately bypass quantity and source caps. Lower tiers
+    retain the source-spread policy, with ten 4-star and five 1--3-star stories
+    as hard ceilings.
     """
     by_id = {fetched.candidate.id: fetched for fetched in candidates}
+    selected: list[SelectedCandidate] = []
     domains: dict[str, int] = {}
+    four_star_count = 0
+    low_importance_count = 0
     for item in ranked:
+        if item.id not in by_id:
+            raise ValueError("selection has unknown candidate ID")
+        if item.importance == 4 and four_star_count >= policy.max_four_star_items:
+            continue
+        if item.importance <= 3 and low_importance_count >= policy.max_low_importance_items:
+            continue
         domain = by_id[item.id].candidate.hostname
-        domains[domain] = domains.get(domain, 0) + 1
-    maximum = min(policy.max_items, sum(min(n, policy.max_per_domain) for n in domains.values()))
-    if len({item.topic for item in ranked}) < policy.min_topics:
-        maximum = min(maximum, 2)
-    if len({item.market for item in ranked}) < policy.min_markets:
-        maximum = min(maximum, 2)
-    if len(domains) < policy.min_domains_full:
-        maximum = min(maximum, policy.max_items - 1)
-
-    def find(
-        needed: int, start: int, items: list[SelectedCandidate], counts: dict[str, int]
-    ) -> Selection | None:
-        if needed == 0:
-            subset = Selection(selections=tuple(items))
-            try:
-                enforce_selection_policy(subset, candidates, policy)
-            except ValueError:
-                return None
-            return subset
-        for index in range(start, len(ranked) - needed + 1):
-            item = ranked[index]
-            domain = by_id[item.id].candidate.hostname
-            if counts.get(domain, 0) >= policy.max_per_domain:
+        if item.importance < 5 and domains.get(domain, 0) >= policy.max_per_domain:
+            continue
+        selected.append(item)
+        if item.importance < 5:
+            domains[domain] = domains.get(domain, 0) + 1
+        if item.importance == 4:
+            four_star_count += 1
+        elif item.importance <= 3:
+            low_importance_count += 1
+    has_five_star = any(item.importance == 5 for item in selected)
+    if not has_five_star and policy.min_domains_full > 1 and len(selected) >= policy.max_items:
+        edition = selected[: policy.max_items]
+        edition_domains = {by_id[item.id].candidate.hostname for item in edition}
+        for candidate in ranked:
+            candidate_domain = by_id[candidate.id].candidate.hostname
+            if candidate in selected or candidate_domain in edition_domains:
                 continue
-            counts[domain] = counts.get(domain, 0) + 1
-            items.append(item)
-            result = find(needed - 1, index + 1, items, counts)
-            items.pop()
-            counts[domain] -= 1
-            if result is not None:
-                return result
-        return None
-
-    for count in range(maximum, -1, -1):
-        result = find(count, 0, [], {})
-        if result is not None:
-            return result
-    raise AssertionError("empty publication is valid")
+            candidate_bucket = 4 if candidate.importance == 4 else 3
+            domain_counts = Counter(by_id[item.id].candidate.hostname for item in edition)
+            replacement_index = next(
+                (
+                    index
+                    for index in range(len(edition) - 1, -1, -1)
+                    if (4 if edition[index].importance == 4 else 3) == candidate_bucket
+                    and domain_counts[by_id[edition[index].id].candidate.hostname] > 1
+                ),
+                None,
+            )
+            if replacement_index is None:
+                continue
+            selected[replacement_index] = candidate
+            edition = selected[: policy.max_items]
+            edition_domains = {by_id[item.id].candidate.hostname for item in edition}
+            if len(edition_domains) >= policy.min_domains_full:
+                break
+        if len(edition_domains) < policy.min_domains_full:
+            selected = selected[: policy.max_items - 1]
+    if (
+        len(selected) >= 3
+        and not has_five_star
+        and (
+            len({item.topic for item in selected}) < policy.min_topics
+            or len({item.market for item in selected}) < policy.min_markets
+        )
+    ):
+        # A partial two-story edition is preferable to fabricating diversity.
+        # A later refill with another topic/market lets the full ranked set pass.
+        selected = selected[:2]
+    subset = Selection(selections=tuple(selected))
+    enforce_selection_policy(subset, candidates, policy, enforce_return_limit=False)
+    return subset
 
 
 def enforce_selection_policy(
-    value: Selection, candidates: list[FetchedCandidate], policy: SelectionPolicy
+    value: Selection,
+    candidates: list[FetchedCandidate],
+    policy: SelectionPolicy,
+    *,
+    enforce_return_limit: bool = True,
 ) -> None:
     by_id = {fetched.candidate.id: fetched for fetched in candidates}
     if any(item.id not in by_id for item in value.selections):
         raise ValueError("selection has unknown candidate ID")
-    if len(value.selections) > policy.selection_limit:
+    if enforce_return_limit and len(value.selections) > policy.selection_limit:
         raise ValueError(f"selection exceeds {policy.selection_limit} stories")
+    four_star_count = sum(item.importance == 4 for item in value.selections)
+    low_importance_count = sum(item.importance <= 3 for item in value.selections)
+    if four_star_count > policy.max_four_star_items:
+        raise ValueError(f"selection exceeds {policy.max_four_star_items} 4-star stories")
+    if low_importance_count > policy.max_low_importance_items:
+        raise ValueError(
+            f"selection exceeds {policy.max_low_importance_items} stories rated 1 to 3"
+        )
+    has_five_star = any(item.importance == 5 for item in value.selections)
     domains: dict[str, int] = {}
     for item in value.selections:
+        if item.importance == 5:
+            continue
         domain = by_id[item.id].candidate.hostname
         domains[domain] = domains.get(domain, 0) + 1
         if domains[domain] > policy.max_per_domain:
             raise ValueError(f"selection exceeds {policy.max_per_domain} stories per domain")
-    if len(value.selections) >= 3:
+    if len(value.selections) >= 3 and not has_five_star:
         topics = {item.topic for item in value.selections}
         markets = {item.market for item in value.selections}
         if len(topics) < policy.min_topics:
@@ -580,7 +625,11 @@ def enforce_selection_policy(
             raise ValueError(
                 f"three or more selections must cover at least {policy.min_markets} markets"
             )
-    if policy.min_domains_full > 1 and len(value.selections) >= policy.max_items:
+    if (
+        policy.min_domains_full > 1
+        and len(value.selections) >= policy.max_items
+        and not has_five_star
+    ):
         edition = value.selections[: policy.max_items]
         edition_domains = {by_id[item.id].candidate.hostname for item in edition}
         if len(edition_domains) < policy.min_domains_full:

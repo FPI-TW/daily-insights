@@ -5,6 +5,7 @@ from datetime import date, datetime
 from anyio import Path
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from daily_insights_api import models as registered_models  # noqa: F401
 from daily_insights_api.core.config import Settings, get_settings, is_placeholder_value
 from daily_insights_api.core.database import create_engine, create_session_factory
 from daily_insights_api.core.logging import configure_logging
