@@ -2,7 +2,7 @@ import { formatTimestamp } from "#/lib/format"
 import type { LatestNews, NewsItem } from "@daily-insights/api-client"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
   fadeIn,
@@ -101,6 +101,8 @@ function PaginatedNewsGroups({
   const [pageIndex, setPageIndex] = useState(0)
   const [direction, setDirection] = useState<1 | -1>(1)
   const [hasPaginated, setHasPaginated] = useState(false)
+  const [viewportHeight, setViewportHeight] = useState<number>()
+  const pageRef = useRef<HTMLDivElement>(null)
   const reduceMotion = useReducedMotion()
   const totalPages = Math.max(1, Math.ceil(news.items.length / NEWS_PAGE_SIZE))
   const currentPageIndex = Math.min(pageIndex, totalPages - 1)
@@ -110,13 +112,43 @@ function PaginatedNewsGroups({
     items: news.items.slice(pageStart, pageStart + NEWS_PAGE_SIZE),
   }
 
+  useLayoutEffect(() => {
+    const page = pageRef.current
+    if (!page) return
+
+    const preserveTallestPage = () => {
+      const measuredHeight = Math.ceil(page.getBoundingClientRect().height)
+      if (measuredHeight > 0) {
+        setViewportHeight(current =>
+          current === undefined
+            ? measuredHeight
+            : Math.max(current, measuredHeight)
+        )
+      }
+    }
+
+    preserveTallestPage()
+    if (typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(preserveTallestPage)
+    observer.observe(page)
+    return () => observer.disconnect()
+  }, [currentPageIndex])
+
   return (
     <>
       <div className="relative">
-        <div className="grid overflow-hidden">
+        <div
+          className="grid overflow-hidden"
+          style={
+            viewportHeight === undefined
+              ? undefined
+              : { height: viewportHeight }
+          }
+        >
           <AnimatePresence initial={false} custom={direction} mode="sync">
             <motion.div
               key={currentPageIndex}
+              ref={pageRef}
               className="col-start-1 row-start-1 w-full"
               custom={direction}
               variants={horizontalPageSlide}
