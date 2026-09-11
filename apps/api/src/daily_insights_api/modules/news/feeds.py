@@ -601,15 +601,6 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         markets=US_AND_GLOBAL,
         display_name="CNBC",
     ),
-    FeedSource(
-        "finance.yahoo.com",
-        "https://finance.yahoo.com/news/rssindex",
-        "rss",
-        r"^https://finance\.yahoo\.com/(news|[a-z-]+/articles)/[a-z0-9-]+(\.html)?$",
-        markets=US_AND_GLOBAL,
-        max_items=20,
-        display_name="Yahoo Finance",
-    ),
     # FX and rates commentary; the feed is macro-only.
     FeedSource(
         "www.fxstreet.com",
