@@ -224,6 +224,10 @@ def test_source_failure_redacts_secrets_and_bounds_storage() -> None:
         'headers={"Authorization": "Bearer supersecret"}',
         "password='two words must disappear'",
         "request?token=supersecret&market=US",
+        # Providers write the key name as prose in their own error text.
+        "API key: supersecret",
+        "API Key: supersecret",
+        "Api-Key: supersecret",
     ],
 )
 def test_source_failure_redacts_structured_secrets(detail: str) -> None:
@@ -232,6 +236,42 @@ def test_source_failure_redacts_structured_secrets(detail: str) -> None:
     assert "supersecret" not in sanitized
     assert "two words must disappear" not in sanitized
     assert "[REDACTED]" in sanitized
+
+
+@pytest.mark.parametrize(
+    "detail",
+    [
+        "connection to postgresql://dbuser:hunter2@db.internal:5432/app failed",
+        "postgresql+psycopg://dbuser:hunter2@host/db",
+        "amqps://dbuser:hunter2@broker:5671",
+    ],
+)
+def test_source_failure_redacts_a_connection_string_password(detail: str) -> None:
+    """A DSN carries its password with no key name to match on.
+
+    Driver errors quote the whole connection string back, and these details are
+    read by an operator in the back office.
+    """
+    sanitized = sanitize_error_detail(detail)
+    assert sanitized is not None
+    assert "hunter2" not in sanitized
+    assert "[REDACTED]" in sanitized
+    # The user survives: it says which credential to rotate.
+    assert "dbuser" in sanitized
+
+
+@pytest.mark.parametrize(
+    "detail",
+    [
+        "GET https://example.com/path returned 500",
+        "GET https://docs.example.com:8443/guide returned 404",
+        "mailto user@example.com bounced",
+        "retry after 3:04@2026-09-11",
+    ],
+)
+def test_source_failure_keeps_details_that_hold_no_secret(detail: str) -> None:
+    # Over-redaction costs diagnosis: a port or an address is not a credential.
+    assert sanitize_error_detail(detail) == detail
 
 
 def publication(source_as_of: date, published_at: datetime) -> ReportPublication:

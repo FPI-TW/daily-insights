@@ -35,7 +35,7 @@ from daily_insights_api.modules.admin.schemas import (
 )
 from daily_insights_api.modules.audit.api import record_audit_event
 from daily_insights_api.modules.audit.models import AuditEvent
-from daily_insights_api.modules.data_sources.api import TRACKED_INDICES, YfinanceAdapter
+from daily_insights_api.modules.data_sources.api import YfinanceAdapter
 from daily_insights_api.modules.identity.api import (
     AuthContext,
     require_csrf_roles,
@@ -44,6 +44,8 @@ from daily_insights_api.modules.identity.api import (
 from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.identity.session_models import Session
 from daily_insights_api.modules.markets.api import (
+    AUTOMATIC_SHORT_REFRESH_PERIOD,
+    YFINANCE_INDICES,
     MarketResponse,
     market_responses,
     refresh_index_daily_bars,
@@ -729,7 +731,8 @@ async def fetch_yfinance_daily_bars(
     if not settings.yfinance_enabled:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "yfinance is not enabled")
 
-    requested = list(TRACKED_INDICES)
+    # ^TWII is served by TWSE, not by this yfinance-specific endpoint.
+    requested = list(YFINANCE_INDICES)
 
     try:
         # Fail inside the proxy's 60s budget (infra/nginx/conf.d/default.conf,
@@ -741,7 +744,7 @@ async def fetch_yfinance_daily_bars(
                 database,
                 adapter=YfinanceAdapter(timeout_seconds=settings.yfinance_timeout_seconds),
                 symbols=requested,
-                period="7d",
+                period=AUTOMATIC_SHORT_REFRESH_PERIOD,
             )
     except TimeoutError:
         # Nothing committed: the session is rolled back by its dependency.
@@ -772,7 +775,7 @@ async def fetch_yfinance_daily_bars(
         target_type="data_source",
         target_id="yfinance",
         after={
-            "period": "7d",
+            "period": AUTOMATIC_SHORT_REFRESH_PERIOD,
             "requested": requested,
             "succeeded": [entry.symbol for entry in succeeded],
             "failed": [entry.symbol for entry in failed],
@@ -781,7 +784,7 @@ async def fetch_yfinance_daily_bars(
     )
     await database.commit()
     return YfinanceDailyBarsResponse(
-        period="7d",
+        period=AUTOMATIC_SHORT_REFRESH_PERIOD,
         fetched_at=datetime.now(UTC),
         succeeded=succeeded,
         failed=failed,

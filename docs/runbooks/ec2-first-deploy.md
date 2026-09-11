@@ -133,7 +133,9 @@ absolute HTTPS URL。
 
 `DAILY_INSIGHTS_YFINANCE_ENABLED` 控制 `index-daily-bars-scheduler` 與後台 Yahoo
 抓取；`DAILY_INSIGHTS_TWSE_ENABLED` 控制 `institutional-flows-scheduler` 每天台北
-17:00 排入三大法人回補。`DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 控制
+17:00 排入三大法人回補，**同時也控制 `index-daily-bars-scheduler` 的 ^TWII** ——
+該指數改由證交所供應，兩個旗標缺一不可。只設 `YFINANCE_ENABLED` 的話，排程每天
+會因 ^TWII 失敗而回報 failed，並連帶把 Yahoo 那八檔一路重試到中午。`DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 控制
 `daily-news-scheduler` 每天台北 08:00 排入 initial `news_all`；scheduler 只寫入
 durable queue，`data-management-worker` 才會執行新聞 provider request 與逐市場重試。
 `DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED` 則控制 analyst viewpoints scheduler 與

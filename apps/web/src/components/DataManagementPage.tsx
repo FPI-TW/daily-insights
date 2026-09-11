@@ -208,7 +208,7 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
             disabled={
               Boolean(activeIndex) ||
               enqueue.isPending ||
-              !catalog.data?.yfinance_enabled
+              !(catalog.data?.yfinance_enabled || catalog.data?.twse_enabled)
             }
             onClick={() => void submit({ operation: "index_yahoo" })}
           >

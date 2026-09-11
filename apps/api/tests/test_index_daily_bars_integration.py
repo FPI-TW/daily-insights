@@ -23,8 +23,12 @@ from daily_insights_api.core.enums import SystemRole, UserStatus
 from daily_insights_api.modules.data_sources.api import (
     TRACKED_INDICES,
     DailyBar,
+    DataSourceContractError,
     IndexSymbol,
     Provenance,
+    TaiexDailyBar,
+    TaiexDailyBars,
+    TwseAdapter,
     YfinanceAdapter,
     YfinanceDailyBars,
 )
@@ -42,9 +46,19 @@ from daily_insights_api.modules.markets.models import (
     OrganizationMarketPolicy,
 )
 from daily_insights_api.modules.markets.service import (
+    AUTOMATIC_SHORT_REFRESH_PERIOD,
+    INITIAL_SERIES_BACKFILL_PERIOD,
     MAX_BIND_PARAMETERS,
+    MAX_CONSECUTIVE_TAIEX_FAILURES,
     MAX_FETCH_CONCURRENCY,
+    TAIEX_INCREMENTAL_MONTHS,
+    TAIEX_INITIAL_BACKFILL_MONTHS,
+    YAHOO_REFRESH_LOCK_KEY,
+    YFINANCE_INDICES,
     IndexProviderConflictError,
+    refresh_taiex_daily_bars,
+    select_taiex_refresh_months,
+    taiex_months,
 )
 from daily_insights_api.modules.tenancy.models import Organization
 from daily_insights_api.web.app import create_app
@@ -290,14 +304,18 @@ async def test_first_short_refresh_backfills_a_new_symbol_then_returns_to_short_
     )
 
     async with session_factory.begin() as database:
-        await refresh_index_daily_bars(database, adapter=adapter, symbols=["^NDX"], period="7d")
-    assert cast(_RecordingAdapter, adapter).periods == [("^NDX", "2y")]
+        await refresh_index_daily_bars(
+            database, adapter=adapter, symbols=["^NDX"], period=AUTOMATIC_SHORT_REFRESH_PERIOD
+        )
+    assert cast(_RecordingAdapter, adapter).periods == [("^NDX", INITIAL_SERIES_BACKFILL_PERIOD)]
 
     async with session_factory.begin() as database:
-        await refresh_index_daily_bars(database, adapter=adapter, symbols=["^NDX"], period="7d")
+        await refresh_index_daily_bars(
+            database, adapter=adapter, symbols=["^NDX"], period=AUTOMATIC_SHORT_REFRESH_PERIOD
+        )
     assert cast(_RecordingAdapter, adapter).periods == [
-        ("^NDX", "2y"),
-        ("^NDX", "7d"),
+        ("^NDX", INITIAL_SERIES_BACKFILL_PERIOD),
+        ("^NDX", AUTOMATIC_SHORT_REFRESH_PERIOD),
     ]
 
 
@@ -310,7 +328,9 @@ async def test_a_failing_symbol_does_not_roll_back_the_others(
     results = {
         "^DJI": _result("^DJI", "us_equity", (_symbol_bar("^DJI", "us_equity", "100.0"),)),
         "^HSI": _result("^HSI", "hk_equity", (_symbol_bar("^HSI", "not_a_market", "200.0"),)),
-        "^TWII": _result("^TWII", "tw_equity", (_symbol_bar("^TWII", "tw_equity", "300.0"),)),
+        "000001.SS": _result(
+            "000001.SS", "cn_equity", (_symbol_bar("000001.SS", "cn_equity", "300.0"),)
+        ),
     }
     adapter = cast(YfinanceAdapter, _StubAdapter(results))
 
@@ -318,17 +338,17 @@ async def test_a_failing_symbol_does_not_roll_back_the_others(
         refreshed, failures = await refresh_index_daily_bars(
             database,
             adapter=adapter,
-            symbols=["^DJI", "^HSI", "^TWII"],
+            symbols=["^DJI", "^HSI", "000001.SS"],
             period="7d",
         )
 
-    assert [entry.result.symbol for entry in refreshed] == ["^DJI", "^TWII"]
+    assert [entry.result.symbol for entry in refreshed] == ["^DJI", "000001.SS"]
     assert [entry.symbol for entry in failures] == ["^HSI"]
     assert "ValueError" in failures[0].error
 
     async with session_factory() as database:
         stored = (await database.scalars(select(IndexDailyBar.symbol))).all()
-        assert sorted(stored) == ["^DJI", "^TWII"]
+        assert sorted(stored) == ["000001.SS", "^DJI"]
 
 
 async def test_a_backfill_larger_than_the_bind_parameter_limit_is_chunked(
@@ -385,7 +405,7 @@ async def test_symbols_are_fetched_concurrently_and_written_in_order(
     # the fetches overlap. The writes must stay sequential: an AsyncSession is
     # not safe for concurrent use.
     stub = _SlowStubAdapter(delay=0.05)
-    symbols = list(TRACKED_INDICES)
+    symbols = list(YFINANCE_INDICES)
 
     async with session_factory.begin() as database:
         refreshed, failures = await refresh_index_daily_bars(
@@ -475,22 +495,24 @@ async def test_provider_conflict_stays_isolated_to_one_refresh_symbol(
     results = {
         "^DJI": _result("^DJI", "us_equity", (_symbol_bar("^DJI", "us_equity", "100.0"),)),
         "^HSI": _result("^HSI", "hk_equity", (_symbol_bar("^HSI", "hk_equity", "200.0"),)),
-        "^TWII": _result("^TWII", "tw_equity", (_symbol_bar("^TWII", "tw_equity", "300.0"),)),
+        "000001.SS": _result(
+            "000001.SS", "cn_equity", (_symbol_bar("000001.SS", "cn_equity", "300.0"),)
+        ),
     }
     async with session_factory.begin() as database:
         refreshed, failures = await refresh_index_daily_bars(
             database,
             adapter=cast(YfinanceAdapter, _StubAdapter(results)),
-            symbols=["^DJI", "^HSI", "^TWII"],
+            symbols=["^DJI", "^HSI", "000001.SS"],
             period="7d",
         )
 
-    assert [entry.result.symbol for entry in refreshed] == ["^DJI", "^TWII"]
+    assert [entry.result.symbol for entry in refreshed] == ["^DJI", "000001.SS"]
     assert [entry.symbol for entry in failures] == ["^HSI"]
     assert "IndexProviderConflictError" in failures[0].error
     async with session_factory() as database:
         stored = (await database.scalars(select(IndexDailyBar.symbol))).all()
-        assert sorted(stored) == ["^DJI", "^HSI", "^TWII"]
+        assert sorted(stored) == ["000001.SS", "^DJI", "^HSI"]
 
 
 async def test_concurrent_different_provider_claims_serialize(
@@ -1002,3 +1024,254 @@ async def test_the_same_provider_still_updates_an_existing_row(
         row = await database.scalar(select(IndexDailyBar))
         assert row is not None
         assert row.close == Decimal("123.5")
+
+
+async def test_an_empty_taiex_series_widens_the_incremental_window_to_the_backfill(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The provider switch deletes ^TWII's rows and backfills nothing.
+
+    Without this the refresh would only ever ask for its incremental window and
+    the two years behind it would never come back. Mirrors the Yahoo path's
+    two-year bootstrap for a series with no stored bars.
+    """
+    today = date(2026, 9, 11)
+
+    async with session_factory() as database:
+        empty = await select_taiex_refresh_months(
+            database, today=today, requested_months=TAIEX_INCREMENTAL_MONTHS
+        )
+    assert len(empty) == TAIEX_INITIAL_BACKFILL_MONTHS
+    assert empty[-1] == date(2026, 9, 1)
+    assert empty[0] == date(2024, 9, 1)
+
+    async with session_factory.begin() as database:
+        await _store_as(database, [_bar(date(2026, 9, 1), "100.0")], "twse")
+
+    async with session_factory() as database:
+        populated = await select_taiex_refresh_months(
+            database, today=today, requested_months=TAIEX_INCREMENTAL_MONTHS
+        )
+    assert list(populated) == [date(2026, 8, 1), date(2026, 9, 1)]
+
+
+async def test_an_explicit_taiex_window_is_never_widened(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # A CLI backfill asking for three months means three, even on an empty
+    # series: only the incremental default carries the bootstrap.
+    async with session_factory() as database:
+        months = await select_taiex_refresh_months(
+            database, today=date(2026, 9, 11), requested_months=3
+        )
+    assert list(months) == [date(2026, 7, 1), date(2026, 8, 1), date(2026, 9, 1)]
+
+
+class _StubTwseAdapter:
+    def __init__(
+        self,
+        month: date,
+        close: str = "100.0",
+        failing_months: frozenset[date] = frozenset(),
+    ) -> None:
+        self._month = month
+        self._close = close
+        self._failing_months = failing_months
+        self.asked: list[date] = []
+
+    async def get_taiex_daily_bars(self, month: date) -> TaiexDailyBars:
+        self.asked.append(month)
+        if month in self._failing_months:
+            raise DataSourceContractError(f"{month:%Y-%m} is not a TAIEX report")
+        return TaiexDailyBars(
+            month=month,
+            items=(
+                TaiexDailyBar(
+                    trade_date=month,
+                    open=Decimal("100.0"),
+                    high=Decimal("101.0"),
+                    low=Decimal("99.0"),
+                    close=Decimal(self._close),
+                    volume=1_000,
+                ),
+            ),
+            fetched_at=FETCHED_AT,
+        )
+
+
+async def test_a_taiex_write_failure_surfaces_its_cause_and_frees_the_shared_lock(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A failed write must not poison the transaction the lock release needs.
+
+    `pg_advisory_lock` is session-scoped, so the `finally` clause is the only
+    thing that gives it back. If the write aborts the surrounding transaction,
+    that release raises PendingRollbackError instead -- masking the real cause
+    and leaking the lock, which every later index refresh then blocks on.
+    """
+    month = date(2026, 9, 1)
+    # Hand ^TWII to another provider so the write is refused.
+    async with session_factory.begin() as database:
+        await _store_as(database, [_bar(month, "100.0")], "twelve_data")
+
+    with pytest.raises(IndexProviderConflictError):
+        await refresh_taiex_daily_bars(
+            session_factory,
+            adapter=cast(TwseAdapter, _StubTwseAdapter(month)),
+            months=[month],
+        )
+
+    # The lock is free: a fresh session can take and drop it without blocking.
+    async with session_factory() as database:
+        acquired = await database.scalar(select(func.pg_try_advisory_lock(YAHOO_REFRESH_LOCK_KEY)))
+        assert acquired is True
+        await database.execute(select(func.pg_advisory_unlock(YAHOO_REFRESH_LOCK_KEY)))
+
+
+async def test_a_taiex_write_failure_is_reported_without_poisoning_the_transaction(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A value the adapter let through must not cost us the session lock.
+
+    numeric(20,10) overflows above ten integer digits. Unlike the ownership
+    refusal above -- which raises before any INSERT -- this aborts the
+    transaction, so without a savepoint every later statement in it fails too,
+    including the `pg_advisory_unlock` in the `finally`. That lock is
+    session-scoped: losing it leaves it held by a pooled connection and every
+    later index refresh blocks on it indefinitely. Verified against pg_locks
+    before the fix: the lock stayed granted and the cause surfaced as a bare
+    InternalError.
+    """
+    month = date(2026, 9, 1)
+    # The only month failed, so there is nothing to return -- but the cause is
+    # carried rather than replaced by a bare InternalError.
+    with pytest.raises(DataSourceContractError, match="DataError: numeric field overflow"):
+        await refresh_taiex_daily_bars(
+            session_factory,
+            adapter=cast(TwseAdapter, _StubTwseAdapter(month, close="1" + "0" * 11)),
+            months=[month],
+        )
+
+    async with session_factory() as database:
+        held = await database.scalar(
+            text("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'")
+        )
+        assert held == 0
+
+
+async def test_one_bad_month_does_not_discard_the_backfill(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A 25-month bootstrap must not be all-or-nothing.
+
+    Discarding every month over one bad one is unrecoverable: the series stays
+    empty, so the next run widens back to the same window and meets the same
+    month again. Same failure shape this PR removed from the Yahoo path, where
+    one unsettled row used to discard a symbol's whole history.
+    """
+    months = [date(2026, 7, 1), date(2026, 8, 1), date(2026, 9, 1)]
+    adapter = _StubTwseAdapter(months[0], failing_months=frozenset({months[1]}))
+
+    refreshed = await refresh_taiex_daily_bars(
+        session_factory, adapter=cast(TwseAdapter, adapter), months=months
+    )
+
+    assert refreshed.stored_count == 2
+    assert refreshed.failed_months == (
+        "2026-08: DataSourceContractError: 2026-08 is not a TAIEX report",
+    )
+    assert refreshed.aborted is False
+    # The walk carried on past the bad month rather than stopping there.
+    assert adapter.asked == months
+
+    # The series is no longer empty, so the next run is incremental rather than
+    # widening into the same failure again.
+    async with session_factory() as database:
+        stored = (await database.scalars(select(IndexDailyBar.trade_date))).all()
+        assert sorted(stored) == [date(2026, 7, 1), date(2026, 9, 1)]
+        months_next = await select_taiex_refresh_months(
+            database, today=date(2026, 9, 11), requested_months=TAIEX_INCREMENTAL_MONTHS
+        )
+    assert len(months_next) == TAIEX_INCREMENTAL_MONTHS
+
+
+async def test_a_dead_twse_stops_the_walk_instead_of_asking_every_month(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # Three failures in a row means the source is down, not that one month is
+    # bad. Asking the remaining 22 would cost minutes of spaced requests.
+    months = list(taiex_months(start=date(2024, 9, 1), end=date(2026, 9, 1)))
+    adapter = _StubTwseAdapter(months[0], failing_months=frozenset(months))
+
+    with pytest.raises(DataSourceContractError, match="stored no TAIEX sessions"):
+        await refresh_taiex_daily_bars(
+            session_factory, adapter=cast(TwseAdapter, adapter), months=months
+        )
+
+    assert len(adapter.asked) == MAX_CONSECUTIVE_TAIEX_FAILURES
+
+
+async def test_a_slow_taiex_fetch_does_not_block_a_yahoo_refresh(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The two providers must not serialise against each other.
+
+    The Yahoo lock exists to stop two Yahoo callers duplicating credits and
+    cookies. TWSE paces itself and is a different provider, so sharing that key
+    only meant a 25-month backfill -- minutes of spaced requests -- blocked the
+    admin page's manual refresh past its deadline.
+    """
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class _SlowAdapter(_StubTwseAdapter):
+        async def get_taiex_daily_bars(self, month: date) -> TaiexDailyBars:
+            started.set()
+            await release.wait()
+            return await super().get_taiex_daily_bars(month)
+
+    month = date(2026, 9, 1)
+    taiex = asyncio.create_task(
+        refresh_taiex_daily_bars(
+            session_factory,
+            adapter=cast(TwseAdapter, _SlowAdapter(month)),
+            months=[month],
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=5)
+
+    # Nothing is held while the fetch runs: the write takes the lock, and this
+    # is the whole reason minutes of spaced requests cost no contention.
+    async with session_factory() as database:
+        held = await database.scalar(
+            text("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'")
+        )
+        assert held == 0
+
+    # The Yahoo half must complete while that fetch is still in flight.
+    async with session_factory.begin() as database:
+        refreshed, failures = await asyncio.wait_for(
+            refresh_index_daily_bars(
+                database,
+                adapter=cast(
+                    YfinanceAdapter,
+                    _StubAdapter(
+                        {
+                            "^DJI": _result(
+                                "^DJI",
+                                "us_equity",
+                                (_symbol_bar("^DJI", "us_equity", "1.0"),),
+                            )
+                        }
+                    ),
+                ),
+                symbols=["^DJI"],
+                period=AUTOMATIC_SHORT_REFRESH_PERIOD,
+            ),
+            timeout=5,
+        )
+    assert [entry.result.symbol for entry in refreshed] == ["^DJI"]
+    assert failures == []
+
+    release.set()
+    await taiex

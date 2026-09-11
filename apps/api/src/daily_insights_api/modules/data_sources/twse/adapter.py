@@ -15,6 +15,7 @@ import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import httpx
@@ -28,12 +29,39 @@ logger = logging.getLogger(__name__)
 
 MARKET_FLOWS_PATH = "/rwd/zh/fund/BFI82U"
 STOCK_FLOWS_PATH = "/rwd/zh/fund/T86"
+# TAIEX daily bars need both of these: the index report carries open/high/low/
+# close with no volume, and the trading highlights carry volume with only a
+# close. Both answer with a whole calendar month per request, keyed on any date
+# within it, and both are the English views so the dates are Gregorian rather
+# than the ROC years the zh views use.
+TAIEX_INDEX_PATH = "/en/indicesReport/MI_5MINS_HIST"
+TAIEX_TRADING_PATH = "/en/exchangeReport/FMTQIK"
+# Neither report names the index in its rows: each path serves exactly one
+# series, so the payload only identifies it in the title ("2026/09 TAIEX Total
+# Index Historical Data", stable across every month probed from 2024 to 2026)
+# and, for the trading report, in a column name. We store these under Yahoo's
+# ^TWII ticker, so this is the only thing standing between a changed endpoint
+# and quietly writing some other index into that series.
+TAIEX_TITLE_MARKER = "TAIEX"
+TAIEX_INDEX_FIELDS = (
+    "Date",
+    "Opening Index",
+    "Highest Index",
+    "Lowest Index",
+    "Closing Index",
+)
+TAIEX_TRADING_FIELDS = ("Date", "Trade Volume", "TAIEX")
 # `ALL` also returns ~15k warrant rows; this keeps the ~1.3k securities.
 STOCK_FLOWS_SELECT_TYPE = "ALLBUT0999"
 # TWSE answers both "that date had no trading" and "that date is not published
 # yet" with HTTP 200 and a Chinese `stat`; neither is contract drift. A morning
 # run asks for today before the ~16:00 publication and gets the second one.
-NO_DATA_STAT_MARKERS = ("沒有符合條件", "大於可查詢最大日期")
+NO_DATA_STAT_MARKERS = (
+    "沒有符合條件",
+    "大於可查詢最大日期",
+    # The English views answer a month that has not happened yet with this.
+    "greater than today",
+)
 # Each transient failure waits one more interval; six intervals is the ceiling.
 MAX_BACKOFF_INTERVALS = 5
 
@@ -85,6 +113,13 @@ TWSE_CONTRACT_HASH = hashlib.sha256(
     ).encode()
 ).hexdigest()
 
+# Separate from TWSE_CONTRACT_VERSION: the institutional endpoints and the
+# TAIEX ones drift independently, and a stored bar should say which shape of
+# which report it came from. There is no matching hash: the institutional
+# endpoints have one because their responses carry a Provenance to the API,
+# and index_daily_bars stores only the version.
+TAIEX_CONTRACT_VERSION = "twse-taiex-v1"
+
 Sleep = Callable[[float], Awaitable[None]]
 Monotonic = Callable[[], float]
 
@@ -119,6 +154,28 @@ class TwseStockFlow:
 class TwseStockFlows:
     trade_date: date
     items: tuple[TwseStockFlow, ...]
+    fetched_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class TaiexDailyBar:
+    trade_date: date
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    # None when the index report published a session the trading highlights
+    # have not; the column is nullable and a missing volume must not cost us an
+    # otherwise complete bar.
+    volume: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class TaiexDailyBars:
+    """One calendar month of TAIEX bars, in trade-date order."""
+
+    month: date
+    items: tuple[TaiexDailyBar, ...]
     fetched_at: datetime
 
 
@@ -168,6 +225,142 @@ def _cell(row: list[Any], index: int, field: str) -> Any:
 def _check_net(buy: int, sell: int, net: int, label: str) -> None:
     if net != buy - sell:
         raise DataSourceContractError(f"{label} net does not equal buy minus sell")
+
+
+def _parse_decimal(value: object, field: str) -> Decimal:
+    if not isinstance(value, str):
+        raise DataSourceContractError(f"{field} is not a string")
+    try:
+        return Decimal(value.replace(",", "").strip())
+    except InvalidOperation as error:
+        raise DataSourceContractError(f"{field} is not a number") from error
+
+
+def _parse_trade_date(value: object, field: str) -> date:
+    """The English views date rows as `YYYY/MM/DD`."""
+    if not isinstance(value, str):
+        raise DataSourceContractError(f"{field} is not a string")
+    try:
+        return datetime.strptime(value.strip(), "%Y/%m/%d").date()
+    except ValueError as error:
+        raise DataSourceContractError(f"{field} is not a YYYY/MM/DD date") from error
+
+
+def _month_rows(payload: Mapping[str, Any], month: date) -> list[list[Any]] | None:
+    """`_rows` for the month-wide TAIEX endpoints.
+
+    It differs only in the date check: these echo back the requested date, which
+    is any day inside the month rather than a trading date, so matching it
+    against a single trade date would reject every valid response.
+    """
+    stat = payload.get("stat")
+    if stat != "OK":
+        if isinstance(stat, str) and any(marker in stat for marker in NO_DATA_STAT_MARKERS):
+            return None
+        logger.warning("twse returned unexpected stat %r for %s", stat, month)
+        raise DataSourceContractError("unexpected stat")
+    rows = payload.get("data")
+    if not isinstance(rows, list):
+        raise DataSourceContractError("data is not a list")
+    return rows or None
+
+
+def parse_taiex_index_history(
+    payload: Mapping[str, Any], *, month: date
+) -> dict[date, tuple[Decimal, Decimal, Decimal, Decimal]]:
+    """Open/high/low/close per trade date from MI_5MINS_HIST."""
+    rows = _month_rows(payload, month)
+    if rows is None:
+        return {}
+    title = payload.get("title")
+    if not isinstance(title, str) or TAIEX_TITLE_MARKER not in title:
+        raise DataSourceContractError(f"index history is not a {TAIEX_TITLE_MARKER} report")
+    indexes = _field_indexes(payload, TAIEX_INDEX_FIELDS)
+    bars: dict[date, tuple[Decimal, Decimal, Decimal, Decimal]] = {}
+    for row in rows:
+        if not isinstance(row, list):
+            raise DataSourceContractError("index history row is not a list")
+        trade_date = _parse_trade_date(_cell(row, indexes["Date"], "Date"), "Date")
+        if trade_date.year != month.year or trade_date.month != month.month:
+            raise DataSourceContractError(f"{trade_date} is outside the requested month")
+        if trade_date in bars:
+            raise DataSourceContractError(f"index history repeated {trade_date}")
+        values = [
+            _parse_decimal(_cell(row, indexes[field], field), field)
+            for field in ("Opening Index", "Highest Index", "Lowest Index", "Closing Index")
+        ]
+        bars[trade_date] = (values[0], values[1], values[2], values[3])
+    return bars
+
+
+def parse_taiex_trading_volumes(
+    payload: Mapping[str, Any], *, month: date
+) -> dict[date, tuple[int, Decimal]]:
+    """Volume and the close it belongs to, per trade date, from FMTQIK."""
+    rows = _month_rows(payload, month)
+    if rows is None:
+        return {}
+    indexes = _field_indexes(payload, TAIEX_TRADING_FIELDS)
+    volumes: dict[date, tuple[int, Decimal]] = {}
+    for row in rows:
+        if not isinstance(row, list):
+            raise DataSourceContractError("trading highlights row is not a list")
+        trade_date = _parse_trade_date(_cell(row, indexes["Date"], "Date"), "Date")
+        if trade_date.year != month.year or trade_date.month != month.month:
+            raise DataSourceContractError(f"{trade_date} is outside the requested month")
+        if trade_date in volumes:
+            raise DataSourceContractError(f"trading highlights repeated {trade_date}")
+        volume = _parse_int(_cell(row, indexes["Trade Volume"], "Trade Volume"), "Trade Volume")
+        if volume < 0:
+            raise DataSourceContractError(f"{trade_date} has a negative trade volume")
+        volumes[trade_date] = (
+            volume,
+            _parse_decimal(_cell(row, indexes["TAIEX"], "TAIEX"), "TAIEX"),
+        )
+    return volumes
+
+
+def build_taiex_daily_bars(
+    *,
+    month: date,
+    index_history: Mapping[date, tuple[Decimal, Decimal, Decimal, Decimal]],
+    trading_volumes: Mapping[date, tuple[int, Decimal]],
+    fetched_at: datetime,
+) -> TaiexDailyBars:
+    """Join the two reports on trade date.
+
+    The index report decides which sessions exist, because a bar without a
+    close cannot be stored at all. Both reports carry the closing index, so
+    disagreement between them means the two requests straddled a correction or
+    we are reading the wrong column; either way the month is not trustworthy.
+    """
+    items: list[TaiexDailyBar] = []
+    for trade_date in sorted(index_history):
+        open_index, high, low, close = index_history[trade_date]
+        if close <= 0:
+            raise DataSourceContractError(f"{trade_date} closed at {close}")
+        if high < low:
+            raise DataSourceContractError(f"{trade_date} has high {high} below low {low}")
+        volume: int | None = None
+        published = trading_volumes.get(trade_date)
+        if published is not None:
+            volume, reported_close = published
+            if reported_close != close:
+                raise DataSourceContractError(
+                    f"{trade_date} closed at {close} in the index report but "
+                    f"{reported_close} in the trading highlights"
+                )
+        items.append(
+            TaiexDailyBar(
+                trade_date=trade_date,
+                open=open_index,
+                high=high,
+                low=low,
+                close=close,
+                volume=volume,
+            )
+        )
+    return TaiexDailyBars(month=month, items=tuple(items), fetched_at=fetched_at)
 
 
 def parse_market_flows(
@@ -299,6 +492,26 @@ class TwseAdapter:
             },
         )
         return parse_stock_flows(payload, trade_date=trade_date, fetched_at=fetched_at)
+
+    async def get_taiex_daily_bars(self, month: date) -> TaiexDailyBars:
+        """One calendar month of TAIEX bars, from the two reports that hold them.
+
+        Both requests go through the same spacing as every other TWSE call, so
+        a month costs two intervals. `month` may be any date inside the month.
+        """
+        requested = month.strftime("%Y%m%d")
+        index_payload, index_fetched_at = await self._get(
+            TAIEX_INDEX_PATH, {"response": "json", "date": requested}
+        )
+        volume_payload, _ = await self._get(
+            TAIEX_TRADING_PATH, {"response": "json", "date": requested}
+        )
+        return build_taiex_daily_bars(
+            month=month,
+            index_history=parse_taiex_index_history(index_payload, month=month),
+            trading_volumes=parse_taiex_trading_volumes(volume_payload, month=month),
+            fetched_at=index_fetched_at,
+        )
 
     async def _get(self, path: str, params: Mapping[str, str]) -> tuple[dict[str, Any], datetime]:
         """Retry transient failures in place; a lost date is only refetched on

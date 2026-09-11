@@ -88,6 +88,9 @@ def _admin_client(
             morning_reports_enabled=enabled,
             twelve_data_api_key="test-key",
             yfinance_enabled=enabled,
+            # The index run covers Yahoo and TWSE, so "no provider enabled"
+            # now means both are off.
+            twse_enabled=enabled,
         ),
         readiness(True),
         session_factory=factory,
