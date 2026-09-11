@@ -120,8 +120,16 @@ async def run_refresh(
             symbols=list(YFINANCE_INDICES),
             period=period,
         )
-    taiex_stored, taiex_error = await _refresh_taiex(
-        session_factory, settings=settings, months_back=taiex_months_back
+    # A disabled provider is a deliberate configuration, not a failed run. The
+    # Yahoo half says the same thing by never entering the schedule at all (see
+    # `main`), and no retry can turn a flag on, so the TAIEX half is skipped
+    # rather than failed -- otherwise every run would report failure and drag
+    # the eight Yahoo symbols through a same-day retry until noon with it.
+    taiex_skipped = not settings.twse_enabled
+    taiex_stored, taiex_error = (
+        (0, None)
+        if taiex_skipped
+        else await _refresh_taiex(session_factory, settings=settings, months_back=taiex_months_back)
     )
     emit_event(
         "index_daily_bars.refreshed",
@@ -132,6 +140,7 @@ async def run_refresh(
         + ([TAIEX_SYMBOL] if taiex_error is not None else []),
         taiex_months=taiex_months_back,
         taiex_error=taiex_error,
+        taiex_skipped=taiex_skipped,
     )
     if taiex_error is not None:
         return "failed"
@@ -150,13 +159,13 @@ async def _refresh_taiex(
 ) -> tuple[int, str | None]:
     """Refresh ^TWII from TWSE, returning rows stored and any failure message.
 
-    Kept out of `run_refresh`'s transaction: TWSE spaces its requests, so a long
-    backfill would otherwise hold one open for minutes.
+    Callers check `twse_enabled` first; reaching here means the provider is on,
+    so anything that goes wrong from this point is a real failure worth
+    retrying. Kept out of `run_refresh`'s transaction: TWSE spaces its
+    requests, so a long backfill would otherwise hold one open for minutes.
     """
     if months_back < 1:
         raise ValueError("taiex months must be at least 1")
-    if not settings.twse_enabled:
-        return 0, "twse is not enabled"
     today = datetime.now(TAIPEI).date()
     adapter = TwseAdapter(
         base_url=settings.twse_base_url,
