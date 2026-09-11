@@ -7,6 +7,7 @@ import time
 import unicodedata
 from collections import Counter
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -22,6 +23,7 @@ from daily_insights_api.modules.news.contracts import (
 )
 from daily_insights_api.modules.news.editions import GLOBAL_SPEC, SelectionPolicy
 from daily_insights_api.modules.news.extraction import FetchedCandidate
+from daily_insights_api.modules.news.failures import parse_retry_after
 from daily_insights_api.modules.news.prompts import SelectionCriteria, load_selection_criteria
 
 
@@ -42,6 +44,7 @@ class ModelCallError(ModelOutputError):
         request_id: str | None = None,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
+        retry_after: datetime | None = None,
     ) -> None:
         super().__init__(message)
         self.error_code = error_code
@@ -50,6 +53,7 @@ class ModelCallError(ModelOutputError):
         self.request_id = request_id
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
+        self.retry_after = retry_after
 
 
 TOPIC_VALUES = ["markets", "economy", "companies", "policy", "technology", "commodities"]
@@ -171,6 +175,7 @@ class ModelCall:
     # The model's full validated list in its own order, before filtering and
     # repair; empty for summaries and for callers that construct positionally.
     returned: tuple[SelectedCandidate, ...] = ()
+    reused: bool = False
 
 
 @dataclass(frozen=True)
@@ -687,6 +692,9 @@ def _provider_failure(
         request_id=response.headers.get("x-request-id") if response is not None else None,
         input_tokens=_optional_int(usage.get("prompt_tokens")),
         output_tokens=_optional_int(usage.get("completion_tokens")),
+        retry_after=parse_retry_after(response.headers.get("retry-after"), datetime.now(UTC))
+        if response is not None
+        else None,
     )
 
 

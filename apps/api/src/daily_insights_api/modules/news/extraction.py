@@ -106,6 +106,12 @@ class _SafeArticleTransport(AsyncBaseTransport):
         )
 
     async def handle_async_request(self, request: httpx.Request) -> Response:
+        from daily_insights_api.modules.news.recovery import check_dependency, current_workflow
+
+        workflow = current_workflow()
+        if workflow is not None:
+            await workflow.check(workflow.stage)
+            await check_dependency(workflow, f"source:{request.url.host}")
         assert isinstance(request.stream, AsyncByteStream)
         core_request = httpcore.Request(
             method=request.method,
@@ -238,8 +244,11 @@ async def robots_allowed(client: httpx.AsyncClient, url: str, allowed: frozenset
     ) as response:
         if response.is_redirect:
             return False
-        if response.status_code >= 400:
+        if response.status_code in {404, 410}:
             return True
+        # A temporary robots outage is not permission to crawl. Preserve HTTP
+        # metadata (especially Retry-After) for the source recovery policy.
+        response.raise_for_status()
         chunks: list[bytes] = []
         size = 0
         async for chunk in response.aiter_bytes():

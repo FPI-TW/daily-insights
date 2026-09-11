@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
+from daily_insights_api.modules.news.failures import NewsFailure, NewsStage
+
 Locale = Literal["zh-hant", "zh-hans", "en"]
 NewsStatus = Literal["complete", "partial", "unavailable"]
 
@@ -50,3 +52,16 @@ class LocalizedSummary(StrictModel):
     headline: str = Field(min_length=1, max_length=1000)
     summary: str = Field(min_length=1, max_length=3000)
     numeric_facts: tuple[str, ...] = Field(default=(), max_length=20)
+
+
+class NewsProgress(BaseModel):
+    id: str
+    state: Literal[
+        "queued", "running", "waiting_retry", "needs_attention", "completed", "expired", "cancelled"
+    ]
+    stage: NewsStage
+    progress: dict[str, int]
+    failures: list[NewsFailure]
+    attempt: int
+    next_retry_at: datetime | None
+    publication: Literal["technical_degradation", "editorial_shortfall", "available"]

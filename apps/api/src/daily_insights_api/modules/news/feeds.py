@@ -1112,6 +1112,19 @@ async def discover_feed_candidates(
     live in memory only; they are never persisted.
     """
     end = now or datetime.now(UTC)
+    # Local import avoids coupling the pure feed parsers to model execution.
+    from daily_insights_api.modules.news.failures import NewsFailure, NewsOperationError
+    from daily_insights_api.modules.news.recovery import (
+        check_dependency,
+        current_workflow,
+        fingerprint,
+        source_failure,
+        source_success,
+    )
+
+    workflow = current_workflow()
+    if workflow is not None:
+        workflow.progress["feeds_ok"] = 0
     start = end - timedelta(hours=24)
     resolved_settings = settings or get_settings()
     result: list[Candidate] = []
@@ -1119,8 +1132,36 @@ async def discover_feed_candidates(
     for source in FEED_SOURCES:
         if market not in source.markets or not allowed_hostname(source.hostname, allowed):
             continue
+        checkpoint = None
+        feed_host = (urlparse(source.url).hostname or "").lower()
+        if workflow is not None:
+            checkpoint = await workflow.checkpoint(fingerprint(["feed", source.url]), "feed")
+            if checkpoint.failure is not None and checkpoint.failure.get("action") == "skip":
+                await workflow.record(NewsFailure.model_validate(checkpoint.failure))
+                continue
+            if checkpoint.result is not None and not source.provides_full_text:
+                workflow.progress["feeds_ok"] += 1
+                result.extend(
+                    Candidate.model_validate(item) for item in checkpoint.result["candidates"]
+                )
+                continue
         url = request_url(source, resolved_settings)
         if url is None:
+            if workflow is not None and checkpoint is not None:
+                await source_failure(
+                    workflow,
+                    checkpoint,
+                    NewsOperationError(
+                        NewsFailure(
+                            code="source_configuration_missing",
+                            stage="feed",
+                            action="skip",
+                            scope=f"source:{feed_host}",
+                        )
+                    ),
+                    stage="feed",
+                    hostname=feed_host,
+                )
             emit_event(
                 "news.feed.skipped",
                 hostname=source.hostname,
@@ -1131,6 +1172,21 @@ async def discover_feed_candidates(
         feed_host = (urlparse(source.url).hostname or "").lower()
         headers = request_headers(source, resolved_settings)
         if source.contact_email_setting and headers is None:
+            if workflow is not None and checkpoint is not None:
+                await source_failure(
+                    workflow,
+                    checkpoint,
+                    NewsOperationError(
+                        NewsFailure(
+                            code="source_configuration_missing",
+                            stage="feed",
+                            action="skip",
+                            scope=f"source:{feed_host}",
+                        )
+                    ),
+                    stage="feed",
+                    hostname=feed_host,
+                )
             emit_event(
                 "news.feed.skipped",
                 hostname=source.hostname,
@@ -1139,6 +1195,9 @@ async def discover_feed_candidates(
             )
             continue
         try:
+            if workflow is not None:
+                await workflow.check("feed")
+                await check_dependency(workflow, f"source:{feed_host}")
             if source.min_interval_seconds:
                 elapsed = asyncio.get_running_loop().time() - last_request.get(feed_host, -1e9)
                 if elapsed < source.min_interval_seconds:
@@ -1149,6 +1208,8 @@ async def discover_feed_candidates(
             payload = await _read_capped(client, url, headers)
             entries = parse_feed(source, payload)
         except Exception as error:
+            if workflow is not None and checkpoint is not None:
+                await source_failure(workflow, checkpoint, error, stage="feed", hostname=feed_host)
             emit_event(
                 "news.feed.failed",
                 hostname=source.hostname,
@@ -1181,6 +1242,14 @@ async def discover_feed_candidates(
                 max_age_hours=source.max_age_hours,
             )
         found = filter_window(parsed, start, end)[: source.max_items]
+        if workflow is not None and checkpoint is not None:
+            workflow.progress["feeds_ok"] += 1
+            checkpoint.result = {
+                "candidates": [candidate.model_dump(mode="json") for candidate in found]
+            }
+            checkpoint.failure = None
+            await workflow.store(checkpoint)
+            await source_success(workflow, f"source:{feed_host}", newest, len(found))
         if bodies is not None and source.provides_full_text:
             kept = {candidate.id for candidate in found}
             for candidate, body in entries:

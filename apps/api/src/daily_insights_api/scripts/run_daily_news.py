@@ -17,18 +17,13 @@ from daily_insights_api.modules.news.service import run_all_editions, run_news_e
 from daily_insights_api.modules.reports.scheduler import (
     TAIPEI,
     EditionRunner,
-    SameDayRetry,
     due_edition,
     maintain_disabled_heartbeat,
     parse_args,
-    run_scheduler,
     run_with_heartbeat,
 )
 
 HEARTBEAT_PATH = "/tmp/daily-news-heartbeat"
-# Retry short editions within the existing bounded morning window as fresh
-# candidates arrive; readers keep the last publishable edition throughout.
-RETRY_POLICY = SameDayRetry(retry_outcomes=frozenset({"unavailable", "partial"}))
 
 
 def configure_arguments(parser: argparse.ArgumentParser) -> None:
@@ -83,6 +78,13 @@ async def main() -> None:
     await heartbeat.touch()
     if not settings.daily_news_enabled and not args.once:
         await maintain_disabled_heartbeat(heartbeat)
+    if not args.once:
+        if getattr(args, "market", None) is not None:
+            raise SystemExit("--market requires --once; automatic news uses the durable queue")
+        from daily_insights_api.scripts.run_daily_news_scheduler import main as queue_scheduler
+
+        await queue_scheduler()
+        return
     api_key = settings.news_model_api_key
     if (
         api_key is None
@@ -109,8 +111,6 @@ async def main() -> None:
             if edition is None:
                 raise SystemExit("no edition is due yet; pass --edition-date")
             await runner(edition)
-        else:
-            await run_scheduler(runner, now=lambda: datetime.now(TAIPEI), retry=RETRY_POLICY)
     finally:
         await client.aclose()
         await engine.dispose()

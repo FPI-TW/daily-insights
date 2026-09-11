@@ -6,11 +6,11 @@ import re
 import uuid
 from collections import Counter
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -22,6 +22,7 @@ from daily_insights_api.modules.news.contracts import (
     SelectedCandidate,
     Selection,
 )
+from daily_insights_api.modules.news.curation import visible_item
 from daily_insights_api.modules.news.editions import (
     EDITION_ORDER,
     GLOBAL_SPEC,
@@ -34,6 +35,7 @@ from daily_insights_api.modules.news.extraction import (
     fetch_article,
     safe_article_client,
 )
+from daily_insights_api.modules.news.failures import classify_failure
 from daily_insights_api.modules.news.feeds import discover_feed_candidates, feed_client
 from daily_insights_api.modules.news.llm import (
     CoveredEvent,
@@ -48,6 +50,14 @@ from daily_insights_api.modules.news.models import (
     NewsGenerationAudit,
     NewsItem,
     NewsPresentation,
+)
+from daily_insights_api.modules.news.recovery import (
+    check_dependency,
+    current_workflow,
+    fingerprint,
+    model_step,
+    source_failure,
+    workflow_scope,
 )
 from daily_insights_api.modules.operations.api import sanitize_error_code
 
@@ -87,7 +97,7 @@ async def _retry[T](
         except Exception as error:
             if on_failure is not None:
                 on_failure(error)
-            if attempt:
+            if attempt or classify_failure(error, stage="summary").action != "repair":
                 raise
     raise AssertionError("unreachable")
 
@@ -97,6 +107,7 @@ async def _summarize_with_retry(
     fetched: FetchedCandidate,
     locale: str,
     on_failure: Callable[[Exception], None],
+    after_failure: Callable[[], Awaitable[None]] | None = None,
 ) -> ModelCall:
     feedback: str | None = None
 
@@ -111,7 +122,25 @@ async def _summarize_with_retry(
             feedback = error.error_code
         on_failure(error)
 
-    return await _retry(attempt, failed)
+    key = fingerprint(
+        [
+            "summary",
+            fetched.content_digest,
+            fetched.candidate.model_dump(mode="json"),
+            locale,
+            client.model_name,
+            SUMMARY_PROMPT_VERSION,
+        ]
+    )
+    return await model_step(
+        key,
+        "summary",
+        attempt,
+        failed,
+        locale=locale,
+        candidate_id=fetched.candidate.id,
+        after_failure=after_failure,
+    )
 
 
 def _digest(
@@ -234,6 +263,14 @@ async def _summarize_locales(
     """
     summaries: dict[str, LocalizedSummary] = {}
     attempt_digest = hashlib.sha256(fetched.content_digest.encode()).hexdigest()
+    workflow = current_workflow()
+
+    async def persist_audits() -> None:
+        if workflow is not None and audits:
+            async with workflow.execution.sessions.begin() as database:
+                database.add_all(audits)
+            audits.clear()
+
     for locale in LOCALES:
 
         def audit_attempt_failure(error: Exception, locale: str = locale) -> None:
@@ -249,12 +286,16 @@ async def _summarize_locales(
                 )
             )
 
-        call = await _summarize_with_retry(client, fetched, locale, audit_attempt_failure)
+        call = await _summarize_with_retry(
+            client, fetched, locale, audit_attempt_failure, persist_audits
+        )
         assert isinstance(call.value, LocalizedSummary)
         summaries[locale] = call.value
-        audits.append(
-            _audit(edition_id, "summary", locale, call, model_name, SUMMARY_PROMPT_VERSION)
-        )
+        if not call.reused:
+            audits.append(
+                _audit(edition_id, "summary", locale, call, model_name, SUMMARY_PROMPT_VERSION)
+            )
+        await persist_audits()
     return summaries
 
 
@@ -478,6 +519,17 @@ async def _fetch_usable_candidates(
     async with safe_article_client(allowed, timeout_seconds) as http:
 
         async def fetch_one(candidate: Candidate) -> FetchedCandidate | None:
+            workflow = current_workflow()
+            checkpoint = None
+            if workflow is not None:
+                checkpoint = await workflow.checkpoint(
+                    fingerprint(["article", candidate.id]), "article"
+                )
+                if checkpoint.failure is not None and checkpoint.failure.get("action") == "skip":
+                    from daily_insights_api.modules.news.failures import NewsFailure
+
+                    await workflow.record(NewsFailure.model_validate(checkpoint.failure))
+                    return None
             body = supplied.get(candidate.id)
             if body:
                 # Full-text feeds already passed the discovery allowlist; the
@@ -497,10 +549,23 @@ async def _fetch_usable_candidates(
                 )
             async with semaphore:
                 try:
+                    if workflow is not None:
+                        await workflow.check("article")
+                        await check_dependency(workflow, f"source:{candidate.hostname}")
                     source_url, body, source_published_at = await fetch_article(
                         http, str(candidate.url), allowed
                     )
                     emit_event("news.source.fetched", hostname=candidate.hostname, bytes=len(body))
+                    if workflow is not None and checkpoint is not None:
+                        checkpoint.failure = None
+                        checkpoint.result = {
+                            "candidate": candidate.model_dump(mode="json"),
+                            "content_digest": hashlib.sha256(body.encode()).hexdigest(),
+                            "source_published_at": source_published_at.isoformat()
+                            if source_published_at
+                            else None,
+                        }
+                        await workflow.store(checkpoint)
                     return FetchedCandidate(
                         candidate,
                         source_url,
@@ -509,6 +574,15 @@ async def _fetch_usable_candidates(
                         source_published_at,
                     )
                 except Exception as error:
+                    if workflow is not None and checkpoint is not None:
+                        await source_failure(
+                            workflow,
+                            checkpoint,
+                            error,
+                            stage="article",
+                            hostname=candidate.hostname,
+                            candidate_id=candidate.id,
+                        )
                     emit_event(
                         "news.source.failed",
                         hostname=candidate.hostname,
@@ -521,6 +595,51 @@ async def _fetch_usable_candidates(
 
 
 async def run_news_edition(
+    session_factory: async_sessionmaker[AsyncSession],
+    client: DeepSeekClient,
+    edition_date: date,
+    *,
+    allowed_hostnames: frozenset[str],
+    fetch_timeout_seconds: float = 25,
+    discovery_timeout_seconds: float = 30,
+    spec: EditionSpec = GLOBAL_SPEC,
+) -> str:
+    if edition_date != datetime.now(TAIPEI).date():
+        raise ValueError("daily news only generates the current Taipei edition")
+    async with workflow_scope(session_factory, edition_date, spec.market_code) as workflow:
+        result = await _generate_news_edition(
+            session_factory,
+            client,
+            edition_date,
+            allowed_hostnames=allowed_hostnames,
+            fetch_timeout_seconds=fetch_timeout_seconds,
+            discovery_timeout_seconds=discovery_timeout_seconds,
+            spec=spec,
+        )
+        if result == "idempotent":
+            async with session_factory() as database:
+                latest_id = (
+                    select(NewsEdition.id)
+                    .where(
+                        NewsEdition.edition_date == edition_date,
+                        NewsEdition.market_code == spec.market_code,
+                    )
+                    .order_by(NewsEdition.revision.desc())
+                    .limit(1)
+                    .scalar_subquery()
+                )
+                workflow.progress["published"] = (
+                    await database.scalar(
+                        select(func.count())
+                        .select_from(NewsItem)
+                        .where(NewsItem.edition_id == latest_id, visible_item(spec.market_code))
+                    )
+                    or 0
+                )
+        return result
+
+
+async def _generate_news_edition(
     session_factory: async_sessionmaker[AsyncSession],
     client: DeepSeekClient,
     edition_date: date,
@@ -581,6 +700,10 @@ async def run_news_edition(
         impact_patterns=spec.headline_impact_patterns,
     )
     emit_event("news.sources.usable", market=market_code, count=len(usable))
+    workflow = current_workflow()
+    if workflow is not None:
+        workflow.progress.update(discovered=len(feed_candidates), usable=len(usable))
+        await workflow.save()
     model_name = client.model_name
     selection_prompt_digest = client.selection_prompt_digest
     selection_prompt_version = client.selection_prompt_version
@@ -612,6 +735,7 @@ async def run_news_edition(
             latest is not None
             and latest.status == IDEMPOTENT_STATUS
             and latest.input_digest == input_digest
+            and (workflow is None or not workflow.resuming)
         ):
             await database.rollback()
             emit_event("news.edition.idempotent", edition_date=edition_date, market=market_code)
@@ -629,6 +753,9 @@ async def run_news_edition(
         )
         database.add(edition)
         await database.flush()
+        # Commit the immutable revision identity before calling the model.
+        # Audits and checkpoints use independent, short transactions thereafter.
+        await database.commit()
         if not usable:
             database.add_all(ledger.rows(edition.id))
             await database.commit()
@@ -669,7 +796,21 @@ async def run_news_edition(
                 )
 
             try:
-                call = await _retry(
+                call = await model_step(
+                    fingerprint(
+                        [
+                            "selection",
+                            _digest(
+                                batch,
+                                model_name,
+                                selection_prompt_digest,
+                                market_code,
+                                spec.selection,
+                            ),
+                            [asdict(event) for event in previous_events],
+                        ]
+                    ),
+                    "selection",
                     attempt,
                     lambda error: database.add(
                         _failed_audit(
@@ -682,13 +823,20 @@ async def run_news_edition(
                             prompt_version=selection_prompt_version,
                         )
                     ),
+                    after_failure=database.commit,
                 )
                 assert isinstance(call.value, Selection)
-                database.add(
-                    _audit(
-                        edition.id, "selection", None, call, model_name, selection_prompt_version
+                if not call.reused:
+                    database.add(
+                        _audit(
+                            edition.id,
+                            "selection",
+                            None,
+                            call,
+                            model_name,
+                            selection_prompt_version,
+                        )
                     )
-                )
             except Exception as error:
                 emit_event(
                     "news.selection.failed",
@@ -698,6 +846,8 @@ async def run_news_edition(
                     else type(error).__name__,
                 )
                 return None
+            finally:
+                await database.commit()
             ledger.returned(call)
             selection = call.value
             assert isinstance(selection, Selection)
@@ -761,6 +911,9 @@ async def run_news_edition(
                     )
                 finally:
                     database.add_all(audits)
+                    await database.commit()
+                if workflow is not None and workflow.model_stopped is not None:
+                    break
 
         # Screening: every batch of the pool is rated before anything is
         # summarised, so a five-star story in the second batch is seen even
@@ -795,10 +948,14 @@ async def run_news_edition(
         # events named so they are not chosen twice.
         refill_round = 0
         while (
-            len(publication.selections) < spec.target_items
-            or sum(item.importance == 4 for item in publication.selections)
-            < spec.selection.min_four_star_items
-        ) and selection_calls < MAX_SELECTION_ROUNDS:
+            (workflow is None or workflow.model_stopped is None)
+            and (
+                len(publication.selections) < spec.target_items
+                or sum(item.importance == 4 for item in publication.selections)
+                < spec.selection.min_four_star_items
+            )
+            and selection_calls < MAX_SELECTION_ROUNDS
+        ):
             covered_sources = Counter(selected[item.id].candidate.hostname for item in successful)
             remaining = [fetched for fetched in usable if fetched.candidate.id not in attempted]
             # Unreviewed articles first, then underrepresented sources.
@@ -824,7 +981,15 @@ async def run_news_edition(
                 attempted_count=len(attempted),
             )
         complete_count = len(publication.selections)
+        if workflow is not None:
+            await workflow.check("publication", external=False)
+        await database.execute(
+            select(func.pg_advisory_xact_lock(_lock_key(edition_date, market_code)))
+        )
         published_ids = {item.id for item in publication.selections}
+        visible_count = 0
+        if workflow is not None:
+            await workflow.fence_publication(database)
         for successful_item in successful:
             if successful_item.id not in published_ids:
                 # Summarised, but the publication could not keep it within the
@@ -834,6 +999,11 @@ async def run_news_edition(
             fetched = selected[selected_item.id]
             summaries = localized[selected_item.id]
             item = _news_item(edition.id, rank, selected_item, fetched, summaries)
+            hidden = await _hidden_source(database, market_code, item.source_url, item.event_key)
+            if hidden is not None:
+                item.hidden_at, item.hidden_by_user_id = hidden.hidden_at, hidden.hidden_by_user_id
+            else:
+                visible_count += 1
             database.add(item)
             await database.flush()
             database.add_all(_presentations(item.id, summaries))
@@ -841,10 +1011,31 @@ async def run_news_edition(
         edition.status, edition.caveat = _edition_status(complete_count, spec.target_items)
         database.add_all(ledger.rows(edition.id))
         await database.commit()
+        if workflow is not None:
+            workflow.progress["published"] = visible_count
         emit_event(
             "news.shortfall", market=market_code, status=edition.status, count=complete_count
         )
         return edition.status
+
+
+async def _hidden_source(
+    database: AsyncSession, market: str, url: str, event_key: str | None
+) -> NewsItem | None:
+    item = await database.scalar(
+        select(NewsItem)
+        .join(NewsEdition)
+        .where(
+            NewsEdition.market_code == market,
+            NewsItem.hidden_at.is_not(None),
+            or_(
+                NewsItem.source_url == url,
+                NewsItem.event_key == event_key if event_key else false(),
+            ),
+        )
+        .limit(1)
+    )
+    return item
 
 
 def _news_item(
@@ -1092,9 +1283,35 @@ async def _publish_candidate(
     """
     audits: list[NewsGenerationAudit] = []
     model_name = client.model_name
+    workflow = current_workflow()
+    async with session_factory() as database:
+        issue = await _manual_publication_issue(database, target, candidate)
+    if issue is not None:
+        await _record_publish_failure(session_factory, candidate.id, issue, audits)
+        return issue
+    checkpoint = None
     try:
+        if workflow is not None:
+            checkpoint = await workflow.checkpoint(
+                fingerprint(["article", candidate.candidate_id]), "article"
+            )
+            if checkpoint.failure is not None and checkpoint.failure.get("action") == "skip":
+                from daily_insights_api.modules.news.failures import NewsFailure, NewsOperationError
+
+                raise NewsOperationError(NewsFailure.model_validate(checkpoint.failure))
+            await workflow.check("article")
+            await check_dependency(workflow, f"source:{candidate.hostname}")
         fetched = await _refetch_candidate(candidate, allowed, fetch_timeout_seconds)
     except Exception as error:
+        if workflow is not None and checkpoint is not None:
+            await source_failure(
+                workflow,
+                checkpoint,
+                error,
+                stage="article",
+                hostname=candidate.hostname,
+                candidate_id=candidate.candidate_id,
+            )
         emit_event(
             "news.source.failed", hostname=candidate.hostname, error_code=type(error).__name__
         )
@@ -1113,6 +1330,8 @@ async def _publish_candidate(
         await _record_publish_failure(session_factory, candidate.id, "summary_failed", audits)
         return "summary_failed"
     selection = _manual_selection(candidate, target.market_code)
+    if workflow is not None:
+        await workflow.check("publication", external=False)
     try:
         async with session_factory() as database:
             await database.execute(
@@ -1121,6 +1340,8 @@ async def _publish_candidate(
                 )
             )
             current = await database.get(NewsCandidate, candidate.id, with_for_update=True)
+            if workflow is not None:
+                await workflow.fence_publication(database)
             assert current is not None
             code = (
                 "edition_superseded"
@@ -1129,7 +1350,12 @@ async def _publish_candidate(
                 if current.item_id is not None
                 else "url_already_published"
                 if await _url_published(database, target.edition_id, fetched.source_url)
-                else None
+                else "item_hidden"
+                if await _hidden_source(
+                    database, target.market_code, fetched.source_url, candidate.ai_event_key
+                )
+                is not None
+                else await _manual_publication_issue(database, target, current)
             )
             if code is not None:
                 await database.rollback()
@@ -1186,7 +1412,70 @@ async def _publish_candidate(
     return "published"
 
 
+async def _manual_publication_issue(
+    database: AsyncSession, target: _PublishTarget, candidate: NewsCandidate
+) -> str | None:
+    """Check before paid work and again under the publication lock."""
+    if not await _is_latest_revision(database, target):
+        return "edition_superseded"
+    if await _hidden_source(database, target.market_code, candidate.url, candidate.ai_event_key):
+        return "item_hidden"
+    visible = (
+        await database.scalars(
+            select(NewsItem).where(
+                NewsItem.edition_id == target.edition_id, visible_item(target.market_code)
+            )
+        )
+    ).all()
+    if candidate.ai_event_key and any(item.event_key == candidate.ai_event_key for item in visible):
+        return "duplicate_event"
+    selection = _manual_selection(candidate, target.market_code)
+    policy = edition_spec(target.market_code).selection
+    if (
+        selection.importance == 4
+        and sum(item.importance == 4 for item in visible) >= policy.max_four_star_items
+    ) or (
+        selection.importance <= 3
+        and sum(item.importance <= 3 for item in visible) >= policy.max_low_importance_items
+    ):
+        return "importance_quota_reached"
+    return None
+
+
 async def publish_candidates(
+    session_factory: async_sessionmaker[AsyncSession],
+    client: DeepSeekClient,
+    *,
+    run_id: uuid.UUID,
+    edition_id: uuid.UUID,
+    candidate_ids: list[uuid.UUID],
+    actor_user_id: uuid.UUID | None,
+    allowed_hostnames: frozenset[str],
+    fetch_timeout_seconds: float,
+) -> tuple[str, dict[str, object], str | None]:
+    async with session_factory() as database:
+        edition = await database.get(NewsEdition, edition_id)
+        if edition is None:
+            return "failed", {}, "edition_not_found"
+        edition_date, market = edition.edition_date, edition.market_code
+        if edition_date != datetime.now(TAIPEI).date():
+            return "failed", {"outcome": "expired"}, "news_resume_current_day_only"
+    async with workflow_scope(session_factory, edition_date, market) as workflow:
+        result = await _publish_candidates(
+            session_factory,
+            client,
+            run_id=run_id,
+            edition_id=edition_id,
+            candidate_ids=candidate_ids,
+            actor_user_id=actor_user_id,
+            allowed_hostnames=allowed_hostnames,
+            fetch_timeout_seconds=fetch_timeout_seconds,
+        )
+        workflow.progress["published"] = int(str(result[1].get("published", 0)))
+        return result
+
+
+async def _publish_candidates(
     session_factory: async_sessionmaker[AsyncSession],
     client: DeepSeekClient,
     *,
@@ -1230,6 +1519,10 @@ async def publish_candidates(
         }
     outcomes: dict[str, str] = {}
     for candidate_id in candidate_ids:
+        workflow = current_workflow()
+        if workflow is not None and workflow.model_stopped is not None:
+            outcomes[str(candidate_id)] = "waiting_recovery"
+            continue
         candidate = candidates.get(candidate_id)
         if target is None or candidate is None:
             outcomes[str(candidate_id)] = "candidate_not_found"
@@ -1271,7 +1564,9 @@ async def publish_candidates(
             except Exception:
                 logger.exception("could not record publish failure for %s", candidate.id)
         outcomes[str(candidate_id)] = code
-    published = sum(1 for code in outcomes.values() if code == "published")
+    # Already published is success on a resumed request, never an instruction
+    # to publish (or unhide) the same candidate again.
+    published = sum(1 for code in outcomes.values() if code in {"published", "already_published"})
     failed = len(outcomes) - published
     status = "succeeded" if published and not failed else "partial" if published else "failed"
     result: dict[str, object] = {"published": published, "failed": failed, "candidates": outcomes}

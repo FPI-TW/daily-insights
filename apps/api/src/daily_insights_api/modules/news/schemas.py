@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 from daily_insights_api.modules.news.contracts import Locale
+from daily_insights_api.modules.news.failures import NewsFailure
 
 
 class NewsItemResponse(BaseModel):
@@ -133,3 +134,16 @@ class NewsCandidatePublishRequest(BaseModel):
         if len(set(value)) != len(value):
             raise ValueError("candidate_ids must be unique")
         return value
+
+
+class NewsDependencyResponse(BaseModel):
+    scope: str
+    state: str
+    failure: NewsFailure | None
+    available_at: datetime | None
+    newest_article_at: datetime | None
+    updated_at: datetime
+
+
+class NewsRecoveryResponse(BaseModel):
+    dependencies: list[NewsDependencyResponse]

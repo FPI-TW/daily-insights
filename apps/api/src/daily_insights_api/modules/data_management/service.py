@@ -37,12 +37,20 @@ from daily_insights_api.modules.markets.api import (
 )
 from daily_insights_api.modules.news.api import (
     EDITION_ORDER,
+    PROVIDER_SCOPE,
+    NewsDependencyState,
+    NewsExecution,
+    NewsFailure,
+    automatic_window,
     create_news_client,
+    dependency_failure,
     edition_spec,
     effective_hostnames,
+    news_execution,
     publish_candidates,
-    run_all_editions_with_outcomes,
     run_news_edition,
+    workflow_results,
+    workflow_scope,
 )
 from daily_insights_api.modules.operations.api import sanitize_error_code
 from daily_insights_api.modules.reports.api import (
@@ -114,8 +122,6 @@ AUTOMATIC_MACRO_EDITION_CONSTRAINT = "uq_data_management_runs_automatic_macro_da
 AutomaticMacroEnqueueResult = Literal["queued", "already_recorded"]
 AUTOMATIC_NEWS_ALL_EDITION_CONSTRAINT = "uq_data_management_runs_automatic_news_all_edition"
 AutomaticNewsEnqueueResult = Literal["queued", "already_recorded"]
-NEWS_RETRY_OUTCOMES = frozenset({"partial", "unavailable", "failed"})
-NEWS_RETRY_INTERVAL = timedelta(minutes=30)
 NEWS_RETRY_UNTIL = time(hour=12)
 
 
@@ -286,6 +292,8 @@ async def cancel_run(
         "cancelled_by_user_id": str(actor_user_id),
     }
     run.error = "cancelled"
+    if run.operation.startswith("news"):
+        await _release_unfinished_probe(database, run.id)
     record_audit_event(
         database,
         actor_user_id=actor_user_id,
@@ -296,6 +304,82 @@ async def cancel_run(
         request_id=request_id,
     )
     await database.commit()
+    return run
+
+
+async def resume_news_run(
+    database: AsyncSession,
+    *,
+    run_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    request_id: str | None,
+    resume_provider: bool = False,
+) -> DataManagementRun:
+    """One successor per request target. A row lock makes double clicks safe."""
+    previous = await database.scalar(
+        select(DataManagementRun).where(DataManagementRun.id == run_id).with_for_update()
+    )
+    if previous is None or not previous.operation.startswith("news"):
+        raise ValueError("news_run_not_found")
+    existing = await database.scalar(
+        select(DataManagementRun).where(DataManagementRun.resume_of_id == run_id)
+    )
+    if existing is not None:
+        return existing
+    if previous.status in {"pending", "running"} or (
+        previous.status == "cancelled" and previous.error != "news_window_expired"
+    ):
+        raise RunAlreadyActiveError("news_run_not_resumable")
+    if previous.edition_date != taipei_today():
+        raise ValueError("news_resume_current_day_only")
+    active = await database.scalar(
+        select(DataManagementRun.id)
+        .where(
+            DataManagementRun.operation.in_(("news_all", "news_market", "news_publish")),
+            DataManagementRun.status.in_(("pending", "running")),
+        )
+        .limit(1)
+    )
+    if active is not None:
+        raise RunAlreadyActiveError("news_run_already_active")
+    payload = dict(previous.payload or {})
+    payload["root_run_id"] = payload.get("root_run_id", str(previous.id))
+    payload["retry_attempt"] = int(payload.get("retry_attempt", 0)) + 1
+    run = DataManagementRun(
+        id=uuid.uuid4(),
+        operation=previous.operation,
+        market_code=previous.market_code,
+        edition_date=previous.edition_date,
+        status="pending",
+        requested_by_user_id=actor_user_id,
+        resume_of_id=previous.id,
+        payload=payload,
+        scheduled_for=datetime.now(UTC),
+    )
+    dependency = await database.get(NewsDependencyState, PROVIDER_SCOPE, with_for_update=True)
+    if dependency is not None and dependency.state in {"blocked", "attention", "probing"}:
+        if not resume_provider:
+            raise ValueError("news_provider_resume_required")
+        if dependency.state == "probing":
+            raise RunAlreadyActiveError("news_provider_probe_active")
+        dependency.state = "probing"
+        dependency.probe_run_id = run.id
+        # Do not clear cooldowns, error context or counters on an admin click.
+    database.add(run)
+    record_audit_event(
+        database,
+        actor_user_id=actor_user_id,
+        action="news.run_resumed",
+        target_type="data_management_run",
+        target_id=str(previous.id),
+        after={"run_id": str(run.id), "resume_provider": resume_provider},
+        request_id=request_id,
+    )
+    try:
+        await database.commit()
+    except IntegrityError as error:
+        await database.rollback()
+        raise RunAlreadyActiveError("news_run_already_active") from error
     return run
 
 
@@ -330,7 +414,7 @@ async def claim_next_run(
             local_now = now.astimezone(TAIPEI)
             expired_through = (
                 local_now.date()
-                if local_now.time().replace(tzinfo=None) > NEWS_RETRY_UNTIL
+                if local_now.time().replace(tzinfo=None) >= NEWS_RETRY_UNTIL
                 else local_now.date() - timedelta(days=1)
             )
             expired_news_runs = (
@@ -433,7 +517,7 @@ async def heartbeat_run(
                 DataManagementRun.status == "running",
                 DataManagementRun.lease_owner == owner,
             )
-            .values(lease_expires_at=datetime.now(UTC) + LEASE_FOR)
+            .values(lease_expires_at=datetime.now(UTC) + LEASE_FOR, heartbeat_at=datetime.now(UTC))
             .returning(DataManagementRun.id)
         )
     return updated is not None
@@ -471,25 +555,6 @@ async def complete_run(
         )
 
 
-def _news_outcomes(run: DataManagementRun, result: dict[str, object]) -> dict[str, str]:
-    """Normalize result data before deciding which automatic markets retry."""
-    raw_outcomes = result.get("outcomes")
-    if isinstance(raw_outcomes, dict) and all(
-        isinstance(market, str) and isinstance(outcome, str)
-        for market, outcome in raw_outcomes.items()
-    ):
-        return cast(dict[str, str], raw_outcomes)
-    outcome = result.get("outcome")
-    if not isinstance(outcome, str):
-        outcome = "failed"
-    markets = (
-        (run.market_code,)
-        if run.operation == "news_market" and run.market_code is not None
-        else EDITION_ORDER
-    )
-    return {market: outcome for market in markets}
-
-
 async def _enqueue_automatic_news_retries(
     database: AsyncSession,
     run: DataManagementRun,
@@ -506,13 +571,19 @@ async def _enqueue_automatic_news_retries(
     """
     if run.requested_by_user_id is not None or run.operation not in {"news_all", "news_market"}:
         return
-    retry_at = now.astimezone(TAIPEI) + NEWS_RETRY_INTERVAL
-    deadline = datetime.combine(run.edition_date, NEWS_RETRY_UNTIL, TAIPEI)
-    if retry_at > deadline:
+    progress = result.get("news")
+    if not isinstance(progress, dict):
+        # Old histories have no trustworthy technical-failure classification.
         return
-    outcomes = _news_outcomes(run, result)
-    for market_code, outcome in outcomes.items():
-        if outcome not in NEWS_RETRY_OUTCOMES:
+    payload = run.payload or {}
+    for market_code, details in progress.items():
+        if not isinstance(details, dict) or details.get("state") != "waiting_retry":
+            continue
+        raw_due = details.get("next_retry_at")
+        if not isinstance(raw_due, str):
+            continue
+        retry_at = datetime.fromisoformat(raw_due)
+        if not automatic_window(retry_at, run.edition_date):
             continue
         await database.execute(
             insert(DataManagementRun)
@@ -523,6 +594,10 @@ async def _enqueue_automatic_news_retries(
                 status="pending",
                 requested_by_user_id=None,
                 scheduled_for=retry_at,
+                payload={
+                    "root_run_id": payload.get("root_run_id", str(run.id)),
+                    "retry_attempt": int(payload.get("retry_attempt", 0)) + 1,
+                },
             )
             .on_conflict_do_nothing()
         )
@@ -546,6 +621,7 @@ async def complete_news_run(
         )
         if current is None or current.lease_owner != owner or current.status != "running":
             return
+        await _release_unfinished_probe(database, current.id)
         await _enqueue_automatic_news_retries(database, current, result, now=now)
         current.status = status
         current.result = result
@@ -561,6 +637,22 @@ async def complete_news_run(
             target_id=str(run.id),
             after={"status": status, "operation": run.operation},
         )
+
+
+async def _release_unfinished_probe(database: AsyncSession, run_id: uuid.UUID) -> None:
+    dependency = await database.get(NewsDependencyState, PROVIDER_SCOPE, with_for_update=True)
+    if (
+        dependency is not None
+        and dependency.state == "probing"
+        and dependency.probe_run_id == run_id
+    ):
+        dependency.state, dependency.probe_run_id = "blocked", None
+        dependency.failure = NewsFailure(
+            code="provider_probe_not_completed",
+            action="block",
+            stage="selection",
+            scope=PROVIDER_SCOPE,
+        ).model_dump(mode="json")
 
 
 async def complete_macro_run(
@@ -899,75 +991,122 @@ async def _execute_institutional_twse(
 async def _execute_news(
     run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
 ) -> tuple[str, dict[str, object], str | None]:
-    api_key = settings.news_model_api_key
-    if (
-        not settings.daily_news_enabled
-        or api_key is None
-        or not api_key.get_secret_value().strip()
-        or is_placeholder_value(api_key.get_secret_value())
-    ):
-        outcomes = {
-            market: "unavailable"
-            for market in (
-                (cast(str, run.market_code),) if run.operation == "news_market" else EDITION_ORDER
-            )
-        }
-        return "failed", {"outcome": "unavailable", "outcomes": outcomes}, "daily_news_unavailable"
-    client = create_news_client(
-        base_url=settings.model_api_base_url,
-        api_key=api_key.get_secret_value(),
-        model=settings.model_name,
-        timeout_seconds=settings.model_timeout_seconds,
-    )
+    markets = (cast(str, run.market_code),) if run.operation == "news_market" else EDITION_ORDER
+    client = None
+    if not _news_unavailable(settings):
+        assert settings.news_model_api_key is not None
+        client = create_news_client(
+            base_url=settings.model_api_base_url,
+            api_key=settings.news_model_api_key.get_secret_value(),
+            model=settings.model_name,
+            timeout_seconds=settings.model_timeout_seconds,
+        )
+    execution = _news_execution(run, session_factory)
+    outcomes: dict[str, str] = {}
     try:
         allowed = effective_hostnames(
             settings.news_extra_hostnames, settings.news_blocked_hostnames
         )
-        if run.operation == "news_market":
-            outcome = await run_news_edition(
-                session_factory,
-                client,
-                run.edition_date,
-                allowed_hostnames=allowed,
-                fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
-                discovery_timeout_seconds=settings.news_discovery_timeout_seconds,
-                spec=edition_spec(cast(str, run.market_code)),
-            )
-            outcomes = {cast(str, run.market_code): outcome}
-        else:
-            outcome, outcomes = await run_all_editions_with_outcomes(
-                session_factory,
-                client,
-                run.edition_date,
-                allowed_hostnames=allowed,
-                fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
-                discovery_timeout_seconds=settings.news_discovery_timeout_seconds,
-                # The scheduled run generates each market once: a reclaimed
-                # row after a worker restart only fills in the markets it
-                # never reached. Manual reruns regenerate on purpose.
-                only_missing=run.requested_by_user_id is None,
-            )
-    except Exception as error:
-        outcomes = {
-            market: "failed"
-            for market in (
-                (cast(str, run.market_code),) if run.operation == "news_market" else EDITION_ORDER
-            )
-        }
-        return "failed", {"outcome": "failed", "outcomes": outcomes}, sanitize_error(error)
+        with news_execution(execution):
+            for market in markets:
+                try:
+                    if client is None:
+                        async with workflow_scope(
+                            session_factory, run.edition_date, market
+                        ) as workflow:
+                            failure = NewsFailure(
+                                code="news_model_configuration_missing",
+                                action="block",
+                                stage="selection",
+                                scope=PROVIDER_SCOPE,
+                            )
+                            await dependency_failure(
+                                session_factory, failure, now=datetime.now(UTC)
+                            )
+                            await workflow.record(failure)
+                        outcomes[market] = "unavailable"
+                    else:
+                        outcomes[market] = await run_news_edition(
+                            session_factory,
+                            client,
+                            run.edition_date,
+                            allowed_hostnames=allowed,
+                            fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
+                            discovery_timeout_seconds=settings.news_discovery_timeout_seconds,
+                            spec=edition_spec(market),
+                        )
+                except Exception:
+                    # The workflow stores a sanitized, structured failure. A
+                    # failed database prevents subsequent model calls as well.
+                    outcomes[market] = "failed"
     finally:
-        await client.aclose()
+        if client is not None:
+            await client.aclose()
+    details = await workflow_results(session_factory, run.id)
+    succeeded = len(details) == len(markets) and all(
+        value["state"] == "completed" for value in details.values()
+    )
     status = (
         "succeeded"
-        if outcome in {"complete", "idempotent"}
+        if succeeded
         else "partial"
-        if outcome == "partial"
+        if any(value["progress"].get("published", 0) for value in details.values())
         else "failed"
     )
     return (
         status,
-        {"outcome": outcome, "outcomes": outcomes},
-        None if status == "succeeded" else f"news_{outcome}",
+        {
+            "outcome": "completed" if succeeded else "interrupted",
+            "outcomes": outcomes,
+            "news": details,
+        },
+        None if succeeded else "news_recovery_required",
+    )
+
+
+def _news_execution(
+    run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession]
+) -> NewsExecution:
+    payload = run.payload or {}
+
+    async def publication_owned(database: AsyncSession) -> bool:
+        return (
+            await database.scalar(
+                select(DataManagementRun.id)
+                .where(
+                    DataManagementRun.id == run.id,
+                    DataManagementRun.status == "running",
+                    DataManagementRun.lease_owner == run.lease_owner,
+                    DataManagementRun.lease_expires_at > datetime.now(UTC),
+                )
+                .with_for_update()
+            )
+            is not None
+        )
+
+    async def still_owned() -> bool:
+        async with session_factory() as database:
+            return (
+                await database.scalar(
+                    select(DataManagementRun.id).where(
+                        DataManagementRun.id == run.id,
+                        DataManagementRun.status == "running",
+                        DataManagementRun.lease_owner == run.lease_owner,
+                        DataManagementRun.lease_expires_at > datetime.now(UTC),
+                    )
+                )
+                is not None
+            )
+
+    return NewsExecution(
+        session_factory,
+        uuid.UUID(str(payload.get("root_run_id", run.id))),
+        run.id,
+        run.edition_date,
+        automatic=run.requested_by_user_id is None,
+        attempt=int(payload.get("retry_attempt", 0)),
+        guard=still_owned if run.lease_owner else None,
+        guard_transaction=publication_owned if run.lease_owner else None,
     )
 
 
@@ -986,6 +1125,16 @@ async def _execute_news_publish(
 ) -> tuple[str, dict[str, object], str | None]:
     """Publish admin-chosen candidates into their edition with the news client."""
     if _news_unavailable(settings):
+        await dependency_failure(
+            session_factory,
+            NewsFailure(
+                code="news_model_configuration_missing",
+                action="block",
+                stage="summary",
+                scope=PROVIDER_SCOPE,
+            ),
+            now=datetime.now(UTC),
+        )
         return "failed", {"outcome": "unavailable"}, "daily_news_unavailable"
     payload = run.payload or {}
     try:
@@ -1001,18 +1150,21 @@ async def _execute_news_publish(
         timeout_seconds=settings.model_timeout_seconds,
     )
     try:
-        return await publish_candidates(
-            session_factory,
-            client,
-            run_id=run.id,
-            edition_id=edition_id,
-            candidate_ids=candidate_ids,
-            actor_user_id=run.requested_by_user_id,
-            allowed_hostnames=effective_hostnames(
-                settings.news_extra_hostnames, settings.news_blocked_hostnames
-            ),
-            fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
-        )
+        with news_execution(_news_execution(run, session_factory)):
+            outcome, result, error = await publish_candidates(
+                session_factory,
+                client,
+                run_id=run.id,
+                edition_id=edition_id,
+                candidate_ids=candidate_ids,
+                actor_user_id=run.requested_by_user_id,
+                allowed_hostnames=effective_hostnames(
+                    settings.news_extra_hostnames, settings.news_blocked_hostnames
+                ),
+                fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
+            )
+        result["news"] = await workflow_results(session_factory, run.id)
+        return outcome, result, error
     except Exception as error:
         return "failed", {}, sanitize_error(error)
     finally:
@@ -1104,7 +1256,12 @@ async def worker_loop(
                         try:
                             await asyncio.wait_for(stopped.wait(), timeout=heartbeat_seconds)
                         except TimeoutError:
-                            if not await heartbeat_run(session_factory, claimed_run_id, owner):
+                            try:
+                                owned = await heartbeat_run(session_factory, claimed_run_id, owner)
+                            except Exception:
+                                # Fail closed on DB/heartbeat failure: no next paid call.
+                                owned = False
+                            if not owned:
                                 lost.set()
                                 return
                             if heartbeat_path is not None:

@@ -5,6 +5,7 @@ from typing import Annotated, Any, Literal, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from daily_insights_api.modules.data_management.models import DataManagementRun
+from daily_insights_api.modules.news.api import NewsProgress
 from daily_insights_api.modules.reports.api import LaunchMarketCode
 
 NewsMarketCode = Literal["global", "tw_equity", "us_equity"]
@@ -97,6 +98,14 @@ class _DataManagementRunResponse(BaseModel):
     completed_at: datetime | None
     result: dict[str, Any] | None
     error: str | None
+    scheduled_for: datetime | None = None
+    heartbeat_at: datetime | None = None
+    news: dict[str, NewsProgress] | None = None
+
+
+class NewsResumeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    resume_provider: bool = False
 
 
 class MorningAllRunResponse(_DataManagementRunResponse):
@@ -159,7 +168,9 @@ class DataManagementRunList(BaseModel):
     items: list[DataManagementRunResponse]
 
 
-def run_response(run: DataManagementRun) -> DataManagementRunResponse:
+def run_response(
+    run: DataManagementRun, *, news: dict[str, NewsProgress] | None = None
+) -> DataManagementRunResponse:
     values = dict(
         id=run.id,
         edition_date=run.edition_date,
@@ -168,6 +179,9 @@ def run_response(run: DataManagementRun) -> DataManagementRunResponse:
         created_at=run.created_at,
         started_at=run.started_at,
         completed_at=run.completed_at,
+        scheduled_for=run.scheduled_for,
+        heartbeat_at=run.heartbeat_at,
+        news=news if news is not None else (run.result or {}).get("news"),
         result=run.result,
         error=run.error,
     )
