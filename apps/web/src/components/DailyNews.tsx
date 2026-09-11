@@ -36,7 +36,7 @@ export function DailyNewsLoading() {
 }
 
 export function DailyNews({
-  news,
+  news: latest,
   eyebrowKey = "dailyNewsEyebrow",
   titleKey = "dailyNewsTitle",
   groupByMarket = true,
@@ -48,8 +48,19 @@ export function DailyNews({
   // the page title (or expose a stray tag from an older edition).
   groupByMarket?: boolean
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const animate = useEnterAnimation()
+  const scope = `${titleKey}:${i18n.resolvedLanguage}`
+  const [retained, setRetained] = useState({ scope, news: latest })
+  // Null means this refresh failed, not an authoritative empty edition.
+  // Keep the mounted cards (and their page) only within this market/locale.
+  if (
+    retained.scope !== scope ||
+    (latest !== null && latest !== retained.news)
+  ) {
+    setRetained({ scope, news: latest })
+  }
+  const news = latest ?? (retained.scope === scope ? retained.news : null)
   // The edition status and the pipeline's fallback notice are not shown:
   // readers get the stories or the unavailable panel, nothing about
   // completeness or which day the edition came from.
@@ -72,7 +83,7 @@ export function DailyNews({
               className="surface-panel p-5 text-sm text-sea-ink-soft"
               role="status"
             >
-              {t("dailyNewsLoadFailed")}
+              {t("dailyNewsUnavailable")}
             </div>
           ) : (
             <div className="surface-panel p-5 text-sm text-sea-ink-soft">

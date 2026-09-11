@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ApiError } from "@daily-insights/api-client"
 import {
   cleanup,
+  act,
   fireEvent,
   render,
   screen,
@@ -23,6 +24,8 @@ const {
   unhideItem,
   publishCandidates,
   redirectExpired,
+  resumeRun,
+  recoveryStatus,
 } = vi.hoisted(() => ({
   catalog: vi.fn(),
   listRuns: vi.fn(),
@@ -33,6 +36,8 @@ const {
   unhideItem: vi.fn(),
   publishCandidates: vi.fn(),
   redirectExpired: vi.fn().mockResolvedValue(false),
+  resumeRun: vi.fn(),
+  recoveryStatus: vi.fn().mockResolvedValue({ dependencies: [] }),
 }))
 
 vi.mock("#/lib/admin-members", () => ({
@@ -45,6 +50,8 @@ vi.mock("#/lib/admin-members", () => ({
     hideNewsItem: hideItem,
     unhideNewsItem: unhideItem,
     publishNewsCandidates: publishCandidates,
+    resumeNewsRun: resumeRun,
+    newsRecoveryStatus: recoveryStatus,
   }),
 }))
 
@@ -166,13 +173,11 @@ vi.mock("#/lib/useSessionExpiry", () => ({
   useSessionExpiryRedirect: () => redirectExpired,
 }))
 
-function renderPage() {
+function renderPage(
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+) {
   return render(
-    <QueryClientProvider
-      client={
-        new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      }
-    >
+    <QueryClientProvider client={client}>
       <I18nextProvider i18n={createI18n("en")}>
         <NewsManagementPage locale="en" />
       </I18nextProvider>
@@ -196,11 +201,70 @@ afterEach(() => {
   hideItem.mockReset()
   unhideItem.mockReset()
   publishCandidates.mockReset()
+  resumeRun.mockReset()
+  recoveryStatus.mockReset()
+  recoveryStatus.mockResolvedValue({ dependencies: [] })
   redirectExpired.mockReset()
   redirectExpired.mockResolvedValue(false)
 })
 
 describe("NewsManagementPage", () => {
+  it("retains curation data on refresh failure and offers a manual reload", async () => {
+    catalog.mockResolvedValue(enabledCatalog)
+    listNewsRuns.mockResolvedValue({ items: [] })
+    listEditions.mockResolvedValue(editions)
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    renderPage(client)
+    await screen.findByRole("heading", { name: "Published stories" })
+    listEditions.mockRejectedValueOnce(
+      new ApiError(500, "news-refresh-request", "failed")
+    )
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["news-admin", "editions"] })
+    })
+    expect(
+      screen.getByRole("heading", { name: "Published stories" })
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByText("Request ID: news-refresh-request")
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Request ID: news-refresh-request")
+      ).not.toBeInTheDocument()
+    )
+  })
+  it("shows the recovery action and submits it once with CSRF", async () => {
+    catalog.mockResolvedValue(enabledCatalog)
+    listEditions.mockResolvedValue(editions)
+    listNewsRuns.mockResolvedValue({
+      items: [
+        {
+          id: editionId,
+          operation: "news_market",
+          market_code: "us_equity",
+          edition_date: enabledCatalog.taipei_date,
+          status: "failed",
+          requested_by_user_id: null,
+          error: "news_recovery_required",
+          result: null,
+        },
+      ],
+    })
+    resumeRun.mockResolvedValue({})
+    renderPage()
+    const button = await screen.findByRole("button", {
+      name: "Resume / probe model",
+    })
+    fireEvent.click(button)
+    await waitFor(() =>
+      expect(resumeRun).toHaveBeenCalledWith(editionId, true, "csrf")
+    )
+    expect(resumeRun).toHaveBeenCalledOnce()
+  })
   it("shows an accessible loading state", () => {
     catalog.mockReturnValue(new Promise(() => {}))
     listNewsRuns.mockReturnValue(new Promise(() => {}))
