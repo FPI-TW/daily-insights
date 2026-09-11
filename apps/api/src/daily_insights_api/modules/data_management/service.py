@@ -716,41 +716,56 @@ async def _execute_index_refresh(
     publishes it across two month-wide reports. They are reported as one list of
     symbols because that is what an operator is looking at, and either source
     failing leaves the other's symbols stored.
+
+    The two providers are gated independently. ^TWII does not touch Yahoo, so
+    turning Yahoo off must not stop it, and vice versa; only both being off
+    leaves nothing to do.
     """
-    if not settings.yfinance_enabled:
-        return "failed", {"symbols": []}, "yfinance_unavailable"
-    async with session_factory.begin() as database:
-        refreshed, failures = await refresh_index_daily_bars(
-            database,
-            adapter=YfinanceAdapter(timeout_seconds=settings.yfinance_timeout_seconds),
-            symbols=list(YFINANCE_INDICES),
-            period=AUTOMATIC_SHORT_REFRESH_PERIOD,
+    symbols: list[dict[str, object]] = []
+    failed_count = 0
+    if settings.yfinance_enabled:
+        async with session_factory.begin() as database:
+            refreshed, failures = await refresh_index_daily_bars(
+                database,
+                adapter=YfinanceAdapter(timeout_seconds=settings.yfinance_timeout_seconds),
+                symbols=list(YFINANCE_INDICES),
+                period=AUTOMATIC_SHORT_REFRESH_PERIOD,
+            )
+        symbols.extend(
+            {
+                "symbol": entry.result.symbol,
+                "status": "succeeded",
+                "fetched_at": entry.result.provenance.fetched_at.isoformat(),
+                "source_as_of": (
+                    entry.result.provenance.as_of.isoformat()
+                    if entry.result.provenance.as_of is not None
+                    else run.edition_date.isoformat()
+                ),
+                "record_count": entry.stored_count,
+            }
+            for entry in refreshed
         )
-    symbols: list[dict[str, object]] = [
-        {
-            "symbol": entry.result.symbol,
-            "status": "succeeded",
-            "fetched_at": entry.result.provenance.fetched_at.isoformat(),
-            "source_as_of": (
-                entry.result.provenance.as_of.isoformat()
-                if entry.result.provenance.as_of is not None
-                else run.edition_date.isoformat()
-            ),
-            "record_count": entry.stored_count,
-        }
-        for entry in refreshed
-    ]
-    symbols.extend(
-        {
-            "symbol": item.symbol,
-            "status": "failed",
-            "error": sanitize_item_error(item.error),
-        }
-        for item in failures
-    )
+        symbols.extend(
+            {
+                "symbol": item.symbol,
+                "status": "failed",
+                "error": sanitize_item_error(item.error),
+            }
+            for item in failures
+        )
+        failed_count += len(failures)
+    else:
+        # Listed per symbol rather than as one run-level error so the operator
+        # sees which series did not update and why, next to the ones that did.
+        symbols.extend(
+            {"symbol": symbol, "status": "failed", "error": "yfinance_unavailable"}
+            for symbol in YFINANCE_INDICES
+        )
+        failed_count += len(YFINANCE_INDICES)
     taiex_entry = await _refresh_taiex(run, session_factory, settings)
     symbols.append(taiex_entry)
-    failed_count = len(failures) + (1 if taiex_entry["status"] == "failed" else 0)
+    if taiex_entry["status"] == "failed":
+        failed_count += 1
     succeeded_count = len(symbols) - failed_count
     return (
         "failed" if not succeeded_count else "partial" if failed_count else "succeeded",

@@ -684,3 +684,83 @@ async def test_institutional_twse_is_refused_when_disabled() -> None:
         Settings(environment="test", twse_enabled=False),
     )
     assert (status, result, error) == ("failed", {}, "twse_unavailable")
+
+
+@pytest.mark.asyncio
+async def test_a_disabled_yahoo_still_refreshes_taiex_from_twse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """^TWII comes from the exchange, so the Yahoo flag must not gate it.
+
+    The guard used to return before the TAIEX leg ran at all, which meant
+    turning Yahoo off silently stopped a series that never touched Yahoo.
+    """
+    from daily_insights_api.modules.data_management import service
+
+    async def refresh_taiex(*_: object, **__: object) -> TaiexRefresh:
+        return TaiexRefresh(
+            stored_count=21,
+            as_of=date(2026, 9, 10),
+            fetched_at=datetime(2026, 9, 11, tzinfo=UTC),
+            empty_months=(),
+        )
+
+    async def select_months(*_: object, **__: object) -> tuple[date, ...]:
+        return (date(2026, 9, 1),)
+
+    monkeypatch.setattr(service, "select_taiex_refresh_months", select_months)
+    monkeypatch.setattr(service, "refresh_taiex_daily_bars", refresh_taiex)
+    status, result, error = await execute_run(
+        _run("index_yahoo"),
+        cast(Any, _StubSessionFactory()),
+        Settings(environment="test", yfinance_enabled=False, twse_enabled=True),
+    )
+
+    symbols = cast(list[dict[str, object]], result["symbols"])
+    taiex = next(item for item in symbols if item["symbol"] == TAIEX_SYMBOL)
+    assert taiex["status"] == "succeeded" and taiex["record_count"] == 21
+    # The Yahoo symbols are reported as unavailable rather than omitted.
+    assert all(
+        item["error"] == "yfinance_unavailable"
+        for item in symbols
+        if item["symbol"] != TAIEX_SYMBOL
+    )
+    assert status == "partial" and error == "index_symbol_failures"
+
+
+@pytest.mark.asyncio
+async def test_a_disabled_twse_still_refreshes_the_yahoo_symbols(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.modules.data_management import service
+
+    async def refresh(*_: object, **__: object) -> tuple[list[object], list[object]]:
+        return (
+            [
+                SimpleNamespace(
+                    result=SimpleNamespace(
+                        symbol="^DJI",
+                        provenance=SimpleNamespace(
+                            fetched_at=datetime(2026, 9, 11, tzinfo=UTC),
+                            as_of=date(2026, 9, 10),
+                        ),
+                    ),
+                    stored_count=7,
+                )
+            ],
+            [],
+        )
+
+    monkeypatch.setattr(service, "YfinanceAdapter", lambda **_: object())
+    monkeypatch.setattr(service, "refresh_index_daily_bars", refresh)
+    status, result, _ = await execute_run(
+        _run("index_yahoo"),
+        cast(Any, _StubSessionFactory()),
+        Settings(environment="test", yfinance_enabled=True, twse_enabled=False),
+    )
+
+    symbols = cast(list[dict[str, object]], result["symbols"])
+    assert next(item for item in symbols if item["symbol"] == "^DJI")["status"] == "succeeded"
+    taiex = next(item for item in symbols if item["symbol"] == TAIEX_SYMBOL)
+    assert taiex["status"] == "failed" and taiex["error"] == "twse_unavailable"
+    assert status == "partial"
