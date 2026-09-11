@@ -1114,13 +1114,12 @@ async def test_a_taiex_write_failure_surfaces_its_cause_and_frees_the_shared_loc
     async with session_factory.begin() as database:
         await _store_as(database, [_bar(month, "100.0")], "twelve_data")
 
-    async with session_factory.begin() as database:
-        with pytest.raises(IndexProviderConflictError):
-            await refresh_taiex_daily_bars(
-                database,
-                adapter=cast(TwseAdapter, _StubTwseAdapter(month)),
-                months=[month],
-            )
+    with pytest.raises(IndexProviderConflictError):
+        await refresh_taiex_daily_bars(
+            session_factory,
+            adapter=cast(TwseAdapter, _StubTwseAdapter(month)),
+            months=[month],
+        )
 
     # The lock is free: a fresh session can take and drop it without blocking.
     async with session_factory() as database:
@@ -1144,17 +1143,14 @@ async def test_a_taiex_write_failure_is_reported_without_poisoning_the_transacti
     InternalError.
     """
     month = date(2026, 9, 1)
-    async with session_factory.begin() as database:
-        # The only month failed, so there is nothing to return -- but the cause
-        # is carried rather than replaced by a bare InternalError.
-        with pytest.raises(DataSourceContractError, match="DataError: numeric field overflow"):
-            await refresh_taiex_daily_bars(
-                database,
-                adapter=cast(TwseAdapter, _StubTwseAdapter(month, close="1" + "0" * 11)),
-                months=[month],
-            )
-        # The transaction survived, which is what lets the lock be released.
-        assert await database.scalar(select(1)) == 1
+    # The only month failed, so there is nothing to return -- but the cause is
+    # carried rather than replaced by a bare InternalError.
+    with pytest.raises(DataSourceContractError, match="DataError: numeric field overflow"):
+        await refresh_taiex_daily_bars(
+            session_factory,
+            adapter=cast(TwseAdapter, _StubTwseAdapter(month, close="1" + "0" * 11)),
+            months=[month],
+        )
 
     async with session_factory() as database:
         held = await database.scalar(
@@ -1176,10 +1172,9 @@ async def test_one_bad_month_does_not_discard_the_backfill(
     months = [date(2026, 7, 1), date(2026, 8, 1), date(2026, 9, 1)]
     adapter = _StubTwseAdapter(months[0], failing_months=frozenset({months[1]}))
 
-    async with session_factory.begin() as database:
-        refreshed = await refresh_taiex_daily_bars(
-            database, adapter=cast(TwseAdapter, adapter), months=months
-        )
+    refreshed = await refresh_taiex_daily_bars(
+        session_factory, adapter=cast(TwseAdapter, adapter), months=months
+    )
 
     assert refreshed.stored_count == 2
     assert refreshed.failed_months == (
@@ -1208,10 +1203,75 @@ async def test_a_dead_twse_stops_the_walk_instead_of_asking_every_month(
     months = list(taiex_months(start=date(2024, 9, 1), end=date(2026, 9, 1)))
     adapter = _StubTwseAdapter(months[0], failing_months=frozenset(months))
 
-    async with session_factory.begin() as database:
-        with pytest.raises(DataSourceContractError, match="stored no TAIEX sessions"):
-            await refresh_taiex_daily_bars(
-                database, adapter=cast(TwseAdapter, adapter), months=months
-            )
+    with pytest.raises(DataSourceContractError, match="stored no TAIEX sessions"):
+        await refresh_taiex_daily_bars(
+            session_factory, adapter=cast(TwseAdapter, adapter), months=months
+        )
 
     assert len(adapter.asked) == MAX_CONSECUTIVE_TAIEX_FAILURES
+
+
+async def test_a_slow_taiex_fetch_does_not_block_a_yahoo_refresh(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The two providers must not serialise against each other.
+
+    The Yahoo lock exists to stop two Yahoo callers duplicating credits and
+    cookies. TWSE paces itself and is a different provider, so sharing that key
+    only meant a 25-month backfill -- minutes of spaced requests -- blocked the
+    admin page's manual refresh past its deadline.
+    """
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class _SlowAdapter(_StubTwseAdapter):
+        async def get_taiex_daily_bars(self, month: date) -> TaiexDailyBars:
+            started.set()
+            await release.wait()
+            return await super().get_taiex_daily_bars(month)
+
+    month = date(2026, 9, 1)
+    taiex = asyncio.create_task(
+        refresh_taiex_daily_bars(
+            session_factory,
+            adapter=cast(TwseAdapter, _SlowAdapter(month)),
+            months=[month],
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=5)
+
+    # Nothing is held while the fetch runs: the write takes the lock, and this
+    # is the whole reason minutes of spaced requests cost no contention.
+    async with session_factory() as database:
+        held = await database.scalar(
+            text("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'")
+        )
+        assert held == 0
+
+    # The Yahoo half must complete while that fetch is still in flight.
+    async with session_factory.begin() as database:
+        refreshed, failures = await asyncio.wait_for(
+            refresh_index_daily_bars(
+                database,
+                adapter=cast(
+                    YfinanceAdapter,
+                    _StubAdapter(
+                        {
+                            "^DJI": _result(
+                                "^DJI",
+                                "us_equity",
+                                (_symbol_bar("^DJI", "us_equity", "1.0"),),
+                            )
+                        }
+                    ),
+                ),
+                symbols=["^DJI"],
+                period=AUTOMATIC_SHORT_REFRESH_PERIOD,
+            ),
+            timeout=5,
+        )
+    assert [entry.result.symbol for entry in refreshed] == ["^DJI"]
+    assert failures == []
+
+    release.set()
+    await taiex

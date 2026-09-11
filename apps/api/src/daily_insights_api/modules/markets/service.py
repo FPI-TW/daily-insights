@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import Result, String, column, func, literal_column, select, true, update, values
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DataError, IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 
 from daily_insights_api.modules.data_sources.api import (
@@ -82,6 +82,13 @@ TAIEX_INITIAL_BACKFILL_MONTHS = 25
 # TWSE being down looks the same for every month, so stop asking after three.
 # Mirrors the institutional-flows walk, which paces the same provider.
 MAX_CONSECUTIVE_TAIEX_FAILURES = 3
+# Deliberately NOT the Yahoo key. That lock exists to stop two Yahoo callers
+# from duplicating credits and cookies for a provider with no published quota;
+# TWSE is a different provider that paces itself inside TwseAdapter. Sharing
+# the key made a 25-month backfill -- minutes of spaced requests -- block the
+# admin page's manual Yahoo refresh past its 45s deadline. This one is held
+# per transaction, so it covers the write and nothing else.
+TAIEX_REFRESH_LOCK_KEY = 7_215_884_310_662_047_913
 # Every other tracked index still comes from Yahoo.
 YFINANCE_INDICES: tuple[IndexSymbol, ...] = tuple(
     symbol for symbol in TRACKED_INDICES if symbol != TAIEX_SYMBOL
@@ -556,107 +563,106 @@ async def select_taiex_refresh_months(
 
 
 async def refresh_taiex_daily_bars(
-    database: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
     *,
     adapter: TwseAdapter,
     months: Sequence[date],
 ) -> TaiexRefresh:
     """Fetch and upsert ^TWII one month at a time.
 
-    Each month is its own fetch and its own savepoint, because a 25-month
-    bootstrap that discarded everything over one bad month could never recover:
-    an empty series widens the window back to the same 25 months on the next
-    run and meets the same month again. A month that fails is reported and the
-    walk continues, so a later run only has to fill the holes. That mirrors the
-    Yahoo path, where one dead symbol does not discard the ones that resolved.
+    Takes a session factory rather than a session because the fetching is slow
+    and the writing is not: TWSE spaces its own requests, so a 25-month
+    backfill is minutes of network I/O. Holding one transaction across all of
+    it would pin a connection, keep every stored month invisible and
+    rollback-able until the very end, and hold a lock the whole time. Instead
+    each month is fetched outside any transaction and then written in its own,
+    taking `TAIEX_REFRESH_LOCK_KEY` for that write alone. A month that lands is
+    committed and stays.
 
-    Each month costs two spaced TWSE requests, so callers on a request deadline
-    should ask for few months and leave long backfills to the CLI.
+    A month that fails is reported and the walk continues, because a bootstrap
+    that discarded everything over one bad month could never recover: an empty
+    series widens the window back to the same months on the next run and meets
+    the same failure again. That mirrors the Yahoo path, where one dead symbol
+    does not discard the ones that resolved.
     """
     if not months:
         raise ValueError("months must not be empty")
-    # Shared with the Yahoo refresh on purpose: both write index_daily_bars, and
-    # serialising them keeps one from waiting on the other's conflict rows.
-    await database.execute(select(func.pg_advisory_lock(YAHOO_REFRESH_LOCK_KEY)))
-    try:
-        stored_count = 0
-        as_of: date | None = None
-        fetched_at: datetime | None = None
-        empty_months: list[date] = []
-        failed_months: list[str] = []
+    stored_count = 0
+    as_of: date | None = None
+    fetched_at: datetime | None = None
+    empty_months: list[date] = []
+    failed_months: list[str] = []
+    consecutive_failures = 0
+    aborted = False
+    for month in months:
+        # Outside any transaction: this is the slow part.
+        try:
+            fetched = await adapter.get_taiex_daily_bars(month)
+        except DataSourceError as error:
+            failed_months.append(f"{month:%Y-%m}: {type(error).__name__}: {error}")
+            consecutive_failures += 1
+            if consecutive_failures >= MAX_CONSECUTIVE_TAIEX_FAILURES:
+                # The source is down, not this one month. Asking the rest would
+                # cost minutes of spaced requests and tell us nothing.
+                aborted = True
+                break
+            continue
         consecutive_failures = 0
-        aborted = False
-        for month in months:
-            try:
-                fetched = await adapter.get_taiex_daily_bars(month)
-            except DataSourceError as error:
-                failed_months.append(f"{month:%Y-%m}: {type(error).__name__}: {error}")
-                consecutive_failures += 1
-                if consecutive_failures >= MAX_CONSECUTIVE_TAIEX_FAILURES:
-                    # The source is down, not this one month. Asking the rest
-                    # would cost minutes of spaced requests and tell us nothing.
-                    aborted = True
-                    break
-                continue
-            consecutive_failures = 0
-            if not fetched.items:
-                empty_months.append(month)
-                continue
-            bars = [
-                DailyBar(
-                    instrument_source_id=TAIEX_SYMBOL,
-                    market=TRACKED_INDICES[TAIEX_SYMBOL],
-                    symbol=TAIEX_SYMBOL,
-                    trade_date=bar.trade_date,
-                    open=bar.open,
-                    high=bar.high,
-                    low=bar.low,
-                    close=bar.close,
-                    volume=bar.volume,
-                    source=TAIEX_PROVIDER,
-                )
-                for bar in fetched.items
-            ]
-            # One savepoint per month. Besides keeping a bad month from
-            # discarding the good ones, it keeps the transaction usable: the
-            # `pg_advisory_unlock` below is session-scoped and is the only
-            # thing that returns that lock.
-            try:
-                async with database.begin_nested():
-                    stored_count += await store_index_daily_bars(
-                        database,
-                        bars=bars,
-                        provider=TAIEX_PROVIDER,
-                        contract_version=TAIEX_CONTRACT_VERSION,
-                        source_fetched_at=fetched.fetched_at,
-                    )
-            except (IntegrityError, DataError) as error:
-                # A value the adapter let through that the schema will not hold.
-                # `IndexProviderConflictError` deliberately is not caught: the
-                # series belonging to another provider is true for every month,
-                # so retrying the remaining ones would be pointless.
-                failed_months.append(f"{month:%Y-%m}: {type(error).__name__}: {error.orig}")
-                continue
-            fetched_at = fetched.fetched_at
-            month_as_of = max(bar.trade_date for bar in bars)
-            as_of = month_as_of if as_of is None else max(as_of, month_as_of)
-
-        if as_of is None or fetched_at is None:
-            raise DataSourceContractError(
-                "twse stored no TAIEX sessions for any of the "
-                f"{len(months)} requested month(s): "
-                + ("; ".join(failed_months) if failed_months else "all months were empty")
+        if not fetched.items:
+            empty_months.append(month)
+            continue
+        bars = [
+            DailyBar(
+                instrument_source_id=TAIEX_SYMBOL,
+                market=TRACKED_INDICES[TAIEX_SYMBOL],
+                symbol=TAIEX_SYMBOL,
+                trade_date=bar.trade_date,
+                open=bar.open,
+                high=bar.high,
+                low=bar.low,
+                close=bar.close,
+                volume=bar.volume,
+                source=TAIEX_PROVIDER,
             )
-        return TaiexRefresh(
-            stored_count=stored_count,
-            as_of=as_of,
-            fetched_at=fetched_at,
-            empty_months=tuple(empty_months),
-            failed_months=tuple(failed_months),
-            aborted=aborted,
+            for bar in fetched.items
+        ]
+        try:
+            async with session_factory.begin() as database:
+                # Transaction-scoped: released on commit or rollback, so it
+                # cannot be stranded the way a session-scoped lock can.
+                await database.execute(select(func.pg_advisory_xact_lock(TAIEX_REFRESH_LOCK_KEY)))
+                stored_count += await store_index_daily_bars(
+                    database,
+                    bars=bars,
+                    provider=TAIEX_PROVIDER,
+                    contract_version=TAIEX_CONTRACT_VERSION,
+                    source_fetched_at=fetched.fetched_at,
+                )
+        except (IntegrityError, DataError) as error:
+            # A value the adapter let through that the schema will not hold.
+            # `IndexProviderConflictError` is deliberately not caught: the
+            # series belonging to another provider is true for every month, so
+            # retrying the remaining ones would be pointless.
+            failed_months.append(f"{month:%Y-%m}: {type(error).__name__}: {error.orig}")
+            continue
+        fetched_at = fetched.fetched_at
+        month_as_of = max(bar.trade_date for bar in bars)
+        as_of = month_as_of if as_of is None else max(as_of, month_as_of)
+
+    if as_of is None or fetched_at is None:
+        raise DataSourceContractError(
+            "twse stored no TAIEX sessions for any of the "
+            f"{len(months)} requested month(s): "
+            + ("; ".join(failed_months) if failed_months else "all months were empty")
         )
-    finally:
-        await database.execute(select(func.pg_advisory_unlock(YAHOO_REFRESH_LOCK_KEY)))
+    return TaiexRefresh(
+        stored_count=stored_count,
+        as_of=as_of,
+        fetched_at=fetched_at,
+        empty_months=tuple(empty_months),
+        failed_months=tuple(failed_months),
+        aborted=aborted,
+    )
 
 
 async def refresh_index_daily_bars(

@@ -778,6 +778,9 @@ async def _refresh_taiex(
         max_attempts=settings.twse_retry_attempts,
     )
     try:
+        # Two scopes on purpose: the month selection is one short read, and the
+        # refresh below opens its own transaction per month so that minutes of
+        # spaced TWSE requests never sit inside one.
         async with session_factory.begin() as database:
             # An empty series widens this to the full backfill on its own.
             months = await select_taiex_refresh_months(
@@ -785,7 +788,7 @@ async def _refresh_taiex(
                 today=run.edition_date,
                 requested_months=TAIEX_INCREMENTAL_MONTHS,
             )
-            refreshed = await refresh_taiex_daily_bars(database, adapter=adapter, months=months)
+        refreshed = await refresh_taiex_daily_bars(session_factory, adapter=adapter, months=months)
     # IndexProviderConflictError is not a provider failure: it means ^TWII's
     # series still belongs to yfinance, which happens when the code ships ahead
     # of the migration that releases it. The operator needs to see that rather

@@ -162,8 +162,8 @@ async def _refresh_taiex(
 
     Callers check `twse_enabled` first; reaching here means the provider is on,
     so anything that goes wrong from this point is a real failure worth
-    retrying. Kept out of `run_refresh`'s transaction: TWSE spaces its
-    requests, so a long backfill would otherwise hold one open for minutes.
+    retrying. The refresh itself opens a transaction per month, so the minutes
+    of spaced TWSE requests never sit inside one.
     """
     if months_back < 1:
         raise ValueError("taiex months must be at least 1")
@@ -181,7 +181,7 @@ async def _refresh_taiex(
             months = await select_taiex_refresh_months(
                 database, today=today, requested_months=months_back
             )
-            refreshed = await refresh_taiex_daily_bars(database, adapter=adapter, months=months)
+        refreshed = await refresh_taiex_daily_bars(session_factory, adapter=adapter, months=months)
     # See the data-management path: a provider conflict means the migration
     # that releases ^TWII has not run, not that TWSE failed.
     except (DataSourceError, IndexProviderConflictError) as error:
