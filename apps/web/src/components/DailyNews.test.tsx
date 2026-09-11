@@ -274,8 +274,22 @@ describe("DailyNews", () => {
       "items-end",
       "justify-between"
     )
-    expect(previous).toHaveClass("flex", "size-10")
-    expect(next).toHaveClass("flex", "size-10")
+    expect(previous).toHaveClass(
+      "flex",
+      "size-11",
+      "border-lagoon-deep",
+      "bg-lagoon-deep",
+      "text-white",
+      "focus-visible:outline-lagoon-deep"
+    )
+    expect(next).toHaveClass(
+      "flex",
+      "size-11",
+      "border-lagoon-deep",
+      "bg-lagoon-deep",
+      "text-white",
+      "focus-visible:outline-lagoon-deep"
+    )
     expect(previous).toBeEnabled()
     expect(next).toBeEnabled()
 

@@ -149,7 +149,7 @@ function PaginatedNewsGroups({
           >
             <button
               type="button"
-              className="flex size-10 items-center justify-center rounded-full border border-line bg-surface text-sea-ink shadow-sm transition-[color,border-color,transform] hover:scale-105 hover:border-lagoon hover:text-lagoon"
+              className="flex size-11 items-center justify-center rounded-full border border-lagoon-deep bg-lagoon-deep text-white shadow-[0_6px_16px_rgb(21_158_132/28%)] transition-[color,background-color,border-color,transform,box-shadow] hover:scale-105 hover:border-palm hover:bg-palm hover:shadow-[0_8px_20px_rgb(21_158_132/34%)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lagoon-deep"
               aria-label={t("dailyNewsPreviousPage")}
               onClick={() => {
                 setHasPaginated(true)
@@ -157,11 +157,15 @@ function PaginatedNewsGroups({
                 setPageIndex(index => (index - 1 + totalPages) % totalPages)
               }}
             >
-              <ChevronLeft aria-hidden="true" className="size-5" />
+              <ChevronLeft
+                aria-hidden="true"
+                className="size-6"
+                strokeWidth={2.75}
+              />
             </button>
             <button
               type="button"
-              className="flex size-10 items-center justify-center rounded-full border border-line bg-surface text-sea-ink shadow-sm transition-[color,border-color,transform] hover:scale-105 hover:border-lagoon hover:text-lagoon"
+              className="flex size-11 items-center justify-center rounded-full border border-lagoon-deep bg-lagoon-deep text-white shadow-[0_6px_16px_rgb(21_158_132/28%)] transition-[color,background-color,border-color,transform,box-shadow] hover:scale-105 hover:border-palm hover:bg-palm hover:shadow-[0_8px_20px_rgb(21_158_132/34%)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lagoon-deep"
               aria-label={t("dailyNewsNextPage")}
               onClick={() => {
                 setHasPaginated(true)
@@ -169,7 +173,11 @@ function PaginatedNewsGroups({
                 setPageIndex(index => (index + 1) % totalPages)
               }}
             >
-              <ChevronRight aria-hidden="true" className="size-5" />
+              <ChevronRight
+                aria-hidden="true"
+                className="size-6"
+                strokeWidth={2.75}
+              />
             </button>
           </nav>
         ) : null}
