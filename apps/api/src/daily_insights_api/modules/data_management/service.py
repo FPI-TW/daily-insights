@@ -18,7 +18,6 @@ from daily_insights_api.core.config import Settings, is_placeholder_value
 from daily_insights_api.modules.audit.api import record_audit_event
 from daily_insights_api.modules.data_management.models import DataManagementRun
 from daily_insights_api.modules.data_sources.api import (
-    TRACKED_INDICES,
     DataSourceError,
     RetryPolicy,
     TwelveDataAdapter,
@@ -27,10 +26,16 @@ from daily_insights_api.modules.data_sources.api import (
     YfinanceAdapter,
 )
 from daily_insights_api.modules.markets.api import (
+    AUTOMATIC_SHORT_REFRESH_PERIOD,
     INSTITUTIONAL_MARKET_CODE,
+    TAIEX_INCREMENTAL_MONTHS,
+    TAIEX_SYMBOL,
+    YFINANCE_INDICES,
     InstitutionalMarketFlow,
     InstitutionalStockFlow,
     refresh_index_daily_bars,
+    refresh_taiex_daily_bars,
+    select_taiex_refresh_months,
     store_institutional_market_flows,
     store_institutional_stock_flows,
     stored_flow_dates,
@@ -43,7 +48,7 @@ from daily_insights_api.modules.news.api import (
     run_all_editions_with_outcomes,
     run_news_edition,
 )
-from daily_insights_api.modules.operations.api import sanitize_error_code
+from daily_insights_api.modules.operations.api import sanitize_error_code, sanitize_error_detail
 from daily_insights_api.modules.reports.api import (
     ACTIVE_LAUNCH_MANIFEST,
     LaunchMarketCode,
@@ -85,6 +90,23 @@ def sanitize_error(error: Exception) -> str:
     # Provider errors can contain URLs, upstream response fragments, and keys.
     # Store a stable code only; detailed diagnostics belong in protected logs.
     return sanitize_error_code(type(error).__name__)[:500]
+
+
+def sanitize_item_error(error: Exception | str) -> str:
+    """A per-item failure message for the run detail the operator reads.
+
+    `sanitize_error` is right for `DataManagementRun.error`, whose value is
+    compared and aggregated, but applying it to one symbol or one date reduced
+    every cause to a bare class name: an operator staring at `runtimeerror` in
+    the back office learns nothing and has to reproduce the fetch by hand.
+    These strings are only ever read, so they keep the message with secrets
+    redacted by `sanitize_error_detail`.
+    """
+    message = error if isinstance(error, str) else f"{type(error).__name__}: {error}"
+    detail = sanitize_error_detail(message)
+    if detail is not None:
+        return detail[:500]
+    return sanitize_error_code(message) if isinstance(error, str) else sanitize_error(error)
 
 
 def execution_lock_key(run_id: uuid.UUID) -> int:
@@ -663,7 +685,7 @@ async def _execute_morning(
                         "market_code": market,
                         "publication_action": "failed",
                         "datasets": [],
-                        "error": sanitize_error(error),
+                        "error": sanitize_item_error(error),
                     }
                 )
     failures = [item for item in outcomes if item["publication_action"] == "failed"]
@@ -684,17 +706,24 @@ async def _execute_morning(
     )
 
 
-async def _execute_yahoo(
+async def _execute_index_refresh(
     run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
 ) -> tuple[str, dict[str, object], str | None]:
+    """Refresh every tracked index, from whichever source owns it.
+
+    Eight come from Yahoo in one batched call; ^TWII comes from TWSE, which
+    publishes it across two month-wide reports. They are reported as one list of
+    symbols because that is what an operator is looking at, and either source
+    failing leaves the other's symbols stored.
+    """
     if not settings.yfinance_enabled:
         return "failed", {"symbols": []}, "yfinance_unavailable"
     async with session_factory.begin() as database:
         refreshed, failures = await refresh_index_daily_bars(
             database,
             adapter=YfinanceAdapter(timeout_seconds=settings.yfinance_timeout_seconds),
-            symbols=list(TRACKED_INDICES),
-            period="7d",
+            symbols=list(YFINANCE_INDICES),
+            period=AUTOMATIC_SHORT_REFRESH_PERIOD,
         )
     symbols: list[dict[str, object]] = [
         {
@@ -714,15 +743,63 @@ async def _execute_yahoo(
         {
             "symbol": item.symbol,
             "status": "failed",
-            "error": sanitize_error(RuntimeError(item.error)),
+            "error": sanitize_item_error(item.error),
         }
         for item in failures
     )
+    taiex_entry = await _refresh_taiex(run, session_factory, settings)
+    symbols.append(taiex_entry)
+    failed_count = len(failures) + (1 if taiex_entry["status"] == "failed" else 0)
+    succeeded_count = len(symbols) - failed_count
     return (
-        "failed" if failures and not refreshed else "partial" if failures else "succeeded",
-        {"period": "7d", "symbols": symbols},
-        "yfinance_symbol_failures" if failures else None,
+        "failed" if not succeeded_count else "partial" if failed_count else "succeeded",
+        {"period": AUTOMATIC_SHORT_REFRESH_PERIOD, "symbols": symbols},
+        "index_symbol_failures" if failed_count else None,
     )
+
+
+async def _refresh_taiex(
+    run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
+) -> dict[str, object]:
+    """^TWII from TWSE, as one entry in the run's symbol list.
+
+    The window is the edition month plus the one before it, so a run on the
+    first of a month still repairs the end of the previous one. That mirrors why
+    the Yahoo window is a week rather than a day; the store upserts, so the
+    overlap costs nothing but the requests.
+    """
+    if not settings.twse_enabled:
+        return {"symbol": TAIEX_SYMBOL, "status": "failed", "error": "twse_unavailable"}
+    adapter = TwseAdapter(
+        base_url=settings.twse_base_url,
+        timeout_seconds=settings.twse_timeout_seconds,
+        request_interval_seconds=settings.twse_request_interval_seconds,
+        max_attempts=settings.twse_retry_attempts,
+    )
+    try:
+        async with session_factory.begin() as database:
+            # An empty series widens this to the full backfill on its own.
+            months = await select_taiex_refresh_months(
+                database,
+                today=run.edition_date,
+                requested_months=TAIEX_INCREMENTAL_MONTHS,
+            )
+            refreshed = await refresh_taiex_daily_bars(database, adapter=adapter, months=months)
+    except DataSourceError as error:
+        return {
+            "symbol": TAIEX_SYMBOL,
+            "status": "failed",
+            "error": sanitize_item_error(error),
+        }
+    finally:
+        await adapter.close()
+    return {
+        "symbol": TAIEX_SYMBOL,
+        "status": "succeeded",
+        "fetched_at": refreshed.fetched_at.isoformat(),
+        "source_as_of": refreshed.as_of.isoformat(),
+        "record_count": refreshed.stored_count,
+    }
 
 
 class _TwseFlows(Protocol):
@@ -788,7 +865,7 @@ async def _fetch_flows_back[Flows: _TwseFlows](
         except DataSourceError as error:
             walk.failures += 1
             consecutive_failures += 1
-            entry.update(status="failed", error=sanitize_error(error))
+            entry.update(status="failed", error=sanitize_item_error(error))
             if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                 # The source is down, not this one date. Asking the remaining
                 # dates would cost minutes and tell us nothing; the next run
@@ -980,7 +1057,7 @@ async def execute_run(
     run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
 ) -> tuple[str, dict[str, object], str | None]:
     if run.operation == "index_yahoo":
-        return await _execute_yahoo(run, session_factory, settings)
+        return await _execute_index_refresh(run, session_factory, settings)
     if run.operation == "institutional_twse":
         return await _execute_institutional_twse(run, session_factory, settings)
     if run.operation.startswith("news"):

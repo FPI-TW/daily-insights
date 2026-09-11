@@ -282,8 +282,7 @@ const resources: Resource = {
       dataManagementFullAction: "重跑全部市場",
       dataManagementMarket: "單一市場重跑",
       dataManagementIndex: "指數資料更新",
-      dataManagementIndexDescription:
-        "以 Yahoo Finance 更新全部已追蹤指數最近 7 日資料。",
+      dataManagementIndexDescription: "更新全部已追蹤指數的最近資料。",
       dataManagementIndexAction: "更新指數",
       dataManagementInstitutional: "台股三大法人",
       dataManagementInstitutionalDescription:
@@ -323,7 +322,8 @@ const resources: Resource = {
       newsEdition_tw_equity: "台灣股市",
       newsEdition_us_equity: "美國股市",
       indexDataAdminTitle: "指數資料更新",
-      indexDataAdminDescription: "檢視並手動更新所有已追蹤指數的最近日線資料。",
+      indexDataAdminDescription:
+        "檢視並手動更新由 Yahoo Finance 供應的指數最近日線資料。臺灣加權指數由證交所供應，請至資料管理頁更新。",
       indexDataRefreshTitle: "增量更新",
       indexDataRefreshDescription:
         "系統每天台北時間上午 8 點自動更新。此操作只重新抓取最近 7 日，不會取代首次兩年回補。",
@@ -995,8 +995,7 @@ const resources: Resource = {
       dataManagementFullAction: "重跑全部市场",
       dataManagementMarket: "单一市场重跑",
       dataManagementIndex: "指数数据更新",
-      dataManagementIndexDescription:
-        "以 Yahoo Finance 更新全部已追踪指数最近 7 日数据。",
+      dataManagementIndexDescription: "更新全部已追踪指数的最近数据。",
       dataManagementIndexAction: "更新指数",
       dataManagementInstitutional: "台股三大法人",
       dataManagementInstitutionalDescription:
@@ -1036,7 +1035,8 @@ const resources: Resource = {
       newsEdition_tw_equity: "台湾股市",
       newsEdition_us_equity: "美国股市",
       indexDataAdminTitle: "指数数据更新",
-      indexDataAdminDescription: "查看并手动更新所有已追踪指数的最近日线数据。",
+      indexDataAdminDescription:
+        "查看并手动更新由 Yahoo Finance 供应的指数最近日线数据。台湾加权指数由证交所供应，请至数据管理页更新。",
       indexDataRefreshTitle: "增量更新",
       indexDataRefreshDescription:
         "系统每天台北时间上午 8 点自动更新。此操作只重新抓取最近 7 日，不会取代首次两年回补。",
@@ -1720,7 +1720,7 @@ const resources: Resource = {
       dataManagementMarket: "Single-market rerun",
       dataManagementIndex: "Index data update",
       dataManagementIndexDescription:
-        "Update seven days of all tracked Yahoo Finance indices.",
+        "Update recent data for every tracked index.",
       dataManagementIndexAction: "Update indices",
       dataManagementInstitutional: "Taiwan institutional flows",
       dataManagementInstitutionalDescription:
@@ -1764,7 +1764,7 @@ const resources: Resource = {
       newsEdition_us_equity: "US equities",
       indexDataAdminTitle: "Index data refresh",
       indexDataAdminDescription:
-        "Review and manually refresh recent daily bars for every tracked index.",
+        "Review and manually refresh recent daily bars for indices supplied by Yahoo Finance. The Taiwan index comes from TWSE; refresh it from the data management page.",
       indexDataRefreshTitle: "Incremental refresh",
       indexDataRefreshDescription:
         "The scheduler refreshes at 08:00 Asia/Taipei daily. This action fetches only the latest seven days and does not replace the initial two-year backfill.",

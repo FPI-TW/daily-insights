@@ -21,9 +21,12 @@ from daily_insights_api.core.models import Base
 from daily_insights_api.core.security import hash_password, verify_password
 from daily_insights_api.modules.admin import router as admin_router
 from daily_insights_api.modules.audit.models import AuditEvent
-from daily_insights_api.modules.data_sources.api import TRACKED_INDICES
 from daily_insights_api.modules.identity import router as identity_router
 from daily_insights_api.modules.identity.models import User
+from daily_insights_api.modules.markets.api import (
+    AUTOMATIC_SHORT_REFRESH_PERIOD,
+    YFINANCE_INDICES,
+)
 from daily_insights_api.modules.markets.catalog import MARKETS
 from daily_insights_api.modules.markets.models import Market
 from daily_insights_api.scripts import bootstrap_admin as bootstrap_admin_module
@@ -424,7 +427,7 @@ async def test_index_refresh_requires_csrf_and_an_administrator(harness: Harness
     admin_csrf = await login(harness.client, "admin@example.com", "AdminPassword123!")
     missing_csrf = await harness.client.post(
         "/api/admin/data-sources/yfinance/daily-bars",
-        json={"period": "7d"},
+        json={"period": AUTOMATIC_SHORT_REFRESH_PERIOD},
     )
     assert missing_csrf.status_code == 403
 
@@ -444,7 +447,7 @@ async def test_index_refresh_requires_csrf_and_an_administrator(harness: Harness
         forbidden = await asset_client.post(
             "/api/admin/data-sources/yfinance/daily-bars",
             headers={"X-CSRF-Token": asset_csrf},
-            json={"period": "7d"},
+            json={"period": AUTOMATIC_SHORT_REFRESH_PERIOD},
         )
         assert forbidden.status_code == 403
     finally:
@@ -504,12 +507,12 @@ async def test_index_refresh_disabled_returns_503(harness: Harness) -> None:
     response = await harness.client.post(
         "/api/admin/data-sources/yfinance/daily-bars",
         headers={"X-CSRF-Token": csrf_token},
-        json={"period": "7d"},
+        json={"period": AUTOMATIC_SHORT_REFRESH_PERIOD},
     )
     assert response.status_code == 503
 
 
-@pytest.mark.parametrize("payload", [{}, {"period": "7d"}])
+@pytest.mark.parametrize("payload", [{}, {"period": AUTOMATIC_SHORT_REFRESH_PERIOD}])
 async def test_index_refresh_serializes_partial_result_and_audits(
     harness: Harness,
     monkeypatch: pytest.MonkeyPatch,
@@ -547,7 +550,8 @@ async def test_index_refresh_serializes_partial_result_and_audits(
     )
 
     assert response.status_code == 200, response.text
-    assert calls == [(list(TRACKED_INDICES), "7d")]
+    # ^TWII is excluded: this endpoint is yfinance-specific and TWSE owns it.
+    assert calls == [(list(YFINANCE_INDICES), AUTOMATIC_SHORT_REFRESH_PERIOD)]
     assert response.json()["succeeded"] == [
         {
             "symbol": "^TWII",
@@ -568,8 +572,8 @@ async def test_index_refresh_serializes_partial_result_and_audits(
         )
     assert event is not None
     assert event.after == {
-        "period": "7d",
-        "requested": list(TRACKED_INDICES),
+        "period": AUTOMATIC_SHORT_REFRESH_PERIOD,
+        "requested": list(YFINANCE_INDICES),
         "succeeded": ["^TWII"],
         "failed": ["^HSI"],
     }
@@ -622,7 +626,7 @@ async def test_index_refresh_timeout_returns_504_without_an_audit_event(
     response = await harness.client.post(
         "/api/admin/data-sources/yfinance/daily-bars",
         headers={"X-CSRF-Token": csrf_token},
-        json={"period": "7d"},
+        json={"period": AUTOMATIC_SHORT_REFRESH_PERIOD},
     )
 
     assert response.status_code == 504

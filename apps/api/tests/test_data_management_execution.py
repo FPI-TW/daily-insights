@@ -20,7 +20,13 @@ from daily_insights_api.modules.data_management.service import (
     worker_loop,
 )
 from daily_insights_api.modules.data_sources.api import DataSourceError
-from daily_insights_api.modules.markets.api import InstitutionalMarketFlow
+from daily_insights_api.modules.markets.api import (
+    AUTOMATIC_SHORT_REFRESH_PERIOD,
+    TAIEX_INCREMENTAL_MONTHS,
+    TAIEX_SYMBOL,
+    InstitutionalMarketFlow,
+    TaiexRefresh,
+)
 from daily_insights_api.modules.reports.api import (
     LaunchMarketCode,
     MorningDatasetExecution,
@@ -247,7 +253,7 @@ async def test_morning_full_classifies_degraded_and_failed_markets(
 
 
 @pytest.mark.asyncio
-async def test_yahoo_execution_uses_seven_day_period_and_serializes_symbols(
+async def test_yahoo_execution_uses_the_incremental_period_and_keeps_symbol_error_detail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from daily_insights_api.modules.data_management import service
@@ -260,7 +266,7 @@ async def test_yahoo_execution_uses_seven_day_period_and_serializes_symbols(
             [
                 SimpleNamespace(
                     result=SimpleNamespace(
-                        symbol="^TWII",
+                        symbol="^DJI",
                         provenance=SimpleNamespace(
                             fetched_at=datetime(2026, 9, 7, tzinfo=UTC),
                             as_of=date(2026, 9, 6),
@@ -272,18 +278,41 @@ async def test_yahoo_execution_uses_seven_day_period_and_serializes_symbols(
             [SimpleNamespace(symbol="^HSI", error="api_key=secret")],
         )
 
+    async def select_months(*_: object, **kwargs: object) -> tuple[date, ...]:
+        calls["taiex_requested_months"] = kwargs["requested_months"]
+        return (date(2026, 8, 1), date(2026, 9, 1))
+
+    async def refresh_taiex(*_: object, **__: object) -> TaiexRefresh:
+        return TaiexRefresh(
+            stored_count=21,
+            as_of=date(2026, 9, 10),
+            fetched_at=datetime(2026, 9, 11, tzinfo=UTC),
+            empty_months=(),
+        )
+
     monkeypatch.setattr(service, "YfinanceAdapter", lambda **_: object())
     monkeypatch.setattr(service, "refresh_index_daily_bars", refresh)
+    monkeypatch.setattr(service, "select_taiex_refresh_months", select_months)
+    monkeypatch.setattr(service, "refresh_taiex_daily_bars", refresh_taiex)
     status, result, error = await execute_run(
         _run("index_yahoo"),
         cast(Any, _StubSessionFactory()),
-        Settings(environment="test", yfinance_enabled=True),
+        Settings(environment="test", yfinance_enabled=True, twse_enabled=True),
     )
-    assert status == "partial" and error == "yfinance_symbol_failures"
-    assert calls["period"] == "7d"
+    assert status == "partial" and error == "index_symbol_failures"
+    assert calls["period"] == AUTOMATIC_SHORT_REFRESH_PERIOD
+    # ^TWII belongs to TWSE now, so it must not be in the Yahoo request.
+    assert TAIEX_SYMBOL not in cast(list[str], calls["symbols"])
     symbols = cast(list[dict[str, object]], result["symbols"])
     assert symbols[0]["record_count"] == 7 and symbols[0]["source_as_of"] == "2026-09-06"
-    assert symbols[1]["error"] == "runtimeerror"
+    taiex = next(item for item in symbols if item["symbol"] == TAIEX_SYMBOL)
+    assert taiex["status"] == "succeeded" and taiex["record_count"] == 21
+    # The run always asks for the incremental window; widening an empty series
+    # to the two-year backfill is the selector's decision, not the run's.
+    assert calls["taiex_requested_months"] == TAIEX_INCREMENTAL_MONTHS
+    # The operator reads this string in the back office, so it keeps the cause
+    # instead of collapsing to a class name -- with secrets still redacted.
+    assert symbols[1]["error"] == "api_key=[REDACTED]"
 
 
 @pytest.mark.asyncio

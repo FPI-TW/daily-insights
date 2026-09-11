@@ -2,7 +2,7 @@ import asyncio
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
 
@@ -13,11 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from daily_insights_api.modules.data_sources.api import (
+    TAIEX_CONTRACT_VERSION,
     TRACKED_INDICES,
     DailyBar,
+    DataSourceContractError,
     DataSourceError,
     IndexSymbol,
     MarketCode,
+    TwseAdapter,
     TwseMarketFlows,
     TwseStockFlows,
     YfinanceAdapter,
@@ -52,8 +55,34 @@ MAX_BIND_PARAMETERS = 65535
 # this stays conservative; it matches TwelveDataTransport's default.
 MAX_FETCH_CONCURRENCY = 4
 INITIAL_SERIES_BACKFILL_PERIOD = "2y"
+# Deliberately a week, not a day. A one-day window holds nothing but the most
+# recent session, and that session is regularly unusable: mid-morning in Taipei
+# it is the still-open local one, and Yahoo publishes the just-closed Asian
+# session with open/high/low but a NaN close for hours. Either way the adapter
+# drops the only row it was given and the symbol fails. A week-wide window
+# always carries settled days behind whatever the newest row is doing, and
+# absorbs holidays and a missed run without any catch-up logic.
 AUTOMATIC_SHORT_REFRESH_PERIOD = "7d"
 YAHOO_REFRESH_LOCK_KEY = 4_741_901_938_764_211_037
+# ^TWII comes from the exchange itself rather than Yahoo. Two TWSE reports hold
+# one bar between them -- MI_5MINS_HIST has open/high/low/close, FMTQIK has the
+# volume -- and both answer a whole month per request. Yahoo's ^TWII volume did
+# not agree with the exchange's published share count, so this is the only
+# source for the series; `index_daily_bar_series` enforces that one provider
+# owns it.
+TAIEX_SYMBOL: IndexSymbol = "^TWII"
+TAIEX_PROVIDER = "twse"
+# The Yahoo path gives a series with no stored bars a two-year bootstrap so a
+# catalog rollout needs no manual backfill. TWSE is keyed on months rather than
+# a lookback window, so this is the same two years counted its way: 24 months
+# back plus the current one. Without it a fresh series would only ever hold the
+# incremental window, and nothing would go back for the rest.
+TAIEX_INCREMENTAL_MONTHS = 2
+TAIEX_INITIAL_BACKFILL_MONTHS = 25
+# Every other tracked index still comes from Yahoo.
+YFINANCE_INDICES: tuple[IndexSymbol, ...] = tuple(
+    symbol for symbol in TRACKED_INDICES if symbol != TAIEX_SYMBOL
+)
 MOVING_AVERAGE_PERIODS = (20, 60, 120, 240)
 MOVING_AVERAGE_WARMUP_SESSIONS = max(MOVING_AVERAGE_PERIODS) - 1
 MOVING_AVERAGE_QUANTUM = Decimal("0.0000000001")
@@ -464,6 +493,122 @@ class IndexRefreshFailure:
     error: str
 
 
+@dataclass(frozen=True, slots=True)
+class TaiexRefresh:
+    stored_count: int
+    as_of: date
+    fetched_at: datetime
+    # Months TWSE reported no trading for. A month-wide request answers an
+    # unpublished or future month with an empty payload rather than an error,
+    # and that is not a failure worth losing the other months over.
+    empty_months: tuple[date, ...]
+
+
+def taiex_months(*, start: date, end: date) -> tuple[date, ...]:
+    """First-of-month markers covering `start`..`end` inclusive.
+
+    TWSE keys both TAIEX reports on any date inside the wanted month, so the
+    caller walks months rather than trading days.
+    """
+    if start > end:
+        raise ValueError("start must not be after end")
+    months: list[date] = []
+    cursor = start.replace(day=1)
+    last = end.replace(day=1)
+    while cursor <= last:
+        months.append(cursor)
+        cursor = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return tuple(months)
+
+
+async def select_taiex_refresh_months(
+    database: AsyncSession, *, today: date, requested_months: int
+) -> tuple[date, ...]:
+    """Widen an incremental request to the full backfill when the series is empty.
+
+    Mirrors `select_index_refresh_period` for the Yahoo path. An explicit longer
+    request is left alone; only the incremental window is widened, so a CLI
+    backfill still means exactly what it asked for.
+    """
+    if requested_months < 1:
+        raise ValueError("requested_months must be at least 1")
+    months_back = requested_months
+    if requested_months == TAIEX_INCREMENTAL_MONTHS:
+        has_stored_bars = await database.scalar(
+            select(IndexDailyBar.symbol).where(IndexDailyBar.symbol == TAIEX_SYMBOL).limit(1)
+        )
+        if has_stored_bars is None:
+            months_back = TAIEX_INITIAL_BACKFILL_MONTHS
+    start = today.replace(day=1)
+    for _ in range(months_back - 1):
+        start = (start - timedelta(days=1)).replace(day=1)
+    return taiex_months(start=start, end=today)
+
+
+async def refresh_taiex_daily_bars(
+    database: AsyncSession,
+    *,
+    adapter: TwseAdapter,
+    months: Sequence[date],
+) -> TaiexRefresh:
+    """Fetch and upsert ^TWII for each month.
+
+    Unlike the Yahoo path there is no per-symbol partial state to report: this
+    is one symbol, so a failed fetch raises and the caller records the symbol as
+    failed. Each month costs two spaced TWSE requests, so callers on a request
+    deadline should ask for few months and leave long backfills to the CLI.
+    """
+    if not months:
+        raise ValueError("months must not be empty")
+    # Shared with the Yahoo refresh on purpose: both write index_daily_bars, and
+    # serialising them keeps one from waiting on the other's conflict rows.
+    await database.execute(select(func.pg_advisory_lock(YAHOO_REFRESH_LOCK_KEY)))
+    try:
+        bars: list[DailyBar] = []
+        empty_months: list[date] = []
+        fetched_at: datetime | None = None
+        for month in months:
+            fetched = await adapter.get_taiex_daily_bars(month)
+            fetched_at = fetched.fetched_at
+            if not fetched.items:
+                empty_months.append(month)
+                continue
+            bars.extend(
+                DailyBar(
+                    instrument_source_id=TAIEX_SYMBOL,
+                    market=TRACKED_INDICES[TAIEX_SYMBOL],
+                    symbol=TAIEX_SYMBOL,
+                    trade_date=bar.trade_date,
+                    open=bar.open,
+                    high=bar.high,
+                    low=bar.low,
+                    close=bar.close,
+                    volume=bar.volume,
+                    source=TAIEX_PROVIDER,
+                )
+                for bar in fetched.items
+            )
+        if not bars or fetched_at is None:
+            raise DataSourceContractError(
+                f"twse published no TAIEX sessions for {len(months)} requested month(s)"
+            )
+        stored_count = await store_index_daily_bars(
+            database,
+            bars=bars,
+            provider=TAIEX_PROVIDER,
+            contract_version=TAIEX_CONTRACT_VERSION,
+            source_fetched_at=fetched_at,
+        )
+        return TaiexRefresh(
+            stored_count=stored_count,
+            as_of=max(bar.trade_date for bar in bars),
+            fetched_at=fetched_at,
+            empty_months=tuple(empty_months),
+        )
+    finally:
+        await database.execute(select(func.pg_advisory_unlock(YAHOO_REFRESH_LOCK_KEY)))
+
+
 async def refresh_index_daily_bars(
     database: AsyncSession,
     *,
@@ -478,9 +623,11 @@ async def refresh_index_daily_bars(
     run where nobody is watching.
     """
     # Reject invalid caller input before using a database connection/lock.
-    untracked = sorted(set(symbols) - set(TRACKED_INDICES))
-    if untracked:
-        raise ValueError(f"untracked symbols: {', '.join(untracked)}")
+    # ^TWII is tracked but not served here: it belongs to TWSE, and letting it
+    # through would quietly overwrite the exchange's bars with Yahoo's.
+    unsupported = sorted(set(symbols) - set(YFINANCE_INDICES))
+    if unsupported:
+        raise ValueError(f"symbols not served by yfinance: {', '.join(unsupported)}")
     # One session-scoped lock covers the legacy synchronous endpoint, scheduler
     # and durable worker. It is deliberately acquired before any Yahoo call,
     # because this provider has no published quota and credits/cookies are not
@@ -503,9 +650,11 @@ async def _refresh_index_daily_bars_unlocked(
 ) -> tuple[list[IndexRefresh], list[IndexRefreshFailure]]:
     # Typing keeps checked callers honest; this guard keeps an untyped one from
     # reaching a bare KeyError on the lookup below.
-    untracked = sorted(set(symbols) - set(TRACKED_INDICES))
-    if untracked:
-        raise ValueError(f"untracked symbols: {', '.join(untracked)}")
+    # ^TWII is tracked but not served here: it belongs to TWSE, and letting it
+    # through would quietly overwrite the exchange's bars with Yahoo's.
+    unsupported = sorted(set(symbols) - set(YFINANCE_INDICES))
+    if unsupported:
+        raise ValueError(f"symbols not served by yfinance: {', '.join(unsupported)}")
 
     # A newly added tracked symbol has no rows in an existing deployment. A
     # short scheduled refresh alone cannot provide the prior-year close needed
