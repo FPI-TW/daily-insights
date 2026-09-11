@@ -23,8 +23,12 @@ from daily_insights_api.core.enums import SystemRole, UserStatus
 from daily_insights_api.modules.data_sources.api import (
     TRACKED_INDICES,
     DailyBar,
+    DataSourceContractError,
     IndexSymbol,
     Provenance,
+    TaiexDailyBar,
+    TaiexDailyBars,
+    TwseAdapter,
     YfinanceAdapter,
     YfinanceDailyBars,
 )
@@ -48,8 +52,10 @@ from daily_insights_api.modules.markets.service import (
     MAX_FETCH_CONCURRENCY,
     TAIEX_INCREMENTAL_MONTHS,
     TAIEX_INITIAL_BACKFILL_MONTHS,
+    YAHOO_REFRESH_LOCK_KEY,
     YFINANCE_INDICES,
     IndexProviderConflictError,
+    refresh_taiex_daily_bars,
     select_taiex_refresh_months,
 )
 from daily_insights_api.modules.tenancy.models import Organization
@@ -1057,3 +1063,87 @@ async def test_an_explicit_taiex_window_is_never_widened(
             database, today=date(2026, 9, 11), requested_months=3
         )
     assert list(months) == [date(2026, 7, 1), date(2026, 8, 1), date(2026, 9, 1)]
+
+
+class _StubTwseAdapter:
+    def __init__(self, month: date, close: str = "100.0") -> None:
+        self._month = month
+        self._close = close
+
+    async def get_taiex_daily_bars(self, month: date) -> TaiexDailyBars:
+        return TaiexDailyBars(
+            month=month,
+            items=(
+                TaiexDailyBar(
+                    trade_date=month,
+                    open=Decimal("100.0"),
+                    high=Decimal("101.0"),
+                    low=Decimal("99.0"),
+                    close=Decimal(self._close),
+                    volume=1_000,
+                ),
+            ),
+            fetched_at=FETCHED_AT,
+        )
+
+
+async def test_a_taiex_write_failure_surfaces_its_cause_and_frees_the_shared_lock(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A failed write must not poison the transaction the lock release needs.
+
+    `pg_advisory_lock` is session-scoped, so the `finally` clause is the only
+    thing that gives it back. If the write aborts the surrounding transaction,
+    that release raises PendingRollbackError instead -- masking the real cause
+    and leaking the lock, which every later index refresh then blocks on.
+    """
+    month = date(2026, 9, 1)
+    # Hand ^TWII to another provider so the write is refused.
+    async with session_factory.begin() as database:
+        await _store_as(database, [_bar(month, "100.0")], "twelve_data")
+
+    async with session_factory.begin() as database:
+        with pytest.raises(IndexProviderConflictError):
+            await refresh_taiex_daily_bars(
+                database,
+                adapter=cast(TwseAdapter, _StubTwseAdapter(month)),
+                months=[month],
+            )
+
+    # The lock is free: a fresh session can take and drop it without blocking.
+    async with session_factory() as database:
+        acquired = await database.scalar(select(func.pg_try_advisory_lock(YAHOO_REFRESH_LOCK_KEY)))
+        assert acquired is True
+        await database.execute(select(func.pg_advisory_unlock(YAHOO_REFRESH_LOCK_KEY)))
+
+
+async def test_a_taiex_write_failure_is_reported_without_poisoning_the_transaction(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A value the adapter let through must not cost us the session lock.
+
+    numeric(20,10) overflows above ten integer digits. Unlike the ownership
+    refusal above -- which raises before any INSERT -- this aborts the
+    transaction, so without a savepoint every later statement in it fails too,
+    including the `pg_advisory_unlock` in the `finally`. That lock is
+    session-scoped: losing it leaves it held by a pooled connection and every
+    later index refresh blocks on it indefinitely. Verified against pg_locks
+    before the fix: the lock stayed granted and the cause surfaced as a bare
+    InternalError.
+    """
+    month = date(2026, 9, 1)
+    async with session_factory.begin() as database:
+        with pytest.raises(DataSourceContractError, match="rejected on write"):
+            await refresh_taiex_daily_bars(
+                database,
+                adapter=cast(TwseAdapter, _StubTwseAdapter(month, close="1" + "0" * 11)),
+                months=[month],
+            )
+        # The transaction survived, which is what lets the lock be released.
+        assert await database.scalar(select(1)) == 1
+
+    async with session_factory() as database:
+        held = await database.scalar(
+            text("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'")
+        )
+        assert held == 0

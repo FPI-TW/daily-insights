@@ -50,6 +50,7 @@ from daily_insights_api.modules.markets.api import (
     TAIEX_INCREMENTAL_MONTHS,
     TAIEX_SYMBOL,
     YFINANCE_INDICES,
+    IndexProviderConflictError,
     refresh_index_daily_bars,
     refresh_taiex_daily_bars,
     select_taiex_refresh_months,
@@ -181,7 +182,9 @@ async def _refresh_taiex(
                 database, today=today, requested_months=months_back
             )
             refreshed = await refresh_taiex_daily_bars(database, adapter=adapter, months=months)
-    except DataSourceError as error:
+    # See the data-management path: a provider conflict means the migration
+    # that releases ^TWII has not run, not that TWSE failed.
+    except (DataSourceError, IndexProviderConflictError) as error:
         return 0, f"{type(error).__name__}: {error}"
     finally:
         await adapter.close()

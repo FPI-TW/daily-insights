@@ -31,6 +31,7 @@ from daily_insights_api.modules.markets.api import (
     TAIEX_INCREMENTAL_MONTHS,
     TAIEX_SYMBOL,
     YFINANCE_INDICES,
+    IndexProviderConflictError,
     InstitutionalMarketFlow,
     InstitutionalStockFlow,
     refresh_index_daily_bars,
@@ -785,7 +786,11 @@ async def _refresh_taiex(
                 requested_months=TAIEX_INCREMENTAL_MONTHS,
             )
             refreshed = await refresh_taiex_daily_bars(database, adapter=adapter, months=months)
-    except DataSourceError as error:
+    # IndexProviderConflictError is not a provider failure: it means ^TWII's
+    # series still belongs to yfinance, which happens when the code ships ahead
+    # of the migration that releases it. The operator needs to see that rather
+    # than have it escape as an unhandled error.
+    except (DataSourceError, IndexProviderConflictError) as error:
         return {
             "symbol": TAIEX_SYMBOL,
             "status": "failed",

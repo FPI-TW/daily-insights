@@ -592,13 +592,28 @@ async def refresh_taiex_daily_bars(
             raise DataSourceContractError(
                 f"twse published no TAIEX sessions for {len(months)} requested month(s)"
             )
-        stored_count = await store_index_daily_bars(
-            database,
-            bars=bars,
-            provider=TAIEX_PROVIDER,
-            contract_version=TAIEX_CONTRACT_VERSION,
-            source_fetched_at=fetched_at,
-        )
+        # The write gets its own savepoint for the same reason the Yahoo path
+        # gives each symbol one, but the stakes here are higher: a row that
+        # trips a CHECK aborts the surrounding transaction, and then the
+        # `pg_advisory_unlock` below fails too. That lock is session-scoped, so
+        # the `finally` is the only thing that returns it -- losing it leaves
+        # every later index refresh blocking on it indefinitely.
+        try:
+            async with database.begin_nested():
+                stored_count = await store_index_daily_bars(
+                    database,
+                    bars=bars,
+                    provider=TAIEX_PROVIDER,
+                    contract_version=TAIEX_CONTRACT_VERSION,
+                    source_fetched_at=fetched_at,
+                )
+        except (IntegrityError, DataError) as error:
+            # A value the adapter let through that the schema will not hold is
+            # the provider disagreeing with our contract. Carry the cause: this
+            # is what an operator reads in the back office.
+            raise DataSourceContractError(
+                f"twse TAIEX bars were rejected on write: {type(error).__name__}: {error.orig}"
+            ) from error
         return TaiexRefresh(
             stored_count=stored_count,
             as_of=max(bar.trade_date for bar in bars),
