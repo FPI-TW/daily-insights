@@ -188,6 +188,8 @@ async def _refresh_taiex(
         return 0, f"{type(error).__name__}: {error}"
     finally:
         await adapter.close()
+    if refreshed.failed_months:
+        return refreshed.stored_count, "; ".join(refreshed.failed_months)
     return refreshed.stored_count, None
 
 

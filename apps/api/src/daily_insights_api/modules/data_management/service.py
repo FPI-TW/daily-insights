@@ -798,13 +798,21 @@ async def _refresh_taiex(
         }
     finally:
         await adapter.close()
-    return {
+    entry: dict[str, object] = {
         "symbol": TAIEX_SYMBOL,
-        "status": "succeeded",
+        "status": "succeeded" if not refreshed.failed_months else "partial",
         "fetched_at": refreshed.fetched_at.isoformat(),
         "source_as_of": refreshed.as_of.isoformat(),
         "record_count": refreshed.stored_count,
     }
+    if refreshed.failed_months:
+        # Months that did not land. The rest are stored, so this is the operator's
+        # only way to know a later run should be pointed at them.
+        entry["error"] = sanitize_item_error(
+            ("twse stopped early; " if refreshed.aborted else "")
+            + "; ".join(refreshed.failed_months)
+        )
+    return entry
 
 
 class _TwseFlows(Protocol):

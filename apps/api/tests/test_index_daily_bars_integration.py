@@ -49,6 +49,7 @@ from daily_insights_api.modules.markets.service import (
     AUTOMATIC_SHORT_REFRESH_PERIOD,
     INITIAL_SERIES_BACKFILL_PERIOD,
     MAX_BIND_PARAMETERS,
+    MAX_CONSECUTIVE_TAIEX_FAILURES,
     MAX_FETCH_CONCURRENCY,
     TAIEX_INCREMENTAL_MONTHS,
     TAIEX_INITIAL_BACKFILL_MONTHS,
@@ -57,6 +58,7 @@ from daily_insights_api.modules.markets.service import (
     IndexProviderConflictError,
     refresh_taiex_daily_bars,
     select_taiex_refresh_months,
+    taiex_months,
 )
 from daily_insights_api.modules.tenancy.models import Organization
 from daily_insights_api.web.app import create_app
@@ -1066,11 +1068,21 @@ async def test_an_explicit_taiex_window_is_never_widened(
 
 
 class _StubTwseAdapter:
-    def __init__(self, month: date, close: str = "100.0") -> None:
+    def __init__(
+        self,
+        month: date,
+        close: str = "100.0",
+        failing_months: frozenset[date] = frozenset(),
+    ) -> None:
         self._month = month
         self._close = close
+        self._failing_months = failing_months
+        self.asked: list[date] = []
 
     async def get_taiex_daily_bars(self, month: date) -> TaiexDailyBars:
+        self.asked.append(month)
+        if month in self._failing_months:
+            raise DataSourceContractError(f"{month:%Y-%m} is not a TAIEX report")
         return TaiexDailyBars(
             month=month,
             items=(
@@ -1133,7 +1145,9 @@ async def test_a_taiex_write_failure_is_reported_without_poisoning_the_transacti
     """
     month = date(2026, 9, 1)
     async with session_factory.begin() as database:
-        with pytest.raises(DataSourceContractError, match="rejected on write"):
+        # The only month failed, so there is nothing to return -- but the cause
+        # is carried rather than replaced by a bare InternalError.
+        with pytest.raises(DataSourceContractError, match="DataError: numeric field overflow"):
             await refresh_taiex_daily_bars(
                 database,
                 adapter=cast(TwseAdapter, _StubTwseAdapter(month, close="1" + "0" * 11)),
@@ -1147,3 +1161,57 @@ async def test_a_taiex_write_failure_is_reported_without_poisoning_the_transacti
             text("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'")
         )
         assert held == 0
+
+
+async def test_one_bad_month_does_not_discard_the_backfill(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A 25-month bootstrap must not be all-or-nothing.
+
+    Discarding every month over one bad one is unrecoverable: the series stays
+    empty, so the next run widens back to the same window and meets the same
+    month again. Same failure shape this PR removed from the Yahoo path, where
+    one unsettled row used to discard a symbol's whole history.
+    """
+    months = [date(2026, 7, 1), date(2026, 8, 1), date(2026, 9, 1)]
+    adapter = _StubTwseAdapter(months[0], failing_months=frozenset({months[1]}))
+
+    async with session_factory.begin() as database:
+        refreshed = await refresh_taiex_daily_bars(
+            database, adapter=cast(TwseAdapter, adapter), months=months
+        )
+
+    assert refreshed.stored_count == 2
+    assert refreshed.failed_months == (
+        "2026-08: DataSourceContractError: 2026-08 is not a TAIEX report",
+    )
+    assert refreshed.aborted is False
+    # The walk carried on past the bad month rather than stopping there.
+    assert adapter.asked == months
+
+    # The series is no longer empty, so the next run is incremental rather than
+    # widening into the same failure again.
+    async with session_factory() as database:
+        stored = (await database.scalars(select(IndexDailyBar.trade_date))).all()
+        assert sorted(stored) == [date(2026, 7, 1), date(2026, 9, 1)]
+        months_next = await select_taiex_refresh_months(
+            database, today=date(2026, 9, 11), requested_months=TAIEX_INCREMENTAL_MONTHS
+        )
+    assert len(months_next) == TAIEX_INCREMENTAL_MONTHS
+
+
+async def test_a_dead_twse_stops_the_walk_instead_of_asking_every_month(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # Three failures in a row means the source is down, not that one month is
+    # bad. Asking the remaining 22 would cost minutes of spaced requests.
+    months = list(taiex_months(start=date(2024, 9, 1), end=date(2026, 9, 1)))
+    adapter = _StubTwseAdapter(months[0], failing_months=frozenset(months))
+
+    async with session_factory.begin() as database:
+        with pytest.raises(DataSourceContractError, match="stored no TAIEX sessions"):
+            await refresh_taiex_daily_bars(
+                database, adapter=cast(TwseAdapter, adapter), months=months
+            )
+
+    assert len(adapter.asked) == MAX_CONSECUTIVE_TAIEX_FAILURES

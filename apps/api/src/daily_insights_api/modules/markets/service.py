@@ -79,6 +79,9 @@ TAIEX_PROVIDER = "twse"
 # incremental window, and nothing would go back for the rest.
 TAIEX_INCREMENTAL_MONTHS = 2
 TAIEX_INITIAL_BACKFILL_MONTHS = 25
+# TWSE being down looks the same for every month, so stop asking after three.
+# Mirrors the institutional-flows walk, which paces the same provider.
+MAX_CONSECUTIVE_TAIEX_FAILURES = 3
 # Every other tracked index still comes from Yahoo.
 YFINANCE_INDICES: tuple[IndexSymbol, ...] = tuple(
     symbol for symbol in TRACKED_INDICES if symbol != TAIEX_SYMBOL
@@ -502,6 +505,13 @@ class TaiexRefresh:
     # unpublished or future month with an empty payload rather than an error,
     # and that is not a failure worth losing the other months over.
     empty_months: tuple[date, ...]
+    # Months that failed, as "YYYY-MM: reason". Non-empty means the refresh was
+    # partial: the months that did work are stored, and the caller reports which
+    # did not so a later run can be pointed at them.
+    failed_months: tuple[str, ...] = ()
+    # True when the walk stopped early because TWSE looked down rather than
+    # because one month was bad.
+    aborted: bool = False
 
 
 def taiex_months(*, start: date, end: date) -> tuple[date, ...]:
@@ -551,12 +561,17 @@ async def refresh_taiex_daily_bars(
     adapter: TwseAdapter,
     months: Sequence[date],
 ) -> TaiexRefresh:
-    """Fetch and upsert ^TWII for each month.
+    """Fetch and upsert ^TWII one month at a time.
 
-    Unlike the Yahoo path there is no per-symbol partial state to report: this
-    is one symbol, so a failed fetch raises and the caller records the symbol as
-    failed. Each month costs two spaced TWSE requests, so callers on a request
-    deadline should ask for few months and leave long backfills to the CLI.
+    Each month is its own fetch and its own savepoint, because a 25-month
+    bootstrap that discarded everything over one bad month could never recover:
+    an empty series widens the window back to the same 25 months on the next
+    run and meets the same month again. A month that fails is reported and the
+    walk continues, so a later run only has to fill the holes. That mirrors the
+    Yahoo path, where one dead symbol does not discard the ones that resolved.
+
+    Each month costs two spaced TWSE requests, so callers on a request deadline
+    should ask for few months and leave long backfills to the CLI.
     """
     if not months:
         raise ValueError("months must not be empty")
@@ -564,16 +579,30 @@ async def refresh_taiex_daily_bars(
     # serialising them keeps one from waiting on the other's conflict rows.
     await database.execute(select(func.pg_advisory_lock(YAHOO_REFRESH_LOCK_KEY)))
     try:
-        bars: list[DailyBar] = []
-        empty_months: list[date] = []
+        stored_count = 0
+        as_of: date | None = None
         fetched_at: datetime | None = None
+        empty_months: list[date] = []
+        failed_months: list[str] = []
+        consecutive_failures = 0
+        aborted = False
         for month in months:
-            fetched = await adapter.get_taiex_daily_bars(month)
-            fetched_at = fetched.fetched_at
+            try:
+                fetched = await adapter.get_taiex_daily_bars(month)
+            except DataSourceError as error:
+                failed_months.append(f"{month:%Y-%m}: {type(error).__name__}: {error}")
+                consecutive_failures += 1
+                if consecutive_failures >= MAX_CONSECUTIVE_TAIEX_FAILURES:
+                    # The source is down, not this one month. Asking the rest
+                    # would cost minutes of spaced requests and tell us nothing.
+                    aborted = True
+                    break
+                continue
+            consecutive_failures = 0
             if not fetched.items:
                 empty_months.append(month)
                 continue
-            bars.extend(
+            bars = [
                 DailyBar(
                     instrument_source_id=TAIEX_SYMBOL,
                     market=TRACKED_INDICES[TAIEX_SYMBOL],
@@ -587,38 +616,44 @@ async def refresh_taiex_daily_bars(
                     source=TAIEX_PROVIDER,
                 )
                 for bar in fetched.items
-            )
-        if not bars or fetched_at is None:
+            ]
+            # One savepoint per month. Besides keeping a bad month from
+            # discarding the good ones, it keeps the transaction usable: the
+            # `pg_advisory_unlock` below is session-scoped and is the only
+            # thing that returns that lock.
+            try:
+                async with database.begin_nested():
+                    stored_count += await store_index_daily_bars(
+                        database,
+                        bars=bars,
+                        provider=TAIEX_PROVIDER,
+                        contract_version=TAIEX_CONTRACT_VERSION,
+                        source_fetched_at=fetched.fetched_at,
+                    )
+            except (IntegrityError, DataError) as error:
+                # A value the adapter let through that the schema will not hold.
+                # `IndexProviderConflictError` deliberately is not caught: the
+                # series belonging to another provider is true for every month,
+                # so retrying the remaining ones would be pointless.
+                failed_months.append(f"{month:%Y-%m}: {type(error).__name__}: {error.orig}")
+                continue
+            fetched_at = fetched.fetched_at
+            month_as_of = max(bar.trade_date for bar in bars)
+            as_of = month_as_of if as_of is None else max(as_of, month_as_of)
+
+        if as_of is None or fetched_at is None:
             raise DataSourceContractError(
-                f"twse published no TAIEX sessions for {len(months)} requested month(s)"
+                "twse stored no TAIEX sessions for any of the "
+                f"{len(months)} requested month(s): "
+                + ("; ".join(failed_months) if failed_months else "all months were empty")
             )
-        # The write gets its own savepoint for the same reason the Yahoo path
-        # gives each symbol one, but the stakes here are higher: a row that
-        # trips a CHECK aborts the surrounding transaction, and then the
-        # `pg_advisory_unlock` below fails too. That lock is session-scoped, so
-        # the `finally` is the only thing that returns it -- losing it leaves
-        # every later index refresh blocking on it indefinitely.
-        try:
-            async with database.begin_nested():
-                stored_count = await store_index_daily_bars(
-                    database,
-                    bars=bars,
-                    provider=TAIEX_PROVIDER,
-                    contract_version=TAIEX_CONTRACT_VERSION,
-                    source_fetched_at=fetched_at,
-                )
-        except (IntegrityError, DataError) as error:
-            # A value the adapter let through that the schema will not hold is
-            # the provider disagreeing with our contract. Carry the cause: this
-            # is what an operator reads in the back office.
-            raise DataSourceContractError(
-                f"twse TAIEX bars were rejected on write: {type(error).__name__}: {error.orig}"
-            ) from error
         return TaiexRefresh(
             stored_count=stored_count,
-            as_of=max(bar.trade_date for bar in bars),
+            as_of=as_of,
             fetched_at=fetched_at,
             empty_months=tuple(empty_months),
+            failed_months=tuple(failed_months),
+            aborted=aborted,
         )
     finally:
         await database.execute(select(func.pg_advisory_unlock(YAHOO_REFRESH_LOCK_KEY)))
