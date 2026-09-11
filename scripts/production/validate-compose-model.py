@@ -125,6 +125,15 @@ def main() -> None:
             "DAILY_INSIGHTS_YFINANCE_ENABLED",
             None,
         ),
+        # The same scheduler refreshes ^TWII from TWSE, which supplies it
+        # instead of Yahoo. Without this flag the TAIEX leg reports a failure
+        # every run, and the same-day retry re-fetches every Yahoo symbol with
+        # it until noon.
+        (
+            "index-daily-bars-scheduler",
+            "DAILY_INSIGHTS_TWSE_ENABLED",
+            None,
+        ),
         # TWSE publishes no API either; the scheduler only queues the run
         # that the worker below executes.
         (

@@ -78,8 +78,17 @@ grep -Fq 'DAILY_INSIGHTS_YFINANCE_ENABLED: ${DAILY_INSIGHTS_YFINANCE_ENABLED:-fa
 grep -Fq 'daily_insights_api.scripts.run_index_daily_bars' "$compose_file"
 grep -Fq '/tmp/index-daily-bars-heartbeat' "$compose_file"
 # The API gates the request and reports the flag to the admin page, the worker
-# gates the execution, and the scheduler gates the queueing: all three need it.
-[ "$(grep -c 'DAILY_INSIGHTS_TWSE_ENABLED: ${DAILY_INSIGHTS_TWSE_ENABLED:-false}' "$compose_file")" -eq 3 ]
+# gates the execution, the institutional scheduler gates the queueing, and the
+# index scheduler needs it because ^TWII is refreshed from TWSE rather than
+# Yahoo. A service that misses it does not fail loudly: the flag defaults to
+# false, so that leg reports a failure on every run and the same-day retry
+# re-fetches everything alongside it until noon.
+twse_flag_services=$(grep -c 'DAILY_INSIGHTS_TWSE_ENABLED: ${DAILY_INSIGHTS_TWSE_ENABLED:-false}' "$compose_file")
+if [ "$twse_flag_services" -ne 4 ]; then
+  echo "expected DAILY_INSIGHTS_TWSE_ENABLED on 4 services (api, data-management-worker," >&2
+  echo "institutional-flows-scheduler, index-daily-bars-scheduler); found $twse_flag_services" >&2
+  exit 1
+fi
 grep -Fq 'daily_insights_api.scripts.run_institutional_flows' "$compose_file"
 grep -Fq '/tmp/institutional-flows-heartbeat' "$compose_file"
 grep -Fq 'daily_insights_api.scripts.run_macro_dashboard_scheduler' "$compose_file"
