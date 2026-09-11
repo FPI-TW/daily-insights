@@ -508,10 +508,6 @@ class TaiexRefresh:
     stored_count: int
     as_of: date
     fetched_at: datetime
-    # Months TWSE reported no trading for. A month-wide request answers an
-    # unpublished or future month with an empty payload rather than an error,
-    # and that is not a failure worth losing the other months over.
-    empty_months: tuple[date, ...]
     # Months that failed, as "YYYY-MM: reason". Non-empty means the refresh was
     # partial: the months that did work are stored, and the caller reports which
     # did not so a later run can be pointed at them.
@@ -590,7 +586,6 @@ async def refresh_taiex_daily_bars(
     stored_count = 0
     as_of: date | None = None
     fetched_at: datetime | None = None
-    empty_months: list[date] = []
     failed_months: list[str] = []
     consecutive_failures = 0
     aborted = False
@@ -609,7 +604,9 @@ async def refresh_taiex_daily_bars(
             continue
         consecutive_failures = 0
         if not fetched.items:
-            empty_months.append(month)
+            # A month-wide request answers an unpublished or future month with
+            # an empty payload rather than an error. Nothing to store, and not
+            # a failure worth reporting.
             continue
         bars = [
             DailyBar(
@@ -659,7 +656,6 @@ async def refresh_taiex_daily_bars(
         stored_count=stored_count,
         as_of=as_of,
         fetched_at=fetched_at,
-        empty_months=tuple(empty_months),
         failed_months=tuple(failed_months),
         aborted=aborted,
     )

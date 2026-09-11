@@ -115,15 +115,10 @@ TWSE_CONTRACT_HASH = hashlib.sha256(
 
 # Separate from TWSE_CONTRACT_VERSION: the institutional endpoints and the
 # TAIEX ones drift independently, and a stored bar should say which shape of
-# which report it came from.
+# which report it came from. There is no matching hash: the institutional
+# endpoints have one because their responses carry a Provenance to the API,
+# and index_daily_bars stores only the version.
 TAIEX_CONTRACT_VERSION = "twse-taiex-v1"
-TAIEX_CONTRACT_HASH = hashlib.sha256(
-    json.dumps(
-        {"MI_5MINS_HIST": TAIEX_INDEX_FIELDS, "FMTQIK": TAIEX_TRADING_FIELDS},
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode()
-).hexdigest()
 
 Sleep = Callable[[float], Awaitable[None]]
 Monotonic = Callable[[], float]

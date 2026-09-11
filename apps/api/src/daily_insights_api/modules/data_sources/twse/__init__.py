@@ -1,10 +1,7 @@
 from daily_insights_api.modules.data_sources.twse.adapter import (
     BFI82U_ENDPOINT,
     T86_ENDPOINT,
-    TAIEX_CONTRACT_HASH,
     TAIEX_CONTRACT_VERSION,
-    TAIEX_INDEX_PATH,
-    TAIEX_TRADING_PATH,
     TWSE_CONTRACT_HASH,
     TWSE_CONTRACT_VERSION,
     TaiexDailyBar,
@@ -24,10 +21,7 @@ from daily_insights_api.modules.data_sources.twse.adapter import (
 __all__ = [
     "BFI82U_ENDPOINT",
     "T86_ENDPOINT",
-    "TAIEX_CONTRACT_HASH",
     "TAIEX_CONTRACT_VERSION",
-    "TAIEX_INDEX_PATH",
-    "TAIEX_TRADING_PATH",
     "TWSE_CONTRACT_HASH",
     "TWSE_CONTRACT_VERSION",
     "TaiexDailyBar",

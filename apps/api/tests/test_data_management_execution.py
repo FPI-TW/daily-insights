@@ -287,7 +287,6 @@ async def test_yahoo_execution_uses_the_incremental_period_and_keeps_symbol_erro
             stored_count=21,
             as_of=date(2026, 9, 10),
             fetched_at=datetime(2026, 9, 11, tzinfo=UTC),
-            empty_months=(),
         )
 
     monkeypatch.setattr(service, "YfinanceAdapter", lambda **_: object())
@@ -702,7 +701,6 @@ async def test_a_disabled_yahoo_still_refreshes_taiex_from_twse(
             stored_count=21,
             as_of=date(2026, 9, 10),
             fetched_at=datetime(2026, 9, 11, tzinfo=UTC),
-            empty_months=(),
         )
 
     async def select_months(*_: object, **__: object) -> tuple[date, ...]:
