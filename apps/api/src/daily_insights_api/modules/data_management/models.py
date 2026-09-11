@@ -135,6 +135,7 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
             postgresql_where=text("operation = 'macro_dashboard' AND requested_by_user_id IS NULL"),
         ),
         Index("ix_data_management_runs_created_at", "created_at"),
+        Index("uq_data_management_runs_resume_of", "resume_of_id", unique=True),
     )
 
     operation: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -154,6 +155,8 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
     # soon as they are queued.  Automatic market retry rows are not claimable
     # until this durable Taipei-time timestamp.
     scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resume_of_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)

@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from daily_insights_api.modules.news.contracts import Candidate
+from daily_insights_api.modules.news.editions import GLOBAL_SPEC, TW_EQUITY_SPEC, US_EQUITY_SPEC
 from daily_insights_api.modules.news.extraction import FetchedCandidate
 from daily_insights_api.modules.news.service import _limit_candidates
 
@@ -94,6 +95,143 @@ def test_cap_discovery_favours_full_text_candidates_within_the_total_budget() ->
         per_host[candidate.hostname] = per_host.get(candidate.hostname, 0) + 1
     assert max(per_host.values()) <= 3
     assert len(_cap_discovery(candidates, per_source=10)) == 20
+
+
+def test_global_candidate_limits_keep_systemic_catalysts_ahead_of_newer_company_news() -> None:
+    from daily_insights_api.modules.news.service import _cap_discovery
+
+    base = datetime(2026, 9, 10, 0, 0, tzinfo=UTC)
+    headlines = [
+        "CNBC Daily Open: Apple foldable debuts as bond vigilantes retreat",
+        "Retailer unveils a new customer loyalty programme",
+        "Technology company adds a cybersecurity director",
+        "Media group reports a strong summer box office",
+        "Payments companies announce an AI partnership",
+        "Treasury Department to buy back longer-term debt at triple the normal level",
+        "U.S. import ban on Canadian goods escalates trade war",
+        "ECB rate decision and U.S. PPI set the global market tone",
+    ]
+    candidates = [
+        _fetched(
+            index,
+            "www.cnbc.com",
+            base - timedelta(minutes=index),
+        ).candidate.model_copy(update={"headline": headline})
+        for index, headline in enumerate(headlines)
+    ]
+
+    capped = _cap_discovery(
+        candidates,
+        per_source=5,
+        total=3,
+        impact_patterns=GLOBAL_SPEC.headline_impact_patterns,
+    )
+
+    selected_headlines = {candidate.headline for candidate in capped}
+    assert selected_headlines == set(headlines[-3:])
+
+    fetched = [
+        FetchedCandidate(
+            candidate,
+            str(candidate.url),
+            f"Body for {candidate.headline}",
+            candidate.id,
+        )
+        for candidate in candidates
+    ]
+    limited = _limit_candidates(
+        fetched,
+        per_source=5,
+        total=3,
+        impact_patterns=GLOBAL_SPEC.headline_impact_patterns,
+    )
+    limited_headlines = {item.candidate.headline for item in limited}
+    assert selected_headlines == limited_headlines
+
+
+def test_taiwan_candidate_limits_use_taiwan_market_signals() -> None:
+    from daily_insights_api.modules.news.service import _cap_discovery
+
+    base = datetime(2026, 9, 10, 0, 0, tzinfo=UTC)
+    headlines = [
+        "Celebrity opens a restaurant in Taipei",
+        "New smartphone colour launches in Taiwan",
+        "Taipei luxury-home listing reaches a record price",
+        "台股加權指數重挫 外資賣超擴大",
+        "台積電上調先進製程資本支出與營收展望",
+        "金管會公布影響上市公司的新規則",
+    ]
+    candidates = [
+        _fetched(index, "news.example", base - timedelta(minutes=index)).candidate.model_copy(
+            update={"headline": headline}
+        )
+        for index, headline in enumerate(headlines)
+    ]
+
+    capped = _cap_discovery(
+        candidates,
+        per_source=3,
+        total=3,
+        impact_patterns=TW_EQUITY_SPEC.headline_impact_patterns,
+    )
+
+    assert {candidate.headline for candidate in capped} == set(headlines[3:])
+
+
+def test_us_candidate_limits_use_us_market_signals() -> None:
+    from daily_insights_api.modules.news.service import _cap_discovery
+
+    base = datetime(2026, 9, 10, 0, 0, tzinfo=UTC)
+    headlines = [
+        "Hollywood studio releases a movie trailer",
+        "Apple reveals another iPhone accessory",
+        "Retail chain opens a store in California",
+        "Fed inflation surprise sends the S&P 500 lower",
+        "Treasury yields jump after a Fed rate decision",
+        "Nvidia earnings guidance lifts the semiconductor sector",
+    ]
+    candidates = [
+        _fetched(index, "news.example", base - timedelta(minutes=index)).candidate.model_copy(
+            update={"headline": headline}
+        )
+        for index, headline in enumerate(headlines)
+    ]
+
+    capped = _cap_discovery(
+        candidates,
+        per_source=3,
+        total=3,
+        impact_patterns=US_EQUITY_SPEC.headline_impact_patterns,
+    )
+
+    assert {candidate.headline for candidate in capped} == set(headlines[3:])
+
+
+def test_us_candidate_limits_keep_material_chip_catalyst_ahead_of_routine_financing() -> None:
+    from daily_insights_api.modules.news.service import _cap_discovery
+
+    base = datetime(2026, 9, 10, 0, 0, tzinfo=UTC)
+    headlines = [
+        "Simon Property issues $800m senior notes",
+        "Dollar General discusses its AI business strategy",
+        "UBS sends investors a message about the economy",
+        "英特爾兩日狂飆逾10% CPU喊漲10% 輝達入股帶動AI想像",
+    ]
+    candidates = [
+        _fetched(index, "news.example", base - timedelta(minutes=index)).candidate.model_copy(
+            update={"headline": headline}
+        )
+        for index, headline in enumerate(headlines)
+    ]
+
+    capped = _cap_discovery(
+        candidates,
+        per_source=1,
+        total=1,
+        impact_patterns=US_EQUITY_SPEC.headline_impact_patterns,
+    )
+
+    assert [candidate.headline for candidate in capped] == [headlines[-1]]
 
 
 def test_interleaving_spreads_slots_across_sources_while_keeping_each_newest_first() -> None:

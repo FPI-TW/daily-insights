@@ -73,6 +73,8 @@ services:
     command:
       ["python", "-m", "daily_insights_api.scripts.run_data_management_worker"]
     depends_on:
+      api:
+        condition: service_healthy
       postgres:
         condition: service_healthy
     healthcheck:
@@ -137,6 +139,8 @@ services:
     command:
       ["python", "-m", "daily_insights_api.scripts.run_daily_news_scheduler"]
     depends_on:
+      api:
+        condition: service_healthy
       postgres:
         condition: service_healthy
     healthcheck:
@@ -186,7 +190,7 @@ services:
       - app
 
   nginx:
-    image: nginx:1.27-alpine
+    image: docker.io/library/nginx@sha256:4a73073bd557c65b759505da037898b61f1be6cbcc3c2c3aeac22d2a470c1752
     restart: unless-stopped
     ports:
       - "${APP_PORT:-8080}:80"
@@ -199,7 +203,11 @@ services:
       web:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/nginx-health"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/api && wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/web",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5

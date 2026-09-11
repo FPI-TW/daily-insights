@@ -5,6 +5,8 @@ root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root_dir"
 
 nginx_image=${1:-$(awk 'index($0, "image: docker.io/library/nginx@sha256:") { print $2 }' compose.production.yaml)}
+profile=${2:-production}
+case "$profile" in production|local) ;; *) echo "profile must be production or local" >&2; exit 2 ;; esac
 case "$nginx_image" in
   docker.io/library/nginx@sha256:????????????????????????????????????????????????????????????????) ;;
   *)
@@ -123,30 +125,28 @@ start_mock() {
 start_mock "$api_name" api "$temporary_dir/api-v1.conf"
 start_mock "$web_name" web "$temporary_dir/web-v1.conf"
 
-docker run --rm \
-  --network "$network_name" \
-  --env PUBLIC_HOSTNAME=daily-insights.test \
-  --mount "type=bind,src=${root_dir}/infra/production/nginx/nginx.conf,dst=/etc/nginx/nginx.conf,readonly" \
-  --mount "type=bind,src=${root_dir}/infra/production/nginx/default.conf.template,dst=/etc/nginx/templates/default.conf.template,readonly" \
-  --mount "type=bind,src=${temporary_dir}/cloudflare-realip.conf,dst=/etc/nginx/cloudflare-realip.conf,readonly" \
-  --mount "type=bind,src=${temporary_dir}/origin.crt,dst=/etc/nginx/tls/origin.crt,readonly" \
-  --mount "type=bind,src=${temporary_dir}/origin.key,dst=/etc/nginx/tls/origin.key,readonly" \
-  --tmpfs /etc/nginx/conf.d:size=1m \
-  "$nginx_image" nginx -T >"$temporary_dir/rendered-nginx.conf" 2>&1
+set -- --network "$network_name"
+if [ "$profile" = local ]; then
+  set -- "$@" \
+    --mount "type=bind,src=${root_dir}/infra/nginx/nginx.conf,dst=/etc/nginx/nginx.conf,readonly" \
+    --mount "type=bind,src=${root_dir}/infra/nginx/conf.d,dst=/etc/nginx/conf.d,readonly"
+else
+  set -- "$@" --env PUBLIC_HOSTNAME=daily-insights.test \
+    --mount "type=bind,src=${root_dir}/infra/production/nginx/nginx.conf,dst=/etc/nginx/nginx.conf,readonly" \
+    --mount "type=bind,src=${root_dir}/infra/production/nginx/default.conf.template,dst=/etc/nginx/templates/default.conf.template,readonly" \
+    --mount "type=bind,src=${temporary_dir}/cloudflare-realip.conf,dst=/etc/nginx/cloudflare-realip.conf,readonly" \
+    --mount "type=bind,src=${temporary_dir}/origin.crt,dst=/etc/nginx/tls/origin.crt,readonly" \
+    --mount "type=bind,src=${temporary_dir}/origin.key,dst=/etc/nginx/tls/origin.key,readonly" \
+    --tmpfs /etc/nginx/conf.d:size=1m
+fi
+docker run --rm "$@" "$nginx_image" nginx -T >"$temporary_dir/rendered-nginx.conf" 2>&1
 grep -Fq 'resolver 127.0.0.11 valid=2s ipv6=off;' "$temporary_dir/rendered-nginx.conf"
 grep -Fq 'server api:8000 resolve;' "$temporary_dir/rendered-nginx.conf"
 grep -Fq 'server web:3000 resolve;' "$temporary_dir/rendered-nginx.conf"
 
 docker run --rm -d \
   --name "$proxy_name" \
-  --network "$network_name" \
-  --env PUBLIC_HOSTNAME=daily-insights.test \
-  --mount "type=bind,src=${root_dir}/infra/production/nginx/nginx.conf,dst=/etc/nginx/nginx.conf,readonly" \
-  --mount "type=bind,src=${root_dir}/infra/production/nginx/default.conf.template,dst=/etc/nginx/templates/default.conf.template,readonly" \
-  --mount "type=bind,src=${temporary_dir}/cloudflare-realip.conf,dst=/etc/nginx/cloudflare-realip.conf,readonly" \
-  --mount "type=bind,src=${temporary_dir}/origin.crt,dst=/etc/nginx/tls/origin.crt,readonly" \
-  --mount "type=bind,src=${temporary_dir}/origin.key,dst=/etc/nginx/tls/origin.key,readonly" \
-  --tmpfs /etc/nginx/conf.d:size=1m \
+  "$@" \
   --tmpfs /var/cache/nginx:size=32m \
   --tmpfs /var/run:size=1m \
   "$nginx_image" >/dev/null
@@ -161,6 +161,10 @@ internal_probe() {
 
 public_get() {
   path=$1
+  if [ "$profile" = local ]; then
+    docker exec "$proxy_name" wget -q -T 2 -O - "http://127.0.0.1${path}"
+    return
+  fi
   docker exec "$proxy_name" wget -q -T 2 --no-check-certificate \
     --header 'Host: daily-insights.test' -O - "https://127.0.0.1${path}"
 }
@@ -253,4 +257,4 @@ if [ "$probe_elapsed" -gt 3 ]; then
   exit 1
 fi
 
-echo "production nginx DNS replacement regression passed"
+echo "$profile nginx DNS replacement regression passed"

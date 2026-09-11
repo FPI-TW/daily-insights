@@ -216,6 +216,68 @@ export const dataManagementCatalogSchema = z.object({
   macro_dashboard_enabled: z.boolean(),
 })
 export type DataManagementCatalog = z.infer<typeof dataManagementCatalogSchema>
+export const newsFailureSchema = z.object({
+  code: z.string(),
+  stage: z.enum([
+    "queued",
+    "feed",
+    "article",
+    "selection",
+    "summary",
+    "publication",
+    "complete",
+  ]),
+  action: z.enum([
+    "retry",
+    "block",
+    "repair",
+    "skip",
+    "attention",
+    "expired",
+    "cancelled",
+  ]),
+  scope: z.string(),
+  http_status: z.number().nullable(),
+  retry_after: z.iso.datetime({ offset: true }).nullable(),
+  candidate_id: z.string().nullable(),
+  locale: z.string().nullable(),
+  request_id: z.string().nullable(),
+})
+export const newsProgressSchema = z.object({
+  id: z.string(),
+  state: z.enum([
+    "queued",
+    "running",
+    "waiting_retry",
+    "needs_attention",
+    "completed",
+    "expired",
+    "cancelled",
+  ]),
+  stage: newsFailureSchema.shape.stage,
+  progress: z.record(z.string(), z.number().int().nonnegative()),
+  failures: z.array(newsFailureSchema),
+  attempt: z.number().int().nonnegative(),
+  next_retry_at: z.iso.datetime({ offset: true }).nullable(),
+  publication: z.enum([
+    "technical_degradation",
+    "editorial_shortfall",
+    "available",
+  ]),
+})
+export type NewsProgress = z.infer<typeof newsProgressSchema>
+export const newsRecoverySchema = z.object({
+  dependencies: z.array(
+    z.object({
+      scope: z.string(),
+      state: z.string(),
+      failure: newsFailureSchema.nullable(),
+      available_at: z.iso.datetime({ offset: true }).nullable(),
+      newest_article_at: z.iso.datetime({ offset: true }).nullable(),
+      updated_at: z.iso.datetime({ offset: true }),
+    })
+  ),
+})
 const dataManagementRunBaseSchema = z.object({
   id: z.uuid(),
   edition_date: z.iso.date(),
@@ -227,6 +289,9 @@ const dataManagementRunBaseSchema = z.object({
   completed_at: z.iso.datetime({ offset: true }).nullable(),
   result: z.record(z.string(), z.unknown()).nullable(),
   error: z.string().nullable(),
+  scheduled_for: z.iso.datetime({ offset: true }).nullish(),
+  heartbeat_at: z.iso.datetime({ offset: true }).nullish(),
+  news: z.record(z.string(), newsProgressSchema).nullish(),
 })
 export const dataManagementRunSchema = z.discriminatedUnion("operation", [
   dataManagementRunBaseSchema.extend({

@@ -158,6 +158,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/admin/data-management/runs/{run_id}/resume": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Resume Run */
+    post: operations["resume_run_api_admin_data_management_runs__run_id__resume_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/admin/data-sources/yfinance/daily-bars": {
     parameters: {
       query?: never
@@ -264,6 +281,23 @@ export interface paths {
     put?: never
     /** Unhide Item */
     post: operations["unhide_item_api_admin_news_items__item_id__unhide_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/news/recovery": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Recovery Status */
+    get: operations["recovery_status_api_admin_news_recovery_get"]
+    put?: never
+    post?: never
     delete?: never
     options?: never
     head?: never
@@ -1523,6 +1557,8 @@ export interface components {
       edition_date: string
       /** Error */
       error: string | null
+      /** Heartbeat At */
+      heartbeat_at?: string | null
       /**
        * Id
        * Format: uuid
@@ -1530,6 +1566,10 @@ export interface components {
       id: string
       /** Market Code */
       market_code: null
+      /** News */
+      news?: {
+        [key: string]: components["schemas"]["NewsProgress"]
+      } | null
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
@@ -1541,6 +1581,8 @@ export interface components {
       result: {
         [key: string]: unknown
       } | null
+      /** Scheduled For */
+      scheduled_for?: string | null
       /** Started At */
       started_at: string | null
       /**
@@ -1637,6 +1679,8 @@ export interface components {
       edition_date: string
       /** Error */
       error: string | null
+      /** Heartbeat At */
+      heartbeat_at?: string | null
       /**
        * Id
        * Format: uuid
@@ -1644,6 +1688,10 @@ export interface components {
       id: string
       /** Market Code */
       market_code: null
+      /** News */
+      news?: {
+        [key: string]: components["schemas"]["NewsProgress"]
+      } | null
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
@@ -1655,6 +1703,8 @@ export interface components {
       result: {
         [key: string]: unknown
       } | null
+      /** Scheduled For */
+      scheduled_for?: string | null
       /** Started At */
       started_at: string | null
       /**
@@ -1776,6 +1826,8 @@ export interface components {
       edition_date: string
       /** Error */
       error: string | null
+      /** Heartbeat At */
+      heartbeat_at?: string | null
       /**
        * Id
        * Format: uuid
@@ -1783,6 +1835,10 @@ export interface components {
       id: string
       /** Market Code */
       market_code: null
+      /** News */
+      news?: {
+        [key: string]: components["schemas"]["NewsProgress"]
+      } | null
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
@@ -1794,6 +1850,8 @@ export interface components {
       result: {
         [key: string]: unknown
       } | null
+      /** Scheduled For */
+      scheduled_for?: string | null
       /** Started At */
       started_at: string | null
       /**
@@ -1939,6 +1997,8 @@ export interface components {
       edition_date: string
       /** Error */
       error: string | null
+      /** Heartbeat At */
+      heartbeat_at?: string | null
       /**
        * Id
        * Format: uuid
@@ -1946,6 +2006,10 @@ export interface components {
       id: string
       /** Market Code */
       market_code: null
+      /** News */
+      news?: {
+        [key: string]: components["schemas"]["NewsProgress"]
+      } | null
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
@@ -1957,6 +2021,8 @@ export interface components {
       result: {
         [key: string]: unknown
       } | null
+      /** Scheduled For */
+      scheduled_for?: string | null
       /** Started At */
       started_at: string | null
       /**
@@ -1995,6 +2061,8 @@ export interface components {
       edition_date: string
       /** Error */
       error: string | null
+      /** Heartbeat At */
+      heartbeat_at?: string | null
       /**
        * Id
        * Format: uuid
@@ -2005,6 +2073,10 @@ export interface components {
        * @enum {string}
        */
       market_code: "global_macro_bonds" | "crypto" | "us_equity"
+      /** News */
+      news?: {
+        [key: string]: components["schemas"]["NewsProgress"]
+      } | null
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
@@ -2016,6 +2088,8 @@ export interface components {
       result: {
         [key: string]: unknown
       } | null
+      /** Scheduled For */
+      scheduled_for?: string | null
       /** Started At */
       started_at: string | null
       /**
@@ -2216,6 +2290,8 @@ export interface components {
       edition_date: string
       /** Error */
       error: string | null
+      /** Heartbeat At */
+      heartbeat_at?: string | null
       /**
        * Id
        * Format: uuid
@@ -2223,6 +2299,10 @@ export interface components {
       id: string
       /** Market Code */
       market_code: null
+      /** News */
+      news?: {
+        [key: string]: components["schemas"]["NewsProgress"]
+      } | null
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
@@ -2234,6 +2314,8 @@ export interface components {
       result: {
         [key: string]: unknown
       } | null
+      /** Scheduled For */
+      scheduled_for?: string | null
       /** Started At */
       started_at: string | null
       /**
@@ -2252,6 +2334,67 @@ export interface components {
        * Format: uuid
        */
       edition_id: string
+    }
+    /** NewsDependencyResponse */
+    NewsDependencyResponse: {
+      /** Available At */
+      available_at: string | null
+      failure: components["schemas"]["NewsFailure"] | null
+      /** Newest Article At */
+      newest_article_at: string | null
+      /** Scope */
+      scope: string
+      /** State */
+      state: string
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string
+    }
+    /** NewsFailure */
+    NewsFailure: {
+      /**
+       * Action
+       * @enum {string}
+       */
+      action:
+        | "retry"
+        | "block"
+        | "repair"
+        | "skip"
+        | "attention"
+        | "expired"
+        | "cancelled"
+      /** Candidate Id */
+      candidate_id?: string | null
+      /** Code */
+      code: string
+      /** Http Status */
+      http_status?: number | null
+      /** Locale */
+      locale?: string | null
+      /** Request Id */
+      request_id?: string | null
+      /** Retry After */
+      retry_after?: string | null
+      /**
+       * Scope
+       * @default workflow
+       */
+      scope: string
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage:
+        | "queued"
+        | "feed"
+        | "article"
+        | "selection"
+        | "summary"
+        | "publication"
+        | "complete"
     }
     /** NewsItemResponse */
     NewsItemResponse: {
@@ -2317,6 +2460,8 @@ export interface components {
       edition_date: string
       /** Error */
       error: string | null
+      /** Heartbeat At */
+      heartbeat_at?: string | null
       /**
        * Id
        * Format: uuid
@@ -2327,6 +2472,10 @@ export interface components {
        * @enum {string}
        */
       market_code: "global" | "tw_equity" | "us_equity"
+      /** News */
+      news?: {
+        [key: string]: components["schemas"]["NewsProgress"]
+      } | null
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
@@ -2338,6 +2487,8 @@ export interface components {
       result: {
         [key: string]: unknown
       } | null
+      /** Scheduled For */
+      scheduled_for?: string | null
       /** Started At */
       started_at: string | null
       /**
@@ -2346,6 +2497,50 @@ export interface components {
        */
       status:
         "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
+    }
+    /** NewsProgress */
+    NewsProgress: {
+      /** Attempt */
+      attempt: number
+      /** Failures */
+      failures: components["schemas"]["NewsFailure"][]
+      /** Id */
+      id: string
+      /** Next Retry At */
+      next_retry_at: string | null
+      /** Progress */
+      progress: {
+        [key: string]: number
+      }
+      /**
+       * Publication
+       * @enum {string}
+       */
+      publication: "technical_degradation" | "editorial_shortfall" | "available"
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage:
+        | "queued"
+        | "feed"
+        | "article"
+        | "selection"
+        | "summary"
+        | "publication"
+        | "complete"
+      /**
+       * State
+       * @enum {string}
+       */
+      state:
+        | "queued"
+        | "running"
+        | "waiting_retry"
+        | "needs_attention"
+        | "completed"
+        | "expired"
+        | "cancelled"
     }
     /**
      * NewsPublishRunResponse
@@ -2367,6 +2562,8 @@ export interface components {
       edition_date: string
       /** Error */
       error: string | null
+      /** Heartbeat At */
+      heartbeat_at?: string | null
       /**
        * Id
        * Format: uuid
@@ -2374,6 +2571,10 @@ export interface components {
       id: string
       /** Market Code */
       market_code: null
+      /** News */
+      news?: {
+        [key: string]: components["schemas"]["NewsProgress"]
+      } | null
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
@@ -2385,6 +2586,8 @@ export interface components {
       result: {
         [key: string]: unknown
       } | null
+      /** Scheduled For */
+      scheduled_for?: string | null
       /** Started At */
       started_at: string | null
       /**
@@ -2393,6 +2596,19 @@ export interface components {
        */
       status:
         "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
+    }
+    /** NewsRecoveryResponse */
+    NewsRecoveryResponse: {
+      /** Dependencies */
+      dependencies: components["schemas"]["NewsDependencyResponse"][]
+    }
+    /** NewsResumeRequest */
+    NewsResumeRequest: {
+      /**
+       * Resume Provider
+       * @default false
+       */
+      resume_provider: boolean
     }
     /** OrganizationCreate */
     OrganizationCreate: {
@@ -3501,6 +3717,51 @@ export interface operations {
       }
     }
   }
+  resume_run_api_admin_data_management_runs__run_id__resume_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        run_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NewsResumeRequest"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json":
+            | components["schemas"]["MorningAllRunResponse"]
+            | components["schemas"]["MorningMarketRunResponse"]
+            | components["schemas"]["IndexYahooRunResponse"]
+            | components["schemas"]["InstitutionalTwseRunResponse"]
+            | components["schemas"]["NewsAllRunResponse"]
+            | components["schemas"]["NewsMarketRunResponse"]
+            | components["schemas"]["NewsPublishRunResponse"]
+            | components["schemas"]["MacroDashboardRunResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
   fetch_yfinance_daily_bars_api_admin_data_sources_yfinance_daily_bars_post: {
     parameters: {
       query?: never
@@ -3746,6 +4007,26 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  recovery_status_api_admin_news_recovery_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["NewsRecoveryResponse"]
         }
       }
     }

@@ -1522,6 +1522,18 @@
             ],
             "title": "Error"
           },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat At"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -1530,6 +1542,20 @@
           "market_code": {
             "title": "Market Code",
             "type": "null"
+          },
+          "news": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/NewsProgress"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "News"
           },
           "operation": {
             "const": "index_yahoo",
@@ -1559,6 +1585,18 @@
               }
             ],
             "title": "Result"
+          },
+          "scheduled_for": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled For"
           },
           "started_at": {
             "anyOf": [
@@ -1816,6 +1854,18 @@
             ],
             "title": "Error"
           },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat At"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -1824,6 +1874,20 @@
           "market_code": {
             "title": "Market Code",
             "type": "null"
+          },
+          "news": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/NewsProgress"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "News"
           },
           "operation": {
             "const": "institutional_twse",
@@ -1853,6 +1917,18 @@
               }
             ],
             "title": "Result"
+          },
+          "scheduled_for": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled For"
           },
           "started_at": {
             "anyOf": [
@@ -2200,6 +2276,18 @@
             ],
             "title": "Error"
           },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat At"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -2208,6 +2296,20 @@
           "market_code": {
             "title": "Market Code",
             "type": "null"
+          },
+          "news": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/NewsProgress"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "News"
           },
           "operation": {
             "const": "macro_dashboard",
@@ -2237,6 +2339,18 @@
               }
             ],
             "title": "Result"
+          },
+          "scheduled_for": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled For"
           },
           "started_at": {
             "anyOf": [
@@ -2618,6 +2732,18 @@
             ],
             "title": "Error"
           },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat At"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -2626,6 +2752,20 @@
           "market_code": {
             "title": "Market Code",
             "type": "null"
+          },
+          "news": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/NewsProgress"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "News"
           },
           "operation": {
             "const": "morning_all",
@@ -2655,6 +2795,18 @@
               }
             ],
             "title": "Result"
+          },
+          "scheduled_for": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled For"
           },
           "started_at": {
             "anyOf": [
@@ -2750,6 +2902,18 @@
             ],
             "title": "Error"
           },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat At"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -2759,6 +2923,20 @@
             "enum": ["global_macro_bonds", "crypto", "us_equity"],
             "title": "Market Code",
             "type": "string"
+          },
+          "news": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/NewsProgress"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "News"
           },
           "operation": {
             "const": "morning_market",
@@ -2788,6 +2966,18 @@
               }
             ],
             "title": "Result"
+          },
+          "scheduled_for": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled For"
           },
           "started_at": {
             "anyOf": [
@@ -3356,6 +3546,18 @@
             ],
             "title": "Error"
           },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat At"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -3364,6 +3566,20 @@
           "market_code": {
             "title": "Market Code",
             "type": "null"
+          },
+          "news": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/NewsProgress"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "News"
           },
           "operation": {
             "const": "news_all",
@@ -3393,6 +3609,18 @@
               }
             ],
             "title": "Result"
+          },
+          "scheduled_for": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled For"
           },
           "started_at": {
             "anyOf": [
@@ -3456,6 +3684,166 @@
         },
         "required": ["edition_id", "candidate_ids"],
         "title": "NewsCandidatePublishRequest",
+        "type": "object"
+      },
+      "NewsDependencyResponse": {
+        "properties": {
+          "available_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available At"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NewsFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "newest_article_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Newest Article At"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "state",
+          "failure",
+          "available_at",
+          "newest_article_at",
+          "updated_at"
+        ],
+        "title": "NewsDependencyResponse",
+        "type": "object"
+      },
+      "NewsFailure": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "retry",
+              "block",
+              "repair",
+              "skip",
+              "attention",
+              "expired",
+              "cancelled"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "candidate_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Id"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Http Status"
+          },
+          "locale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locale"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "retry_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry After"
+          },
+          "scope": {
+            "default": "workflow",
+            "title": "Scope",
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "queued",
+              "feed",
+              "article",
+              "selection",
+              "summary",
+              "publication",
+              "complete"
+            ],
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": ["code", "stage", "action"],
+        "title": "NewsFailure",
         "type": "object"
       },
       "NewsItemResponse": {
@@ -3613,6 +4001,18 @@
             ],
             "title": "Error"
           },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat At"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -3622,6 +4022,20 @@
             "enum": ["global", "tw_equity", "us_equity"],
             "title": "Market Code",
             "type": "string"
+          },
+          "news": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/NewsProgress"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "News"
           },
           "operation": {
             "const": "news_market",
@@ -3651,6 +4065,18 @@
               }
             ],
             "title": "Result"
+          },
+          "scheduled_for": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled For"
           },
           "started_at": {
             "anyOf": [
@@ -3693,6 +4119,91 @@
         "title": "NewsMarketRunResponse",
         "type": "object"
       },
+      "NewsProgress": {
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "failures": {
+            "items": {
+              "$ref": "#/components/schemas/NewsFailure"
+            },
+            "title": "Failures",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "next_retry_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Retry At"
+          },
+          "progress": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Progress",
+            "type": "object"
+          },
+          "publication": {
+            "enum": [
+              "technical_degradation",
+              "editorial_shortfall",
+              "available"
+            ],
+            "title": "Publication",
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "queued",
+              "feed",
+              "article",
+              "selection",
+              "summary",
+              "publication",
+              "complete"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "running",
+              "waiting_retry",
+              "needs_attention",
+              "completed",
+              "expired",
+              "cancelled"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "stage",
+          "progress",
+          "failures",
+          "attempt",
+          "next_retry_at",
+          "publication"
+        ],
+        "title": "NewsProgress",
+        "type": "object"
+      },
       "NewsPublishRunResponse": {
         "description": "A manual publish of admin-chosen news candidates; created only through\nthe news management API, never through the generic run endpoint.",
         "properties": {
@@ -3729,6 +4240,18 @@
             ],
             "title": "Error"
           },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat At"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -3737,6 +4260,20 @@
           "market_code": {
             "title": "Market Code",
             "type": "null"
+          },
+          "news": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/NewsProgress"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "News"
           },
           "operation": {
             "const": "news_publish",
@@ -3766,6 +4303,18 @@
               }
             ],
             "title": "Result"
+          },
+          "scheduled_for": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled For"
           },
           "started_at": {
             "anyOf": [
@@ -3806,6 +4355,32 @@
           "market_code"
         ],
         "title": "NewsPublishRunResponse",
+        "type": "object"
+      },
+      "NewsRecoveryResponse": {
+        "properties": {
+          "dependencies": {
+            "items": {
+              "$ref": "#/components/schemas/NewsDependencyResponse"
+            },
+            "title": "Dependencies",
+            "type": "array"
+          }
+        },
+        "required": ["dependencies"],
+        "title": "NewsRecoveryResponse",
+        "type": "object"
+      },
+      "NewsResumeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "resume_provider": {
+            "default": false,
+            "title": "Resume Provider",
+            "type": "boolean"
+          }
+        },
+        "title": "NewsResumeRequest",
         "type": "object"
       },
       "OrganizationCreate": {
@@ -6173,6 +6748,111 @@
         "tags": ["data management"]
       }
     },
+    "/api/admin/data-management/runs/{run_id}/resume": {
+      "post": {
+        "operationId": "resume_run_api_admin_data_management_runs__run_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewsResumeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
+                      "institutional_twse": "#/components/schemas/InstitutionalTwseRunResponse",
+                      "macro_dashboard": "#/components/schemas/MacroDashboardRunResponse",
+                      "morning_all": "#/components/schemas/MorningAllRunResponse",
+                      "morning_market": "#/components/schemas/MorningMarketRunResponse",
+                      "news_all": "#/components/schemas/NewsAllRunResponse",
+                      "news_market": "#/components/schemas/NewsMarketRunResponse",
+                      "news_publish": "#/components/schemas/NewsPublishRunResponse"
+                    },
+                    "propertyName": "operation"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MorningAllRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MorningMarketRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexYahooRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InstitutionalTwseRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NewsAllRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NewsMarketRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NewsPublishRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MacroDashboardRunResponse"
+                    }
+                  ],
+                  "title": "Response Resume Run Api Admin Data Management Runs  Run Id  Resume Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resume Run",
+        "tags": ["data management"]
+      }
+    },
     "/api/admin/data-sources/yfinance/daily-bars": {
       "post": {
         "deprecated": true,
@@ -6566,6 +7246,25 @@
           }
         },
         "summary": "Unhide Item",
+        "tags": ["news management"]
+      }
+    },
+    "/api/admin/news/recovery": {
+      "get": {
+        "operationId": "recovery_status_api_admin_news_recovery_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsRecoveryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Recovery Status",
         "tags": ["news management"]
       }
     },

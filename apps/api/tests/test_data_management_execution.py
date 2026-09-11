@@ -5,10 +5,13 @@ from pathlib import Path as FileSystemPath
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
+from zoneinfo import ZoneInfo
 
 import pytest
 from anyio import Path
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from test_news_integration import news_database as news_database
 
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.data_management.models import DataManagementRun
@@ -293,6 +296,7 @@ async def test_news_execution_routes_market_and_all_runs_and_closes_client(
     from daily_insights_api.modules.data_management import service
 
     calls: list[str] = []
+    observed: dict[str, object] = {}
 
     class Client:
         def __init__(self, **_: object) -> None:
@@ -305,13 +309,16 @@ async def test_news_execution_routes_market_and_all_runs_and_closes_client(
         calls.append(f"market:{cast(Any, kwargs['spec']).market_code}")
         return "complete"
 
-    async def all_editions(*_: object, **kwargs: object) -> tuple[str, dict[str, str]]:
-        calls.append(f"all:only_missing={kwargs.get('only_missing')}")
-        return "partial", {"global": "complete", "tw_equity": "partial", "us_equity": "failed"}
+    async def progress(*_: object) -> dict[str, object]:
+        return {market: {"state": "completed", "progress": {"published": 1}} for market in observed}
+
+    async def market_with_progress(*args: object, **kwargs: object) -> str:
+        observed[str(cast(Any, kwargs["spec"]).market_code)] = True
+        return await market(*args, **kwargs)
 
     monkeypatch.setattr(service, "create_news_client", lambda **_: Client())
-    monkeypatch.setattr(service, "run_news_edition", market)
-    monkeypatch.setattr(service, "run_all_editions_with_outcomes", all_editions)
+    monkeypatch.setattr(service, "run_news_edition", market_with_progress)
+    monkeypatch.setattr(service, "workflow_results", progress)
     settings = Settings(environment="test", daily_news_enabled=True, news_model_api_key="key")
     market_status, market_result, market_error = await execute_run(
         _run("news_market", "tw_equity"), cast(Any, None), settings
@@ -325,18 +332,23 @@ async def test_news_execution_routes_market_and_all_runs_and_closes_client(
     manual.requested_by_user_id = uuid.uuid4()
     await execute_run(manual, cast(Any, None), settings)
     assert (market_status, market_error) == ("succeeded", None)
-    assert (all_status, all_error) == ("partial", "news_partial")
-    assert market_result == {"outcome": "complete", "outcomes": {"tw_equity": "complete"}}
-    assert all_result == {
-        "outcome": "partial",
-        "outcomes": {"global": "complete", "tw_equity": "partial", "us_equity": "failed"},
+    assert (all_status, all_error) == ("succeeded", None)
+    assert market_result["outcomes"] == {"tw_equity": "complete"}
+    assert all_result["outcomes"] == {
+        "global": "complete",
+        "tw_equity": "complete",
+        "us_equity": "complete",
     }
     assert calls == [
         "market:tw_equity",
         "closed",
-        "all:only_missing=True",
+        "market:global",
+        "market:tw_equity",
+        "market:us_equity",
         "closed",
-        "all:only_missing=False",
+        "market:global",
+        "market:tw_equity",
+        "market:us_equity",
         "closed",
     ]
 
@@ -367,6 +379,7 @@ async def test_news_publish_execution_passes_the_payload_and_closes_client(
 
     monkeypatch.setattr(service, "create_news_client", lambda **_: Client())
     monkeypatch.setattr(service, "publish_candidates", publish)
+    monkeypatch.setattr(service, "workflow_results", AsyncMock(return_value={}))
     run = _run("news_publish")
     run.requested_by_user_id = uuid.uuid4()
     edition_id, candidate_id = uuid.uuid4(), uuid.uuid4()
@@ -379,7 +392,7 @@ async def test_news_publish_execution_passes_the_payload_and_closes_client(
     )
     status, result, error = await execute_run(run, cast(Any, None), settings)
     assert (status, error) == ("partial", "news_publish_partial")
-    assert result == {"published": 1, "failed": 1}
+    assert result == {"published": 1, "failed": 1, "news": {}}
     assert calls == ["publish", "closed"]
     assert seen["run_id"] == run.id
     assert seen["edition_id"] == edition_id
@@ -397,13 +410,16 @@ async def test_news_publish_execution_passes_the_payload_and_closes_client(
 
 
 @pytest.mark.asyncio
-async def test_news_publish_execution_rejects_disabled_or_missing_model_key() -> None:
+@pytest.mark.integration
+async def test_news_publish_execution_rejects_disabled_or_missing_model_key(
+    news_database: async_sessionmaker[AsyncSession],
+) -> None:
     for settings in (
         Settings(environment="test", daily_news_enabled=False, news_model_api_key="key"),
         Settings(environment="test", daily_news_enabled=True, news_model_api_key=None),
         Settings(environment="test", daily_news_enabled=True, news_model_api_key="CHANGE_ME_KEY"),
     ):
-        status, result, error = await execute_run(_run("news_publish"), cast(Any, None), settings)
+        status, result, error = await execute_run(_run("news_publish"), news_database, settings)
         assert (status, result, error) == (
             "failed",
             {"outcome": "unavailable"},
@@ -412,24 +428,24 @@ async def test_news_publish_execution_rejects_disabled_or_missing_model_key() ->
 
 
 @pytest.mark.asyncio
-async def test_news_execution_rejects_disabled_or_missing_model_key() -> None:
+@pytest.mark.integration
+async def test_news_execution_rejects_disabled_or_missing_model_key(
+    news_database: async_sessionmaker[AsyncSession],
+) -> None:
+    run = _run("news_all")
+    run.edition_date = datetime.now(ZoneInfo("Asia/Taipei")).date()
+    run.requested_by_user_id = uuid.uuid4()
     status, result, error = await execute_run(
-        _run("news_all"),
-        cast(Any, None),
+        run,
+        news_database,
         Settings(environment="test", daily_news_enabled=False),
     )
-    assert (status, result, error) == (
-        "failed",
-        {
-            "outcome": "unavailable",
-            "outcomes": {
-                "global": "unavailable",
-                "tw_equity": "unavailable",
-                "us_equity": "unavailable",
-            },
-        },
-        "daily_news_unavailable",
-    )
+    assert (status, error) == ("failed", "news_recovery_required")
+    assert result["outcomes"] == {
+        "global": "unavailable",
+        "tw_equity": "unavailable",
+        "us_equity": "unavailable",
+    }
 
 
 @pytest.mark.asyncio

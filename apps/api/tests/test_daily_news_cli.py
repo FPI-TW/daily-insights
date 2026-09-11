@@ -1,4 +1,6 @@
 import asyncio
+import subprocess
+import sys
 from argparse import Namespace
 from datetime import date
 from pathlib import Path as FileSystemPath
@@ -37,9 +39,30 @@ def test_daily_news_cli_shares_the_scheduler_argument_contract() -> None:
     assert args.market == "us_equity"
     with pytest.raises(SystemExit):
         parse_args(["--market", "fx"], configure=run_daily_news.configure_arguments)
-    assert run_daily_news.RETRY_POLICY.retries("unavailable")
-    assert run_daily_news.RETRY_POLICY.retries("failed")
-    assert run_daily_news.RETRY_POLICY.retries("partial")
+    # Automatic retries are owned by the durable queue, not edition counts.
+    assert not hasattr(run_daily_news, "RETRY_POLICY")
+
+
+def test_daily_news_cli_registers_every_referenced_orm_table() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from daily_insights_api.core.models import Base; "
+                "import daily_insights_api.scripts.run_daily_news; "
+                "print(','.join(table.name for table in Base.metadata.sorted_tables))"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "users" in result.stdout.split(",")
+    assert "audit_events" in result.stdout.split(",")
+    assert "news_candidates" in result.stdout.split(",")
 
 
 @pytest.mark.parametrize("key", ["CHANGE_ME_NEWS_MODEL_API_KEY", "   \t", None])
@@ -217,7 +240,7 @@ async def test_runner_returns_edition_status_and_refreshes_heartbeat(
     assert await heartbeat.exists()
 
 
-async def test_queue_scheduler_uses_the_no_catchup_schedule_and_enqueues_once(
+async def test_queue_scheduler_reconciles_the_durable_obligation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: FileSystemPath
 ) -> None:
     scheduled: list[date] = []
@@ -250,14 +273,12 @@ async def test_queue_scheduler_uses_the_no_catchup_schedule_and_enqueues_once(
     monkeypatch.setattr(run_daily_news_scheduler, "create_engine", lambda _: Engine())
     monkeypatch.setattr(run_daily_news_scheduler, "create_session_factory", lambda _: object())
     monkeypatch.setattr(run_daily_news_scheduler, "enqueue_automatic_news_all_run", enqueue)
-    monkeypatch.setattr(run_daily_news_scheduler, "run_scheduler", drive)
+    monkeypatch.setattr(run_daily_news_scheduler, "reconcile_news", drive)
+    monkeypatch.setattr(run_daily_news_scheduler, "automatic_window", lambda *_: True)
 
     with pytest.raises(asyncio.CancelledError):
         await run_daily_news_scheduler.main()
 
     assert scheduled == [date(2026, 9, 8)]
-    assert scheduler_options["catch_up_on_start"] is False
     assert callable(scheduler_options["now"])
-    retry = cast(Any, scheduler_options["retry"])
-    assert retry.interval.total_seconds() == 30 * 60
-    assert retry.retries("failed")
+    assert "retry" not in scheduler_options

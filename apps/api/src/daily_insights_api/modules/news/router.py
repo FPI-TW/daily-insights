@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from daily_insights_api.modules.identity.api import AuthContext, require_password_changed
 from daily_insights_api.modules.news.access import visible_news_market_codes
 from daily_insights_api.modules.news.contracts import Locale
+from daily_insights_api.modules.news.curation import visible_item
 from daily_insights_api.modules.news.editions import (
     GLOBAL_SPEC,
     MARKET_NEWS_CODES,
@@ -51,7 +52,7 @@ async def _latest_response(
                 .join(NewsPresentation, NewsPresentation.item_id == NewsItem.id)
                 .where(
                     NewsItem.edition_id == NewsEdition.id,
-                    NewsItem.hidden_at.is_(None),
+                    visible_item(spec.market_code),
                     NewsPresentation.locale == locale,
                 )
                 .exists(),
@@ -82,7 +83,7 @@ async def _latest_response(
         )
         # Hidden items stay in the immutable edition but are not shown to
         # readers; manually published items are ordinary items.
-        .where(NewsItem.edition_id == edition.id, NewsItem.hidden_at.is_(None))
+        .where(NewsItem.edition_id == edition.id, visible_item(spec.market_code))
         .order_by(NewsItem.rank)
     )
     items = [
