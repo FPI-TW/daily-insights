@@ -36,7 +36,9 @@ for (const locale of locales) {
           exact: true,
         })
       ).toBeVisible()
-      const count = market === "tw_equity" ? 2 : 4
+      // Oil/gold and copper/gold now have separate charts, plus curve, DXY and FX.
+      // Taiwan also renders the independently loaded institutional-flow chart.
+      const count = market === "tw_equity" ? 3 : 5
       await expect(page.locator("canvas")).toHaveCount(count, {
         timeout: 15_000,
       })
@@ -92,11 +94,26 @@ for (const locale of locales) {
         const up = page.getByText(
           locale === "en" ? "▲ Up" : locale === "zh-hans" ? "▲ 涨" : "▲ 漲"
         )
-        const introBox = await introduction.boundingBox()
-        const upBox = await up.boundingBox()
-        expect(introBox).not.toBeNull()
-        expect(upBox).not.toBeNull()
-        expect(upBox!.x - (introBox!.x + introBox!.width)).toBeLessThan(24)
+        // The compact dashboard removed the old introduction and standalone legend.
+        await expect(introduction).toHaveCount(0)
+        await expect(up).toHaveCount(0)
+        await expect(
+          page.getByRole("heading", {
+            name: locale === "en" ? "Oil / gold" : "油金比",
+            exact: true,
+          })
+        ).toBeVisible()
+        await expect(
+          page.getByRole("heading", {
+            name:
+              locale === "en"
+                ? "Copper / gold"
+                : locale === "zh-hans"
+                  ? "铜金比"
+                  : "銅金比",
+            exact: true,
+          })
+        ).toBeVisible()
       }
       await page.screenshot({
         path: info.outputPath(`${locale}-${market}.png`),
@@ -133,7 +150,7 @@ for (const locale of locales) {
         await expect(
           page.getByText(publishedReport[locale], { exact: true })
         ).toHaveCount(0)
-        await expect(page.locator("canvas")).toHaveCount(4)
+        await expect(page.locator("canvas")).toHaveCount(5)
       }
       expect(errors).toEqual([])
     })
@@ -159,8 +176,14 @@ test("technical controls and chart zoom only slice the already loaded data", asy
   await expect(
     page.getByRole("button", { name: "Last 1 year", exact: true })
   ).toHaveAttribute("aria-pressed", "true")
-  await page.getByRole("button", { name: "Last 2 years", exact: true }).click()
-  await expect.poll(() => meter.getAttribute("aria-valuenow")).not.toBe(before)
+  await page
+    .getByRole("button", { name: "Last 1.5 years", exact: true })
+    .click()
+  await expect(
+    page.getByRole("button", { name: "Last 1.5 years", exact: true })
+  ).toHaveAttribute("aria-pressed", "true")
+  // The initial window is already 18 months; returning to it restores the reading.
+  await expect.poll(() => meter.getAttribute("aria-valuenow")).toBe(before)
   const chart = page
     .getByRole("img", { name: "TAIEX bias", exact: true })
     .first()
@@ -169,7 +192,8 @@ test("technical controls and chart zoom only slice the already loaded data", asy
   if (!box) throw new Error("Bias chart has no bounds")
   const valueBeforeZoom = await meter.getAttribute("aria-valuenow")
   // Drag the actual slider's right handle to exercise ECharts' datazoom event.
-  await page.mouse.move(box.x + box.width - 21, box.y + box.height - 9)
+  // The default bias slider handle sits just inside the plot's right inset.
+  await page.mouse.move(box.x + box.width - 24, box.y + box.height - 9)
   await page.mouse.down()
   await page.mouse.move(box.x + box.width * 0.6, box.y + box.height - 9, {
     steps: 12,
@@ -178,13 +202,8 @@ test("technical controls and chart zoom only slice the already loaded data", asy
   await expect
     .poll(() => meter.getAttribute("aria-valuenow"))
     .not.toBe(valueBeforeZoom)
-  const visibleRange = page
-    .getByText("Visible date range", { exact: true })
-    .locator("..")
-    .locator("span.font-mono")
-  const rangeBeforeZoom = await visibleRange.textContent()
   const candleCharts = page.getByRole("img", {
-    name: "TAIEX — daily candles + MA + volume",
+    name: "Taiwan Weighted Index",
     exact: true,
   })
   expect(await candleCharts.count()).toBeGreaterThan(0)
@@ -192,6 +211,11 @@ test("technical controls and chart zoom only slice the already loaded data", asy
   await candleChart.scrollIntoViewIfNeeded()
   const candleBox = await candleChart.boundingBox()
   if (!candleBox) throw new Error("Candlestick chart has no bounds")
+  // The compact chart no longer includes a textual visible-range footer.
+  // Compare its actual canvas with the pointer outside it, excluding tooltips.
+  await page.mouse.move(20, 100)
+  const canvas = candleChart.locator("canvas")
+  const candlesBeforeZoom = await canvas.screenshot()
   await page.mouse.move(
     candleBox.x + candleBox.width - 21,
     candleBox.y + candleBox.height - 19
@@ -203,7 +227,10 @@ test("technical controls and chart zoom only slice the already loaded data", asy
     { steps: 12 }
   )
   await page.mouse.up()
-  await expect.poll(() => visibleRange.textContent()).not.toBe(rangeBeforeZoom)
+  await page.mouse.move(20, 100)
+  await expect
+    .poll(async () => (await canvas.screenshot()).equals(candlesBeforeZoom))
+    .toBe(false)
   const requestsAfter = (await getMockApiState(request)).requests.filter(r =>
     r.path.includes("/indices/")
   ).length

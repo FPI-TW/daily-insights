@@ -29,8 +29,10 @@ from daily_insights_api.modules.data_management.service import (
     enqueue_automatic_macro_run,
     enqueue_automatic_news_all_run,
     enqueue_run,
+    execute_run,
     execution_lock_key,
     heartbeat_run,
+    resume_news_run,
     worker_loop,
 )
 from daily_insights_api.modules.identity.api import (
@@ -40,9 +42,102 @@ from daily_insights_api.modules.identity.api import (
 )
 from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.identity.session_models import Session
+from daily_insights_api.modules.news import service as news_service
+from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary
+from daily_insights_api.modules.news.llm import ModelCall
+from daily_insights_api.modules.news.models import (
+    NewsCandidate,
+    NewsDependencyState,
+    NewsEdition,
+    NewsGenerationAudit,
+    NewsItem,
+    NewsPresentation,
+)
 from daily_insights_api.web.app import create_app
 
 pytestmark = pytest.mark.integration
+
+
+async def test_concurrent_resume_creates_one_probe_and_cancel_revokes_it(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(data_management_database)
+    async with data_management_database.begin() as database:
+        previous = DataManagementRun(
+            operation="news_market",
+            market_code="us_equity",
+            edition_date=data_management_service.taipei_today(),
+            status="failed",
+        )
+        database.add(previous)
+        database.add(NewsDependencyState(scope="provider:news", state="blocked"))
+        await database.flush()
+        run_id = previous.id
+
+    async def resume() -> uuid.UUID:
+        async with data_management_database() as database:
+            run = await resume_news_run(
+                database,
+                run_id=run_id,
+                actor_user_id=user.id,
+                request_id="repeatable",
+                resume_provider=True,
+            )
+            return run.id
+
+    first, second = await asyncio.gather(resume(), resume())
+    assert first == second
+    async with data_management_database() as database:
+        gate = await database.get(NewsDependencyState, "provider:news")
+        assert gate is not None and gate.state == "probing" and gate.probe_run_id == first
+        assert await database.scalar(select(func.count()).select_from(DataManagementRun)) == 2
+        cancelled = await cancel_run(
+            database, run_id=first, actor_user_id=user.id, request_id="cancel-probe"
+        )
+        assert cancelled is not None and cancelled.status == "cancelled"
+    async with data_management_database() as database:
+        gate = await database.get(NewsDependencyState, "provider:news")
+        assert gate is not None and gate.state == "blocked" and gate.probe_run_id is None
+        with pytest.raises(RunAlreadyActiveError):
+            await resume_news_run(
+                database,
+                run_id=first,
+                actor_user_id=user.id,
+                request_id="cancelled",
+                resume_provider=True,
+            )
+
+
+@pytest.mark.parametrize("count", [0, 1, 4, 15])
+async def test_normal_editorial_counts_never_schedule_retry(
+    data_management_database: async_sessionmaker[AsyncSession],
+    count: int,
+) -> None:
+    initial_at = datetime(2026, 9, 11, 1, tzinfo=UTC)
+    await enqueue_automatic_news_all_run(data_management_database, edition_date=initial_at.date())
+    run = await claim_next_run(data_management_database, "worker", now=initial_at)
+    assert run is not None
+    await complete_news_run(
+        data_management_database,
+        run,
+        "worker",
+        status="succeeded",
+        now=initial_at,
+        result={
+            "news": {
+                "global": {
+                    "state": "completed",
+                    "progress": {"published": count},
+                    "failures": [],
+                    "next_retry_at": None,
+                }
+            }
+        },
+    )
+    async with data_management_database() as database:
+        assert await database.scalar(select(func.count()).select_from(DataManagementRun)) == 1
+        stored = await database.get(DataManagementRun, run.id)
+        assert stored is not None and stored.status == "succeeded"
 
 
 @pytest_asyncio.fixture
@@ -246,6 +341,13 @@ async def test_automatic_news_retries_only_unsuccessful_markets_when_due(
         status="partial",
         result={
             "outcome": "partial",
+            "news": {
+                market: {
+                    "state": "waiting_retry",
+                    "next_retry_at": (initial_at + timedelta(minutes=5)).isoformat(),
+                }
+                for market in ("tw_equity", "us_equity")
+            },
             "outcomes": {
                 "global": "complete",
                 "tw_equity": "partial",
@@ -267,21 +369,21 @@ async def test_automatic_news_retries_only_unsuccessful_markets_when_due(
             )
         ).all()
     assert [(retry.market_code, retry.scheduled_for) for retry in retries] == [
-        ("tw_equity", datetime(2026, 9, 8, 8, 30, tzinfo=ZoneInfo("Asia/Taipei"))),
-        ("us_equity", datetime(2026, 9, 8, 8, 30, tzinfo=ZoneInfo("Asia/Taipei"))),
+        ("tw_equity", datetime(2026, 9, 8, 8, 5, tzinfo=ZoneInfo("Asia/Taipei"))),
+        ("us_equity", datetime(2026, 9, 8, 8, 5, tzinfo=ZoneInfo("Asia/Taipei"))),
     ]
     assert (
         await claim_next_run(
             data_management_database,
             "early-worker",
-            now=datetime(2026, 9, 8, 8, 29, tzinfo=ZoneInfo("Asia/Taipei")),
+            now=datetime(2026, 9, 8, 8, 4, tzinfo=ZoneInfo("Asia/Taipei")),
         )
         is None
     )
     retry = await claim_next_run(
         data_management_database,
         "retry-worker",
-        now=datetime(2026, 9, 8, 8, 30, tzinfo=ZoneInfo("Asia/Taipei")),
+        now=datetime(2026, 9, 8, 8, 5, tzinfo=ZoneInfo("Asia/Taipei")),
     )
     assert retry is not None and retry.market_code == "tw_equity"
     await complete_news_run(
@@ -351,7 +453,7 @@ async def test_automatic_news_retry_is_cancelled_instead_of_claimed_after_deadli
     }
 
 
-async def test_automatic_news_retry_is_claimable_at_exact_deadline(
+async def test_automatic_news_retry_is_not_claimable_at_exact_deadline(
     data_management_database: async_sessionmaker[AsyncSession],
 ) -> None:
     deadline = datetime(2026, 9, 8, 12, tzinfo=ZoneInfo("Asia/Taipei"))
@@ -371,10 +473,7 @@ async def test_automatic_news_retry_is_claimable_at_exact_deadline(
         "deadline-worker",
         now=deadline,
     )
-    assert claimed is not None
-    assert claimed.id == retry.id
-    assert claimed.status == "running"
-    assert claimed.error is None
+    assert claimed is None
 
 
 async def test_automatic_news_all_is_cancelled_instead_of_claimed_after_deadline(
@@ -412,7 +511,7 @@ async def test_automatic_news_all_is_cancelled_instead_of_claimed_after_deadline
     }
 
 
-async def test_automatic_news_all_is_claimable_at_exact_deadline(
+async def test_automatic_news_all_is_not_claimable_at_exact_deadline(
     data_management_database: async_sessionmaker[AsyncSession],
 ) -> None:
     edition = date(2026, 9, 8)
@@ -424,11 +523,7 @@ async def test_automatic_news_all_is_claimable_at_exact_deadline(
     deadline = datetime(2026, 9, 8, 12, tzinfo=ZoneInfo("Asia/Taipei"))
     claimed = await claim_next_run(data_management_database, "deadline-worker", now=deadline)
 
-    assert claimed is not None
-    assert claimed.operation == "news_all"
-    assert claimed.edition_date == edition
-    assert claimed.status == "running"
-    assert claimed.error is None
+    assert claimed is None
 
 
 async def test_due_automatic_news_retry_is_claimed_ahead_of_pending_manual_work(
@@ -463,6 +558,337 @@ async def test_due_automatic_news_retry_is_claimed_ahead_of_pending_manual_work(
         pending_manual = await database.get(DataManagementRun, manual.id)
     assert pending_manual is not None
     assert pending_manual.status == "pending"
+
+
+class _PublishClient:
+    """Summarises every locale; the provider is never contacted."""
+
+    model_name = "deepseek-chat"
+
+    def __init__(self) -> None:
+        self.closed = False
+        self.summarized: list[tuple[str, str]] = []
+
+    async def summarize(
+        self,
+        candidate: Candidate,
+        article_text: str,
+        locale: str,
+        *,
+        retry_feedback: str | None = None,
+    ) -> ModelCall:
+        del article_text, retry_feedback
+        self.summarized.append((candidate.id, locale))
+        return ModelCall(
+            LocalizedSummary(
+                headline=f"{locale} manual headline",
+                summary=f"{locale} manual summary",
+                numeric_facts=("3%",),
+            ),
+            f"summary-{locale}",
+            6,
+            4,
+            1,
+            "c" * 64,
+        )
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.parametrize(
+    "importance,count,event,expected",
+    [
+        (4, 1, "story-0", "duplicate_event"),
+        (4, 10, "new-event", "importance_quota_reached"),
+        (3, 5, "new-event", "importance_quota_reached"),
+        (5, 15, "new-event", "published"),
+    ],
+)
+async def test_manual_recovery_enforces_event_and_tier_limits_before_paid_work(
+    data_management_database: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    importance: int,
+    count: int,
+    event: str,
+    expected: str,
+) -> None:
+    user = await _admin(data_management_database)
+    today = data_management_service.taipei_today()
+    async with data_management_database.begin() as database:
+        edition = NewsEdition(
+            edition_date=today,
+            market_code="tw_equity",
+            revision=1,
+            input_digest="d" * 64,
+            derivation_version="test",
+            prompt_version="test",
+            status="complete",
+        )
+        database.add(edition)
+        await database.flush()
+        for index in range(count):
+            database.add(
+                NewsItem(
+                    edition_id=edition.id,
+                    rank=index + 1,
+                    topic="markets",
+                    source_name="Test",
+                    source_hostname="source.example",
+                    source_url=f"https://source.example/{index}",
+                    source_headline="Headline",
+                    importance=importance,
+                    content_digest="e" * 64,
+                    numeric_facts=[],
+                    market="taiwan",
+                    event_key=f"story-{index}",
+                )
+            )
+        candidate = _candidate(edition.id, 1, ai_importance=importance, ai_event_key=event)
+        database.add(candidate)
+        await database.flush()
+        edition_id, candidate_id = edition.id, candidate.id
+    async with data_management_database() as database:
+        run = await enqueue_run(
+            database,
+            operation="news_publish",
+            market_code=None,
+            requester_id=user.id,
+            request_id="tier",
+            edition_date=today,
+            payload={"edition_id": str(edition_id), "candidate_ids": [str(candidate_id)]},
+        )
+    client = _PublishClient()
+    monkeypatch.setattr(data_management_service, "create_news_client", lambda **_: client)
+
+    async def fetch(
+        http: object, url: str, allowed: frozenset[str]
+    ) -> tuple[str, str, datetime | None]:
+        assert expected == "published", "ineligible candidate must not fetch or call model"
+        return url, "Verified source with 3% growth", None
+
+    monkeypatch.setattr(news_service, "fetch_article", fetch)
+    _, result, _ = await execute_run(
+        run,
+        data_management_database,
+        Settings(
+            environment="test",
+            daily_news_enabled=True,
+            news_model_api_key="key",
+            news_extra_hostnames="source1.example",
+        ),
+    )
+    assert result["candidates"] == {str(candidate_id): expected}
+    assert len(client.summarized) == (3 if expected == "published" else 0)
+
+
+def _candidate(edition_id: uuid.UUID, index: int, **overrides: object) -> NewsCandidate:
+    values: dict[str, object] = dict(
+        edition_id=edition_id,
+        candidate_id=str(index) * 64,
+        source_name=f"Source {index}",
+        hostname=f"source{index}.example",
+        url=f"https://source{index}.example/story-{index}",
+        headline=f"Story {index}",
+        seen_at=datetime(2026, 9, 8, 1, index, tzinfo=UTC),
+        stage="reviewed",
+    )
+    values.update(overrides)
+    return NewsCandidate(**values)
+
+
+async def test_news_publish_run_publishes_candidates_end_to_end(
+    data_management_database: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.modules.data_management import service
+
+    user = await _admin(data_management_database)
+    today = data_management_service.taipei_today()
+    async with data_management_database.begin() as database:
+        edition = NewsEdition(
+            edition_date=today,
+            market_code="tw_equity",
+            revision=1,
+            input_digest="d" * 64,
+            derivation_version="test",
+            prompt_version="test",
+            status="partial",
+        )
+        database.add(edition)
+        await database.flush()
+        existing = NewsItem(
+            edition_id=edition.id,
+            rank=1,
+            topic="markets",
+            source_name="Source 0",
+            source_hostname="source0.example",
+            source_url="https://source0.example/story-0",
+            source_headline="Story 0",
+            importance=3,
+            content_digest="0" * 64,
+            numeric_facts=[],
+            market="taiwan",
+            event_key="story-0",
+        )
+        database.add(existing)
+        picked = _candidate(
+            edition.id,
+            1,
+            stage="dropped",
+            drop_reason="reserve",
+            ai_rank=6,
+            ai_topic="companies",
+            ai_market="taiwan",
+            ai_importance=4,
+            ai_event_key="tsmc-guidance",
+        )
+        unfetchable = _candidate(edition.id, 2)
+        unclassified = _candidate(edition.id, 3)
+        database.add_all([picked, unfetchable, unclassified])
+        await database.flush()
+        edition_id = edition.id
+        candidate_ids = [picked.id, unfetchable.id, unclassified.id]
+
+    async with data_management_database() as database:
+        run = await enqueue_run(
+            database,
+            operation="news_publish",
+            market_code=None,
+            requester_id=user.id,
+            request_id="publish",
+            edition_date=today,
+            payload={
+                "edition_id": str(edition_id),
+                "candidate_ids": [str(candidate_id) for candidate_id in candidate_ids],
+            },
+        )
+    claimed = await claim_next_run(data_management_database, "publish-worker")
+    assert claimed is not None and claimed.id == run.id
+
+    client = _PublishClient()
+    fetched_urls: list[str] = []
+
+    async def fetch_article(
+        http: object, url: str, allowed: frozenset[str]
+    ) -> tuple[str, str, datetime | None]:
+        del http
+        fetched_urls.append(url)
+        assert "source2.example" in allowed
+        if "source2" in url:
+            raise ValueError("robots disallow extraction")
+        return url, "Article body with 3% growth", datetime(2026, 9, 8, tzinfo=UTC)
+
+    monkeypatch.setattr(service, "create_news_client", lambda **_: client)
+    monkeypatch.setattr(news_service, "fetch_article", fetch_article)
+    settings = Settings(
+        environment="test",
+        daily_news_enabled=True,
+        news_model_api_key="key",
+        news_extra_hostnames="source1.example,source2.example,source3.example",
+    )
+    status, result, error = await execute_run(claimed, data_management_database, settings)
+    await complete_run(
+        data_management_database,
+        claimed,
+        "publish-worker",
+        status=status,
+        result=result,
+        error=error,
+    )
+
+    assert (status, error) == ("partial", "news_publish_partial")
+    assert result["published"] == 2 and result["failed"] == 1
+    assert result["candidates"] == {
+        str(candidate_ids[0]): "published",
+        str(candidate_ids[1]): "fetch_failed",
+        str(candidate_ids[2]): "published",
+    }
+    assert client.closed
+    assert len(fetched_urls) == 3
+    assert [locale for _, locale in client.summarized] == ["zh-hant", "zh-hans", "en"] * 2
+
+    async with data_management_database() as database:
+        items = list(
+            await database.scalars(
+                select(NewsItem).where(NewsItem.edition_id == edition_id).order_by(NewsItem.rank)
+            )
+        )
+        assert [(item.rank, item.origin) for item in items] == [
+            (1, "model"),
+            (2, "manual"),
+            (3, "manual"),
+        ]
+        first, second = items[1], items[2]
+        assert first.published_by_user_id == user.id and first.hidden_at is None
+        assert (first.topic, first.market, first.importance, first.event_key) == (
+            "companies",
+            "taiwan",
+            4,
+            "tsmc-guidance",
+        )
+        # No model classification: the edition's own tag and neutral defaults.
+        assert (second.topic, second.market, second.importance, second.event_key) == (
+            "markets",
+            "taiwan",
+            3,
+            None,
+        )
+        assert first.numeric_facts == ["3%"] and len(first.content_digest) == 64
+        presentations = list(
+            await database.scalars(
+                select(NewsPresentation).where(NewsPresentation.item_id.in_([first.id, second.id]))
+            )
+        )
+        assert len(presentations) == 6
+        candidates = {
+            candidate.id: candidate
+            for candidate in await database.scalars(
+                select(NewsCandidate).where(NewsCandidate.edition_id == edition_id)
+            )
+        }
+        assert candidates[candidate_ids[0]].stage == "published"
+        assert candidates[candidate_ids[0]].item_id == first.id
+        assert candidates[candidate_ids[0]].publish_error is None
+        assert candidates[candidate_ids[1]].stage == "reviewed"
+        assert candidates[candidate_ids[1]].item_id is None
+        assert candidates[candidate_ids[1]].publish_error == "fetch_failed"
+        assert candidates[candidate_ids[2]].item_id == second.id
+        audits = list(
+            await database.scalars(
+                select(NewsGenerationAudit).where(NewsGenerationAudit.edition_id == edition_id)
+            )
+        )
+        assert len(audits) == 6
+        assert {audit.stage for audit in audits} == {"summary"}
+        assert all(audit.status == "succeeded" for audit in audits)
+        published_events = list(
+            await database.scalars(
+                select(AuditEvent).where(AuditEvent.action == "news.candidate_published")
+            )
+        )
+        assert {event.target_id for event in published_events} == {
+            str(candidate_ids[0]),
+            str(candidate_ids[2]),
+        }
+        assert all(event.actor_user_id == user.id for event in published_events)
+        completed = await database.get(DataManagementRun, run.id)
+        assert completed is not None and completed.status == "partial"
+
+    # Re-running a published candidate is idempotent and makes no model call.
+    async with data_management_database() as database:
+        rerun = await enqueue_run(
+            database,
+            operation="news_publish",
+            market_code=None,
+            requester_id=user.id,
+            request_id="publish-again",
+            edition_date=date(2026, 9, 8),
+            payload={"edition_id": str(edition_id), "candidate_ids": [str(candidate_ids[0])]},
+        )
+    status, result, error = await execute_run(rerun, data_management_database, settings)
+    assert (status, error) == ("succeeded", None)
+    assert result["candidates"] == {str(candidate_ids[0]): "already_published"}
 
 
 async def test_cancelled_macro_cannot_overlap_another_macro_execution(
@@ -677,6 +1103,17 @@ async def test_admin_api_filters_news_runs_before_applying_limit(
     assert news_runs.status_code == 200
     assert [run["operation"] for run in news_runs.json()["items"]] == ["news_all"]
     assert invalid_filter.status_code == 422
+
+
+async def test_generic_run_endpoint_refuses_news_publish(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(data_management_database)
+    async with _admin_client(data_management_database, user, enabled=True) as client:
+        refused = await client.post(
+            "/api/admin/data-management/runs", json={"operation": "news_publish"}
+        )
+    assert refused.status_code == 422
 
 
 async def test_admin_api_rejects_unauthenticated_writes_and_disabled_providers(

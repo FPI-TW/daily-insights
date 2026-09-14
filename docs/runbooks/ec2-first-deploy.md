@@ -136,6 +136,8 @@ absolute HTTPS URL。
 17:00 排入三大法人回補。`DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 控制
 `daily-news-scheduler` 每天台北 08:00 排入 initial `news_all`；scheduler 只寫入
 durable queue，`data-management-worker` 才會執行新聞 provider request 與逐市場重試。
+新聞 scheduler 在 08:00–12:00 重啟會補建當日缺漏 initial 作業；恢復依技術失敗分類，
+不以不足額判斷。額度／金鑰修復後須至後台按恢復，詳見 [新聞恢復操作](news-recovery.md)。
 `DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED` 則控制 analyst viewpoints scheduler 與
 API 功能。
 

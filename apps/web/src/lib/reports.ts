@@ -151,8 +151,8 @@ function summary(report: ApiReportSummary): ProvisionalReport {
     status: report.status,
     editionDate: report.edition_date,
     sourceDate: report.source_as_of,
-    stale: report.stale,
-    staleReason: report.stale_reason,
+    // The API's stale flag and reason code are operator signals; readers
+    // never see them, so they are not carried into the view model.
     caveatKey: "reportCaveatLive",
     summaryKey: `reportSummary_${report.market_code}`,
     blocks: [],

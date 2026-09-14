@@ -1,26 +1,33 @@
 import asyncio
 import hashlib
 import json
+import logging
+import re
 import uuid
 from collections import Counter
 from collections.abc import Awaitable, Callable
+from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import false, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api.core.observability import emit_event
+from daily_insights_api.modules.audit.api import record_audit_event
 from daily_insights_api.modules.news.contracts import (
     Candidate,
     LocalizedSummary,
     SelectedCandidate,
     Selection,
 )
+from daily_insights_api.modules.news.curation import visible_item
 from daily_insights_api.modules.news.editions import (
     EDITION_ORDER,
     GLOBAL_SPEC,
     EditionSpec,
+    SelectionPolicy,
     edition_spec,
 )
 from daily_insights_api.modules.news.extraction import (
@@ -28,6 +35,7 @@ from daily_insights_api.modules.news.extraction import (
     fetch_article,
     safe_article_client,
 )
+from daily_insights_api.modules.news.failures import classify_failure
 from daily_insights_api.modules.news.feeds import discover_feed_candidates, feed_client
 from daily_insights_api.modules.news.llm import (
     CoveredEvent,
@@ -37,13 +45,27 @@ from daily_insights_api.modules.news.llm import (
     publishable_selection,
 )
 from daily_insights_api.modules.news.models import (
+    NewsCandidate,
+    NewsCheckpoint,
     NewsEdition,
     NewsGenerationAudit,
     NewsItem,
     NewsPresentation,
 )
+from daily_insights_api.modules.news.recovery import (
+    Workflow,
+    check_dependency,
+    current_workflow,
+    fingerprint,
+    model_step,
+    source_failure,
+    source_success,
+    workflow_scope,
+)
+from daily_insights_api.modules.operations.api import sanitize_error_code
 
-DERIVATION_VERSION = "feeds-deepseek-news.v6"
+logger = logging.getLogger("daily_insights")
+DERIVATION_VERSION = "feeds-deepseek-news.v12"
 SUMMARY_PROMPT_VERSION = "summary-v3"
 LOCALES = ("zh-hant", "zh-hans", "en")
 TAIPEI = ZoneInfo("Asia/Taipei")
@@ -51,12 +73,22 @@ TAIPEI = ZoneInfo("Asia/Taipei")
 # regenerated from identical inputs so a transient provider failure cannot
 # freeze the day's news.
 IDEMPOTENT_STATUS = "complete"
+# Selection calls per edition, screening and refill together: the pool is at
+# most two prompt windows, which leaves one call to refill a short edition.
 MAX_SELECTION_ROUNDS = 3
 MAX_CANDIDATES = 20
 MAX_CANDIDATES_PER_SOURCE = 5
 # Extraction is the expensive stage, so discovery is capped per source before
 # any article is fetched; the post-extraction cap above then selects the prompt.
 MAX_DISCOVERY_PER_SOURCE = 10
+# Market tag a manually published story receives when the model never
+# classified it: the edition's own tag, which is the only one it publishes.
+MANUAL_MARKET_BY_EDITION = {"global": "global", "tw_equity": "taiwan", "us_equity": "us"}
+
+
+def _market_impact_score(headline: str, patterns: tuple[str, ...]) -> int:
+    """Count independent, edition-owned impact signals in one headline."""
+    return sum(re.search(pattern, headline, re.IGNORECASE) is not None for pattern in patterns)
 
 
 async def _retry[T](
@@ -68,7 +100,7 @@ async def _retry[T](
         except Exception as error:
             if on_failure is not None:
                 on_failure(error)
-            if attempt:
+            if attempt or classify_failure(error, stage="summary").action != "repair":
                 raise
     raise AssertionError("unreachable")
 
@@ -78,6 +110,7 @@ async def _summarize_with_retry(
     fetched: FetchedCandidate,
     locale: str,
     on_failure: Callable[[Exception], None],
+    after_failure: Callable[[], Awaitable[None]] | None = None,
 ) -> ModelCall:
     feedback: str | None = None
 
@@ -92,7 +125,25 @@ async def _summarize_with_retry(
             feedback = error.error_code
         on_failure(error)
 
-    return await _retry(attempt, failed)
+    key = fingerprint(
+        [
+            "summary",
+            fetched.content_digest,
+            fetched.candidate.model_dump(mode="json"),
+            locale,
+            client.model_name,
+            SUMMARY_PROMPT_VERSION,
+        ]
+    )
+    return await model_step(
+        key,
+        "summary",
+        attempt,
+        failed,
+        locale=locale,
+        candidate_id=fetched.candidate.id,
+        after_failure=after_failure,
+    )
 
 
 def _digest(
@@ -100,11 +151,30 @@ def _digest(
     model_name: str,
     selection_prompt_digest: str,
     market_code: str = GLOBAL_SPEC.market_code,
+    policy: SelectionPolicy | None = None,
 ) -> str:
     payload = {
         "derivation": DERIVATION_VERSION,
         "market": market_code,
         "selection_prompt_digest": selection_prompt_digest,
+        "selection_policy": (
+            {
+                "max_items": policy.max_items,
+                "max_returned_items": policy.max_returned_items,
+                "max_per_domain": policy.max_per_domain,
+                "min_topics": policy.min_topics,
+                "min_markets": policy.min_markets,
+                "min_four_star_items": policy.min_four_star_items,
+                "max_four_star_items": policy.max_four_star_items,
+                "max_low_importance_items": policy.max_low_importance_items,
+                "market_focus": policy.market_focus,
+                "allowed_markets": sorted(policy.allowed_markets or ()),
+                "min_domains_full": policy.min_domains_full,
+                "importance_guidance": policy.importance_guidance,
+            }
+            if policy is not None
+            else None
+        ),
         "summary_prompt": SUMMARY_PROMPT_VERSION,
         "model": model_name,
         "candidates": [
@@ -181,6 +251,161 @@ def _failed_audit(
     )
 
 
+async def _summarize_locales(
+    client: DeepSeekClient,
+    fetched: FetchedCandidate,
+    edition_id: uuid.UUID,
+    model_name: str,
+    audits: list[NewsGenerationAudit],
+) -> dict[str, LocalizedSummary]:
+    """Summarise one story in every locale, collecting audit rows as it goes.
+
+    Failed attempts are appended before the exception propagates so the
+    caller can still persist them; a story is publishable only when all
+    three locales validated.
+    """
+    summaries: dict[str, LocalizedSummary] = {}
+    attempt_digest = hashlib.sha256(fetched.content_digest.encode()).hexdigest()
+    workflow = current_workflow()
+
+    async def persist_audits() -> None:
+        if workflow is not None and audits:
+            async with workflow.execution.sessions.begin() as database:
+                database.add_all(audits)
+            audits.clear()
+
+    for locale in LOCALES:
+
+        def audit_attempt_failure(error: Exception, locale: str = locale) -> None:
+            audits.append(
+                _failed_audit(
+                    edition_id,
+                    "summary",
+                    locale,
+                    attempt_digest,
+                    model_name,
+                    error,
+                    prompt_version=SUMMARY_PROMPT_VERSION,
+                )
+            )
+
+        call = await _summarize_with_retry(
+            client, fetched, locale, audit_attempt_failure, persist_audits
+        )
+        assert isinstance(call.value, LocalizedSummary)
+        summaries[locale] = call.value
+        if not call.reused:
+            audits.append(
+                _audit(edition_id, "summary", locale, call, model_name, SUMMARY_PROMPT_VERSION)
+            )
+        await persist_audits()
+    return summaries
+
+
+@dataclass
+class _CandidateRecord:
+    candidate: Candidate
+    stage: str = "discovered"
+    drop_reason: str | None = None
+    content_digest: str | None = None
+    source_published_at: datetime | None = None
+    ai_rank: int | None = None
+    ai_topic: str | None = None
+    ai_market: str | None = None
+    ai_importance: int | None = None
+    ai_event_key: str | None = None
+    item_id: uuid.UUID | None = None
+
+
+class _CandidateLedger:
+    """How far each feed candidate got, recorded as the edition's candidate rows.
+
+    Stages advance monotonically through discovery, extraction and review;
+    the model's original answer is kept from the first round that returned a
+    story, and the drop reason records the last decision that kept it out.
+    """
+
+    def __init__(self, discovered: list[Candidate]) -> None:
+        self._records = {candidate.id: _CandidateRecord(candidate) for candidate in discovered}
+
+    def _record(self, candidate: Candidate) -> _CandidateRecord:
+        # Extraction may be stubbed with stories the feeds never listed; they
+        # still belong to the edition's record.
+        return self._records.setdefault(candidate.id, _CandidateRecord(candidate))
+
+    def fetching(self, candidates: list[Candidate]) -> None:
+        for candidate in candidates:
+            self._record(candidate).stage = "fetch_failed"
+
+    def extracted(self, fetched: list[FetchedCandidate]) -> None:
+        for item in fetched:
+            record = self._record(item.candidate)
+            record.stage = "unused"
+            record.content_digest = item.content_digest
+            record.source_published_at = item.source_published_at
+
+    def reviewed(self, batch: list[FetchedCandidate]) -> None:
+        for item in batch:
+            record = self._record(item.candidate)
+            if record.stage == "unused":
+                record.stage = "reviewed"
+
+    def returned(self, call: ModelCall) -> None:
+        """Record the model's own list; anything returned starts as a reserve."""
+        selection = call.value
+        assert isinstance(selection, Selection)
+        original = call.returned or (
+            *selection.selections,
+            *(item for item, _ in call.rejected),
+        )
+        for rank, item in enumerate(original, start=1):
+            record = self._records.get(item.id)
+            if record is None:
+                continue
+            if record.ai_rank is None:
+                record.ai_rank = rank
+                record.ai_topic = item.topic
+                record.ai_market = item.market
+                record.ai_importance = item.importance
+                record.ai_event_key = item.event_key
+            record.stage, record.drop_reason = "dropped", "reserve"
+        for item, reason in call.rejected:
+            self.drop(item.id, reason)
+
+    def drop(self, candidate_id: str, reason: str) -> None:
+        record = self._records.get(candidate_id)
+        if record is not None:
+            record.stage, record.drop_reason = "dropped", reason
+
+    def published(self, candidate_id: str, item_id: uuid.UUID) -> None:
+        record = self._records[candidate_id]
+        record.stage, record.drop_reason, record.item_id = "published", None, item_id
+
+    def rows(self, edition_id: uuid.UUID) -> list[NewsCandidate]:
+        return [
+            NewsCandidate(
+                edition_id=edition_id,
+                candidate_id=record.candidate.id,
+                source_name=record.candidate.source_name,
+                hostname=record.candidate.hostname,
+                url=str(record.candidate.url),
+                headline=record.candidate.headline,
+                seen_at=record.candidate.seen_at,
+                source_published_at=record.source_published_at,
+                content_digest=record.content_digest,
+                stage=record.stage,
+                drop_reason=record.drop_reason,
+                ai_rank=record.ai_rank,
+                ai_topic=record.ai_topic,
+                ai_market=record.ai_market,
+                ai_importance=record.ai_importance,
+                ai_event_key=record.ai_event_key,
+                item_id=record.item_id,
+            )
+            for record in self._records.values()
+        ]
+
+
 def _interleave_by_host[T](items: list[T], host_of: Callable[[T], str]) -> list[T]:
     """Round-robin across hosts, keeping each host's own order.
 
@@ -207,6 +432,7 @@ def _cap_discovery(
     total: int | None = None,
     full_text_ids: frozenset[str] = frozenset(),
     interleave: bool = False,
+    impact_patterns: tuple[str, ...] = (),
 ) -> list[Candidate]:
     """Bound the articles fetched per source and in total, newest first.
 
@@ -217,6 +443,7 @@ def _cap_discovery(
     ordered = sorted(
         candidates,
         key=lambda candidate: (
+            -_market_impact_score(candidate.headline, impact_patterns),
             candidate.id not in full_text_ids,
             candidate.seen_at is None,
             -(candidate.seen_at.timestamp() if candidate.seen_at else 0.0),
@@ -243,6 +470,7 @@ def _limit_candidates(
     total: int = MAX_CANDIDATES,
     per_source: int = MAX_CANDIDATES_PER_SOURCE,
     interleave: bool = False,
+    impact_patterns: tuple[str, ...] = (),
 ) -> list[FetchedCandidate]:
     """Keep the freshest candidates while bounding any single source.
 
@@ -252,9 +480,10 @@ def _limit_candidates(
     are reproducible for identical discovery results.
     """
 
-    def sort_key(fetched: FetchedCandidate) -> tuple[bool, float, str]:
+    def sort_key(fetched: FetchedCandidate) -> tuple[int, bool, float, str]:
         freshness = fetched.source_published_at or fetched.candidate.seen_at
         return (
+            -_market_impact_score(fetched.candidate.headline, impact_patterns),
             freshness is None,
             -(freshness.timestamp() if freshness is not None else 0.0),
             fetched.source_url,
@@ -293,6 +522,12 @@ async def _fetch_usable_candidates(
     async with safe_article_client(allowed, timeout_seconds) as http:
 
         async def fetch_one(candidate: Candidate) -> FetchedCandidate | None:
+            workflow = current_workflow()
+            checkpoint = None
+            if workflow is not None:
+                checkpoint = await workflow.checkpoint(
+                    fingerprint(["article", candidate.id]), "article"
+                )
             body = supplied.get(candidate.id)
             if body:
                 # Full-text feeds already passed the discovery allowlist; the
@@ -303,27 +538,55 @@ async def _fetch_usable_candidates(
                     bytes=len(body),
                     full_text=True,
                 )
-                return FetchedCandidate(
+                fetched = FetchedCandidate(
                     candidate,
                     str(candidate.url),
                     body,
                     hashlib.sha256(body.encode()).hexdigest(),
                     candidate.seen_at,
                 )
+                if workflow is not None and checkpoint is not None:
+                    await _record_article_success(workflow, checkpoint, fetched)
+                return fetched
+            if workflow is not None and checkpoint is not None:
+                if checkpoint.failure is not None and checkpoint.failure.get("action") == "skip":
+                    from daily_insights_api.modules.news.failures import NewsFailure
+
+                    await workflow.record(NewsFailure.model_validate(checkpoint.failure))
+                    return None
             async with semaphore:
                 try:
+                    if workflow is not None:
+                        await workflow.check("article")
+                        await check_dependency(workflow, f"source:{candidate.hostname}")
                     source_url, body, source_published_at = await fetch_article(
                         http, str(candidate.url), allowed
                     )
                     emit_event("news.source.fetched", hostname=candidate.hostname, bytes=len(body))
-                    return FetchedCandidate(
+                    fetched = FetchedCandidate(
                         candidate,
                         source_url,
                         body,
                         hashlib.sha256(body.encode()).hexdigest(),
                         source_published_at,
                     )
+                    if workflow is not None and checkpoint is not None:
+                        await _record_article_success(
+                            workflow,
+                            checkpoint,
+                            fetched,
+                        )
+                    return fetched
                 except Exception as error:
+                    if workflow is not None and checkpoint is not None:
+                        await source_failure(
+                            workflow,
+                            checkpoint,
+                            error,
+                            stage="article",
+                            hostname=candidate.hostname,
+                            candidate_id=candidate.id,
+                        )
                     emit_event(
                         "news.source.failed",
                         hostname=candidate.hostname,
@@ -335,7 +598,73 @@ async def _fetch_usable_candidates(
     return [item for item in fetched if item is not None]
 
 
+async def _record_article_success(
+    workflow: Workflow, checkpoint: NewsCheckpoint, fetched: FetchedCandidate
+) -> None:
+    """Clear candidate and shared source failures after a proven recovery."""
+    checkpoint.failure = None
+    checkpoint.result = {
+        "candidate": fetched.candidate.model_dump(mode="json"),
+        "content_digest": fetched.content_digest,
+        "source_published_at": fetched.source_published_at.isoformat()
+        if fetched.source_published_at
+        else None,
+    }
+    await workflow.store(checkpoint)
+    await source_success(
+        workflow,
+        f"source:{fetched.candidate.hostname}",
+        fetched.source_published_at,
+        1,
+    )
+
+
 async def run_news_edition(
+    session_factory: async_sessionmaker[AsyncSession],
+    client: DeepSeekClient,
+    edition_date: date,
+    *,
+    allowed_hostnames: frozenset[str],
+    fetch_timeout_seconds: float = 25,
+    discovery_timeout_seconds: float = 30,
+    spec: EditionSpec = GLOBAL_SPEC,
+) -> str:
+    if edition_date != datetime.now(TAIPEI).date():
+        raise ValueError("daily news only generates the current Taipei edition")
+    async with workflow_scope(session_factory, edition_date, spec.market_code) as workflow:
+        result = await _generate_news_edition(
+            session_factory,
+            client,
+            edition_date,
+            allowed_hostnames=allowed_hostnames,
+            fetch_timeout_seconds=fetch_timeout_seconds,
+            discovery_timeout_seconds=discovery_timeout_seconds,
+            spec=spec,
+        )
+        if result == "idempotent":
+            async with session_factory() as database:
+                latest_id = (
+                    select(NewsEdition.id)
+                    .where(
+                        NewsEdition.edition_date == edition_date,
+                        NewsEdition.market_code == spec.market_code,
+                    )
+                    .order_by(NewsEdition.revision.desc())
+                    .limit(1)
+                    .scalar_subquery()
+                )
+                workflow.progress["published"] = (
+                    await database.scalar(
+                        select(func.count())
+                        .select_from(NewsItem)
+                        .where(NewsItem.edition_id == latest_id, visible_item(spec.market_code))
+                    )
+                    or 0
+                )
+        return result
+
+
+async def _generate_news_edition(
     session_factory: async_sessionmaker[AsyncSession],
     client: DeepSeekClient,
     edition_date: date,
@@ -371,31 +700,46 @@ async def run_news_edition(
             count=len(feed_candidates),
             floor=floor,
         )
+    ledger = _CandidateLedger(feed_candidates)
     candidates = _cap_discovery(
         feed_candidates,
         per_source=spec.max_discovery_per_source,
         total=spec.max_discovery_total,
         full_text_ids=frozenset(bodies),
         interleave=spec.interleave_sources,
+        impact_patterns=spec.headline_impact_patterns,
     )
     emit_event("news.candidates.merged", market=market_code, total=len(candidates))
-    usable = (
+    ledger.fetching(candidates)
+    extracted = (
         await _fetch_usable_candidates(candidates, allowed, fetch_timeout_seconds, bodies)
         if candidates
         else []
     )
+    ledger.extracted(extracted)
     usable = _limit_candidates(
-        usable,
+        extracted,
         total=spec.max_candidates * 2,
         per_source=spec.max_per_source,
         interleave=spec.interleave_sources,
+        impact_patterns=spec.headline_impact_patterns,
     )
     emit_event("news.sources.usable", market=market_code, count=len(usable))
+    workflow = current_workflow()
+    if workflow is not None:
+        workflow.progress.update(discovered=len(feed_candidates), usable=len(usable))
+        await workflow.save()
     model_name = client.model_name
     selection_prompt_digest = client.selection_prompt_digest
     selection_prompt_version = client.selection_prompt_version
     edition_prompt_version = f"{selection_prompt_version}+{SUMMARY_PROMPT_VERSION}"
-    input_digest = _digest(usable, model_name, selection_prompt_digest, market_code)
+    input_digest = _digest(
+        usable,
+        model_name,
+        selection_prompt_digest,
+        market_code,
+        spec.selection,
+    )
     async with session_factory() as database:
         await database.execute(
             select(func.pg_advisory_xact_lock(_lock_key(edition_date, market_code)))
@@ -416,6 +760,7 @@ async def run_news_edition(
             latest is not None
             and latest.status == IDEMPOTENT_STATUS
             and latest.input_digest == input_digest
+            and (workflow is None or not workflow.resuming)
         ):
             await database.rollback()
             emit_event("news.edition.idempotent", edition_date=edition_date, market=market_code)
@@ -433,7 +778,11 @@ async def run_news_edition(
         )
         database.add(edition)
         await database.flush()
+        # Commit the immutable revision identity before calling the model.
+        # Audits and checkpoints use independent, short transactions thereafter.
+        await database.commit()
         if not usable:
+            database.add_all(ledger.rows(edition.id))
             await database.commit()
             emit_event("news.shortfall", market=market_code, status="unavailable", count=0)
             return edition.status
@@ -444,42 +793,50 @@ async def run_news_edition(
         successful: list[SelectedCandidate] = []
         localized: dict[str, dict[str, LocalizedSummary]] = {}
         publication = Selection(selections=())
-        for round_index in range(MAX_SELECTION_ROUNDS):
-            covered_sources = Counter(selected[item.id].candidate.hostname for item in successful)
-            remaining = [fetched for fetched in usable if fetched.candidate.id not in attempted]
-            # Explore the expanded pool before recycling unselected articles;
-            # within each group prefer underrepresented sources, then freshness.
-            remaining.sort(
-                key=lambda fetched: (
-                    fetched.candidate.id in reviewed,
-                    covered_sources[fetched.candidate.hostname],
-                )
-            )
-            batch = remaining[: spec.max_candidates]
-            if not batch or len(publication.selections) >= spec.target_items:
-                break
-            reviewed.update(fetched.candidate.id for fetched in batch)
-            previous_events = tuple(
+        selection_calls = 0
+
+        def covered(items: list[SelectedCandidate]) -> tuple[CoveredEvent, ...]:
+            return tuple(
                 CoveredEvent(
                     item.event_key,
                     selected[item.id].candidate.headline,
                     selected[item.id].candidate.hostname,
                     item.topic,
                 )
-                for item in successful
+                for item in items
             )
 
-            async def select_batch(
-                batch: list[FetchedCandidate] = batch,
-                previous_events: tuple[CoveredEvent, ...] = previous_events,
-            ) -> ModelCall:
+        async def select_batch(
+            batch: list[FetchedCandidate], previous_events: tuple[CoveredEvent, ...]
+        ) -> Selection | None:
+            """One rated selection call; None when the provider failed twice."""
+            nonlocal selection_calls
+            selection_calls += 1
+            reviewed.update(fetched.candidate.id for fetched in batch)
+            ledger.reviewed(batch)
+
+            async def attempt() -> ModelCall:
                 return await client.select(
                     batch, policy=spec.selection, previous_events=previous_events
                 )
 
             try:
-                selection_call = await _retry(
-                    select_batch,
+                call = await model_step(
+                    fingerprint(
+                        [
+                            "selection",
+                            _digest(
+                                batch,
+                                model_name,
+                                selection_prompt_digest,
+                                market_code,
+                                spec.selection,
+                            ),
+                            [asdict(event) for event in previous_events],
+                        ]
+                    ),
+                    "selection",
+                    attempt,
                     lambda error: database.add(
                         _failed_audit(
                             edition.id,
@@ -491,18 +848,20 @@ async def run_news_edition(
                             prompt_version=selection_prompt_version,
                         )
                     ),
+                    after_failure=database.commit,
                 )
-                assert isinstance(selection_call.value, Selection)
-                database.add(
-                    _audit(
-                        edition.id,
-                        "selection",
-                        None,
-                        selection_call,
-                        model_name,
-                        selection_prompt_version,
+                assert isinstance(call.value, Selection)
+                if not call.reused:
+                    database.add(
+                        _audit(
+                            edition.id,
+                            "selection",
+                            None,
+                            call,
+                            model_name,
+                            selection_prompt_version,
+                        )
                     )
-                )
             except Exception as error:
                 emit_event(
                     "news.selection.failed",
@@ -511,58 +870,63 @@ async def run_news_edition(
                     if isinstance(error, ModelCallError)
                     else type(error).__name__,
                 )
-                break
-            if not selection_call.value.selections:
+                return None
+            finally:
+                await database.commit()
+            ledger.returned(call)
+            selection = call.value
+            assert isinstance(selection, Selection)
+            if not selection.selections:
                 attempted.update(fetched.candidate.id for fetched in batch)
-            for selected_item in selection_call.value.selections:
-                if len(publication.selections) >= spec.target_items:
-                    break
+            return selection
+
+        async def summarise(picks: list[SelectedCandidate]) -> None:
+            """Summarise ranked picks until each importance tier reaches its quota."""
+            nonlocal publication
+            for selected_item in picks:
+                published_four_star = sum(item.importance == 4 for item in publication.selections)
+                published_low_importance = sum(
+                    item.importance <= 3 for item in publication.selections
+                )
+                if (
+                    selected_item.importance == 4
+                    and published_four_star >= spec.selection.max_four_star_items
+                ) or (
+                    selected_item.importance <= 3
+                    and published_low_importance >= spec.selection.max_low_importance_items
+                ):
+                    ledger.drop(selected_item.id, "reserve")
+                    continue
                 attempted.add(selected_item.id)
                 if selected_item.event_key in event_keys:
+                    ledger.drop(selected_item.id, "duplicate_event")
                     continue
                 fetched = selected[selected_item.id]
-                summaries: dict[str, LocalizedSummary] = {}
+                # The per-domain cap is settled before any summary is paid
+                # for: importance ordering merges windows that each obeyed
+                # the cap on their own, so a third story from a domain that
+                # already holds two summarised ones can never be published.
+                domain_count = sum(
+                    1
+                    for item in successful
+                    if item.importance < 5
+                    and selected[item.id].candidate.hostname == fetched.candidate.hostname
+                )
+                if selected_item.importance < 5 and domain_count >= spec.selection.max_per_domain:
+                    ledger.drop(selected_item.id, "policy")
+                    continue
+                audits: list[NewsGenerationAudit] = []
                 try:
-                    for locale in LOCALES:
-
-                        def audit_attempt_failure(
-                            error: Exception,
-                            locale: str = locale,
-                            content_digest: str = fetched.content_digest,
-                        ) -> None:
-                            database.add(
-                                _failed_audit(
-                                    edition.id,
-                                    "summary",
-                                    locale,
-                                    hashlib.sha256(content_digest.encode()).hexdigest(),
-                                    model_name,
-                                    error,
-                                    prompt_version=SUMMARY_PROMPT_VERSION,
-                                )
-                            )
-
-                        call = await _summarize_with_retry(
-                            client, fetched, locale, audit_attempt_failure
-                        )
-                        assert isinstance(call.value, LocalizedSummary)
-                        summaries[locale] = call.value
-                        database.add(
-                            _audit(
-                                edition.id,
-                                "summary",
-                                locale,
-                                call,
-                                model_name,
-                                SUMMARY_PROMPT_VERSION,
-                            )
-                        )
+                    summaries = await _summarize_locales(
+                        client, fetched, edition.id, model_name, audits
+                    )
                     successful.append(selected_item)
                     localized[selected_item.id] = summaries
                     event_keys.add(selected_item.event_key)
                     publication = publishable_selection(successful, usable, spec.selection)
                     emit_event("news.summary.succeeded", locale_count=3, rank=len(successful))
                 except Exception as error:
+                    ledger.drop(selected_item.id, "summary_failed")
                     emit_event(
                         "news.summary.failed",
                         hostname=fetched.candidate.hostname,
@@ -570,49 +934,173 @@ async def run_news_edition(
                         if isinstance(error, ModelCallError)
                         else type(error).__name__,
                     )
+                finally:
+                    database.add_all(audits)
+                    await database.commit()
+                if workflow is not None and workflow.model_stopped is not None:
+                    break
+
+        # Screening: every batch of the pool is rated before anything is
+        # summarised, so a five-star story in the second batch is seen even
+        # when the first batch alone could fill the edition. The batches are
+        # then merged and taken by importance, five stars before four and so
+        # on; within one rating the model's own order stands.
+        picks: list[SelectedCandidate] = []
+        for start in range(0, len(usable), spec.max_candidates):
+            if selection_calls >= MAX_SELECTION_ROUNDS:
+                break
+            batch = usable[start : start + spec.max_candidates]
+            selection = await select_batch(batch, covered(picks))
+            if selection is None:
+                break
+            # A second report of an event already picked from an earlier
+            # window is kept: it only counts as a duplicate once the earlier
+            # report has actually been published, and a higher-rated report
+            # of the same event may lead after the sort.
+            picks.extend(selection.selections)
+            emit_event(
+                "news.screening.batch",
+                market=market_code,
+                batch=selection_calls,
+                candidates=len(batch),
+                returned=len(selection.selections),
+            )
+        picks.sort(key=lambda item: -item.importance)
+        await summarise(picks)
+
+        # Refill: only while the edition is still short and calls remain,
+        # recycling articles the model has not picked, with the published
+        # events named so they are not chosen twice.
+        refill_round = 0
+        while (
+            (workflow is None or workflow.model_stopped is None)
+            and (
+                len(publication.selections) < spec.target_items
+                or sum(item.importance == 4 for item in publication.selections)
+                < spec.selection.min_four_star_items
+            )
+            and selection_calls < MAX_SELECTION_ROUNDS
+        ):
+            covered_sources = Counter(selected[item.id].candidate.hostname for item in successful)
+            remaining = [fetched for fetched in usable if fetched.candidate.id not in attempted]
+            # Unreviewed articles first, then underrepresented sources.
+            remaining.sort(
+                key=lambda fetched: (
+                    fetched.candidate.id in reviewed,
+                    covered_sources[fetched.candidate.hostname],
+                )
+            )
+            batch = remaining[: spec.max_candidates]
+            if not batch:
+                break
+            selection = await select_batch(batch, covered(successful))
+            if selection is None:
+                break
+            await summarise(sorted(selection.selections, key=lambda item: -item.importance))
+            refill_round += 1
             emit_event(
                 "news.refill.round",
                 market=market_code,
-                round=round_index + 1,
+                round=refill_round,
                 published_count=len(publication.selections),
                 attempted_count=len(attempted),
             )
         complete_count = len(publication.selections)
+        if workflow is not None:
+            await workflow.check("publication", external=False)
+        await database.execute(
+            select(func.pg_advisory_xact_lock(_lock_key(edition_date, market_code)))
+        )
+        published_ids = {item.id for item in publication.selections}
+        visible_count = 0
+        if workflow is not None:
+            await workflow.fence_publication(database)
+        for successful_item in successful:
+            if successful_item.id not in published_ids:
+                # Summarised, but the publication could not keep it within the
+                # source and diversity limits.
+                ledger.drop(successful_item.id, "policy")
         for rank, selected_item in enumerate(publication.selections, start=1):
             fetched = selected[selected_item.id]
             summaries = localized[selected_item.id]
-            item = NewsItem(
-                edition_id=edition.id,
-                rank=rank,
-                topic=selected_item.topic,
-                source_name=fetched.candidate.source_name,
-                source_hostname=fetched.candidate.hostname,
-                source_url=fetched.source_url,
-                source_headline=fetched.candidate.headline,
-                source_published_at=fetched.source_published_at,
-                importance=selected_item.importance,
-                content_digest=fetched.content_digest,
-                numeric_facts=list(summaries["en"].numeric_facts),
-                market=selected_item.market,
-                event_key=selected_item.event_key,
-            )
+            item = _news_item(edition.id, rank, selected_item, fetched, summaries)
+            hidden = await _hidden_source(database, market_code, item.source_url, item.event_key)
+            if hidden is not None:
+                item.hidden_at, item.hidden_by_user_id = hidden.hidden_at, hidden.hidden_by_user_id
+            else:
+                visible_count += 1
             database.add(item)
             await database.flush()
-            for locale, summary in summaries.items():
-                database.add(
-                    NewsPresentation(
-                        item_id=item.id,
-                        locale=locale,
-                        headline=summary.headline,
-                        summary=summary.summary,
-                    )
-                )
+            database.add_all(_presentations(item.id, summaries))
+            ledger.published(selected_item.id, item.id)
         edition.status, edition.caveat = _edition_status(complete_count, spec.target_items)
+        database.add_all(ledger.rows(edition.id))
         await database.commit()
+        if workflow is not None:
+            workflow.progress["published"] = visible_count
         emit_event(
             "news.shortfall", market=market_code, status=edition.status, count=complete_count
         )
         return edition.status
+
+
+async def _hidden_source(
+    database: AsyncSession, market: str, url: str, event_key: str | None
+) -> NewsItem | None:
+    item = await database.scalar(
+        select(NewsItem)
+        .join(NewsEdition)
+        .where(
+            NewsEdition.market_code == market,
+            NewsItem.hidden_at.is_not(None),
+            or_(
+                NewsItem.source_url == url,
+                NewsItem.event_key == event_key if event_key else false(),
+            ),
+        )
+        .limit(1)
+    )
+    return item
+
+
+def _news_item(
+    edition_id: uuid.UUID,
+    rank: int,
+    selected_item: SelectedCandidate,
+    fetched: FetchedCandidate,
+    summaries: dict[str, LocalizedSummary],
+    *,
+    origin: str = "model",
+    published_by_user_id: uuid.UUID | None = None,
+) -> NewsItem:
+    return NewsItem(
+        edition_id=edition_id,
+        rank=rank,
+        topic=selected_item.topic,
+        source_name=fetched.candidate.source_name,
+        source_hostname=fetched.candidate.hostname,
+        source_url=fetched.source_url,
+        source_headline=fetched.candidate.headline,
+        source_published_at=fetched.source_published_at,
+        importance=selected_item.importance,
+        content_digest=fetched.content_digest,
+        numeric_facts=list(summaries["en"].numeric_facts),
+        market=selected_item.market,
+        event_key=selected_item.event_key,
+        origin=origin,
+        published_by_user_id=published_by_user_id,
+    )
+
+
+def _presentations(
+    item_id: uuid.UUID, summaries: dict[str, LocalizedSummary]
+) -> list[NewsPresentation]:
+    return [
+        NewsPresentation(
+            item_id=item_id, locale=locale, headline=summary.headline, summary=summary.summary
+        )
+        for locale, summary in summaries.items()
+    ]
 
 
 OUTCOME_SEVERITY = {"failed": 4, "unavailable": 3, "partial": 2, "idempotent": 1, "complete": 0}
@@ -627,6 +1115,7 @@ async def run_all_editions(
     fetch_timeout_seconds: float = 25,
     discovery_timeout_seconds: float = 30,
     markets: tuple[str, ...] = EDITION_ORDER,
+    only_missing: bool = False,
 ) -> str:
     """Run every configured edition in order and return the worst outcome.
 
@@ -641,6 +1130,7 @@ async def run_all_editions(
         fetch_timeout_seconds=fetch_timeout_seconds,
         discovery_timeout_seconds=discovery_timeout_seconds,
         markets=markets,
+        only_missing=only_missing,
     )
     return outcome
 
@@ -654,17 +1144,32 @@ async def run_all_editions_with_outcomes(
     fetch_timeout_seconds: float = 25,
     discovery_timeout_seconds: float = 30,
     markets: tuple[str, ...] = EDITION_ORDER,
+    only_missing: bool = False,
 ) -> tuple[str, dict[str, str]]:
     """Run every edition and retain each market's terminal outcome.
 
     One edition's exception does not stop the others; it is reported as
     ``failed`` so the durable queue can retry only that market.  The returned
     aggregate keeps the historical ``failed -> unavailable`` normalization.
+
+    ``only_missing`` is the automatic run's contract: a market that already
+    has an edition for the date is left alone whatever its status, so a
+    worker that died mid-run and was reclaimed after its lease expired
+    finishes the markets it never reached instead of generating the finished
+    ones a second time. The existing edition's status stands in as the outcome.
     """
     worst = "complete"
     outcomes: dict[str, str] = {}
     for market_code in markets:
         spec = edition_spec(market_code)
+        if only_missing:
+            existing = await _existing_edition_status(session_factory, edition_date, market_code)
+            if existing is not None:
+                emit_event("news.edition.skipped_existing", market=market_code, status=existing)
+                outcomes[market_code] = existing
+                if OUTCOME_SEVERITY[existing] > OUTCOME_SEVERITY[worst]:
+                    worst = existing
+                continue
         try:
             outcome = await run_news_edition(
                 session_factory,
@@ -682,3 +1187,414 @@ async def run_all_editions_with_outcomes(
         if OUTCOME_SEVERITY[outcome] > OUTCOME_SEVERITY[worst]:
             worst = outcome
     return ("unavailable" if worst == "failed" else worst), outcomes
+
+
+async def _existing_edition_status(
+    session_factory: async_sessionmaker[AsyncSession], edition_date: date, market_code: str
+) -> str | None:
+    """Status of the latest edition for the market and date, or None."""
+    async with session_factory() as database:
+        status = await database.scalar(
+            select(NewsEdition.status)
+            .where(
+                NewsEdition.edition_date == edition_date,
+                NewsEdition.market_code == market_code,
+            )
+            .order_by(NewsEdition.revision.desc())
+            .limit(1)
+        )
+    return str(status) if status is not None else None
+
+
+@dataclass(frozen=True)
+class _PublishTarget:
+    """The edition a manual publish adds to, captured outside any session."""
+
+    edition_id: uuid.UUID
+    edition_date: date
+    market_code: str
+
+
+async def _is_latest_revision(database: AsyncSession, target: _PublishTarget) -> bool:
+    latest = await database.scalar(
+        select(NewsEdition.id)
+        .where(
+            NewsEdition.edition_date == target.edition_date,
+            NewsEdition.market_code == target.market_code,
+        )
+        .order_by(NewsEdition.revision.desc())
+        .limit(1)
+    )
+    return latest == target.edition_id
+
+
+async def _url_published(database: AsyncSession, edition_id: uuid.UUID, url: str) -> bool:
+    existing = await database.scalar(
+        select(NewsItem.id)
+        .where(NewsItem.edition_id == edition_id, NewsItem.source_url == url)
+        .limit(1)
+    )
+    return existing is not None
+
+
+async def _refetch_candidate(
+    candidate: NewsCandidate, allowed: frozenset[str], timeout_seconds: float
+) -> FetchedCandidate:
+    """Fetch the article again: bodies are never stored, only their digest."""
+    feed_candidate = Candidate(
+        id=candidate.candidate_id,
+        url=candidate.url,
+        hostname=candidate.hostname,
+        source_name=candidate.source_name,
+        headline=candidate.headline,
+        seen_at=candidate.seen_at,
+    )
+    async with safe_article_client(allowed, timeout_seconds) as http:
+        source_url, body, source_published_at = await fetch_article(http, candidate.url, allowed)
+    emit_event("news.source.fetched", hostname=candidate.hostname, bytes=len(body))
+    return FetchedCandidate(
+        feed_candidate,
+        source_url,
+        body,
+        hashlib.sha256(body.encode()).hexdigest(),
+        source_published_at,
+    )
+
+
+def _manual_selection(candidate: NewsCandidate, market_code: str) -> SelectedCandidate:
+    """The model's classification when it gave one, else safe edition defaults.
+
+    The event key is only a placeholder here: the item keeps the model's
+    ``ai_event_key`` (possibly null) because a made-up key would look like a
+    classification that never happened.
+    """
+    return SelectedCandidate(
+        id=candidate.candidate_id,
+        topic=candidate.ai_topic or "markets",
+        event_key=f"manual-{candidate.candidate_id[:16]}",
+        market=candidate.ai_market or MANUAL_MARKET_BY_EDITION[market_code],
+        importance=candidate.ai_importance or 3,
+    )
+
+
+async def _record_publish_failure(
+    session_factory: async_sessionmaker[AsyncSession],
+    candidate_id: uuid.UUID,
+    code: str,
+    audits: list[NewsGenerationAudit],
+) -> None:
+    async with session_factory.begin() as database:
+        candidate = await database.get(NewsCandidate, candidate_id)
+        if candidate is not None:
+            candidate.publish_error = sanitize_error_code(code)[:500]
+        database.add_all(audits)
+
+
+async def _publish_candidate(
+    session_factory: async_sessionmaker[AsyncSession],
+    client: DeepSeekClient,
+    target: _PublishTarget,
+    candidate: NewsCandidate,
+    *,
+    run_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None,
+    allowed: frozenset[str],
+    fetch_timeout_seconds: float,
+) -> str:
+    """Publish one candidate; returns ``published`` or the failure code.
+
+    Fetching and summarising happen outside any transaction so the edition's
+    advisory lock is only held while the item is written.
+    """
+    audits: list[NewsGenerationAudit] = []
+    model_name = client.model_name
+    workflow = current_workflow()
+    async with session_factory() as database:
+        issue = await _manual_publication_issue(database, target, candidate)
+    if issue is not None:
+        await _record_publish_failure(session_factory, candidate.id, issue, audits)
+        return issue
+    checkpoint = None
+    try:
+        if workflow is not None:
+            checkpoint = await workflow.checkpoint(
+                fingerprint(["article", candidate.candidate_id]), "article"
+            )
+            if checkpoint.failure is not None and checkpoint.failure.get("action") == "skip":
+                from daily_insights_api.modules.news.failures import NewsFailure, NewsOperationError
+
+                raise NewsOperationError(NewsFailure.model_validate(checkpoint.failure))
+            await workflow.check("article")
+            await check_dependency(workflow, f"source:{candidate.hostname}")
+        fetched = await _refetch_candidate(candidate, allowed, fetch_timeout_seconds)
+        if workflow is not None and checkpoint is not None:
+            await _record_article_success(workflow, checkpoint, fetched)
+    except Exception as error:
+        if workflow is not None and checkpoint is not None:
+            await source_failure(
+                workflow,
+                checkpoint,
+                error,
+                stage="article",
+                hostname=candidate.hostname,
+                candidate_id=candidate.candidate_id,
+            )
+        emit_event(
+            "news.source.failed", hostname=candidate.hostname, error_code=type(error).__name__
+        )
+        await _record_publish_failure(session_factory, candidate.id, "fetch_failed", audits)
+        return "fetch_failed"
+    try:
+        summaries = await _summarize_locales(client, fetched, target.edition_id, model_name, audits)
+    except Exception as error:
+        emit_event(
+            "news.summary.failed",
+            hostname=candidate.hostname,
+            error_code=error.error_code
+            if isinstance(error, ModelCallError)
+            else type(error).__name__,
+        )
+        await _record_publish_failure(session_factory, candidate.id, "summary_failed", audits)
+        return "summary_failed"
+    selection = _manual_selection(candidate, target.market_code)
+    if workflow is not None:
+        await workflow.check("publication", external=False)
+    try:
+        async with session_factory() as database:
+            await database.execute(
+                select(
+                    func.pg_advisory_xact_lock(_lock_key(target.edition_date, target.market_code))
+                )
+            )
+            current = await database.get(NewsCandidate, candidate.id, with_for_update=True)
+            if workflow is not None:
+                await workflow.fence_publication(database)
+            assert current is not None
+            code = (
+                "edition_superseded"
+                if not await _is_latest_revision(database, target)
+                else "already_published"
+                if current.item_id is not None
+                else "url_already_published"
+                if await _url_published(database, target.edition_id, fetched.source_url)
+                else "item_hidden"
+                if await _hidden_source(
+                    database, target.market_code, fetched.source_url, candidate.ai_event_key
+                )
+                is not None
+                else await _manual_publication_issue(database, target, current)
+            )
+            if code is not None:
+                await database.rollback()
+                await _record_publish_failure(session_factory, candidate.id, code, audits)
+                return code
+            next_rank = await database.scalar(
+                select(func.coalesce(func.max(NewsItem.rank), 0) + 1).where(
+                    NewsItem.edition_id == target.edition_id
+                )
+            )
+            assert next_rank is not None
+            item = _news_item(
+                target.edition_id,
+                next_rank,
+                selection,
+                fetched,
+                summaries,
+                origin="manual",
+                published_by_user_id=actor_user_id,
+            )
+            item.event_key = candidate.ai_event_key
+            database.add(item)
+            await database.flush()
+            database.add_all(_presentations(item.id, summaries))
+            database.add_all(audits)
+            current.stage = "published"
+            current.item_id = item.id
+            current.publish_error = None
+            current.content_digest = fetched.content_digest
+            current.source_published_at = fetched.source_published_at
+            record_audit_event(
+                database,
+                actor_user_id=actor_user_id,
+                action="news.candidate_published",
+                target_type="news_candidate",
+                target_id=str(candidate.id),
+                after={
+                    "run_id": str(run_id),
+                    "edition_id": str(target.edition_id),
+                    "item_id": str(item.id),
+                    "rank": next_rank,
+                    "source_url": fetched.source_url,
+                },
+            )
+            await database.commit()
+    except IntegrityError:
+        # A concurrent writer took the URL or rank first; the candidate keeps
+        # its stage and the admin sees why.
+        await _record_publish_failure(
+            session_factory, candidate.id, "url_already_published", audits
+        )
+        return "url_already_published"
+    emit_event("news.candidate.published", market=target.market_code, hostname=candidate.hostname)
+    return "published"
+
+
+async def _manual_publication_issue(
+    database: AsyncSession, target: _PublishTarget, candidate: NewsCandidate
+) -> str | None:
+    """Check before paid work and again under the publication lock."""
+    if not await _is_latest_revision(database, target):
+        return "edition_superseded"
+    if await _hidden_source(database, target.market_code, candidate.url, candidate.ai_event_key):
+        return "item_hidden"
+    visible = (
+        await database.scalars(
+            select(NewsItem).where(
+                NewsItem.edition_id == target.edition_id, visible_item(target.market_code)
+            )
+        )
+    ).all()
+    if candidate.ai_event_key and any(item.event_key == candidate.ai_event_key for item in visible):
+        return "duplicate_event"
+    selection = _manual_selection(candidate, target.market_code)
+    policy = edition_spec(target.market_code).selection
+    if (
+        selection.importance == 4
+        and sum(item.importance == 4 for item in visible) >= policy.max_four_star_items
+    ) or (
+        selection.importance <= 3
+        and sum(item.importance <= 3 for item in visible) >= policy.max_low_importance_items
+    ):
+        return "importance_quota_reached"
+    return None
+
+
+async def publish_candidates(
+    session_factory: async_sessionmaker[AsyncSession],
+    client: DeepSeekClient,
+    *,
+    run_id: uuid.UUID,
+    edition_id: uuid.UUID,
+    candidate_ids: list[uuid.UUID],
+    actor_user_id: uuid.UUID | None,
+    allowed_hostnames: frozenset[str],
+    fetch_timeout_seconds: float,
+) -> tuple[str, dict[str, object], str | None]:
+    async with session_factory() as database:
+        edition = await database.get(NewsEdition, edition_id)
+        if edition is None:
+            return "failed", {}, "edition_not_found"
+        edition_date, market = edition.edition_date, edition.market_code
+        if edition_date != datetime.now(TAIPEI).date():
+            return "failed", {"outcome": "expired"}, "news_resume_current_day_only"
+    async with workflow_scope(session_factory, edition_date, market) as workflow:
+        result = await _publish_candidates(
+            session_factory,
+            client,
+            run_id=run_id,
+            edition_id=edition_id,
+            candidate_ids=candidate_ids,
+            actor_user_id=actor_user_id,
+            allowed_hostnames=allowed_hostnames,
+            fetch_timeout_seconds=fetch_timeout_seconds,
+        )
+        workflow.progress["published"] = int(str(result[1].get("published", 0)))
+        return result
+
+
+async def _publish_candidates(
+    session_factory: async_sessionmaker[AsyncSession],
+    client: DeepSeekClient,
+    *,
+    run_id: uuid.UUID,
+    edition_id: uuid.UUID,
+    candidate_ids: list[uuid.UUID],
+    actor_user_id: uuid.UUID | None,
+    allowed_hostnames: frozenset[str],
+    fetch_timeout_seconds: float,
+) -> tuple[str, dict[str, object], str | None]:
+    """Publish admin-chosen candidates into their edition, one commit each.
+
+    Returns the run outcome: ``succeeded`` when every candidate was
+    published, ``partial`` when some were, ``failed`` when none. The result
+    maps each candidate id to ``published`` or its failure code.
+    """
+    async with session_factory() as database:
+        edition = await database.get(NewsEdition, edition_id)
+        target = (
+            _PublishTarget(edition.id, edition.edition_date, edition.market_code)
+            if edition is not None
+            else None
+        )
+        candidates = (
+            {
+                candidate.id: candidate
+                for candidate in await database.scalars(
+                    select(NewsCandidate).where(
+                        NewsCandidate.edition_id == edition_id,
+                        NewsCandidate.id.in_(candidate_ids),
+                    )
+                )
+            }
+            if target is not None
+            else {}
+        )
+        superseded = target is not None and not await _is_latest_revision(database, target)
+        published_urls = {
+            candidate.id: await _url_published(database, edition_id, candidate.url)
+            for candidate in candidates.values()
+        }
+    outcomes: dict[str, str] = {}
+    for candidate_id in candidate_ids:
+        workflow = current_workflow()
+        if workflow is not None and workflow.model_stopped is not None:
+            outcomes[str(candidate_id)] = "waiting_recovery"
+            continue
+        candidate = candidates.get(candidate_id)
+        if target is None or candidate is None:
+            outcomes[str(candidate_id)] = "candidate_not_found"
+            continue
+        code = (
+            "edition_superseded"
+            if superseded
+            else "already_published"
+            if candidate.item_id is not None
+            else "url_already_published"
+            if published_urls[candidate.id]
+            else None
+        )
+        try:
+            if code is not None:
+                await _record_publish_failure(session_factory, candidate.id, code, [])
+            else:
+                code = await _publish_candidate(
+                    session_factory,
+                    client,
+                    target,
+                    candidate,
+                    run_id=run_id,
+                    actor_user_id=actor_user_id,
+                    allowed=allowed_hostnames,
+                    fetch_timeout_seconds=fetch_timeout_seconds,
+                )
+        except Exception as error:
+            # One candidate's unexpected failure must not discard the outcomes
+            # of the candidates already committed before it, nor stop the rest.
+            emit_event(
+                "news.publish.failed",
+                candidate_id=str(candidate.id),
+                error_code=type(error).__name__,
+            )
+            code = "unexpected_error"
+            try:
+                await _record_publish_failure(session_factory, candidate.id, code, [])
+            except Exception:
+                logger.exception("could not record publish failure for %s", candidate.id)
+        outcomes[str(candidate_id)] = code
+    # Already published is success on a resumed request, never an instruction
+    # to publish (or unhide) the same candidate again.
+    published = sum(1 for code in outcomes.values() if code in {"published", "already_published"})
+    failed = len(outcomes) - published
+    status = "succeeded" if published and not failed else "partial" if published else "failed"
+    result: dict[str, object] = {"published": published, "failed": failed, "candidates": outcomes}
+    return status, result, None if status == "succeeded" else f"news_publish_{status}"
