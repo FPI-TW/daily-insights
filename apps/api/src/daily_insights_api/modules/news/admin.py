@@ -11,7 +11,7 @@ from datetime import UTC, date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import select
+from sqlalchemy import false, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.enums import SystemRole
@@ -27,6 +27,7 @@ from daily_insights_api.modules.identity.api import AuthContext, require_csrf_ro
 from daily_insights_api.modules.news.editions import EDITION_ORDER, edition_spec
 from daily_insights_api.modules.news.models import (
     NewsCandidate,
+    NewsDependencyState,
     NewsEdition,
     NewsItem,
     NewsPresentation,
@@ -39,7 +40,10 @@ from daily_insights_api.modules.news.schemas import (
     NewsAdminEditionsResponse,
     NewsAdminItem,
     NewsCandidatePublishRequest,
+    NewsDependencyResponse,
+    NewsRecoveryResponse,
 )
+from daily_insights_api.modules.news.service import _lock_key
 from daily_insights_api.web.dependencies import get_database_session
 
 router = APIRouter(prefix="/api/admin/news", tags=["news management"])
@@ -50,6 +54,26 @@ ADMIN_LOCALE = "zh-hant"
 # Published stories lead, then what the model returned but the edition
 # dropped, then what it reviewed and passed over, then everything it never saw.
 STAGE_ORDER = {"published": 0, "dropped": 1, "reviewed": 2}
+
+
+@router.get("/recovery", response_model=NewsRecoveryResponse)
+async def recovery_status(_: AdminRead, database: Database) -> NewsRecoveryResponse:
+    rows = (
+        await database.scalars(select(NewsDependencyState).order_by(NewsDependencyState.scope))
+    ).all()
+    return NewsRecoveryResponse(
+        dependencies=[
+            NewsDependencyResponse(
+                scope=row.scope,
+                state=row.state,
+                failure=row.failure,
+                available_at=row.available_at,
+                newest_article_at=row.newest_article_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+    )
 
 
 async def _latest_edition(
@@ -239,12 +263,31 @@ async def _set_hidden(
     item = await database.get(NewsItem, _parse_uuid(item_id, "news item"))
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "news item not found")
+    edition = await database.get(NewsEdition, item.edition_id)
+    assert edition is not None
+    await database.execute(
+        select(func.pg_advisory_xact_lock(_lock_key(edition.edition_date, edition.market_code)))
+    )
+    await database.refresh(item)
     before = {"hidden": item.hidden_at is not None}
     if (item.hidden_at is not None) != hidden:
         # Idempotent: repeating the same request neither rewrites the
         # timestamp nor records a second audit event.
         item.hidden_at = datetime.now(UTC) if hidden else None
         item.hidden_by_user_id = actor.user.id if hidden else None
+        await database.execute(
+            update(NewsItem)
+            .where(
+                NewsItem.edition_id.in_(
+                    select(NewsEdition.id).where(NewsEdition.market_code == edition.market_code)
+                ),
+                or_(
+                    NewsItem.source_url == item.source_url,
+                    NewsItem.event_key == item.event_key if item.event_key else false(),
+                ),
+            )
+            .values(hidden_at=item.hidden_at, hidden_by_user_id=item.hidden_by_user_id)
+        )
         record_audit_event(
             database,
             actor_user_id=actor.user.id,

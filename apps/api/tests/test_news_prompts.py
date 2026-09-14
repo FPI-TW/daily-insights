@@ -1,8 +1,10 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from daily_insights_api.modules.news.contracts import Candidate
+from daily_insights_api.modules.news.editions import US_EQUITY_SPEC
 from daily_insights_api.modules.news.extraction import FetchedCandidate
 from daily_insights_api.modules.news.prompts import (
     MAX_SELECTION_CRITERIA_CHARS,
@@ -28,7 +30,12 @@ def test_packaged_selection_criteria_loads_with_version_and_digest() -> None:
     # Five-star stories come first; lower ratings only fill what is left.
     assert "重要性是排序的第一鍵" in criteria.text
     assert len(criteria.digest) == 64
-    assert criteria.version == f"selection-v8:{criteria.digest[:12]}"
+    assert "原始催化劑" in criteria.text
+    assert "單一公司產品發表" in criteria.text
+    assert "純即時價格走勢稿" in criteria.text
+    assert "企業交易、支付科技" in criteria.text
+    assert "互相獨立的全球宏觀主線" in criteria.text
+    assert criteria.version == f"selection-v11:{criteria.digest[:12]}"
 
 
 @pytest.mark.parametrize("content", ["", "   \n\t"])
@@ -74,4 +81,21 @@ def test_prompt_content_changes_edition_input_digest(tmp_path: Path) -> None:
     )
     assert _digest([fetched], "deepseek-chat", first.digest) != _digest(
         [fetched], "deepseek-chat", second.digest
+    )
+
+
+def test_market_policy_changes_edition_input_digest() -> None:
+    candidate = Candidate(
+        id="a" * 64,
+        url="https://www.reuters.com/article",
+        hostname="www.reuters.com",
+        source_name="Reuters",
+        headline="Intel shares surge after a material pricing change",
+    )
+    fetched = FetchedCandidate(candidate, str(candidate.url), "Body", "b" * 64)
+    policy = US_EQUITY_SPEC.selection
+    changed = replace(policy, market_focus=f"{policy.market_focus} Updated rule.")
+
+    assert _digest([fetched], "deepseek-chat", "c" * 64, "us_equity", policy) != _digest(
+        [fetched], "deepseek-chat", "c" * 64, "us_equity", changed
     )

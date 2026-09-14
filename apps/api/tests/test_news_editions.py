@@ -1,3 +1,4 @@
+import re
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -68,11 +69,16 @@ def test_edition_registry_is_ordered_global_first_and_targets_match_policies() -
     assert EDITION_ORDER == ("global", "tw_equity", "us_equity")
     assert MARKET_NEWS_CODES == ("tw_equity", "us_equity")
     for spec in EDITION_SPECS.values():
-        # Every edition shows five stories; the difference is how wide a pool
-        # it screens to find them.
         assert spec.target_items == spec.selection.max_items == 5
+        assert spec.selection.min_four_star_items == 5
+        assert spec.selection.max_four_star_items == 10
+        assert spec.selection.max_low_importance_items == 5
         assert spec.max_candidates >= spec.target_items
         assert spec.max_per_source >= 1
+        assert spec.headline_impact_patterns
+        assert spec.selection.importance_guidance
+        for pattern in spec.headline_impact_patterns:
+            re.compile(pattern)
     for spec in (TW_EQUITY_SPEC, US_EQUITY_SPEC):
         assert spec.max_candidates > GLOBAL_SPEC.max_candidates
         assert spec.max_discovery_per_source > GLOBAL_SPEC.max_discovery_per_source
@@ -104,9 +110,9 @@ def test_market_policies_allow_a_single_source_and_single_market() -> None:
         enforce_selection_policy(diverse, candidates, GLOBAL_SPEC.selection)
     with pytest.raises(ValueError, match="3 stories per domain"):
         enforce_selection_policy(diverse, candidates, US_EQUITY_SPEC.selection)
-    # Five slots plus two reserves is the most any edition may return.
+    # Low-importance stories share one five-story ceiling.
     eight = [_fetched(index, "news.cnyes.com") for index in range(1, 9)]
-    with pytest.raises(ValueError, match="exceeds 7 stories"):
+    with pytest.raises(ValueError, match="exceeds 5 stories rated 1 to 3"):
         enforce_selection_policy(_selection(list(range(1, 9))), eight, TW_EQUITY_SPEC.selection)
     with pytest.raises(ValueError, match="unknown candidate ID"):
         enforce_selection_policy(diverse, candidates[:2], TW_EQUITY_SPEC.selection)
@@ -130,27 +136,18 @@ def _global_or_us_selection(ids: list[int]) -> Selection:
 
 
 def test_full_edition_must_spread_across_three_source_domains() -> None:
-    # The US edition allows three per domain, so five picks could come from
-    # two outlets; the full-edition rule requires a third.
-    hosts = ["a.example"] * 3 + ["b.example"] * 3 + ["c.example"] * 2
+    # The US edition's five-story baseline must span at least three outlets.
+    hosts = ["a.example"] * 4 + ["b.example"] * 4 + ["c.example"] * 4
     candidates = [_fetched(index, host) for index, host in enumerate(hosts, start=1)]
-    two_domains = _global_or_us_selection([1, 2, 3, 4, 5])
-    with pytest.raises(ValueError, match="at least 3 source domains"):
-        enforce_selection_policy(two_domains, candidates, US_EQUITY_SPEC.selection)
-    # A reserve from a third domain does not rescue the edition set.
-    with pytest.raises(ValueError, match="at least 3 source domains"):
-        enforce_selection_policy(
-            _global_or_us_selection([1, 2, 3, 4, 5, 7]), candidates, US_EQUITY_SPEC.selection
+    two_domains = Selection(
+        selections=tuple(
+            item.model_copy(update={"importance": 4})
+            for item in _global_or_us_selection(list(range(1, 9))).selections
         )
-    # Four picks never trigger the rule; a full edition with c.example passes.
-    enforce_selection_policy(
-        _global_or_us_selection([1, 2, 3, 4]), candidates, US_EQUITY_SPEC.selection
     )
-    enforce_selection_policy(
-        _global_or_us_selection([1, 2, 3, 4, 7]), candidates, US_EQUITY_SPEC.selection
-    )
-    # The global digest's two-per-domain cap already implies three domains;
-    # Taiwan deliberately allows a single source even when full.
+    with pytest.raises(ValueError, match="3 stories per domain"):
+        enforce_selection_policy(two_domains, candidates, US_EQUITY_SPEC.selection)
+    # Taiwan deliberately allows a single source; global and US retain spread.
     assert GLOBAL_SPEC.selection.min_domains_full == 3
     assert TW_EQUITY_SPEC.selection.min_domains_full == 1
 
@@ -158,8 +155,10 @@ def test_full_edition_must_spread_across_three_source_domains() -> None:
 def test_output_contract_reflects_each_policy() -> None:
     global_contract = selection_output_contract(GLOBAL_SPEC.selection)
     market_contract = selection_output_contract(TW_EQUITY_SPEC.selection)
-    assert "0 to 7 objects" in global_contract["selections"]
-    assert "the first 5 form the edition" in global_contract["selections"]
+    assert "0 to 20 objects" in global_contract["selections"]
+    assert "every qualifying 5-star story" in global_contract["selections"]
+    assert "at most 10" in global_contract["selections"]
+    assert "5 stories rated 1 to 3" in global_contract["selections"]
     assert "event_keys unique" in global_contract["selections"]
     assert "span at least 3 distinct source domains" in global_contract["selections"]
     assert "source domains" not in market_contract["selections"].split("topics")[-1]
@@ -169,12 +168,26 @@ def test_output_contract_reflects_each_policy() -> None:
     assert "distinct markets" not in global_contract["selections"]
     assert global_contract["market"] == MARKET_VALUES
     assert "publishes only selections tagged 'global'" in global_contract["market_rule"]
-    assert "0 to 7 objects" in market_contract["selections"]
-    assert "the first 5 form the edition" in market_contract["selections"]
+    assert "0 to 30 objects" in market_contract["selections"]
+    assert "every qualifying 5-star story" in market_contract["selections"]
     assert "distinct markets" not in market_contract["selections"]
     assert market_contract["market"] == MARKET_VALUES
     assert "publishes only selections tagged 'taiwan'" in market_contract["market_rule"]
     assert "never relabel a story to fit" in market_contract["market_rule"]
+    assert "absolute Taiwan-equity scale" in market_contract["importance"]
+    us_contract = selection_output_contract(US_EQUITY_SPEC.selection)
+    assert "absolute US-equity scale" in us_contract["importance"]
+    assert "systemic catalyst" in global_contract["importance"]
+    assert (
+        len(
+            {
+                global_contract["importance"],
+                market_contract["importance"],
+                us_contract["importance"],
+            }
+        )
+        == 3
+    )
 
 
 def test_feed_sources_are_tagged_per_market() -> None:
@@ -326,7 +339,31 @@ def test_publication_enforces_domain_cap_across_more_than_one_selection_batch() 
     ranked += list(_global_or_us_selection(list(range(9, 13))).selections)
     publication = publishable_selection(ranked, candidates, US_EQUITY_SPEC.selection)
     assert len(publication.selections) == 5
-    # Three from the first domain, then the earliest picks that reach a
-    # third domain so the full edition satisfies the spread rule.
     assert [item.id for item in publication.selections] == [f"{i:064x}" for i in [1, 2, 3, 9, 12]]
     enforce_selection_policy(publication, candidates, US_EQUITY_SPEC.selection)
+
+
+def test_every_market_publishes_all_fives_and_caps_lower_importance_tiers() -> None:
+    from daily_insights_api.modules.news.llm import publishable_selection
+
+    candidates = [_fetched(index, f"source-{index}.example") for index in range(1, 35)]
+    ranked = Selection.model_validate(
+        {
+            "selections": [
+                {
+                    "id": f"{index:064x}",
+                    "topic": "policy" if index % 2 else "markets",
+                    "event_key": f"quota-event-{index}",
+                    "market": "global",
+                    "importance": 5 if index <= 12 else 4 if index <= 24 else 2,
+                }
+                for index in range(1, 35)
+            ]
+        }
+    ).selections
+
+    for spec in EDITION_SPECS.values():
+        publication = publishable_selection(list(ranked), candidates, spec.selection)
+        assert sum(item.importance == 5 for item in publication.selections) == 12
+        assert sum(item.importance == 4 for item in publication.selections) == 10
+        assert sum(item.importance <= 3 for item in publication.selections) == 5

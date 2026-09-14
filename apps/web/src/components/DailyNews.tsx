@@ -1,9 +1,13 @@
 import { formatTimestamp } from "#/lib/format"
 import type { LatestNews, NewsItem } from "@daily-insights/api-client"
-import { motion } from "motion/react"
+import { ChevronLeft, ChevronRight } from "lucide-react"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import type { ReactNode } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
   fadeIn,
+  horizontalPageSlide,
   hoverLift,
   reveal,
   springs,
@@ -32,7 +36,7 @@ export function DailyNewsLoading() {
 }
 
 export function DailyNews({
-  news,
+  news: latest,
   eyebrowKey = "dailyNewsEyebrow",
   titleKey = "dailyNewsTitle",
   groupByMarket = true,
@@ -44,14 +48,69 @@ export function DailyNews({
   // the page title (or expose a stray tag from an older edition).
   groupByMarket?: boolean
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const animate = useEnterAnimation()
+  const scope = `${titleKey}:${i18n.resolvedLanguage}`
+  const [retained, setRetained] = useState({ scope, news: latest })
+  // Null means this refresh failed, not an authoritative empty edition.
+  // Keep the mounted cards (and their page) only within this market/locale.
+  if (
+    retained.scope !== scope ||
+    (latest !== null && latest !== retained.news)
+  ) {
+    setRetained({ scope, news: latest })
+  }
+  const news = latest ?? (retained.scope === scope ? retained.news : null)
   // The edition status and the pipeline's fallback notice are not shown:
   // readers get the stories or the unavailable panel, nothing about
   // completeness or which day the edition came from.
   return (
     <section className="mt-7 mb-6" aria-labelledby="daily-news-title">
-      <div className="mb-4">
+      {news !== null && news.status !== "unavailable" ? (
+        <PaginatedNewsGroups
+          key={`${news.edition_id}:${news.revision}`}
+          news={news}
+          animate={animate}
+          grouped={groupByMarket}
+          eyebrowKey={eyebrowKey}
+          titleKey={titleKey}
+        />
+      ) : (
+        <>
+          <DailyNewsHeader eyebrowKey={eyebrowKey} titleKey={titleKey} />
+          {news === null ? (
+            <div
+              className="surface-panel p-5 text-sm text-sea-ink-soft"
+              role="status"
+            >
+              {t("dailyNewsUnavailable")}
+            </div>
+          ) : (
+            <div className="surface-panel p-5 text-sm text-sea-ink-soft">
+              {news.caveat ?? t("dailyNewsUnavailable")}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  )
+}
+
+const NEWS_PAGE_SIZE = 6
+
+function DailyNewsHeader({
+  eyebrowKey,
+  titleKey,
+  children,
+}: {
+  eyebrowKey: string
+  titleKey: string
+  children?: ReactNode
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="mb-4 flex items-end justify-between gap-4">
+      <div className="min-w-0">
         <p className="eyebrow">{t(eyebrowKey)}</p>
         <h2
           id="daily-news-title"
@@ -60,21 +119,104 @@ export function DailyNews({
           {t(titleKey)}
         </h2>
       </div>
-      {news === null ? (
-        <div
-          className="surface-panel p-5 text-sm text-sea-ink-soft"
-          role="status"
-        >
-          {t("dailyNewsLoadFailed")}
-        </div>
-      ) : news.status === "unavailable" ? (
-        <div className="surface-panel p-5 text-sm text-sea-ink-soft">
-          {news.caveat ?? t("dailyNewsUnavailable")}
-        </div>
-      ) : (
-        <NewsGroups news={news} animate={animate} grouped={groupByMarket} />
-      )}
-    </section>
+      {children}
+    </div>
+  )
+}
+
+function PaginatedNewsGroups({
+  news,
+  animate,
+  grouped,
+  eyebrowKey,
+  titleKey,
+}: {
+  news: LatestNews
+  animate: boolean
+  grouped: boolean
+  eyebrowKey: string
+  titleKey: string
+}) {
+  const { t } = useTranslation()
+  const [pageIndex, setPageIndex] = useState(0)
+  const [direction, setDirection] = useState<1 | -1>(1)
+  const [hasPaginated, setHasPaginated] = useState(false)
+  const reduceMotion = useReducedMotion()
+  const totalPages = Math.max(1, Math.ceil(news.items.length / NEWS_PAGE_SIZE))
+  const currentPageIndex = Math.min(pageIndex, totalPages - 1)
+  const pageStart = currentPageIndex * NEWS_PAGE_SIZE
+  const pageNews = {
+    ...news,
+    items: news.items.slice(pageStart, pageStart + NEWS_PAGE_SIZE),
+  }
+
+  return (
+    <>
+      <DailyNewsHeader eyebrowKey={eyebrowKey} titleKey={titleKey}>
+        {totalPages > 1 ? (
+          <nav
+            className="flex shrink-0 gap-2"
+            aria-label={t("dailyNewsPagination")}
+          >
+            <button
+              type="button"
+              className="flex size-11 items-center justify-center rounded-full border border-lagoon-deep bg-lagoon-deep text-white shadow-[0_6px_16px_rgb(21_158_132/28%)] transition-[color,background-color,border-color,transform,box-shadow] hover:scale-105 hover:border-palm hover:bg-palm hover:shadow-[0_8px_20px_rgb(21_158_132/34%)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lagoon-deep"
+              aria-label={t("dailyNewsPreviousPage")}
+              onClick={() => {
+                setHasPaginated(true)
+                setDirection(-1)
+                setPageIndex(index => (index - 1 + totalPages) % totalPages)
+              }}
+            >
+              <ChevronLeft
+                aria-hidden="true"
+                className="size-6"
+                strokeWidth={2.75}
+              />
+            </button>
+            <button
+              type="button"
+              className="flex size-11 items-center justify-center rounded-full border border-lagoon-deep bg-lagoon-deep text-white shadow-[0_6px_16px_rgb(21_158_132/28%)] transition-[color,background-color,border-color,transform,box-shadow] hover:scale-105 hover:border-palm hover:bg-palm hover:shadow-[0_8px_20px_rgb(21_158_132/34%)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lagoon-deep"
+              aria-label={t("dailyNewsNextPage")}
+              onClick={() => {
+                setHasPaginated(true)
+                setDirection(1)
+                setPageIndex(index => (index + 1) % totalPages)
+              }}
+            >
+              <ChevronRight
+                aria-hidden="true"
+                className="size-6"
+                strokeWidth={2.75}
+              />
+            </button>
+          </nav>
+        ) : null}
+      </DailyNewsHeader>
+      <div className="grid overflow-hidden">
+        <AnimatePresence initial={false} custom={direction} mode="sync">
+          <motion.div
+            key={currentPageIndex}
+            className="col-start-1 row-start-1 w-full"
+            custom={direction}
+            variants={horizontalPageSlide}
+            {...(reduceMotion
+              ? { initial: false }
+              : {
+                  initial: "enter" as const,
+                  animate: "visible" as const,
+                  exit: "exit" as const,
+                })}
+          >
+            <NewsGroups
+              news={pageNews}
+              animate={animate && !hasPaginated}
+              grouped={grouped}
+            />
+          </motion.div>
+        </AnimatePresence>
+      </div>
+    </>
   )
 }
 

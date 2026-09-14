@@ -45,6 +45,7 @@ import {
   type DataManagementRunCreateInput,
   newsAdminEditionsSchema,
   newsAdminItemSchema,
+  newsRecoverySchema,
   type NewsCandidatePublishInput,
   userSchema,
 } from "./schemas"
@@ -376,6 +377,32 @@ export function createAdministrationClient(transport: ApiTransport) {
           `/api/admin/news/editions${search ? `?${search}` : ""}`
         ),
         newsAdminEditionsSchema
+      )
+    },
+    async newsRecoveryStatus() {
+      return parseResponse(
+        await transport("/api/admin/news/recovery"),
+        newsRecoverySchema
+      )
+    },
+    async resumeNewsRun(
+      runId: string,
+      resumeProvider: boolean,
+      csrfToken: string
+    ) {
+      return parseResponse(
+        await transport(
+          `/api/admin/data-management/runs/${encodeURIComponent(runId)}/resume`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRF-Token": csrfToken,
+            },
+            body: JSON.stringify({ resume_provider: resumeProvider }),
+          }
+        ),
+        dataManagementRunSchema
       )
     },
     async hideNewsItem(itemId: string, csrfToken: string) {

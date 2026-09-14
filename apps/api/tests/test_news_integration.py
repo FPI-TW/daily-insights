@@ -588,9 +588,10 @@ async def test_screening_rates_the_whole_pool_and_publishes_five_star_stories_fi
         "source2.example",
         "source3.example",
         "source4.example",
+        "source5.example",
     ]
-    assert [item.importance for item in items] == [5, 4, 4, 4, 4]
-    assert (rows[5].stage, rows[5].drop_reason) == ("dropped", "reserve")
+    assert [item.importance for item in items] == [5, 4, 4, 4, 4, 4]
+    assert rows[5].stage == "published"
 
 
 class _DuplicateEventNewsClient(_ImportanceNewsClient):
@@ -760,7 +761,7 @@ class _SameDomainNewsClient(_ImportanceNewsClient):
 async def test_domain_quota_is_settled_before_summaries_are_paid_for(
     news_database: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Three five-star wire stories across two windows; the global cap is two per domain."""
+    """Five-star stories bypass the ordinary per-domain cap."""
     from dataclasses import replace
 
     from daily_insights_api.modules.news.editions import GLOBAL_SPEC
@@ -807,9 +808,8 @@ async def test_domain_quota_is_settled_before_summaries_are_paid_for(
         spec=replace(GLOBAL_SPEC, max_candidates=3),
     )
     assert status == "complete"
-    # Candidate 4 is the third wire story: skipped without a single summary call.
-    assert "4" not in client.summarized
-    assert len(client.summarized) == 15
+    assert "4" in client.summarized
+    assert len(client.summarized) == 18
     async with news_database() as database:
         edition = (await database.scalars(select(NewsEdition))).one()
         items = list(
@@ -823,8 +823,8 @@ async def test_domain_quota_is_settled_before_summaries_are_paid_for(
                 select(NewsCandidate).where(NewsCandidate.edition_id == edition.id)
             )
         }
-    assert [item.importance for item in items] == [5, 5, 4, 4, 4]
-    assert (rows[4].stage, rows[4].drop_reason) == ("dropped", "policy")
+    assert [item.importance for item in items] == [5, 5, 5, 4, 4, 4]
+    assert rows[4].stage == "published"
 
 
 async def test_thin_discovery_reports_the_candidate_floor(
@@ -1031,7 +1031,7 @@ async def test_refill_deduplicates_events_across_rounds_before_summarizing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _RefillNewsClient(duplicate_event=True)
-    await _assert_refill(news_database, monkeypatch, client, "global", 5)
+    await _assert_refill(news_database, monkeypatch, client, "global", 7)
     assert len(client.batches) == 3
     assert f"{4:064x}" in client.batches[1]
     assert f"{4:064x}" not in client.summarized
@@ -1103,7 +1103,7 @@ async def _assert_refill(
         allowed_hostnames=frozenset(f.candidate.hostname for f in candidates),
         spec=spec,
     )
-    assert result == ("complete" if expected == spec.target_items else "partial")
+    assert result == ("complete" if expected >= spec.target_items else "partial")
     assert 2 <= len(client.batches) <= 3
     assert f"{1:064x}" not in client.batches[1]
     assert client.histories[1]

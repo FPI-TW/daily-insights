@@ -1,10 +1,73 @@
-import { render, screen, within } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import { I18nextProvider } from "react-i18next"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 import { createI18n } from "#/lib/i18n"
 import { DailyNews, DailyNewsLoading } from "./DailyNews"
+import type { LatestNews } from "@daily-insights/api-client"
+
+afterEach(cleanup)
 
 describe("DailyNews", () => {
+  it("keeps the current cards and page on refresh failure without a warning", async () => {
+    const i18n = createI18n("en")
+    const news: LatestNews = {
+      market_code: "us_equity",
+      target_items: 5,
+      edition_id: "00000000-0000-4000-8000-000000000004",
+      edition_date: "2026-09-11",
+      revision: 1,
+      status: "complete",
+      locale: "en",
+      generated_at: "2026-09-11T00:00:00Z",
+      caveat: null,
+      items: Array.from({ length: 7 }, (_, index) => ({
+        id: `00000000-0000-4000-8000-00000000000${index}`,
+        rank: index + 1,
+        importance: 4,
+        topic: "markets",
+        headline: `Retained story ${index + 1}`,
+        summary: "Validated summary",
+        source_name: "Source",
+        source_hostname: "source.example",
+        source_url: `https://source.example/${index}`,
+        source_published_at: null,
+        numeric_facts: [],
+        market: "us",
+        event_key: `story-${index}`,
+      })),
+    }
+    const view = (
+      latest: LatestNews | null,
+      titleKey = "marketNewsTitle_us_equity"
+    ) => (
+      <I18nextProvider i18n={i18n}>
+        <DailyNews news={latest} titleKey={titleKey} groupByMarket={false} />
+      </I18nextProvider>
+    )
+    const { container, rerender } = render(view(news))
+    const panel = within(container)
+    fireEvent.click(panel.getByRole("button", { name: "Next news page" }))
+    await waitFor(() =>
+      expect(container.querySelectorAll("article")).toHaveLength(1)
+    )
+    rerender(view(null))
+    expect(panel.getByText("Retained story 7")).toBeInTheDocument()
+    expect(panel.queryByRole("alert")).not.toBeInTheDocument()
+    expect(panel.queryByRole("status")).not.toBeInTheDocument()
+    // An authoritative empty response (for example all items hidden) wins.
+    rerender(view({ ...news, status: "unavailable", items: [] }))
+    expect(panel.queryByText("Retained story 7")).not.toBeInTheDocument()
+    rerender(view(news))
+    rerender(view(null, "marketNewsTitle_tw_equity"))
+    expect(panel.queryByText("Retained story 1")).not.toBeInTheDocument()
+  })
   it("shows an accessible initial skeleton", async () => {
     const i18n = createI18n("en")
     await i18n.changeLanguage("en")
@@ -210,6 +273,137 @@ describe("DailyNews", () => {
     expect(panel.queryByText("全球")).not.toBeInTheDocument()
   })
 
+  it("paginates news into at most six cards with looping arrow navigation", async () => {
+    const i18n = createI18n("en")
+    await i18n.changeLanguage("en")
+    const item = (index: number) => ({
+      id: `00000000-0000-4000-8000-0000000001${index.toString().padStart(2, "0")}`,
+      rank: index,
+      importance: 4,
+      topic: "markets" as const,
+      headline: `Story ${index}`,
+      summary: "Summary.",
+      source_name: "Source",
+      source_hostname: "source.example",
+      source_url: `https://source.example/${index}`,
+      source_published_at: null,
+      numeric_facts: [],
+      market: "taiwan" as const,
+      event_key: `event-${index}`,
+    })
+    const { container } = render(
+      <I18nextProvider i18n={i18n}>
+        <DailyNews
+          news={{
+            market_code: "tw_equity",
+            target_items: 5,
+            edition_id: "00000000-0000-4000-8000-000000000004",
+            edition_date: "2026-09-05",
+            revision: 1,
+            status: "complete",
+            locale: "en",
+            generated_at: "2026-09-05T00:00:00+00:00",
+            caveat: null,
+            items: Array.from({ length: 13 }, (_, index) => item(index + 1)),
+          }}
+          groupByMarket={false}
+        />
+      </I18nextProvider>
+    )
+
+    const panel = within(container)
+    expect(container.querySelectorAll("article")).toHaveLength(6)
+    expect(panel.getByText("Story 1")).toBeInTheDocument()
+    expect(panel.queryByText("Story 7")).not.toBeInTheDocument()
+    expect(panel.queryByText("Page 1 of 3")).not.toBeInTheDocument()
+
+    const previous = panel.getByRole("button", {
+      name: "Previous news page",
+    })
+    const next = panel.getByRole("button", { name: "Next news page" })
+    const pagination = panel.getByRole("navigation", {
+      name: "News pagination",
+    })
+    expect(pagination).toHaveClass("flex", "shrink-0", "gap-2")
+    expect(pagination).not.toHaveClass("absolute")
+    expect(pagination.parentElement).toHaveClass(
+      "flex",
+      "items-end",
+      "justify-between"
+    )
+    expect(previous).toHaveClass(
+      "flex",
+      "size-11",
+      "border-lagoon-deep",
+      "bg-lagoon-deep",
+      "text-white",
+      "focus-visible:outline-lagoon-deep"
+    )
+    expect(next).toHaveClass(
+      "flex",
+      "size-11",
+      "border-lagoon-deep",
+      "bg-lagoon-deep",
+      "text-white",
+      "focus-visible:outline-lagoon-deep"
+    )
+    expect(previous).toBeEnabled()
+    expect(next).toBeEnabled()
+
+    fireEvent.click(previous)
+    await waitFor(() =>
+      expect(container.querySelectorAll("article")).toHaveLength(1)
+    )
+    expect(panel.getByText("Story 13")).toBeInTheDocument()
+    expect(panel.getByRole("button", { name: "Previous news page" })).toBe(
+      previous
+    )
+    expect(panel.getByRole("button", { name: "Next news page" })).toBe(next)
+
+    fireEvent.click(next)
+    await waitFor(() => expect(panel.getByText("Story 1")).toBeInTheDocument())
+
+    fireEvent.click(next)
+    await waitFor(() => expect(panel.getByText("Story 7")).toBeInTheDocument())
+    expect(panel.queryByText("Story 1")).not.toBeInTheDocument()
+
+    fireEvent.click(next)
+    await waitFor(() =>
+      expect(container.querySelectorAll("article")).toHaveLength(1)
+    )
+    expect(panel.getByText("Story 13")).toBeInTheDocument()
+
+    fireEvent.click(next)
+    await waitFor(() => expect(panel.getByText("Story 1")).toBeInTheDocument())
+  })
+
+  it("hides pagination controls when all news fits on one page", async () => {
+    const i18n = createI18n("en")
+    await i18n.changeLanguage("en")
+    const { container } = render(
+      <I18nextProvider i18n={i18n}>
+        <DailyNews
+          news={{
+            market_code: "global",
+            target_items: 5,
+            edition_id: "00000000-0000-4000-8000-000000000005",
+            edition_date: "2026-09-05",
+            revision: 1,
+            status: "complete",
+            locale: "en",
+            generated_at: "2026-09-05T00:00:00+00:00",
+            caveat: null,
+            items: [],
+          }}
+        />
+      </I18nextProvider>
+    )
+
+    expect(
+      within(container).queryByRole("navigation", { name: "News pagination" })
+    ).not.toBeInTheDocument()
+  })
+
   it("degrades to an unavailable panel when the news request failed", async () => {
     const i18n = createI18n("en")
     await i18n.changeLanguage("en")
@@ -220,7 +414,7 @@ describe("DailyNews", () => {
     )
     const panel = within(container)
     expect(
-      panel.getByText(/Today’s major news could not be loaded right now/)
+      panel.getByText(/Today’s major news has not been generated yet/)
     ).toHaveAttribute("role", "status")
     expect(panel.queryByText("Unavailable")).not.toBeInTheDocument()
     expect(container.querySelector("section")).toHaveClass("mt-7", "mb-6")

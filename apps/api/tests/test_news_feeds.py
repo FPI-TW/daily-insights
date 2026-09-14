@@ -238,6 +238,9 @@ def test_registry_is_internally_consistent() -> None:
             assert source.kind in {"rss_full", "json_list"}, source.url
         assert (source.hostname, source.url) not in seen_urls, source.url
         seen_urls.add((source.hostname, source.url))
+    # This legacy endpoint returns a freshly generated channel containing only
+    # stale articles, so it must not silently return to production discovery.
+    assert "https://finance.yahoo.com/news/rssindex" not in {source.url for source in FEED_SOURCES}
     # Publishers that block crawlers stay out of the registry.
     assert not registry_hostnames() & {
         "www.bbc.com",

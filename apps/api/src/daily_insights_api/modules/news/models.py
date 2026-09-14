@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime
+from typing import Any
 
 from sqlalchemy import (
     CheckConstraint,
@@ -214,4 +215,64 @@ class NewsGenerationAudit(UUIDPrimaryKeyMixin, Base):
     error_code: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class NewsWorkflow(UUIDPrimaryKeyMixin, Base):
+    """Durable, news-only progress; run history remains owned by the queue."""
+
+    __tablename__ = "news_workflows"
+    __table_args__ = (
+        UniqueConstraint("root_run_id", "market_code", name="uq_news_workflow_root_market"),
+        Index("ix_news_workflows_market_date", "market_code", "edition_date"),
+    )
+    root_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    edition_date: Mapped[date] = mapped_column(Date, nullable=False)
+    market_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    state: Mapped[str] = mapped_column(String(30), nullable=False, default="queued")
+    stage: Mapped[str] = mapped_column(String(30), nullable=False, default="queued")
+    progress: Mapped[dict[str, int]] = mapped_column(JSONB, nullable=False, default=dict)
+    failures: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class NewsCheckpoint(UUIDPrimaryKeyMixin, Base):
+    """Only metadata and validated outputs, never article bodies or prompts."""
+
+    __tablename__ = "news_checkpoints"
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "key", name="uq_news_checkpoint_workflow_key"),
+        Index("ix_news_checkpoints_expires_at", "expires_at"),
+    )
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("news_workflows.id", ondelete="CASCADE"), nullable=False
+    )
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    stage: Mapped[str] = mapped_column(String(30), nullable=False)
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    failure: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    repairs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class NewsDependencyState(Base):
+    """Shared cooldown/account gate for news, independent of other model features."""
+
+    __tablename__ = "news_dependency_states"
+    scope: Mapped[str] = mapped_column(String(300), primary_key=True)
+    state: Mapped[str] = mapped_column(String(30), nullable=False, default="ready")
+    failure: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    available_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    probe_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    failures_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    newest_article_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )

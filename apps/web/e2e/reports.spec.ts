@@ -22,11 +22,11 @@ test("customer login opens reports, then a market detail without mobile overflow
   await expect(page).toHaveURL("/en/reports")
   await page
     .getByRole("navigation", { name: "Market category navigation" })
-    .getByRole("link", { name: "Global macro & bonds" })
+    .getByRole("link", { name: "Global macro", exact: true })
     .click()
   await expect(page).toHaveURL("/en/reports/global_macro_bonds")
   await expect(
-    page.getByRole("heading", { name: "Global macro & bonds", level: 1 })
+    page.getByRole("heading", { name: "Global macro", level: 1, exact: true })
   ).toBeVisible()
   await expect(
     page.getByRole("heading", {

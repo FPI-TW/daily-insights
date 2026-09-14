@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 from typing import Any, get_args
 from unittest.mock import AsyncMock
 
@@ -61,6 +62,7 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
         ("b", "央行維持利率不變", "繁體中文原始正文"),
         ("c", "企业公布季度业绩", "简体中文原始正文"),
     ]
+    source_published_at = datetime(2026, 9, 10, 8, 30, tzinfo=UTC)
     candidates = [
         FetchedCandidate(
             Candidate(
@@ -73,6 +75,7 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
             f"https://www.reuters.com/{character}",
             body,
             character * 64,
+            source_published_at,
         )
         for character, headline, body in values
     ]
@@ -87,7 +90,9 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
     assert "cross-check the candidate data" in task
     assert "do not count as independent confirmation" in task
     assert "Fill all available slots" in task
-    assert "the first 5 form the edition" in task
+    assert "5-star publication has no quantity cap" in task
+    assert "up to 10 qualifying 4-star stories" in task
+    assert "at most 5 stories rated 1 to 3 combined" in task
     # Relevance is a fixed gate ahead of ranking, so the deploy-time criteria
     # cannot talk the model into filling a slot with an off-market story.
     assert "Relevance to this edition is a hard gate" in task
@@ -98,6 +103,16 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
     assert isinstance(contract, dict)
     assert "ordered by importance from 5 down to 1" in contract["selections"]
     assert "absolute scale" in contract["importance"]
+    assert "systemic catalyst" in contract["importance"]
+    assert "official forward guidance" in contract["importance"]
+    assert "investment-bank" in contract["importance"]
+    assert "Pure price action" in contract["importance"]
+    global_focus = str(captured["MARKET_FOCUS"])
+    assert "independent dominant macro themes" in global_focus
+    assert "sovereign debt supply" in global_focus
+    assert "Pure price-action reports" in global_focus
+    assert "company transaction" in global_focus
+    assert "high-credibility consensus" in global_focus
     # The closed vocabularies shown to the model must match the validated contract.
     fields = SelectedCandidate.model_fields
     assert set(contract["topic"]) == set(get_args(fields["topic"].annotation))
@@ -109,6 +124,9 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
     assert isinstance(prompt_candidates, list)
     assert [item["headline"] for item in prompt_candidates] == [value[1] for value in values]
     assert [item["source_text"] for item in prompt_candidates] == [value[2] for value in values]
+    assert [item["source_published_at"] for item in prompt_candidates] == [
+        source_published_at.isoformat()
+    ] * len(values)
 
 
 async def test_selection_rejects_unknown_id_and_summary_rejects_fabricated_number(
@@ -452,13 +470,40 @@ async def test_market_edition_prompt_gates_relevance_and_publishes_only_its_tag(
         assert focus.startswith("This edition covers one market only")
         assert "strong, direct link" in focus
         assert "relevance gate" in focus
-        assert "empty slot is always better" in focus
-        assert "Fill all 5 slots" in focus
+        assert "empty quota is always better" in focus
+        assert "Aim for at least 5 4-star stories" in focus
         assert "hard gate" in prompt["task"]
         contract = prompt["OUTPUT_CONTRACT"]
         assert contract["market"] == MARKET_VALUES
         assert f"publishes only selections tagged '{tag}'" in contract["market_rule"]
         assert contract["example"]["selections"][0]["market"] == tag
+
+
+async def test_us_equity_prompt_prioritizes_equity_catalysts_and_primary_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.modules.news.editions import US_EQUITY_SPEC
+
+    client = DeepSeekClient(base_url="https://api.deepseek.com", api_key="secret", model="test")
+    complete = AsyncMock(return_value=({"selections": []}, None, None, None, 1, "a" * 64))
+    monkeypatch.setattr(client, "_complete", complete)
+
+    await client.select([], policy=US_EQUITY_SPEC.selection)
+
+    prompt = complete.call_args.args[0]
+    focus = str(prompt["MARKET_FOCUS"])
+    importance = str(prompt["OUTPUT_CONTRACT"]["importance"])
+    assert "pricing of broad US indexes" in focus
+    assert "30-40% market-wide drivers" in focus
+    assert "60-70% company or sector equity catalysts" in focus
+    assert "Evaluate event certainty" in focus
+    assert "prefer the primary event" in focus
+    assert "freshness penalty" in focus
+    assert "24 hours old" in focus
+    assert "Routine financing" in importance
+    assert "at most 2" in importance
+    assert "senior-note or bond issuance" in importance
+    assert "investment-bank or CEO forecast" in importance
 
 
 async def test_select_drops_picks_the_model_tags_for_another_market(

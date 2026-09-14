@@ -39,6 +39,71 @@ from daily_insights_api.web.app import create_app
 pytestmark = pytest.mark.integration
 
 
+async def test_failed_or_empty_new_revision_falls_back_without_resurrecting_hidden_stories(
+    news_admin_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(news_admin_database)
+    today = datetime.now(TAIPEI).date()
+    previous, _, _ = await _seed_global_edition(news_admin_database, today - timedelta(days=1))
+    async with news_admin_database.begin() as database:
+        current = NewsEdition(
+            edition_date=today,
+            market_code="global",
+            revision=1,
+            input_digest="c" * 64,
+            derivation_version="test",
+            prompt_version="test",
+            status="partial",
+        )
+        database.add(current)
+        await database.flush()
+        hidden = _item(current.id, 1)
+        database.add(hidden)
+        await database.flush()
+        for locale in ("en", "zh-hant", "zh-hans"):
+            database.add(
+                NewsPresentation(
+                    item_id=hidden.id,
+                    locale=locale,
+                    headline="Current story",
+                    summary="Validated summary",
+                )
+            )
+        hidden_id = hidden.id
+        # Zero-story complete versions must not replace the readable fallback.
+        database.add(
+            NewsEdition(
+                edition_date=today,
+                market_code="global",
+                revision=2,
+                input_digest="d" * 64,
+                derivation_version="test",
+                prompt_version="test",
+                status="complete",
+            )
+        )
+        database.add(
+            NewsEdition(
+                edition_date=today,
+                market_code="global",
+                revision=3,
+                input_digest="e" * 64,
+                derivation_version="test",
+                prompt_version="test",
+                status="unavailable",
+            )
+        )
+    async with _client(news_admin_database, user) as client:
+        response = await client.post(f"/api/admin/news/items/{hidden_id}/hide")
+        assert response.status_code == 200
+    async with news_admin_database() as database:
+        for locale in ("en", "zh-hant", "zh-hans"):
+            result = await _latest_response(database, Response(), cast(Any, locale), GLOBAL_SPEC)
+            assert result.edition_id == previous
+            assert len(result.items) == 1 and result.items[0].event_key == "story-2"
+            assert result.caveat is None
+
+
 @pytest_asyncio.fixture
 async def news_admin_database() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     database_url = os.environ.get("DAILY_INSIGHTS_TEST_DATABASE_URL")
