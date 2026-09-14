@@ -258,8 +258,6 @@ def test_registry_is_internally_consistent() -> None:
         "www.forbes.com",
         "www.investing.com",
         "www.marketwatch.com",
-        "wantrich.chinatimes.com",
-        "www.ctee.com.tw",
     }
 
 

@@ -244,23 +244,21 @@ reason="missing_credential")`，不得讓整份 edition 失敗。
 
 ### 4.2 台灣 — `poll_group="fast"`，`markets` 含 `tw_equity`
 
-| hostname                   | url                                                                  | kind           | full text | 佐證                                           |
-| -------------------------- | -------------------------------------------------------------------- | -------------- | --------- | ---------------------------------------------- |
-| `news.cnyes.com`           | `https://news.cnyes.com/rss/v1/news/category/tw_stock`               | `rss_full`     | ✅        | 09-03 10:20:06，30 則                          |
-| `news.cnyes.com`           | `https://news.cnyes.com/rss/v1/news/category/headline`               | `rss_full`     | ✅        | 40 則                                          |
-| `news.cnyes.com`           | `https://news.cnyes.com/rss/v1/news/category/wd_stock`               | `rss_full`     | ✅        | 國際股市                                       |
-| `money.udn.com`            | `https://money.udn.com/rssfeed/news/1001/5590?ch=money`              | `rss`          | ❌        | 09-03 10:16:59（要聞）                         |
-| `money.udn.com`            | `https://money.udn.com/rssfeed/news/1001/5591?ch=money`              | `rss`          | ❌        | 產業                                           |
-| `feeds.feedburner.com`     | `https://feeds.feedburner.com/rsscna/finance`                        | `rss`          | ❌        | 09-03 00:55:15（中央社財經）                   |
-| `feeds.feedburner.com`     | `https://feeds.feedburner.com/ettoday/finance`                       | `rss`          | ❌        | 09-03 08:15:00，50 則                          |
-| `cdn.technews.tw`          | `https://cdn.technews.tw/feed/`                                      | `rss`          | ❌        | 09-03 10:35（`technews.tw/feed/` 會 302 到此） |
-| `news.ltn.com.tw`          | `https://news.ltn.com.tw/rss/all.xml`                                | `rss`          | ❌        | 09-03 10:35:10                                 |
-| `www.inside.com.tw`        | `https://www.inside.com.tw/feed/rss`                                 | `rss_full`     | ✅        | 09-03 07:34，僅 11 則                          |
-| `www.gvm.com.tw`           | `https://www.gvm.com.tw/rss`                                         | `rss`          | ❌        | 09-02 21:18                                    |
-| `www.chinatimes.com`       | `https://www.chinatimes.com/sitemaps/sitemap_wantrich_todaynews.xml` | `news_sitemap` | ❌        | 09-03 10:09:01，200+ 條（中時財經專版）        |
-| `www.ctee.com.tw`          | `https://www.ctee.com.tw/sitemaps/sitemap_newstoday.xml`             | `news_sitemap` | ❌        | 09-03 10:09:05，150+ 條                        |
-| `www.businesstoday.com.tw` | `https://www.businesstoday.com.tw/news-sitemap.xml`                  | `news_sitemap` | ❌        | 09-03 10:00:00，200 條                         |
-| `www.storm.mg`             | `https://www.storm.mg/feed/sitemap/news`                             | `news_sitemap` | ❌        | 09-03 10:35，200+ 條                           |
+| hostname                   | url                                                     | kind           | full text | 佐證                                           |
+| -------------------------- | ------------------------------------------------------- | -------------- | --------- | ---------------------------------------------- |
+| `news.cnyes.com`           | `https://news.cnyes.com/rss/v1/news/category/tw_stock`  | `rss_full`     | ✅        | 09-03 10:20:06，30 則                          |
+| `news.cnyes.com`           | `https://news.cnyes.com/rss/v1/news/category/headline`  | `rss_full`     | ✅        | 40 則                                          |
+| `news.cnyes.com`           | `https://news.cnyes.com/rss/v1/news/category/wd_stock`  | `rss_full`     | ✅        | 國際股市                                       |
+| `money.udn.com`            | `https://money.udn.com/rssfeed/news/1001/5590?ch=money` | `rss`          | ❌        | 09-03 10:16:59（要聞）                         |
+| `money.udn.com`            | `https://money.udn.com/rssfeed/news/1001/5591?ch=money` | `rss`          | ❌        | 產業                                           |
+| `feeds.feedburner.com`     | `https://feeds.feedburner.com/rsscna/finance`           | `rss`          | ❌        | 09-03 00:55:15（中央社財經）                   |
+| `feeds.feedburner.com`     | `https://feeds.feedburner.com/ettoday/finance`          | `rss`          | ❌        | 09-03 08:15:00，50 則                          |
+| `cdn.technews.tw`          | `https://cdn.technews.tw/feed/`                         | `rss`          | ❌        | 09-03 10:35（`technews.tw/feed/` 會 302 到此） |
+| `news.ltn.com.tw`          | `https://news.ltn.com.tw/rss/all.xml`                   | `rss`          | ❌        | 09-03 10:35:10                                 |
+| `www.inside.com.tw`        | `https://www.inside.com.tw/feed/rss`                    | `rss_full`     | ✅        | 09-03 07:34，僅 11 則                          |
+| `www.gvm.com.tw`           | `https://www.gvm.com.tw/rss`                            | `rss`          | ❌        | 09-02 21:18                                    |
+| `www.businesstoday.com.tw` | `https://www.businesstoday.com.tw/news-sitemap.xml`     | `news_sitemap` | ❌        | 09-03 10:00:00，200 條                         |
+| `www.storm.mg`             | `https://www.storm.mg/feed/sitemap/news`                | `news_sitemap` | ❌        | 09-03 10:35，200+ 條                           |
 
 **注意事項：**
 

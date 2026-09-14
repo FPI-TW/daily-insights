@@ -135,8 +135,8 @@ flowchart LR
 | 台灣（`fast`）       | 鉅亨台股與頭條、經濟日報要聞與產業、中央社財經、ETtoday 財經、財經新報、自由財經、INSIDE（全文）、遠見、今周刊、風傳媒；鉅亨國際股市掛 `us_equity`                       | `rss`、`rss_full`、sitemap     | `tw_equity`                  |
 
 2026-09-14 起，執行清單只保留現有三個新聞市場使用的 32 個 feed。未上線市場的
-19 個 feed、暫停的旺得富與工商時報 sitemap，以及移除的 GlobeNewswire 公司公告，
-其端點與重新啟用條件保留在[非執行中的新聞來源](inactive-news-sources.md)。
+19 個 feed 與移除的 GlobeNewswire 公司公告，其端點與重新啟用條件保留在
+[非執行中的新聞來源](inactive-news-sources.md)。
 
 adapter 種類：`rss` 同時處理 RSS 2.0、RSS 1.0／RDF（`dc:date`）與 Atom（`link href`、
 `updated`）；`rss_full` 另讀 `content:encoded`（或第三方 feed 的 `description`），內文

@@ -28,13 +28,6 @@
 | 韓國 | 한국경제     | `https://www.hankyung.com/feed/finance`                                                      |
 | 韓國 | 한국경제     | `https://www.hankyung.com/feed/economy`                                                      |
 
-## 暫停抓取
-
-| 來源     | 原 feed 端點                                                         | 原因與重新啟用條件                                                      |
-| -------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| 旺得富   | `https://www.chinatimes.com/sitemaps/sitemap_wantrich_todaynews.xml` | 本機連續記錄 source_access_denied；取得可合法存取的來源並驗證後再啟用。 |
-| 工商時報 | `https://www.ctee.com.tw/sitemaps/sitemap_newstoday.xml`             | 本機連續記錄 source_access_denied；取得可合法存取的來源並驗證後再啟用。 |
-
 ## 已移除的廣泛公司公告
 
 GlobeNewswire Company Announcement（subjectcode 9）退出執行清單，以縮減例行公司公告候選。保留財報（subjectcode 13）與併購（subjectcode 27）。
