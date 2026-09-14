@@ -70,13 +70,13 @@ MARKET_FLOW_LOOKBACK_CALENDAR_DAYS = 80
 STOCK_FLOW_LOOKBACK_TRADING_DAYS = 1
 STOCK_FLOW_LOOKBACK_CALENDAR_DAYS = 10
 # TWSE revises a published report for days afterwards, so a run re-asks this
-# many of the newest stored market days instead of trusting them; older days are
-# settled. Per-stock flows get a one-day version of the same treatment rather
-# than none: only their latest stored day is ever read, and that day is re-asked
-# whether or not it is the edition date. A run on a Saturday, or before the
-# afternoon publication, has a Friday to correct and no edition date to correct
-# it through.
-MARKET_FLOW_REFRESH_TRADING_DAYS = 7
+# many of the newest stored market days instead of trusting them, on top of the
+# edition date it is for; older days are settled. Per-stock flows get a one-day
+# version of the same treatment rather than none: only their latest stored day
+# is ever read, and that day is re-asked whether or not it is the edition date.
+# A run on a Saturday, or before the afternoon publication, has a Friday to
+# correct and no edition date to correct it through.
+MARKET_FLOW_REFRESH_TRADING_DAYS = 10
 # TWSE being down looks the same on every date, so stop asking after three.
 MAX_CONSECUTIVE_FAILURES = 3
 
@@ -864,14 +864,13 @@ async def _execute_institutional_twse(
     # upserts in `store_institutional_*_flows` overwrite in place, so nothing is
     # deleted to make room for the answer.
     refresh_stock = existing_stock | {run.edition_date}
-    # Counted from the edition date rather than from the newest stored row, so
-    # the depth does not shift by a day depending on whether today has been
-    # fetched yet: the window is the same on the first run of a day and on the
-    # fifth.
-    refresh_market = set(
-        sorted(existing_market | {run.edition_date}, reverse=True)[
-            :MARKET_FLOW_REFRESH_TRADING_DAYS
-        ]
+    # The invariant is how many stored trading days get corrected, not which
+    # calendar dates: the newest `MARKET_FLOW_REFRESH_TRADING_DAYS` of them,
+    # every run. The edition date joins them whether or not it is stored yet,
+    # because an edition that never traded, or has not published, must not cost
+    # the window one of its days.
+    refresh_market = {run.edition_date}.union(
+        sorted(existing_market, reverse=True)[:MARKET_FLOW_REFRESH_TRADING_DAYS]
     )
 
     async with TwseAdapter(

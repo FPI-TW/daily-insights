@@ -287,7 +287,7 @@ const resources: Resource = {
       dataManagementIndexAction: "更新指數",
       dataManagementInstitutional: "台股三大法人",
       dataManagementInstitutionalDescription:
-        "以證交所資料重抓個股最近一個交易日，並回補大盤 40 個交易日。證交所事後會修正數字，所以最近 7 個交易日的大盤一律重抓覆蓋，更早的日期不重抓。",
+        "以證交所資料重抓個股最近一個交易日，並回補大盤 40 個交易日。證交所事後會修正數字，所以最近 10 個交易日的大盤一律重抓覆蓋，更早的日期不重抓。",
       dataManagementInstitutionalAction: "更新三大法人",
       dataManagementMacro: "全球總經儀表板",
       dataManagementMacroDescription: "重新整理並發布最新的全球總經資料快照。",
@@ -1000,7 +1000,7 @@ const resources: Resource = {
       dataManagementIndexAction: "更新指数",
       dataManagementInstitutional: "台股三大法人",
       dataManagementInstitutionalDescription:
-        "以证交所数据重抓个股最近一个交易日，并回补大盘 40 个交易日。证交所事后会修正数字，所以最近 7 个交易日的大盘一律重抓覆盖，更早的日期不重抓。",
+        "以证交所数据重抓个股最近一个交易日，并回补大盘 40 个交易日。证交所事后会修正数字，所以最近 10 个交易日的大盘一律重抓覆盖，更早的日期不重抓。",
       dataManagementInstitutionalAction: "更新三大法人",
       dataManagementMacro: "全球宏观仪表板",
       dataManagementMacroDescription: "重新整理并发布最新的全球宏观资料快照。",
@@ -1724,7 +1724,7 @@ const resources: Resource = {
       dataManagementIndexAction: "Update indices",
       dataManagementInstitutional: "Taiwan institutional flows",
       dataManagementInstitutionalDescription:
-        "Fetch the newest trading day per security and backfill 40 trading days for the market from TWSE. TWSE revises its numbers afterwards, so the newest per-stock day and the seven newest market days are always fetched again and overwritten; older dates are left alone.",
+        "Fetch the newest trading day per security and backfill 40 trading days for the market from TWSE. TWSE revises its numbers afterwards, so the newest per-stock day and the ten newest market days are always fetched again and overwritten; older dates are left alone.",
       dataManagementInstitutionalAction: "Update institutional flows",
       dataManagementMacro: "Global macro dashboard",
       dataManagementMacroDescription:

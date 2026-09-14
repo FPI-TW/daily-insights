@@ -495,7 +495,9 @@ async def test_institutional_twse_refetches_the_newest_stored_days_and_trusts_th
 
     edition = date(2026, 9, 7)
     stored_market = _weekdays_before(edition, 39) | {edition}
-    refreshed = set(sorted(stored_market, reverse=True)[: service.MARKET_FLOW_REFRESH_TRADING_DAYS])
+    refreshed = {edition}.union(
+        sorted(stored_market, reverse=True)[: service.MARKET_FLOW_REFRESH_TRADING_DAYS]
+    )
     settled = stored_market - refreshed
     asked: list[date] = []
     stored: list[date] = []
@@ -824,13 +826,13 @@ async def test_institutional_twse_walks_back_to_forty_trading_days_refetching_on
     from daily_insights_api.modules.data_management import service
 
     edition = date(2026, 9, 7)  # Monday
-    # Eleven weekdays are already stored. The refresh window is counted from the
-    # edition date, which is not among them, so it reaches the newest six of
-    # them; the five behind those are settled and must count toward the window
-    # without a request.
-    already_stored = _weekdays_before(edition, 11)
+    # Fourteen weekdays are already stored. The newest of them fill the refresh
+    # window and are re-asked because TWSE keeps correcting them; the four
+    # behind those are settled and must count toward the window without a
+    # request.
+    already_stored = _weekdays_before(edition, 14)
     refreshed = set(
-        sorted(already_stored, reverse=True)[: service.MARKET_FLOW_REFRESH_TRADING_DAYS - 1]
+        sorted(already_stored, reverse=True)[: service.MARKET_FLOW_REFRESH_TRADING_DAYS]
     )
     settled = already_stored - refreshed
     fetched_market: list[date] = []

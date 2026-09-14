@@ -1,17 +1,17 @@
-"""Queue the daily TWSE institutional-flow run at Taipei 17:00.
+"""Queue the daily TWSE institutional-flow run at Taipei 08:00, for yesterday.
 
 This one queues rather than fetches. The adapter spaces its own requests six
 seconds apart, which only holds while a single walk is in flight, and that is
 what the data-management queue guarantees: one institutional run at a time,
 whether an administrator pressed the button or this scheduler did.
 
-17:00 because TWSE publishes the day's figures around 16:00. A run queued
-before that finds the date unpublished, records it and moves on, so the walk
-would simply come back a day short.
+08:00 like every other daily scheduler, asking for the previous day: TWSE
+publishes a day's figures around 16:00, so by the next morning the day it is
+asked for is one the source can actually serve.
 """
 
 import asyncio
-from datetime import date, datetime, time
+from datetime import date, datetime, timedelta
 
 from anyio import Path
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -33,19 +33,25 @@ from daily_insights_api.modules.reports.scheduler import (
 __all__ = ["main", "queue_run"]
 
 HEARTBEAT_PATH = "/tmp/institutional-flows-heartbeat"
-RUN_AT = time(hour=17, minute=0)
-# TWSE can publish late; keep trying into the evening rather than losing the day.
-RETRY_POLICY = SameDayRetry(until=time(hour=21))
+# The edition the scheduler hands out is today's; the figures this run is for
+# are the day before it.
+EDITION_LAG = timedelta(days=1)
+RETRY_POLICY = SameDayRetry()
 
 
-async def queue_run(session_factory: async_sessionmaker[AsyncSession]) -> str:
-    """Queue one run, treating an already-active one as this day's run.
+async def queue_run(session_factory: async_sessionmaker[AsyncSession], *, run_date: date) -> str:
+    """Queue one run for the trading day before `run_date`.
 
-    The worker executes it, and the walk asks only for the dates it is missing
-    plus the newest few it re-asks because TWSE revises them, so a queue that
-    lands on an afternoon TWSE has not published yet costs one request per
-    missing date and the next day's run fills the gap.
+    `run_date` is the edition the scheduler hands out, which is the day it
+    fires. TWSE publishes a day's figures around 16:00, so the day this morning
+    run can actually be served is the one before it.
+
+    An already-active run is treated as this day's. The worker executes it, and
+    the walk asks only for the dates it is missing plus the newest few it
+    re-asks because TWSE revises them, so a queue that lands on a date TWSE has
+    not published yet costs one request and the next day's run fills the gap.
     """
+    edition_date = run_date - EDITION_LAG
     try:
         async with session_factory.begin() as database:
             run = await enqueue_run(
@@ -54,6 +60,7 @@ async def queue_run(session_factory: async_sessionmaker[AsyncSession]) -> str:
                 market_code=None,
                 requester_id=None,
                 request_id=None,
+                edition_date=edition_date,
             )
         emit_event("institutional_flows.queued", run_id=str(run.id))
     except RunAlreadyActiveError:
@@ -72,8 +79,8 @@ async def main() -> None:
     engine = create_engine(settings)
     session_factory = create_session_factory(engine)
 
-    async def queue(_: date) -> str:
-        return await queue_run(session_factory)
+    async def queue(edition: date) -> str:
+        return await queue_run(session_factory, run_date=edition)
 
     async def runner(run_date: date) -> str | None:
         return await run_with_heartbeat(queue, run_date, heartbeat)
@@ -82,9 +89,7 @@ async def main() -> None:
         if args.once:
             await runner(datetime.now(TAIPEI).date())
         else:
-            await run_scheduler(
-                runner, now=lambda: datetime.now(TAIPEI), retry=RETRY_POLICY, run_at=RUN_AT
-            )
+            await run_scheduler(runner, now=lambda: datetime.now(TAIPEI), retry=RETRY_POLICY)
     finally:
         await engine.dispose()
 
