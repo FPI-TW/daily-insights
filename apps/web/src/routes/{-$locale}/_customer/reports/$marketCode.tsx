@@ -301,24 +301,19 @@ function ReportPage() {
       ? { kind: "report_detail", publication_id: report.report.publicationId }
       : null
   )
-  // The US page reads top-down: the analyst's bullets, the stories behind
-  // them, then the numbers and charts. Other markets open with the news.
-  const newsUnderViewpoint = marketCode === "us_equity"
-  const newsSection = news ? (
-    <DailyNews
-      news={news.latest}
-      eyebrowKey="marketNewsEyebrow"
-      titleKey={`marketNewsTitle_${news.marketCode}`}
-      groupByMarket={false}
-    />
-  ) : null
   return (
     <>
-      {newsUnderViewpoint ? null : newsSection}
+      {news ? (
+        <DailyNews
+          news={news.latest}
+          eyebrowKey="marketNewsEyebrow"
+          titleKey={`marketNewsTitle_${news.marketCode}`}
+          groupByMarket={false}
+        />
+      ) : null}
       {(report.kind !== "report" || macroDashboard) && viewpoint ? (
         <MarketViewpoint viewpoint={viewpoint} />
       ) : null}
-      {newsUnderViewpoint && report.kind !== "report" ? newsSection : null}
       {macroDashboard ? (
         <Suspense fallback={<MacroDashboardLoading />}>
           <Await promise={macroDashboard}>
@@ -340,7 +335,6 @@ function ReportPage() {
           locale={locale}
           report={report.report}
           viewpoint={viewpoint}
-          afterViewpoint={newsUnderViewpoint ? newsSection : null}
           leadingBlock={
             marketCode === "us_equity" && indexHistory ? (
               <Suspense fallback={<UsIndexPerformanceTableLoading />}>
@@ -362,10 +356,7 @@ function ReportPage() {
         <Suspense
           fallback={
             marketCode === "tw_equity" ? (
-              <>
-                <TaiwanInstitutionalFlowsLoading />
-                <TaiwanIndexHistoryLoading />
-              </>
+              <TaiwanIndexHistoryLoading />
             ) : (
               <IndexHistoryLoading />
             )
@@ -374,22 +365,6 @@ function ReportPage() {
           <Await promise={indexHistory}>
             {history => (
               <>
-                {/* Taiwan reads the institutional flows and their top stocks
-                    first; the bias chart follows them. Both need the index
-                    history, so they share this Await. */}
-                {marketCode === "tw_equity" && institutionalData ? (
-                  <Suspense fallback={<TaiwanInstitutionalFlowsLoading />}>
-                    <Await promise={institutionalData}>
-                      {data => (
-                        <TaiwanInstitutionalFlows
-                          data={data}
-                          history={history}
-                          locale={locale}
-                        />
-                      )}
-                    </Await>
-                  </Suspense>
-                ) : null}
                 {marketCode === "tw_equity" ? (
                   <TaiwanIndexHistoryChart
                     history={history}
@@ -403,6 +378,19 @@ function ReportPage() {
                     movingAverages={indexMovingAverages}
                   />
                 )}
+                {marketCode === "tw_equity" && institutionalData ? (
+                  <Suspense fallback={<TaiwanInstitutionalFlowsLoading />}>
+                    <Await promise={institutionalData}>
+                      {data => (
+                        <TaiwanInstitutionalFlows
+                          data={data}
+                          history={history}
+                          locale={locale}
+                        />
+                      )}
+                    </Await>
+                  </Suspense>
+                ) : null}
               </>
             )}
           </Await>
@@ -423,26 +411,14 @@ function MarketPageLoading() {
   const { marketCode } = Route.useParams()
   return (
     <>
-      {isNewsMarketCode(marketCode) && marketCode !== "us_equity" ? (
-        <DailyNewsLoading />
-      ) : null}
+      {isNewsMarketCode(marketCode) ? <DailyNewsLoading /> : null}
       <ReportLoadingScreen />
       {marketCode === "us_equity" ? (
-        <>
-          <DailyNewsLoading />
-          <div className="mt-6">
-            <UsIndexPerformanceTableLoading />
-          </div>
-        </>
+        <div className="mt-6">
+          <UsIndexPerformanceTableLoading />
+        </div>
       ) : null}
-      {marketCode === "tw_equity" ? (
-        <>
-          <TaiwanInstitutionalFlowsLoading />
-          <TaiwanIndexHistoryLoading />
-        </>
-      ) : (
-        <IndexHistoryLoading />
-      )}
+      <IndexHistoryLoading />
       {marketCode === "us_equity" ? <VixHistoryLoading /> : null}
     </>
   )
