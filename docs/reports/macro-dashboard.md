@@ -8,7 +8,7 @@
 - 油金比、銅金比：各自一張圖，相同日期的現貨收盤相除；缺日期不跨日配對，不補值，兩張圖的日期軸互不影響。
 - 殖利率變動表：3M、2Y、5Y、10Y、30Y 及 SOFR；殖利率以百分比顯示、變動以 bp 顯示。
 - 殖利率曲線：五個公債天期最後共同日期的觀察值，SOFR 不加入期限曲線。
-- 經濟日曆：台北當日的 Nasdaq 公開經濟數據與來源涵蓋的央行事件；以來源提供的 GMT 時間轉換並篩選日期。未到事件時間不顯示來源提前提供的實際值。實際值 0 仍顯示為 0。
+- 經濟日曆目前未在前台顯示，Nasdaq 抓取預設停用；保留相容的 calendar payload。
 - 美元指數：DXY（DX-Y.NYB）最近 90 個日曆日的已完成收盤。
 - 外匯：EUR/USD、GBP/USD、AUD/USD、NZD/USD、USD/JPY、USD/CHF、USD/CAD、USD/TWD，可選擇 30／90／365 日與貨幣對，切換不重送請求。
 
@@ -18,12 +18,16 @@
 
 `GET /api/reports/global_macro_bonds/dashboard` 回傳獨立的市場補充資料，不建立或變更報告 publication。
 
-- `DAILY_INSIGHTS_YFINANCE_ENABLED=true`：沿用既有 Yahoo Finance 開關與 adapter，讀取期貨、DXY、外匯歷史。來源為延遲日資料，排除尚未完成的當日交易。DXY 的週末隔夜列沒有正式日收盤，排除該列並保留工作日收盤；工作日缺收盤仍視為資料錯誤。
+- `DAILY_INSIGHTS_YFINANCE_ENABLED=true`：沿用既有 Yahoo Finance 開關與 adapter，讀取 DXY、外匯歷史。來源為延遲日資料，排除尚未完成的當日交易。DXY 的週末隔夜列沒有正式日收盤，排除該列並保留工作日收盤；工作日缺收盤仍視為資料錯誤。
 - 美國財政部：[Daily Treasury XML](https://home.treasury.gov/treasury-daily-interest-rate-xml-feed)，不需金鑰。讀取當年及前兩年，單一年度失敗不丟棄其他成功年度。
 - 紐約聯準銀行：[SOFR](https://www.newyorkfed.org/markets/reference-rates/sofr)，不需金鑰。
-- Nasdaq：[Economic Calendar](https://www.nasdaq.com/market-activity/economic-calendar)，不需金鑰。API 讀取台北今日與前一日的來源資料，再以 GMT 時間轉換後保留台北當日事件；來源失敗時顯示不可用，不將它當成「當日沒有事件」。Nasdaq 未提供事件重要性時，介面不顯示空白的重要性欄位。
+- Nasdaq：[Economic Calendar](https://www.nasdaq.com/market-activity/economic-calendar)，不需金鑰。`DAILY_INSIGHTS_MACRO_CALENDAR_ENABLED=false` 為預設值，完全不發送 Nasdaq 請求，calendar 為 `disabled` 且不造成作業失敗。重新啟用時設定為 `true` 並重建 worker；逐列驗證、略過合法的 `All Day`，保留其他有效事件。只有空事件或全天事件屬正常結果；兩個查詢日皆 HTTP／解析失敗或全為無效列才為 `unavailable`。
 
-伺服器按程序共用五分鐘快取，並合併同時進入的請求；台北跨日後日曆快取失效。Yahoo 請求最多四個並行，各商品失敗獨立處理。初次請求顯示 skeleton，缺資料顯示 `—` 或不可用訊息。來源失敗不以示範資料補上。
+HTTP 從資料庫讀取最後保存的 dashboard snapshot，不直接呼叫來源。排程器或管理操作建立 durable job，由 data-management worker 抓取與保存。Yahoo 請求最多四個並行，各商品失敗獨立處理。
+
+每筆宏觀作業的 `result.sources` 記錄五個來源的 `code`、`name`、`status`、`fetched_at`、`affected_items` 與 `failures`。每個 failure 保存固定 endpoint 名称、項目、分類和可取得的 HTTP 狀態碼；不保存原始例外、金鑰或回應內容。來源狀態為 `ok/degraded/unavailable/disabled`。同一來源可以包含多種失敗；adapter 沒有提供可辨識原因時顯示「原因未能確認」。診斷只供後台，不加入前台 dashboard API。
+
+市場來源失敗使用 `macro_sources_unavailable`，僅日曆完全不可用使用 `macro_calendar_unavailable`；兩者同時失敗以市場來源錯誤優先。日曆少量異常列記入明細，但仍保留有效結果。歷史作業沒有來源明細時顯示「未記錄來源明細」，不回寫歷史。
 
 日變動比較前一筆有效交易日；週／月／年以日曆期間回推，尋找該日期當日或之前最多七日的觀察值。月末與閏年採該月最後一天。超過七日的比較缺口不計算報酬，資料日期由各商品自行標示。
 

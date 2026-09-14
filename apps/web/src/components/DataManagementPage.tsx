@@ -4,6 +4,7 @@ import { LoaderCircle } from "lucide-react"
 import { useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Dialog } from "#/components/Dialog"
+import { MacroSourceDiagnostics } from "#/components/MacroSourceDiagnostics"
 import { browserAdministrationClient } from "#/lib/admin-members"
 import { requireCsrfToken } from "#/lib/auth"
 import { marketTabLabel } from "#/lib/markets"
@@ -272,7 +273,11 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
                   ? ` · ${new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(new Date(run.completed_at))}`
                   : ""}
               </summary>
-              <RunDetail result={run.result} error={run.error} />
+              {run.operation === "macro_dashboard" ? (
+                <MacroSourceDiagnostics result={run.result} error={run.error} />
+              ) : (
+                <RunDetail result={run.result} error={run.error} />
+              )}
               {ACTIVE_STATUSES.includes(run.status) ? (
                 <button
                   type="button"
