@@ -5,13 +5,9 @@ from typing import Any, cast
 
 import pytest
 
-from daily_insights_api.core.config import Settings
+from daily_insights_api.modules.markets.api import TAIEX_SYMBOL
 from daily_insights_api.scripts import run_index_daily_bars
-from daily_insights_api.scripts.run_index_daily_bars import (
-    SCHEDULED_PERIOD,
-    SCHEDULED_TAIEX_MONTHS,
-    parse_args,
-)
+from daily_insights_api.scripts.run_index_daily_bars import SCHEDULED_PERIOD, parse_args
 
 
 def test_the_scheduled_run_defaults_to_a_week_wide_window() -> None:
@@ -37,16 +33,13 @@ def test_edition_date_is_refused_rather_than_silently_ignored() -> None:
         parse_args(["--once", "--edition-date", "2026-09-01"])
 
 
-def test_the_scheduled_run_defaults_to_two_taiex_months() -> None:
-    args = parse_args([])
-
-    assert args.taiex_months == SCHEDULED_TAIEX_MONTHS
-
-
-def test_a_taiex_backfill_reaches_further_back_with_taiex_months() -> None:
-    args = parse_args(["--once", "--taiex-months", "25"])
-
-    assert args.taiex_months == 25
+def test_taiex_months_is_refused_because_this_job_no_longer_fetches_it() -> None:
+    # ^TWII is refreshed by the TWSE run, which holds the one client whose
+    # request interval keeps the exchange from being asked twice as often as
+    # either caller believes. An operator reaching for this flag here has the
+    # wrong container.
+    with pytest.raises(SystemExit):
+        parse_args(["--once", "--taiex-months", "25"])
 
 
 class _NullSessionFactory:
@@ -61,29 +54,17 @@ async def _null_transaction() -> AsyncIterator[object]:
     yield object()
 
 
-async def _run_refresh(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    twse_enabled: bool,
-    taiex_rows: int | None,
-) -> tuple[str, dict[str, object]]:
-    """Drive `run_refresh` with both providers stubbed, returning its event.
-
-    `taiex_rows=None` asserts the TAIEX provider is never reached.
-    """
+async def _run_refresh(monkeypatch: pytest.MonkeyPatch) -> tuple[str, dict[str, object], list[str]]:
+    """Drive `run_refresh` with Yahoo stubbed, returning its event and symbols."""
     events: list[dict[str, object]] = []
+    asked: list[str] = []
 
-    async def yahoo(*_: object, **__: object) -> tuple[list[object], list[object]]:
+    async def yahoo(*_: object, **kwargs: object) -> tuple[list[object], list[object]]:
+        asked.extend(cast(list[str], kwargs["symbols"]))
         return [SimpleNamespace(result=SimpleNamespace(symbol="^DJI"), stored_count=7)], []
-
-    async def taiex(*_: object, **__: object) -> tuple[int, str | None]:
-        if taiex_rows is None:
-            raise AssertionError("a disabled provider must not be reached")
-        return taiex_rows, None
 
     monkeypatch.setattr(run_index_daily_bars, "YfinanceAdapter", lambda **_: object())
     monkeypatch.setattr(run_index_daily_bars, "refresh_index_daily_bars", yahoo)
-    monkeypatch.setattr(run_index_daily_bars, "_refresh_taiex", taiex)
     monkeypatch.setattr(
         run_index_daily_bars, "emit_event", lambda _name, **fields: events.append(fields)
     )
@@ -92,39 +73,24 @@ async def _run_refresh(
         cast(Any, _NullSessionFactory()),
         SCHEDULED_PERIOD,
         timeout_seconds=1.0,
-        settings=Settings(environment="test", twse_enabled=twse_enabled),
     )
-    return outcome, events[-1]
+    return outcome, events[-1], asked
 
 
 @pytest.mark.asyncio
-async def test_a_disabled_twse_is_skipped_rather_than_failing_the_whole_run(
+async def test_the_run_is_yahoo_only_and_never_asks_for_taiex(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A flag being off is a configuration, not a failure.
-
-    The Yahoo half says the same thing by never entering the schedule at all.
-    Reporting "failed" here would hand SameDayRetry an outcome it retries every
-    30 minutes until noon, re-fetching all eight Yahoo symbols each time -- and
-    no retry can turn a flag on.
-    """
-    outcome, event = await _run_refresh(monkeypatch, twse_enabled=False, taiex_rows=None)
+    """TWSE supplies ^TWII, and everything TWSE supplies is refreshed by the
+    TWSE run. This container holds no TWSE client, so its lifecycle -- the
+    yfinance flag, the heartbeat, the same-day retry -- cannot reach ^TWII."""
+    outcome, event, asked = await _run_refresh(monkeypatch)
 
     assert outcome == "complete"
-    assert event["taiex_skipped"] is True
-    assert event["taiex_error"] is None
+    assert TAIEX_SYMBOL not in asked
+    assert asked
+    assert event["stored"] == 7
     assert event["failed"] == []
     assert event["succeeded"] == ["^DJI"]
-
-
-@pytest.mark.asyncio
-async def test_an_enabled_twse_counts_its_rows_and_is_not_marked_skipped(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    outcome, event = await _run_refresh(monkeypatch, twse_enabled=True, taiex_rows=21)
-
-    assert outcome == "complete"
-    assert event["taiex_skipped"] is False
-    # Seven Yahoo rows plus twenty-one TAIEX rows.
-    assert event["stored"] == 28
-    assert event["succeeded"] == ["^DJI", "^TWII"]
+    # Nothing in the event speaks for a provider this job does not use.
+    assert not [key for key in event if "taiex" in key]

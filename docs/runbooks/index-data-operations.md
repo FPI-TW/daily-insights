@@ -32,9 +32,11 @@ Before enabling the feature in production, confirm all of the following:
    current terms, permitted use, rate limits, and any required attribution have
    been reviewed by the product/legal owner. Record the decision in the release
    ticket; do not infer a license from a successful request.
-   `DAILY_INSIGHTS_TWSE_ENABLED=true` is required alongside it: ^TWII is supplied
-   by the exchange rather than Yahoo, and the scheduler refreshes both on every
-   run. Leaving it false makes every run report a failure and retry until noon.
+   `DAILY_INSIGHTS_TWSE_ENABLED=true` is a separate gate for ^TWII, which the
+   exchange supplies rather than Yahoo. It is refreshed by the TWSE run
+   alongside the institutional flows, not by this scheduler, because the two
+   share one client and one request interval. Leaving it false stops ^TWII and
+   the flows together and leaves the eight Yahoo symbols unaffected.
 2. The scheduler and its 08:00 Asia/Taipei run are deployed, and the admin-only
    **Index data** page is reachable by an administrator.
 3. When a release adds a tracked symbol, deploy the API and scheduler image

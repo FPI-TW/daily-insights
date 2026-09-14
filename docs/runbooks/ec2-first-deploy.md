@@ -131,11 +131,13 @@ Daily news 除 always-required `DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 與啟用時�
 Compose 會使用列出的 defaults。若有設定 model API base URL，啟用 daily news 時必須是
 absolute HTTPS URL。
 
-`DAILY_INSIGHTS_YFINANCE_ENABLED` 控制 `index-daily-bars-scheduler` 與後台 Yahoo
-抓取；`DAILY_INSIGHTS_TWSE_ENABLED` 控制 `institutional-flows-scheduler` 每天台北
-17:00 排入三大法人回補，**同時也控制 `index-daily-bars-scheduler` 的 ^TWII** ——
-該指數改由證交所供應，兩個旗標缺一不可。只設 `YFINANCE_ENABLED` 的話，排程每天
-會因 ^TWII 失敗而回報 failed，並連帶把 Yahoo 那八檔一路重試到中午。`DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 控制
+`DAILY_INSIGHTS_YFINANCE_ENABLED` 控制 `index-daily-bars-scheduler` 與後台的國際
+指數抓取，範圍是 Yahoo 供應的那八檔；`DAILY_INSIGHTS_TWSE_ENABLED` 控制
+`institutional-flows-scheduler` 每天台北 17:00 排入的證交所回補，**^TWII 的日線
+也在其中** —— 該指數改由證交所供應，與三大法人共用同一個 TWSE client 與請求間隔，
+因此由同一筆 run 更新。`index-daily-bars-scheduler` 不需要、也不應該拿到
+`DAILY_INSIGHTS_TWSE_ENABLED`：那個容器不會連到證交所。
+`DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 控制
 `daily-news-scheduler` 每天台北 08:00 排入 initial `news_all`；scheduler 只寫入
 durable queue，`data-management-worker` 才會執行新聞 provider request 與逐市場重試。
 `DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED` 則控制 analyst viewpoints scheduler 與

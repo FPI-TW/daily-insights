@@ -762,41 +762,32 @@ async def _execute_index_refresh(
             for symbol in YFINANCE_INDICES
         )
         failed_count += len(YFINANCE_INDICES)
-    taiex_entry = await _refresh_taiex(run, session_factory, settings)
-    symbols.append(taiex_entry)
-    if taiex_entry["status"] == "failed":
-        failed_count += 1
-    has_partial_result = taiex_entry["status"] == "partial"
     succeeded_count = len(symbols) - failed_count
     return (
-        "failed"
-        if not succeeded_count
-        else "partial"
-        if failed_count or has_partial_result
-        else "succeeded",
+        "failed" if not succeeded_count else "partial" if failed_count else "succeeded",
         {"period": AUTOMATIC_SHORT_REFRESH_PERIOD, "symbols": symbols},
-        "index_symbol_failures" if failed_count or has_partial_result else None,
+        "index_symbol_failures" if failed_count else None,
     )
 
 
 async def _refresh_taiex(
-    run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
+    run: DataManagementRun,
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    adapter: TwseAdapter,
 ) -> dict[str, object]:
-    """^TWII from TWSE, as one entry in the run's symbol list.
+    """^TWII from TWSE, as one entry in the run's result.
 
     The window is the edition month plus the one before it, so a run on the
     first of a month still repairs the end of the previous one. That mirrors why
     the Yahoo window is a week rather than a day; the store upserts, so the
     overlap costs nothing but the requests.
+
+    The adapter is the run's, not this function's: it carries the interval TWSE
+    is asked at, and a second client would halve it. That is the reason ^TWII
+    rides with the institutional walk rather than with the Yahoo symbols it is
+    displayed next to.
     """
-    if not settings.twse_enabled:
-        return {"symbol": TAIEX_SYMBOL, "status": "failed", "error": "twse_unavailable"}
-    adapter = TwseAdapter(
-        base_url=settings.twse_base_url,
-        timeout_seconds=settings.twse_timeout_seconds,
-        request_interval_seconds=settings.twse_request_interval_seconds,
-        max_attempts=settings.twse_retry_attempts,
-    )
     try:
         # Two scopes on purpose: the month selection is one short read, and the
         # refresh below opens its own transaction per month so that minutes of
@@ -819,8 +810,6 @@ async def _refresh_taiex(
             "status": "failed",
             "error": sanitize_item_error(error),
         }
-    finally:
-        await adapter.close()
     entry: dict[str, object] = {
         "symbol": TAIEX_SYMBOL,
         "status": "succeeded" if not refreshed.failed_months else "partial",
@@ -924,7 +913,15 @@ async def _fetch_flows_back[Flows: _TwseFlows](
 async def _execute_institutional_twse(
     run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
 ) -> tuple[str, dict[str, object], str | None]:
-    """Per-stock flows for the edition date only; market flows back to 40."""
+    """Everything TWSE supplies, in one walk: ^TWII's daily bars, per-stock
+    flows for the edition date, and market flows back to 40 trading days.
+
+    One run rather than one per dataset because TWSE is asked at a fixed
+    interval, and that interval is a property of the client, not of the
+    schedule: two runs holding two adapters would ask twice as often as either
+    of them believes it is asking. The queue serialises runs, so one adapter
+    per run is one adapter against TWSE.
+    """
     if not settings.twse_enabled:
         return "failed", {}, "twse_unavailable"
 
@@ -950,6 +947,10 @@ async def _execute_institutional_twse(
         request_interval_seconds=settings.twse_request_interval_seconds,
         max_attempts=settings.twse_retry_attempts,
     ) as adapter:
+        # First, and inside the same adapter: the chart it feeds is the one the
+        # flows are drawn on, and a reader comparing them wants both to have
+        # moved in the same run.
+        taiex = await _refresh_taiex(run, session_factory, adapter=adapter)
         stock = await _fetch_flows_back(
             edition_date=run.edition_date,
             existing=existing_stock,
@@ -979,12 +980,17 @@ async def _execute_institutional_twse(
     failures = stock.failures + market.failures
     covered = stock.covered_trading_days + market.covered_trading_days
     wanted = stock.lookback_trading_days + market.lookback_trading_days
+    taiex_failed = taiex["status"] == "failed"
     if not covered:
         status, error_code = "failed", "twse_fetch_failures" if failures else "twse_no_coverage"
     elif failures:
         status, error_code = "partial", "twse_fetch_failures"
     elif covered < wanted:
         status, error_code = "partial", "twse_partial_coverage"
+    elif taiex_failed or taiex["status"] == "partial":
+        # The flows are whole and the index is not; the run is not a success and
+        # the entry below says which months are missing.
+        status, error_code = "partial", "twse_index_failure"
     else:
         status, error_code = "succeeded", None
     return (
@@ -992,6 +998,7 @@ async def _execute_institutional_twse(
         {
             "market_code": INSTITUTIONAL_MARKET_CODE,
             "request_interval_seconds": settings.twse_request_interval_seconds,
+            "index": taiex,
             "stock_flows": stock.summary(),
             "market_flows": market.summary(),
         },

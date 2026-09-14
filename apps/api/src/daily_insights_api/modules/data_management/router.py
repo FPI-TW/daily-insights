@@ -104,13 +104,10 @@ async def create_run(
     settings = request.app.state.settings
     if payload.operation.startswith("morning") and not settings.morning_reports_enabled:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "morning reports are unavailable")
-    # The index run covers both providers now: Yahoo for eight symbols and TWSE
-    # for ^TWII. Either one alone still has work to do, so only both being off
-    # makes the run unavailable.
-    if payload.operation == "index_yahoo" and not (
-        settings.yfinance_enabled or settings.twse_enabled
-    ):
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "no index data source is enabled")
+    if payload.operation == "index_yahoo" and not settings.yfinance_enabled:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "yfinance is unavailable")
+    # ^TWII rides with this one: everything TWSE supplies shares one client and
+    # one request interval, so it shares one run and one flag.
     if payload.operation == "institutional_twse" and not settings.twse_enabled:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "twse is unavailable")
     if payload.operation.startswith("news") and not settings.daily_news_enabled:

@@ -1,9 +1,16 @@
-"""Queue the daily TWSE institutional-flow run at Taipei 17:00.
+"""Queue the daily TWSE data run at Taipei 17:00.
+
+Everything the exchange supplies goes through this one schedule: ^TWII's daily
+bars as well as the institutional flows. Not because they belong together as
+data -- ^TWII is displayed beside eight Yahoo indices -- but because they are
+asked of the same host at a fixed interval, and that interval lives in the
+client. Two schedulers holding two clients would each keep to six seconds and
+together ask every three.
 
 This one queues rather than fetches. The adapter spaces its own requests six
 seconds apart, which only holds while a single walk is in flight, and that is
-what the data-management queue guarantees: one institutional run at a time,
-whether an administrator pressed the button or this scheduler did.
+what the data-management queue guarantees: one TWSE run at a time, whether an
+administrator pressed the button or this scheduler did.
 
 17:00 because TWSE publishes the day's figures around 16:00. A run queued
 before that finds the date unpublished, records it and moves on, so the walk
@@ -41,9 +48,10 @@ RETRY_POLICY = SameDayRetry(until=time(hour=21))
 async def queue_run(session_factory: async_sessionmaker[AsyncSession]) -> str:
     """Queue one run, treating an already-active one as this day's run.
 
-    The worker executes it, and the walk skips dates already stored, so a queue
-    that lands on an afternoon TWSE has not published yet costs one request per
-    missing date and the next day's run fills the gap.
+    The worker executes it -- ^TWII's months first, then the flow walks -- and
+    the walk skips dates already stored, so a queue that lands on an afternoon
+    TWSE has not published yet costs one request per missing date and the next
+    day's run fills the gap.
     """
     try:
         async with session_factory.begin() as database:
