@@ -132,11 +132,14 @@ async def run_refresh(
         if taiex_skipped
         else await _refresh_taiex(session_factory, settings=settings, months_back=taiex_months_back)
     )
+    succeeded = [entry.result.symbol for entry in refreshed]
+    if not taiex_skipped and taiex_error is None:
+        succeeded.append(TAIEX_SYMBOL)
     emit_event(
         "index_daily_bars.refreshed",
         period=period,
         stored=sum(entry.stored_count for entry in refreshed) + taiex_stored,
-        succeeded=[entry.result.symbol for entry in refreshed],
+        succeeded=succeeded,
         failed=[entry.symbol for entry in failures]
         + ([TAIEX_SYMBOL] if taiex_error is not None else []),
         taiex_months=taiex_months_back,

@@ -315,6 +315,58 @@ async def test_yahoo_execution_uses_the_incremental_period_and_keeps_symbol_erro
 
 
 @pytest.mark.asyncio
+async def test_index_execution_propagates_a_partial_taiex_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.modules.data_management import service
+
+    async def refresh_yahoo(*_: object, **__: object) -> tuple[list[object], list[object]]:
+        return (
+            [
+                SimpleNamespace(
+                    result=SimpleNamespace(
+                        symbol="^DJI",
+                        provenance=SimpleNamespace(
+                            fetched_at=datetime(2026, 9, 11, tzinfo=UTC),
+                            as_of=date(2026, 9, 10),
+                        ),
+                    ),
+                    stored_count=7,
+                )
+            ],
+            [],
+        )
+
+    async def select_months(*_: object, **__: object) -> tuple[date, ...]:
+        return (date(2026, 8, 1), date(2026, 9, 1))
+
+    async def refresh_taiex(*_: object, **__: object) -> TaiexRefresh:
+        return TaiexRefresh(
+            stored_count=21,
+            as_of=date(2026, 9, 10),
+            fetched_at=datetime(2026, 9, 11, tzinfo=UTC),
+            failed_months=("2026-08: DataSourceContractError: boom",),
+        )
+
+    monkeypatch.setattr(service, "YfinanceAdapter", lambda **_: object())
+    monkeypatch.setattr(service, "refresh_index_daily_bars", refresh_yahoo)
+    monkeypatch.setattr(service, "select_taiex_refresh_months", select_months)
+    monkeypatch.setattr(service, "refresh_taiex_daily_bars", refresh_taiex)
+
+    status, result, error = await execute_run(
+        _run("index_yahoo"),
+        cast(Any, _StubSessionFactory()),
+        Settings(environment="test", yfinance_enabled=True, twse_enabled=True),
+    )
+
+    assert status == "partial"
+    assert error == "index_symbol_failures"
+    symbols = cast(list[dict[str, object]], result["symbols"])
+    taiex = next(item for item in symbols if item["symbol"] == TAIEX_SYMBOL)
+    assert taiex["status"] == "partial"
+
+
+@pytest.mark.asyncio
 async def test_news_execution_routes_market_and_all_runs_and_closes_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

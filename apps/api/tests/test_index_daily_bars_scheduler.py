@@ -114,6 +114,7 @@ async def test_a_disabled_twse_is_skipped_rather_than_failing_the_whole_run(
     assert event["taiex_skipped"] is True
     assert event["taiex_error"] is None
     assert event["failed"] == []
+    assert event["succeeded"] == ["^DJI"]
 
 
 @pytest.mark.asyncio
@@ -126,3 +127,4 @@ async def test_an_enabled_twse_counts_its_rows_and_is_not_marked_skipped(
     assert event["taiex_skipped"] is False
     # Seven Yahoo rows plus twenty-one TAIEX rows.
     assert event["stored"] == 28
+    assert event["succeeded"] == ["^DJI", "^TWII"]

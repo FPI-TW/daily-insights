@@ -766,11 +766,16 @@ async def _execute_index_refresh(
     symbols.append(taiex_entry)
     if taiex_entry["status"] == "failed":
         failed_count += 1
+    has_partial_result = taiex_entry["status"] == "partial"
     succeeded_count = len(symbols) - failed_count
     return (
-        "failed" if not succeeded_count else "partial" if failed_count else "succeeded",
+        "failed"
+        if not succeeded_count
+        else "partial"
+        if failed_count or has_partial_result
+        else "succeeded",
         {"period": AUTOMATIC_SHORT_REFRESH_PERIOD, "symbols": symbols},
-        "index_symbol_failures" if failed_count else None,
+        "index_symbol_failures" if failed_count or has_partial_result else None,
     )
 
 
