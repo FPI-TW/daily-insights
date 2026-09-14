@@ -275,28 +275,20 @@ function AnalystViewpoints({
   )
 }
 
-/** Freshness line above the blocks: a stale marker with its reason and the
- * report-level caveat when the pipeline attached one. */
-function ReportFreshness({ report }: { report: ProvisionalReport }) {
+/** Notices above the blocks: the partial-status badge and the report-level
+ * caveat when the pipeline attached one. Source freshness (the API's stale
+ * flag and its reason code) is an operator signal and is never shown here. */
+function ReportNotices({ report }: { report: ProvisionalReport }) {
   const { t } = useTranslation()
-  if (!report.stale && !report.caveat && report.status !== "partial")
-    return null
+  if (!report.caveat && report.status !== "partial") return null
   return (
     <div className="mb-4 text-xs text-sea-ink-soft">
-      <div className="flex flex-wrap items-center gap-2">
-        {report.stale ? (
-          <span className="rounded-full border border-market-caution/50 bg-market-caution/10 px-2 py-0.5 font-bold text-market-caution">
-            {t("reportStale")}
-          </span>
-        ) : null}
-        {report.status === "partial" ? (
+      {report.status === "partial" ? (
+        <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full border border-line px-2 py-0.5 font-bold">
             {t("reportStatusPartial")}
           </span>
-        ) : null}
-      </div>
-      {report.stale && report.staleReason ? (
-        <p className="mt-1 mb-0">{report.staleReason}</p>
+        </div>
       ) : null}
       {report.caveat ? <p className="mt-1 mb-0">{report.caveat}</p> : null}
     </div>
@@ -322,7 +314,7 @@ export function ReportDetail({
   const loneNarrowBlock = narrowBlocks.length === 1 && !leadingBlock
   return (
     <>
-      <ReportFreshness report={report} />
+      <ReportNotices report={report} />
       {viewpoint ? <MarketViewpoint viewpoint={viewpoint} /> : null}
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">
         {leadingBlock ? <div className="min-w-0">{leadingBlock}</div> : null}

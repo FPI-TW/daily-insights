@@ -1,4 +1,4 @@
-from typing import Annotated, cast
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
@@ -11,23 +11,19 @@ from daily_insights_api.modules.data_management.schemas import (
     DataManagementRunCreate,
     DataManagementRunList,
     DataManagementRunResponse,
-    IndexYahooRunResponse,
-    InstitutionalTwseRunResponse,
-    MacroDashboardRunResponse,
-    MorningAllRunResponse,
-    MorningMarketRunResponse,
-    NewsAllRunResponse,
-    NewsMarketRunResponse,
+    NewsResumeRequest,
     RunOperationGroup,
+    run_response,
 )
 from daily_insights_api.modules.data_management.service import (
     RunAlreadyActiveError,
     cancel_run,
     enqueue_run,
+    resume_news_run,
     taipei_today,
 )
 from daily_insights_api.modules.identity.api import AuthContext, require_csrf_roles, require_roles
-from daily_insights_api.modules.news.api import EDITION_ORDER
+from daily_insights_api.modules.news.api import EDITION_ORDER, NewsProgress, NewsWorkflow
 from daily_insights_api.modules.reports.api import ACTIVE_LAUNCH_MANIFEST
 from daily_insights_api.web.dependencies import get_database_session
 
@@ -36,39 +32,7 @@ AdminRead = Annotated[AuthContext, Depends(require_roles(SystemRole.ADMIN))]
 AdminWrite = Annotated[AuthContext, Depends(require_csrf_roles(SystemRole.ADMIN))]
 
 
-def response(run: DataManagementRun) -> DataManagementRunResponse:
-    values = dict(
-        id=run.id,
-        edition_date=run.edition_date,
-        status=run.status,
-        requested_by_user_id=run.requested_by_user_id,
-        created_at=run.created_at,
-        started_at=run.started_at,
-        completed_at=run.completed_at,
-        result=run.result,
-        error=run.error,
-    )
-    if run.operation == "morning_all":
-        return MorningAllRunResponse(operation="morning_all", market_code=None, **values)
-    if run.operation == "morning_market":
-        return MorningMarketRunResponse(
-            operation="morning_market",
-            market_code=cast(str, run.market_code),
-            **values,
-        )
-    if run.operation == "institutional_twse":
-        return InstitutionalTwseRunResponse(
-            operation="institutional_twse", market_code=None, **values
-        )
-    if run.operation == "news_all":
-        return NewsAllRunResponse(operation="news_all", market_code=None, **values)
-    if run.operation == "news_market":
-        return NewsMarketRunResponse(
-            operation="news_market", market_code=cast(str, run.market_code), **values
-        )
-    if run.operation == "macro_dashboard":
-        return MacroDashboardRunResponse(operation="macro_dashboard", market_code=None, **values)
-    return IndexYahooRunResponse(operation="index_yahoo", market_code=None, **values)
+response = run_response
 
 
 @router.get("/catalog", response_model=DataManagementCatalog)
@@ -174,11 +138,72 @@ async def list_runs(
 ) -> DataManagementRunList:
     statement = select(DataManagementRun)
     if operation_group == "news":
-        statement = statement.where(DataManagementRun.operation.in_(("news_all", "news_market")))
+        statement = statement.where(
+            DataManagementRun.operation.in_(("news_all", "news_market", "news_publish"))
+        )
     runs = (
         await database.scalars(statement.order_by(DataManagementRun.created_at.desc()).limit(limit))
     ).all()
-    return DataManagementRunList(items=[response(run) for run in runs])
+    return DataManagementRunList(
+        items=[response(run, news=await _news_progress(database, run)) for run in runs]
+    )
+
+
+async def _news_progress(
+    database: AsyncSession, run: DataManagementRun
+) -> dict[str, NewsProgress] | None:
+    if not run.operation.startswith("news") or run.status not in {"pending", "running"}:
+        return None
+    workflows = (
+        await database.scalars(select(NewsWorkflow).where(NewsWorkflow.run_id == run.id))
+    ).all()
+    return {
+        row.market_code: NewsProgress(
+            id=str(row.id),
+            state=row.state,
+            stage=row.stage,
+            progress=row.progress,
+            failures=row.failures,
+            attempt=row.attempt,
+            next_retry_at=row.next_retry_at,
+            publication="technical_degradation"
+            if row.failures
+            else "editorial_shortfall"
+            if row.progress.get("published", 0) < 5
+            else "available",
+        )
+        for row in workflows
+    } or None
+
+
+@router.post(
+    "/runs/{run_id}/resume",
+    response_model=DataManagementRunResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def resume_run(
+    run_id: str,
+    payload: NewsResumeRequest,
+    request: Request,
+    actor: AdminWrite,
+    database: Annotated[AsyncSession, Depends(get_database_session)],
+) -> DataManagementRunResponse:
+    import uuid
+
+    try:
+        parsed = uuid.UUID(run_id)
+        run = await resume_news_run(
+            database,
+            run_id=parsed,
+            actor_user_id=actor.user.id,
+            request_id=request.state.request_id,
+            resume_provider=payload.resume_provider,
+        )
+    except ValueError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
+    except RunAlreadyActiveError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, "news recovery already active") from error
+    return response(run)
 
 
 @router.get("/runs/{run_id}", response_model=DataManagementRunResponse)
@@ -194,4 +219,4 @@ async def get_run(
     run = await database.get(DataManagementRun, parsed)
     if run is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found")
-    return response(run)
+    return response(run, news=await _news_progress(database, run))

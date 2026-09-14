@@ -21,6 +21,7 @@ from daily_insights_api.modules.model_runtime.models import (
     ModelConfiguration,
 )
 from daily_insights_api.modules.news.models import (
+    NewsCandidate,
     NewsEdition,
     NewsGenerationAudit,
     NewsItem,
@@ -53,6 +54,7 @@ __all__ = [
     "Membership",
     "Message",
     "ModelConfiguration",
+    "NewsCandidate",
     "NewsEdition",
     "NewsGenerationAudit",
     "NewsItem",

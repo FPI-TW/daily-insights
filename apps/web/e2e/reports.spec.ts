@@ -22,11 +22,11 @@ test("customer login opens reports, then a market detail without mobile overflow
   await expect(page).toHaveURL("/en/reports")
   await page
     .getByRole("navigation", { name: "Market category navigation" })
-    .getByRole("link", { name: "Global macro & bonds" })
+    .getByRole("link", { name: "Global macro", exact: true })
     .click()
   await expect(page).toHaveURL("/en/reports/global_macro_bonds")
   await expect(
-    page.getByRole("heading", { name: "Global macro & bonds", level: 1 })
+    page.getByRole("heading", { name: "Global macro", level: 1, exact: true })
   ).toBeVisible()
   await expect(
     page.getByRole("heading", {
@@ -163,7 +163,11 @@ for (const [locale, heading, cumulative, foreign, days60] of [
       .getByRole("heading", { name: heading, level: 3 })
       .locator("xpath=ancestor::section[2]")
     await expect(section).toBeVisible()
-    await expect(section.getByText("2026-09-04").first()).toBeVisible()
+    // The stock tables no longer carry a dated closing note; the latest net
+    // flow figure is the panel's own "data arrived" signal.
+    await expect(
+      section.getByText(locale === "en" ? "Latest" : "最新", { exact: true })
+    ).toBeVisible()
     await expect(section.getByRole("button", { pressed: true })).toHaveCount(3)
     await expect(
       section.getByText(locale === "en" ? "TSMC" : "台積電")

@@ -25,7 +25,8 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
         CheckConstraint(
             (
                 "operation IN ('morning_all', 'morning_market', 'index_yahoo', "
-                "'institutional_twse', 'news_all', 'news_market', 'macro_dashboard')"
+                "'institutional_twse', 'news_all', 'news_market', 'news_publish', "
+                "'macro_dashboard')"
             ),
             name="operation_valid",
         ),
@@ -40,7 +41,7 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
             "(operation = 'news_market' AND market_code IN "
             "('global', 'tw_equity', 'us_equity')) OR "
             "(operation IN ('morning_all', 'index_yahoo', 'institutional_twse', 'news_all', "
-            "'macro_dashboard') "
+            "'news_publish', 'macro_dashboard') "
             "AND market_code IS NULL)"
             ")",
             name="market_code_valid_for_operation",
@@ -100,6 +101,16 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
                 "AND scheduled_for IS NOT NULL"
             ),
         ),
+        # Manual publishes are their own class: one at a time, but they never
+        # wait for (or block) a news rerun.
+        Index(
+            "uq_data_management_runs_active_news_publish",
+            text("(1)"),
+            unique=True,
+            postgresql_where=text(
+                "status IN ('pending', 'running') AND operation = 'news_publish'"
+            ),
+        ),
         Index(
             "uq_data_management_runs_active_manual_macro_dashboard",
             text("(1)"),
@@ -124,6 +135,7 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
             postgresql_where=text("operation = 'macro_dashboard' AND requested_by_user_id IS NULL"),
         ),
         Index("ix_data_management_runs_created_at", "created_at"),
+        Index("uq_data_management_runs_resume_of", "resume_of_id", unique=True),
     )
 
     operation: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -143,10 +155,15 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
     # soon as they are queued.  Automatic market retry rows are not claimable
     # until this durable Taipei-time timestamp.
     scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resume_of_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     error: Mapped[str | None] = mapped_column(String(500))
+    # Operation input that cannot be expressed by operation/market/date alone;
+    # only news_publish uses it ({"edition_id": ..., "candidate_ids": [...]}).
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

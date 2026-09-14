@@ -201,7 +201,7 @@ async def test_market_news_is_policy_gated_and_unknown_markets_are_not_found(
 
     assert visible_response.status_code == 200
     assert visible_response.json()["market_code"] == "us_equity"
-    assert visible_response.json()["target_items"] == 8
+    assert visible_response.json()["target_items"] == 5
     assert visible_response.json()["status"] == "unavailable"
     assert hidden_response.status_code == 404
     assert unknown_response.status_code == 404
