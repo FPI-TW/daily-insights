@@ -438,18 +438,10 @@ describe("DataManagementPage", () => {
     )
     // The run detail says how much of each window was actually covered, which
     // is what tells an operator whether to run it again.
-    expect(
-      screen.getByText(/stock_flows · covered_trading_days: 7 \/ 7/)
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText(/market_flows · covered_trading_days: 39 \/ 40/)
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText(/2026-09-04 · stored · record_count: 6700/)
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText(/2026-09-04 · failed · error: boom/)
-    ).toBeInTheDocument()
+    expect(screen.getByText("Covered 7 / 7 trading days")).toBeInTheDocument()
+    expect(screen.getByText("Covered 39 / 40 trading days")).toBeInTheDocument()
+    expect(screen.getByText("6700")).toBeInTheDocument()
+    expect(screen.getByText("boom")).toBeInTheDocument()
   })
 
   it("disables the Taiwan rerun when TWSE is off, and its own run locks only itself", async () => {

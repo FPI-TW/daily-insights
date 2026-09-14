@@ -5,6 +5,7 @@ import { useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Dialog } from "#/components/Dialog"
 import { MacroSourceDiagnostics } from "#/components/MacroSourceDiagnostics"
+import { TaiwanSourceDiagnostics } from "#/components/TaiwanSourceDiagnostics"
 import { browserAdministrationClient } from "#/lib/admin-members"
 import { requireCsrfToken } from "#/lib/auth"
 import { marketTabLabel } from "#/lib/markets"
@@ -275,6 +276,11 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
               </summary>
               {run.operation === "macro_dashboard" ? (
                 <MacroSourceDiagnostics result={run.result} error={run.error} />
+              ) : run.operation === "institutional_twse" ? (
+                <TaiwanSourceDiagnostics
+                  result={run.result}
+                  error={run.error}
+                />
               ) : (
                 <RunDetail result={run.result} error={run.error} />
               )}
@@ -419,7 +425,7 @@ function RunDetail({
           const item = symbol as Record<string, unknown>
           return (
             <li key={`${String(item.symbol)}-${index}`}>
-              {`${String(item.symbol)} · ${String(item.status)} · record_count: ${String(item.record_count ?? "—")} · fetched_at: ${String(item.fetched_at ?? "—")} · source_as_of: ${String(item.source_as_of ?? "—")}${item.error ? ` · error: ${String(item.error)}` : ""}`}
+              {`Yahoo Finance · ${String(item.symbol)} · ${String(item.status)} · record_count: ${String(item.record_count ?? "—")} · fetched_at: ${String(item.fetched_at ?? "—")} · source_as_of: ${String(item.source_as_of ?? "—")}${item.error ? ` · error: ${String(item.error)}` : ""}`}
             </li>
           )
         })}
