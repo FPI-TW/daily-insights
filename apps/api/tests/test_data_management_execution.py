@@ -424,13 +424,17 @@ def _weekdays_before(day: date, count: int) -> set[date]:
 async def test_institutional_twse_rerun_whose_only_fetch_fails_is_partial_not_failed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A re-run stores nothing because every older date is already covered, so
-    `stored_rows` cannot tell a healthy window from an empty one."""
+    """A re-run covers its whole window from storage and the refresh window, so
+    `stored_rows` cannot tell a healthy window from an empty one. The edition
+    date is stored and its refresh is the fetch that fails: the rows behind it
+    still cover that day, so the run is partial over one failed refresh rather
+    than short of its window."""
     from daily_insights_api.modules.data_management import service
 
     edition = date(2026, 9, 7)
-    stored_market = _weekdays_before(edition, 40)
+    stored_market = _weekdays_before(edition, 39) | {edition}
     stored_stock = _weekdays_before(edition, 1)
+    asked: list[date] = []
 
     class Adapter:
         def __init__(self, **_: object) -> None:
@@ -443,19 +447,29 @@ async def test_institutional_twse_rerun_whose_only_fetch_fails_is_partial_not_fa
             return None
 
         async def get_stock_flows(self, trade_date: date) -> SimpleNamespace:
+            asked.append(trade_date)
             if trade_date == edition:
                 raise DataSourceError("boom")
+            # The refresh window re-asks stored weekdays; weekends never traded.
             return SimpleNamespace(
-                trade_date=trade_date, items=(), fetched_at=datetime(2026, 9, 7, 9, tzinfo=UTC)
+                trade_date=trade_date,
+                items=() if trade_date.weekday() >= 5 else (object(),),
+                fetched_at=datetime(2026, 9, 7, 9, tzinfo=UTC),
             )
 
         get_market_flows = get_stock_flows
 
     async def existing(*_: object, **kwargs: object) -> set[date]:
-        return stored_market if kwargs["flows"] is InstitutionalMarketFlow else stored_stock
+        # Copies, like the real query: the run drops dates from what it is given.
+        return set(stored_market if kwargs["flows"] is InstitutionalMarketFlow else stored_stock)
+
+    async def record(_: object, *, market_code: str, flows: SimpleNamespace) -> int:
+        return len(flows.items)
 
     monkeypatch.setattr(service, "TwseAdapter", Adapter)
     monkeypatch.setattr(service, "stored_flow_dates", existing)
+    monkeypatch.setattr(service, "store_institutional_stock_flows", record)
+    monkeypatch.setattr(service, "store_institutional_market_flows", record)
 
     run = _run("institutional_twse")
     run.edition_date = edition
@@ -466,6 +480,213 @@ async def test_institutional_twse_rerun_whose_only_fetch_fails_is_partial_not_fa
     assert (status, error) == ("partial", "twse_fetch_failures")
     assert cast(dict[str, Any], result["market_flows"])["covered_trading_days"] == 40
     assert cast(dict[str, Any], result["stock_flows"])["covered_trading_days"] == 1
+    # The failed refresh did not cost the window a day, so the walk stopped on
+    # the oldest date it already held instead of buying another one behind it.
+    assert min(asked) >= min(stored_market)
+
+
+@pytest.mark.asyncio
+async def test_institutional_twse_refetches_the_newest_stored_days_and_trusts_the_rest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TWSE corrects a published report for days afterwards, so the newest
+    market days are re-asked; the settled ones behind them stay untouched."""
+    from daily_insights_api.modules.data_management import service
+
+    edition = date(2026, 9, 7)
+    stored_market = _weekdays_before(edition, 39) | {edition}
+    refreshed = set(sorted(stored_market, reverse=True)[: service.MARKET_FLOW_REFRESH_TRADING_DAYS])
+    settled = stored_market - refreshed
+    asked: list[date] = []
+    stored: list[date] = []
+
+    class Adapter:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "Adapter":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def get_stock_flows(self, trade_date: date) -> SimpleNamespace:
+            asked.append(trade_date)
+            return SimpleNamespace(
+                trade_date=trade_date,
+                items=(object(),) if trade_date in stored_market else (),
+                fetched_at=datetime(2026, 9, 7, 16, 30, tzinfo=UTC),
+            )
+
+        get_market_flows = get_stock_flows
+
+    async def existing(*_: object, **kwargs: object) -> set[date]:
+        # A copy, like the real query: the run drops dates from what it is given.
+        return set(stored_market) if kwargs["flows"] is InstitutionalMarketFlow else {edition}
+
+    async def record(_: object, *, market_code: str, flows: SimpleNamespace) -> int:
+        stored.append(flows.trade_date)
+        return 1
+
+    monkeypatch.setattr(service, "TwseAdapter", Adapter)
+    monkeypatch.setattr(service, "stored_flow_dates", existing)
+    monkeypatch.setattr(service, "store_institutional_stock_flows", record)
+    monkeypatch.setattr(service, "store_institutional_market_flows", record)
+
+    run = _run("institutional_twse")
+    run.edition_date = edition
+    status, result, error = await execute_run(
+        run, cast(Any, _StubSessionFactory()), Settings(environment="test", twse_enabled=True)
+    )
+
+    assert (status, error) == ("succeeded", None)
+    # Seven market days re-asked and overwritten, the other 33 covered from
+    # storage without a request, and the edition date re-asked by both walks.
+    assert set(asked) & stored_market == refreshed
+    assert not set(asked) & settled
+    assert set(stored) == refreshed
+    # The edition date is stored twice: once by each walk.
+    assert len(stored) == len(refreshed) + 1
+    assert asked.count(edition) == 2
+    assert cast(dict[str, Any], result["market_flows"])["covered_trading_days"] == 40
+
+
+@pytest.mark.asyncio
+async def test_institutional_twse_keeps_stored_rows_when_the_refresh_comes_back_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refreshed date the source will not serve right now must not un-cover
+    the window: the rows are still there, so the walk stops where it should
+    instead of buying the same forty days further back."""
+    from daily_insights_api.modules.data_management import service
+
+    edition = date(2026, 9, 7)
+    stored_market = _weekdays_before(edition, 39) | {edition}
+    oldest_stored = min(stored_market)
+    asked: list[date] = []
+    stored: list[date] = []
+
+    class Adapter:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "Adapter":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def get_stock_flows(self, trade_date: date) -> SimpleNamespace:
+            asked.append(trade_date)
+            # TWSE answers every date with its no-data stat, refreshed or not.
+            return SimpleNamespace(
+                trade_date=trade_date,
+                items=(),
+                fetched_at=datetime(2026, 9, 7, 16, 30, tzinfo=UTC),
+            )
+
+        get_market_flows = get_stock_flows
+
+    async def existing(*_: object, **kwargs: object) -> set[date]:
+        return set(stored_market) if kwargs["flows"] is InstitutionalMarketFlow else {edition}
+
+    async def record(_: object, *, market_code: str, flows: SimpleNamespace) -> int:
+        stored.append(flows.trade_date)
+        return 1
+
+    monkeypatch.setattr(service, "TwseAdapter", Adapter)
+    monkeypatch.setattr(service, "stored_flow_dates", existing)
+    monkeypatch.setattr(service, "store_institutional_stock_flows", record)
+    monkeypatch.setattr(service, "store_institutional_market_flows", record)
+
+    run = _run("institutional_twse")
+    run.edition_date = edition
+    status, result, error = await execute_run(
+        run, cast(Any, _StubSessionFactory()), Settings(environment="test", twse_enabled=True)
+    )
+
+    assert (status, error) == ("succeeded", None)
+    assert not stored
+    # The per-stock window is one day wide, so a refresh that answers nothing
+    # must rest on the stored day rather than walk back and buy it again.
+    stock = cast(dict[str, Any], result["stock_flows"])
+    assert stock["covered_trading_days"] == 1
+    assert [(day["trade_date"], day["status"]) for day in stock["days"]] == [
+        (edition.isoformat(), "kept")
+    ]
+    market = cast(dict[str, Any], result["market_flows"])
+    assert market["covered_trading_days"] == 40
+    # The stored days that answered nothing are marked, not silently counted as
+    # a fetch, and the walk never reaches behind the window it already holds.
+    statuses = [day["status"] for day in market["days"]]
+    assert statuses.count("kept") == service.MARKET_FLOW_REFRESH_TRADING_DAYS
+    assert statuses.count("existing") == 40 - service.MARKET_FLOW_REFRESH_TRADING_DAYS
+    assert min(asked) >= oldest_stored
+
+
+@pytest.mark.asyncio
+async def test_institutional_twse_refreshes_the_stored_stock_day_on_a_non_trading_edition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The scheduler runs every day, weekends included. On a Saturday the market
+    walk corrects Friday, so the per-stock day it is read alongside has to be
+    corrected too rather than left at whatever Friday first published."""
+    from daily_insights_api.modules.data_management import service
+
+    saturday = date(2026, 9, 12)
+    friday = date(2026, 9, 11)
+    asked: list[date] = []
+    stored_stock: list[date] = []
+
+    class Adapter:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "Adapter":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def get_stock_flows(self, trade_date: date) -> SimpleNamespace:
+            asked.append(trade_date)
+            return SimpleNamespace(
+                trade_date=trade_date,
+                items=(object(),) if trade_date.weekday() < 5 else (),
+                fetched_at=datetime(2026, 9, 12, 17, tzinfo=UTC),
+            )
+
+        get_market_flows = get_stock_flows
+
+    async def existing(*_: object, **kwargs: object) -> set[date]:
+        return set() if kwargs["flows"] is InstitutionalMarketFlow else {friday}
+
+    async def record_stock(_: object, *, market_code: str, flows: SimpleNamespace) -> int:
+        stored_stock.append(flows.trade_date)
+        return 1
+
+    async def record_market(_: object, *, market_code: str, flows: SimpleNamespace) -> int:
+        return 1
+
+    monkeypatch.setattr(service, "TwseAdapter", Adapter)
+    monkeypatch.setattr(service, "stored_flow_dates", existing)
+    monkeypatch.setattr(service, "store_institutional_stock_flows", record_stock)
+    monkeypatch.setattr(service, "store_institutional_market_flows", record_market)
+
+    run = _run("institutional_twse")
+    run.edition_date = saturday
+    status, result, error = await execute_run(
+        run, cast(Any, _StubSessionFactory()), Settings(environment="test", twse_enabled=True)
+    )
+
+    assert (status, error) == ("succeeded", None)
+    assert stored_stock == [friday]
+    stock = cast(dict[str, Any], result["stock_flows"])
+    assert [(day["trade_date"], day["status"]) for day in stock["days"]] == [
+        (saturday.isoformat(), "no_data"),
+        (friday.isoformat(), "stored"),
+    ]
+    assert asked.count(friday) >= 1
 
 
 @pytest.mark.asyncio
@@ -514,6 +735,49 @@ async def test_institutional_twse_stops_walking_once_the_source_is_clearly_down(
 
 
 @pytest.mark.asyncio
+async def test_institutional_twse_outage_over_a_full_window_is_partial_not_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refresh window is asked first, so an outage spends the failure budget
+    before the walk ever reaches a date it holds. A run that still has forty
+    stored days has not lost them, and must not report as if it had."""
+    from daily_insights_api.modules.data_management import service
+
+    edition = date(2026, 9, 7)
+    stored_market = _weekdays_before(edition, 39) | {edition}
+
+    class Adapter:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "Adapter":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def get_stock_flows(self, _: date) -> SimpleNamespace:
+            raise DataSourceError("503 Service Unavailable")
+
+        get_market_flows = get_stock_flows
+
+    async def existing(*_: object, **kwargs: object) -> set[date]:
+        return set(stored_market) if kwargs["flows"] is InstitutionalMarketFlow else {edition}
+
+    monkeypatch.setattr(service, "TwseAdapter", Adapter)
+    monkeypatch.setattr(service, "stored_flow_dates", existing)
+
+    run = _run("institutional_twse")
+    run.edition_date = edition
+    status, result, error = await execute_run(
+        run, cast(Any, _StubSessionFactory()), Settings(environment="test", twse_enabled=True)
+    )
+
+    assert (status, error) == ("partial", "twse_fetch_failures")
+    assert cast(dict[str, Any], result["market_flows"])["aborted"] is True
+
+
+@pytest.mark.asyncio
 async def test_institutional_twse_reaching_no_trading_day_is_failed_not_succeeded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -554,15 +818,21 @@ async def test_institutional_twse_reaching_no_trading_day_is_failed_not_succeede
 
 
 @pytest.mark.asyncio
-async def test_institutional_twse_walks_back_to_forty_trading_days_without_refetching(
+async def test_institutional_twse_walks_back_to_forty_trading_days_refetching_only_the_newest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from daily_insights_api.modules.data_management import service
 
     edition = date(2026, 9, 7)  # Monday
-    # The five most recent weekdays are already stored: they must count toward
-    # the window without a request.
-    already_stored = {date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 3), date(2026, 9, 4)}
+    # Eleven weekdays are already stored. The refresh window is counted from the
+    # edition date, which is not among them, so it reaches the newest six of
+    # them; the five behind those are settled and must count toward the window
+    # without a request.
+    already_stored = _weekdays_before(edition, 11)
+    refreshed = set(
+        sorted(already_stored, reverse=True)[: service.MARKET_FLOW_REFRESH_TRADING_DAYS - 1]
+    )
+    settled = already_stored - refreshed
     fetched_market: list[date] = []
     fetched_stock: list[date] = []
     stored: list[tuple[str, date, int]] = []
@@ -596,8 +866,9 @@ async def test_institutional_twse_walks_back_to_forty_trading_days_without_refet
             return flows(trade_date, 0 if trade_date.weekday() >= 5 else 5)
 
     async def existing(*_: object, **kwargs: object) -> set[date]:
-        # Only the market table has history; the stock table starts empty.
-        return already_stored if kwargs["flows"] is InstitutionalMarketFlow else set()
+        # Only the market table has history; the stock table starts empty. The
+        # copy matters: the run drops dates from the set it is given.
+        return set(already_stored) if kwargs["flows"] is InstitutionalMarketFlow else set()
 
     async def store_market(_: object, *, market_code: str, flows: SimpleNamespace) -> int:
         stored.append((market_code, flows.trade_date, len(flows.items)))
@@ -625,12 +896,13 @@ async def test_institutional_twse_walks_back_to_forty_trading_days_without_refet
     assert stock["covered_trading_days"] == 1
     stock_statuses = [day["status"] for day in stock["days"]]
     assert stock_statuses == ["stored"]
-    assert already_stored.isdisjoint(fetched_market)
+    assert settled.isdisjoint(fetched_market)
+    assert refreshed <= set(fetched_market)
     market = cast(dict[str, Any], result["market_flows"])
     assert market["covered_trading_days"] == 40
     statuses = [day["status"] for day in market["days"]]
-    assert statuses.count("existing") == 4
-    assert statuses.count("stored") == 36
+    assert statuses.count("existing") == len(settled)
+    assert statuses.count("stored") == 40 - len(settled)
     assert statuses.count("failed") == 1
     assert all(
         status == "no_data"

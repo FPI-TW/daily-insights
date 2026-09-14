@@ -6,7 +6,18 @@ from datetime import date, datetime
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
 
-from sqlalchemy import Result, String, column, func, literal_column, select, true, update, values
+from sqlalchemy import (
+    Result,
+    String,
+    column,
+    delete,
+    func,
+    literal_column,
+    select,
+    true,
+    update,
+    values,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -639,7 +650,13 @@ async def store_institutional_market_flows(
 async def store_institutional_stock_flows(
     database: AsyncSession, *, market_code: str, flows: TwseStockFlows
 ) -> int:
-    """Upsert one day's per-stock flows, keyed on (trade_date, symbol, investor_type)."""
+    """Replace one day's per-stock flows with what this report lists.
+
+    Upserted on (trade_date, symbol, investor_type), then anything the report no
+    longer carries is dropped: TWSE republishes a corrected day as a whole
+    report, and a security it has taken out would otherwise keep its first
+    numbers and its place in a ranking that reads every row of the day.
+    """
     if not flows.items:
         return 0
     rows = [
@@ -675,6 +692,13 @@ async def store_institutional_stock_flows(
                 },
             )
         )
+    await database.execute(
+        delete(InstitutionalStockFlow).where(
+            InstitutionalStockFlow.trade_date == flows.trade_date,
+            InstitutionalStockFlow.market_code == market_code,
+            InstitutionalStockFlow.symbol.notin_({item.symbol for item in flows.items}),
+        )
+    )
     return len(rows)
 
 

@@ -3,6 +3,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 import pytest_asyncio
@@ -24,6 +25,7 @@ from daily_insights_api.modules.identity.api import AuthContext, require_passwor
 from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.identity.session_models import Session
 from daily_insights_api.modules.markets.api import (
+    institutional_stock_rows,
     store_institutional_market_flows,
     store_institutional_stock_flows,
     stored_flow_dates,
@@ -178,6 +180,64 @@ def _signed_in_client(
 
 
 @pytest.mark.asyncio
+async def test_a_corrected_stock_report_drops_the_securities_it_no_longer_lists(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """TWSE republishes a corrected day as a whole report. A security it has
+    taken out must not keep its first numbers: every row of the day is read, so
+    a leftover would hold a place in the ranking it no longer belongs in."""
+    first = datetime(2026, 9, 11, 16, tzinfo=UTC)
+    second = datetime(2026, 9, 11, 18, tzinfo=UTC)
+    day = date(2026, 9, 11)
+    async with session_factory.begin() as database:
+        await store_institutional_stock_flows(
+            database,
+            market_code="tw_equity",
+            flows=TwseStockFlows(
+                trade_date=day,
+                items=(
+                    TwseStockFlow("2330", "台積電", "foreign", 30, 10, 20),
+                    TwseStockFlow("2324", "仁寶", "foreign", 90, 10, 80),
+                ),
+                fetched_at=first,
+            ),
+        )
+        # An untouched neighbouring day must survive the correction.
+        await store_institutional_stock_flows(
+            database,
+            market_code="tw_equity",
+            flows=TwseStockFlows(
+                trade_date=date(2026, 9, 10),
+                items=(TwseStockFlow("2324", "仁寶", "foreign", 5, 1, 4),),
+                fetched_at=first,
+            ),
+        )
+    async with session_factory.begin() as database:
+        await store_institutional_stock_flows(
+            database,
+            market_code="tw_equity",
+            flows=TwseStockFlows(
+                trade_date=day,
+                items=(TwseStockFlow("2330", "台積電", "foreign", 40, 10, 30),),
+                fetched_at=second,
+            ),
+        )
+
+    async with session_factory() as database:
+        as_of, rows = await institutional_stock_rows(
+            database, market_code="tw_equity", on_or_before=day
+        )
+        assert as_of == day
+        assert [row.symbol for row in rows] == ["2330"]
+        assert rows[0].foreign_lots == Decimal("0.03")  # 30 shares, 1,000 to a lot
+        surviving = await database.scalars(
+            select(InstitutionalStockFlow.symbol).where(
+                InstitutionalStockFlow.trade_date == date(2026, 9, 10)
+            )
+        )
+        assert set(surviving) == {"2324"}
+
+
 async def test_market_flow_series_folds_five_categories_and_reports_in_hundred_millions(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:

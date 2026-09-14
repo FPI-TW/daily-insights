@@ -41,8 +41,9 @@ RETRY_POLICY = SameDayRetry(until=time(hour=21))
 async def queue_run(session_factory: async_sessionmaker[AsyncSession]) -> str:
     """Queue one run, treating an already-active one as this day's run.
 
-    The worker executes it, and the walk skips dates already stored, so a queue
-    that lands on an afternoon TWSE has not published yet costs one request per
+    The worker executes it, and the walk asks only for the dates it is missing
+    plus the newest few it re-asks because TWSE revises them, so a queue that
+    lands on an afternoon TWSE has not published yet costs one request per
     missing date and the next day's run fills the gap.
     """
     try:
