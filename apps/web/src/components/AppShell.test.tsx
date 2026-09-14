@@ -2,7 +2,7 @@ import type { User } from "@daily-insights/api-client"
 import type { AnchorHTMLAttributes, ReactNode } from "react"
 import { I18nextProvider } from "react-i18next"
 import { render, screen, within } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createI18n } from "#/lib/i18n"
 import { AppShell } from "./AppShell"
 
@@ -10,6 +10,7 @@ const router = vi.hoisted(() => ({
   invalidate: vi.fn(),
   navigate: vi.fn(),
 }))
+const location = vi.hoisted(() => ({ pathname: "/zh-hant/reports" }))
 
 type MockLinkProps = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & {
   children: ReactNode
@@ -30,8 +31,14 @@ vi.mock("@tanstack/react-router", () => ({
       {children}
     </a>
   ),
-  useLocation: () => ({ pathname: "/zh-hant/reports" }),
+  useLocation: () => location,
   useRouter: () => router,
+}))
+
+vi.mock("./ActiveIndicator", () => ({
+  ActiveIndicator: ({ activeKey }: { activeKey: string }) => (
+    <span data-testid="active-indicator" data-active-key={activeKey} />
+  ),
 }))
 
 vi.mock("#/lib/useSessionExpiry", () => ({
@@ -47,6 +54,10 @@ const user: User = {
   must_change_password: false,
   organization_id: "00000000-0000-4000-8000-000000000004",
 }
+
+beforeEach(() => {
+  location.pathname = "/zh-hant/reports"
+})
 
 describe("AppShell customer navigation", () => {
   it("renders the updated brand and navigation in the requested order", () => {
@@ -100,6 +111,39 @@ describe("AppShell customer navigation", () => {
     expect(screen.getByRole("link", { name: "前往晨間報告" })).toHaveAttribute(
       "href",
       "/zh-hant/reports"
+    )
+  })
+
+  it("remeasures the admin tab highlight after leaving news management", () => {
+    location.pathname = "/zh-hant/admin/news-management"
+    const view = (content: string) => (
+      <I18nextProvider i18n={createI18n("zh-hant")}>
+        <AppShell
+          locale="zh-hant"
+          user={{ ...user, system_role: "admin", organization_id: null }}
+          surface="admin"
+        >
+          <main>{content}</main>
+        </AppShell>
+      </I18nextProvider>
+    )
+    const rendered = render(view("News"))
+
+    expect(
+      within(rendered.container).getByTestId("active-indicator")
+    ).toHaveAttribute(
+      "data-active-key",
+      "zh-hant:/zh-hant/admin/news-management"
+    )
+
+    location.pathname = "/zh-hant/admin/data-management"
+    rendered.rerender(view("Data"))
+
+    expect(
+      within(rendered.container).getByTestId("active-indicator")
+    ).toHaveAttribute(
+      "data-active-key",
+      "zh-hant:/zh-hant/admin/data-management"
     )
   })
 })

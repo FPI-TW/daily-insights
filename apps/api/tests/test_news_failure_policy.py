@@ -1,7 +1,10 @@
+import socket
 from datetime import UTC, datetime, timedelta
 
+import httpcore
 import httpx
 import pytest
+from httpx._transports.default import map_httpcore_exceptions
 
 from daily_insights_api.modules.news.failures import classify_failure, retry_time
 
@@ -49,6 +52,28 @@ def test_unknown_bug_is_not_automatically_retried() -> None:
     failure = classify_failure(RuntimeError("private detail"), stage="selection")
     assert failure.action == "attention"
     assert "private detail" not in failure.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "error_number,expected",
+    [
+        (socket.EAI_NONAME, ("source_dns_configuration", "skip")),
+        (socket.EAI_AGAIN, ("network_error", "retry")),
+    ],
+)
+def test_wrapped_dns_failures_preserve_permanent_vs_transient_policy(
+    error_number: int, expected: tuple[str, str]
+) -> None:
+    resolution_error = socket.gaierror(error_number, "resolution failed")
+    transport_error = httpcore.ConnectError("unable to resolve destination")
+    transport_error.__cause__ = resolution_error
+
+    with pytest.raises(httpx.ConnectError) as captured:
+        with map_httpcore_exceptions():
+            raise transport_error
+
+    failure = classify_failure(captured.value, stage="article", scope="source:example.test")
+    assert (failure.code, failure.action) == expected
 
 
 @pytest.mark.parametrize(

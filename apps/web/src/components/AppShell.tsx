@@ -52,19 +52,6 @@ export function AppShell({
       : pathname.endsWith("/account")
         ? "account"
         : null
-  const adminSection = pathname.includes("/admin/audio")
-    ? "audio"
-    : pathname.includes("/admin/members")
-      ? "members"
-      : pathname.includes("/admin/data-management") ||
-          pathname.includes("/admin/news-management") ||
-          pathname.includes("/admin/index-data")
-        ? "data-management"
-        : pathname.includes("/admin/analyst-viewpoints")
-          ? "analyst-viewpoints"
-          : pathname.includes("/admin/conversations")
-            ? "conversations"
-            : null
   const reportMarketCode = marketCodes.find(code =>
     location.pathname.endsWith(`/reports/${code}`)
   )
@@ -223,7 +210,7 @@ export function AppShell({
               aria-label={t("adminNav")}
             >
               <ActiveIndicator
-                activeKey={`${locale}:${adminSection}`}
+                activeKey={`${locale}:${pathname}`}
                 variant="underline"
               />
               <Link
