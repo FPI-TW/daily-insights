@@ -1,7 +1,11 @@
 """Release ^TWII from yfinance so TWSE can own the series.
 
 Revision ID: 20260911_0024
-Revises: 20260909_0023
+Revises: 20260911_0025
+
+Re-pointed after main gained the news-recovery migrations: the revision id is
+left alone because environments already stamped with it would otherwise lose
+their place in the graph. Alembic orders by the graph, not by the filename.
 """
 
 from collections.abc import Sequence
@@ -10,7 +14,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "20260911_0024"
-down_revision: str | None = "20260909_0023"
+down_revision: str | None = "20260911_0025"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
