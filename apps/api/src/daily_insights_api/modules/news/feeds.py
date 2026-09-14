@@ -48,13 +48,7 @@ KEPT_LANGUAGES = frozenset({"en", "zh-cn", "zh-tw", "ja", "ko"})
 GLOBAL = frozenset({GLOBAL_MARKET})
 TAIWAN = frozenset({"tw_equity"})
 US_AND_GLOBAL = frozenset({GLOBAL_MARKET, "us_equity"})
-# The global digest reads English-native sources only, so Chinese, Japanese
-# and Korean publishers carry their own (still dormant) market tags and stay
-# out of it; those tags pre-sort sources for future editions.
-CHINA = frozenset({"cn_equity"})
-HONG_KONG = frozenset({"hk_equity"})
-JAPAN = frozenset({"jp_equity"})
-KOREA = frozenset({"kr_equity"})
+
 # langdetect is non-deterministic unless seeded.
 DetectorFactory.seed = 0
 _SITEMAP_NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
@@ -151,10 +145,7 @@ _CNBC_PATTERN = r"^https://www\.cnbc\.com/\d{4}/\d{2}/\d{2}/[a-z0-9-]+\.html$"
 _GUARDIAN_PATTERN = (
     r"^https://www\.theguardian\.com/[a-z-]+(/[a-z-]+)?/\d{4}/[a-z]{3}/\d{2}/[a-z0-9-]+$"
 )
-_ETNET_PATTERN = (
-    r"^https://www\.etnet\.com\.hk/www/tc/news/home_categorized_news_detail\.php\?newsid=ETN\d+$"
-)
-_HANKYUNG_PATTERN = r"^https://www\.hankyung\.com/article/\d+[a-z]?$"
+
 _UDN_PATTERN = r"^https://money\.udn\.com/money/story/\d+/\d+$"
 
 # Every source names the article host (``hostname``) explicitly, even when the
@@ -165,133 +156,6 @@ _UDN_PATTERN = r"^https://money\.udn\.com/money/story/\d+/\d+$"
 # Investing.com and Forbes were dropped for the same reason. Verified live on
 # 2026-09-03 and 2026-09-04; see docs/architecture/daily-news.md.
 FEED_SOURCES: tuple[FeedSource, ...] = (
-    # --- Chinese flash APIs (poll_group flash) -------------------------------
-    FeedSource(
-        "www.cls.cn",
-        "https://m.cls.cn/nodeapi/telegraphs?app=CailianpressWap&os=web&sv=1&rn=30",
-        "json_list",
-        r"^https://www\.cls\.cn/detail/\d+$",
-        markets=CHINA,
-        display_name="財聯社",
-        provides_full_text=True,
-        poll_group="flash",
-        mapping=JsonListMapping(
-            items_path=("data", "roll_data"),
-            id_field="id",
-            url_template="https://www.cls.cn/detail/{id}",
-            title_field="title",
-            title_fallback_field="content",
-            time_field="ctime",
-            time_format="unix_s",
-            body_field="content",
-            min_body_chars=20,
-        ),
-    ),
-    FeedSource(
-        "flash.jin10.com",
-        "https://www.jin10.com/flash_newest.js",
-        "json_list",
-        r"^https://flash\.jin10\.com/detail/\d+$",
-        markets=CHINA,
-        display_name="金十數據",
-        provides_full_text=True,
-        poll_group="flash",
-        mapping=JsonListMapping(
-            items_path=(),
-            id_field="id",
-            url_template="https://flash.jin10.com/detail/{id}",
-            title_field="data.title",
-            title_fallback_field="data.content",
-            time_field="time",
-            time_format="datetime_str",
-            body_field="data.content",
-            min_body_chars=20,
-            js_prefix=True,
-        ),
-    ),
-    FeedSource(
-        "wallstreetcn.com",
-        "https://api-one.wallstcn.com/apiv1/content/lives?channel=global-channel&client=pc&limit=30",
-        "json_list",
-        r"^https://wallstreetcn\.com/livenews/\d+$",
-        markets=CHINA,
-        display_name="華爾街見聞",
-        provides_full_text=True,
-        poll_group="flash",
-        mapping=JsonListMapping(
-            items_path=("data", "items"),
-            url_field="uri",
-            title_field="title",
-            title_fallback_field="content_text",
-            time_field="display_time",
-            time_format="unix_s",
-            body_field="content_text",
-            min_body_chars=20,
-        ),
-    ),
-    # Without a fresh cache-buster the CDN serves a weeks-old copy with HTTP 200.
-    FeedSource(
-        "finance.eastmoney.com",
-        "https://newsapi.eastmoney.com/kuaixun/v1/getlist_102_ajaxResult_50_1_.html",
-        "json_list",
-        r"^https://finance\.eastmoney\.com/a/\d+\.html$",
-        markets=CHINA,
-        display_name="東方財富",
-        poll_group="flash",
-        cache_buster_param="r",
-        mapping=JsonListMapping(
-            items_path=("LivesList",),
-            url_field="url_w",
-            title_field="title",
-            time_field="showtime",
-            time_format="datetime_str",
-            js_prefix=True,
-        ),
-    ),
-    FeedSource(
-        "finance.sina.com.cn",
-        "https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid=2516&num=30&page=1",
-        "json_list",
-        r"^https://finance\.sina\.com\.cn/.+\.shtml$",
-        markets=CHINA,
-        display_name="新浪財經",
-        poll_group="flash",
-        mapping=JsonListMapping(
-            items_path=("result", "data"),
-            url_field="url",
-            title_field="title",
-            time_field="ctime",
-            time_format="unix_s",
-        ),
-    ),
-    FeedSource(
-        "www.thepaper.cn",
-        "https://cache.thepaper.cn/contentapi/wwwIndex/rightSidebar",
-        "json_list",
-        r"^https://www\.thepaper\.cn/newsDetail_forward_\d+$",
-        markets=CHINA,
-        display_name="澎湃新聞",
-        poll_group="flash",
-        mapping=JsonListMapping(
-            items_path=("data", "hotNews"),
-            id_field="contId",
-            url_template="https://www.thepaper.cn/newsDetail_forward_{id}",
-            title_field="name",
-            time_field="pubTimeLong",
-            time_format="unix_ms",
-        ),
-    ),
-    # Third-party full-text mirror; the article body arrives in <description>.
-    FeedSource(
-        "m.jiemian.com",
-        "https://feedx.net/rss/jiemian.xml",
-        "rss_full",
-        r"^https://m\.jiemian\.com/article/\d+\.html$",
-        markets=CHINA,
-        display_name="界面新聞",
-        provides_full_text=True,
-        poll_group="flash",
-    ),
     # --- Taiwan (poll_group fast) ----------------------------------------------
     # cnyes' content:encoded holds a 300-character teaser, not the article, so
     # these stay plain RSS and go through extraction.
@@ -403,26 +267,6 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         naive_time_zone="Asia/Taipei",
     ),
     FeedSource(
-        "wantrich.chinatimes.com",
-        "https://www.chinatimes.com/sitemaps/sitemap_wantrich_todaynews.xml",
-        "news_sitemap",
-        r"^https://wantrich\.chinatimes\.com/news/\d+-\d+$",
-        markets=TAIWAN,
-        max_items=30,
-        display_name="旺得富",
-        poll_group="fast",
-    ),
-    FeedSource(
-        "www.ctee.com.tw",
-        "https://www.ctee.com.tw/sitemaps/sitemap_newstoday.xml",
-        "news_sitemap",
-        r"^https://www\.ctee\.com\.tw/news/\d+-\d+$",
-        markets=TAIWAN,
-        max_items=30,
-        display_name="工商時報",
-        poll_group="fast",
-    ),
-    FeedSource(
         "www.businesstoday.com.tw",
         "https://www.businesstoday.com.tw/news-sitemap.xml",
         "news_sitemap",
@@ -439,116 +283,6 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
         markets=TAIWAN,
         display_name="風傳媒",
         poll_group="fast",
-    ),
-    # --- Hong Kong, Japan, Korea -------------------------------------------------
-    FeedSource(
-        "www.etnet.com.hk",
-        "https://www.etnet.com.hk/www/tc/news/rss.php?section=editor",
-        "rss",
-        _ETNET_PATTERN,
-        markets=HONG_KONG,
-        display_name="經濟通",
-        poll_group="fast",
-        keep_query=True,
-    ),
-    FeedSource(
-        "www.etnet.com.hk",
-        "https://www.etnet.com.hk/www/tc/news/rss.php?section=rumour",
-        "rss",
-        _ETNET_PATTERN,
-        markets=HONG_KONG,
-        display_name="經濟通",
-        poll_group="fast",
-        keep_query=True,
-    ),
-    FeedSource(
-        "www.etnet.com.hk",
-        "https://www.etnet.com.hk/www/tc/news/rss.php?section=commentary",
-        "rss",
-        _ETNET_PATTERN,
-        markets=HONG_KONG,
-        display_name="經濟通",
-        poll_group="fast",
-        keep_query=True,
-    ),
-    FeedSource(
-        "www.etnet.com.hk",
-        "https://www.etnet.com.hk/www/tc/news/rss.php?section=special",
-        "rss",
-        _ETNET_PATTERN,
-        markets=HONG_KONG,
-        display_name="經濟通",
-        poll_group="fast",
-        keep_query=True,
-    ),
-    FeedSource(
-        "news.rthk.hk",
-        "https://rthk9.rthk.hk/rthk/news/rss/c_expressnews_cfinance.xml",
-        "rss",
-        r"^https://news\.rthk\.hk/rthk/ch/component/k2/\d+-\d+\.htm$",
-        markets=HONG_KONG,
-        display_name="香港電台",
-        poll_group="fast",
-    ),
-    # Site-wide feed; the pattern keeps the finance, property and China desks.
-    FeedSource(
-        "www.stheadline.com",
-        "https://www.stheadline.com/rss",
-        "rss",
-        r"^https://www\.stheadline\.com/realtime-(finance|property|china)/\d+/",
-        markets=HONG_KONG,
-        display_name="星島頭條",
-        poll_group="fast",
-    ),
-    FeedSource(
-        "toyokeizai.net",
-        "https://toyokeizai.net/list/feed/rss",
-        "rss",
-        r"^https://toyokeizai\.net/articles/-/\d+$",
-        markets=JAPAN,
-        display_name="東洋経済",
-    ),
-    FeedSource(
-        "diamond.jp",
-        "https://diamond.jp/list/feed/rss/dol",
-        "rss",
-        r"^https://diamond\.jp/articles/-/\d+$",
-        markets=JAPAN,
-        display_name="ダイヤモンド",
-    ),
-    # Mostly press releases under /pr/, which the pattern excludes.
-    FeedSource(
-        "www.kyodo.co.jp",
-        "https://www.kyodo.co.jp/feed/",
-        "rss",
-        r"^https://www\.kyodo\.co\.jp/(?!pr/)[a-z]+/\d{4}-\d{2}-\d{2}_\d+/$",
-        markets=JAPAN,
-        display_name="共同通信",
-    ),
-    # RSS 1.0 mirror of Nikkei's headlines; items are dated with dc:date.
-    FeedSource(
-        "www.nikkei.com",
-        "https://assets.wor.jp/rss/rdf/nikkei/news.rdf",
-        "rss",
-        r"^https://www\.nikkei\.com/article/[A-Z0-9]+/$",
-        markets=JAPAN,
-        display_name="日本経済新聞",
-    ),
-    FeedSource(
-        "www.hankyung.com",
-        "https://www.hankyung.com/feed/finance",
-        "rss",
-        _HANKYUNG_PATTERN,
-        markets=KOREA,
-        display_name="한국경제",
-    ),
-    FeedSource(
-        "www.hankyung.com",
-        "https://www.hankyung.com/feed/economy",
-        "rss",
-        _HANKYUNG_PATTERN,
-        markets=KOREA,
-        display_name="한국경제",
     ),
     # --- English-native sources for the global digest (verified 2026-09-04:
     # feeds answer 200 and article pages extract with the bot User-Agent) ----
@@ -669,15 +403,6 @@ FEED_SOURCES: tuple[FeedSource, ...] = (
     FeedSource(
         "www.globenewswire.com",
         _GLOBENEWSWIRE.format(code=27, name="Mergers%20and%20Acquisitions"),
-        "rss",
-        _GLOBENEWSWIRE_PATTERN,
-        markets=US_AND_GLOBAL,
-        display_name="GlobeNewswire",
-        language_filter=True,
-    ),
-    FeedSource(
-        "www.globenewswire.com",
-        _GLOBENEWSWIRE.format(code=9, name="Company%20Announcement"),
         "rss",
         _GLOBENEWSWIRE_PATTERN,
         markets=US_AND_GLOBAL,
