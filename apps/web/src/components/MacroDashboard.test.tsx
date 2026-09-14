@@ -24,7 +24,7 @@ const data: MacroDashboardData = {
   fetched_at: "2026-09-04T00:00:00Z",
   calendar: {
     date: "2026-09-04",
-    source: "Nasdaq",
+    source: "",
     status: "disabled",
     events: [],
   },

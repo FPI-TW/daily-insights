@@ -1177,12 +1177,8 @@ async def _execute_macro(
     dashboard = await refresh_macro_dashboard(settings)
     sources_degraded = any(
         history.status == "unavailable" for history in dashboard.histories
-    ) or any(
-        source.code != "nasdaq_calendar" and source.status in {"degraded", "unavailable"}
-        for source in dashboard._sources
-    )
-    calendar_unavailable = dashboard.calendar.status == "unavailable"
-    status = "partial" if sources_degraded or calendar_unavailable else "succeeded"
+    ) or any(source.status in {"degraded", "unavailable"} for source in dashboard._sources)
+    status = "partial" if sources_degraded else "succeeded"
     return (
         status,
         {
@@ -1190,9 +1186,7 @@ async def _execute_macro(
             "edition_date": dashboard.calendar.date.isoformat(),
             "sources": [source.model_dump(mode="json") for source in dashboard._sources],
         },
-        "macro_sources_unavailable"
-        if sources_degraded
-        else ("macro_calendar_unavailable" if calendar_unavailable else None),
+        "macro_sources_unavailable" if sources_degraded else None,
         dashboard,
     )
 

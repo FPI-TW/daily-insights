@@ -6,7 +6,7 @@ import { MacroSourceDiagnostics } from "./MacroSourceDiagnostics"
 
 afterEach(cleanup)
 
-it("shows multiple failures and disabled Nasdaq with localized descriptions", () => {
+it("shows multiple source failures with localized descriptions", () => {
   render(
     <I18nextProvider i18n={createI18n("zh-hant")}>
       <MacroSourceDiagnostics
@@ -43,14 +43,6 @@ it("shows multiple failures and disabled Nasdaq with localized descriptions", ()
                 },
               ],
             },
-            {
-              code: "nasdaq_calendar",
-              name: "Nasdaq",
-              status: "disabled",
-              fetched_at: "2026-09-14T00:00:00Z",
-              affected_items: [],
-              failures: [],
-            },
           ],
         }}
       />
@@ -59,17 +51,18 @@ it("shows multiple failures and disabled Nasdaq with localized descriptions", ()
   expect(screen.getByText("Yahoo Finance · 部分失敗")).toBeInTheDocument()
   expect(screen.getByText(/history · 請求逾時/)).toBeInTheDocument()
   expect(screen.getByText(/HTTP 503/)).toBeInTheDocument()
-  expect(screen.getByText("Nasdaq · 已停用")).toBeInTheDocument()
 })
 
 it("keeps historical errors without inventing source details", () => {
   render(
     <I18nextProvider i18n={createI18n("en")}>
-      <MacroSourceDiagnostics result={{}} error="macro_calendar_unavailable" />
+      <MacroSourceDiagnostics result={{}} error="macro_sources_unavailable" />
     </I18nextProvider>
   )
   expect(
     screen.getByText("Source details were not recorded")
   ).toBeInTheDocument()
-  expect(screen.getByText(/Economic calendar unavailable/)).toBeInTheDocument()
+  expect(
+    screen.getByText(/Some market data sources have problems/)
+  ).toBeInTheDocument()
 })

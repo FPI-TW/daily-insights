@@ -51,11 +51,9 @@ export function MacroSourceDiagnostics({
       <h3 className="font-bold text-sea-ink">{t("macroSourceTitle")}</h3>
       {error ? (
         <p>
-          {error === "macro_calendar_unavailable"
-            ? t("macroCalendarFailure")
-            : error === "macro_sources_unavailable"
-              ? t("macroMarketFailure")
-              : error}{" "}
+          {error === "macro_sources_unavailable"
+            ? t("macroMarketFailure")
+            : error}{" "}
           · <code>{error}</code>
         </p>
       ) : null}

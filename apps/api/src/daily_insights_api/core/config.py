@@ -49,7 +49,6 @@ class Settings(BaseSettings):
     # Yahoo has no published API contract and is reached through a scraping
     # client, so the back-office fetch endpoint is opt-in.
     yfinance_enabled: bool = False
-    macro_calendar_enabled: bool = False
     yfinance_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     # TWSE rwd is a public site with no API contract or key. Reachability from a
     # datacenter IP is unverified, so the institutional-flow fetch is opt-in and

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from unittest.mock import AsyncMock
 
 import httpx
@@ -39,23 +39,6 @@ async def test_twelve_data_transport_keeps_status(status: int, kind: str) -> Non
     assert classify(caught.value) == (kind, status)
 
 
-@pytest.mark.parametrize(
-    "body,kind", [(b"not json", "parse_error"), (b'{"data": {}}', "validation_error")]
-)
-async def test_calendar_invalid_envelope(body: bytes, kind: str) -> None:
-    entries: list[tuple[str, SourceFailure]] = []
-    token = diagnostics.set(entries)
-    try:
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda request: httpx.Response(200, content=body))
-        ) as client:
-            result = await macro.load_calendar(client, datetime(2026, 9, 14, tzinfo=UTC))
-        assert result.status == "unavailable"
-        assert {failure.failure_type for _, failure in entries} == {kind}
-    finally:
-        diagnostics.reset(token)
-
-
 async def test_treasury_keeps_successful_year_and_reports_failed_year() -> None:
     from daily_insights_api.modules.reports.macro_diagnostics import summarize
 
@@ -87,71 +70,21 @@ async def test_treasury_keeps_successful_year_and_reports_failed_year() -> None:
         diagnostics.reset(token)
 
 
-@pytest.mark.parametrize(
-    "rows,expected,count",
-    [
-        ([{"gmt": "All Day", "country": "Russia", "eventName": "Holiday"}], "ok", 0),
-        ([], "ok", 0),
-        ([{"gmt": "25:99", "country": "Japan", "eventName": "Invalid"}], "unavailable", 0),
-        (
-            [
-                {"gmt": "All Day", "country": "Russia", "eventName": "Holiday"},
-                {"gmt": "01:00", "country": "Japan", "eventName": "Valid"},
-                {"gmt": "broken"},
-            ],
-            "ok",
-            1,
-        ),
-    ],
-)
-async def test_calendar_isolates_rows(
-    rows: list[dict[str, str]], expected: str, count: int
-) -> None:
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(
-            lambda request: httpx.Response(200, json={"data": {"rows": rows}})
-        )
-    ) as client:
-        result = await macro.load_calendar(client, datetime(2026, 9, 14, tzinfo=UTC))
-    assert result.status == expected
-    assert len(result.events) == count
-
-
-async def test_calendar_keeps_errors_without_raw_response() -> None:
-    entries: list[tuple[str, SourceFailure]] = []
-    token = diagnostics.set(entries)
-    try:
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(
-                lambda request: httpx.Response(429, text="secret credential")
-            )
-        ) as client:
-            result = await macro.load_calendar(client, datetime(2026, 9, 14, tzinfo=UTC))
-        assert result.status == "unavailable"
-        assert len(entries) == 2
-        assert all(f.failure_type == "rate_limited" and f.http_status == 429 for _, f in entries)
-        assert "secret" not in str(entries)
-    finally:
-        diagnostics.reset(token)
-
-
 def test_typed_provider_error_preserves_http_status() -> None:
     assert classify(DataSourceTransientError("private", http_status=503)) == ("http_error", 503)
     assert classify(httpx.ReadTimeout("private")) == ("timeout", None)
 
 
 @pytest.mark.parametrize(
-    "calendar_status,history_status,error",
+    "history_status,error",
     [
-        ("disabled", "ok", None),
-        ("disabled", "disabled", None),
-        ("unavailable", "ok", "macro_calendar_unavailable"),
-        ("unavailable", "unavailable", "macro_sources_unavailable"),
-        ("ok", "unavailable", "macro_sources_unavailable"),
+        ("ok", None),
+        ("disabled", None),
+        ("unavailable", "macro_sources_unavailable"),
     ],
 )
 async def test_run_error_precedence(
-    monkeypatch: pytest.MonkeyPatch, calendar_status: str, history_status: str, error: str | None
+    monkeypatch: pytest.MonkeyPatch, history_status: str, error: str | None
 ) -> None:
     dashboard = macro.MacroDashboard.model_validate(
         {
@@ -165,7 +98,7 @@ async def test_run_error_precedence(
                     "status": history_status,
                 }
             ],
-            "calendar": {"date": "2026-09-14", "source": "Nasdaq", "status": calendar_status},
+            "calendar": {"date": "2026-09-14", "source": "", "status": "disabled"},
         }
     )
     monkeypatch.setattr(service, "refresh_macro_dashboard", AsyncMock(return_value=dashboard))
@@ -175,7 +108,7 @@ async def test_run_error_precedence(
     assert "sources" in result
 
 
-async def test_disabled_calendar_and_multiple_source_failures(
+async def test_multiple_source_failures_without_calendar_source(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def markets(settings: Settings) -> list[macro.History]:
@@ -207,12 +140,9 @@ async def test_disabled_calendar_and_multiple_source_failures(
             )
         ),
     )
-    calendar = AsyncMock(side_effect=AssertionError("disabled calendar made a request"))
-    monkeypatch.setattr(macro, "load_calendar", calendar)
     result = await macro.refresh_macro_dashboard(Settings())
-    calendar.assert_not_awaited()
     sources = {source.code: source for source in result._sources}
-    assert sources["nasdaq_calendar"].status == "disabled"
+    assert set(sources) == {"twelve_data", "yahoo_finance", "us_treasury", "new_york_fed"}
     assert sources["yahoo_finance"].affected_items == ["DX-Y.NYB"]
     assert sources["new_york_fed"].affected_items == ["SOFR"]
     assert "sources" not in result.model_dump_json()

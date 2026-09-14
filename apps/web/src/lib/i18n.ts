@@ -296,7 +296,6 @@ const resources: Resource = {
       macroSourcesNotRecorded: "未記錄來源明細",
       macroSourceFetched: "本次抓取時間：{{time}}",
       macroSourceAffected: "受影響項目：{{items}}",
-      macroCalendarFailure: "經濟日曆無法使用",
       macroMarketFailure: "部分市場資料來源有問題，請查看來源明細",
       macroFailureTimeout: "請求逾時",
       macroFailureDns: "DNS 解析失敗",
@@ -1146,7 +1145,6 @@ const resources: Resource = {
       macroSourcesNotRecorded: "未记录来源明细",
       macroSourceFetched: "本次抓取时间：{{time}}",
       macroSourceAffected: "受影响项目：{{items}}",
-      macroCalendarFailure: "经济日历无法使用",
       macroMarketFailure: "部分市场数据来源有问题，请查看来源明细",
       macroFailureTimeout: "请求超时",
       macroFailureDns: "DNS 解析失败",
@@ -2005,7 +2003,6 @@ const resources: Resource = {
       macroSourcesNotRecorded: "Source details were not recorded",
       macroSourceFetched: "Fetched at: {{time}}",
       macroSourceAffected: "Affected items: {{items}}",
-      macroCalendarFailure: "Economic calendar unavailable",
       macroMarketFailure:
         "Some market data sources have problems; see source details",
       macroFailureTimeout: "Request timed out",

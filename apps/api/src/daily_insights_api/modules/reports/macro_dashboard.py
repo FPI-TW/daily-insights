@@ -6,8 +6,6 @@ remain explicit and never borrow a value from another instrument.
 """
 
 import asyncio
-import html
-import re
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
@@ -117,97 +115,6 @@ TREASURY_URL = (
     "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml"
 )
 SOFR_URL = "https://markets.newyorkfed.org/api/rates/secured/sofr/search.json"
-CALENDAR_URL = "https://api.nasdaq.com/api/calendar/economicevents"
-CALENDAR_HEADERS = {
-    "Accept": "application/json, text/plain, */*",
-    "Origin": "https://www.nasdaq.com",
-    "Referer": "https://www.nasdaq.com/",
-    "User-Agent": "Mozilla/5.0",
-}
-CALENDAR_SOURCE = "Nasdaq"
-CALENDAR_VALUE = re.compile(
-    r"^\s*(?P<prefix>[$€£¥])?\s*"
-    r"(?P<number>[+-]?(?:\d+(?:,\d{3})*|\d+)(?:\.\d+)?)\s*"
-    r"(?P<suffix>%|[KMBT]|bps?)?\s*$",
-    re.IGNORECASE,
-)
-COUNTRY_DETAILS = {
-    "Argentina": ("AR", "ARS"),
-    "Australia": ("AU", "AUD"),
-    "Brazil": ("BR", "BRL"),
-    "Canada": ("CA", "CAD"),
-    "Chile": ("CL", "CLP"),
-    "China": ("CN", "CNY"),
-    "Colombia": ("CO", "COP"),
-    "Czech Republic": ("CZ", "CZK"),
-    "Denmark": ("DK", "DKK"),
-    "Euro Area": ("EU", "EUR"),
-    "European Union": ("EU", "EUR"),
-    "France": ("FR", "EUR"),
-    "Germany": ("DE", "EUR"),
-    "Hong Kong": ("HK", "HKD"),
-    "Hungary": ("HU", "HUF"),
-    "India": ("IN", "INR"),
-    "Indonesia": ("ID", "IDR"),
-    "Ireland": ("IE", "EUR"),
-    "Israel": ("IL", "ILS"),
-    "Italy": ("IT", "EUR"),
-    "Japan": ("JP", "JPY"),
-    "Mexico": ("MX", "MXN"),
-    "New Zealand": ("NZ", "NZD"),
-    "Norway": ("NO", "NOK"),
-    "Poland": ("PL", "PLN"),
-    "Portugal": ("PT", "EUR"),
-    "Saudi Arabia": ("SA", "SAR"),
-    "Singapore": ("SG", "SGD"),
-    "South Africa": ("ZA", "ZAR"),
-    "South Korea": ("KR", "KRW"),
-    "Spain": ("ES", "EUR"),
-    "Switzerland": ("CH", "CHF"),
-    "Sweden": ("SE", "SEK"),
-    "Taiwan": ("TW", "TWD"),
-    "Turkey": ("TR", "TRY"),
-    "United Kingdom": ("GB", "GBP"),
-    "United States": ("US", "USD"),
-}
-
-
-class NasdaqCalendarRow(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    gmt: str = Field(pattern=r"^(?:[0-1]\d|2[0-3]):[0-5]\d$|^All Day$")
-    country: str = Field(min_length=1, max_length=100)
-    event_name: str = Field(alias="eventName", min_length=1, max_length=300)
-    actual: str | int | float | None = None
-    consensus: str | int | float | None = None
-    previous: str | int | float | None = None
-
-
-class NasdaqCalendarData(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    rows: list[object] | None
-
-
-class NasdaqCalendarResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    data: NasdaqCalendarData | None = None
-
-
-def parse_calendar_value(raw: str | int | float | None) -> tuple[Decimal | None, str | None]:
-    if raw is None:
-        return None, None
-    text = html.unescape(str(raw)).replace("\xa0", " ").strip()
-    if not text:
-        return None, None
-    match = CALENDAR_VALUE.fullmatch(text)
-    if match is None:
-        return None, None
-    prefix = match.group("prefix")
-    suffix = match.group("suffix")
-    prefix_unit = {"$": "USD", "€": "EUR", "£": "GBP", "¥": "JPY"}.get(prefix)
-    unit = suffix.upper() if suffix else prefix_unit
-    if prefix_unit and suffix:
-        unit = f"{prefix_unit} {suffix.upper()}"
-    return Decimal(match.group("number").replace(",", "")), unit
 
 
 def treasury_histories(payloads: list[bytes], today: date) -> list[History]:
@@ -328,96 +235,6 @@ async def load_sofr(client: httpx.AsyncClient, today: date) -> History:
         return History(
             id="sofr", symbol="SOFR", unit="percent", source="New York Fed", status="unavailable"
         )
-
-
-async def load_calendar(client: httpx.AsyncClient, now: datetime) -> Calendar:
-    today = now.astimezone(ZoneInfo("Asia/Taipei")).date()
-    try:
-        query_days = (today - timedelta(days=1), today)
-        responses = await asyncio.gather(
-            *(
-                client.get(
-                    CALENDAR_URL,
-                    params={"date": day.isoformat()},
-                    headers=CALENDAR_HEADERS,
-                )
-                for day in query_days
-            ),
-            return_exceptions=True,
-        )
-        selected: list[EconomicEvent] = []
-        successful_response = False
-        for query_day, response in zip(query_days, responses, strict=True):
-            if not isinstance(response, httpx.Response):
-                record_failure(
-                    "nasdaq_calendar", "economicevents", [query_day.isoformat()], response
-                )
-                continue
-            try:
-                response.raise_for_status()
-                payload = NasdaqCalendarResponse.model_validate(response.json())
-            except Exception as error:
-                record_failure("nasdaq_calendar", "economicevents", [query_day.isoformat()], error)
-                continue
-            if payload.data is None:
-                record_failure(
-                    "nasdaq_calendar",
-                    "economicevents",
-                    [query_day.isoformat()],
-                    kind="validation_error",
-                )
-                continue
-            rows = payload.data.rows or []
-            valid_rows = 0
-            for index, raw in enumerate(rows):
-                try:
-                    row = NasdaqCalendarRow.model_validate(raw)
-                except Exception as error:
-                    record_failure(
-                        "nasdaq_calendar",
-                        "economicevents",
-                        [f"{query_day.isoformat()} row {index + 1}"],
-                        error,
-                    )
-                    continue
-                valid_rows += 1
-                if row.gmt == "All Day":
-                    continue
-                moment = datetime.combine(
-                    query_day,
-                    datetime.strptime(row.gmt, "%H:%M").time(),
-                    tzinfo=UTC,
-                )
-                if moment.astimezone(ZoneInfo("Asia/Taipei")).date() != today:
-                    continue
-                actual, actual_unit = parse_calendar_value(row.actual)
-                estimate, estimate_unit = parse_calendar_value(row.consensus)
-                previous, previous_unit = parse_calendar_value(row.previous)
-                country_code, currency = COUNTRY_DETAILS.get(row.country, (row.country, None))
-                selected.append(
-                    EconomicEvent(
-                        date=moment,
-                        country=country_code,
-                        event=row.event_name,
-                        currency=currency,
-                        estimate=estimate,
-                        previous=previous,
-                        actual=actual if moment <= now else None,
-                        unit=actual_unit or estimate_unit or previous_unit,
-                    )
-                )
-            successful_response = successful_response or not rows or valid_rows > 0
-        if not successful_response:
-            return Calendar(status="unavailable", date=today, source=CALENDAR_SOURCE)
-        return Calendar(
-            status="ok",
-            date=today,
-            source=CALENDAR_SOURCE,
-            events=sorted(selected, key=lambda item: (item.date, item.country, item.event)),
-        )
-    except Exception as error:
-        record_failure("nasdaq_calendar", "economicevents", [today.isoformat()], error)
-        return Calendar(status="unavailable", date=today, source=CALENDAR_SOURCE)
 
 
 async def load_commodity_histories(settings: Settings) -> list[History]:
@@ -568,11 +385,7 @@ async def refresh_macro_dashboard(settings: Settings) -> MacroDashboard:
                 load_treasury(client, today),
                 load_sofr(client, today),
             )
-            calendar = (
-                await load_calendar(client, now)
-                if settings.macro_calendar_enabled
-                else Calendar(status="disabled", date=today, source=CALENDAR_SOURCE)
-            )
+            calendar = Calendar(status="disabled", date=today, source="")
         dashboard = MacroDashboard(
             fetched_at=datetime.now(UTC), histories=[*markets, *treasury, sofr], calendar=calendar
         )
@@ -585,7 +398,6 @@ async def refresh_macro_dashboard(settings: Settings) -> MacroDashboard:
                 ("new_york_fed", "New York Fed"),
             )
         ]
-        states.append(("nasdaq_calendar", CALENDAR_SOURCE, [(today.isoformat(), calendar.status)]))
         dashboard._sources = summarize(entries, states, dashboard.fetched_at)
         return dashboard
     finally:
