@@ -411,7 +411,8 @@ async def source_success(
             # already-in-flight request succeeded. Never erase its cooldown.
             return
         row.state = "ready" if count else "no_new_content"
-        row.newest_article_at = newest
+        if newest is not None and (row.newest_article_at is None or newest > row.newest_article_at):
+            row.newest_article_at = newest
         row.failure, row.available_at = None, None
         row.failures_count = 0
         row.updated_at = workflow.execution.clock()
