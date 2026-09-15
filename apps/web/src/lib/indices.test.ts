@@ -46,6 +46,7 @@ describe("indexHistoryOutcomes", () => {
               low: "1",
               close: "1",
               volume: null,
+              trade_value: null,
             },
           ],
         },
@@ -143,6 +144,7 @@ describe("bias indicators", () => {
       low: null,
       close: "110",
       volume: null,
+      trade_value: null,
     }))
     const averages: IndexMovingAverages = {
       symbol: "^TWII",

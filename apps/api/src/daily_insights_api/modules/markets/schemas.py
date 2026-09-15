@@ -37,6 +37,7 @@ class IndexDailyBarResponse(BaseModel):
     low: PriceDecimal | None
     close: PriceDecimal
     volume: int | None
+    trade_value: int | None
 
 
 class IndexLatestBarResponse(IndexDailyBarResponse):

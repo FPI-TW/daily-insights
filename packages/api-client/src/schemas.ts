@@ -63,6 +63,7 @@ export const indexDailyBarSchema = z.object({
   low: decimalSchema.nullable(),
   close: decimalSchema,
   volume: z.number().int().nonnegative().nullable(),
+  trade_value: z.number().int().nonnegative().nullable().default(null),
 })
 export type IndexDailyBar = z.infer<typeof indexDailyBarSchema>
 export const indexDailyBarListSchema = z.array(indexDailyBarSchema)

@@ -110,6 +110,15 @@ test("US market renders a dedicated responsive VIX chart", async ({
   await expect(
     page.getByRole("heading", { name: "Index performance", exact: true })
   ).toBeVisible()
+  const indexPanel = page
+    .getByRole("heading", { name: "Index performance", exact: true })
+    .locator("xpath=ancestor::section[1]")
+  await expect(
+    indexPanel.getByText(
+      "Index data is temporarily unavailable. The morning report remains available."
+    )
+  ).toHaveCount(0)
+  await expect(indexPanel.locator("canvas").first()).toBeVisible()
   await expect(
     page.getByRole("heading", { name: "Index technicals", exact: true })
   ).toHaveCount(0)

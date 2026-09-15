@@ -1179,6 +1179,17 @@
             "title": "Trade Date",
             "type": "string"
           },
+          "trade_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trade Value"
+          },
           "volume": {
             "anyOf": [
               {
@@ -1199,7 +1210,8 @@
           "high",
           "low",
           "close",
-          "volume"
+          "volume",
+          "trade_value"
         ],
         "title": "IndexDailyBarResponse",
         "type": "object"
@@ -1273,6 +1285,17 @@
             "title": "Trade Date",
             "type": "string"
           },
+          "trade_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trade Value"
+          },
           "volume": {
             "anyOf": [
               {
@@ -1294,6 +1317,7 @@
           "low",
           "close",
           "volume",
+          "trade_value",
           "previous_close"
         ],
         "title": "IndexLatestBarResponse",

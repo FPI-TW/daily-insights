@@ -1417,6 +1417,8 @@ export interface components {
        * Format: date
        */
       trade_date: string
+      /** Trade Value */
+      trade_value: number | null
       /** Volume */
       volume: number | null
     }
@@ -1444,6 +1446,8 @@ export interface components {
        * Format: date
        */
       trade_date: string
+      /** Trade Value */
+      trade_value: number | null
       /** Volume */
       volume: number | null
     }

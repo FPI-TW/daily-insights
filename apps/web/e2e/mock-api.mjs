@@ -454,6 +454,7 @@ function indexBars(symbol) {
     low: close,
     close,
     volume: 0,
+    trade_value: null,
   }))
 }
 
@@ -719,6 +720,10 @@ const server = createServer(async (request, response) => {
         low: (Math.min(open, close) - 100).toFixed(2),
         close: close.toFixed(2),
         volume: Math.round(3500000000 + Math.sin(i / 4) * 1600000000),
+        trade_value:
+          symbol === "^TWII"
+            ? Math.round(400000000000 + Math.sin(i / 4) * 120000000000)
+            : null,
       }
     })
     recordRequest(request, url, role)

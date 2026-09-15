@@ -14,6 +14,7 @@ import { createServerTransport } from "../src/server"
 import {
   dataManagementRunCreateSchema,
   dataManagementRunSchema,
+  indexDailyBarSchema,
   indexMovingAveragesSchema,
   institutionalStocksSchema,
   newsAdminEditionsSchema,
@@ -379,6 +380,7 @@ describe("API client trust boundary", () => {
       low: "99.0000000000",
       close: "100.5000000000",
       volume: 1000,
+      trade_value: 123_000_000_000,
     }
     const transport = vi.fn(async (path: string) =>
       Response.json(
@@ -392,7 +394,12 @@ describe("API client trust boundary", () => {
     expect(transport).toHaveBeenCalledWith("/api/markets/indices")
     await expect(
       client.indexDailyBars("^TWII", { start: "2026-01-01" })
-    ).resolves.toHaveLength(1)
+    ).resolves.toEqual([
+      expect.objectContaining({
+        symbol: "^TWII",
+        trade_value: 123_000_000_000,
+      }),
+    ])
     expect(transport).toHaveBeenCalledWith(
       "/api/markets/indices/%5ETWII/daily-bars?start=2026-01-01"
     )
@@ -400,6 +407,21 @@ describe("API client trust boundary", () => {
     expect(transport).toHaveBeenCalledWith(
       "/api/markets/indices/%5ETWII/daily-bars"
     )
+  })
+
+  it("accepts daily bars from an API version before trade value was added", () => {
+    expect(
+      indexDailyBarSchema.parse({
+        symbol: "^DJI",
+        market_code: "us_equity",
+        trade_date: "2026-09-02",
+        open: "100.0000000000",
+        high: "101.0000000000",
+        low: "99.0000000000",
+        close: "100.5000000000",
+        volume: 1000,
+      })
+    ).toMatchObject({ symbol: "^DJI", trade_value: null })
   })
 
   it("accepts an institutional stock row whose name TWSE left blank", async () => {

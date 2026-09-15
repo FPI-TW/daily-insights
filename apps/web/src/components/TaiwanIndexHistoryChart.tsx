@@ -398,11 +398,11 @@ function CandlesPanel({
     bar => bar.open === null || bar.high === null || bar.low === null
   ).length
   const name = t(indexNameKey(selected.symbol) ?? selected.symbol)
-  const title =
-    selected.symbol === "^TWII"
-      ? t("kTitle")
-      : t("kTitleIndex", { index: name })
-  const volume = (value: number | null) =>
+  const isTaiex = selected.symbol === "^TWII"
+  const title = isTaiex ? t("kTitle") : t("kTitleIndex", { index: name })
+  const activityLabel = t(isTaiex ? "tradeValueLabel" : "volumeLabel")
+  const activityLegend = t(isTaiex ? "tradeValueLegend" : "volumeLegend")
+  const formatActivity = (value: number | null) =>
     value === null
       ? "—"
       : new Intl.NumberFormat(numberLocales[locale], {
@@ -437,12 +437,16 @@ function CandlesPanel({
       },
     ]
   })
-  const volumes = bars.map(bar =>
-    bar.volume === null ? null : bar.volume / 100_000_000
+  const activityValues = bars.map(bar => {
+    const value = isTaiex ? bar.trade_value : bar.volume
+    return value === null ? null : value / 100_000_000
+  })
+  const maximum = Math.max(
+    1,
+    ...activityValues.flatMap(value => (value === null ? [] : [value]))
   )
-  const maximum = Math.max(1, ...volumes.flatMap(v => (v === null ? [] : [v])))
   const magnitude = 10 ** Math.floor(Math.log10(maximum))
-  const volumeMax = Math.ceil(maximum / magnitude) * magnitude
+  const activityMax = Math.ceil(maximum / magnitude) * magnitude
   return (
     <DashboardPanel
       title={title}
@@ -464,9 +468,9 @@ function CandlesPanel({
                 : signed(Math.abs(change), locale).replace("+", "")}
             </span>
           </span>
-          <span>{t("volumeLabel")}</span>
+          <span>{activityLabel}</span>
           <strong className="font-mono text-[13px] text-sea-ink tabular-nums">
-            {volume(latest.volume)}
+            {formatActivity(isTaiex ? latest.trade_value : latest.volume)}
           </strong>
         </div>
       }
@@ -506,9 +510,64 @@ function CandlesPanel({
                 animation: false,
                 textStyle: { fontFamily: colors.font },
                 aria: { enabled: true, description: title },
+                title: [
+                  {
+                    text: activityLegend,
+                    left: 4,
+                    top: 4,
+                    padding: 0,
+                    textStyle: {
+                      color: colors.text,
+                      fontSize: 11,
+                      fontWeight: "bold",
+                    },
+                    coordinateSystem: "matrix",
+                    coord: [0, 4],
+                  },
+                ],
+                matrix: {
+                  left: 0,
+                  right: 0,
+                  top: 4,
+                  bottom: 54,
+                  x: { show: false, data: [null] },
+                  y: { show: false, data: Array(6).fill(null) },
+                  body: {
+                    data: [
+                      {
+                        coord: [
+                          [0, 0],
+                          [0, 3],
+                        ],
+                        mergeCells: true,
+                      },
+                      {
+                        coord: [
+                          [0, 0],
+                          [4, 5],
+                        ],
+                        mergeCells: true,
+                      },
+                    ],
+                  },
+                },
                 grid: [
-                  { left: 64, right: 20, top: 8, height: 312 },
-                  { left: 64, right: 20, top: 330, height: 84 },
+                  {
+                    coordinateSystem: "matrix",
+                    coord: [0, 0],
+                    left: 64,
+                    right: 20,
+                    top: 28,
+                    bottom: 4,
+                  },
+                  {
+                    coordinateSystem: "matrix",
+                    coord: [0, 4],
+                    left: 64,
+                    right: 20,
+                    top: 24,
+                    bottom: 2,
+                  },
                 ],
                 axisPointer: { link: [{ xAxisIndex: "all" }] },
                 tooltip: {
@@ -527,7 +586,7 @@ function CandlesPanel({
                       `${t("kHigh")}: ${formatNumber(bar.high, null, locale)}`,
                       `${t("kLow")}: ${formatNumber(bar.low, null, locale)}`,
                       `${t("kClose")}: ${formatNumber(bar.close, null, locale)}`,
-                      `${t("volumeLabel")}: ${volume(bar.volume)}`,
+                      `${activityLabel}: ${formatActivity(isTaiex ? bar.trade_value : bar.volume)}`,
                       ...maLines.map(
                         line =>
                           `${line.name}: ${formatNumber(line.data[parsed.data[0]!.dataIndex], null, locale)}`
@@ -536,8 +595,9 @@ function CandlesPanel({
                   },
                 },
                 legend: {
-                  bottom: 52,
-                  data: [...maLines.map(line => line.name), t("volumeLegend")],
+                  top: 10,
+                  right: 20,
+                  data: maLines.map(line => line.name),
                   itemWidth: 10,
                   itemHeight: 10,
                   icon: "rect",
@@ -595,8 +655,8 @@ function CandlesPanel({
                     type: "value",
                     gridIndex: 1,
                     min: 0,
-                    max: volumeMax,
-                    interval: volumeMax,
+                    max: activityMax,
+                    interval: activityMax,
                     axisLabel: {
                       color: colors.text,
                       fontFamily: "monospace",
@@ -617,7 +677,7 @@ function CandlesPanel({
                     xAxisIndex: [0, 1],
                     ...zoom,
                     height: 26,
-                    bottom: 6,
+                    bottom: 4,
                     borderColor: colors.grid,
                     backgroundColor: colors.surface,
                     fillerColor: colors.gridSoft,
@@ -652,13 +712,13 @@ function CandlesPanel({
                   },
                   ...maLines,
                   {
-                    name: t("volumeLegend"),
+                    name: activityLegend,
                     type: "bar",
                     xAxisIndex: 1,
                     yAxisIndex: 1,
                     itemStyle: { color: colors.up, opacity: 0.4 },
                     data: bars.map((bar, i) => ({
-                      value: volumes[i],
+                      value: activityValues[i],
                       itemStyle: {
                         color:
                           bar.open === null
@@ -685,7 +745,7 @@ function CandlesPanel({
               <th>{t("kHigh")}</th>
               <th>{t("kLow")}</th>
               <th>{t("kClose")}</th>
-              <th>{t("volumeLabel")}</th>
+              <th>{activityLabel}</th>
               {maLines.map(line => (
                 <th key={line.name}>{line.name}</th>
               ))}
@@ -699,7 +759,9 @@ function CandlesPanel({
                 <td>{formatNumber(bar.high, null, locale)}</td>
                 <td>{formatNumber(bar.low, null, locale)}</td>
                 <td>{formatNumber(bar.close, null, locale)}</td>
-                <td>{volume(bar.volume)}</td>
+                <td>
+                  {formatActivity(isTaiex ? bar.trade_value : bar.volume)}
+                </td>
                 {maLines.map(line => (
                   <td key={line.name}>
                     {formatNumber(line.data[i], null, locale)}

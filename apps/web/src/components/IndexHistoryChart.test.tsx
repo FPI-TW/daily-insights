@@ -37,7 +37,8 @@ const history: MarketIndexHistory = {
           high: "45100.0",
           low: "44900.0",
           close: "45050.5",
-          volume: null,
+          volume: 100_000_000,
+          trade_value: null,
         },
       ],
     },
@@ -52,7 +53,8 @@ const history: MarketIndexHistory = {
           high: "6550.0",
           low: "6480.0",
           close: "6525.25",
-          volume: null,
+          volume: 200_000_000,
+          trade_value: null,
         },
       ],
     },
@@ -84,6 +86,15 @@ describe("IndexHistoryChart", () => {
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
       '"lineStyle":{"width":3}'
     )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"coordinateSystem":"matrix"'
+    )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"coord":[[0,0],[4,5]],"mergeCells":true'
+    )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"name":"Volume (100M shares)","type":"bar"'
+    )
     expect(screen.getByRole("status")).toHaveTextContent("^SOX")
     expect(
       screen.getByRole("option", { name: "Dow Jones Industrial Average" })
@@ -99,6 +110,7 @@ describe("IndexHistoryChart", () => {
     })
 
     expect(screen.getByTestId("index-chart")).toHaveTextContent("6525.25")
+    expect(screen.getByTestId("index-chart")).toHaveTextContent('"value":2')
     expect(screen.getByTestId("index-chart")).not.toHaveTextContent("45050.5")
   })
 

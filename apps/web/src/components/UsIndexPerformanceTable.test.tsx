@@ -27,6 +27,7 @@ const history: MarketIndexHistory = {
           low: null,
           close: "100",
           volume: null,
+          trade_value: null,
         },
         {
           symbol: "^GSPC",
@@ -37,6 +38,7 @@ const history: MarketIndexHistory = {
           low: null,
           close: "110",
           volume: null,
+          trade_value: null,
         },
         {
           symbol: "^GSPC",
@@ -47,6 +49,7 @@ const history: MarketIndexHistory = {
           low: null,
           close: "120",
           volume: null,
+          trade_value: null,
         },
         {
           symbol: "^GSPC",
@@ -57,6 +60,7 @@ const history: MarketIndexHistory = {
           low: null,
           close: "126",
           volume: null,
+          trade_value: null,
         },
       ],
     },
@@ -72,6 +76,7 @@ const history: MarketIndexHistory = {
           low: null,
           close: "100",
           volume: null,
+          trade_value: null,
         },
         {
           symbol,
@@ -82,6 +87,7 @@ const history: MarketIndexHistory = {
           low: null,
           close: "101",
           volume: null,
+          trade_value: null,
         },
       ],
     })),

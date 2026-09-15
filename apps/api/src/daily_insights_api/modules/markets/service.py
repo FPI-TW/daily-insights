@@ -188,6 +188,7 @@ def _bar_response(bar: IndexDailyBar) -> IndexDailyBarResponse:
         low=bar.low,
         close=bar.close,
         volume=bar.volume,
+        trade_value=bar.trade_value,
     )
 
 
@@ -369,8 +370,13 @@ async def store_index_daily_bars(
     provider: str,
     contract_version: str,
     source_fetched_at: datetime,
+    preserve_existing_activity: bool = False,
 ) -> int:
     """Upsert settled daily bars, keyed on (symbol, trade_date).
+
+    ``preserve_existing_activity`` is reserved for TWSE enrichment: if its
+    activity report temporarily omits a session, a price refresh must not erase
+    volume or trade value that was stored by an earlier successful response.
 
     Re-fetching an overlapping window rewrites the same rows instead of adding
     duplicates, so a nightly 7d run and the original 2y backfill can coexist.
@@ -398,6 +404,7 @@ async def store_index_daily_bars(
                 "low": bar.low,
                 "close": bar.close,
                 "volume": bar.volume,
+                "trade_value": bar.trade_value,
                 "provider": provider,
                 "contract_version": contract_version,
                 "source_fetched_at": source_fetched_at,
@@ -464,7 +471,16 @@ async def store_index_daily_bars(
                     "high": statement.excluded.high,
                     "low": statement.excluded.low,
                     "close": statement.excluded.close,
-                    "volume": statement.excluded.volume,
+                    "volume": (
+                        func.coalesce(statement.excluded.volume, IndexDailyBar.volume)
+                        if preserve_existing_activity
+                        else statement.excluded.volume
+                    ),
+                    "trade_value": (
+                        func.coalesce(statement.excluded.trade_value, IndexDailyBar.trade_value)
+                        if preserve_existing_activity
+                        else statement.excluded.trade_value
+                    ),
                     "contract_version": statement.excluded.contract_version,
                     "source_fetched_at": statement.excluded.source_fetched_at,
                     "updated_at": func.now(),
@@ -559,19 +575,22 @@ async def select_taiex_refresh_months(
     if requested_months != TAIEX_INCREMENTAL_MONTHS:
         return requested
 
-    stored_dates = (
-        await database.scalars(
-            select(IndexDailyBar.trade_date).where(
+    stored_rows = (
+        await database.execute(
+            select(IndexDailyBar.trade_date, IndexDailyBar.trade_value).where(
                 IndexDailyBar.symbol == TAIEX_SYMBOL,
                 IndexDailyBar.trade_date >= start,
                 IndexDailyBar.trade_date <= today,
             )
         )
     ).all()
-    stored_months = {trade_date.replace(day=1) for trade_date in stored_dates}
+    stored_months: dict[date, bool] = {}
+    for trade_date, trade_value in stored_rows:
+        month = trade_date.replace(day=1)
+        stored_months[month] = stored_months.get(month, True) and trade_value is not None
     recent = requested[-TAIEX_INCREMENTAL_MONTHS:]
     missing = tuple(
-        month for month in requested if month not in stored_months and month not in recent
+        month for month in requested if not stored_months.get(month, False) and month not in recent
     )
     return (*recent, *missing)
 
@@ -638,6 +657,7 @@ async def refresh_taiex_daily_bars(
                 low=bar.low,
                 close=bar.close,
                 volume=bar.volume,
+                trade_value=bar.trade_value,
                 source=TAIEX_PROVIDER,
             )
             for bar in fetched.items
@@ -653,6 +673,7 @@ async def refresh_taiex_daily_bars(
                     provider=TAIEX_PROVIDER,
                     contract_version=TAIEX_CONTRACT_VERSION,
                     source_fetched_at=fetched.fetched_at,
+                    preserve_existing_activity=True,
                 )
         except (IntegrityError, DataError) as error:
             # A value the adapter let through that the schema will not hold.

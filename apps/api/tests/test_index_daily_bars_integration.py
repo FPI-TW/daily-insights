@@ -93,7 +93,12 @@ def _taipei_today() -> date:
     return datetime.now(ZoneInfo("Asia/Taipei")).date()
 
 
-def _bar(trade_date: date, close: str, volume: int | None = 1_000) -> DailyBar:
+def _bar(
+    trade_date: date,
+    close: str,
+    volume: int | None = 1_000,
+    trade_value: int | None = None,
+) -> DailyBar:
     return DailyBar(
         instrument_source_id="^TWII",
         market="tw_equity",
@@ -104,6 +109,7 @@ def _bar(trade_date: date, close: str, volume: int | None = 1_000) -> DailyBar:
         low=Decimal("99.0"),
         close=Decimal(close),
         volume=volume,
+        trade_value=trade_value,
         source="yfinance",
     )
 
@@ -1026,6 +1032,37 @@ async def test_the_same_provider_still_updates_an_existing_row(
         assert row.close == Decimal("123.5")
 
 
+async def test_taiex_enrichment_preserves_existing_activity_when_report_is_incomplete(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    trade_date = date(2026, 9, 1)
+    async with session_factory.begin() as database:
+        await store_index_daily_bars(
+            database,
+            bars=[_bar(trade_date, "100.0", 1_000, 2_000)],
+            provider="twse",
+            contract_version="twse-taiex-v2",
+            source_fetched_at=FETCHED_AT,
+            preserve_existing_activity=True,
+        )
+    async with session_factory.begin() as database:
+        await store_index_daily_bars(
+            database,
+            bars=[_bar(trade_date, "101.0", None, None)],
+            provider="twse",
+            contract_version="twse-taiex-v2",
+            source_fetched_at=FETCHED_AT,
+            preserve_existing_activity=True,
+        )
+
+    async with session_factory() as database:
+        row = await database.scalar(select(IndexDailyBar))
+        assert row is not None
+        assert row.close == Decimal("101.0")
+        assert row.volume == 1_000
+        assert row.trade_value == 2_000
+
+
 async def test_an_empty_taiex_series_widens_the_incremental_window_to_the_backfill(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -1096,6 +1133,7 @@ class _StubTwseAdapter:
                     low=Decimal("99.0"),
                     close=Decimal(self._close),
                     volume=1_000,
+                    trade_value=2_000,
                 ),
             ),
             fetched_at=FETCHED_AT,
@@ -1205,7 +1243,7 @@ async def test_a_partially_populated_taiex_window_keeps_retrying_older_gaps(
     today = date(2026, 9, 11)
     required = taiex_months(start=date(2024, 9, 1), end=today)
     missing = {required[0], required[1]}
-    bars = [_bar(month, "100.0") for month in required if month not in missing]
+    bars = [_bar(month, "100.0", 1_000, 2_000) for month in required if month not in missing]
     async with session_factory.begin() as database:
         await _store_as(database, bars, "twse")
 

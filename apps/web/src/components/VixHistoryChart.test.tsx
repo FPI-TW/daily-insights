@@ -28,6 +28,7 @@ const history: VixHistory = {
       low: "17.10",
       close: "18.10",
       volume: 0,
+      trade_value: null,
     },
     {
       symbol: "^VIX",
@@ -38,6 +39,7 @@ const history: VixHistory = {
       low: "21.50",
       close: "24.40",
       volume: 0,
+      trade_value: null,
     },
     {
       symbol: "^VIX",
@@ -48,6 +50,7 @@ const history: VixHistory = {
       low: "30.50",
       close: "32.70",
       volume: 0,
+      trade_value: null,
     },
   ],
 }

@@ -18,20 +18,20 @@ from daily_insights_api.modules.markets.service import (
 )
 
 
-class _StoredDates:
-    def __init__(self, dates: list[date]) -> None:
-        self._dates = dates
+class _StoredRows:
+    def __init__(self, rows: list[tuple[date, int | None]]) -> None:
+        self._rows = rows
 
-    def all(self) -> list[date]:
-        return self._dates
+    def all(self) -> list[tuple[date, int | None]]:
+        return self._rows
 
 
 class _Database:
-    def __init__(self, dates: list[date]) -> None:
-        self._dates = dates
+    def __init__(self, dates: list[date], *, incomplete: frozenset[date] = frozenset()) -> None:
+        self._rows = [(value, None if value in incomplete else 1) for value in dates]
 
-    async def scalars(self, _: object) -> _StoredDates:
-        return _StoredDates(self._dates)
+    async def execute(self, _: object) -> _StoredRows:
+        return _StoredRows(self._rows)
 
 
 class _WriteSessionFactory:
@@ -141,6 +141,22 @@ async def test_empty_taiex_selection_requests_all_25_months() -> None:
 
 
 @pytest.mark.asyncio
+async def test_taiex_selection_retries_a_month_with_missing_trade_value() -> None:
+    today = date(2026, 9, 11)
+    required = taiex_months(start=date(2024, 9, 1), end=today)
+    incomplete = date(2025, 8, 1)
+
+    selected = await select_taiex_refresh_months(
+        cast(Any, _Database(list(required), incomplete=frozenset({incomplete}))),
+        today=today,
+        requested_months=TAIEX_INCREMENTAL_MONTHS,
+    )
+
+    assert selected[:2] == (date(2026, 8, 1), date(2026, 9, 1))
+    assert selected[2:] == (incomplete,)
+
+
+@pytest.mark.asyncio
 async def test_empty_taiex_month_is_reported_as_retryable_partial(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -158,6 +174,7 @@ async def test_empty_taiex_month_is_reported_as_retryable_partial(
                         low=Decimal("99"),
                         close=Decimal("100"),
                         volume=1_000,
+                        trade_value=2_000,
                     ),
                 )
             return TaiexDailyBars(month=month, items=items, fetched_at=fetched_at)
