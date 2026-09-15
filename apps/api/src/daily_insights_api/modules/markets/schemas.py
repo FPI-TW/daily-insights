@@ -94,6 +94,21 @@ class IndexMacdSeriesResponse(BaseModel):
     points: list[IndexMacdPointResponse]
 
 
+class IndexKdPointResponse(BaseModel):
+    trade_date: date
+    k: PriceDecimal | None
+    d: PriceDecimal | None
+
+
+class IndexKdSeriesResponse(BaseModel):
+    lookback_period: Literal[9]
+    k_smoothing_period: Literal[3]
+    d_smoothing_period: Literal[3]
+    method: Literal["smoothed-rsv"]
+    formula_version: Literal["stochastic-kd-9-3-3-v1"]
+    points: list[IndexKdPointResponse]
+
+
 class IndexMovingAveragesResponse(BaseModel):
     """Read-time close-based technical indicators for settled index bars."""
 
@@ -111,6 +126,7 @@ class IndexMovingAveragesResponse(BaseModel):
     ]
     rsi: IndexRsiSeriesResponse
     macd: IndexMacdSeriesResponse
+    kd: IndexKdSeriesResponse
 
 
 class InstitutionalFlowPointResponse(BaseModel):

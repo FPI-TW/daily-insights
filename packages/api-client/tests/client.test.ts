@@ -487,6 +487,20 @@ describe("API client trust boundary", () => {
           },
         ],
       },
+      kd: {
+        lookback_period: 9,
+        k_smoothing_period: 3,
+        d_smoothing_period: 3,
+        method: "smoothed-rsv",
+        formula_version: "stochastic-kd-9-3-3-v1",
+        points: [
+          {
+            trade_date: "2026-09-02",
+            k: "75.0000000000",
+            d: "68.0000000000",
+          },
+        ],
+      },
     }
     const transport = vi.fn(async () => Response.json(response))
     await expect(
@@ -515,6 +529,7 @@ describe("API client trust boundary", () => {
       openapi.components.schemas.IndexMovingAveragesResponse
     expect(responseSchema).toMatchObject({
       properties: {
+        kd: { $ref: "#/components/schemas/IndexKdSeriesResponse" },
         series: {
           type: "array",
           minItems: 4,

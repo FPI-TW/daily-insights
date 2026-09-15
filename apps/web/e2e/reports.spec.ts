@@ -100,7 +100,7 @@ test("visible market without a publication shows a non-error state", async ({
   ).toBeVisible()
 })
 
-test("US market renders a dedicated responsive VIX chart", async ({
+test("US market renders a responsive VIX chart with MACD and KD", async ({
   context,
   page,
 }) => {
@@ -136,6 +136,12 @@ test("US market renders a dedicated responsive VIX chart", async ({
   await expect(
     page.getByRole("heading", { name: "VIX volatility trend" })
   ).toBeVisible()
+  const vixPanel = page
+    .getByRole("heading", { name: "VIX volatility trend" })
+    .locator("xpath=ancestor::section[1]")
+  await expect
+    .poll(async () => (await vixPanel.locator("canvas").boundingBox())?.height)
+    .toBeGreaterThan(600)
   await expect(
     page.getByText(/20 and 30 are reference risk bands/)
   ).toBeVisible()

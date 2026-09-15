@@ -132,6 +132,14 @@ describe("indexMovingAverageOutcomes", () => {
         formula_version: "macd-ema-close-v1",
         points: [],
       },
+      kd: {
+        lookback_period: 9,
+        k_smoothing_period: 3,
+        d_smoothing_period: 3,
+        method: "smoothed-rsv",
+        formula_version: "stochastic-kd-9-3-3-v1",
+        points: [],
+      },
     }
 
     expect(
@@ -191,6 +199,14 @@ describe("bias indicators", () => {
         signal_period: 9,
         method: "ema",
         formula_version: "macd-ema-close-v1",
+        points: [],
+      },
+      kd: {
+        lookback_period: 9,
+        k_smoothing_period: 3,
+        d_smoothing_period: 3,
+        method: "smoothed-rsv",
+        formula_version: "stochastic-kd-9-3-3-v1",
         points: [],
       },
     }

@@ -38,6 +38,8 @@ from daily_insights_api.modules.markets.models import (
 )
 from daily_insights_api.modules.markets.schemas import (
     IndexDailyBarResponse,
+    IndexKdPointResponse,
+    IndexKdSeriesResponse,
     IndexLatestBarResponse,
     IndexMacdPointResponse,
     IndexMacdSeriesResponse,
@@ -103,6 +105,8 @@ RSI_PERIOD = 14
 MACD_FAST_PERIOD = 12
 MACD_SLOW_PERIOD = 26
 MACD_SIGNAL_PERIOD = 9
+KD_LOOKBACK_PERIOD = 9
+KD_SMOOTHING_PERIOD = 3
 
 
 class IndexProviderConflictError(ValueError):
@@ -313,6 +317,10 @@ def index_moving_averages_response(
         bars=(*warmup_bars, *requested_bars),
         requested_offset=len(warmup_bars),
     )
+    kd_points = _kd_indicator_points(
+        bars=(*warmup_bars, *requested_bars),
+        requested_offset=len(warmup_bars),
+    )
     return IndexMovingAveragesResponse(
         symbol=symbol,
         market_code=market_code,
@@ -339,6 +347,14 @@ def index_moving_averages_response(
             method="ema",
             formula_version="macd-ema-close-v1",
             points=macd_points,
+        ),
+        kd=IndexKdSeriesResponse(
+            lookback_period=KD_LOOKBACK_PERIOD,
+            k_smoothing_period=KD_SMOOTHING_PERIOD,
+            d_smoothing_period=KD_SMOOTHING_PERIOD,
+            method="smoothed-rsv",
+            formula_version="stochastic-kd-9-3-3-v1",
+            points=kd_points,
         ),
     )
 
@@ -446,6 +462,60 @@ def _momentum_indicator_points(
                 )
             )
     return rsi_points, macd_points
+
+
+def _kd_indicator_points(
+    *,
+    bars: Sequence[IndexDailyBar],
+    requested_offset: int,
+) -> list[IndexKdPointResponse]:
+    """Calculate Taiwan-style stochastic KD (9-day RSV, 1/3 smoothing)."""
+    points: list[IndexKdPointResponse] = []
+    window: list[IndexDailyBar] = []
+    k_value = Decimal(50)
+    d_value = Decimal(50)
+    smoothing = Decimal(KD_SMOOTHING_PERIOD)
+
+    for index, bar in enumerate(bars):
+        window.append(bar)
+        if len(window) > KD_LOOKBACK_PERIOD:
+            window.pop(0)
+
+        k: Decimal | None = None
+        d: Decimal | None = None
+        if len(window) == KD_LOOKBACK_PERIOD and all(
+            item.high is not None and item.low is not None for item in window
+        ):
+            highest = max(item.high for item in window if item.high is not None)
+            lowest = min(item.low for item in window if item.low is not None)
+            raw_rsv = (
+                Decimal(50)
+                if highest == lowest
+                else (bar.close - lowest) / (highest - lowest) * Decimal(100)
+            )
+            rsv = min(Decimal(100), max(Decimal(0), raw_rsv))
+            k_value = (k_value * (smoothing - 1) + rsv) / smoothing
+            d_value = (d_value * (smoothing - 1) + k_value) / smoothing
+            k = k_value
+            d = d_value
+
+        if index >= requested_offset:
+            points.append(
+                IndexKdPointResponse(
+                    trade_date=bar.trade_date,
+                    k=(
+                        k.quantize(MOVING_AVERAGE_QUANTUM, rounding=ROUND_HALF_EVEN)
+                        if k is not None
+                        else None
+                    ),
+                    d=(
+                        d.quantize(MOVING_AVERAGE_QUANTUM, rounding=ROUND_HALF_EVEN)
+                        if d is not None
+                        else None
+                    ),
+                )
+            )
+    return points
 
 
 async def index_moving_averages(

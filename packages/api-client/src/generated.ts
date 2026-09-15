@@ -1422,6 +1422,48 @@ export interface components {
       /** Volume */
       volume: number | null
     }
+    /** IndexKdPointResponse */
+    IndexKdPointResponse: {
+      /** D */
+      d: string | null
+      /** K */
+      k: string | null
+      /**
+       * Trade Date
+       * Format: date
+       */
+      trade_date: string
+    }
+    /** IndexKdSeriesResponse */
+    IndexKdSeriesResponse: {
+      /**
+       * D Smoothing Period
+       * @constant
+       */
+      d_smoothing_period: 3
+      /**
+       * Formula Version
+       * @constant
+       */
+      formula_version: "stochastic-kd-9-3-3-v1"
+      /**
+       * K Smoothing Period
+       * @constant
+       */
+      k_smoothing_period: 3
+      /**
+       * Lookback Period
+       * @constant
+       */
+      lookback_period: 9
+      /**
+       * Method
+       * @constant
+       */
+      method: "smoothed-rsv"
+      /** Points */
+      points: components["schemas"]["IndexKdPointResponse"][]
+    }
     /**
      * IndexLatestBarResponse
      * @description The most recent settled bar plus the close before it, for a change figure.
@@ -1557,6 +1599,7 @@ export interface components {
        * @constant
        */
       formula_version: "sma-close-v1"
+      kd: components["schemas"]["IndexKdSeriesResponse"]
       macd: components["schemas"]["IndexMacdSeriesResponse"]
       /** Market Code */
       market_code: string

@@ -1216,6 +1216,88 @@
         "title": "IndexDailyBarResponse",
         "type": "object"
       },
+      "IndexKdPointResponse": {
+        "properties": {
+          "d": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "D"
+          },
+          "k": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "K"
+          },
+          "trade_date": {
+            "format": "date",
+            "title": "Trade Date",
+            "type": "string"
+          }
+        },
+        "required": ["trade_date", "k", "d"],
+        "title": "IndexKdPointResponse",
+        "type": "object"
+      },
+      "IndexKdSeriesResponse": {
+        "properties": {
+          "d_smoothing_period": {
+            "const": 3,
+            "title": "D Smoothing Period",
+            "type": "integer"
+          },
+          "formula_version": {
+            "const": "stochastic-kd-9-3-3-v1",
+            "title": "Formula Version",
+            "type": "string"
+          },
+          "k_smoothing_period": {
+            "const": 3,
+            "title": "K Smoothing Period",
+            "type": "integer"
+          },
+          "lookback_period": {
+            "const": 9,
+            "title": "Lookback Period",
+            "type": "integer"
+          },
+          "method": {
+            "const": "smoothed-rsv",
+            "title": "Method",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/IndexKdPointResponse"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "lookback_period",
+          "k_smoothing_period",
+          "d_smoothing_period",
+          "method",
+          "formula_version",
+          "points"
+        ],
+        "title": "IndexKdSeriesResponse",
+        "type": "object"
+      },
       "IndexLatestBarResponse": {
         "description": "The most recent settled bar plus the close before it, for a change figure.",
         "properties": {
@@ -1537,6 +1619,9 @@
             "title": "Formula Version",
             "type": "string"
           },
+          "kd": {
+            "$ref": "#/components/schemas/IndexKdSeriesResponse"
+          },
           "macd": {
             "$ref": "#/components/schemas/IndexMacdSeriesResponse"
           },
@@ -1591,7 +1676,8 @@
           "as_of",
           "series",
           "rsi",
-          "macd"
+          "macd",
+          "kd"
         ],
         "title": "IndexMovingAveragesResponse",
         "type": "object"

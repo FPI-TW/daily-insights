@@ -106,6 +106,19 @@ export const indexMacdSeriesSchema = z.object({
   formula_version: z.literal("macd-ema-close-v1"),
   points: z.array(indexMacdPointSchema),
 })
+export const indexKdPointSchema = z.object({
+  trade_date: z.iso.date(),
+  k: decimalSchema.nullable(),
+  d: decimalSchema.nullable(),
+})
+export const indexKdSeriesSchema = z.object({
+  lookback_period: z.literal(9),
+  k_smoothing_period: z.literal(3),
+  d_smoothing_period: z.literal(3),
+  method: z.literal("smoothed-rsv"),
+  formula_version: z.literal("stochastic-kd-9-3-3-v1"),
+  points: z.array(indexKdPointSchema),
+})
 export const indexMovingAveragesSchema = z.object({
   symbol: z.string().min(1),
   market_code: marketCodeSchema,
@@ -121,6 +134,7 @@ export const indexMovingAveragesSchema = z.object({
   ]),
   rsi: indexRsiSeriesSchema,
   macd: indexMacdSeriesSchema,
+  kd: indexKdSeriesSchema,
 })
 export type IndexMovingAverages = z.infer<typeof indexMovingAveragesSchema>
 export const indexLatestBarSchema = indexDailyBarSchema.extend({

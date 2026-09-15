@@ -34,6 +34,7 @@ export type VixHistory = {
   start: string
   end: string
   bars: IndexDailyBar[]
+  indicators: IndexMovingAverages | null
 }
 
 export type IndexMovingAverageMap = Record<string, IndexMovingAverages>
@@ -193,10 +194,16 @@ export const getVixHistory = createServerFn({ method: "GET" })
     setResponseHeader("Cache-Control", "no-store")
     const range = data.range ?? twoYearTaipeiRange()
     const client = serverMarketClient()
+    const [bars, indicators] = await Promise.allSettled([
+      client.indexDailyBars(VIX_SYMBOL, range),
+      client.indexMovingAverages(VIX_SYMBOL, range),
+    ])
+    if (bars.status === "rejected") throw bars.reason
     return {
       symbol: VIX_SYMBOL,
       ...range,
-      bars: await client.indexDailyBars(VIX_SYMBOL, range),
+      bars: bars.value,
+      indicators: indicators.status === "fulfilled" ? indicators.value : null,
     }
   })
 

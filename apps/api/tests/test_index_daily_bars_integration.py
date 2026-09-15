@@ -866,6 +866,14 @@ async def test_moving_averages_use_hidden_warmup_and_only_expose_requested_dates
         {"trade_date": "2026-01-20", "macd": None, "signal": None, "histogram": None},
         {"trade_date": "2026-01-23", "macd": None, "signal": None, "histogram": None},
     ]
+    assert payload["kd"]["formula_version"] == "stochastic-kd-9-3-3-v1"
+    assert [point["trade_date"] for point in payload["kd"]["points"]] == [
+        "2026-01-20",
+        "2026-01-23",
+    ]
+    for point in payload["kd"]["points"]:
+        assert Decimal(0) <= Decimal(point["k"]) <= Decimal(100)
+        assert Decimal(0) <= Decimal(point["d"]) <= Decimal(100)
 
 
 async def test_moving_average_route_has_daily_bar_visibility_and_range_contract(
@@ -884,6 +892,7 @@ async def test_moving_average_route_has_daily_bar_visibility_and_range_contract(
     assert [item["points"] for item in no_data.json()["series"]] == [[], [], [], []]
     assert no_data.json()["rsi"]["points"] == []
     assert no_data.json()["macd"]["points"] == []
+    assert no_data.json()["kd"]["points"] == []
 
     unknown = await member_client.get("/api/markets/indices/NOPE/moving-averages")
     inverted = await member_client.get(

@@ -782,6 +782,19 @@ const server = createServer(async (request, response) => {
                 }
               }),
             },
+            kd: {
+              lookback_period: 9,
+              k_smoothing_period: 3,
+              d_smoothing_period: 3,
+              method: "smoothed-rsv",
+              formula_version: "stochastic-kd-9-3-3-v1",
+              points: bars.map((bar, i) => ({
+                trade_date: bar.trade_date,
+                k: i < 8 ? null : (50 + Math.sin(i / 11) * 35).toFixed(10),
+                d:
+                  i < 8 ? null : (50 + Math.sin((i - 3) / 11) * 28).toFixed(10),
+              })),
+            },
           }
     )
     return

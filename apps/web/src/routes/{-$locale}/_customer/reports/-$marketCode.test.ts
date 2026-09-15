@@ -69,6 +69,7 @@ const vixHistory = {
   start: "2024-09-02",
   end: "2026-09-02",
   bars: [],
+  indicators: null,
 }
 
 const viewpoint = {
