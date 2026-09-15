@@ -88,6 +88,12 @@ describe("IndexHistoryChart", () => {
       screen.getByRole("heading", { name: "Index performance" })
     ).toBeVisible()
     expect(
+      screen
+        .getByRole("heading", { name: "Index performance" })
+        .compareDocumentPosition(screen.getByRole("combobox")) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
       screen.queryByText("Daily closing levels from 2024/9/4 to 2026/9/4")
     ).toBeNull()
     expect(
@@ -104,7 +110,7 @@ describe("IndexHistoryChart", () => {
       '"coordinateSystem":"matrix"'
     )
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
-      '"coord":[[0,0],[4,5]],"mergeCells":true'
+      '"coord":[[0,0],[8,9]],"mergeCells":true'
     )
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
       '"name":"Volume (100M shares)","type":"bar"'
@@ -198,6 +204,36 @@ describe("IndexHistoryChart", () => {
                 ],
               },
             ],
+            rsi: {
+              period: 14,
+              method: "wilder",
+              formula_version: "rsi-wilder-close-v1",
+              points: [
+                { trade_date: "2026-09-02", value: "52.0" },
+                { trade_date: "2026-09-03", value: "54.0" },
+              ],
+            },
+            macd: {
+              fast_period: 12,
+              slow_period: 26,
+              signal_period: 9,
+              method: "ema",
+              formula_version: "macd-ema-close-v1",
+              points: [
+                {
+                  trade_date: "2026-09-02",
+                  macd: "5.0",
+                  signal: "4.0",
+                  histogram: "1.0",
+                },
+                {
+                  trade_date: "2026-09-03",
+                  macd: "6.0",
+                  signal: "4.5",
+                  histogram: "1.5",
+                },
+              ],
+            },
           },
         })}
       />
@@ -212,11 +248,17 @@ describe("IndexHistoryChart", () => {
       '"selected":{"SMA 20":true,"SMA 240":false}'
     )
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
-      '"type":"slider","xAxisIndex":[0,1],"start":0,"end":100,"height":26'
+      '"type":"slider","xAxisIndex":[0,1,2,3],"start":0,"end":100,"height":26'
+    )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"name":"MACD","type":"line"'
+    )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"name":"RSI 14","type":"line"'
     )
     fireEvent.click(screen.getByTestId("index-chart"))
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
-      '"type":"inside","xAxisIndex":[0,1],"start":25,"end":75'
+      '"type":"inside","xAxisIndex":[0,1,2,3],"start":25,"end":75'
     )
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
       '"color":["#2563eb","#d97706"'

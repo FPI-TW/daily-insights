@@ -119,6 +119,17 @@ test("US market renders a dedicated responsive VIX chart", async ({
     )
   ).toHaveCount(0)
   await expect(indexPanel.locator("canvas").first()).toBeVisible()
+  const titleBox = await indexPanel
+    .getByRole("heading", { name: "Index performance", exact: true })
+    .boundingBox()
+  const selectorBox = await indexPanel.getByRole("combobox").boundingBox()
+  expect(titleBox?.y).toBeLessThan(selectorBox?.y ?? 0)
+  await expect
+    .poll(
+      async () =>
+        (await indexPanel.locator("canvas").first().boundingBox())?.height
+    )
+    .toBeGreaterThan(600)
   await expect(
     page.getByRole("heading", { name: "Index technicals", exact: true })
   ).toHaveCount(0)

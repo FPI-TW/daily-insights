@@ -33,6 +33,11 @@ def test_moving_averages_have_fixed_order_and_include_current_close() -> None:
     assert response.series[0].points[0].trade_date == date(2026, 1, 20)
     assert response.series[0].points[0].value == Decimal("1.0500000000")
     assert response.series[1].points[0].value is None
+    assert response.rsi.period == 14
+    assert response.rsi.points[0].value == Decimal("100.0000000000")
+    assert response.macd.fast_period == 12
+    assert response.macd.slow_period == 26
+    assert response.macd.signal_period == 9
 
 
 def test_moving_averages_quantize_to_ten_places_with_half_even_rounding() -> None:
@@ -74,3 +79,39 @@ def test_moving_averages_have_empty_fixed_series_when_no_requested_bars() -> Non
 
     assert response.as_of is None
     assert [series.points for series in response.series] == [[], [], [], []]
+    assert response.rsi.points == []
+    assert response.macd.points == []
+
+
+def test_rsi_and_macd_use_hidden_warmup_and_emit_neutral_constant_series() -> None:
+    response = index_moving_averages_response(
+        symbol="^GSPC",
+        market_code="us_equity",
+        warmup_bars=_bars(date(2026, 1, 1), ["100"] * 34),
+        requested_bars=_bars(date(2026, 2, 4), ["100"]),
+    )
+
+    assert response.rsi.method == "wilder"
+    assert response.rsi.formula_version == "rsi-wilder-close-v1"
+    assert response.rsi.points[0].value == Decimal("50.0000000000")
+    assert response.macd.method == "ema"
+    assert response.macd.formula_version == "macd-ema-close-v1"
+    point = response.macd.points[0]
+    assert point.macd == Decimal("0E-10")
+    assert point.signal == Decimal("0E-10")
+    assert point.histogram == Decimal("0E-10")
+
+
+def test_rsi_and_macd_follow_a_steady_rising_series() -> None:
+    response = index_moving_averages_response(
+        symbol="^GSPC",
+        market_code="us_equity",
+        warmup_bars=_bars(date(2026, 1, 1), [str(value) for value in range(1, 35)]),
+        requested_bars=_bars(date(2026, 2, 4), ["35"]),
+    )
+
+    assert response.rsi.points[0].value == Decimal("100.0000000000")
+    point = response.macd.points[0]
+    assert point.macd == Decimal("7.0000000000")
+    assert point.signal == Decimal("7.0000000000")
+    assert point.histogram == Decimal("0E-10")

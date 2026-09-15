@@ -466,6 +466,27 @@ describe("API client trust boundary", () => {
         period,
         points: [{ trade_date: "2026-09-02", value: null }],
       })),
+      rsi: {
+        period: 14,
+        method: "wilder",
+        formula_version: "rsi-wilder-close-v1",
+        points: [{ trade_date: "2026-09-02", value: "55.0000000000" }],
+      },
+      macd: {
+        fast_period: 12,
+        slow_period: 26,
+        signal_period: 9,
+        method: "ema",
+        formula_version: "macd-ema-close-v1",
+        points: [
+          {
+            trade_date: "2026-09-02",
+            macd: "1.0000000000",
+            signal: "0.7500000000",
+            histogram: "0.2500000000",
+          },
+        ],
+      },
     }
     const transport = vi.fn(async () => Response.json(response))
     await expect(

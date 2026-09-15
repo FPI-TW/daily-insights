@@ -79,6 +79,28 @@ const averages: IndexMovingAverageMap = {
       { period: 120, points: [] },
       { period: 240, points: [] },
     ],
+    rsi: {
+      period: 14,
+      method: "wilder",
+      formula_version: "rsi-wilder-close-v1",
+      points: dates.map((trade_date, index) => ({
+        trade_date,
+        value: String(45 + index),
+      })),
+    },
+    macd: {
+      fast_period: 12,
+      slow_period: 26,
+      signal_period: 9,
+      method: "ema",
+      formula_version: "macd-ema-close-v1",
+      points: dates.map((trade_date, index) => ({
+        trade_date,
+        macd: String(index + 1),
+        signal: String(index + 0.5),
+        histogram: "0.5",
+      })),
+    },
   },
 }
 function show(ui: React.ReactNode) {
@@ -128,7 +150,13 @@ describe("TaiwanIndexHistoryChart", () => {
       '"type":"candlestick"'
     )
     expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
-      '"xAxisIndex":[0,1]'
+      '"xAxisIndex":[0,1,2,3]'
+    )
+    expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
+      '"name":"MACD","type":"line"'
+    )
+    expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
+      '"name":"RSI 14","type":"line"'
     )
     expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
       '"coordinateSystem":"matrix"'
@@ -237,7 +265,7 @@ describe("TaiwanIndexHistoryChart", () => {
     expect(chart).toHaveTextContent('"value":1')
     expect(chart).not.toHaveTextContent("Trade value (TWD 100M)")
     expect(chart).toHaveTextContent('"coordinateSystem":"matrix"')
-    expect(chart).toHaveTextContent('"coord":[[0,0],[4,5]],"mergeCells":true')
+    expect(chart).toHaveTextContent('"coord":[[0,0],[8,9]],"mergeCells":true')
   })
   it("has explicit loading, failure and empty states", () => {
     show(<TaiwanIndexHistoryLoading />)

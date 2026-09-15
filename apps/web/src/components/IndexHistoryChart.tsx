@@ -148,6 +148,38 @@ export function IndexHistoryChart({
   const activityValues = selected.bars.map(bar =>
     bar.volume === null ? null : bar.volume / 100_000_000
   )
+  const rsiByDate = new Map(
+    (selectedMovingAverages?.rsi.points ?? []).map(point => [
+      point.trade_date,
+      point.value,
+    ])
+  )
+  const rsiValues = dates.map(date => {
+    const value = rsiByDate.get(date)
+    return value == null ? null : Number(value)
+  })
+  const macdByDate = new Map(
+    (selectedMovingAverages?.macd.points ?? []).map(point => [
+      point.trade_date,
+      point,
+    ])
+  )
+  const macdValues = dates.map(date => {
+    const value = macdByDate.get(date)?.macd
+    return value == null ? null : Number(value)
+  })
+  const signalValues = dates.map(date => {
+    const value = macdByDate.get(date)?.signal
+    return value == null ? null : Number(value)
+  })
+  const histogramValues = dates.map(date => {
+    const value = macdByDate.get(date)?.histogram
+    return value == null ? null : Number(value)
+  })
+  const macdLabel = t("indexChartMacd")
+  const signalLabel = t("indexChartMacdSignal")
+  const histogramLabel = t("indexChartMacdHistogram")
+  const rsiLabel = t("indexChartRsi")
   const series = [
     {
       name: closeLabel,
@@ -178,24 +210,26 @@ export function IndexHistoryChart({
       className="rounded-2xl border border-line bg-surface mt-6 min-w-0 p-5"
       aria-labelledby="index-history-title"
     >
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
+      <div className="mb-4">
         <h2 id="index-history-title" className="m-0 text-base font-extrabold">
           {t("indexChartTitle")}
         </h2>
-        <label className="grid gap-1 text-xs font-bold text-sea-ink-soft">
-          {t("indexChartSelect")}
-          <select
-            className="min-h-10 rounded-md border border-line bg-surface px-3 text-sm text-sea-ink"
-            value={selected.symbol}
-            onChange={event => setSelectedSymbol(event.target.value)}
-          >
-            {history.series.map(item => (
-              <option key={item.symbol} value={item.symbol}>
-                {indexOptionLabel(item.symbol, t)}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="mt-3 flex justify-end">
+          <label className="grid gap-1 text-xs font-bold text-sea-ink-soft">
+            {t("indexChartSelect")}
+            <select
+              className="min-h-10 rounded-md border border-line bg-surface px-3 text-sm text-sea-ink"
+              value={selected.symbol}
+              onChange={event => setSelectedSymbol(event.target.value)}
+            >
+              {history.series.map(item => (
+                <option key={item.symbol} value={item.symbol}>
+                  {indexOptionLabel(item.symbol, t)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
       {history.failedSymbols.length > 0 ? (
         <p
@@ -207,7 +241,7 @@ export function IndexHistoryChart({
           })}
         </p>
       ) : null}
-      <div className="h-108 min-w-0 w-full overflow-hidden border-y border-line py-2 sm:h-120">
+      <div className="h-168 min-w-0 w-full overflow-hidden border-y border-line py-2 sm:h-184">
         <ClientOnly
           fallback={
             <div
@@ -250,6 +284,32 @@ export function IndexHistoryChart({
                   coordinateSystem: "matrix",
                   coord: [0, 4],
                 },
+                {
+                  text: macdLabel,
+                  left: 4,
+                  top: 4,
+                  padding: 0,
+                  textStyle: {
+                    color: colors.text,
+                    fontSize: 11,
+                    fontWeight: "bold",
+                  },
+                  coordinateSystem: "matrix",
+                  coord: [0, 6],
+                },
+                {
+                  text: rsiLabel,
+                  left: 4,
+                  top: 4,
+                  padding: 0,
+                  textStyle: {
+                    color: colors.text,
+                    fontSize: 11,
+                    fontWeight: "bold",
+                  },
+                  coordinateSystem: "matrix",
+                  coord: [0, 8],
+                },
               ],
               matrix: {
                 left: 0,
@@ -257,7 +317,7 @@ export function IndexHistoryChart({
                 top: 4,
                 bottom: 54,
                 x: { show: false, data: [null] },
-                y: { show: false, data: Array(6).fill(null) },
+                y: { show: false, data: Array(10).fill(null) },
                 body: {
                   data: [
                     {
@@ -270,7 +330,7 @@ export function IndexHistoryChart({
                     {
                       coord: [
                         [0, 0],
-                        [4, 5],
+                        [8, 9],
                       ],
                       mergeCells: true,
                     },
@@ -294,6 +354,22 @@ export function IndexHistoryChart({
                   top: 24,
                   bottom: 2,
                 },
+                {
+                  coordinateSystem: "matrix",
+                  coord: [0, 6],
+                  left: 64,
+                  right: 18,
+                  top: 24,
+                  bottom: 2,
+                },
+                {
+                  coordinateSystem: "matrix",
+                  coord: [0, 8],
+                  left: 64,
+                  right: 18,
+                  top: 24,
+                  bottom: 2,
+                },
               ],
               axisPointer: { link: [{ xAxisIndex: "all" }] },
               tooltip: {
@@ -306,6 +382,12 @@ export function IndexHistoryChart({
                 type: "scroll",
                 top: 10,
                 right: 18,
+                data: [
+                  closeLabel,
+                  ...availableMovingAverages.map(item =>
+                    t("indexChartSma", { period: item.period })
+                  ),
+                ],
                 selected: legendSelection,
                 textStyle: { color: colors.text },
               },
@@ -323,6 +405,22 @@ export function IndexHistoryChart({
                   type: "category",
                   data: dates,
                   gridIndex: 1,
+                  axisLabel: { show: false },
+                  axisTick: { show: false },
+                  axisLine: { show: false },
+                },
+                {
+                  type: "category",
+                  data: dates,
+                  gridIndex: 2,
+                  axisLabel: { show: false },
+                  axisTick: { show: false },
+                  axisLine: { show: false },
+                },
+                {
+                  type: "category",
+                  data: dates,
+                  gridIndex: 3,
                   axisLabel: {
                     color: colors.text,
                     hideOverlap: true,
@@ -356,16 +454,36 @@ export function IndexHistoryChart({
                     lineStyle: { color: colors.grid, type: "dashed" },
                   },
                 },
+                {
+                  type: "value",
+                  gridIndex: 2,
+                  scale: true,
+                  axisLabel: { color: colors.text },
+                  splitLine: {
+                    lineStyle: { color: colors.grid, type: "dashed" },
+                  },
+                },
+                {
+                  type: "value",
+                  gridIndex: 3,
+                  min: 0,
+                  max: 100,
+                  interval: 30,
+                  axisLabel: { color: colors.text },
+                  splitLine: {
+                    lineStyle: { color: colors.grid, type: "dashed" },
+                  },
+                },
               ],
               dataZoom: [
                 {
                   type: "inside",
-                  xAxisIndex: [0, 1],
+                  xAxisIndex: [0, 1, 2, 3],
                   ...zoom,
                 },
                 {
                   type: "slider",
-                  xAxisIndex: [0, 1],
+                  xAxisIndex: [0, 1, 2, 3],
                   ...zoom,
                   height: 26,
                   bottom: 4,
@@ -408,6 +526,57 @@ export function IndexHistoryChart({
                     },
                   })),
                 },
+                {
+                  name: histogramLabel,
+                  type: "bar",
+                  xAxisIndex: 2,
+                  yAxisIndex: 2,
+                  data: histogramValues.map(value => ({
+                    value,
+                    itemStyle: {
+                      color:
+                        value === null || value >= 0 ? colors.up : colors.down,
+                      opacity: 0.55,
+                    },
+                  })),
+                },
+                {
+                  name: macdLabel,
+                  type: "line",
+                  xAxisIndex: 2,
+                  yAxisIndex: 2,
+                  data: macdValues,
+                  showSymbol: false,
+                  connectNulls: false,
+                  lineStyle: { width: 1.5, color: colors.series[0] },
+                },
+                {
+                  name: signalLabel,
+                  type: "line",
+                  xAxisIndex: 2,
+                  yAxisIndex: 2,
+                  data: signalValues,
+                  showSymbol: false,
+                  connectNulls: false,
+                  lineStyle: { width: 1.5, color: colors.series[1] },
+                },
+                {
+                  name: rsiLabel,
+                  type: "line",
+                  xAxisIndex: 3,
+                  yAxisIndex: 3,
+                  data: rsiValues,
+                  showSymbol: false,
+                  connectNulls: false,
+                  lineStyle: { width: 1.5, color: colors.series[3] },
+                  markLine: {
+                    silent: true,
+                    symbol: "none",
+                    label: { show: false },
+                    lineStyle: { color: colors.grid, type: "dashed" },
+                    data: [{ yAxis: 30 }, { yAxis: 70 }],
+                  },
+                },
               ],
             }}
           />
@@ -429,6 +598,10 @@ export function IndexHistoryChart({
               <th>{t("indexChartDate")}</th>
               <th>{closeLabel}</th>
               <th>{activityLabel}</th>
+              <th>{macdLabel}</th>
+              <th>{signalLabel}</th>
+              <th>{histogramLabel}</th>
+              <th>{rsiLabel}</th>
               {availableMovingAverages.map(item => (
                 <th key={item.period}>
                   {t("indexChartSma", { period: item.period })}
@@ -448,6 +621,10 @@ export function IndexHistoryChart({
                         maximumFractionDigits: 2,
                       }).format(bar.volume / 100_000_000)}
                 </td>
+                <td>{formatNumber(macdValues[index], null, locale)}</td>
+                <td>{formatNumber(signalValues[index], null, locale)}</td>
+                <td>{formatNumber(histogramValues[index], null, locale)}</td>
+                <td>{formatNumber(rsiValues[index], null, locale)}</td>
                 {availableMovingAverages.map(item => (
                   <td key={item.period}>
                     {item.values[index] === null

@@ -756,6 +756,32 @@ const server = createServer(async (request, response) => {
                       ).toFixed(10),
               })),
             })),
+            rsi: {
+              period: 14,
+              method: "wilder",
+              formula_version: "rsi-wilder-close-v1",
+              points: bars.map((bar, i) => ({
+                trade_date: bar.trade_date,
+                value: i < 14 ? null : (50 + Math.sin(i / 12) * 25).toFixed(10),
+              })),
+            },
+            macd: {
+              fast_period: 12,
+              slow_period: 26,
+              signal_period: 9,
+              method: "ema",
+              formula_version: "macd-ema-close-v1",
+              points: bars.map((bar, i) => {
+                const macd = Math.sin(i / 16) * 120
+                const signal = Math.sin((i - 4) / 16) * 100
+                return {
+                  trade_date: bar.trade_date,
+                  macd: i < 25 ? null : macd.toFixed(10),
+                  signal: i < 33 ? null : signal.toFixed(10),
+                  histogram: i < 33 ? null : (macd - signal).toFixed(10),
+                }
+              }),
+            },
           }
     )
     return

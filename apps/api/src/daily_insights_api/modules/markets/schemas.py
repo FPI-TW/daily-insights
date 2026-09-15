@@ -71,8 +71,31 @@ class IndexMovingAverage240SeriesResponse(BaseModel):
     points: list[IndexMovingAveragePointResponse]
 
 
+class IndexRsiSeriesResponse(BaseModel):
+    period: Literal[14]
+    method: Literal["wilder"]
+    formula_version: Literal["rsi-wilder-close-v1"]
+    points: list[IndexMovingAveragePointResponse]
+
+
+class IndexMacdPointResponse(BaseModel):
+    trade_date: date
+    macd: PriceDecimal | None
+    signal: PriceDecimal | None
+    histogram: PriceDecimal | None
+
+
+class IndexMacdSeriesResponse(BaseModel):
+    fast_period: Literal[12]
+    slow_period: Literal[26]
+    signal_period: Literal[9]
+    method: Literal["ema"]
+    formula_version: Literal["macd-ema-close-v1"]
+    points: list[IndexMacdPointResponse]
+
+
 class IndexMovingAveragesResponse(BaseModel):
-    """Read-time simple moving averages of settled daily closing prices."""
+    """Read-time close-based technical indicators for settled index bars."""
 
     symbol: str
     market_code: str
@@ -86,6 +109,8 @@ class IndexMovingAveragesResponse(BaseModel):
         IndexMovingAverage120SeriesResponse,
         IndexMovingAverage240SeriesResponse,
     ]
+    rsi: IndexRsiSeriesResponse
+    macd: IndexMacdSeriesResponse
 
 
 class InstitutionalFlowPointResponse(BaseModel):

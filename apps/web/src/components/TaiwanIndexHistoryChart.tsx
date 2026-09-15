@@ -441,6 +441,32 @@ function CandlesPanel({
     const value = isTaiex ? bar.trade_value : bar.volume
     return value === null ? null : value / 100_000_000
   })
+  const rsiByDate = new Map(
+    (averages?.rsi.points ?? []).map(point => [point.trade_date, point.value])
+  )
+  const rsiValues = dates.map(date => {
+    const value = rsiByDate.get(date)
+    return value == null ? null : Number(value)
+  })
+  const macdByDate = new Map(
+    (averages?.macd.points ?? []).map(point => [point.trade_date, point])
+  )
+  const macdValues = dates.map(date => {
+    const value = macdByDate.get(date)?.macd
+    return value == null ? null : Number(value)
+  })
+  const signalValues = dates.map(date => {
+    const value = macdByDate.get(date)?.signal
+    return value == null ? null : Number(value)
+  })
+  const histogramValues = dates.map(date => {
+    const value = macdByDate.get(date)?.histogram
+    return value == null ? null : Number(value)
+  })
+  const macdLabel = t("indexChartMacd")
+  const signalLabel = t("indexChartMacdSignal")
+  const histogramLabel = t("indexChartMacdHistogram")
+  const rsiLabel = t("indexChartRsi")
   const maximum = Math.max(
     1,
     ...activityValues.flatMap(value => (value === null ? [] : [value]))
@@ -496,7 +522,7 @@ function CandlesPanel({
           <ClientOnly fallback={<ChartSkeleton candles />}>
             <ReactECharts
               notMerge
-              style={{ height: 522 }}
+              style={{ height: 700 }}
               onEvents={{
                 datazoom: (event: unknown) => {
                   const parsed = zoomEventSchema.safeParse(event)
@@ -524,6 +550,32 @@ function CandlesPanel({
                     coordinateSystem: "matrix",
                     coord: [0, 4],
                   },
+                  {
+                    text: macdLabel,
+                    left: 4,
+                    top: 4,
+                    padding: 0,
+                    textStyle: {
+                      color: colors.text,
+                      fontSize: 11,
+                      fontWeight: "bold",
+                    },
+                    coordinateSystem: "matrix",
+                    coord: [0, 6],
+                  },
+                  {
+                    text: rsiLabel,
+                    left: 4,
+                    top: 4,
+                    padding: 0,
+                    textStyle: {
+                      color: colors.text,
+                      fontSize: 11,
+                      fontWeight: "bold",
+                    },
+                    coordinateSystem: "matrix",
+                    coord: [0, 8],
+                  },
                 ],
                 matrix: {
                   left: 0,
@@ -531,7 +583,7 @@ function CandlesPanel({
                   top: 4,
                   bottom: 54,
                   x: { show: false, data: [null] },
-                  y: { show: false, data: Array(6).fill(null) },
+                  y: { show: false, data: Array(10).fill(null) },
                   body: {
                     data: [
                       {
@@ -544,7 +596,7 @@ function CandlesPanel({
                       {
                         coord: [
                           [0, 0],
-                          [4, 5],
+                          [8, 9],
                         ],
                         mergeCells: true,
                       },
@@ -563,6 +615,22 @@ function CandlesPanel({
                   {
                     coordinateSystem: "matrix",
                     coord: [0, 4],
+                    left: 64,
+                    right: 20,
+                    top: 24,
+                    bottom: 2,
+                  },
+                  {
+                    coordinateSystem: "matrix",
+                    coord: [0, 6],
+                    left: 64,
+                    right: 20,
+                    top: 24,
+                    bottom: 2,
+                  },
+                  {
+                    coordinateSystem: "matrix",
+                    coord: [0, 8],
                     left: 64,
                     right: 20,
                     top: 24,
@@ -587,6 +655,10 @@ function CandlesPanel({
                       `${t("kLow")}: ${formatNumber(bar.low, null, locale)}`,
                       `${t("kClose")}: ${formatNumber(bar.close, null, locale)}`,
                       `${activityLabel}: ${formatActivity(isTaiex ? bar.trade_value : bar.volume)}`,
+                      `${macdLabel}: ${formatNumber(macdValues[parsed.data[0].dataIndex], null, locale)}`,
+                      `${signalLabel}: ${formatNumber(signalValues[parsed.data[0].dataIndex], null, locale)}`,
+                      `${histogramLabel}: ${formatNumber(histogramValues[parsed.data[0].dataIndex], null, locale)}`,
+                      `${rsiLabel}: ${formatNumber(rsiValues[parsed.data[0].dataIndex], null, locale)}`,
                       ...maLines.map(
                         line =>
                           `${line.name}: ${formatNumber(line.data[parsed.data[0]!.dataIndex], null, locale)}`
@@ -617,6 +689,22 @@ function CandlesPanel({
                     type: "category",
                     data: dates,
                     gridIndex: 1,
+                    axisLabel: { show: false },
+                    axisTick: { show: false },
+                    axisLine: { show: false },
+                  },
+                  {
+                    type: "category",
+                    data: dates,
+                    gridIndex: 2,
+                    axisLabel: { show: false },
+                    axisTick: { show: false },
+                    axisLine: { show: false },
+                  },
+                  {
+                    type: "category",
+                    data: dates,
+                    gridIndex: 3,
                     axisLabel: {
                       color: colors.text,
                       fontFamily: "monospace",
@@ -669,12 +757,40 @@ function CandlesPanel({
                       lineStyle: { color: colors.gridSoft, type: "dashed" },
                     },
                   },
+                  {
+                    type: "value",
+                    gridIndex: 2,
+                    scale: true,
+                    axisLabel: {
+                      color: colors.text,
+                      fontFamily: "monospace",
+                      fontSize: 11,
+                    },
+                    splitLine: {
+                      lineStyle: { color: colors.gridSoft, type: "dashed" },
+                    },
+                  },
+                  {
+                    type: "value",
+                    gridIndex: 3,
+                    min: 0,
+                    max: 100,
+                    interval: 30,
+                    axisLabel: {
+                      color: colors.text,
+                      fontFamily: "monospace",
+                      fontSize: 11,
+                    },
+                    splitLine: {
+                      lineStyle: { color: colors.gridSoft, type: "dashed" },
+                    },
+                  },
                 ],
                 dataZoom: [
-                  { type: "inside", xAxisIndex: [0, 1], ...zoom },
+                  { type: "inside", xAxisIndex: [0, 1, 2, 3], ...zoom },
                   {
                     type: "slider",
-                    xAxisIndex: [0, 1],
+                    xAxisIndex: [0, 1, 2, 3],
                     ...zoom,
                     height: 26,
                     bottom: 4,
@@ -729,6 +845,59 @@ function CandlesPanel({
                       },
                     })),
                   },
+                  {
+                    name: histogramLabel,
+                    type: "bar",
+                    xAxisIndex: 2,
+                    yAxisIndex: 2,
+                    data: histogramValues.map(value => ({
+                      value,
+                      itemStyle: {
+                        color:
+                          value === null || value >= 0
+                            ? colors.up
+                            : colors.down,
+                        opacity: 0.55,
+                      },
+                    })),
+                  },
+                  {
+                    name: macdLabel,
+                    type: "line",
+                    xAxisIndex: 2,
+                    yAxisIndex: 2,
+                    data: macdValues,
+                    showSymbol: false,
+                    connectNulls: false,
+                    lineStyle: { width: 1.5, color: colors.series[0] },
+                  },
+                  {
+                    name: signalLabel,
+                    type: "line",
+                    xAxisIndex: 2,
+                    yAxisIndex: 2,
+                    data: signalValues,
+                    showSymbol: false,
+                    connectNulls: false,
+                    lineStyle: { width: 1.5, color: colors.series[1] },
+                  },
+                  {
+                    name: rsiLabel,
+                    type: "line",
+                    xAxisIndex: 3,
+                    yAxisIndex: 3,
+                    data: rsiValues,
+                    showSymbol: false,
+                    connectNulls: false,
+                    lineStyle: { width: 1.5, color: colors.series[3] },
+                    markLine: {
+                      silent: true,
+                      symbol: "none",
+                      label: { show: false },
+                      lineStyle: { color: colors.gridSoft, type: "dashed" },
+                      data: [{ yAxis: 30 }, { yAxis: 70 }],
+                    },
+                  },
                 ],
               }}
             />
@@ -746,6 +915,10 @@ function CandlesPanel({
               <th>{t("kLow")}</th>
               <th>{t("kClose")}</th>
               <th>{activityLabel}</th>
+              <th>{macdLabel}</th>
+              <th>{signalLabel}</th>
+              <th>{histogramLabel}</th>
+              <th>{rsiLabel}</th>
               {maLines.map(line => (
                 <th key={line.name}>{line.name}</th>
               ))}
@@ -762,6 +935,10 @@ function CandlesPanel({
                 <td>
                   {formatActivity(isTaiex ? bar.trade_value : bar.volume)}
                 </td>
+                <td>{formatNumber(macdValues[i], null, locale)}</td>
+                <td>{formatNumber(signalValues[i], null, locale)}</td>
+                <td>{formatNumber(histogramValues[i], null, locale)}</td>
+                <td>{formatNumber(rsiValues[i], null, locale)}</td>
                 {maLines.map(line => (
                   <td key={line.name}>
                     {formatNumber(line.data[i], null, locale)}

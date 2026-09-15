@@ -852,6 +852,20 @@ async def test_moving_averages_use_hidden_warmup_and_only_expose_requested_dates
         {"trade_date": "2026-01-20", "value": None},
         {"trade_date": "2026-01-23", "value": None},
     ]
+    assert payload["rsi"] == {
+        "period": 14,
+        "method": "wilder",
+        "formula_version": "rsi-wilder-close-v1",
+        "points": [
+            {"trade_date": "2026-01-20", "value": "100.0000000000"},
+            {"trade_date": "2026-01-23", "value": "100.0000000000"},
+        ],
+    }
+    assert payload["macd"]["formula_version"] == "macd-ema-close-v1"
+    assert payload["macd"]["points"] == [
+        {"trade_date": "2026-01-20", "macd": None, "signal": None, "histogram": None},
+        {"trade_date": "2026-01-23", "macd": None, "signal": None, "histogram": None},
+    ]
 
 
 async def test_moving_average_route_has_daily_bar_visibility_and_range_contract(
@@ -868,6 +882,8 @@ async def test_moving_average_route_has_daily_bar_visibility_and_range_contract(
     assert no_data.status_code == 200, no_data.text
     assert no_data.json()["as_of"] is None
     assert [item["points"] for item in no_data.json()["series"]] == [[], [], [], []]
+    assert no_data.json()["rsi"]["points"] == []
+    assert no_data.json()["macd"]["points"] == []
 
     unknown = await member_client.get("/api/markets/indices/NOPE/moving-averages")
     inverted = await member_client.get(

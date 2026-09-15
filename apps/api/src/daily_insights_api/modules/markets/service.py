@@ -39,12 +39,15 @@ from daily_insights_api.modules.markets.models import (
 from daily_insights_api.modules.markets.schemas import (
     IndexDailyBarResponse,
     IndexLatestBarResponse,
+    IndexMacdPointResponse,
+    IndexMacdSeriesResponse,
     IndexMovingAverage20SeriesResponse,
     IndexMovingAverage60SeriesResponse,
     IndexMovingAverage120SeriesResponse,
     IndexMovingAverage240SeriesResponse,
     IndexMovingAveragePointResponse,
     IndexMovingAveragesResponse,
+    IndexRsiSeriesResponse,
     InstitutionalFlowPointResponse,
     InstitutionalStockFlowResponse,
     MarketResponse,
@@ -96,6 +99,10 @@ YFINANCE_INDICES: tuple[IndexSymbol, ...] = tuple(
 MOVING_AVERAGE_PERIODS = (20, 60, 120, 240)
 MOVING_AVERAGE_WARMUP_SESSIONS = max(MOVING_AVERAGE_PERIODS) - 1
 MOVING_AVERAGE_QUANTUM = Decimal("0.0000000001")
+RSI_PERIOD = 14
+MACD_FAST_PERIOD = 12
+MACD_SLOW_PERIOD = 26
+MACD_SIGNAL_PERIOD = 9
 
 
 class IndexProviderConflictError(ValueError):
@@ -274,7 +281,7 @@ def index_moving_averages_response(
     requested_bars: Sequence[IndexDailyBar],
     warmup_bars: Sequence[IndexDailyBar],
 ) -> IndexMovingAveragesResponse:
-    """Calculate fixed SMAs without emitting dates outside the requested range.
+    """Calculate close-based indicators without emitting dates outside the requested range.
 
     A trading session is a stored settled daily bar, so gaps such as weekends
     and exchange holidays never produce calendar filler points.  The caller
@@ -302,6 +309,10 @@ def index_moving_averages_response(
                     points[period].append(
                         IndexMovingAveragePointResponse(trade_date=bar.trade_date, value=value)
                     )
+    rsi_points, macd_points = _momentum_indicator_points(
+        bars=(*warmup_bars, *requested_bars),
+        requested_offset=len(warmup_bars),
+    )
     return IndexMovingAveragesResponse(
         symbol=symbol,
         market_code=market_code,
@@ -315,7 +326,126 @@ def index_moving_averages_response(
             IndexMovingAverage120SeriesResponse(period=120, points=points[120]),
             IndexMovingAverage240SeriesResponse(period=240, points=points[240]),
         ),
+        rsi=IndexRsiSeriesResponse(
+            period=RSI_PERIOD,
+            method="wilder",
+            formula_version="rsi-wilder-close-v1",
+            points=rsi_points,
+        ),
+        macd=IndexMacdSeriesResponse(
+            fast_period=MACD_FAST_PERIOD,
+            slow_period=MACD_SLOW_PERIOD,
+            signal_period=MACD_SIGNAL_PERIOD,
+            method="ema",
+            formula_version="macd-ema-close-v1",
+            points=macd_points,
+        ),
     )
+
+
+def _momentum_indicator_points(
+    *,
+    bars: Sequence[IndexDailyBar],
+    requested_offset: int,
+) -> tuple[list[IndexMovingAveragePointResponse], list[IndexMacdPointResponse]]:
+    """Calculate Wilder RSI and conventionally seeded MACD from settled closes."""
+    rsi_points: list[IndexMovingAveragePointResponse] = []
+    macd_points: list[IndexMacdPointResponse] = []
+    previous_close: Decimal | None = None
+    gains: list[Decimal] = []
+    losses: list[Decimal] = []
+    average_gain: Decimal | None = None
+    average_loss: Decimal | None = None
+    fast_seed: list[Decimal] = []
+    slow_seed: list[Decimal] = []
+    signal_seed: list[Decimal] = []
+    fast_ema: Decimal | None = None
+    slow_ema: Decimal | None = None
+    signal_ema: Decimal | None = None
+    fast_multiplier = Decimal(2) / Decimal(MACD_FAST_PERIOD + 1)
+    slow_multiplier = Decimal(2) / Decimal(MACD_SLOW_PERIOD + 1)
+    signal_multiplier = Decimal(2) / Decimal(MACD_SIGNAL_PERIOD + 1)
+
+    for index, bar in enumerate(bars):
+        rsi: Decimal | None = None
+        if previous_close is not None:
+            change = bar.close - previous_close
+            gain = max(change, Decimal(0))
+            loss = max(-change, Decimal(0))
+            if average_gain is None or average_loss is None:
+                gains.append(gain)
+                losses.append(loss)
+                if len(gains) == RSI_PERIOD:
+                    average_gain = sum(gains) / Decimal(RSI_PERIOD)
+                    average_loss = sum(losses) / Decimal(RSI_PERIOD)
+            else:
+                average_gain = (average_gain * Decimal(RSI_PERIOD - 1) + gain) / Decimal(RSI_PERIOD)
+                average_loss = (average_loss * Decimal(RSI_PERIOD - 1) + loss) / Decimal(RSI_PERIOD)
+            if average_gain is not None and average_loss is not None:
+                if average_gain == 0 and average_loss == 0:
+                    rsi = Decimal(50)
+                elif average_loss == 0:
+                    rsi = Decimal(100)
+                else:
+                    relative_strength = average_gain / average_loss
+                    rsi = Decimal(100) - Decimal(100) / (Decimal(1) + relative_strength)
+        previous_close = bar.close
+
+        if fast_ema is None:
+            fast_seed.append(bar.close)
+            if len(fast_seed) == MACD_FAST_PERIOD:
+                fast_ema = sum(fast_seed) / Decimal(MACD_FAST_PERIOD)
+        else:
+            fast_ema += (bar.close - fast_ema) * fast_multiplier
+        if slow_ema is None:
+            slow_seed.append(bar.close)
+            if len(slow_seed) == MACD_SLOW_PERIOD:
+                slow_ema = sum(slow_seed) / Decimal(MACD_SLOW_PERIOD)
+        else:
+            slow_ema += (bar.close - slow_ema) * slow_multiplier
+
+        macd = fast_ema - slow_ema if fast_ema is not None and slow_ema is not None else None
+        if macd is not None:
+            if signal_ema is None:
+                signal_seed.append(macd)
+                if len(signal_seed) == MACD_SIGNAL_PERIOD:
+                    signal_ema = sum(signal_seed) / Decimal(MACD_SIGNAL_PERIOD)
+            else:
+                signal_ema += (macd - signal_ema) * signal_multiplier
+        histogram = macd - signal_ema if macd is not None and signal_ema is not None else None
+
+        if index >= requested_offset:
+            rsi_points.append(
+                IndexMovingAveragePointResponse(
+                    trade_date=bar.trade_date,
+                    value=(
+                        rsi.quantize(MOVING_AVERAGE_QUANTUM, rounding=ROUND_HALF_EVEN)
+                        if rsi is not None
+                        else None
+                    ),
+                )
+            )
+            macd_points.append(
+                IndexMacdPointResponse(
+                    trade_date=bar.trade_date,
+                    macd=(
+                        macd.quantize(MOVING_AVERAGE_QUANTUM, rounding=ROUND_HALF_EVEN)
+                        if macd is not None
+                        else None
+                    ),
+                    signal=(
+                        signal_ema.quantize(MOVING_AVERAGE_QUANTUM, rounding=ROUND_HALF_EVEN)
+                        if signal_ema is not None
+                        else None
+                    ),
+                    histogram=(
+                        histogram.quantize(MOVING_AVERAGE_QUANTUM, rounding=ROUND_HALF_EVEN)
+                        if histogram is not None
+                        else None
+                    ),
+                )
+            )
+    return rsi_points, macd_points
 
 
 async def index_moving_averages(

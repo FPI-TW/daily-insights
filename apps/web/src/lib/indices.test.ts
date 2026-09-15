@@ -118,6 +118,20 @@ describe("indexMovingAverageOutcomes", () => {
         { period: 120, points: [{ trade_date: "2026-09-03", value: null }] },
         { period: 240, points: [{ trade_date: "2026-09-03", value: null }] },
       ],
+      rsi: {
+        period: 14,
+        method: "wilder",
+        formula_version: "rsi-wilder-close-v1",
+        points: [],
+      },
+      macd: {
+        fast_period: 12,
+        slow_period: 26,
+        signal_period: 9,
+        method: "ema",
+        formula_version: "macd-ema-close-v1",
+        points: [],
+      },
     }
 
     expect(
@@ -165,6 +179,20 @@ describe("bias indicators", () => {
         { period: 120, points: [] },
         { period: 240, points: [] },
       ],
+      rsi: {
+        period: 14,
+        method: "wilder",
+        formula_version: "rsi-wilder-close-v1",
+        points: [],
+      },
+      macd: {
+        fast_period: 12,
+        slow_period: 26,
+        signal_period: 9,
+        method: "ema",
+        formula_version: "macd-ema-close-v1",
+        points: [],
+      },
     }
     const lines = biasSeries(bars, averages)
     expect(lines[0]!.points.slice(0, 2).map(p => p.value)).toEqual([null, null])
