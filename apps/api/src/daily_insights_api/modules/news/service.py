@@ -46,17 +46,20 @@ from daily_insights_api.modules.news.llm import (
 )
 from daily_insights_api.modules.news.models import (
     NewsCandidate,
+    NewsCheckpoint,
     NewsEdition,
     NewsGenerationAudit,
     NewsItem,
     NewsPresentation,
 )
 from daily_insights_api.modules.news.recovery import (
+    Workflow,
     check_dependency,
     current_workflow,
     fingerprint,
     model_step,
     source_failure,
+    source_success,
     workflow_scope,
 )
 from daily_insights_api.modules.operations.api import sanitize_error_code
@@ -525,11 +528,6 @@ async def _fetch_usable_candidates(
                 checkpoint = await workflow.checkpoint(
                     fingerprint(["article", candidate.id]), "article"
                 )
-                if checkpoint.failure is not None and checkpoint.failure.get("action") == "skip":
-                    from daily_insights_api.modules.news.failures import NewsFailure
-
-                    await workflow.record(NewsFailure.model_validate(checkpoint.failure))
-                    return None
             body = supplied.get(candidate.id)
             if body:
                 # Full-text feeds already passed the discovery allowlist; the
@@ -540,13 +538,22 @@ async def _fetch_usable_candidates(
                     bytes=len(body),
                     full_text=True,
                 )
-                return FetchedCandidate(
+                fetched = FetchedCandidate(
                     candidate,
                     str(candidate.url),
                     body,
                     hashlib.sha256(body.encode()).hexdigest(),
                     candidate.seen_at,
                 )
+                if workflow is not None and checkpoint is not None:
+                    await _record_article_success(workflow, checkpoint, fetched)
+                return fetched
+            if workflow is not None and checkpoint is not None:
+                if checkpoint.failure is not None and checkpoint.failure.get("action") == "skip":
+                    from daily_insights_api.modules.news.failures import NewsFailure
+
+                    await workflow.record(NewsFailure.model_validate(checkpoint.failure))
+                    return None
             async with semaphore:
                 try:
                     if workflow is not None:
@@ -556,23 +563,20 @@ async def _fetch_usable_candidates(
                         http, str(candidate.url), allowed
                     )
                     emit_event("news.source.fetched", hostname=candidate.hostname, bytes=len(body))
-                    if workflow is not None and checkpoint is not None:
-                        checkpoint.failure = None
-                        checkpoint.result = {
-                            "candidate": candidate.model_dump(mode="json"),
-                            "content_digest": hashlib.sha256(body.encode()).hexdigest(),
-                            "source_published_at": source_published_at.isoformat()
-                            if source_published_at
-                            else None,
-                        }
-                        await workflow.store(checkpoint)
-                    return FetchedCandidate(
+                    fetched = FetchedCandidate(
                         candidate,
                         source_url,
                         body,
                         hashlib.sha256(body.encode()).hexdigest(),
                         source_published_at,
                     )
+                    if workflow is not None and checkpoint is not None:
+                        await _record_article_success(
+                            workflow,
+                            checkpoint,
+                            fetched,
+                        )
+                    return fetched
                 except Exception as error:
                     if workflow is not None and checkpoint is not None:
                         await source_failure(
@@ -592,6 +596,27 @@ async def _fetch_usable_candidates(
 
         fetched = await asyncio.gather(*(fetch_one(candidate) for candidate in candidates))
     return [item for item in fetched if item is not None]
+
+
+async def _record_article_success(
+    workflow: Workflow, checkpoint: NewsCheckpoint, fetched: FetchedCandidate
+) -> None:
+    """Clear candidate and shared source failures after a proven recovery."""
+    checkpoint.failure = None
+    checkpoint.result = {
+        "candidate": fetched.candidate.model_dump(mode="json"),
+        "content_digest": fetched.content_digest,
+        "source_published_at": fetched.source_published_at.isoformat()
+        if fetched.source_published_at
+        else None,
+    }
+    await workflow.store(checkpoint)
+    await source_success(
+        workflow,
+        f"source:{fetched.candidate.hostname}",
+        fetched.source_published_at,
+        1,
+    )
 
 
 async def run_news_edition(
@@ -1302,6 +1327,8 @@ async def _publish_candidate(
             await workflow.check("article")
             await check_dependency(workflow, f"source:{candidate.hostname}")
         fetched = await _refetch_candidate(candidate, allowed, fetch_timeout_seconds)
+        if workflow is not None and checkpoint is not None:
+            await _record_article_success(workflow, checkpoint, fetched)
     except Exception as error:
         if workflow is not None and checkpoint is not None:
             await source_failure(

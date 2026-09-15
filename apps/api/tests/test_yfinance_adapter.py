@@ -76,6 +76,43 @@ def test_settled_bars_are_mapped_with_provenance() -> None:
     assert result.provenance.record_count == 2
 
 
+def test_trailing_bar_without_a_close_is_dropped_and_the_settled_days_survive() -> None:
+    """The failure that took ^TWII, ^HSI and 000001.SS out on 2026-09-11.
+
+    Yahoo's multi-day queries carried the just-closed Asian session with
+    open/high/low but a NaN close for hours after that market shut, while its
+    1d query already had the settled value. Failing the symbol threw away every
+    settled day alongside the pending one.
+    """
+    result = _normalize(
+        _frame(
+            {
+                date(2026, 8, 31): (100.5, 101.0, 99.5, 100.0, 1_000.0),
+                date(2026, 9, 1): (100.0, 102.0, 100.0, 101.25, 2_000.0),
+                date(2026, 9, 2): (101.0, 101.5, 100.5, float("nan"), 0.0),
+            }
+        )
+    )
+
+    assert [bar.trade_date for bar in result.items] == [date(2026, 8, 31), date(2026, 9, 1)]
+    assert result.dropped_unsettled_trade_date == date(2026, 9, 2)
+    assert result.provenance.as_of == date(2026, 9, 1)
+
+
+def test_a_missing_close_inside_the_series_still_fails_the_symbol() -> None:
+    # A hole behind settled days is a broken series, not a pending one.
+    with pytest.raises(DataSourceContractError, match="without a close"):
+        _normalize(
+            _frame(
+                {
+                    date(2026, 8, 31): (100.5, 101.0, 99.5, 100.0, 1_000.0),
+                    date(2026, 9, 1): (100.0, 102.0, 100.0, float("nan"), 2_000.0),
+                    date(2026, 9, 2): (101.0, 101.5, 100.5, 101.0, 3_000.0),
+                }
+            )
+        )
+
+
 def test_same_day_bar_before_regular_close_is_dropped_and_reported() -> None:
     today = date(2026, 9, 3)
     yesterday = today - timedelta(days=1)
@@ -206,7 +243,7 @@ def test_the_tracked_symbol_type_and_mapping_stay_in_step() -> None:
 def test_an_untracked_symbol_is_refused_before_the_lookup() -> None:
     # refresh_index_daily_bars indexes TRACKED_INDICES directly, so an untyped
     # caller must get a named error rather than a bare KeyError.
-    with pytest.raises(ValueError, match="untracked symbols: NOT_TRACKED"):
+    with pytest.raises(ValueError, match="not served by yfinance: NOT_TRACKED"):
         asyncio.run(
             refresh_index_daily_bars(
                 cast(AsyncSession, None),

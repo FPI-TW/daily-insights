@@ -387,9 +387,15 @@ function RunDetail({
   }
   const stockFlows = walk(result?.stock_flows)
   const marketFlows = walk(result?.market_flows)
+  const index = walk(result?.index)
   if (stockFlows || marketFlows) {
     return (
       <div className="mt-3 grid gap-3 text-sm text-sea-ink-soft">
+        {index ? (
+          <p className="m-0">
+            {`${String(index.symbol)} · ${String(index.status)} · record_count: ${String(index.record_count ?? "—")} · source_as_of: ${String(index.source_as_of ?? "—")}${index.error ? ` · error: ${String(index.error)}` : ""}`}
+          </p>
+        ) : null}
         {[
           ["stock_flows", stockFlows],
           ["market_flows", marketFlows],

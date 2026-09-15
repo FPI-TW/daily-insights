@@ -14,6 +14,14 @@ const walkSchema = z.object({
   aborted: z.boolean(),
   days: z.array(daySchema),
 })
+const indexSchema = z.object({
+  symbol: z.string(),
+  status: z.enum(["succeeded", "partial", "failed"]),
+  record_count: z.number().int().nonnegative().optional(),
+  fetched_at: z.iso.datetime({ offset: true }).optional(),
+  source_as_of: z.iso.date().optional(),
+  error: z.string().optional(),
+})
 
 export function TaiwanSourceDiagnostics({
   result,
@@ -29,11 +37,37 @@ export function TaiwanSourceDiagnostics({
     no_data: t("twSourceNoData"),
     failed: t("macroSourceUnavailable"),
   }
+  const parsedIndex = indexSchema.safeParse(result?.index)
+  const index = parsedIndex.success ? parsedIndex.data : null
+  const indexStatus =
+    error === "twse_unavailable"
+      ? t("macroSourceDisabled")
+      : !index
+        ? t("macroSourcesNotRecorded")
+        : index.status === "succeeded"
+          ? t("macroSourceOk")
+          : index.status === "partial"
+            ? t("macroSourceDegraded")
+            : t("macroSourceUnavailable")
   return (
     <div className="mt-3 text-sm text-sea-ink-soft">
       <h3 className="font-bold text-sea-ink">{t("macroSourceTitle")}</h3>
       {error ? <p role="status">{error}</p> : null}
       <ul className="grid gap-3">
+        <li className="rounded-md border border-line p-3">
+          <p className="font-bold text-sea-ink">
+            TWSE · {index?.symbol ?? "^TWII"} · {t("twSourceIndex")} ·{" "}
+            {indexStatus}
+          </p>
+          <code>
+            /en/indicesReport/MI_5MINS_HIST · /en/exchangeReport/FMTQIK
+          </code>
+          {index ? (
+            <p>
+              {`${t("twSourceRows")}: ${index.record_count ?? "—"} · ${t("twSourceFetched")}: ${index.fetched_at ?? "—"} · source_as_of: ${index.source_as_of ?? "—"}${index.error ? ` · ${t("twSourceError")}: ${index.error}` : ""}`}
+            </p>
+          ) : null}
+        </li>
         {(
           [
             ["market_flows", "BFI82U", t("twSourceMarket")],

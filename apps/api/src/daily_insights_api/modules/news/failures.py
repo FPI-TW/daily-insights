@@ -55,6 +55,18 @@ def retry_time(attempt: int, now: datetime, retry_after: datetime | None = None)
     return max(due, retry_after) if retry_after is not None else due
 
 
+def _socket_resolution_error(error: BaseException) -> socket.gaierror | None:
+    """Find DNS failures hidden by httpcore/httpx transport wrappers."""
+    current: BaseException | None = error
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        if isinstance(current, socket.gaierror):
+            return current
+        current = current.__cause__ or current.__context__
+    return None
+
+
 def classify_failure(
     error: Exception,
     *,
@@ -160,7 +172,8 @@ def classify_failure(
         for term in ("unsafe destination", "not exclusively public", "unix sockets")
     ):
         code, action = "unsafe_destination", "skip"
-    if isinstance(error, socket.gaierror) and error.errno != socket.EAI_AGAIN:
+    resolution_error = _socket_resolution_error(error)
+    if resolution_error is not None and resolution_error.errno != socket.EAI_AGAIN:
         code, action = "source_dns_configuration", "skip"
     return NewsFailure(
         code=code,

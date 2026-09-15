@@ -142,6 +142,21 @@ def normalize_daily_bars(
             f"yfinance history for {symbol} omitted columns: {', '.join(missing)}"
         )
 
+    # Yahoo publishes a session's bar before its close is known: the still-open
+    # local session mid-morning, and for hours after an Asian market closes its
+    # multi-day queries carry open/high/low with a NaN close while its 1d query
+    # already has the settled value. Those rows are trailing, so the last row
+    # that does have a close marks the end of the settled series. Anything after
+    # it has not settled and is dropped; a missing close *before* it is a hole
+    # in history rather than a pending one, and still fails the symbol. A frame
+    # with no close anywhere is a broken response, not a series of pending days,
+    # so it fails too rather than silently normalizing to nothing.
+    # `last_valid_index` is typed as any hashable label. Narrowing it the same
+    # way the loop below narrows each index keeps the comparison honest, and an
+    # index that is not a Timestamp leaves it None, which fails closed.
+    last_valid = frame["Close"].last_valid_index()
+    last_settled_index = last_valid if isinstance(last_valid, Timestamp) else None
+
     items: list[DailyBar] = []
     dropped_unsettled_trade_date: date | None = None
     for index, row in frame.iterrows():
@@ -168,6 +183,9 @@ def normalize_daily_bars(
             continue
         close = _decimal(row["Close"])
         if close is None:
+            if last_settled_index is not None and index > last_settled_index:
+                dropped_unsettled_trade_date = trade_date
+                continue
             raise DataSourceContractError(
                 f"yfinance history for {symbol} returned {trade_date} without a close"
             )

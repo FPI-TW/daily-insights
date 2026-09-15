@@ -50,6 +50,6 @@ it("keeps missing historical details unknown", () => {
     </I18nextProvider>
   )
   expect(screen.getAllByText(/Source details were not recorded/)).toHaveLength(
-    2
+    3
   )
 })

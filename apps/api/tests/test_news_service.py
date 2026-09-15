@@ -1,8 +1,17 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from typing import cast
+from unittest.mock import AsyncMock
+
+import pytest
 
 from daily_insights_api.modules.news.contracts import Candidate
 from daily_insights_api.modules.news.editions import GLOBAL_SPEC, TW_EQUITY_SPEC, US_EQUITY_SPEC
 from daily_insights_api.modules.news.extraction import FetchedCandidate
+from daily_insights_api.modules.news.models import NewsCheckpoint
+from daily_insights_api.modules.news.recovery import Workflow, source_success
 from daily_insights_api.modules.news.service import _limit_candidates
 
 
@@ -21,6 +30,120 @@ def _fetched(index: int, host: str, seen_at: datetime | None) -> FetchedCandidat
         f"Body {index}",
         f"{index:064x}",
     )
+
+
+async def test_article_success_clears_checkpoint_and_source_cooldown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.modules.news import service
+
+    fetched = _fetched(1, "www.reuters.com", datetime(2026, 9, 14, tzinfo=UTC))
+    checkpoint = SimpleNamespace(failure={"code": "source_http_429"}, result=None)
+    workflow = SimpleNamespace(store=AsyncMock())
+    recovered = AsyncMock()
+    monkeypatch.setattr(service, "source_success", recovered)
+
+    await service._record_article_success(
+        cast(Workflow, workflow),
+        cast(NewsCheckpoint, checkpoint),
+        fetched,
+    )
+
+    assert checkpoint.failure is None
+    assert checkpoint.result == {
+        "candidate": fetched.candidate.model_dump(mode="json"),
+        "content_digest": fetched.content_digest,
+        "source_published_at": None,
+    }
+    workflow.store.assert_awaited_once_with(checkpoint)
+    recovered.assert_awaited_once_with(
+        workflow,
+        "source:www.reuters.com",
+        None,
+        1,
+    )
+
+
+async def test_full_text_body_records_success_before_honoring_stale_skip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.modules.news import service
+
+    fetched_at = datetime(2026, 9, 14, tzinfo=UTC)
+    candidate = _fetched(2, "www.reuters.com", fetched_at).candidate
+    checkpoint = SimpleNamespace(failure={"action": "skip"}, result=None)
+    workflow = SimpleNamespace(
+        checkpoint=AsyncMock(return_value=checkpoint),
+        record=AsyncMock(),
+    )
+    recovered = AsyncMock()
+
+    @asynccontextmanager
+    async def article_client(*_args: object) -> AsyncIterator[object]:
+        yield object()
+
+    monkeypatch.setattr(service, "safe_article_client", article_client)
+    monkeypatch.setattr(service, "current_workflow", lambda: cast(Workflow, workflow))
+    monkeypatch.setattr(service, "_record_article_success", recovered)
+
+    result = await service._fetch_usable_candidates(
+        [candidate],
+        frozenset({candidate.hostname}),
+        bodies={candidate.id: "Full article body"},
+    )
+
+    assert len(result) == 1
+    assert result[0].body == "Full article body"
+    recovered.assert_awaited_once_with(
+        cast(Workflow, workflow),
+        checkpoint,
+        result[0],
+    )
+    workflow.record.assert_not_awaited()
+
+
+async def test_source_success_keeps_newest_article_timestamp_monotonic() -> None:
+    current = datetime(2026, 9, 14, tzinfo=UTC)
+    row = SimpleNamespace(
+        state="ready",
+        available_at=None,
+        newest_article_at=current,
+        failure={"code": "network_error"},
+        failures_count=2,
+        updated_at=None,
+    )
+    database = SimpleNamespace(
+        execute=AsyncMock(),
+        get=AsyncMock(return_value=row),
+    )
+
+    @asynccontextmanager
+    async def begin() -> AsyncIterator[object]:
+        yield database
+
+    workflow = SimpleNamespace(
+        execution=SimpleNamespace(
+            sessions=SimpleNamespace(begin=begin),
+            clock=lambda: current,
+        )
+    )
+
+    await source_success(cast(Workflow, workflow), "source:www.reuters.com", None, 1)
+    assert row.newest_article_at == current
+
+    await source_success(
+        cast(Workflow, workflow),
+        "source:www.reuters.com",
+        current - timedelta(days=1),
+        1,
+    )
+    assert row.newest_article_at == current
+
+    newer = current + timedelta(hours=1)
+    await source_success(cast(Workflow, workflow), "source:www.reuters.com", newer, 1)
+    assert row.newest_article_at == newer
+    assert row.failure is None
+    assert row.failures_count == 0
 
 
 def test_limit_prefers_newest_candidates_and_caps_each_source() -> None:

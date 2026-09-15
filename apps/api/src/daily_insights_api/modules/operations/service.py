@@ -19,10 +19,19 @@ from daily_insights_api.modules.reports.models import (
 
 _ERROR_SECRET = re.compile(
     r"(?i)(?<![a-z0-9_-])"
-    r"(?P<key>authorization|api[_-]?key|token|secret|password)"
+    # A single space is as common as an underscore in prose: providers write
+    # "API key: ..." in their own error text.
+    r"(?P<key>authorization|api[ _-]?key|token|secret|password)"
     r"[\"']?\s*[:=]\s*"
     r"(?:(?P<quote>[\"'])(?:bearer\s+)?[^\"']*(?P=quote)"
     r"|(?:bearer\s+)?[^\s,;}&]+)"
+)
+# A connection string carries its password with no key name to match on, and
+# driver errors quote the whole DSN back: "connection to
+# postgresql://user:pw@host failed". The user is left readable because it
+# identifies which credential to rotate.
+_ERROR_DSN_PASSWORD = re.compile(
+    r"(?i)(?P<prefix>[a-z][a-z0-9+.\-]*://[^:@/\s]+:)(?P<secret>[^@/\s]+)(?P<suffix>@)"
 )
 _ERROR_CODE = re.compile(r"[^a-z0-9_.-]+")
 
@@ -94,6 +103,7 @@ def sanitize_error_detail(detail: str | None) -> str | None:
     if detail is None:
         return None
     redacted = _ERROR_SECRET.sub(lambda match: f"{match.group('key')}=[REDACTED]", detail)
+    redacted = _ERROR_DSN_PASSWORD.sub(r"\g<prefix>[REDACTED]\g<suffix>", redacted)
     printable = "".join(character if character.isprintable() else " " for character in redacted)
     collapsed = " ".join(printable.split())
     return collapsed[:1_000] or None
