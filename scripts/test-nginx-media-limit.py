@@ -84,7 +84,11 @@ def check(production: bool, revision: str | None) -> None:
             f"127.0.0.1::{port}",
             "--entrypoint",
             "sh",
-            "nginx:1.27-alpine",
+            next(
+                line.split("image:", 1)[1].strip()
+                for line in source("compose.production.yaml").splitlines()
+                if "image: docker.io/library/nginx@sha256:" in line
+            ),
             "-c",
             "sleep 300",
         )

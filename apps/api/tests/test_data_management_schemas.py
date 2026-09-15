@@ -43,6 +43,8 @@ def test_run_create_discriminator_accepts_only_valid_scope(
         {"operation": "index_yahoo", "market_code": "crypto"},
         {"operation": "news_all", "market_code": "global"},
         {"operation": "news_market"},
+        # Manual publishes are created only through the news management API.
+        {"operation": "news_publish"},
     ],
 )
 def test_run_create_discriminator_rejects_invalid_scope(payload: dict[str, str]) -> None:
@@ -78,6 +80,14 @@ def test_run_response_discriminator_preserves_market_scope() -> None:
         {**base, "operation": "macro_dashboard", "market_code": None, "status": "cancelled"}
     )
     assert macro_response.operation == "macro_dashboard" and macro_response.status == "cancelled"
+    publish_response = response_adapter.validate_python(
+        {**base, "operation": "news_publish", "market_code": None}
+    )
+    assert publish_response.operation == "news_publish" and publish_response.market_code is None
+    with pytest.raises(ValidationError):
+        response_adapter.validate_python(
+            {**base, "operation": "news_publish", "market_code": "global"}
+        )
 
 
 def test_openapi_declares_discriminated_responses_conflicts_and_legacy_deprecation() -> None:
@@ -177,3 +187,36 @@ def test_news_migration_downgrade_preflights_without_deleting_runs() -> None:
     assert "_drop_market_scope_check()" in downgrade
     assert "market_scope_matches_operation" in downgrade
     assert "fk_data_management_runs_market_code_markets" in downgrade
+
+
+def test_news_curation_migration_registers_indexes_and_refuses_lossy_downgrade() -> None:
+    run_table = Base.metadata.tables["data_management_runs"]
+    checks = [str(getattr(item, "sqltext", "")) for item in run_table.constraints]
+    assert any("'news_publish'" in check and "operation IN" in check for check in checks)
+    assert "payload" in run_table.columns
+    index_names = {index.name for index in run_table.indexes}
+    assert "uq_data_management_runs_active_news_publish" in index_names
+    # The daily obligation index comes from migration 0022 (upstream); the
+    # curation migration must not redefine it.
+    assert "uq_data_management_runs_automatic_news_all_edition" in index_names
+    candidates = Base.metadata.tables["news_candidates"]
+    assert {"edition_id", "candidate_id", "stage", "drop_reason", "ai_rank", "item_id"} <= set(
+        candidates.columns.keys()
+    )
+    items = Base.metadata.tables["news_items"]
+    assert {"origin", "hidden_at", "hidden_by_user_id", "published_by_user_id"} <= set(
+        items.columns.keys()
+    )
+    migration = (
+        Path(__file__).parents[1]
+        / "migrations/versions/20260909_0024_news_candidates_and_curation.py"
+    ).read_text()
+    assert "news_candidates" in migration
+    assert "uq_data_management_runs_active_news_publish" in migration
+    assert "automatic_news" not in migration
+    downgrade = migration[migration.index("def downgrade()") :]
+    assert "DELETE FROM" not in downgrade.upper()
+    preflight = downgrade.index("RAISE EXCEPTION")
+    assert preflight < downgrade.index("op.drop_")
+    assert "operation = 'news_publish'" in downgrade
+    assert "EXISTS (SELECT 1 FROM {CANDIDATES})" in downgrade

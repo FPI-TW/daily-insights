@@ -1,20 +1,25 @@
-"""Keep index_daily_bars current from Yahoo Finance.
+"""Keep the Yahoo half of index_daily_bars current.
+
+Eight symbols in one batched call. ^TWII is not among them: TWSE supplies it,
+and everything TWSE supplies is refreshed by the TWSE run, which holds the one
+client whose request interval keeps the exchange from being asked twice as
+often as either caller believes.
 
 Two uses, one code path, because the store upserts on (symbol, trade_date):
 
-    --once --period 2y   explicit two-year backfill for all tracked symbols
-    (no arguments)       the scheduled container, 7d every morning
+    --once --period 2y   explicit two-year backfill
+    (no arguments)       7d
 
 When a newly tracked symbol has no durable bars, its first normal short-window
 refresh automatically fetches two years for that symbol only. Later scheduled
 refreshes return to seven days, so a catalog rollout needs no separate manual
 empty-database backfill.
 
-The nightly window is 7d rather than 1d on purpose. At 08:00 Taipei the US
-session that closed a few hours earlier is still "today" in its own exchange
-timezone, so the adapter drops it as unsettled and it only lands the following
-morning. A week-wide window absorbs that lag, plus public holidays and a missed
-run, without any catch-up logic.
+The window is 7d rather than 1d on purpose. At 08:00 Taipei the US session that
+closed a few hours earlier is still "today" in its own exchange timezone, so the
+adapter drops it as unsettled and it only lands the following morning. A
+week-wide window absorbs that lag, plus public holidays and a missed run,
+without any catch-up logic.
 """
 
 import argparse
@@ -28,8 +33,12 @@ from daily_insights_api import models as registered_models  # noqa: F401
 from daily_insights_api.core.config import get_settings
 from daily_insights_api.core.database import create_engine, create_session_factory
 from daily_insights_api.core.observability import emit_event
-from daily_insights_api.modules.data_sources.api import TRACKED_INDICES, YfinanceAdapter
-from daily_insights_api.modules.markets.api import refresh_index_daily_bars
+from daily_insights_api.modules.data_sources.api import YfinanceAdapter
+from daily_insights_api.modules.markets.api import (
+    AUTOMATIC_SHORT_REFRESH_PERIOD,
+    YFINANCE_INDICES,
+    refresh_index_daily_bars,
+)
 from daily_insights_api.modules.reports.scheduler import (
     TAIPEI,
     SameDayRetry,
@@ -41,7 +50,7 @@ from daily_insights_api.modules.reports.scheduler import (
 __all__ = ["main", "parse_args", "run_refresh"]
 
 HEARTBEAT_PATH = "/tmp/index-daily-bars-heartbeat"
-SCHEDULED_PERIOD = "7d"
+SCHEDULED_PERIOD = AUTOMATIC_SHORT_REFRESH_PERIOD
 # A failed run retries inside the same morning rather than restarting the
 # container, matching the other two schedulers.
 RETRY_POLICY = SameDayRetry()
@@ -77,7 +86,7 @@ async def run_refresh(
         refreshed, failures = await refresh_index_daily_bars(
             database,
             adapter=adapter,
-            symbols=list(TRACKED_INDICES),
+            symbols=list(YFINANCE_INDICES),
             period=period,
         )
     emit_event(

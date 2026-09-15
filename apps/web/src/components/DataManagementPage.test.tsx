@@ -226,7 +226,9 @@ describe("DataManagementPage", () => {
         "csrf"
       )
     )
-    fireEvent.click(screen.getByRole("button", { name: "Update indices" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Update international indices" })
+    )
     await waitFor(() =>
       expect(createRun).toHaveBeenCalledWith(
         { operation: "index_yahoo" },
@@ -324,7 +326,9 @@ describe("DataManagementPage", () => {
     })
     expect(full).toBeDisabled()
     expect(screen.getByRole("button", { name: "Crypto" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Update indices" })).toBeEnabled()
+    expect(
+      screen.getByRole("button", { name: "Update international indices" })
+    ).toBeEnabled()
     expect(
       screen.getByText(/pending · morning_all/).closest("details")
     ).not.toHaveAttribute("open")
@@ -363,7 +367,7 @@ describe("DataManagementPage", () => {
     renderPage()
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "Update indices" })
+        screen.getByRole("button", { name: "Update international indices" })
       ).toBeDisabled()
     )
     expect(
@@ -399,6 +403,12 @@ describe("DataManagementPage", () => {
           edition_date: "2026-09-07",
           completed_at: "2026-09-07T09:00:00Z",
           result: {
+            index: {
+              symbol: "^TWII",
+              status: "succeeded",
+              record_count: 21,
+              source_as_of: "2026-09-05",
+            },
             stock_flows: {
               lookback_trading_days: 7,
               covered_trading_days: 7,
@@ -428,7 +438,7 @@ describe("DataManagementPage", () => {
     createRun.mockResolvedValue({})
     renderPage()
     fireEvent.click(
-      await screen.findByRole("button", { name: "Update institutional flows" })
+      await screen.findByRole("button", { name: "Update exchange data" })
     )
     await waitFor(() =>
       expect(createRun).toHaveBeenCalledWith(
@@ -450,6 +460,11 @@ describe("DataManagementPage", () => {
     expect(
       screen.getByText(/2026-09-04 · failed · error: boom/)
     ).toBeInTheDocument()
+    // ^TWII rides with this run now, so its result has to be readable here and
+    // not on the Yahoo card, which no longer fetches it.
+    expect(
+      screen.getByText(/\^TWII · succeeded · record_count: 21/)
+    ).toBeInTheDocument()
   })
 
   it("disables the Taiwan rerun when TWSE is off, and its own run locks only itself", async () => {
@@ -464,7 +479,7 @@ describe("DataManagementPage", () => {
     renderPage()
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "Update institutional flows" })
+        screen.getByRole("button", { name: "Update exchange data" })
       ).toBeDisabled()
     )
     cleanup()
@@ -495,13 +510,54 @@ describe("DataManagementPage", () => {
     // institutional job must not disable the morning or index buttons.
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "Update institutional flows" })
+        screen.getByRole("button", { name: "Update exchange data" })
       ).toBeDisabled()
     )
     expect(
       screen.getByRole("button", { name: "Rerun all markets" })
     ).toBeEnabled()
     expect(screen.getByRole("button", { name: "Crypto" })).toBeEnabled()
-    expect(screen.getByRole("button", { name: "Update indices" })).toBeEnabled()
+    expect(
+      screen.getByRole("button", { name: "Update international indices" })
+    ).toBeEnabled()
+  })
+
+  it("gates Yahoo and TWSE actions independently", async () => {
+    catalog.mockResolvedValue({
+      taipei_date: "2026-09-07",
+      morning_reports_enabled: true,
+      yfinance_enabled: false,
+      twse_enabled: true,
+      markets: ["crypto"],
+    })
+    listRuns.mockResolvedValue({ items: [] })
+    renderPage()
+    expect(
+      await screen.findByRole("button", {
+        name: "Update international indices",
+      })
+    ).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: "Update exchange data" })
+    ).toBeEnabled()
+    cleanup()
+
+    catalog.mockResolvedValue({
+      taipei_date: "2026-09-07",
+      morning_reports_enabled: true,
+      yfinance_enabled: true,
+      twse_enabled: false,
+      markets: ["crypto"],
+    })
+    listRuns.mockResolvedValue({ items: [] })
+    renderPage()
+    expect(
+      await screen.findByRole("button", {
+        name: "Update international indices",
+      })
+    ).toBeEnabled()
+    expect(
+      screen.getByRole("button", { name: "Update exchange data" })
+    ).toBeDisabled()
   })
 })

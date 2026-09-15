@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime
+from typing import Any
 
 from sqlalchemy import (
     CheckConstraint,
@@ -72,6 +73,7 @@ class NewsItem(UUIDPrimaryKeyMixin, Base):
             "('global','us','asia','china','taiwan','europe','commodities','crypto')",
             name="market_valid",
         ),
+        CheckConstraint("origin IN ('model','manual')", name="origin_valid"),
         UniqueConstraint("edition_id", "rank", name="uq_news_item_rank"),
         UniqueConstraint("edition_id", "source_url", name="uq_news_item_url"),
     )
@@ -95,6 +97,85 @@ class NewsItem(UUIDPrimaryKeyMixin, Base):
     # tracking; both are null on editions persisted before migration 0012.
     market: Mapped[str | None] = mapped_column(String(20))
     event_key: Mapped[str | None] = mapped_column(String(80))
+    # ``model`` items come from the pipeline's selection; ``manual`` items were
+    # published from the admin candidate table. Both render identically.
+    origin: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="model", server_default="model"
+    )
+    # A hidden item stays in the immutable edition but leaves the customer
+    # response; the who/when is kept for the admin view and audit trail.
+    hidden_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    hidden_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    published_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT")
+    )
+
+
+CANDIDATE_STAGES = ("discovered", "fetch_failed", "unused", "reviewed", "dropped", "published")
+CANDIDATE_DROP_REASONS = ("off_market", "policy", "duplicate_event", "summary_failed", "reserve")
+
+
+class NewsCandidate(UUIDPrimaryKeyMixin, Base):
+    """Every feed candidate an edition saw and how far it got.
+
+    The row is the admin's view of the pipeline: what was discovered, what the
+    model returned and why something was not published. Article bodies are
+    never stored; a manual publish re-fetches the article.
+    """
+
+    __tablename__ = "news_candidates"
+    __table_args__ = (
+        CheckConstraint(
+            "stage IN ('discovered','fetch_failed','unused','reviewed','dropped','published')",
+            name="stage_valid",
+        ),
+        CheckConstraint(
+            "drop_reason IS NULL OR drop_reason IN "
+            "('off_market','policy','duplicate_event','summary_failed','reserve')",
+            name="drop_reason_valid",
+        ),
+        UniqueConstraint("edition_id", "candidate_id", name="uq_news_candidate_edition"),
+    )
+    edition_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("news_editions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    # The pipeline's sha256 candidate id, unique within one edition.
+    candidate_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    hostname: Mapped[str] = mapped_column(String(255), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    headline: Mapped[str] = mapped_column(String(1_000), nullable=False)
+    seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    content_digest: Mapped[str | None] = mapped_column(String(64))
+    stage: Mapped[str] = mapped_column(String(20), nullable=False)
+    drop_reason: Mapped[str | None] = mapped_column(String(30))
+    # The model's original answer before market filtering and policy repair;
+    # ai_rank is the 1-based position in the first round that returned it.
+    ai_rank: Mapped[int | None] = mapped_column(Integer)
+    ai_topic: Mapped[str | None] = mapped_column(String(50))
+    ai_market: Mapped[str | None] = mapped_column(String(20))
+    ai_importance: Mapped[int | None] = mapped_column(Integer)
+    ai_event_key: Mapped[str | None] = mapped_column(String(80))
+    item_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("news_items.id", ondelete="SET NULL")
+    )
+    # Latest manual publish run that targeted this candidate; no foreign key
+    # because run history belongs to the data_management module.
+    publish_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    publish_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    publish_requested_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    publish_error: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class NewsPresentation(Base):
@@ -134,4 +215,64 @@ class NewsGenerationAudit(UUIDPrimaryKeyMixin, Base):
     error_code: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class NewsWorkflow(UUIDPrimaryKeyMixin, Base):
+    """Durable, news-only progress; run history remains owned by the queue."""
+
+    __tablename__ = "news_workflows"
+    __table_args__ = (
+        UniqueConstraint("root_run_id", "market_code", name="uq_news_workflow_root_market"),
+        Index("ix_news_workflows_market_date", "market_code", "edition_date"),
+    )
+    root_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    edition_date: Mapped[date] = mapped_column(Date, nullable=False)
+    market_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    state: Mapped[str] = mapped_column(String(30), nullable=False, default="queued")
+    stage: Mapped[str] = mapped_column(String(30), nullable=False, default="queued")
+    progress: Mapped[dict[str, int]] = mapped_column(JSONB, nullable=False, default=dict)
+    failures: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class NewsCheckpoint(UUIDPrimaryKeyMixin, Base):
+    """Only metadata and validated outputs, never article bodies or prompts."""
+
+    __tablename__ = "news_checkpoints"
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "key", name="uq_news_checkpoint_workflow_key"),
+        Index("ix_news_checkpoints_expires_at", "expires_at"),
+    )
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("news_workflows.id", ondelete="CASCADE"), nullable=False
+    )
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    stage: Mapped[str] = mapped_column(String(30), nullable=False)
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    failure: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    repairs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class NewsDependencyState(Base):
+    """Shared cooldown/account gate for news, independent of other model features."""
+
+    __tablename__ = "news_dependency_states"
+    scope: Mapped[str] = mapped_column(String(300), primary_key=True)
+    state: Mapped[str] = mapped_column(String(30), nullable=False, default="ready")
+    failure: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    available_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    probe_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    failures_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    newest_article_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )

@@ -12,10 +12,98 @@ import {
 } from "../src"
 import { createServerTransport } from "../src/server"
 import {
+  dataManagementRunCreateSchema,
+  dataManagementRunSchema,
   indexMovingAveragesSchema,
   institutionalStocksSchema,
+  newsAdminEditionsSchema,
+  newsCandidatePublishInputSchema,
   yfinanceDailyBarsResponseSchema,
 } from "../src/schemas"
+
+const newsAdminItem = {
+  id: "0f9b6a6e-3d7f-4f4f-9a3f-2b7d3f1c9e11",
+  rank: 1,
+  origin: "model",
+  hidden: false,
+  hidden_at: null,
+  headline: "台積電法說",
+  source_headline: "TSMC earnings call",
+  source_name: "Reuters",
+  source_hostname: "www.reuters.com",
+  source_url: "https://www.reuters.com/tsmc",
+  source_published_at: null,
+  topic: "companies",
+  market: "taiwan",
+  importance: 4,
+  event_key: "tsmc-earnings",
+  candidate_id: "2a5e0d3e-5b2c-4d51-8f2e-6f0d3a9c1b22",
+}
+
+const newsAdminCandidate = {
+  id: "2a5e0d3e-5b2c-4d51-8f2e-6f0d3a9c1b22",
+  stage: "published",
+  drop_reason: null,
+  headline: "TSMC earnings call",
+  source_name: "Reuters",
+  hostname: "www.reuters.com",
+  url: "https://www.reuters.com/tsmc",
+  seen_at: "2026-09-08T00:00:00+00:00",
+  source_published_at: null,
+  ai_rank: 1,
+  ai_topic: "companies",
+  ai_market: "taiwan",
+  ai_importance: 4,
+  ai_event_key: "tsmc-earnings",
+  item_id: "0f9b6a6e-3d7f-4f4f-9a3f-2b7d3f1c9e11",
+  publish_run_id: null,
+  publish_requested_at: null,
+  publish_error: null,
+}
+
+const newsAdminEditions = {
+  edition_date: "2026-09-08",
+  editions: [
+    {
+      market_code: "global",
+      edition: {
+        id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
+        revision: 1,
+        status: "complete",
+        generated_at: "2026-09-08T00:05:00+00:00",
+        prompt_version: "selection-v7:abc",
+        target_items: 5,
+        counts: {
+          discovered: 0,
+          fetch_failed: 1,
+          unused: 2,
+          reviewed: 3,
+          dropped: 1,
+          published: 1,
+          hidden: 0,
+        },
+      },
+      items: [newsAdminItem],
+      candidates: [newsAdminCandidate],
+    },
+    { market_code: "tw_equity", edition: null, items: [], candidates: [] },
+    { market_code: "us_equity", edition: null, items: [], candidates: [] },
+  ],
+}
+
+const newsPublishRun = {
+  id: "c744cb20-bf7c-4f4a-8e7b-1e0c69a91adf",
+  operation: "news_publish",
+  market_code: null,
+  edition_date: "2026-09-08",
+  status: "pending",
+  requested_by_user_id: "9322a09a-6a02-421b-a966-a5cd5f44056e",
+  created_at: "2026-09-08T01:00:00+00:00",
+  started_at: null,
+  completed_at: null,
+  result: null,
+  error: null,
+}
 
 describe("API client trust boundary", () => {
   afterEach(() => {
@@ -41,6 +129,136 @@ describe("API client trust boundary", () => {
     expect(transport).toHaveBeenCalledWith(
       "/api/admin/data-management/runs?limit=20&operation_group=news"
     )
+  })
+
+  it("lists news editions for curation with an optional date", async () => {
+    const transport = vi.fn(async () => Response.json(newsAdminEditions))
+    const client = createAdministrationClient(transport)
+
+    const editions = await client.listNewsEditions()
+    expect(editions.edition_date).toBe("2026-09-08")
+    expect(editions.editions).toHaveLength(3)
+    expect(editions.editions[0]).toMatchObject({
+      market_code: "global",
+      candidates: [{ stage: "published", ai_rank: 1 }],
+    })
+    expect(editions.editions[1]).toMatchObject({
+      market_code: "tw_equity",
+      edition: null,
+    })
+    expect(transport).toHaveBeenCalledWith("/api/admin/news/editions")
+    await client.listNewsEditions("2026-09-07")
+    expect(transport).toHaveBeenCalledWith(
+      "/api/admin/news/editions?date=2026-09-07"
+    )
+  })
+
+  it("rejects a candidate stage or drop reason outside the contract", () => {
+    const withCandidate = (candidate: Record<string, unknown>) => ({
+      ...newsAdminEditions,
+      editions: [{ ...newsAdminEditions.editions[0], candidates: [candidate] }],
+    })
+    expect(
+      newsAdminEditionsSchema.safeParse(
+        withCandidate({ ...newsAdminCandidate, stage: "queued" })
+      ).success
+    ).toBe(false)
+    expect(
+      newsAdminEditionsSchema.safeParse(
+        withCandidate({
+          ...newsAdminCandidate,
+          stage: "dropped",
+          drop_reason: "boring",
+        })
+      ).success
+    ).toBe(false)
+    expect(
+      newsAdminEditionsSchema.safeParse(
+        withCandidate({
+          ...newsAdminCandidate,
+          stage: "dropped",
+          drop_reason: "reserve",
+          item_id: null,
+        })
+      ).success
+    ).toBe(true)
+  })
+
+  it("hides and unhides a news item with CSRF protection", async () => {
+    const transport = vi.fn(async () =>
+      Response.json({
+        ...newsAdminItem,
+        hidden: true,
+        hidden_at: "2026-09-08T02:00:00+00:00",
+      })
+    )
+    const client = createAdministrationClient(transport)
+
+    await expect(
+      client.hideNewsItem(newsAdminItem.id, "csrf-token")
+    ).resolves.toMatchObject({ hidden: true })
+    expect(transport).toHaveBeenCalledWith(
+      `/api/admin/news/items/${newsAdminItem.id}/hide`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": "csrf-token",
+        },
+      }
+    )
+    await client.unhideNewsItem(newsAdminItem.id, "csrf-token")
+    expect(transport).toHaveBeenLastCalledWith(
+      `/api/admin/news/items/${newsAdminItem.id}/unhide`,
+      expect.objectContaining({ method: "POST" })
+    )
+  })
+
+  it("queues a manual publish and validates the news_publish run", async () => {
+    const transport = vi.fn(async () =>
+      Response.json(newsPublishRun, { status: 202 })
+    )
+    const input = {
+      edition_id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
+      candidate_ids: [newsAdminCandidate.id],
+    }
+
+    const run = await createAdministrationClient(
+      transport
+    ).publishNewsCandidates(input, "csrf-token")
+
+    expect(run).toMatchObject({ operation: "news_publish", market_code: null })
+    expect(transport).toHaveBeenCalledWith(
+      "/api/admin/news/candidates/publish",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": "csrf-token",
+        },
+        body: JSON.stringify(input),
+      }
+    )
+    expect(newsCandidatePublishInputSchema.safeParse(input).success).toBe(true)
+    expect(
+      newsCandidatePublishInputSchema.safeParse({ ...input, candidate_ids: [] })
+        .success
+    ).toBe(false)
+  })
+
+  it("keeps news_publish out of the generic run form", () => {
+    // A publish run carries a candidate payload the generic form cannot
+    // express, so it is only created through the news admin endpoint.
+    expect(
+      dataManagementRunSchema.safeParse({
+        ...newsPublishRun,
+        market_code: "global",
+      }).success
+    ).toBe(false)
+    expect(
+      dataManagementRunCreateSchema.safeParse({ operation: "news_publish" })
+        .success
+    ).toBe(false)
   })
 
   it("uses same-origin credentials in the browser", async () => {

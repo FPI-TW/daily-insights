@@ -43,6 +43,10 @@ import {
   dataManagementRunSchema,
   type DataManagementRun,
   type DataManagementRunCreateInput,
+  newsAdminEditionsSchema,
+  newsAdminItemSchema,
+  newsRecoverySchema,
+  type NewsCandidatePublishInput,
   userSchema,
 } from "./schemas"
 
@@ -361,6 +365,75 @@ export function createAdministrationClient(transport: ApiTransport) {
             headers: mutationHeaders(csrfToken),
           }
         ),
+        dataManagementRunSchema
+      )
+    },
+    async listNewsEditions(date?: string) {
+      const query = new URLSearchParams()
+      if (date) query.set("date", date)
+      const search = query.toString()
+      return parseResponse(
+        await transport(
+          `/api/admin/news/editions${search ? `?${search}` : ""}`
+        ),
+        newsAdminEditionsSchema
+      )
+    },
+    async newsRecoveryStatus() {
+      return parseResponse(
+        await transport("/api/admin/news/recovery"),
+        newsRecoverySchema
+      )
+    },
+    async resumeNewsRun(
+      runId: string,
+      resumeProvider: boolean,
+      csrfToken: string
+    ) {
+      return parseResponse(
+        await transport(
+          `/api/admin/data-management/runs/${encodeURIComponent(runId)}/resume`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRF-Token": csrfToken,
+            },
+            body: JSON.stringify({ resume_provider: resumeProvider }),
+          }
+        ),
+        dataManagementRunSchema
+      )
+    },
+    async hideNewsItem(itemId: string, csrfToken: string) {
+      return parseResponse(
+        await transport(
+          `/api/admin/news/items/${encodeURIComponent(itemId)}/hide`,
+          { method: "POST", headers: mutationHeaders(csrfToken) }
+        ),
+        newsAdminItemSchema
+      )
+    },
+    async unhideNewsItem(itemId: string, csrfToken: string) {
+      return parseResponse(
+        await transport(
+          `/api/admin/news/items/${encodeURIComponent(itemId)}/unhide`,
+          { method: "POST", headers: mutationHeaders(csrfToken) }
+        ),
+        newsAdminItemSchema
+      )
+    },
+    // Responds 202 with the queued news_publish run; the worker publishes.
+    async publishNewsCandidates(
+      input: NewsCandidatePublishInput,
+      csrfToken: string
+    ): Promise<DataManagementRun> {
+      return parseResponse(
+        await transport("/api/admin/news/candidates/publish", {
+          method: "POST",
+          headers: mutationHeaders(csrfToken),
+          body: JSON.stringify(input),
+        }),
         dataManagementRunSchema
       )
     },

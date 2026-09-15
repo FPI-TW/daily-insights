@@ -1,7 +1,17 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from typing import cast
+from unittest.mock import AsyncMock
+
+import pytest
 
 from daily_insights_api.modules.news.contracts import Candidate
+from daily_insights_api.modules.news.editions import GLOBAL_SPEC, TW_EQUITY_SPEC, US_EQUITY_SPEC
 from daily_insights_api.modules.news.extraction import FetchedCandidate
+from daily_insights_api.modules.news.models import NewsCheckpoint
+from daily_insights_api.modules.news.recovery import Workflow, source_success
 from daily_insights_api.modules.news.service import _limit_candidates
 
 
@@ -20,6 +30,120 @@ def _fetched(index: int, host: str, seen_at: datetime | None) -> FetchedCandidat
         f"Body {index}",
         f"{index:064x}",
     )
+
+
+async def test_article_success_clears_checkpoint_and_source_cooldown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.modules.news import service
+
+    fetched = _fetched(1, "www.reuters.com", datetime(2026, 9, 14, tzinfo=UTC))
+    checkpoint = SimpleNamespace(failure={"code": "source_http_429"}, result=None)
+    workflow = SimpleNamespace(store=AsyncMock())
+    recovered = AsyncMock()
+    monkeypatch.setattr(service, "source_success", recovered)
+
+    await service._record_article_success(
+        cast(Workflow, workflow),
+        cast(NewsCheckpoint, checkpoint),
+        fetched,
+    )
+
+    assert checkpoint.failure is None
+    assert checkpoint.result == {
+        "candidate": fetched.candidate.model_dump(mode="json"),
+        "content_digest": fetched.content_digest,
+        "source_published_at": None,
+    }
+    workflow.store.assert_awaited_once_with(checkpoint)
+    recovered.assert_awaited_once_with(
+        workflow,
+        "source:www.reuters.com",
+        None,
+        1,
+    )
+
+
+async def test_full_text_body_records_success_before_honoring_stale_skip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.modules.news import service
+
+    fetched_at = datetime(2026, 9, 14, tzinfo=UTC)
+    candidate = _fetched(2, "www.reuters.com", fetched_at).candidate
+    checkpoint = SimpleNamespace(failure={"action": "skip"}, result=None)
+    workflow = SimpleNamespace(
+        checkpoint=AsyncMock(return_value=checkpoint),
+        record=AsyncMock(),
+    )
+    recovered = AsyncMock()
+
+    @asynccontextmanager
+    async def article_client(*_args: object) -> AsyncIterator[object]:
+        yield object()
+
+    monkeypatch.setattr(service, "safe_article_client", article_client)
+    monkeypatch.setattr(service, "current_workflow", lambda: cast(Workflow, workflow))
+    monkeypatch.setattr(service, "_record_article_success", recovered)
+
+    result = await service._fetch_usable_candidates(
+        [candidate],
+        frozenset({candidate.hostname}),
+        bodies={candidate.id: "Full article body"},
+    )
+
+    assert len(result) == 1
+    assert result[0].body == "Full article body"
+    recovered.assert_awaited_once_with(
+        cast(Workflow, workflow),
+        checkpoint,
+        result[0],
+    )
+    workflow.record.assert_not_awaited()
+
+
+async def test_source_success_keeps_newest_article_timestamp_monotonic() -> None:
+    current = datetime(2026, 9, 14, tzinfo=UTC)
+    row = SimpleNamespace(
+        state="ready",
+        available_at=None,
+        newest_article_at=current,
+        failure={"code": "network_error"},
+        failures_count=2,
+        updated_at=None,
+    )
+    database = SimpleNamespace(
+        execute=AsyncMock(),
+        get=AsyncMock(return_value=row),
+    )
+
+    @asynccontextmanager
+    async def begin() -> AsyncIterator[object]:
+        yield database
+
+    workflow = SimpleNamespace(
+        execution=SimpleNamespace(
+            sessions=SimpleNamespace(begin=begin),
+            clock=lambda: current,
+        )
+    )
+
+    await source_success(cast(Workflow, workflow), "source:www.reuters.com", None, 1)
+    assert row.newest_article_at == current
+
+    await source_success(
+        cast(Workflow, workflow),
+        "source:www.reuters.com",
+        current - timedelta(days=1),
+        1,
+    )
+    assert row.newest_article_at == current
+
+    newer = current + timedelta(hours=1)
+    await source_success(cast(Workflow, workflow), "source:www.reuters.com", newer, 1)
+    assert row.newest_article_at == newer
+    assert row.failure is None
+    assert row.failures_count == 0
 
 
 def test_limit_prefers_newest_candidates_and_caps_each_source() -> None:
@@ -96,6 +220,143 @@ def test_cap_discovery_favours_full_text_candidates_within_the_total_budget() ->
     assert len(_cap_discovery(candidates, per_source=10)) == 20
 
 
+def test_global_candidate_limits_keep_systemic_catalysts_ahead_of_newer_company_news() -> None:
+    from daily_insights_api.modules.news.service import _cap_discovery
+
+    base = datetime(2026, 9, 10, 0, 0, tzinfo=UTC)
+    headlines = [
+        "CNBC Daily Open: Apple foldable debuts as bond vigilantes retreat",
+        "Retailer unveils a new customer loyalty programme",
+        "Technology company adds a cybersecurity director",
+        "Media group reports a strong summer box office",
+        "Payments companies announce an AI partnership",
+        "Treasury Department to buy back longer-term debt at triple the normal level",
+        "U.S. import ban on Canadian goods escalates trade war",
+        "ECB rate decision and U.S. PPI set the global market tone",
+    ]
+    candidates = [
+        _fetched(
+            index,
+            "www.cnbc.com",
+            base - timedelta(minutes=index),
+        ).candidate.model_copy(update={"headline": headline})
+        for index, headline in enumerate(headlines)
+    ]
+
+    capped = _cap_discovery(
+        candidates,
+        per_source=5,
+        total=3,
+        impact_patterns=GLOBAL_SPEC.headline_impact_patterns,
+    )
+
+    selected_headlines = {candidate.headline for candidate in capped}
+    assert selected_headlines == set(headlines[-3:])
+
+    fetched = [
+        FetchedCandidate(
+            candidate,
+            str(candidate.url),
+            f"Body for {candidate.headline}",
+            candidate.id,
+        )
+        for candidate in candidates
+    ]
+    limited = _limit_candidates(
+        fetched,
+        per_source=5,
+        total=3,
+        impact_patterns=GLOBAL_SPEC.headline_impact_patterns,
+    )
+    limited_headlines = {item.candidate.headline for item in limited}
+    assert selected_headlines == limited_headlines
+
+
+def test_taiwan_candidate_limits_use_taiwan_market_signals() -> None:
+    from daily_insights_api.modules.news.service import _cap_discovery
+
+    base = datetime(2026, 9, 10, 0, 0, tzinfo=UTC)
+    headlines = [
+        "Celebrity opens a restaurant in Taipei",
+        "New smartphone colour launches in Taiwan",
+        "Taipei luxury-home listing reaches a record price",
+        "台股加權指數重挫 外資賣超擴大",
+        "台積電上調先進製程資本支出與營收展望",
+        "金管會公布影響上市公司的新規則",
+    ]
+    candidates = [
+        _fetched(index, "news.example", base - timedelta(minutes=index)).candidate.model_copy(
+            update={"headline": headline}
+        )
+        for index, headline in enumerate(headlines)
+    ]
+
+    capped = _cap_discovery(
+        candidates,
+        per_source=3,
+        total=3,
+        impact_patterns=TW_EQUITY_SPEC.headline_impact_patterns,
+    )
+
+    assert {candidate.headline for candidate in capped} == set(headlines[3:])
+
+
+def test_us_candidate_limits_use_us_market_signals() -> None:
+    from daily_insights_api.modules.news.service import _cap_discovery
+
+    base = datetime(2026, 9, 10, 0, 0, tzinfo=UTC)
+    headlines = [
+        "Hollywood studio releases a movie trailer",
+        "Apple reveals another iPhone accessory",
+        "Retail chain opens a store in California",
+        "Fed inflation surprise sends the S&P 500 lower",
+        "Treasury yields jump after a Fed rate decision",
+        "Nvidia earnings guidance lifts the semiconductor sector",
+    ]
+    candidates = [
+        _fetched(index, "news.example", base - timedelta(minutes=index)).candidate.model_copy(
+            update={"headline": headline}
+        )
+        for index, headline in enumerate(headlines)
+    ]
+
+    capped = _cap_discovery(
+        candidates,
+        per_source=3,
+        total=3,
+        impact_patterns=US_EQUITY_SPEC.headline_impact_patterns,
+    )
+
+    assert {candidate.headline for candidate in capped} == set(headlines[3:])
+
+
+def test_us_candidate_limits_keep_material_chip_catalyst_ahead_of_routine_financing() -> None:
+    from daily_insights_api.modules.news.service import _cap_discovery
+
+    base = datetime(2026, 9, 10, 0, 0, tzinfo=UTC)
+    headlines = [
+        "Simon Property issues $800m senior notes",
+        "Dollar General discusses its AI business strategy",
+        "UBS sends investors a message about the economy",
+        "英特爾兩日狂飆逾10% CPU喊漲10% 輝達入股帶動AI想像",
+    ]
+    candidates = [
+        _fetched(index, "news.example", base - timedelta(minutes=index)).candidate.model_copy(
+            update={"headline": headline}
+        )
+        for index, headline in enumerate(headlines)
+    ]
+
+    capped = _cap_discovery(
+        candidates,
+        per_source=1,
+        total=1,
+        impact_patterns=US_EQUITY_SPEC.headline_impact_patterns,
+    )
+
+    assert [candidate.headline for candidate in capped] == [headlines[-1]]
+
+
 def test_interleaving_spreads_slots_across_sources_while_keeping_each_newest_first() -> None:
     from daily_insights_api.modules.news.service import _cap_discovery
 
@@ -134,3 +395,64 @@ def test_interleaving_spreads_slots_across_sources_while_keeping_each_newest_fir
         "wire-b.example",
         "flash.example",
     ]
+
+
+def test_candidate_ledger_records_the_furthest_stage_each_candidate_reached() -> None:
+    import uuid
+
+    from daily_insights_api.modules.news.contracts import SelectedCandidate, Selection
+    from daily_insights_api.modules.news.llm import ModelCall
+    from daily_insights_api.modules.news.service import _CandidateLedger
+
+    fetched = [_fetched(index, f"host{index}.example", None) for index in range(1, 8)]
+    discovered = [item.candidate for item in fetched]
+    ledger = _CandidateLedger(discovered)
+    # Candidate 7 is cut before extraction, 6 fails extraction, 5 is extracted
+    # but never reaches a prompt.
+    ledger.fetching(discovered[:6])
+    ledger.extracted(fetched[:5])
+    ledger.reviewed(fetched[:4])
+
+    def pick(index: int, market: str = "global") -> SelectedCandidate:
+        return SelectedCandidate(
+            id=fetched[index - 1].candidate.id,
+            topic="markets",
+            event_key=f"event-{index}",
+            market=market,
+            importance=3,
+        )
+
+    returned = (pick(1), pick(2, "asia"), pick(3))
+    ledger.returned(
+        ModelCall(
+            Selection(selections=(pick(1), pick(3))),
+            None,
+            None,
+            None,
+            1,
+            "a" * 64,
+            rejected=((pick(2, "asia"), "off_market"),),
+            returned=returned,
+        )
+    )
+    ledger.drop(fetched[2].candidate.id, "summary_failed")
+    item_id = uuid.uuid4()
+    ledger.published(fetched[0].candidate.id, item_id)
+    edition_id = uuid.uuid4()
+    rows = {row.candidate_id: row for row in ledger.rows(edition_id)}
+    assert all(row.edition_id == edition_id for row in rows.values())
+    by_index = {index: rows[fetched[index - 1].candidate.id] for index in range(1, 8)}
+    assert [(by_index[i].stage, by_index[i].drop_reason) for i in range(1, 8)] == [
+        ("published", None),
+        ("dropped", "off_market"),
+        ("dropped", "summary_failed"),
+        ("reviewed", None),
+        ("unused", None),
+        ("fetch_failed", None),
+        ("discovered", None),
+    ]
+    assert by_index[1].item_id == item_id
+    # The model's original order survives filtering: "asia" was second.
+    assert [by_index[i].ai_rank for i in (1, 2, 3, 4)] == [1, 2, 3, None]
+    assert by_index[2].ai_market == "asia" and by_index[5].content_digest is not None
+    assert by_index[6].content_digest is None and by_index[7].seen_at is None

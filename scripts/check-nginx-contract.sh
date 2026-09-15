@@ -1,14 +1,23 @@
 #!/bin/sh
 set -eu
 
+nginx_image=$(awk 'index($0, "image: docker.io/library/nginx@sha256:") { print $2 }' compose.yaml)
+production_image=$(awk 'index($0, "image: docker.io/library/nginx@sha256:") { print $2 }' compose.production.yaml)
+test -n "$nginx_image" && test "$nginx_image" = "$production_image"
+
 docker run --rm \
   --add-host api:127.0.0.1 \
   --add-host web:127.0.0.1 \
   -v "$PWD/infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
   -v "$PWD/infra/nginx/conf.d:/etc/nginx/conf.d:ro" \
-  nginx:1.27-alpine nginx -t
+  "$nginx_image" nginx -t
 
 config_file="infra/nginx/conf.d/default.conf"
+grep -Fq 'resolver 127.0.0.11 valid=2s ipv6=off;' infra/nginx/nginx.conf
+grep -Fq 'server api:8000 resolve;' "$config_file"
+grep -Fq 'server web:3000 resolve;' "$config_file"
+grep -Fq 'proxy_pass http://api_upstream/health/ready;' "$config_file"
+grep -Fq 'proxy_pass http://web_upstream/zh-hant/login;' "$config_file"
 grep -q 'proxy_buffering off;' "$config_file"
 grep -q 'X-Accel-Buffering "no"' "$config_file"
 grep -q 'location ~ \^/api/podcasts/' "$config_file"

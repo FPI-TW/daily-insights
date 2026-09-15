@@ -32,8 +32,11 @@ from daily_insights_api.modules.data_sources.twelve_data import (
 from daily_insights_api.modules.data_sources.twse import (
     BFI82U_ENDPOINT,
     T86_ENDPOINT,
+    TAIEX_CONTRACT_VERSION,
     TWSE_CONTRACT_HASH,
     TWSE_CONTRACT_VERSION,
+    TaiexDailyBar,
+    TaiexDailyBars,
     TwseAdapter,
     TwseMarketFlow,
     TwseMarketFlows,
@@ -50,6 +53,7 @@ from daily_insights_api.modules.data_sources.yfinance import (
 __all__ = [
     "BFI82U_ENDPOINT",
     "T86_ENDPOINT",
+    "TAIEX_CONTRACT_VERSION",
     "TRACKED_INDICES",
     "TWELVE_DATA_CONTRACT_HASH",
     "TWELVE_DATA_CONTRACT_VERSION",
@@ -74,6 +78,8 @@ __all__ = [
     "QuoteResult",
     "QuotesResult",
     "RetryPolicy",
+    "TaiexDailyBar",
+    "TaiexDailyBars",
     "TwelveDataAdapter",
     "TwelveDataTransport",
     "TwseAdapter",
