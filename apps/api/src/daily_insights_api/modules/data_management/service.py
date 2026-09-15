@@ -9,7 +9,7 @@ from typing import Any, Literal, Protocol, cast
 from zoneinfo import ZoneInfo
 
 from anyio import Path
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -86,6 +86,10 @@ STOCK_FLOW_LOOKBACK_TRADING_DAYS = 1
 STOCK_FLOW_LOOKBACK_CALENDAR_DAYS = 10
 # TWSE being down looks the same on every date, so stop asking after three.
 MAX_CONSECUTIVE_FAILURES = 3
+# Serializes institutional scheduler obligation checks with enqueue,
+# completion, and cancellation. This is transaction-scoped so a crashed
+# caller cannot strand it.
+INSTITUTIONAL_SCHEDULE_LOCK_KEY = 5_420_190_674_228_311_907
 
 
 class RunAlreadyActiveError(Exception):
@@ -197,10 +201,48 @@ async def enqueue_run(
         raise ValueError("market_code is only allowed for market operations")
     if (operation == "news_publish") != (payload is not None):
         raise ValueError("payload is required for, and only for, news_publish")
+    effective_edition = edition_date or taipei_today()
+    if operation == "institutional_twse":
+        await database.execute(select(func.pg_advisory_xact_lock(INSTITUTIONAL_SCHEDULE_LOCK_KEY)))
+        if requester_id is None:
+            # This check and the insert below share the same lock as worker
+            # completion and cancellation. A scheduler restart therefore
+            # cannot insert between "no final row" and a same-edition run
+            # becoming final.
+            final = await database.scalar(
+                select(DataManagementRun)
+                .where(
+                    DataManagementRun.operation == operation,
+                    DataManagementRun.edition_date == effective_edition,
+                    or_(
+                        DataManagementRun.status == "succeeded",
+                        and_(
+                            DataManagementRun.status == "cancelled",
+                            DataManagementRun.requested_by_user_id.is_(None),
+                        ),
+                    ),
+                )
+                .order_by(DataManagementRun.created_at.desc())
+                .limit(1)
+            )
+            if final is not None:
+                return final
+            active = await database.scalar(
+                select(DataManagementRun)
+                .where(
+                    DataManagementRun.operation == operation,
+                    DataManagementRun.edition_date == effective_edition,
+                    DataManagementRun.status.in_(("pending", "running")),
+                )
+                .order_by(DataManagementRun.created_at.desc())
+                .limit(1)
+            )
+            if active is not None:
+                return active
     run = DataManagementRun(
         operation=operation,
         market_code=market_code,
-        edition_date=edition_date or taipei_today(),
+        edition_date=effective_edition,
         status="pending",
         requested_by_user_id=requester_id,
         payload=payload,
@@ -298,6 +340,7 @@ async def cancel_run(
     request_id: str | None,
 ) -> DataManagementRun | None:
     """Atomically terminalize queued/in-flight work and revoke its lease."""
+    await database.execute(select(func.pg_advisory_xact_lock(INSTITUTIONAL_SCHEDULE_LOCK_KEY)))
     run = await database.scalar(
         select(DataManagementRun).where(DataManagementRun.id == run_id).with_for_update()
     )
@@ -557,6 +600,10 @@ async def complete_run(
 ) -> None:
     now = datetime.now(UTC)
     async with session_factory.begin() as database:
+        if run.operation == "institutional_twse":
+            await database.execute(
+                select(func.pg_advisory_xact_lock(INSTITUTIONAL_SCHEDULE_LOCK_KEY))
+            )
         current = await database.scalar(
             select(DataManagementRun).where(DataManagementRun.id == run.id).with_for_update()
         )
@@ -812,16 +859,11 @@ async def _execute_morning(
 async def _execute_index_refresh(
     run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
 ) -> tuple[str, dict[str, object], str | None]:
-    """Refresh every tracked index, from whichever source owns it.
+    """Refresh the international indices owned by Yahoo.
 
-    Eight come from Yahoo in one batched call; ^TWII comes from TWSE, which
-    publishes it across two month-wide reports. They are reported as one list of
-    symbols because that is what an operator is looking at, and either source
-    failing leaves the other's symbols stored.
-
-    The two providers are gated independently. ^TWII does not touch Yahoo, so
-    turning Yahoo off must not stop it, and vice versa; only both being off
-    leaves nothing to do.
+    ^TWII is deliberately absent: TWSE owns and refreshes it in the separate
+    ``institutional_twse`` operation. Keeping this operation provider-specific
+    makes its feature gate and failure status unambiguous.
     """
     symbols: list[dict[str, object]] = []
     failed_count = 0
@@ -1083,8 +1125,16 @@ async def _execute_institutional_twse(
     covered = stock.covered_trading_days + market.covered_trading_days
     wanted = stock.lookback_trading_days + market.lookback_trading_days
     taiex_failed = taiex["status"] == "failed"
-    if not covered:
+    if not covered and taiex_failed:
         status, error_code = "failed", "twse_fetch_failures" if failures else "twse_no_coverage"
+    elif not covered:
+        # The run covers three datasets. A usable (or partially usable) index
+        # means zero flow coverage is degraded aggregate success, not total
+        # failure.
+        status, error_code = (
+            "partial",
+            "twse_fetch_failures" if failures else "twse_partial_coverage",
+        )
     elif failures:
         status, error_code = "partial", "twse_fetch_failures"
     elif covered < wanted:

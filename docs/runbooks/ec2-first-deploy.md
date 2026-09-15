@@ -223,8 +223,11 @@ Workflow 在 SSH process 中執行：
 7. 用 disposable nginx container 渲染 template 並執行 `nginx -t`；
 8. 在舊 API／Web 仍存活時，以 `--force-recreate --no-deps nginx` 單獨重建
    nginx，使 Docker DNS 動態解析先開始運作；
-9. 停止舊版 `daily-news-scheduler` 與 `data-management-worker`，並逐一確認兩個
-   container 都已停止，避免舊版直接抓取或完成語意跨越 migration boundary；
+9. 停止舊版 `daily-news-scheduler`、`index-daily-bars-scheduler`、
+   `institutional-flows-scheduler` 與 `data-management-worker`，並逐一確認四個
+   container 都已停止，避免舊版直接抓取
+   或完成語意跨越 migration boundary；其中 index scheduler 必須在 TWII provider
+   migration 前停止，才不會把剛刪除的 Yahoo 資料寫回；
 10. 使用 API image 執行 `alembic upgrade head`；
 11. 以 `--force-recreate --no-deps data-management-worker` 單獨啟動 replacement
     worker，並等待其 health check 通過；
@@ -235,10 +238,12 @@ Workflow 在 SSH process 中執行：
 14. 輸出失敗 container state/logs，並從 GHCR logout。
 
 若 migration、replacement worker 啟動或 health、final convergence、final health
-任一階段失敗，deployment 會再次停止 `daily-news-scheduler` 與
-`data-management-worker`，並確認兩者已停止；若 Docker 無法確認 quiescence，錯誤訊息
+任一階段失敗，deployment 會再次停止 `daily-news-scheduler`、
+`index-daily-bars-scheduler`、`institutional-flows-scheduler` 與
+`data-management-worker`，並確認四者已停止；若 Docker 無法確認 quiescence，錯誤訊息
 會要求 operator 先手動停止並確認。Operator 應依 diagnostics 修正問題後重新執行
-`deploy.sh`。Migration 不做自動 downgrade 或 rollback。
+`deploy.sh`。Migration 不做自動 downgrade 或 rollback；TWII provider migration
+會拒絕 downgrade，因為刪除已回補的 TWSE 歷史或恢復錯誤的 Yahoo 資料都不安全。
 
 nginx 以 Docker embedded DNS 重新解析 `api`／`web` service alias，TTL 為兩秒。
 後端換址期間 deployment 會保持 pending；兩條 upstream probe 都成功前不得回報部署

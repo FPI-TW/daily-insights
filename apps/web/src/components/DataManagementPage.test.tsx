@@ -521,4 +521,43 @@ describe("DataManagementPage", () => {
       screen.getByRole("button", { name: "Update international indices" })
     ).toBeEnabled()
   })
+
+  it("gates Yahoo and TWSE actions independently", async () => {
+    catalog.mockResolvedValue({
+      taipei_date: "2026-09-07",
+      morning_reports_enabled: true,
+      yfinance_enabled: false,
+      twse_enabled: true,
+      markets: ["crypto"],
+    })
+    listRuns.mockResolvedValue({ items: [] })
+    renderPage()
+    expect(
+      await screen.findByRole("button", {
+        name: "Update international indices",
+      })
+    ).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: "Update exchange data" })
+    ).toBeEnabled()
+    cleanup()
+
+    catalog.mockResolvedValue({
+      taipei_date: "2026-09-07",
+      morning_reports_enabled: true,
+      yfinance_enabled: true,
+      twse_enabled: false,
+      markets: ["crypto"],
+    })
+    listRuns.mockResolvedValue({ items: [] })
+    renderPage()
+    expect(
+      await screen.findByRole("button", {
+        name: "Update international indices",
+      })
+    ).toBeEnabled()
+    expect(
+      screen.getByRole("button", { name: "Update exchange data" })
+    ).toBeDisabled()
+  })
 })

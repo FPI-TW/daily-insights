@@ -537,25 +537,43 @@ def taiex_months(*, start: date, end: date) -> tuple[date, ...]:
 async def select_taiex_refresh_months(
     database: AsyncSession, *, today: date, requested_months: int
 ) -> tuple[date, ...]:
-    """Widen an incremental request to the full backfill when the series is empty.
+    """Keep the required history complete while refreshing the newest months.
 
-    Mirrors `select_index_refresh_period` for the Yahoo path. An explicit longer
-    request is left alone; only the incremental window is widened, so a CLI
-    backfill still means exactly what it asked for.
+    An explicit request is left alone. The automatic incremental request always
+    asks for the newest months first, then every missing month in the required
+    25-month window. Prioritising the newest data keeps the chart fresh during a
+    long bootstrap; retaining missing older months makes a partially successful
+    migration resumable instead of permanently truncating its history.
     """
     if requested_months < 1:
         raise ValueError("requested_months must be at least 1")
-    months_back = requested_months
-    if requested_months == TAIEX_INCREMENTAL_MONTHS:
-        has_stored_bars = await database.scalar(
-            select(IndexDailyBar.symbol).where(IndexDailyBar.symbol == TAIEX_SYMBOL).limit(1)
-        )
-        if has_stored_bars is None:
-            months_back = TAIEX_INITIAL_BACKFILL_MONTHS
+    months_back = (
+        TAIEX_INITIAL_BACKFILL_MONTHS
+        if requested_months == TAIEX_INCREMENTAL_MONTHS
+        else requested_months
+    )
     start = today.replace(day=1)
     for _ in range(months_back - 1):
         start = (start - timedelta(days=1)).replace(day=1)
-    return taiex_months(start=start, end=today)
+    requested = taiex_months(start=start, end=today)
+    if requested_months != TAIEX_INCREMENTAL_MONTHS:
+        return requested
+
+    stored_dates = (
+        await database.scalars(
+            select(IndexDailyBar.trade_date).where(
+                IndexDailyBar.symbol == TAIEX_SYMBOL,
+                IndexDailyBar.trade_date >= start,
+                IndexDailyBar.trade_date <= today,
+            )
+        )
+    ).all()
+    stored_months = {trade_date.replace(day=1) for trade_date in stored_dates}
+    recent = requested[-TAIEX_INCREMENTAL_MONTHS:]
+    missing = tuple(
+        month for month in requested if month not in stored_months and month not in recent
+    )
+    return (*recent, *missing)
 
 
 async def refresh_taiex_daily_bars(
@@ -604,9 +622,10 @@ async def refresh_taiex_daily_bars(
             continue
         consecutive_failures = 0
         if not fetched.items:
-            # A month-wide request answers an unpublished or future month with
-            # an empty payload rather than an error. Nothing to store, and not
-            # a failure worth reporting.
+            # TWSE answers an unpublished month with an empty payload. It is
+            # still missing from the required history, so surface it as a
+            # retryable partial outcome instead of silently declaring success.
+            failed_months.append(f"{month:%Y-%m}: no data")
             continue
         bars = [
             DailyBar(

@@ -20,7 +20,6 @@ depends_on: str | Sequence[str] | None = None
 
 SYMBOL = "^TWII"
 OLD_PROVIDER = "yfinance"
-NEW_PROVIDER = "twse"
 
 
 def upgrade() -> None:
@@ -35,9 +34,9 @@ def upgrade() -> None:
 
     Nothing is backfilled here: a migration must not depend on an external API
     being reachable, and these two TWSE reports take minutes to walk. The
-    refresh does it instead, widening its window to two years on its own when
-    it finds the series empty. Ownership is left alone; `store_index_daily_bars`
-    reassigns it once no bars remain.
+    refresh does it instead, continually selecting missing months until the
+    required 25-month window is complete. Ownership is left alone;
+    `store_index_daily_bars` reassigns it once no bars remain.
 
     Scoped to the old provider so it is idempotent and leaves an
     already-migrated deployment untouched.
@@ -50,20 +49,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Release the series back, leaving it empty for a yfinance refresh.
+    """Refuse an unsafe rollback to the known-bad Yahoo source.
 
-    The yfinance bars this replaced cannot be reconstructed here for the same
-    reason they could not be updated in place. Dropping the TWSE rows and the
-    ownership claim returns ^TWII to the state a fresh yfinance refresh expects,
-    which then backfills two years from Yahoo.
+    The upgrade deletes erroneous Yahoo history, while the replacement TWSE
+    history may already be serving the product. Neither deleting that valid
+    history nor repopulating from Yahoo is a safe automatic downgrade. A
+    rollback therefore requires an explicit coordinated data/provider plan.
     """
-    op.execute(
-        sa.text(
-            "DELETE FROM index_daily_bars WHERE symbol = :symbol AND provider = :provider"
-        ).bindparams(symbol=SYMBOL, provider=NEW_PROVIDER)
-    )
-    op.execute(
-        sa.text(
-            "DELETE FROM index_daily_bar_series WHERE symbol = :symbol AND provider = :provider"
-        ).bindparams(symbol=SYMBOL, provider=NEW_PROVIDER)
+    raise RuntimeError(
+        "20260911_0024 is irreversible: retain TWSE ^TWII history and perform "
+        "a coordinated application/data rollback"
     )

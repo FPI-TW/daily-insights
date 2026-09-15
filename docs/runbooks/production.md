@@ -205,8 +205,9 @@ Compose while retaining immutable deployment inputs.
    pulls pinned images, renders and tests the nginx template in a disposable
    container, then recreates only nginx with Docker DNS re-resolution enabled
    while the previous API/Web containers are still available. It then stops
-   the old `daily-news-scheduler` and `data-management-worker` and confirms both
-   are stopped before running `alembic upgrade head`. After migration, it
+   the old `daily-news-scheduler`, `index-daily-bars-scheduler`,
+   `institutional-flows-scheduler`, and `data-management-worker` and confirms
+   all four are stopped before running `alembic upgrade head`. After migration, it
    force-recreates only the replacement worker and waits until that container
    is healthy. Only then does it start the daily-news scheduler and converge
    API, Web, and the remaining schedulers without recreating nginx again.
@@ -219,20 +220,22 @@ Compose while retaining immutable deployment inputs.
    playback, including locale fallback and browser-local progress restoration.
    Add report and SSE chat smoke tests only when those surfaces enter the
    deployed release.
-7. For routine recovery after migration `20260909_0022`, keep
-   `daily-news-scheduler` and `data-management-worker` quiesced, apply a forward
-   fix, and rerun `deploy.sh`. A prior image may be redeployed only when it is
+7. For routine recovery after a schema-boundary migration, keep
+   `daily-news-scheduler`, `index-daily-bars-scheduler`,
+   `institutional-flows-scheduler`, and `data-management-worker` quiesced,
+   apply a forward fix, and rerun `deploy.sh`. A prior image may be redeployed only when it is
    schema-compatible with the current database; never run a pre-0022 worker or
    scheduler against a post-0022 database.
 
 The host does not save rollback env files because they would duplicate GitHub
 Secrets. If migration, replacement-worker startup or health, final convergence,
-or final health fails, deployment re-stops `daily-news-scheduler` and
-`data-management-worker` and confirms both are quiescent when Docker is able to
-do so. The operator uses the emitted container state and recent logs to correct
+or final health fails, deployment re-stops `daily-news-scheduler`,
+`index-daily-bars-scheduler`, `institutional-flows-scheduler`, and
+`data-management-worker` and confirms all four are quiescent when Docker is able
+to do so. The operator uses the emitted container state and recent logs to correct
 the failure, then reruns `deploy.sh`; the deployment does not downgrade or roll
 back the migration. If Docker cannot confirm quiescence, the operator must stop
-and verify both containers manually before recovery.
+and verify all four containers manually before recovery.
 
 Migration `20260909_0022` is a rollback fence. A true rollback across that fence
 is an incident procedure that restores a compatible pre-migration database

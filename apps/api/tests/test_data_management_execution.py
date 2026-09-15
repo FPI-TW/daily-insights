@@ -129,10 +129,46 @@ async def test_enqueue_only_maps_named_active_run_unique_conflicts_to_409_error(
 
 
 @pytest.mark.asyncio
+async def test_automatic_twse_enqueue_returns_same_edition_manual_success_under_lock() -> None:
+    existing = _run("institutional_twse")
+    existing.status = "succeeded"
+    existing.requested_by_user_id = uuid.uuid4()
+
+    class Database:
+        def __init__(self) -> None:
+            self.locked = False
+
+        async def execute(self, statement: object) -> None:
+            assert "pg_advisory_xact_lock" in str(statement)
+            self.locked = True
+
+        async def scalar(self, _: object) -> DataManagementRun:
+            assert self.locked
+            return existing
+
+        def add(self, _: object) -> None:
+            pytest.fail("a satisfied automatic edition must not add another row")
+
+    returned = await enqueue_run(
+        cast(Any, Database()),
+        operation="institutional_twse",
+        market_code=None,
+        requester_id=None,
+        request_id=None,
+        edition_date=existing.edition_date,
+    )
+
+    assert returned is existing
+
+
+@pytest.mark.asyncio
 async def test_cancel_run_terminalizes_pending_or_running_work_without_a_lease() -> None:
     run = _run("macro_dashboard")
 
     class Database:
+        async def execute(self, _: object) -> None:
+            return None
+
         async def scalar(self, _: object) -> DataManagementRun:
             return run
 
@@ -647,7 +683,7 @@ async def test_institutional_twse_rerun_whose_only_fetch_fails_is_partial_not_fa
 
 
 @pytest.mark.asyncio
-async def test_institutional_twse_stops_walking_once_the_source_is_clearly_down(
+async def test_institutional_twse_with_taiex_and_failed_flows_is_partial(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An outage would otherwise cost 90 requests: 10 stock dates plus 80
@@ -684,7 +720,7 @@ async def test_institutional_twse_stops_walking_once_the_source_is_clearly_down(
         run, cast(Any, _StubSessionFactory()), Settings(environment="test", twse_enabled=True)
     )
 
-    assert (status, error) == ("failed", "twse_fetch_failures")
+    assert (status, error) == ("partial", "twse_fetch_failures")
     assert len(asked) == 2 * service.MAX_CONSECUTIVE_FAILURES
     for walk in ("stock_flows", "market_flows"):
         summary = cast(dict[str, Any], result[walk])
@@ -693,7 +729,7 @@ async def test_institutional_twse_stops_walking_once_the_source_is_clearly_down(
 
 
 @pytest.mark.asyncio
-async def test_institutional_twse_reaching_no_trading_day_is_failed_not_succeeded(
+async def test_institutional_twse_with_taiex_but_no_flow_day_is_partial(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """TWSE answers a date it cannot serve with HTTP 200 and a no-data stat, so
@@ -729,7 +765,7 @@ async def test_institutional_twse_reaching_no_trading_day_is_failed_not_succeede
         run, cast(Any, _StubSessionFactory()), Settings(environment="test", twse_enabled=True)
     )
 
-    assert (status, error) == ("failed", "twse_no_coverage")
+    assert (status, error) == ("partial", "twse_partial_coverage")
     assert cast(dict[str, Any], result["market_flows"])["covered_trading_days"] == 0
 
 

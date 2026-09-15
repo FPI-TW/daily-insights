@@ -53,7 +53,7 @@ from daily_insights_api.modules.markets.service import (
     MAX_FETCH_CONCURRENCY,
     TAIEX_INCREMENTAL_MONTHS,
     TAIEX_INITIAL_BACKFILL_MONTHS,
-    YAHOO_REFRESH_LOCK_KEY,
+    TAIEX_REFRESH_LOCK_KEY,
     YFINANCE_INDICES,
     IndexProviderConflictError,
     refresh_taiex_daily_bars,
@@ -1042,8 +1042,10 @@ async def test_an_empty_taiex_series_widens_the_incremental_window_to_the_backfi
             database, today=today, requested_months=TAIEX_INCREMENTAL_MONTHS
         )
     assert len(empty) == TAIEX_INITIAL_BACKFILL_MONTHS
-    assert empty[-1] == date(2026, 9, 1)
-    assert empty[0] == date(2024, 9, 1)
+    # The newest two months go first so a long bootstrap cannot make the chart
+    # stale; the remaining missing history follows oldest first.
+    assert empty[:2] == (date(2026, 8, 1), date(2026, 9, 1))
+    assert empty[2] == date(2024, 9, 1)
 
     async with session_factory.begin() as database:
         await _store_as(database, [_bar(date(2026, 9, 1), "100.0")], "twse")
@@ -1052,7 +1054,8 @@ async def test_an_empty_taiex_series_widens_the_incremental_window_to_the_backfi
         populated = await select_taiex_refresh_months(
             database, today=today, requested_months=TAIEX_INCREMENTAL_MONTHS
         )
-    assert list(populated) == [date(2026, 8, 1), date(2026, 9, 1)]
+    assert populated[:2] == (date(2026, 8, 1), date(2026, 9, 1))
+    assert date(2024, 9, 1) in populated
 
 
 async def test_an_explicit_taiex_window_is_never_widened(
@@ -1123,9 +1126,9 @@ async def test_a_taiex_write_failure_surfaces_its_cause_and_frees_the_shared_loc
 
     # The lock is free: a fresh session can take and drop it without blocking.
     async with session_factory() as database:
-        acquired = await database.scalar(select(func.pg_try_advisory_lock(YAHOO_REFRESH_LOCK_KEY)))
+        acquired = await database.scalar(select(func.pg_try_advisory_lock(TAIEX_REFRESH_LOCK_KEY)))
         assert acquired is True
-        await database.execute(select(func.pg_advisory_unlock(YAHOO_REFRESH_LOCK_KEY)))
+        await database.execute(select(func.pg_advisory_unlock(TAIEX_REFRESH_LOCK_KEY)))
 
 
 async def test_a_taiex_write_failure_is_reported_without_poisoning_the_transaction(
@@ -1169,7 +1172,7 @@ async def test_one_bad_month_does_not_discard_the_backfill(
     month again. Same failure shape this PR removed from the Yahoo path, where
     one unsettled row used to discard a symbol's whole history.
     """
-    months = [date(2026, 7, 1), date(2026, 8, 1), date(2026, 9, 1)]
+    months = [date(2024, 9, 1), date(2025, 8, 1), date(2026, 9, 1)]
     adapter = _StubTwseAdapter(months[0], failing_months=frozenset({months[1]}))
 
     refreshed = await refresh_taiex_daily_bars(
@@ -1178,21 +1181,45 @@ async def test_one_bad_month_does_not_discard_the_backfill(
 
     assert refreshed.stored_count == 2
     assert refreshed.failed_months == (
-        "2026-08: DataSourceContractError: 2026-08 is not a TAIEX report",
+        "2025-08: DataSourceContractError: 2025-08 is not a TAIEX report",
     )
     assert refreshed.aborted is False
     # The walk carried on past the bad month rather than stopping there.
     assert adapter.asked == months
 
-    # The series is no longer empty, so the next run is incremental rather than
-    # widening into the same failure again.
+    # The successful months do not hide the failed historical month: the next
+    # run keeps its normal recent refresh and also repairs that gap.
     async with session_factory() as database:
         stored = (await database.scalars(select(IndexDailyBar.trade_date))).all()
-        assert sorted(stored) == [date(2026, 7, 1), date(2026, 9, 1)]
+        assert sorted(stored) == [date(2024, 9, 1), date(2026, 9, 1)]
         months_next = await select_taiex_refresh_months(
             database, today=date(2026, 9, 11), requested_months=TAIEX_INCREMENTAL_MONTHS
         )
-    assert len(months_next) == TAIEX_INCREMENTAL_MONTHS
+    assert months_next[:2] == (date(2026, 8, 1), date(2026, 9, 1))
+    assert date(2025, 8, 1) in months_next
+
+
+async def test_a_partially_populated_taiex_window_keeps_retrying_older_gaps(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    today = date(2026, 9, 11)
+    required = taiex_months(start=date(2024, 9, 1), end=today)
+    missing = {required[0], required[1]}
+    bars = [_bar(month, "100.0") for month in required if month not in missing]
+    async with session_factory.begin() as database:
+        await _store_as(database, bars, "twse")
+
+    async with session_factory() as database:
+        selected = await select_taiex_refresh_months(
+            database, today=today, requested_months=TAIEX_INCREMENTAL_MONTHS
+        )
+
+    assert selected == (
+        date(2026, 8, 1),
+        date(2026, 9, 1),
+        date(2024, 9, 1),
+        date(2024, 10, 1),
+    )
 
 
 async def test_a_dead_twse_stops_the_walk_instead_of_asking_every_month(
