@@ -574,7 +574,7 @@ function CandlesPanel({
                       fontWeight: "bold",
                     },
                     coordinateSystem: "matrix",
-                    coord: [0, 8],
+                    coord: [0, 9],
                   },
                 ],
                 matrix: {
@@ -583,7 +583,7 @@ function CandlesPanel({
                   top: 4,
                   bottom: 54,
                   x: { show: false, data: [null] },
-                  y: { show: false, data: Array(10).fill(null) },
+                  y: { show: false, data: Array(12).fill(null) },
                   body: {
                     data: [
                       {
@@ -596,7 +596,21 @@ function CandlesPanel({
                       {
                         coord: [
                           [0, 0],
-                          [8, 9],
+                          [4, 5],
+                        ],
+                        mergeCells: true,
+                      },
+                      {
+                        coord: [
+                          [0, 0],
+                          [6, 8],
+                        ],
+                        mergeCells: true,
+                      },
+                      {
+                        coord: [
+                          [0, 0],
+                          [9, 11],
                         ],
                         mergeCells: true,
                       },
@@ -630,7 +644,7 @@ function CandlesPanel({
                   },
                   {
                     coordinateSystem: "matrix",
-                    coord: [0, 8],
+                    coord: [0, 9],
                     left: 64,
                     right: 20,
                     top: 24,
@@ -761,10 +775,16 @@ function CandlesPanel({
                     type: "value",
                     gridIndex: 2,
                     scale: true,
+                    splitNumber: 3,
                     axisLabel: {
                       color: colors.text,
                       fontFamily: "monospace",
                       fontSize: 11,
+                      hideOverlap: true,
+                      formatter: (value: number) =>
+                        new Intl.NumberFormat(numberLocales[locale], {
+                          maximumFractionDigits: 2,
+                        }).format(value),
                     },
                     splitLine: {
                       lineStyle: { color: colors.gridSoft, type: "dashed" },

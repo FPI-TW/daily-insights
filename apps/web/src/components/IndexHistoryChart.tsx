@@ -308,7 +308,7 @@ export function IndexHistoryChart({
                     fontWeight: "bold",
                   },
                   coordinateSystem: "matrix",
-                  coord: [0, 8],
+                  coord: [0, 9],
                 },
               ],
               matrix: {
@@ -317,7 +317,7 @@ export function IndexHistoryChart({
                 top: 4,
                 bottom: 54,
                 x: { show: false, data: [null] },
-                y: { show: false, data: Array(10).fill(null) },
+                y: { show: false, data: Array(12).fill(null) },
                 body: {
                   data: [
                     {
@@ -330,7 +330,21 @@ export function IndexHistoryChart({
                     {
                       coord: [
                         [0, 0],
-                        [8, 9],
+                        [4, 5],
+                      ],
+                      mergeCells: true,
+                    },
+                    {
+                      coord: [
+                        [0, 0],
+                        [6, 8],
+                      ],
+                      mergeCells: true,
+                    },
+                    {
+                      coord: [
+                        [0, 0],
+                        [9, 11],
                       ],
                       mergeCells: true,
                     },
@@ -364,7 +378,7 @@ export function IndexHistoryChart({
                 },
                 {
                   coordinateSystem: "matrix",
-                  coord: [0, 8],
+                  coord: [0, 9],
                   left: 64,
                   right: 18,
                   top: 24,
@@ -458,7 +472,15 @@ export function IndexHistoryChart({
                   type: "value",
                   gridIndex: 2,
                   scale: true,
-                  axisLabel: { color: colors.text },
+                  splitNumber: 3,
+                  axisLabel: {
+                    color: colors.text,
+                    hideOverlap: true,
+                    formatter: (value: number) =>
+                      new Intl.NumberFormat(numberLocales[locale], {
+                        maximumFractionDigits: 2,
+                      }).format(value),
+                  },
                   splitLine: {
                     lineStyle: { color: colors.grid, type: "dashed" },
                   },

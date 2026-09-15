@@ -265,7 +265,12 @@ describe("TaiwanIndexHistoryChart", () => {
     expect(chart).toHaveTextContent('"value":1')
     expect(chart).not.toHaveTextContent("Trade value (TWD 100M)")
     expect(chart).toHaveTextContent('"coordinateSystem":"matrix"')
-    expect(chart).toHaveTextContent('"coord":[[0,0],[8,9]],"mergeCells":true')
+    expect(chart).toHaveTextContent('"coord":[[0,0],[4,5]],"mergeCells":true')
+    expect(chart).toHaveTextContent('"coord":[[0,0],[6,8]],"mergeCells":true')
+    expect(chart).toHaveTextContent('"coord":[[0,0],[9,11]],"mergeCells":true')
+    expect(chart).toHaveTextContent(
+      '"gridIndex":2,"scale":true,"splitNumber":3'
+    )
   })
   it("has explicit loading, failure and empty states", () => {
     show(<TaiwanIndexHistoryLoading />)

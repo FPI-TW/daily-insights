@@ -110,7 +110,13 @@ describe("IndexHistoryChart", () => {
       '"coordinateSystem":"matrix"'
     )
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
-      '"coord":[[0,0],[8,9]],"mergeCells":true'
+      '"coord":[[0,0],[4,5]],"mergeCells":true'
+    )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"coord":[[0,0],[6,8]],"mergeCells":true'
+    )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"coord":[[0,0],[9,11]],"mergeCells":true'
     )
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
       '"name":"Volume (100M shares)","type":"bar"'
@@ -252,6 +258,9 @@ describe("IndexHistoryChart", () => {
     )
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
       '"name":"MACD","type":"line"'
+    )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"gridIndex":2,"scale":true,"splitNumber":3'
     )
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
       '"name":"RSI 14","type":"line"'
