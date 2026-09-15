@@ -16,10 +16,10 @@ compose() {
 diagnose_cutover_failure() {
   message=$1
   echo "$message" >&2
-  if quiesce_automatic_news; then
-    echo "Automatic news is confirmed quiescent. Inspect the diagnostics, correct the failure, then rerun deploy.sh; do not start daily-news-scheduler before data-management-worker is healthy." >&2
+  if quiesce_schema_boundary_services; then
+    echo "Schema-boundary services are confirmed quiescent. Inspect the diagnostics, correct the failure, then rerun deploy.sh; do not start the schedulers before data-management-worker is healthy." >&2
   else
-    echo "Automatic news could not be confirmed quiescent. Keep the deployment halted, stop daily-news-scheduler and data-management-worker manually, inspect the diagnostics, then rerun deploy.sh." >&2
+    echo "Schema-boundary services could not be confirmed quiescent. Keep the deployment halted, stop daily-news-scheduler, index-daily-bars-scheduler, institutional-flows-scheduler, and data-management-worker manually, inspect the diagnostics, then rerun deploy.sh." >&2
   fi
   "$script_dir/diagnose.sh" >&2 || true
   exit 1
@@ -37,13 +37,19 @@ confirm_stopped() {
   esac
 }
 
-quiesce_automatic_news() {
+quiesce_schema_boundary_services() {
   quiesce_failed=false
-  if ! compose stop daily-news-scheduler data-management-worker; then
-    echo "failed to stop automatic news services" >&2
+  if ! compose stop daily-news-scheduler index-daily-bars-scheduler institutional-flows-scheduler data-management-worker; then
+    echo "failed to stop schema-boundary services" >&2
     quiesce_failed=true
   fi
   if ! confirm_stopped daily-insights-daily-news-scheduler; then
+    quiesce_failed=true
+  fi
+  if ! confirm_stopped daily-insights-index-daily-bars-scheduler; then
+    quiesce_failed=true
+  fi
+  if ! confirm_stopped daily-insights-institutional-flows-scheduler; then
     quiesce_failed=true
   fi
   if ! confirm_stopped daily-insights-data-management-worker; then
@@ -189,12 +195,12 @@ compose up -d --no-build --force-recreate --no-deps nginx
 
 # The old direct-fetch scheduler and old queue worker must not cross the schema
 # boundary: either could execute new automatic rows with predecessor semantics.
-if ! quiesce_automatic_news; then
-  diagnose_cutover_failure "automatic news could not be confirmed quiescent; migration was not attempted"
+if ! quiesce_schema_boundary_services; then
+  diagnose_cutover_failure "schema-boundary services could not be confirmed quiescent; migration was not attempted"
 fi
 
 if ! compose run --rm --no-deps api alembic upgrade head; then
-  diagnose_cutover_failure "database migration failed after automatic news was stopped"
+  diagnose_cutover_failure "database migration failed after schema-boundary services were stopped"
 fi
 
 # Only the replacement worker may observe rows created under the new schema.

@@ -23,12 +23,22 @@ from daily_insights_api.modules.data_management.service import (
     worker_loop,
 )
 from daily_insights_api.modules.data_sources.api import DataSourceError
-from daily_insights_api.modules.markets.api import InstitutionalMarketFlow
+from daily_insights_api.modules.markets.api import (
+    AUTOMATIC_SHORT_REFRESH_PERIOD,
+    TAIEX_SYMBOL,
+    InstitutionalMarketFlow,
+    TaiexRefresh,
+)
 from daily_insights_api.modules.reports.api import (
     LaunchMarketCode,
     MorningDatasetExecution,
     MorningMarketExecution,
 )
+
+
+async def _taiex_stored(*_: object, **__: object) -> dict[str, object]:
+    """^TWII rides with the flows now; the tests below are about the walks."""
+    return {"symbol": TAIEX_SYMBOL, "status": "succeeded", "record_count": 21}
 
 
 def _run(operation: str, market_code: str | None = None) -> DataManagementRun:
@@ -119,10 +129,46 @@ async def test_enqueue_only_maps_named_active_run_unique_conflicts_to_409_error(
 
 
 @pytest.mark.asyncio
+async def test_automatic_twse_enqueue_returns_same_edition_manual_success_under_lock() -> None:
+    existing = _run("institutional_twse")
+    existing.status = "succeeded"
+    existing.requested_by_user_id = uuid.uuid4()
+
+    class Database:
+        def __init__(self) -> None:
+            self.locked = False
+
+        async def execute(self, statement: object) -> None:
+            assert "pg_advisory_xact_lock" in str(statement)
+            self.locked = True
+
+        async def scalar(self, _: object) -> DataManagementRun:
+            assert self.locked
+            return existing
+
+        def add(self, _: object) -> None:
+            pytest.fail("a satisfied automatic edition must not add another row")
+
+    returned = await enqueue_run(
+        cast(Any, Database()),
+        operation="institutional_twse",
+        market_code=None,
+        requester_id=None,
+        request_id=None,
+        edition_date=existing.edition_date,
+    )
+
+    assert returned is existing
+
+
+@pytest.mark.asyncio
 async def test_cancel_run_terminalizes_pending_or_running_work_without_a_lease() -> None:
     run = _run("macro_dashboard")
 
     class Database:
+        async def execute(self, _: object) -> None:
+            return None
+
         async def scalar(self, _: object) -> DataManagementRun:
             return run
 
@@ -250,7 +296,7 @@ async def test_morning_full_classifies_degraded_and_failed_markets(
 
 
 @pytest.mark.asyncio
-async def test_yahoo_execution_uses_seven_day_period_and_serializes_symbols(
+async def test_yahoo_execution_uses_the_incremental_period_and_keeps_symbol_error_detail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from daily_insights_api.modules.data_management import service
@@ -263,7 +309,7 @@ async def test_yahoo_execution_uses_seven_day_period_and_serializes_symbols(
             [
                 SimpleNamespace(
                     result=SimpleNamespace(
-                        symbol="^TWII",
+                        symbol="^DJI",
                         provenance=SimpleNamespace(
                             fetched_at=datetime(2026, 9, 7, tzinfo=UTC),
                             as_of=date(2026, 9, 6),
@@ -280,13 +326,82 @@ async def test_yahoo_execution_uses_seven_day_period_and_serializes_symbols(
     status, result, error = await execute_run(
         _run("index_yahoo"),
         cast(Any, _StubSessionFactory()),
-        Settings(environment="test", yfinance_enabled=True),
+        Settings(environment="test", yfinance_enabled=True, twse_enabled=True),
     )
-    assert status == "partial" and error == "yfinance_symbol_failures"
-    assert calls["period"] == "7d"
+    assert status == "partial" and error == "index_symbol_failures"
+    assert calls["period"] == AUTOMATIC_SHORT_REFRESH_PERIOD
+    # ^TWII belongs to TWSE now, so it must not be in the Yahoo request.
+    assert TAIEX_SYMBOL not in cast(list[str], calls["symbols"])
     symbols = cast(list[dict[str, object]], result["symbols"])
     assert symbols[0]["record_count"] == 7 and symbols[0]["source_as_of"] == "2026-09-06"
-    assert symbols[1]["error"] == "runtimeerror"
+    # Nothing here speaks for ^TWII: the TWSE run reports it, next to the flows
+    # it shares a client with.
+    assert all(item["symbol"] != TAIEX_SYMBOL for item in symbols)
+    # The operator reads this string in the back office, so it keeps the cause
+    # instead of collapsing to a class name -- with secrets still redacted.
+    assert symbols[1]["error"] == "api_key=[REDACTED]"
+
+
+@pytest.mark.asyncio
+async def test_the_twse_run_propagates_a_partial_taiex_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Months that did not land must reach the run's status.
+
+    Ported from the index run, which no longer fetches ^TWII: the flows can be
+    whole while the index is not, and an operator reading "succeeded" would
+    never go looking for the missing months.
+    """
+    from daily_insights_api.modules.data_management import service
+
+    edition = date(2026, 9, 7)
+
+    class Adapter:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "Adapter":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def get_stock_flows(self, trade_date: date) -> SimpleNamespace:
+            return SimpleNamespace(
+                trade_date=trade_date, items=(), fetched_at=datetime(2026, 9, 7, 9, tzinfo=UTC)
+            )
+
+        get_market_flows = get_stock_flows
+
+    async def select_months(*_: object, **__: object) -> tuple[date, ...]:
+        return (date(2026, 8, 1), date(2026, 9, 1))
+
+    async def refresh_taiex(*_: object, **__: object) -> TaiexRefresh:
+        return TaiexRefresh(
+            stored_count=21,
+            as_of=date(2026, 9, 10),
+            fetched_at=datetime(2026, 9, 11, tzinfo=UTC),
+            failed_months=("2026-08: DataSourceContractError: boom",),
+        )
+
+    async def existing(*_: object, **__: object) -> set[date]:
+        return _weekdays_before(edition, 40)
+
+    monkeypatch.setattr(service, "TwseAdapter", Adapter)
+    monkeypatch.setattr(service, "stored_flow_dates", existing)
+    monkeypatch.setattr(service, "select_taiex_refresh_months", select_months)
+    monkeypatch.setattr(service, "refresh_taiex_daily_bars", refresh_taiex)
+
+    run = _run("institutional_twse")
+    run.edition_date = edition
+    status, result, error = await execute_run(
+        run, cast(Any, _StubSessionFactory()), Settings(environment="test", twse_enabled=True)
+    )
+
+    assert (status, error) == ("partial", "twse_index_failure")
+    index = cast(dict[str, object], result["index"])
+    assert index["status"] == "partial"
+    assert "2026-08" in cast(str, index["error"])
 
 
 @pytest.mark.asyncio
@@ -554,6 +669,7 @@ async def test_institutional_twse_rerun_whose_only_fetch_fails_is_partial_not_fa
 
     monkeypatch.setattr(service, "TwseAdapter", Adapter)
     monkeypatch.setattr(service, "stored_flow_dates", existing)
+    monkeypatch.setattr(service, "_refresh_taiex", _taiex_stored)
 
     run = _run("institutional_twse")
     run.edition_date = edition
@@ -567,7 +683,7 @@ async def test_institutional_twse_rerun_whose_only_fetch_fails_is_partial_not_fa
 
 
 @pytest.mark.asyncio
-async def test_institutional_twse_stops_walking_once_the_source_is_clearly_down(
+async def test_institutional_twse_with_taiex_and_failed_flows_is_partial(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An outage would otherwise cost 90 requests: 10 stock dates plus 80
@@ -597,13 +713,14 @@ async def test_institutional_twse_stops_walking_once_the_source_is_clearly_down(
 
     monkeypatch.setattr(service, "TwseAdapter", Adapter)
     monkeypatch.setattr(service, "stored_flow_dates", existing)
+    monkeypatch.setattr(service, "_refresh_taiex", _taiex_stored)
 
     run = _run("institutional_twse")
     status, result, error = await execute_run(
         run, cast(Any, _StubSessionFactory()), Settings(environment="test", twse_enabled=True)
     )
 
-    assert (status, error) == ("failed", "twse_fetch_failures")
+    assert (status, error) == ("partial", "twse_fetch_failures")
     assert len(asked) == 2 * service.MAX_CONSECUTIVE_FAILURES
     for walk in ("stock_flows", "market_flows"):
         summary = cast(dict[str, Any], result[walk])
@@ -612,7 +729,7 @@ async def test_institutional_twse_stops_walking_once_the_source_is_clearly_down(
 
 
 @pytest.mark.asyncio
-async def test_institutional_twse_reaching_no_trading_day_is_failed_not_succeeded(
+async def test_institutional_twse_with_taiex_but_no_flow_day_is_partial(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """TWSE answers a date it cannot serve with HTTP 200 and a no-data stat, so
@@ -641,13 +758,14 @@ async def test_institutional_twse_reaching_no_trading_day_is_failed_not_succeede
 
     monkeypatch.setattr(service, "TwseAdapter", Adapter)
     monkeypatch.setattr(service, "stored_flow_dates", existing)
+    monkeypatch.setattr(service, "_refresh_taiex", _taiex_stored)
 
     run = _run("institutional_twse")
     status, result, error = await execute_run(
         run, cast(Any, _StubSessionFactory()), Settings(environment="test", twse_enabled=True)
     )
 
-    assert (status, error) == ("failed", "twse_no_coverage")
+    assert (status, error) == ("partial", "twse_partial_coverage")
     assert cast(dict[str, Any], result["market_flows"])["covered_trading_days"] == 0
 
 
@@ -707,6 +825,7 @@ async def test_institutional_twse_walks_back_to_forty_trading_days_without_refet
 
     monkeypatch.setattr(service, "TwseAdapter", Adapter)
     monkeypatch.setattr(service, "stored_flow_dates", existing)
+    monkeypatch.setattr(service, "_refresh_taiex", _taiex_stored)
     monkeypatch.setattr(service, "store_institutional_market_flows", store_market)
     monkeypatch.setattr(service, "store_institutional_stock_flows", store_stock)
 
@@ -753,3 +872,93 @@ async def test_institutional_twse_is_refused_when_disabled() -> None:
         Settings(environment="test", twse_enabled=False),
     )
     assert (status, result, error) == ("failed", {}, "twse_unavailable")
+
+
+@pytest.mark.asyncio
+async def test_a_disabled_yahoo_leaves_taiex_alone_because_it_is_not_this_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Turning Yahoo off must stop Yahoo and nothing else.
+
+    ^TWII never touched Yahoo, and it no longer rides with the symbols that do:
+    a run reaching for it here would hold a second TWSE client while the TWSE
+    run holds the first, and the interval each of them keeps would be half the
+    interval the exchange sees.
+    """
+    from daily_insights_api.modules.data_management import service
+
+    async def unreachable(*_: object, **__: object) -> object:
+        raise AssertionError("the Yahoo run must not reach TWSE")
+
+    monkeypatch.setattr(service, "select_taiex_refresh_months", unreachable)
+    monkeypatch.setattr(service, "refresh_taiex_daily_bars", unreachable)
+    status, result, error = await execute_run(
+        _run("index_yahoo"),
+        cast(Any, _StubSessionFactory()),
+        Settings(environment="test", yfinance_enabled=False, twse_enabled=True),
+    )
+
+    symbols = cast(list[dict[str, object]], result["symbols"])
+    assert all(item["error"] == "yfinance_unavailable" for item in symbols)
+    assert all(item["symbol"] != TAIEX_SYMBOL for item in symbols)
+    assert status == "failed" and error == "index_symbol_failures"
+
+
+@pytest.mark.asyncio
+async def test_the_twse_run_refreshes_taiex_through_the_client_the_flows_use(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The point of putting ^TWII here: one client, one interval.
+
+    The exchange is spaced inside a client, so the guarantee only holds while
+    one client is talking to it. This asserts the index leg was handed the same
+    adapter instance the flow walks were, rather than opening its own.
+    """
+    from daily_insights_api.modules.data_management import service
+
+    edition = date(2026, 9, 7)
+    adapters: list[object] = []
+    taiex_adapters: list[object] = []
+
+    class Adapter:
+        def __init__(self, **_: object) -> None:
+            adapters.append(self)
+
+        async def __aenter__(self) -> "Adapter":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def get_stock_flows(self, trade_date: date) -> SimpleNamespace:
+            return SimpleNamespace(
+                trade_date=trade_date, items=(), fetched_at=datetime(2026, 9, 7, 9, tzinfo=UTC)
+            )
+
+        get_market_flows = get_stock_flows
+
+    async def refresh_taiex(
+        _run_row: object, _factory: object, *, adapter: object
+    ) -> dict[str, object]:
+        taiex_adapters.append(adapter)
+        return {"symbol": TAIEX_SYMBOL, "status": "succeeded", "record_count": 21}
+
+    async def existing(*_: object, **__: object) -> set[date]:
+        return _weekdays_before(edition, 40)
+
+    monkeypatch.setattr(service, "TwseAdapter", Adapter)
+    monkeypatch.setattr(service, "stored_flow_dates", existing)
+    monkeypatch.setattr(service, "_refresh_taiex", refresh_taiex)
+
+    run = _run("institutional_twse")
+    run.edition_date = edition
+    status, result, _ = await execute_run(
+        run, cast(Any, _StubSessionFactory()), Settings(environment="test", twse_enabled=True)
+    )
+
+    assert status == "succeeded"
+    # One client opened, and it is the one the index leg was given.
+    assert len(adapters) == 1
+    assert taiex_adapters == adapters
+    index = cast(dict[str, object], result["index"])
+    assert index["symbol"] == TAIEX_SYMBOL and index["record_count"] == 21

@@ -16,6 +16,7 @@ from daily_insights_api.modules.operations.service import (
     pipeline_idempotency_key,
     publish_completed_run,
     sanitize_error_code,
+    sanitize_error_detail,
     start_source_run,
 )
 
@@ -35,5 +36,6 @@ __all__ = [
     "pipeline_idempotency_key",
     "publish_completed_run",
     "sanitize_error_code",
+    "sanitize_error_detail",
     "start_source_run",
 ]

@@ -1,4 +1,6 @@
+from collections.abc import Mapping
 from datetime import UTC, date, datetime
+from decimal import Decimal
 
 import httpx
 import pytest
@@ -8,7 +10,14 @@ from daily_insights_api.modules.data_sources.api import (
     DataSourceTransientError,
     TwseAdapter,
 )
-from daily_insights_api.modules.data_sources.twse import parse_market_flows, parse_stock_flows
+from daily_insights_api.modules.data_sources.twse import (
+    TaiexDailyBars,
+    build_taiex_daily_bars,
+    parse_market_flows,
+    parse_stock_flows,
+    parse_taiex_index_history,
+    parse_taiex_trading_volumes,
+)
 
 TRADE_DATE = date(2026, 9, 4)
 FETCHED_AT = datetime(2026, 9, 7, tzinfo=UTC)
@@ -175,3 +184,102 @@ async def test_adapter_spaces_requests_and_maps_transport_errors() -> None:
     assert sum(1 for request in requests if request.url.params.get("dayDate") == "20260905") == 3
     assert requests[0].url.params["selectType"] == "ALLBUT0999"
     assert requests[1].url.params["type"] == "day"
+
+
+MONTH = date(2026, 9, 1)
+# Trimmed from the 2026-09-10 responses. Both reports answer with a whole
+# calendar month; the closing index appears in each, which is what lets the
+# join check itself.
+TAIEX_INDEX_PAYLOAD = {
+    "stat": "OK",
+    "title": "2026/09 TAIEX Total Index Historical Data",
+    "date": "20260901",
+    "fields": ["Date", "Opening Index", "Highest Index", "Lowest Index", "Closing Index"],
+    "data": [
+        ["2026/09/01", "46,177.11", "46,948.72", "46,081.11", "46,948.72"],
+        ["2026/09/02", "46,901.32", "46,946.60", "46,164.72", "46,164.72"],
+    ],
+}
+TAIEX_TRADING_PAYLOAD = {
+    "stat": "OK",
+    "title": "2026/09 Highlights of Daily Trading",
+    "date": "20260901",
+    "fields": ["Date", "Trade Volume", "Trade Value", "Transaction", "TAIEX", "Change"],
+    "data": [
+        ["2026/09/01", "13,000,849,196", "1,187,571,567,117", "5,301,801", "46,948.72", "820.25"],
+        ["2026/09/02", "10,824,863,832", "976,499,979,054", "5,093,402", "46,164.72", "-784.00"],
+    ],
+}
+
+
+def _taiex_bars(
+    index_payload: Mapping[str, object] | None = None,
+    trading_payload: Mapping[str, object] | None = None,
+) -> TaiexDailyBars:
+    return build_taiex_daily_bars(
+        month=MONTH,
+        index_history=parse_taiex_index_history(index_payload or TAIEX_INDEX_PAYLOAD, month=MONTH),
+        trading_volumes=parse_taiex_trading_volumes(
+            trading_payload or TAIEX_TRADING_PAYLOAD, month=MONTH
+        ),
+        fetched_at=FETCHED_AT,
+    )
+
+
+def test_taiex_joins_prices_from_one_report_with_volume_from_the_other() -> None:
+    bars = _taiex_bars()
+
+    assert [bar.trade_date for bar in bars.items] == [date(2026, 9, 1), date(2026, 9, 2)]
+    first = bars.items[0]
+    assert first.open == Decimal("46177.11")
+    assert first.high == Decimal("46948.72")
+    assert first.low == Decimal("46081.11")
+    assert first.close == Decimal("46948.72")
+    # The exchange publishes shares; Yahoo's ^TWII volume did not agree with it.
+    assert first.volume == 13_000_849_196
+
+
+def test_taiex_keeps_a_session_the_trading_report_has_not_published() -> None:
+    # volume is nullable, so a bar that is otherwise complete is still worth
+    # storing rather than losing the whole month over.
+    trading = {**TAIEX_TRADING_PAYLOAD, "data": TAIEX_TRADING_PAYLOAD["data"][:1]}
+    bars = _taiex_bars(trading_payload=trading)
+
+    assert [bar.volume for bar in bars.items] == [13_000_849_196, None]
+
+
+def test_taiex_rejects_reports_that_disagree_on_the_close() -> None:
+    # Both reports carry the closing index. Disagreement means the two requests
+    # straddled a correction, or a column moved; either way the month is not
+    # trustworthy and must not be written.
+    trading = {
+        **TAIEX_TRADING_PAYLOAD,
+        "data": [["2026/09/01", "13,000,849,196", "1", "1", "46,000.00", "0"]],
+    }
+    with pytest.raises(DataSourceContractError, match="trading highlights"):
+        _taiex_bars(trading_payload=trading)
+
+
+def test_taiex_rejects_a_row_from_another_month() -> None:
+    index = {
+        **TAIEX_INDEX_PAYLOAD,
+        "data": [["2026/08/31", "46,177.11", "46,948.72", "46,081.11", "46,948.72"]],
+    }
+    with pytest.raises(DataSourceContractError, match="outside the requested month"):
+        _taiex_bars(index_payload=index)
+
+
+def test_taiex_month_in_the_future_is_empty_rather_than_an_error() -> None:
+    # The English views answer an unpublished month with a stat sentence.
+    future = {"stat": "Search date greater than today, please retry!", "total": 0}
+    assert parse_taiex_index_history(future, month=MONTH) == {}
+    assert parse_taiex_trading_volumes(future, month=MONTH) == {}
+
+
+def test_taiex_rejects_a_report_that_is_not_the_taiex_index() -> None:
+    # Neither report labels its rows with a symbol, and we store them under
+    # ^TWII. If that path ever starts serving a different index, this is what
+    # keeps it out of the series.
+    other = {**TAIEX_INDEX_PAYLOAD, "title": "2026/09 Some Other Index Historical Data"}
+    with pytest.raises(DataSourceContractError, match="not a TAIEX report"):
+        _taiex_bars(index_payload=other)

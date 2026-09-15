@@ -9,7 +9,7 @@ from typing import Any, Literal, Protocol, cast
 from zoneinfo import ZoneInfo
 
 from anyio import Path
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -18,7 +18,6 @@ from daily_insights_api.core.config import Settings, is_placeholder_value
 from daily_insights_api.modules.audit.api import record_audit_event
 from daily_insights_api.modules.data_management.models import DataManagementRun
 from daily_insights_api.modules.data_sources.api import (
-    TRACKED_INDICES,
     DataSourceError,
     RetryPolicy,
     TwelveDataAdapter,
@@ -27,10 +26,17 @@ from daily_insights_api.modules.data_sources.api import (
     YfinanceAdapter,
 )
 from daily_insights_api.modules.markets.api import (
+    AUTOMATIC_SHORT_REFRESH_PERIOD,
     INSTITUTIONAL_MARKET_CODE,
+    TAIEX_INCREMENTAL_MONTHS,
+    TAIEX_SYMBOL,
+    YFINANCE_INDICES,
+    IndexProviderConflictError,
     InstitutionalMarketFlow,
     InstitutionalStockFlow,
     refresh_index_daily_bars,
+    refresh_taiex_daily_bars,
+    select_taiex_refresh_months,
     store_institutional_market_flows,
     store_institutional_stock_flows,
     stored_flow_dates,
@@ -52,7 +58,7 @@ from daily_insights_api.modules.news.api import (
     workflow_results,
     workflow_scope,
 )
-from daily_insights_api.modules.operations.api import sanitize_error_code
+from daily_insights_api.modules.operations.api import sanitize_error_code, sanitize_error_detail
 from daily_insights_api.modules.reports.api import (
     ACTIVE_LAUNCH_MANIFEST,
     LaunchMarketCode,
@@ -80,6 +86,10 @@ STOCK_FLOW_LOOKBACK_TRADING_DAYS = 1
 STOCK_FLOW_LOOKBACK_CALENDAR_DAYS = 10
 # TWSE being down looks the same on every date, so stop asking after three.
 MAX_CONSECUTIVE_FAILURES = 3
+# Serializes institutional scheduler obligation checks with enqueue,
+# completion, and cancellation. This is transaction-scoped so a crashed
+# caller cannot strand it.
+INSTITUTIONAL_SCHEDULE_LOCK_KEY = 5_420_190_674_228_311_907
 
 
 class RunAlreadyActiveError(Exception):
@@ -94,6 +104,23 @@ def sanitize_error(error: Exception) -> str:
     # Provider errors can contain URLs, upstream response fragments, and keys.
     # Store a stable code only; detailed diagnostics belong in protected logs.
     return sanitize_error_code(type(error).__name__)[:500]
+
+
+def sanitize_item_error(error: Exception | str) -> str:
+    """A per-item failure message for the run detail the operator reads.
+
+    `sanitize_error` is right for `DataManagementRun.error`, whose value is
+    compared and aggregated, but applying it to one symbol or one date reduced
+    every cause to a bare class name: an operator staring at `runtimeerror` in
+    the back office learns nothing and has to reproduce the fetch by hand.
+    These strings are only ever read, so they keep the message with secrets
+    redacted by `sanitize_error_detail`.
+    """
+    message = error if isinstance(error, str) else f"{type(error).__name__}: {error}"
+    detail = sanitize_error_detail(message)
+    if detail is not None:
+        return detail[:500]
+    return sanitize_error_code(message) if isinstance(error, str) else sanitize_error(error)
 
 
 def execution_lock_key(run_id: uuid.UUID) -> int:
@@ -174,10 +201,48 @@ async def enqueue_run(
         raise ValueError("market_code is only allowed for market operations")
     if (operation == "news_publish") != (payload is not None):
         raise ValueError("payload is required for, and only for, news_publish")
+    effective_edition = edition_date or taipei_today()
+    if operation == "institutional_twse":
+        await database.execute(select(func.pg_advisory_xact_lock(INSTITUTIONAL_SCHEDULE_LOCK_KEY)))
+        if requester_id is None:
+            # This check and the insert below share the same lock as worker
+            # completion and cancellation. A scheduler restart therefore
+            # cannot insert between "no final row" and a same-edition run
+            # becoming final.
+            final = await database.scalar(
+                select(DataManagementRun)
+                .where(
+                    DataManagementRun.operation == operation,
+                    DataManagementRun.edition_date == effective_edition,
+                    or_(
+                        DataManagementRun.status == "succeeded",
+                        and_(
+                            DataManagementRun.status == "cancelled",
+                            DataManagementRun.requested_by_user_id.is_(None),
+                        ),
+                    ),
+                )
+                .order_by(DataManagementRun.created_at.desc())
+                .limit(1)
+            )
+            if final is not None:
+                return final
+            active = await database.scalar(
+                select(DataManagementRun)
+                .where(
+                    DataManagementRun.operation == operation,
+                    DataManagementRun.edition_date == effective_edition,
+                    DataManagementRun.status.in_(("pending", "running")),
+                )
+                .order_by(DataManagementRun.created_at.desc())
+                .limit(1)
+            )
+            if active is not None:
+                return active
     run = DataManagementRun(
         operation=operation,
         market_code=market_code,
-        edition_date=edition_date or taipei_today(),
+        edition_date=effective_edition,
         status="pending",
         requested_by_user_id=requester_id,
         payload=payload,
@@ -275,6 +340,7 @@ async def cancel_run(
     request_id: str | None,
 ) -> DataManagementRun | None:
     """Atomically terminalize queued/in-flight work and revoke its lease."""
+    await database.execute(select(func.pg_advisory_xact_lock(INSTITUTIONAL_SCHEDULE_LOCK_KEY)))
     run = await database.scalar(
         select(DataManagementRun).where(DataManagementRun.id == run_id).with_for_update()
     )
@@ -534,6 +600,10 @@ async def complete_run(
 ) -> None:
     now = datetime.now(UTC)
     async with session_factory.begin() as database:
+        if run.operation == "institutional_twse":
+            await database.execute(
+                select(func.pg_advisory_xact_lock(INSTITUTIONAL_SCHEDULE_LOCK_KEY))
+            )
         current = await database.scalar(
             select(DataManagementRun).where(DataManagementRun.id == run.id).with_for_update()
         )
@@ -765,7 +835,7 @@ async def _execute_morning(
                         "market_code": market,
                         "publication_action": "failed",
                         "datasets": [],
-                        "error": sanitize_error(error),
+                        "error": sanitize_item_error(error),
                     }
                 )
     failures = [item for item in outcomes if item["publication_action"] == "failed"]
@@ -786,45 +856,119 @@ async def _execute_morning(
     )
 
 
-async def _execute_yahoo(
+async def _execute_index_refresh(
     run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
 ) -> tuple[str, dict[str, object], str | None]:
-    if not settings.yfinance_enabled:
-        return "failed", {"symbols": []}, "yfinance_unavailable"
-    async with session_factory.begin() as database:
-        refreshed, failures = await refresh_index_daily_bars(
-            database,
-            adapter=YfinanceAdapter(timeout_seconds=settings.yfinance_timeout_seconds),
-            symbols=list(TRACKED_INDICES),
-            period="7d",
+    """Refresh the international indices owned by Yahoo.
+
+    ^TWII is deliberately absent: TWSE owns and refreshes it in the separate
+    ``institutional_twse`` operation. Keeping this operation provider-specific
+    makes its feature gate and failure status unambiguous.
+    """
+    symbols: list[dict[str, object]] = []
+    failed_count = 0
+    if settings.yfinance_enabled:
+        async with session_factory.begin() as database:
+            refreshed, failures = await refresh_index_daily_bars(
+                database,
+                adapter=YfinanceAdapter(timeout_seconds=settings.yfinance_timeout_seconds),
+                symbols=list(YFINANCE_INDICES),
+                period=AUTOMATIC_SHORT_REFRESH_PERIOD,
+            )
+        symbols.extend(
+            {
+                "symbol": entry.result.symbol,
+                "status": "succeeded",
+                "fetched_at": entry.result.provenance.fetched_at.isoformat(),
+                "source_as_of": (
+                    entry.result.provenance.as_of.isoformat()
+                    if entry.result.provenance.as_of is not None
+                    else run.edition_date.isoformat()
+                ),
+                "record_count": entry.stored_count,
+            }
+            for entry in refreshed
         )
-    symbols: list[dict[str, object]] = [
-        {
-            "symbol": entry.result.symbol,
-            "status": "succeeded",
-            "fetched_at": entry.result.provenance.fetched_at.isoformat(),
-            "source_as_of": (
-                entry.result.provenance.as_of.isoformat()
-                if entry.result.provenance.as_of is not None
-                else run.edition_date.isoformat()
-            ),
-            "record_count": entry.stored_count,
-        }
-        for entry in refreshed
-    ]
-    symbols.extend(
-        {
-            "symbol": item.symbol,
-            "status": "failed",
-            "error": sanitize_error(RuntimeError(item.error)),
-        }
-        for item in failures
-    )
+        symbols.extend(
+            {
+                "symbol": item.symbol,
+                "status": "failed",
+                "error": sanitize_item_error(item.error),
+            }
+            for item in failures
+        )
+        failed_count += len(failures)
+    else:
+        # Listed per symbol rather than as one run-level error so the operator
+        # sees which series did not update and why, next to the ones that did.
+        symbols.extend(
+            {"symbol": symbol, "status": "failed", "error": "yfinance_unavailable"}
+            for symbol in YFINANCE_INDICES
+        )
+        failed_count += len(YFINANCE_INDICES)
+    succeeded_count = len(symbols) - failed_count
     return (
-        "failed" if failures and not refreshed else "partial" if failures else "succeeded",
-        {"period": "7d", "symbols": symbols},
-        "yfinance_symbol_failures" if failures else None,
+        "failed" if not succeeded_count else "partial" if failed_count else "succeeded",
+        {"period": AUTOMATIC_SHORT_REFRESH_PERIOD, "symbols": symbols},
+        "index_symbol_failures" if failed_count else None,
     )
+
+
+async def _refresh_taiex(
+    run: DataManagementRun,
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    adapter: TwseAdapter,
+) -> dict[str, object]:
+    """^TWII from TWSE, as one entry in the run's result.
+
+    The window is the edition month plus the one before it, so a run on the
+    first of a month still repairs the end of the previous one. That mirrors why
+    the Yahoo window is a week rather than a day; the store upserts, so the
+    overlap costs nothing but the requests.
+
+    The adapter is the run's, not this function's: it carries the interval TWSE
+    is asked at, and a second client would halve it. That is the reason ^TWII
+    rides with the institutional walk rather than with the Yahoo symbols it is
+    displayed next to.
+    """
+    try:
+        # Two scopes on purpose: the month selection is one short read, and the
+        # refresh below opens its own transaction per month so that minutes of
+        # spaced TWSE requests never sit inside one.
+        async with session_factory.begin() as database:
+            # An empty series widens this to the full backfill on its own.
+            months = await select_taiex_refresh_months(
+                database,
+                today=run.edition_date,
+                requested_months=TAIEX_INCREMENTAL_MONTHS,
+            )
+        refreshed = await refresh_taiex_daily_bars(session_factory, adapter=adapter, months=months)
+    # IndexProviderConflictError is not a provider failure: it means ^TWII's
+    # series still belongs to yfinance, which happens when the code ships ahead
+    # of the migration that releases it. The operator needs to see that rather
+    # than have it escape as an unhandled error.
+    except (DataSourceError, IndexProviderConflictError) as error:
+        return {
+            "symbol": TAIEX_SYMBOL,
+            "status": "failed",
+            "error": sanitize_item_error(error),
+        }
+    entry: dict[str, object] = {
+        "symbol": TAIEX_SYMBOL,
+        "status": "succeeded" if not refreshed.failed_months else "partial",
+        "fetched_at": refreshed.fetched_at.isoformat(),
+        "source_as_of": refreshed.as_of.isoformat(),
+        "record_count": refreshed.stored_count,
+    }
+    if refreshed.failed_months:
+        # Months that did not land. The rest are stored, so this is the operator's
+        # only way to know a later run should be pointed at them.
+        entry["error"] = sanitize_item_error(
+            ("twse stopped early; " if refreshed.aborted else "")
+            + "; ".join(refreshed.failed_months)
+        )
+    return entry
 
 
 class _TwseFlows(Protocol):
@@ -890,7 +1034,7 @@ async def _fetch_flows_back[Flows: _TwseFlows](
         except DataSourceError as error:
             walk.failures += 1
             consecutive_failures += 1
-            entry.update(status="failed", error=sanitize_error(error))
+            entry.update(status="failed", error=sanitize_item_error(error))
             if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                 # The source is down, not this one date. Asking the remaining
                 # dates would cost minutes and tell us nothing; the next run
@@ -913,7 +1057,15 @@ async def _fetch_flows_back[Flows: _TwseFlows](
 async def _execute_institutional_twse(
     run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
 ) -> tuple[str, dict[str, object], str | None]:
-    """Per-stock flows for the edition date only; market flows back to 40."""
+    """Everything TWSE supplies, in one walk: ^TWII's daily bars, per-stock
+    flows for the edition date, and market flows back to 40 trading days.
+
+    One run rather than one per dataset because TWSE is asked at a fixed
+    interval, and that interval is a property of the client, not of the
+    schedule: two runs holding two adapters would ask twice as often as either
+    of them believes it is asking. The queue serialises runs, so one adapter
+    per run is one adapter against TWSE.
+    """
     if not settings.twse_enabled:
         return "failed", {}, "twse_unavailable"
 
@@ -939,6 +1091,10 @@ async def _execute_institutional_twse(
         request_interval_seconds=settings.twse_request_interval_seconds,
         max_attempts=settings.twse_retry_attempts,
     ) as adapter:
+        # First, and inside the same adapter: the chart it feeds is the one the
+        # flows are drawn on, and a reader comparing them wants both to have
+        # moved in the same run.
+        taiex = await _refresh_taiex(run, session_factory, adapter=adapter)
         stock = await _fetch_flows_back(
             edition_date=run.edition_date,
             existing=existing_stock,
@@ -968,12 +1124,25 @@ async def _execute_institutional_twse(
     failures = stock.failures + market.failures
     covered = stock.covered_trading_days + market.covered_trading_days
     wanted = stock.lookback_trading_days + market.lookback_trading_days
-    if not covered:
+    taiex_failed = taiex["status"] == "failed"
+    if not covered and taiex_failed:
         status, error_code = "failed", "twse_fetch_failures" if failures else "twse_no_coverage"
+    elif not covered:
+        # The run covers three datasets. A usable (or partially usable) index
+        # means zero flow coverage is degraded aggregate success, not total
+        # failure.
+        status, error_code = (
+            "partial",
+            "twse_fetch_failures" if failures else "twse_partial_coverage",
+        )
     elif failures:
         status, error_code = "partial", "twse_fetch_failures"
     elif covered < wanted:
         status, error_code = "partial", "twse_partial_coverage"
+    elif taiex_failed or taiex["status"] == "partial":
+        # The flows are whole and the index is not; the run is not a success and
+        # the entry below says which months are missing.
+        status, error_code = "partial", "twse_index_failure"
     else:
         status, error_code = "succeeded", None
     return (
@@ -981,6 +1150,7 @@ async def _execute_institutional_twse(
         {
             "market_code": INSTITUTIONAL_MARKET_CODE,
             "request_interval_seconds": settings.twse_request_interval_seconds,
+            "index": taiex,
             "stock_flows": stock.summary(),
             "market_flows": market.summary(),
         },
@@ -1194,7 +1364,7 @@ async def execute_run(
     run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
 ) -> tuple[str, dict[str, object], str | None]:
     if run.operation == "index_yahoo":
-        return await _execute_yahoo(run, session_factory, settings)
+        return await _execute_index_refresh(run, session_factory, settings)
     if run.operation == "institutional_twse":
         return await _execute_institutional_twse(run, session_factory, settings)
     if run.operation == "news_publish":

@@ -131,9 +131,13 @@ Daily news 除 always-required `DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 與啟用時�
 Compose 會使用列出的 defaults。若有設定 model API base URL，啟用 daily news 時必須是
 absolute HTTPS URL。
 
-`DAILY_INSIGHTS_YFINANCE_ENABLED` 控制 `index-daily-bars-scheduler` 與後台 Yahoo
-抓取；`DAILY_INSIGHTS_TWSE_ENABLED` 控制 `institutional-flows-scheduler` 每天台北
-17:00 排入三大法人回補。`DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 控制
+`DAILY_INSIGHTS_YFINANCE_ENABLED` 控制 `index-daily-bars-scheduler` 與後台的國際
+指數抓取，範圍是 Yahoo 供應的那八檔；`DAILY_INSIGHTS_TWSE_ENABLED` 控制
+`institutional-flows-scheduler` 每天台北 17:00 排入的證交所回補，**^TWII 的日線
+也在其中** —— 該指數改由證交所供應，與三大法人共用同一個 TWSE client 與請求間隔，
+因此由同一筆 run 更新。`index-daily-bars-scheduler` 不需要、也不應該拿到
+`DAILY_INSIGHTS_TWSE_ENABLED`：那個容器不會連到證交所。
+`DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 控制
 `daily-news-scheduler` 每天台北 08:00 排入 initial `news_all`；scheduler 只寫入
 durable queue，`data-management-worker` 才會執行新聞 provider request 與逐市場重試。
 新聞 scheduler 在 08:00–12:00 重啟會補建當日缺漏 initial 作業；恢復依技術失敗分類，
@@ -219,8 +223,11 @@ Workflow 在 SSH process 中執行：
 7. 用 disposable nginx container 渲染 template 並執行 `nginx -t`；
 8. 在舊 API／Web 仍存活時，以 `--force-recreate --no-deps nginx` 單獨重建
    nginx，使 Docker DNS 動態解析先開始運作；
-9. 停止舊版 `daily-news-scheduler` 與 `data-management-worker`，並逐一確認兩個
-   container 都已停止，避免舊版直接抓取或完成語意跨越 migration boundary；
+9. 停止舊版 `daily-news-scheduler`、`index-daily-bars-scheduler`、
+   `institutional-flows-scheduler` 與 `data-management-worker`，並逐一確認四個
+   container 都已停止，避免舊版直接抓取
+   或完成語意跨越 migration boundary；其中 index scheduler 必須在 TWII provider
+   migration 前停止，才不會把剛刪除的 Yahoo 資料寫回；
 10. 使用 API image 執行 `alembic upgrade head`；
 11. 以 `--force-recreate --no-deps data-management-worker` 單獨啟動 replacement
     worker，並等待其 health check 通過；
@@ -231,10 +238,13 @@ Workflow 在 SSH process 中執行：
 14. 輸出失敗 container state/logs，並從 GHCR logout。
 
 若 migration、replacement worker 啟動或 health、final convergence、final health
-任一階段失敗，deployment 會再次停止 `daily-news-scheduler` 與
-`data-management-worker`，並確認兩者已停止；若 Docker 無法確認 quiescence，錯誤訊息
+任一階段失敗，deployment 會再次停止 `daily-news-scheduler`、
+`index-daily-bars-scheduler`、`institutional-flows-scheduler` 與
+`data-management-worker`，並確認四者已停止；若 Docker 無法確認 quiescence，錯誤訊息
 會要求 operator 先手動停止並確認。Operator 應依 diagnostics 修正問題後重新執行
-`deploy.sh`。Migration 不做自動 downgrade 或 rollback。
+`deploy.sh`。Deployment 不做自動 downgrade 或 rollback；TWII provider migration
+的 downgrade 是保留 TWSE 歷史的 no-op，因為刪除已回補資料或恢復錯誤的 Yahoo
+資料都不安全，實際 application rollback 仍需另行協調 provider 與資料版本。
 
 nginx 以 Docker embedded DNS 重新解析 `api`／`web` service alias，TTL 為兩秒。
 後端換址期間 deployment 會保持 pending；兩條 upstream probe 都成功前不得回報部署

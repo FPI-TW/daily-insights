@@ -32,6 +32,11 @@ Before enabling the feature in production, confirm all of the following:
    current terms, permitted use, rate limits, and any required attribution have
    been reviewed by the product/legal owner. Record the decision in the release
    ticket; do not infer a license from a successful request.
+   `DAILY_INSIGHTS_TWSE_ENABLED=true` is a separate gate for ^TWII, which the
+   exchange supplies rather than Yahoo. It is refreshed by the TWSE run
+   alongside the institutional flows, not by this scheduler, because the two
+   share one client and one request interval. Leaving it false stops ^TWII and
+   the flows together and leaves the eight Yahoo symbols unaffected.
 2. The scheduler and its 08:00 Asia/Taipei run are deployed, and the admin-only
    **Index data** page is reachable by an administrator.
 3. When a release adds a tracked symbol, deploy the API and scheduler image
@@ -39,17 +44,26 @@ Before enabling the feature in production, confirm all of the following:
    deploy the web image that exposes its chart. Do not enable the chart for
    customers first and backfill later.
 
-## One-time two-year backfill
+## One-time 25-month backfill
 
 Run this once in the API scheduler environment after deploying a catalog
 change, using the configured production database and provider credentials:
 
 ```sh
+# Eight international indices from Yahoo:
 python -m daily_insights_api.scripts.run_index_daily_bars --once --period 2y
+
+# ^TWII plus the TWSE institutional datasets:
+python -m daily_insights_api.scripts.run_institutional_flows --once
 ```
 
-The operation uses upserts and is safe to rerun after a provider interruption.
-It must not be used to bypass the provider's licensed use or rate limits.
+Both operations use upserts and are safe to rerun after a provider interruption.
+The TWSE operation observes its queued worker run and returns a retryable failure
+for partial or failed outcomes. Its TWII selector refreshes the newest two
+months first, then keeps requesting any missing month in the required 25-month
+window; a partially successful first run therefore does not permanently
+truncate chart history. These commands must not be used to bypass provider
+terms or rate limits.
 
 Validate each settled tracked series after the run. The database must contain at
 least 450 bars per symbol, and the newest stored `trade_date` must be within
@@ -57,8 +71,11 @@ seven calendar days of the validation date in Asia/Taipei. Investigate market
 holidays before declaring a failure. A rerun should leave the same date/symbol
 keys in place (corrected close values may legitimately update).
 
-For the VIX chart rollout, explicitly verify that `^VIX` meets both checks
-before deploying the web image. `^VIX` is the Cboe Volatility Index itself.
+For `^TWII`, additionally confirm every calendar month in the trailing
+25-month window has at least one settled row and every row reports provider
+`twse`; no `yfinance` row may remain. For the VIX chart rollout, explicitly
+verify that `^VIX` meets both checks before deploying the web image. `^VIX` is
+the Cboe Volatility Index itself.
 
 ## Routine and manual refresh
 
@@ -69,6 +86,7 @@ symbols are committed and visible in the result table while failed symbols are
 reported for retry.
 
 If the API returns 503, check the feature flag and release gate. If it returns
-504, no endpoint transaction was committed; use the scheduler command above
-for a large backfill, then revalidate. Preserve audit events when investigating
-who initiated a refresh and which symbols failed.
+504, use the provider-specific scheduler command above, then revalidate. TWII
+months are committed independently, so a timed-out or partial TWSE run may
+already have durable progress. Preserve audit events when investigating who
+initiated a refresh and which symbols failed.

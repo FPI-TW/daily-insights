@@ -70,6 +70,8 @@ async def create_run(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "morning reports are unavailable")
     if payload.operation == "index_yahoo" and not settings.yfinance_enabled:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "yfinance is unavailable")
+    # ^TWII rides with this one: everything TWSE supplies shares one client and
+    # one request interval, so it shares one run and one flag.
     if payload.operation == "institutional_twse" and not settings.twse_enabled:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "twse is unavailable")
     if payload.operation.startswith("news") and not settings.daily_news_enabled:

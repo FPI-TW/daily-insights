@@ -95,7 +95,7 @@ async def test_yahoo_shared_lock_wraps_work_and_releases_after_success_or_error(
     await markets_service.refresh_index_daily_bars(
         cast(Any, database),
         adapter=cast(Any, object()),
-        symbols=["^TWII"],
+        symbols=["^DJI"],
         period="7d",
     )
     assert events == ["lock", "provider", "unlock"]
@@ -119,7 +119,7 @@ async def test_yahoo_shared_lock_wraps_work_and_releases_after_success_or_error(
         await markets_service.refresh_index_daily_bars(
             cast(Any, database),
             adapter=cast(Any, object()),
-            symbols=["^TWII"],
+            symbols=["^DJI"],
             period="7d",
         )
     assert events == ["lock", "provider", "unlock"]
