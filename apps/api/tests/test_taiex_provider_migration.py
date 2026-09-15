@@ -28,14 +28,13 @@ def test_upgrade_deletes_only_yahoo_taiex_bars(monkeypatch: pytest.MonkeyPatch) 
     assert statement.compile().params == {"symbol": "^TWII", "provider": "yfinance"}
 
 
-def test_downgrade_refuses_to_delete_valid_twse_history(
+def test_downgrade_preserves_valid_twse_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     migration = _migration()
     statements: list[TextClause] = []
     monkeypatch.setattr(migration.op, "execute", statements.append)
 
-    with pytest.raises(RuntimeError, match="irreversible"):
-        migration.downgrade()
+    migration.downgrade()
 
     assert statements == []

@@ -242,8 +242,9 @@ Workflow 在 SSH process 中執行：
 `index-daily-bars-scheduler`、`institutional-flows-scheduler` 與
 `data-management-worker`，並確認四者已停止；若 Docker 無法確認 quiescence，錯誤訊息
 會要求 operator 先手動停止並確認。Operator 應依 diagnostics 修正問題後重新執行
-`deploy.sh`。Migration 不做自動 downgrade 或 rollback；TWII provider migration
-會拒絕 downgrade，因為刪除已回補的 TWSE 歷史或恢復錯誤的 Yahoo 資料都不安全。
+`deploy.sh`。Deployment 不做自動 downgrade 或 rollback；TWII provider migration
+的 downgrade 是保留 TWSE 歷史的 no-op，因為刪除已回補資料或恢復錯誤的 Yahoo
+資料都不安全，實際 application rollback 仍需另行協調 provider 與資料版本。
 
 nginx 以 Docker embedded DNS 重新解析 `api`／`web` service alias，TTL 為兩秒。
 後端換址期間 deployment 會保持 pending；兩條 upstream probe 都成功前不得回報部署

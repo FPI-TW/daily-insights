@@ -49,14 +49,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Refuse an unsafe rollback to the known-bad Yahoo source.
+    """Keep valid TWSE history instead of restoring the known-bad Yahoo source.
 
     The upgrade deletes erroneous Yahoo history, while the replacement TWSE
     history may already be serving the product. Neither deleting that valid
     history nor repopulating from Yahoo is a safe automatic downgrade. A
-    rollback therefore requires an explicit coordinated data/provider plan.
+    one-revision downgrade is therefore intentionally a data-preserving no-op.
+    This also lets full migration-chain tests continue through older revisions;
+    an actual application rollback still requires a coordinated provider plan.
     """
-    raise RuntimeError(
-        "20260911_0024 is irreversible: retain TWSE ^TWII history and perform "
-        "a coordinated application/data rollback"
-    )
