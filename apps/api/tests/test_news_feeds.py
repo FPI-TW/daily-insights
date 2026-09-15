@@ -46,7 +46,14 @@ CNYES = FeedSource(
     "rss",
     r"^https://news\.cnyes\.com/news/id/\d+$",
 )
-ETNET = next(source for source in FEED_SOURCES if source.hostname == "www.etnet.com.hk")
+# Query-identity parsing remains supported independently of active publishers.
+ETNET = FeedSource(
+    "www.etnet.com.hk",
+    "https://www.etnet.com.hk/www/tc/news/rss.php?section=editor",
+    "rss",
+    r"^https://www\.etnet\.com\.hk/www/tc/news/home_categorized_news_detail\.php\?newsid=ETN\d+$",
+    keep_query=True,
+)
 GVM = next(source for source in FEED_SOURCES if source.hostname == "www.gvm.com.tw")
 
 RSS = b"""<?xml version="1.0"?>
@@ -228,6 +235,7 @@ def test_registry_is_internally_consistent() -> None:
         assert source.link_pattern, source.url
         assert source.display_name, source.url
         assert source.markets, source.url
+        assert source.markets <= {"global", "tw_equity", "us_equity"}, source.url
         assert (source.kind == "json_list") == (source.mapping is not None), source.url
         if source.mapping is not None:
             assert source.mapping.url_field or (
@@ -251,6 +259,13 @@ def test_registry_is_internally_consistent() -> None:
         "www.investing.com",
         "www.marketwatch.com",
     }
+
+
+def test_globenewswire_keeps_only_earnings_and_acquisitions() -> None:
+    urls = [source.url for source in FEED_SOURCES if source.hostname == "www.globenewswire.com"]
+    assert len(urls) == 2
+    assert any("/13-Earnings" in url for url in urls)
+    assert any("/27-Mergers" in url for url in urls)
 
 
 def test_effective_hostnames_adds_and_blocks_registry_hosts() -> None:

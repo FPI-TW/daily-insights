@@ -120,19 +120,22 @@ class TwelveDataTransport:
 
             if response.status_code in {401, 403}:
                 raise DataSourceAuthenticationError(
-                    f"Twelve Data rejected credentials for {endpoint}"
+                    f"Twelve Data rejected credentials for {endpoint}",
+                    http_status=response.status_code,
                 )
             if response.status_code == 429 or response.status_code >= 500:
                 if attempt == self._retry_policy.max_attempts:
                     raise DataSourceTransientError(
                         f"Twelve Data remained unavailable for {endpoint} "
-                        f"after {attempt} attempts (status {response.status_code})"
+                        f"after {attempt} attempts (status {response.status_code})",
+                        http_status=response.status_code,
                     )
                 await self._sleep(self._retry_delay(attempt, response))
                 continue
             if response.status_code != 200:
                 raise DataSourceContractError(
-                    f"Twelve Data returned unexpected status {response.status_code} for {endpoint}"
+                    f"Twelve Data returned unexpected status {response.status_code} for {endpoint}",
+                    http_status=response.status_code,
                 )
 
             return TwelveDataTransportResponse(

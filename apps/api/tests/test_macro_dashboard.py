@@ -1,7 +1,6 @@
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock
-from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -51,105 +50,6 @@ async def test_sofr_validates_type_and_sorts_observations() -> None:
         result = await macro.load_sofr(client, date(2026, 9, 4))
     assert [point.date for point in result.points] == [date(2026, 9, 3), date(2026, 9, 4)]
     assert result.points[-1].value == Decimal("3.66")
-
-
-async def test_calendar_filters_taipei_day_and_preserves_actual_zero() -> None:
-    requested_dates: list[str] = []
-
-    def respond(request: httpx.Request) -> httpx.Response:
-        requested_dates.append(request.url.params["date"])
-        day = request.url.params["date"]
-        return httpx.Response(
-            200,
-            json={
-                "data": {
-                    "rows": [
-                        {
-                            "gmt": "17:00" if day == "2026-09-03" else "12:00",
-                            "country": "United States",
-                            "eventName": "Released" if day == "2026-09-03" else "Future",
-                            "actual": "0%" if day == "2026-09-03" else "99%",
-                            "consensus": "1.2%",
-                            "previous": "1.0%",
-                        },
-                        *(
-                            [
-                                {
-                                    "gmt": "17:00",
-                                    "country": "United States",
-                                    "eventName": "Tomorrow",
-                                    "actual": "",
-                                }
-                            ]
-                            if day == "2026-09-04"
-                            else []
-                        ),
-                    ]
-                }
-            },
-        )
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-        result = await macro.load_calendar(client, datetime(2026, 9, 4, tzinfo=UTC))
-    assert result.status == "ok"
-    assert result.source == "Nasdaq"
-    assert requested_dates == ["2026-09-03", "2026-09-04"]
-    assert [event.event for event in result.events] == ["Released", "Future"]
-    assert result.events[0].actual == 0
-    assert result.events[1].actual is None
-    assert result.events[0].unit == "%"
-    assert result.events[0].country == "US"
-    assert result.events[0].currency == "USD"
-    assert result.events[0].date.tzinfo is not None
-
-
-async def test_denied_calendar_is_not_a_successful_empty_day() -> None:
-    calls = 0
-
-    def respond(request: httpx.Request) -> httpx.Response:
-        nonlocal calls
-        calls += 1
-        return httpx.Response(403)
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-        denied = await macro.load_calendar(client, datetime.now(UTC))
-        assert denied.status == "unavailable"
-        assert denied.source == "Nasdaq"
-        assert calls == 2
-
-
-async def test_calendar_keeps_a_successful_day_when_the_other_request_fails() -> None:
-    def respond(request: httpx.Request) -> httpx.Response:
-        if request.url.params["date"] == "2026-09-03":
-            return httpx.Response(503)
-        return httpx.Response(
-            200,
-            json={
-                "data": {
-                    "rows": [
-                        {
-                            "gmt": "01:00",
-                            "country": "Japan",
-                            "eventName": "Leading Index",
-                            "actual": "118.1",
-                        }
-                    ]
-                }
-            },
-        )
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-        result = await macro.load_calendar(client, datetime(2026, 9, 4, tzinfo=UTC))
-
-    assert result.status == "ok"
-    assert [(event.country, event.event) for event in result.events] == [("JP", "Leading Index")]
-
-
-def test_calendar_value_parser_preserves_scale_and_rejects_placeholders() -> None:
-    assert macro.parse_calendar_value("357,050.0M") == (Decimal("357050.0"), "M")
-    assert macro.parse_calendar_value("$1.2B") == (Decimal("1.2"), "USD B")
-    assert macro.parse_calendar_value("&nbsp;") == (None, None)
-    assert macro.parse_calendar_value("N/A") == (None, None)
 
 
 async def test_disabled_providers_make_no_provider_calls(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -289,17 +189,9 @@ async def test_cache_coalesces_concurrent_requests(monkeypatch: pytest.MonkeyPat
             id="sofr", symbol="SOFR", unit="percent", source="New York Fed", status="unavailable"
         )
     )
-    calendar = AsyncMock(
-        return_value=macro.Calendar(
-            status="disabled",
-            date=datetime.now(ZoneInfo("Asia/Taipei")).date(),
-            source="Nasdaq",
-        )
-    )
     monkeypatch.setattr(macro, "load_market_histories", markets)
     monkeypatch.setattr(macro, "load_treasury", treasury)
     monkeypatch.setattr(macro, "load_sofr", sofr)
-    monkeypatch.setattr(macro, "load_calendar", calendar)
     service = macro.MacroDashboardService(Settings())
     first, second = await asyncio.gather(service.get(), service.get())
     assert first is second
@@ -348,7 +240,7 @@ async def test_dashboard_reads_persisted_snapshot_without_live_provider_fetch(
     payload = macro.MacroDashboard(
         fetched_at=datetime(2026, 9, 8, tzinfo=UTC),
         histories=[],
-        calendar=macro.Calendar(status="ok", date=date(2026, 9, 8), source="Nasdaq"),
+        calendar=macro.Calendar(status="disabled", date=date(2026, 9, 8), source=""),
     ).model_dump(mode="json")
     database = SimpleNamespace(
         get=AsyncMock(

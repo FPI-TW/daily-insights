@@ -566,32 +566,9 @@ const server = createServer(async (request, response) => {
       })),
       calendar: {
         date: "2026-09-04",
-        source: "Nasdaq",
-        status: "ok",
-        events: [
-          {
-            date: "2026-09-04T12:30:00Z",
-            country: "US",
-            event: "Nonfarm payrolls",
-            currency: "USD",
-            impact: "High",
-            estimate: "185000",
-            previous: "272000",
-            actual: null,
-            unit: null,
-          },
-          {
-            date: "2026-09-04T12:30:00Z",
-            country: "US",
-            event: "Unemployment rate",
-            currency: "USD",
-            impact: "High",
-            estimate: "4.1",
-            previous: "4.0",
-            actual: null,
-            unit: "%",
-          },
-        ],
+        source: "",
+        status: "disabled",
+        events: [],
       },
     })
     return

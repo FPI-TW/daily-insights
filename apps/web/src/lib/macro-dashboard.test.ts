@@ -130,8 +130,8 @@ describe("macro dashboard calculations", () => {
         histories: [history([["2026-09-04", "Infinity"]])],
         calendar: {
           date: "2026-09-04",
-          source: "Nasdaq",
-          status: "ok",
+          source: "",
+          status: "disabled",
           events: [],
         },
       }).success

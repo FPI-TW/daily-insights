@@ -6,8 +6,6 @@ remain explicit and never borrow a value from another instrument.
 """
 
 import asyncio
-import html
-import re
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
@@ -15,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from defusedxml.ElementTree import fromstring
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.data_sources.api import (
@@ -24,6 +22,14 @@ from daily_insights_api.modules.data_sources.api import (
     TwelveDataAdapter,
     TwelveDataTransport,
     YfinanceAdapter,
+)
+from daily_insights_api.modules.reports.macro_diagnostics import (
+    EmptySourceResponse,
+    SourceDiagnostic,
+    SourceFailure,
+    diagnostics,
+    record_failure,
+    summarize,
 )
 from daily_insights_api.modules.reports.morning_report import completed_history_for_eod
 
@@ -64,6 +70,7 @@ class Calendar(BaseModel):
 
 
 class MacroDashboard(BaseModel):
+    _sources: list[SourceDiagnostic] = PrivateAttr(default_factory=list)
     fetched_at: datetime
     histories: list[History]
     calendar: Calendar
@@ -108,97 +115,6 @@ TREASURY_URL = (
     "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml"
 )
 SOFR_URL = "https://markets.newyorkfed.org/api/rates/secured/sofr/search.json"
-CALENDAR_URL = "https://api.nasdaq.com/api/calendar/economicevents"
-CALENDAR_HEADERS = {
-    "Accept": "application/json, text/plain, */*",
-    "Origin": "https://www.nasdaq.com",
-    "Referer": "https://www.nasdaq.com/",
-    "User-Agent": "Mozilla/5.0",
-}
-CALENDAR_SOURCE = "Nasdaq"
-CALENDAR_VALUE = re.compile(
-    r"^\s*(?P<prefix>[$€£¥])?\s*"
-    r"(?P<number>[+-]?(?:\d+(?:,\d{3})*|\d+)(?:\.\d+)?)\s*"
-    r"(?P<suffix>%|[KMBT]|bps?)?\s*$",
-    re.IGNORECASE,
-)
-COUNTRY_DETAILS = {
-    "Argentina": ("AR", "ARS"),
-    "Australia": ("AU", "AUD"),
-    "Brazil": ("BR", "BRL"),
-    "Canada": ("CA", "CAD"),
-    "Chile": ("CL", "CLP"),
-    "China": ("CN", "CNY"),
-    "Colombia": ("CO", "COP"),
-    "Czech Republic": ("CZ", "CZK"),
-    "Denmark": ("DK", "DKK"),
-    "Euro Area": ("EU", "EUR"),
-    "European Union": ("EU", "EUR"),
-    "France": ("FR", "EUR"),
-    "Germany": ("DE", "EUR"),
-    "Hong Kong": ("HK", "HKD"),
-    "Hungary": ("HU", "HUF"),
-    "India": ("IN", "INR"),
-    "Indonesia": ("ID", "IDR"),
-    "Ireland": ("IE", "EUR"),
-    "Israel": ("IL", "ILS"),
-    "Italy": ("IT", "EUR"),
-    "Japan": ("JP", "JPY"),
-    "Mexico": ("MX", "MXN"),
-    "New Zealand": ("NZ", "NZD"),
-    "Norway": ("NO", "NOK"),
-    "Poland": ("PL", "PLN"),
-    "Portugal": ("PT", "EUR"),
-    "Saudi Arabia": ("SA", "SAR"),
-    "Singapore": ("SG", "SGD"),
-    "South Africa": ("ZA", "ZAR"),
-    "South Korea": ("KR", "KRW"),
-    "Spain": ("ES", "EUR"),
-    "Switzerland": ("CH", "CHF"),
-    "Sweden": ("SE", "SEK"),
-    "Taiwan": ("TW", "TWD"),
-    "Turkey": ("TR", "TRY"),
-    "United Kingdom": ("GB", "GBP"),
-    "United States": ("US", "USD"),
-}
-
-
-class NasdaqCalendarRow(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    gmt: str = Field(pattern=r"^\d{2}:\d{2}$")
-    country: str = Field(min_length=1, max_length=100)
-    event_name: str = Field(alias="eventName", min_length=1, max_length=300)
-    actual: str | int | float | None = None
-    consensus: str | int | float | None = None
-    previous: str | int | float | None = None
-
-
-class NasdaqCalendarData(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    rows: list[NasdaqCalendarRow] | None = None
-
-
-class NasdaqCalendarResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    data: NasdaqCalendarData | None = None
-
-
-def parse_calendar_value(raw: str | int | float | None) -> tuple[Decimal | None, str | None]:
-    if raw is None:
-        return None, None
-    text = html.unescape(str(raw)).replace("\xa0", " ").strip()
-    if not text:
-        return None, None
-    match = CALENDAR_VALUE.fullmatch(text)
-    if match is None:
-        return None, None
-    prefix = match.group("prefix")
-    suffix = match.group("suffix")
-    prefix_unit = {"$": "USD", "€": "EUR", "£": "GBP", "¥": "JPY"}.get(prefix)
-    unit = suffix.upper() if suffix else prefix_unit
-    if prefix_unit and suffix:
-        unit = f"{prefix_unit} {suffix.upper()}"
-    return Decimal(match.group("number").replace(",", "")), unit
 
 
 def treasury_histories(payloads: list[bytes], today: date) -> list[History]:
@@ -263,10 +179,23 @@ async def load_treasury(client: httpx.AsyncClient, today: date) -> list[History]
             *(fetch(year) for year in range(today.year - 2, today.year + 1)),
             return_exceptions=True,
         )
-        return treasury_histories(
-            [payload for payload in payloads if isinstance(payload, bytes)], today
-        )
-    except Exception:
+        valid = []
+        for year, payload in zip(range(today.year - 2, today.year + 1), payloads, strict=True):
+            if isinstance(payload, BaseException):
+                record_failure("us_treasury", "yield_curve_xml", [str(year)], payload)
+                continue
+            try:
+                fromstring(payload)
+                valid.append(payload)
+            except Exception as error:
+                record_failure("us_treasury", "yield_curve_xml", [str(year)], error)
+        histories = treasury_histories(valid, today)
+        for history in histories:
+            if history.status != "ok":
+                record_failure("us_treasury", "yield_curve_xml", [history.symbol])
+        return histories
+    except Exception as error:
+        record_failure("us_treasury", "yield_curve_xml", [field for _, field in TENORS], error)
         return [
             History(
                 id=tenor, symbol=field, unit="percent", source="U.S. Treasury", status="unavailable"
@@ -292,7 +221,7 @@ async def load_sofr(client: httpx.AsyncClient, today: date) -> History:
             if item.effectiveDate <= today
         }
         if not values:
-            raise ValueError("SOFR history is empty")
+            raise EmptySourceResponse("SOFR history is empty")
         return History(
             id="sofr",
             symbol="SOFR",
@@ -301,72 +230,11 @@ async def load_sofr(client: httpx.AsyncClient, today: date) -> History:
             status="ok",
             points=[Point(date=day, value=value) for day, value in sorted(values.items())],
         )
-    except Exception:
+    except Exception as error:
+        record_failure("new_york_fed", "sofr/search.json", ["SOFR"], error)
         return History(
             id="sofr", symbol="SOFR", unit="percent", source="New York Fed", status="unavailable"
         )
-
-
-async def load_calendar(client: httpx.AsyncClient, now: datetime) -> Calendar:
-    today = now.astimezone(ZoneInfo("Asia/Taipei")).date()
-    try:
-        query_days = (today - timedelta(days=1), today)
-        responses = await asyncio.gather(
-            *(
-                client.get(
-                    CALENDAR_URL,
-                    params={"date": day.isoformat()},
-                    headers=CALENDAR_HEADERS,
-                )
-                for day in query_days
-            ),
-            return_exceptions=True,
-        )
-        selected: list[EconomicEvent] = []
-        successful_response = False
-        for query_day, response in zip(query_days, responses, strict=True):
-            if not isinstance(response, httpx.Response):
-                continue
-            try:
-                response.raise_for_status()
-                payload = NasdaqCalendarResponse.model_validate(response.json())
-            except Exception:
-                continue
-            successful_response = True
-            for row in payload.data.rows if payload.data and payload.data.rows else []:
-                moment = datetime.combine(
-                    query_day,
-                    datetime.strptime(row.gmt, "%H:%M").time(),
-                    tzinfo=UTC,
-                )
-                if moment.astimezone(ZoneInfo("Asia/Taipei")).date() != today:
-                    continue
-                actual, actual_unit = parse_calendar_value(row.actual)
-                estimate, estimate_unit = parse_calendar_value(row.consensus)
-                previous, previous_unit = parse_calendar_value(row.previous)
-                country_code, currency = COUNTRY_DETAILS.get(row.country, (row.country, None))
-                selected.append(
-                    EconomicEvent(
-                        date=moment,
-                        country=country_code,
-                        event=row.event_name,
-                        currency=currency,
-                        estimate=estimate,
-                        previous=previous,
-                        actual=actual if moment <= now else None,
-                        unit=actual_unit or estimate_unit or previous_unit,
-                    )
-                )
-        if not successful_response:
-            return Calendar(status="unavailable", date=today, source=CALENDAR_SOURCE)
-        return Calendar(
-            status="ok",
-            date=today,
-            source=CALENDAR_SOURCE,
-            events=sorted(selected, key=lambda item: (item.date, item.country, item.event)),
-        )
-    except Exception:
-        return Calendar(status="unavailable", date=today, source=CALENDAR_SOURCE)
 
 
 async def load_commodity_histories(settings: Settings) -> list[History]:
@@ -405,7 +273,9 @@ async def load_commodity_histories(settings: Settings) -> list[History]:
                 for item in completed
                 if item.close is not None
             ]
-            if not points or any(point.value <= 0 for point in points):
+            if not points:
+                raise EmptySourceResponse("commodity history is empty")
+            if any(point.value <= 0 for point in points):
                 raise ValueError("market history must contain positive closes")
             return History(
                 id=key,
@@ -415,7 +285,8 @@ async def load_commodity_histories(settings: Settings) -> list[History]:
                 status="ok",
                 points=points,
             )
-        except Exception:
+        except Exception as error:
+            record_failure("twelve_data", "time_series", [symbol], error)
             return History(
                 id=key, symbol=symbol, unit=unit, source=COMMODITY_SOURCE, status="unavailable"
             )
@@ -446,7 +317,8 @@ async def load_commodity_histories(settings: Settings) -> list[History]:
                     )
                 )
             )
-    except Exception:
+    except Exception as error:
+        record_failure("twelve_data", "eod", [item[1] for item in COMMODITIES], error)
         return fallback("unavailable")
 
 
@@ -475,7 +347,9 @@ async def load_fx_histories(settings: Settings) -> list[History]:
                     for item in result.items
                     if item.close is not None
                 ]
-                if not points or any(point.value <= 0 for point in points):
+                if not points:
+                    raise EmptySourceResponse("FX history is empty")
+                if any(point.value <= 0 for point in points):
                     raise ValueError("market history must contain positive closes")
                 return History(
                     id=key,
@@ -485,7 +359,8 @@ async def load_fx_histories(settings: Settings) -> list[History]:
                     status="ok",
                     points=points,
                 )
-            except Exception:
+            except Exception as error:
+                record_failure("yahoo_finance", "history", [symbol], error)
                 return History(
                     id=key, symbol=symbol, unit=unit, source="Yahoo Finance", status="unavailable"
                 )
@@ -501,16 +376,32 @@ async def refresh_macro_dashboard(settings: Settings) -> MacroDashboard:
     """
     now = datetime.now(UTC)
     today = now.astimezone(ZoneInfo("Asia/Taipei")).date()
-    async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
-        markets, treasury, sofr, calendar = await asyncio.gather(
-            load_market_histories(settings),
-            load_treasury(client, today),
-            load_sofr(client, today),
-            load_calendar(client, now),
+    entries: list[tuple[str, SourceFailure]] = []
+    token = diagnostics.set(entries)
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
+            markets, treasury, sofr = await asyncio.gather(
+                load_market_histories(settings),
+                load_treasury(client, today),
+                load_sofr(client, today),
+            )
+            calendar = Calendar(status="disabled", date=today, source="")
+        dashboard = MacroDashboard(
+            fetched_at=datetime.now(UTC), histories=[*markets, *treasury, sofr], calendar=calendar
         )
-    return MacroDashboard(
-        fetched_at=datetime.now(UTC), histories=[*markets, *treasury, sofr], calendar=calendar
-    )
+        states = [
+            (code, name, [(h.symbol, h.status) for h in dashboard.histories if h.source == name])
+            for code, name in (
+                ("twelve_data", COMMODITY_SOURCE),
+                ("yahoo_finance", "Yahoo Finance"),
+                ("us_treasury", "U.S. Treasury"),
+                ("new_york_fed", "New York Fed"),
+            )
+        ]
+        dashboard._sources = summarize(entries, states, dashboard.fetched_at)
+        return dashboard
+    finally:
+        diagnostics.reset(token)
 
 
 class MacroDashboardService:
