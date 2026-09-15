@@ -2,6 +2,7 @@ import { ClientOnly } from "@tanstack/react-router"
 import ReactECharts from "echarts-for-react"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { z } from "zod"
 import type { Locale } from "@daily-insights/api-client"
 import { useChartColors } from "#/lib/chart"
 import { formatIsoDate, formatNumber, numberLocales } from "#/lib/format"
@@ -42,6 +43,15 @@ function indexOptionLabel(
   return key ? t(key) : symbol
 }
 
+const zoomRangeSchema = z.object({
+  start: z.number().min(0).max(100),
+  end: z.number().min(0).max(100),
+})
+const zoomEventSchema = z.union([
+  zoomRangeSchema,
+  z.object({ batch: z.array(zoomRangeSchema).min(1) }),
+])
+
 export function IndexHistoryChart({
   history,
   locale,
@@ -56,6 +66,7 @@ export function IndexHistoryChart({
   const [selectedSymbol, setSelectedSymbol] = useState(
     history?.series[0]?.symbol ?? ""
   )
+  const [zoom, setZoom] = useState({ start: 0, end: 100 })
   const [movingAverageState, setMovingAverageState] = useState<{
     source: Promise<IndexMovingAverageMap> | null
     values: IndexMovingAverageMap
@@ -156,6 +167,12 @@ export function IndexHistoryChart({
       lineStyle: { width: 1.5 },
     })),
   ]
+  const legendSelection = Object.fromEntries(
+    availableMovingAverages.map(item => [
+      t("indexChartSma", { period: item.period }),
+      item.period !== 240,
+    ])
+  )
   return (
     <section
       className="rounded-2xl border border-line bg-surface mt-6 min-w-0 p-5"
@@ -201,7 +218,17 @@ export function IndexHistoryChart({
           }
         >
           <ReactECharts
+            notMerge
             style={{ height: "100%", width: "100%" }}
+            onEvents={{
+              datazoom: (event: unknown) => {
+                const parsed = zoomEventSchema.safeParse(event)
+                if (!parsed.success) return
+                const range =
+                  "batch" in parsed.data ? parsed.data.batch[0]! : parsed.data
+                if (range.start <= range.end) setZoom(range)
+              },
+            }}
             option={{
               animation: false,
               aria: {
@@ -279,6 +306,7 @@ export function IndexHistoryChart({
                 type: "scroll",
                 top: 10,
                 right: 18,
+                selected: legendSelection,
                 textStyle: { color: colors.text },
               },
               xAxis: [
@@ -333,15 +361,30 @@ export function IndexHistoryChart({
                 {
                   type: "inside",
                   xAxisIndex: [0, 1],
-                  start: 0,
-                  end: 100,
+                  ...zoom,
                 },
                 {
                   type: "slider",
                   xAxisIndex: [0, 1],
-                  height: 18,
+                  ...zoom,
+                  height: 26,
                   bottom: 4,
                   borderColor: colors.grid,
+                  backgroundColor: colors.surface,
+                  fillerColor: colors.gridSoft,
+                  showDataShadow: false,
+                  brushSelect: false,
+                  handleSize: "115%",
+                  handleStyle: {
+                    color: colors.surface,
+                    borderColor: colors.indexSeries[0],
+                    borderWidth: 2,
+                  },
+                  moveHandleSize: 7,
+                  moveHandleStyle: {
+                    color: colors.indexSeries[0],
+                    opacity: 0.45,
+                  },
                   textStyle: { color: colors.text },
                 },
               ],

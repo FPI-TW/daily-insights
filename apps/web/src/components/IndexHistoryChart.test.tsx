@@ -15,8 +15,19 @@ vi.mock("@tanstack/react-router", () => ({
   ClientOnly: ({ children }: { children: React.ReactNode }) => children,
 }))
 vi.mock("echarts-for-react", () => ({
-  default: ({ option }: { option: unknown }) => (
-    <div data-testid="index-chart">{JSON.stringify(option)}</div>
+  default: ({
+    option,
+    onEvents,
+  }: {
+    option: unknown
+    onEvents?: { datazoom?: (event: unknown) => void }
+  }) => (
+    <button
+      data-testid="index-chart"
+      onClick={() => onEvents?.datazoom?.({ start: 25, end: 75 })}
+    >
+      {JSON.stringify(option)}
+    </button>
   ),
 }))
 
@@ -179,7 +190,13 @@ describe("IndexHistoryChart", () => {
               },
               { period: 60, points: [] },
               { period: 120, points: [] },
-              { period: 240, points: [] },
+              {
+                period: 240,
+                points: [
+                  { trade_date: "2026-09-02", value: "44000.0" },
+                  { trade_date: "2026-09-03", value: "44100.0" },
+                ],
+              },
             ],
           },
         })}
@@ -191,6 +208,16 @@ describe("IndexHistoryChart", () => {
     )
     expect(screen.getByTestId("index-chart")).toHaveTextContent("45050")
     expect(screen.getByTestId("index-chart")).not.toHaveTextContent("SMA 60")
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"selected":{"SMA 20":true,"SMA 240":false}'
+    )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"type":"slider","xAxisIndex":[0,1],"start":0,"end":100,"height":26'
+    )
+    fireEvent.click(screen.getByTestId("index-chart"))
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"type":"inside","xAxisIndex":[0,1],"start":25,"end":75'
+    )
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
       '"color":["#2563eb","#d97706"'
     )
