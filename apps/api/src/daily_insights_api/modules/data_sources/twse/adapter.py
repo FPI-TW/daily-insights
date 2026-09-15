@@ -385,8 +385,9 @@ def parse_market_flows(
         _check_net(buy, sell, net, label)
         items.append(TwseMarketFlow(investor_type, buy, sell, net))
     # Every investor must be present exactly once: a short day would still be
-    # stored, and `stored_flow_dates` only asks whether a date has any rows, so
-    # nothing would ever come back to fill the gap.
+    # stored, and the caller's refresh window only re-asks the newest few days.
+    # Once the day falls behind it nothing comes back, because `stored_flow_dates`
+    # reports only whether a date has any rows, not whether it has all of them.
     if sorted(item.investor_type for item in items) != sorted(MARKET_FLOW_INVESTORS.values()):
         raise DataSourceContractError("investor rows are missing or duplicated")
     return TwseMarketFlows(trade_date=trade_date, items=tuple(items), fetched_at=fetched_at)

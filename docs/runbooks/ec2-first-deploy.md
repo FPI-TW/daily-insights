@@ -133,7 +133,7 @@ absolute HTTPS URL。
 
 `DAILY_INSIGHTS_YFINANCE_ENABLED` 控制 `index-daily-bars-scheduler` 與後台的國際
 指數抓取，範圍是 Yahoo 供應的那八檔；`DAILY_INSIGHTS_TWSE_ENABLED` 控制
-`institutional-flows-scheduler` 每天台北 17:00 排入的證交所回補，**^TWII 的日線
+`institutional-flows-scheduler` 每天台北 08:00 排入、抓前一交易日的證交所回補，**^TWII 的日線
 也在其中** —— 該指數改由證交所供應，與三大法人共用同一個 TWSE client 與請求間隔，
 因此由同一筆 run 更新。`index-daily-bars-scheduler` 不需要、也不應該拿到
 `DAILY_INSIGHTS_TWSE_ENABLED`：那個容器不會連到證交所。

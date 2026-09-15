@@ -287,7 +287,7 @@ const resources: Resource = {
       dataManagementIndexAction: "更新國際指數",
       dataManagementInstitutional: "台股證交所資料",
       dataManagementInstitutionalDescription:
-        "一次更新加權指數日線與三大法人買賣超，兩者同屬證交所，共用同一條請求節流。個股抓當天，大盤回補 40 個交易日；已存在的日期不重抓。",
+        "一次更新加權指數日線與三大法人買賣超，兩者同屬證交所，共用同一條請求節流。個股重抓最近一個交易日，大盤回補 40 個交易日；證交所事後會修正數字，所以最近 10 個交易日的大盤一律重抓覆蓋，更早的日期不重抓。",
       dataManagementInstitutionalAction: "更新證交所資料",
       dataManagementMacro: "全球總經儀表板",
       dataManagementMacroDescription: "重新整理並發布最新的全球總經資料快照。",
@@ -1105,7 +1105,7 @@ const resources: Resource = {
       dataManagementIndexAction: "更新国际指数",
       dataManagementInstitutional: "台股证交所数据",
       dataManagementInstitutionalDescription:
-        "一次更新加权指数日线与三大法人买卖超，两者同属证交所，共用同一条请求节流。个股抓当天，大盘回补 40 个交易日；已存在的日期不重抓。",
+        "一次更新加权指数日线与三大法人买卖超，两者同属证交所，共用同一条请求节流。个股重抓最近一个交易日，大盘回补 40 个交易日；证交所事后会修正数字，所以最近 10 个交易日的大盘一律重抓覆盖，更早的日期不重抓。",
       dataManagementInstitutionalAction: "更新证交所数据",
       dataManagementMacro: "全球宏观仪表板",
       dataManagementMacroDescription: "重新整理并发布最新的全球宏观资料快照。",
@@ -1934,7 +1934,7 @@ const resources: Resource = {
       dataManagementIndexAction: "Update international indices",
       dataManagementInstitutional: "Taiwan exchange data",
       dataManagementInstitutionalDescription:
-        "Update the TAIEX daily bars and the institutional flows together: both come from TWSE and share one request interval. Per-stock for the current trading day, 40 trading days of market flows; dates already stored are not fetched again.",
+        "Update the TAIEX daily bars and the institutional flows together: both come from TWSE and share one request interval. The newest per-stock day and 40 trading days of market flows; TWSE revises its numbers afterwards, so the newest per-stock day and the ten newest market days are always fetched again and overwritten, and older dates are left alone.",
       dataManagementInstitutionalAction: "Update exchange data",
       dataManagementMacro: "Global macro dashboard",
       dataManagementMacroDescription:

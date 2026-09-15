@@ -6,9 +6,9 @@ from typing import Any, cast
 import pytest
 
 from daily_insights_api.modules.data_management.api import RunAlreadyActiveError
-from daily_insights_api.modules.reports.scheduler import TAIPEI, run_scheduler
+from daily_insights_api.modules.reports.scheduler import DEFAULT_RUN_AT, TAIPEI, run_scheduler
 from daily_insights_api.scripts import run_institutional_flows
-from daily_insights_api.scripts.run_institutional_flows import RUN_AT, queue_run
+from daily_insights_api.scripts.run_institutional_flows import queue_run
 
 
 class _SessionFactory:
@@ -65,17 +65,18 @@ async def test_queue_run_asks_for_an_institutional_run_with_no_requester(
     monkeypatch.setattr(run_institutional_flows, "enqueue_run", enqueue)
     monkeypatch.setattr(run_institutional_flows, "_wait_for_outcome", wait_for_outcome)
 
-    edition = date(2026, 9, 7)
-    assert await queue_run(cast(Any, _SessionFactory()), edition_date=edition) == "complete"
+    assert await queue_run(cast(Any, _SessionFactory()), run_date=date(2026, 9, 14)) == "complete"
     # Nobody asked for it, so the run carries no requester; the column is
-    # nullable for exactly this case.
+    # nullable for exactly this case. The edition is the day before the one the
+    # scheduler fired on: TWSE publishes around 16:00, so a morning run asking
+    # for its own date would find nothing there.
     assert calls == [
         {
             "operation": "institutional_twse",
             "market_code": None,
             "requester_id": None,
             "request_id": None,
-            "edition_date": edition,
+            "edition_date": date(2026, 9, 13),
         }
     ]
 
@@ -99,7 +100,7 @@ async def test_a_run_an_administrator_already_started_counts_as_todays(
 
     # The existing run is observed; its terminal status, not the enqueue
     # conflict itself, decides whether the scheduler retries.
-    assert await queue_run(cast(Any, _SessionFactory())) == "complete"
+    assert await queue_run(cast(Any, _SessionFactory()), run_date=date(2026, 9, 8)) == "complete"
 
 
 @pytest.mark.asyncio
@@ -133,6 +134,7 @@ async def test_queue_run_returns_the_workers_terminal_outcome(
     assert (
         await queue_run(
             cast(Any, SessionFactory()),
+            run_date=date(2026, 9, 8),
             sleep=lambda _: asyncio.sleep(0),
             poll_seconds=0.01,
             timeout_seconds=0.02,
@@ -163,6 +165,7 @@ async def test_queue_run_times_out_a_stuck_worker_as_retryable_failure(
     assert (
         await queue_run(
             cast(Any, SessionFactory()),
+            run_date=date(2026, 9, 8),
             sleep=lambda _: asyncio.sleep(0),
             poll_seconds=1,
             timeout_seconds=1,
@@ -189,9 +192,7 @@ async def test_scheduler_restart_preserves_final_automatic_outcomes(
 
     monkeypatch.setattr(run_institutional_flows, "enqueue_run", enqueue)
 
-    assert (
-        await queue_run(cast(Any, _SessionFactory()), edition_date=date(2026, 9, 7)) == "complete"
-    )
+    assert await queue_run(cast(Any, _SessionFactory()), run_date=date(2026, 9, 8)) == "complete"
 
 
 @pytest.mark.asyncio
@@ -211,9 +212,7 @@ async def test_completed_manual_run_already_satisfies_the_same_edition(
 
     monkeypatch.setattr(run_institutional_flows, "enqueue_run", enqueue)
 
-    assert (
-        await queue_run(cast(Any, _SessionFactory()), edition_date=date(2026, 9, 7)) == "complete"
-    )
+    assert await queue_run(cast(Any, _SessionFactory()), run_date=date(2026, 9, 8)) == "complete"
 
 
 @pytest.mark.asyncio
@@ -235,7 +234,7 @@ async def test_cancelled_manual_active_run_does_not_cancel_the_automatic_obligat
     monkeypatch.setattr(run_institutional_flows, "enqueue_run", enqueue)
     monkeypatch.setattr(run_institutional_flows, "_same_edition_run", same_edition)
 
-    assert await queue_run(cast(Any, SessionFactory()), edition_date=date(2026, 9, 7)) == "failed"
+    assert await queue_run(cast(Any, SessionFactory()), run_date=date(2026, 9, 8)) == "failed"
 
 
 @pytest.mark.asyncio
@@ -259,7 +258,7 @@ async def test_manual_run_finishing_after_enqueue_conflict_satisfies_the_edition
     monkeypatch.setattr(run_institutional_flows, "enqueue_run", enqueue)
     monkeypatch.setattr(run_institutional_flows, "_same_edition_run", same_edition)
 
-    assert await queue_run(cast(Any, SessionFactory()), edition_date=date(2026, 9, 7)) == "complete"
+    assert await queue_run(cast(Any, SessionFactory()), run_date=date(2026, 9, 8)) == "complete"
 
 
 @pytest.mark.asyncio
@@ -279,13 +278,14 @@ async def test_an_active_run_from_another_edition_is_retryable_not_todays_result
     monkeypatch.setattr(run_institutional_flows, "_same_edition_run", no_current_edition_run)
     monkeypatch.setattr(run_institutional_flows, "_wait_for_outcome", wait_for_outcome)
 
-    assert await queue_run(cast(Any, _SessionFactory()), edition_date=date(2026, 9, 7)) == "failed"
+    assert await queue_run(cast(Any, _SessionFactory()), run_date=date(2026, 9, 8)) == "failed"
 
 
 @pytest.mark.asyncio
-async def test_the_scheduler_waits_for_the_afternoon_publication() -> None:
-    # 08:00 is when the other schedulers fire; TWSE has published nothing yet.
-    clock = _Clock(datetime(2026, 9, 7, 8, 0, tzinfo=TAIPEI), stop_after_sleeps=2)
+async def test_the_scheduler_fires_in_the_morning_like_the_others() -> None:
+    """No waiting for the afternoon: the day this asks for was published
+    yesterday, so it runs on the same 08:00 schedule as everything else."""
+    clock = _Clock(datetime(2026, 9, 7, 8, 0, tzinfo=TAIPEI), stop_after_sleeps=1)
     editions: list[date] = []
 
     async def runner(edition: date) -> str:
@@ -293,15 +293,15 @@ async def test_the_scheduler_waits_for_the_afternoon_publication() -> None:
         return "complete"
 
     with pytest.raises(asyncio.CancelledError):
-        await run_scheduler(runner, now=clock.now, sleep=clock.sleep, run_at=RUN_AT)
+        await run_scheduler(runner, now=clock.now, sleep=clock.sleep)
 
-    assert RUN_AT.hour == 17
-    # It sleeps until 17:00, runs once for that day, then sleeps a full day.
-    assert clock.sleeps == [9 * 3600, 24 * 3600]
+    assert DEFAULT_RUN_AT.hour == 8
+    # Due the moment it starts, then a full day's sleep.
+    assert clock.sleeps == [24 * 3600]
     assert editions == [date(2026, 9, 7)]
 
 
 def test_the_scheduled_day_is_taipeis_rather_than_the_hosts() -> None:
-    # No deployment sets TZ, so the container runs in UTC: 17:00 Taipei is
-    # 09:00 UTC, and a UTC-based scheduler would fire eight hours early.
-    assert datetime(2026, 9, 7, 9, 0, tzinfo=UTC).astimezone(TAIPEI).time() == RUN_AT
+    # No deployment sets TZ, so the container runs in UTC: 08:00 Taipei is the
+    # previous 00:00 UTC, and a UTC-based scheduler would fire eight hours late.
+    assert datetime(2026, 9, 7, 0, 0, tzinfo=UTC).astimezone(TAIPEI).time() == DEFAULT_RUN_AT

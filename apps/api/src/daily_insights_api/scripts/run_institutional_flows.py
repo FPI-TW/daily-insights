@@ -1,4 +1,4 @@
-"""Queue the daily TWSE data run at Taipei 17:00.
+"""Queue the daily TWSE data run at Taipei 08:00, for the previous day.
 
 Everything the exchange supplies goes through this one schedule: ^TWII's daily
 bars as well as the institutional flows. Not because they belong together as
@@ -12,15 +12,15 @@ seconds apart, which only holds while a single walk is in flight, and that is
 what the data-management queue guarantees: one TWSE run at a time, whether an
 administrator pressed the button or this scheduler did.
 
-17:00 because TWSE publishes the day's figures around 16:00. A run queued
-before that finds the date unpublished, records it and moves on, so the walk
-would simply come back a day short.
+08:00 like every other daily scheduler, asking for the previous day: TWSE
+publishes a day's figures around 16:00, so by the next morning the day it is
+asked for is one the source can actually serve.
 """
 
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime, time
+from datetime import date, datetime, timedelta
 from typing import cast
 
 from anyio import Path
@@ -45,9 +45,10 @@ from daily_insights_api.modules.reports.scheduler import (
 __all__ = ["main", "queue_run"]
 
 HEARTBEAT_PATH = "/tmp/institutional-flows-heartbeat"
-RUN_AT = time(hour=17, minute=0)
-# TWSE can publish late; keep trying into the evening rather than losing the day.
-RETRY_POLICY = SameDayRetry(until=time(hour=21))
+# The edition the scheduler hands out is today's; the figures this run is for
+# are the day before it.
+EDITION_LAG = timedelta(days=1)
+RETRY_POLICY = SameDayRetry()
 RUN_POLL_SECONDS = 30.0
 RUN_WAIT_TIMEOUT_SECONDS = 45 * 60.0
 Sleep = Callable[[float], Awaitable[None]]
@@ -115,22 +116,28 @@ async def _wait_for_outcome(
 async def queue_run(
     session_factory: async_sessionmaker[AsyncSession],
     *,
-    edition_date: date | None = None,
+    run_date: date,
     heartbeat: Path | None = None,
     sleep: Sleep = asyncio.sleep,
     poll_seconds: float = RUN_POLL_SECONDS,
     timeout_seconds: float = RUN_WAIT_TIMEOUT_SECONDS,
 ) -> str:
-    """Queue one run and wait for the worker's durable terminal outcome.
+    """Queue one run for the day before `run_date` and wait for the worker's
+    durable terminal outcome.
+
+    `run_date` is the edition the scheduler hands out, which is the day it
+    fires. TWSE publishes a day's figures around 16:00, so the day this morning
+    run can actually be served is the one before it.
 
     The worker executes it -- ^TWII's months first, then the flow walks -- and
-    the walk skips dates already stored, so a queue that lands on an afternoon
-    TWSE has not published yet costs one request per missing date and the next
-    attempt fills the gap. Partial and failed outcomes are returned as failed so
-    ``SameDayRetry`` can actually retry provider degradation. An already-active
-    run is observed instead of duplicated.
+    the walk asks only for the dates it is missing plus the newest few it
+    re-asks because TWSE revises them, so a queue that lands on a date TWSE has
+    not published yet costs one request and the next day's run fills the gap.
+    Partial and failed outcomes are returned as failed so ``SameDayRetry`` can
+    actually retry provider degradation. An already-active run is observed
+    instead of duplicated.
     """
-    edition = edition_date or datetime.now(TAIPEI).date()
+    edition = run_date - EDITION_LAG
     run_id: uuid.UUID | None
     retry_cancelled = False
     try:
@@ -189,8 +196,8 @@ async def main() -> None:
     engine = create_engine(settings)
     session_factory = create_session_factory(engine)
 
-    async def queue(edition_date: date) -> str:
-        return await queue_run(session_factory, edition_date=edition_date, heartbeat=heartbeat)
+    async def queue(run_date: date) -> str:
+        return await queue_run(session_factory, run_date=run_date, heartbeat=heartbeat)
 
     async def runner(run_date: date) -> str | None:
         return await run_with_heartbeat(queue, run_date, heartbeat)
@@ -199,9 +206,7 @@ async def main() -> None:
         if args.once:
             await runner(datetime.now(TAIPEI).date())
         else:
-            await run_scheduler(
-                runner, now=lambda: datetime.now(TAIPEI), retry=RETRY_POLICY, run_at=RUN_AT
-            )
+            await run_scheduler(runner, now=lambda: datetime.now(TAIPEI), retry=RETRY_POLICY)
     finally:
         await engine.dispose()
 

@@ -84,6 +84,14 @@ MARKET_FLOW_LOOKBACK_CALENDAR_DAYS = 80
 # stored and therefore costs no request.
 STOCK_FLOW_LOOKBACK_TRADING_DAYS = 1
 STOCK_FLOW_LOOKBACK_CALENDAR_DAYS = 10
+# TWSE revises a published report for days afterwards, so a run re-asks this
+# many of the newest stored market days instead of trusting them, on top of the
+# edition date it is for; older days are settled. Per-stock flows get a one-day
+# version of the same treatment rather than none: only their latest stored day
+# is ever read, and that day is re-asked whether or not it is the edition date.
+# A run on a Saturday, or before the afternoon publication, has a Friday to
+# correct and no edition date to correct it through.
+MARKET_FLOW_REFRESH_TRADING_DAYS = 10
 # TWSE being down looks the same on every date, so stop asking after three.
 MAX_CONSECUTIVE_FAILURES = 3
 # Serializes institutional scheduler obligation checks with enqueue,
@@ -987,6 +995,10 @@ class _FlowWalk:
     aborted: bool = False
     days: list[dict[str, object]] = field(default_factory=list)
 
+    def cover_one(self) -> None:
+        """Count a covered trading day without exceeding the requested window."""
+        self.covered_trading_days = min(self.lookback_trading_days, self.covered_trading_days + 1)
+
     def summary(self) -> dict[str, object]:
         return {
             "lookback_trading_days": self.lookback_trading_days,
@@ -1000,6 +1012,7 @@ async def _fetch_flows_back[Flows: _TwseFlows](
     *,
     edition_date: date,
     existing: set[date],
+    refresh: set[date],
     lookback_trading_days: int,
     lookback_calendar_days: int,
     fetch: Callable[[date], Awaitable[Flows]],
@@ -1010,23 +1023,30 @@ async def _fetch_flows_back[Flows: _TwseFlows](
     `lookback_trading_days` trading days are covered.
 
     Each date is its own fetch and its own transaction: a failure on one date is
-    recorded and the walk continues, so a re-run only has to fill the holes.
+    recorded and the walk continues, so a re-run has only the holes and its
+    refresh window left to ask for.
     `MAX_CONSECUTIVE_FAILURES` in a row means the source itself is down and the
     walk stops rather than spending minutes asking the remaining dates.
-    Dates already stored count toward the window without a fetch; non-trading
-    dates are re-asked every run because a make-up trading day cannot be told
-    from a holiday without asking.
+    Dates already stored count toward the window without a fetch, except those
+    in `refresh`, which are all asked again even if a newer fetch has already
+    filled the coverage window. A refresh that comes back empty or fails leaves
+    the stored rows alone and still counts, since they are what the window is
+    made of. Non-trading dates are re-asked every run because a make-up trading
+    day cannot be told from a holiday without asking.
     """
     walk = _FlowWalk(lookback_trading_days=lookback_trading_days)
+    pending_refresh = {day for day in refresh if day <= edition_date}
     consecutive_failures = 0
     for offset in range(lookback_calendar_days):
-        if walk.covered_trading_days >= lookback_trading_days:
+        if walk.covered_trading_days >= lookback_trading_days and not pending_refresh:
             break
         day = edition_date - timedelta(days=offset)
+        pending_refresh.discard(day)
         entry: dict[str, object] = {"trade_date": day.isoformat()}
         walk.days.append(entry)
-        if day in existing:
-            walk.covered_trading_days += 1
+        stored_already = day in existing
+        if stored_already and day not in refresh:
+            walk.cover_one()
             entry["status"] = "existing"
             continue
         try:
@@ -1035,6 +1055,10 @@ async def _fetch_flows_back[Flows: _TwseFlows](
             walk.failures += 1
             consecutive_failures += 1
             entry.update(status="failed", error=sanitize_item_error(error))
+            # A refresh that failed still leaves yesterday's rows in place, so
+            # the window is covered; `failures` is what reports the refresh.
+            if stored_already:
+                walk.cover_one()
             if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                 # The source is down, not this one date. Asking the remaining
                 # dates would cost minutes and tell us nothing; the next run
@@ -1044,11 +1068,16 @@ async def _fetch_flows_back[Flows: _TwseFlows](
             continue
         consecutive_failures = 0
         if not flows.items:
-            entry["status"] = "no_data"
+            # Either the date never traded, or the source cannot serve it right
+            # now. Rows already held are not deleted over that answer, and a
+            # window resting on them is still covered.
+            entry["status"] = "kept" if stored_already else "no_data"
+            if stored_already:
+                walk.cover_one()
             continue
         async with session_factory.begin() as database:
             count = await store(database, flows)
-        walk.covered_trading_days += 1
+        walk.cover_one()
         walk.stored_rows += count
         entry.update(status="stored", record_count=count, fetched_at=flows.fetched_at.isoformat())
     return walk
@@ -1058,7 +1087,9 @@ async def _execute_institutional_twse(
     run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
 ) -> tuple[str, dict[str, object], str | None]:
     """Everything TWSE supplies, in one walk: ^TWII's daily bars, per-stock
-    flows for the edition date, and market flows back to 40 trading days.
+    flows for the edition date, and market flows back to 40 trading days, the
+    newest `MARKET_FLOW_REFRESH_TRADING_DAYS` of them re-asked rather than
+    trusted.
 
     One run rather than one per dataset because TWSE is asked at a fixed
     interval, and that interval is a property of the client, not of the
@@ -1084,6 +1115,23 @@ async def _execute_institutional_twse(
             on_or_before=run.edition_date,
             limit=MARKET_FLOW_LOOKBACK_TRADING_DAYS,
         )
+    # The dates to ask again even though they are stored. The edition date is
+    # never trusted because TWSE publishes it mid-afternoon and keeps correcting
+    # it; the market window goes back further because those corrections land
+    # days later, after the chart has already drawn the number. `existing_stock`
+    # holds at most the one per-stock day anything reads, and it is re-asked on
+    # a weekend or a morning run, when the edition date is not that day. The
+    # upserts in `store_institutional_*_flows` overwrite in place, so nothing is
+    # deleted to make room for the answer.
+    refresh_stock = existing_stock | {run.edition_date}
+    # The invariant is how many stored trading days get corrected, not which
+    # calendar dates: the newest `MARKET_FLOW_REFRESH_TRADING_DAYS` of them,
+    # every run. The edition date joins them whether or not it is stored yet,
+    # because an edition that never traded, or has not published, must not cost
+    # the window one of its days.
+    refresh_market = {run.edition_date}.union(
+        sorted(existing_market, reverse=True)[:MARKET_FLOW_REFRESH_TRADING_DAYS]
+    )
 
     async with TwseAdapter(
         base_url=settings.twse_base_url,
@@ -1098,6 +1146,7 @@ async def _execute_institutional_twse(
         stock = await _fetch_flows_back(
             edition_date=run.edition_date,
             existing=existing_stock,
+            refresh=refresh_stock,
             lookback_trading_days=STOCK_FLOW_LOOKBACK_TRADING_DAYS,
             lookback_calendar_days=STOCK_FLOW_LOOKBACK_CALENDAR_DAYS,
             fetch=adapter.get_stock_flows,
@@ -1109,6 +1158,7 @@ async def _execute_institutional_twse(
         market = await _fetch_flows_back(
             edition_date=run.edition_date,
             existing=existing_market,
+            refresh=refresh_market,
             lookback_trading_days=MARKET_FLOW_LOOKBACK_TRADING_DAYS,
             lookback_calendar_days=MARKET_FLOW_LOOKBACK_CALENDAR_DAYS,
             fetch=adapter.get_market_flows,
