@@ -162,17 +162,9 @@ export function IndexHistoryChart({
       aria-labelledby="index-history-title"
     >
       <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h2 id="index-history-title" className="m-0 text-base font-extrabold">
-            {t("indexChartTitle")}
-          </h2>
-          <p className="mt-1 mb-0 text-xs text-sea-ink-soft">
-            {t("indexChartRange", {
-              start: formatIsoDate(history.start, locale),
-              end: formatIsoDate(history.end, locale),
-            })}
-          </p>
-        </div>
+        <h2 id="index-history-title" className="m-0 text-base font-extrabold">
+          {t("indexChartTitle")}
+        </h2>
         <label className="grid gap-1 text-xs font-bold text-sea-ink-soft">
           {t("indexChartSelect")}
           <select

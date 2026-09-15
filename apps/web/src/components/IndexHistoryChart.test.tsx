@@ -77,6 +77,9 @@ describe("IndexHistoryChart", () => {
       screen.getByRole("heading", { name: "Index performance" })
     ).toBeVisible()
     expect(
+      screen.queryByText("Daily closing levels from 2024/9/4 to 2026/9/4")
+    ).toBeNull()
+    expect(
       screen.queryByRole("heading", { name: "Index technicals" })
     ).toBeNull()
     expect(screen.getByTestId("index-chart")).not.toHaveTextContent(
