@@ -995,6 +995,10 @@ class _FlowWalk:
     aborted: bool = False
     days: list[dict[str, object]] = field(default_factory=list)
 
+    def cover_one(self) -> None:
+        """Count a covered trading day without exceeding the requested window."""
+        self.covered_trading_days = min(self.lookback_trading_days, self.covered_trading_days + 1)
+
     def summary(self) -> dict[str, object]:
         return {
             "lookback_trading_days": self.lookback_trading_days,
@@ -1024,23 +1028,25 @@ async def _fetch_flows_back[Flows: _TwseFlows](
     `MAX_CONSECUTIVE_FAILURES` in a row means the source itself is down and the
     walk stops rather than spending minutes asking the remaining dates.
     Dates already stored count toward the window without a fetch, except those
-    in `refresh`, which are asked again because the source revises them; a
-    refresh that comes back empty or fails leaves the stored rows alone and
-    still counts, since they are what the window is made of. Non-trading dates
-    are re-asked every run because a make-up trading day cannot be told from a
-    holiday without asking.
+    in `refresh`, which are all asked again even if a newer fetch has already
+    filled the coverage window. A refresh that comes back empty or fails leaves
+    the stored rows alone and still counts, since they are what the window is
+    made of. Non-trading dates are re-asked every run because a make-up trading
+    day cannot be told from a holiday without asking.
     """
     walk = _FlowWalk(lookback_trading_days=lookback_trading_days)
+    pending_refresh = {day for day in refresh if day <= edition_date}
     consecutive_failures = 0
     for offset in range(lookback_calendar_days):
-        if walk.covered_trading_days >= lookback_trading_days:
+        if walk.covered_trading_days >= lookback_trading_days and not pending_refresh:
             break
         day = edition_date - timedelta(days=offset)
+        pending_refresh.discard(day)
         entry: dict[str, object] = {"trade_date": day.isoformat()}
         walk.days.append(entry)
         stored_already = day in existing
         if stored_already and day not in refresh:
-            walk.covered_trading_days += 1
+            walk.cover_one()
             entry["status"] = "existing"
             continue
         try:
@@ -1052,7 +1058,7 @@ async def _fetch_flows_back[Flows: _TwseFlows](
             # A refresh that failed still leaves yesterday's rows in place, so
             # the window is covered; `failures` is what reports the refresh.
             if stored_already:
-                walk.covered_trading_days += 1
+                walk.cover_one()
             if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                 # The source is down, not this one date. Asking the remaining
                 # dates would cost minutes and tell us nothing; the next run
@@ -1067,11 +1073,11 @@ async def _fetch_flows_back[Flows: _TwseFlows](
             # window resting on them is still covered.
             entry["status"] = "kept" if stored_already else "no_data"
             if stored_already:
-                walk.covered_trading_days += 1
+                walk.cover_one()
             continue
         async with session_factory.begin() as database:
             count = await store(database, flows)
-        walk.covered_trading_days += 1
+        walk.cover_one()
         walk.stored_rows += count
         entry.update(status="stored", record_count=count, fetched_at=flows.fetched_at.isoformat())
     return walk

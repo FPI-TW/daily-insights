@@ -909,6 +909,79 @@ async def test_institutional_twse_refreshes_the_stored_stock_day_on_a_non_tradin
 
 
 @pytest.mark.asyncio
+async def test_institutional_twse_refreshes_the_stored_stock_day_after_a_new_edition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A newly published edition fills the one-day stock coverage window, but
+    the previously latest stored day is still part of the explicit refresh set
+    and must be fetched before the walk stops."""
+    from daily_insights_api.modules.data_management import service
+
+    edition = date(2026, 9, 15)
+    previous = date(2026, 9, 14)
+    stored_market = _weekdays_before(edition, 39) | {edition}
+    asked_stock: list[date] = []
+    stored_stock: list[date] = []
+
+    class Adapter:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "Adapter":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def get_stock_flows(self, trade_date: date) -> SimpleNamespace:
+            asked_stock.append(trade_date)
+            return SimpleNamespace(
+                trade_date=trade_date,
+                items=(object(),),
+                fetched_at=datetime(2026, 9, 15, 17, tzinfo=UTC),
+            )
+
+        async def get_market_flows(self, trade_date: date) -> SimpleNamespace:
+            return SimpleNamespace(
+                trade_date=trade_date,
+                items=(object(),) if trade_date in stored_market else (),
+                fetched_at=datetime(2026, 9, 15, 17, tzinfo=UTC),
+            )
+
+    async def existing(*_: object, **kwargs: object) -> set[date]:
+        return set(stored_market) if kwargs["flows"] is InstitutionalMarketFlow else {previous}
+
+    async def record_stock(_: object, *, market_code: str, flows: SimpleNamespace) -> int:
+        stored_stock.append(flows.trade_date)
+        return 1
+
+    async def record_market(_: object, *, market_code: str, flows: SimpleNamespace) -> int:
+        return 1
+
+    monkeypatch.setattr(service, "TwseAdapter", Adapter)
+    monkeypatch.setattr(service, "stored_flow_dates", existing)
+    monkeypatch.setattr(service, "_refresh_taiex", _taiex_stored)
+    monkeypatch.setattr(service, "store_institutional_stock_flows", record_stock)
+    monkeypatch.setattr(service, "store_institutional_market_flows", record_market)
+
+    run = _run("institutional_twse")
+    run.edition_date = edition
+    status, result, error = await execute_run(
+        run, cast(Any, _StubSessionFactory()), Settings(environment="test", twse_enabled=True)
+    )
+
+    assert (status, error) == ("succeeded", None)
+    assert asked_stock == [edition, previous]
+    assert stored_stock == [edition, previous]
+    stock = cast(dict[str, Any], result["stock_flows"])
+    assert stock["covered_trading_days"] == 1
+    assert [(day["trade_date"], day["status"]) for day in stock["days"]] == [
+        (edition.isoformat(), "stored"),
+        (previous.isoformat(), "stored"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_institutional_twse_with_taiex_and_failed_flows_is_partial(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
