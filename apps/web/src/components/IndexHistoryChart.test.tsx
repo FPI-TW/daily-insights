@@ -15,8 +15,19 @@ vi.mock("@tanstack/react-router", () => ({
   ClientOnly: ({ children }: { children: React.ReactNode }) => children,
 }))
 vi.mock("echarts-for-react", () => ({
-  default: ({ option }: { option: unknown }) => (
-    <div data-testid="index-chart">{JSON.stringify(option)}</div>
+  default: ({
+    option,
+    onEvents,
+  }: {
+    option: unknown
+    onEvents?: { datazoom?: (event: unknown) => void }
+  }) => (
+    <button
+      data-testid="index-chart"
+      onClick={() => onEvents?.datazoom?.({ start: 25, end: 75 })}
+    >
+      {JSON.stringify(option)}
+    </button>
   ),
 }))
 
@@ -37,7 +48,8 @@ const history: MarketIndexHistory = {
           high: "45100.0",
           low: "44900.0",
           close: "45050.5",
-          volume: null,
+          volume: 100_000_000,
+          trade_value: null,
         },
       ],
     },
@@ -52,7 +64,8 @@ const history: MarketIndexHistory = {
           high: "6550.0",
           low: "6480.0",
           close: "6525.25",
-          volume: null,
+          volume: 200_000_000,
+          trade_value: null,
         },
       ],
     },
@@ -75,6 +88,15 @@ describe("IndexHistoryChart", () => {
       screen.getByRole("heading", { name: "Index performance" })
     ).toBeVisible()
     expect(
+      screen
+        .getByRole("heading", { name: "Index performance" })
+        .compareDocumentPosition(screen.getByRole("combobox")) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      screen.queryByText("Daily closing levels from 2024/9/4 to 2026/9/4")
+    ).toBeNull()
+    expect(
       screen.queryByRole("heading", { name: "Index technicals" })
     ).toBeNull()
     expect(screen.getByTestId("index-chart")).not.toHaveTextContent(
@@ -83,6 +105,21 @@ describe("IndexHistoryChart", () => {
     expect(screen.getByTestId("index-chart")).toHaveTextContent("45050.5")
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
       '"lineStyle":{"width":3}'
+    )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"coordinateSystem":"matrix"'
+    )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"coord":[[0,0],[4,5]],"mergeCells":true'
+    )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"coord":[[0,0],[6,8]],"mergeCells":true'
+    )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"coord":[[0,0],[9,11]],"mergeCells":true'
+    )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"name":"Volume (100M shares)","type":"bar"'
     )
     expect(screen.getByRole("status")).toHaveTextContent("^SOX")
     expect(
@@ -99,6 +136,7 @@ describe("IndexHistoryChart", () => {
     })
 
     expect(screen.getByTestId("index-chart")).toHaveTextContent("6525.25")
+    expect(screen.getByTestId("index-chart")).toHaveTextContent('"value":2')
     expect(screen.getByTestId("index-chart")).not.toHaveTextContent("45050.5")
   })
 
@@ -164,8 +202,52 @@ describe("IndexHistoryChart", () => {
               },
               { period: 60, points: [] },
               { period: 120, points: [] },
-              { period: 240, points: [] },
+              {
+                period: 240,
+                points: [
+                  { trade_date: "2026-09-02", value: "44000.0" },
+                  { trade_date: "2026-09-03", value: "44100.0" },
+                ],
+              },
             ],
+            rsi: {
+              period: 14,
+              method: "wilder",
+              formula_version: "rsi-wilder-close-v1",
+              points: [
+                { trade_date: "2026-09-02", value: "52.0" },
+                { trade_date: "2026-09-03", value: "54.0" },
+              ],
+            },
+            macd: {
+              fast_period: 12,
+              slow_period: 26,
+              signal_period: 9,
+              method: "ema",
+              formula_version: "macd-ema-close-v1",
+              points: [
+                {
+                  trade_date: "2026-09-02",
+                  macd: "5.0",
+                  signal: "4.0",
+                  histogram: "1.0",
+                },
+                {
+                  trade_date: "2026-09-03",
+                  macd: "6.0",
+                  signal: "4.5",
+                  histogram: "1.5",
+                },
+              ],
+            },
+            kd: {
+              lookback_period: 9,
+              k_smoothing_period: 3,
+              d_smoothing_period: 3,
+              method: "smoothed-rsv",
+              formula_version: "stochastic-kd-9-3-3-v1",
+              points: [],
+            },
           },
         })}
       />
@@ -176,6 +258,25 @@ describe("IndexHistoryChart", () => {
     )
     expect(screen.getByTestId("index-chart")).toHaveTextContent("45050")
     expect(screen.getByTestId("index-chart")).not.toHaveTextContent("SMA 60")
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"selected":{"SMA 20":true,"SMA 240":false}'
+    )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"type":"slider","xAxisIndex":[0,1,2,3],"start":0,"end":100,"height":26'
+    )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"name":"MACD","type":"line"'
+    )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"gridIndex":2,"scale":true,"splitNumber":3'
+    )
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"name":"RSI 14","type":"line"'
+    )
+    fireEvent.click(screen.getByTestId("index-chart"))
+    expect(screen.getByTestId("index-chart")).toHaveTextContent(
+      '"type":"inside","xAxisIndex":[0,1,2,3],"start":25,"end":75'
+    )
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
       '"color":["#2563eb","#d97706"'
     )

@@ -46,6 +46,7 @@ describe("indexHistoryOutcomes", () => {
               low: "1",
               close: "1",
               volume: null,
+              trade_value: null,
             },
           ],
         },
@@ -117,6 +118,28 @@ describe("indexMovingAverageOutcomes", () => {
         { period: 120, points: [{ trade_date: "2026-09-03", value: null }] },
         { period: 240, points: [{ trade_date: "2026-09-03", value: null }] },
       ],
+      rsi: {
+        period: 14,
+        method: "wilder",
+        formula_version: "rsi-wilder-close-v1",
+        points: [],
+      },
+      macd: {
+        fast_period: 12,
+        slow_period: 26,
+        signal_period: 9,
+        method: "ema",
+        formula_version: "macd-ema-close-v1",
+        points: [],
+      },
+      kd: {
+        lookback_period: 9,
+        k_smoothing_period: 3,
+        d_smoothing_period: 3,
+        method: "smoothed-rsv",
+        formula_version: "stochastic-kd-9-3-3-v1",
+        points: [],
+      },
     }
 
     expect(
@@ -143,6 +166,7 @@ describe("bias indicators", () => {
       low: null,
       close: "110",
       volume: null,
+      trade_value: null,
     }))
     const averages: IndexMovingAverages = {
       symbol: "^TWII",
@@ -163,6 +187,28 @@ describe("bias indicators", () => {
         { period: 120, points: [] },
         { period: 240, points: [] },
       ],
+      rsi: {
+        period: 14,
+        method: "wilder",
+        formula_version: "rsi-wilder-close-v1",
+        points: [],
+      },
+      macd: {
+        fast_period: 12,
+        slow_period: 26,
+        signal_period: 9,
+        method: "ema",
+        formula_version: "macd-ema-close-v1",
+        points: [],
+      },
+      kd: {
+        lookback_period: 9,
+        k_smoothing_period: 3,
+        d_smoothing_period: 3,
+        method: "smoothed-rsv",
+        formula_version: "stochastic-kd-9-3-3-v1",
+        points: [],
+      },
     }
     const lines = biasSeries(bars, averages)
     expect(lines[0]!.points.slice(0, 2).map(p => p.value)).toEqual([null, null])

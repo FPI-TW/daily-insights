@@ -63,6 +63,7 @@ export const indexDailyBarSchema = z.object({
   low: decimalSchema.nullable(),
   close: decimalSchema,
   volume: z.number().int().nonnegative().nullable(),
+  trade_value: z.number().int().nonnegative().nullable().default(null),
 })
 export type IndexDailyBar = z.infer<typeof indexDailyBarSchema>
 export const indexDailyBarListSchema = z.array(indexDailyBarSchema)
@@ -85,6 +86,39 @@ export const indexMovingAverageSeriesSchema = z.object({
 export type IndexMovingAverageSeries = z.infer<
   typeof indexMovingAverageSeriesSchema
 >
+export const indexRsiSeriesSchema = z.object({
+  period: z.literal(14),
+  method: z.literal("wilder"),
+  formula_version: z.literal("rsi-wilder-close-v1"),
+  points: z.array(indexMovingAveragePointSchema),
+})
+export const indexMacdPointSchema = z.object({
+  trade_date: z.iso.date(),
+  macd: decimalSchema.nullable(),
+  signal: decimalSchema.nullable(),
+  histogram: decimalSchema.nullable(),
+})
+export const indexMacdSeriesSchema = z.object({
+  fast_period: z.literal(12),
+  slow_period: z.literal(26),
+  signal_period: z.literal(9),
+  method: z.literal("ema"),
+  formula_version: z.literal("macd-ema-close-v1"),
+  points: z.array(indexMacdPointSchema),
+})
+export const indexKdPointSchema = z.object({
+  trade_date: z.iso.date(),
+  k: decimalSchema.nullable(),
+  d: decimalSchema.nullable(),
+})
+export const indexKdSeriesSchema = z.object({
+  lookback_period: z.literal(9),
+  k_smoothing_period: z.literal(3),
+  d_smoothing_period: z.literal(3),
+  method: z.literal("smoothed-rsv"),
+  formula_version: z.literal("stochastic-kd-9-3-3-v1"),
+  points: z.array(indexKdPointSchema),
+})
 export const indexMovingAveragesSchema = z.object({
   symbol: z.string().min(1),
   market_code: marketCodeSchema,
@@ -98,6 +132,9 @@ export const indexMovingAveragesSchema = z.object({
     indexMovingAverageSeriesSchema.extend({ period: z.literal(120) }),
     indexMovingAverageSeriesSchema.extend({ period: z.literal(240) }),
   ]),
+  rsi: indexRsiSeriesSchema,
+  macd: indexMacdSeriesSchema,
+  kd: indexKdSeriesSchema,
 })
 export type IndexMovingAverages = z.infer<typeof indexMovingAveragesSchema>
 export const indexLatestBarSchema = indexDailyBarSchema.extend({

@@ -1179,6 +1179,17 @@
             "title": "Trade Date",
             "type": "string"
           },
+          "trade_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trade Value"
+          },
           "volume": {
             "anyOf": [
               {
@@ -1199,9 +1210,92 @@
           "high",
           "low",
           "close",
-          "volume"
+          "volume",
+          "trade_value"
         ],
         "title": "IndexDailyBarResponse",
+        "type": "object"
+      },
+      "IndexKdPointResponse": {
+        "properties": {
+          "d": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "D"
+          },
+          "k": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "K"
+          },
+          "trade_date": {
+            "format": "date",
+            "title": "Trade Date",
+            "type": "string"
+          }
+        },
+        "required": ["trade_date", "k", "d"],
+        "title": "IndexKdPointResponse",
+        "type": "object"
+      },
+      "IndexKdSeriesResponse": {
+        "properties": {
+          "d_smoothing_period": {
+            "const": 3,
+            "title": "D Smoothing Period",
+            "type": "integer"
+          },
+          "formula_version": {
+            "const": "stochastic-kd-9-3-3-v1",
+            "title": "Formula Version",
+            "type": "string"
+          },
+          "k_smoothing_period": {
+            "const": 3,
+            "title": "K Smoothing Period",
+            "type": "integer"
+          },
+          "lookback_period": {
+            "const": 9,
+            "title": "Lookback Period",
+            "type": "integer"
+          },
+          "method": {
+            "const": "smoothed-rsv",
+            "title": "Method",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/IndexKdPointResponse"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "lookback_period",
+          "k_smoothing_period",
+          "d_smoothing_period",
+          "method",
+          "formula_version",
+          "points"
+        ],
+        "title": "IndexKdSeriesResponse",
         "type": "object"
       },
       "IndexLatestBarResponse": {
@@ -1273,6 +1367,17 @@
             "title": "Trade Date",
             "type": "string"
           },
+          "trade_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trade Value"
+          },
           "volume": {
             "anyOf": [
               {
@@ -1294,9 +1399,104 @@
           "low",
           "close",
           "volume",
+          "trade_value",
           "previous_close"
         ],
         "title": "IndexLatestBarResponse",
+        "type": "object"
+      },
+      "IndexMacdPointResponse": {
+        "properties": {
+          "histogram": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Histogram"
+          },
+          "macd": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macd"
+          },
+          "signal": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(?:\\.\\d+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal"
+          },
+          "trade_date": {
+            "format": "date",
+            "title": "Trade Date",
+            "type": "string"
+          }
+        },
+        "required": ["trade_date", "macd", "signal", "histogram"],
+        "title": "IndexMacdPointResponse",
+        "type": "object"
+      },
+      "IndexMacdSeriesResponse": {
+        "properties": {
+          "fast_period": {
+            "const": 12,
+            "title": "Fast Period",
+            "type": "integer"
+          },
+          "formula_version": {
+            "const": "macd-ema-close-v1",
+            "title": "Formula Version",
+            "type": "string"
+          },
+          "method": {
+            "const": "ema",
+            "title": "Method",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/IndexMacdPointResponse"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "signal_period": {
+            "const": 9,
+            "title": "Signal Period",
+            "type": "integer"
+          },
+          "slow_period": {
+            "const": 26,
+            "title": "Slow Period",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fast_period",
+          "slow_period",
+          "signal_period",
+          "method",
+          "formula_version",
+          "points"
+        ],
+        "title": "IndexMacdSeriesResponse",
         "type": "object"
       },
       "IndexMovingAverage120SeriesResponse": {
@@ -1400,7 +1600,7 @@
         "type": "object"
       },
       "IndexMovingAveragesResponse": {
-        "description": "Read-time simple moving averages of settled daily closing prices.",
+        "description": "Read-time close-based technical indicators for settled index bars.",
         "properties": {
           "as_of": {
             "anyOf": [
@@ -1419,6 +1619,12 @@
             "title": "Formula Version",
             "type": "string"
           },
+          "kd": {
+            "$ref": "#/components/schemas/IndexKdSeriesResponse"
+          },
+          "macd": {
+            "$ref": "#/components/schemas/IndexMacdSeriesResponse"
+          },
           "market_code": {
             "title": "Market Code",
             "type": "string"
@@ -1432,6 +1638,9 @@
             "const": "close",
             "title": "Price Field",
             "type": "string"
+          },
+          "rsi": {
+            "$ref": "#/components/schemas/IndexRsiSeriesResponse"
           },
           "series": {
             "maxItems": 4,
@@ -1465,9 +1674,41 @@
           "price_field",
           "formula_version",
           "as_of",
-          "series"
+          "series",
+          "rsi",
+          "macd",
+          "kd"
         ],
         "title": "IndexMovingAveragesResponse",
+        "type": "object"
+      },
+      "IndexRsiSeriesResponse": {
+        "properties": {
+          "formula_version": {
+            "const": "rsi-wilder-close-v1",
+            "title": "Formula Version",
+            "type": "string"
+          },
+          "method": {
+            "const": "wilder",
+            "title": "Method",
+            "type": "string"
+          },
+          "period": {
+            "const": 14,
+            "title": "Period",
+            "type": "integer"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/IndexMovingAveragePointResponse"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": ["period", "method", "formula_version", "points"],
+        "title": "IndexRsiSeriesResponse",
         "type": "object"
       },
       "IndexYahooRunCreate": {

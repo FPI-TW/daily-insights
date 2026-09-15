@@ -226,7 +226,7 @@ def _taiex_bars(
     )
 
 
-def test_taiex_joins_prices_from_one_report_with_volume_from_the_other() -> None:
+def test_taiex_joins_prices_with_trading_activity_from_the_other_report() -> None:
     bars = _taiex_bars()
 
     assert [bar.trade_date for bar in bars.items] == [date(2026, 9, 1), date(2026, 9, 2)]
@@ -237,6 +237,7 @@ def test_taiex_joins_prices_from_one_report_with_volume_from_the_other() -> None
     assert first.close == Decimal("46948.72")
     # The exchange publishes shares; Yahoo's ^TWII volume did not agree with it.
     assert first.volume == 13_000_849_196
+    assert first.trade_value == 1_187_571_567_117
 
 
 def test_taiex_keeps_a_session_the_trading_report_has_not_published() -> None:
@@ -245,7 +246,10 @@ def test_taiex_keeps_a_session_the_trading_report_has_not_published() -> None:
     trading = {**TAIEX_TRADING_PAYLOAD, "data": TAIEX_TRADING_PAYLOAD["data"][:1]}
     bars = _taiex_bars(trading_payload=trading)
 
-    assert [bar.volume for bar in bars.items] == [13_000_849_196, None]
+    assert [(bar.volume, bar.trade_value) for bar in bars.items] == [
+        (13_000_849_196, 1_187_571_567_117),
+        (None, None),
+    ]
 
 
 def test_taiex_rejects_reports_that_disagree_on_the_close() -> None:

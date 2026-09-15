@@ -72,6 +72,7 @@ const history: MarketIndexHistory = {
         low: "19800",
         close: String(20000 + index * 100),
         volume: 1,
+        trade_value: 100_000_000,
       })),
     },
   ],

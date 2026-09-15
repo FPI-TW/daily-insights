@@ -49,13 +49,18 @@ from daily_insights_api.modules.markets.models import (
 )
 from daily_insights_api.modules.markets.schemas import (
     IndexDailyBarResponse,
+    IndexKdPointResponse,
+    IndexKdSeriesResponse,
     IndexLatestBarResponse,
+    IndexMacdPointResponse,
+    IndexMacdSeriesResponse,
     IndexMovingAverage20SeriesResponse,
     IndexMovingAverage60SeriesResponse,
     IndexMovingAverage120SeriesResponse,
     IndexMovingAverage240SeriesResponse,
     IndexMovingAveragePointResponse,
     IndexMovingAveragesResponse,
+    IndexRsiSeriesResponse,
     InstitutionalFlowPointResponse,
     InstitutionalStockFlowResponse,
     MarketResponse,
@@ -107,6 +112,12 @@ YFINANCE_INDICES: tuple[IndexSymbol, ...] = tuple(
 MOVING_AVERAGE_PERIODS = (20, 60, 120, 240)
 MOVING_AVERAGE_WARMUP_SESSIONS = max(MOVING_AVERAGE_PERIODS) - 1
 MOVING_AVERAGE_QUANTUM = Decimal("0.0000000001")
+RSI_PERIOD = 14
+MACD_FAST_PERIOD = 12
+MACD_SLOW_PERIOD = 26
+MACD_SIGNAL_PERIOD = 9
+KD_LOOKBACK_PERIOD = 9
+KD_SMOOTHING_PERIOD = 3
 
 
 class IndexProviderConflictError(ValueError):
@@ -199,6 +210,7 @@ def _bar_response(bar: IndexDailyBar) -> IndexDailyBarResponse:
         low=bar.low,
         close=bar.close,
         volume=bar.volume,
+        trade_value=bar.trade_value,
     )
 
 
@@ -284,7 +296,7 @@ def index_moving_averages_response(
     requested_bars: Sequence[IndexDailyBar],
     warmup_bars: Sequence[IndexDailyBar],
 ) -> IndexMovingAveragesResponse:
-    """Calculate fixed SMAs without emitting dates outside the requested range.
+    """Calculate close-based indicators without emitting dates outside the requested range.
 
     A trading session is a stored settled daily bar, so gaps such as weekends
     and exchange holidays never produce calendar filler points.  The caller
@@ -312,6 +324,14 @@ def index_moving_averages_response(
                     points[period].append(
                         IndexMovingAveragePointResponse(trade_date=bar.trade_date, value=value)
                     )
+    rsi_points, macd_points = _momentum_indicator_points(
+        bars=(*warmup_bars, *requested_bars),
+        requested_offset=len(warmup_bars),
+    )
+    kd_points = _kd_indicator_points(
+        bars=(*warmup_bars, *requested_bars),
+        requested_offset=len(warmup_bars),
+    )
     return IndexMovingAveragesResponse(
         symbol=symbol,
         market_code=market_code,
@@ -325,7 +345,188 @@ def index_moving_averages_response(
             IndexMovingAverage120SeriesResponse(period=120, points=points[120]),
             IndexMovingAverage240SeriesResponse(period=240, points=points[240]),
         ),
+        rsi=IndexRsiSeriesResponse(
+            period=RSI_PERIOD,
+            method="wilder",
+            formula_version="rsi-wilder-close-v1",
+            points=rsi_points,
+        ),
+        macd=IndexMacdSeriesResponse(
+            fast_period=MACD_FAST_PERIOD,
+            slow_period=MACD_SLOW_PERIOD,
+            signal_period=MACD_SIGNAL_PERIOD,
+            method="ema",
+            formula_version="macd-ema-close-v1",
+            points=macd_points,
+        ),
+        kd=IndexKdSeriesResponse(
+            lookback_period=KD_LOOKBACK_PERIOD,
+            k_smoothing_period=KD_SMOOTHING_PERIOD,
+            d_smoothing_period=KD_SMOOTHING_PERIOD,
+            method="smoothed-rsv",
+            formula_version="stochastic-kd-9-3-3-v1",
+            points=kd_points,
+        ),
     )
+
+
+def _momentum_indicator_points(
+    *,
+    bars: Sequence[IndexDailyBar],
+    requested_offset: int,
+) -> tuple[list[IndexMovingAveragePointResponse], list[IndexMacdPointResponse]]:
+    """Calculate Wilder RSI and conventionally seeded MACD from settled closes."""
+    rsi_points: list[IndexMovingAveragePointResponse] = []
+    macd_points: list[IndexMacdPointResponse] = []
+    previous_close: Decimal | None = None
+    gains: list[Decimal] = []
+    losses: list[Decimal] = []
+    average_gain: Decimal | None = None
+    average_loss: Decimal | None = None
+    fast_seed: list[Decimal] = []
+    slow_seed: list[Decimal] = []
+    signal_seed: list[Decimal] = []
+    fast_ema: Decimal | None = None
+    slow_ema: Decimal | None = None
+    signal_ema: Decimal | None = None
+    fast_multiplier = Decimal(2) / Decimal(MACD_FAST_PERIOD + 1)
+    slow_multiplier = Decimal(2) / Decimal(MACD_SLOW_PERIOD + 1)
+    signal_multiplier = Decimal(2) / Decimal(MACD_SIGNAL_PERIOD + 1)
+
+    for index, bar in enumerate(bars):
+        rsi: Decimal | None = None
+        if previous_close is not None:
+            change = bar.close - previous_close
+            gain = max(change, Decimal(0))
+            loss = max(-change, Decimal(0))
+            if average_gain is None or average_loss is None:
+                gains.append(gain)
+                losses.append(loss)
+                if len(gains) == RSI_PERIOD:
+                    average_gain = sum(gains) / Decimal(RSI_PERIOD)
+                    average_loss = sum(losses) / Decimal(RSI_PERIOD)
+            else:
+                average_gain = (average_gain * Decimal(RSI_PERIOD - 1) + gain) / Decimal(RSI_PERIOD)
+                average_loss = (average_loss * Decimal(RSI_PERIOD - 1) + loss) / Decimal(RSI_PERIOD)
+            if average_gain is not None and average_loss is not None:
+                if average_gain == 0 and average_loss == 0:
+                    rsi = Decimal(50)
+                elif average_loss == 0:
+                    rsi = Decimal(100)
+                else:
+                    relative_strength = average_gain / average_loss
+                    rsi = Decimal(100) - Decimal(100) / (Decimal(1) + relative_strength)
+        previous_close = bar.close
+
+        if fast_ema is None:
+            fast_seed.append(bar.close)
+            if len(fast_seed) == MACD_FAST_PERIOD:
+                fast_ema = sum(fast_seed) / Decimal(MACD_FAST_PERIOD)
+        else:
+            fast_ema += (bar.close - fast_ema) * fast_multiplier
+        if slow_ema is None:
+            slow_seed.append(bar.close)
+            if len(slow_seed) == MACD_SLOW_PERIOD:
+                slow_ema = sum(slow_seed) / Decimal(MACD_SLOW_PERIOD)
+        else:
+            slow_ema += (bar.close - slow_ema) * slow_multiplier
+
+        macd = fast_ema - slow_ema if fast_ema is not None and slow_ema is not None else None
+        if macd is not None:
+            if signal_ema is None:
+                signal_seed.append(macd)
+                if len(signal_seed) == MACD_SIGNAL_PERIOD:
+                    signal_ema = sum(signal_seed) / Decimal(MACD_SIGNAL_PERIOD)
+            else:
+                signal_ema += (macd - signal_ema) * signal_multiplier
+        histogram = macd - signal_ema if macd is not None and signal_ema is not None else None
+
+        if index >= requested_offset:
+            rsi_points.append(
+                IndexMovingAveragePointResponse(
+                    trade_date=bar.trade_date,
+                    value=(
+                        rsi.quantize(MOVING_AVERAGE_QUANTUM, rounding=ROUND_HALF_EVEN)
+                        if rsi is not None
+                        else None
+                    ),
+                )
+            )
+            macd_points.append(
+                IndexMacdPointResponse(
+                    trade_date=bar.trade_date,
+                    macd=(
+                        macd.quantize(MOVING_AVERAGE_QUANTUM, rounding=ROUND_HALF_EVEN)
+                        if macd is not None
+                        else None
+                    ),
+                    signal=(
+                        signal_ema.quantize(MOVING_AVERAGE_QUANTUM, rounding=ROUND_HALF_EVEN)
+                        if signal_ema is not None
+                        else None
+                    ),
+                    histogram=(
+                        histogram.quantize(MOVING_AVERAGE_QUANTUM, rounding=ROUND_HALF_EVEN)
+                        if histogram is not None
+                        else None
+                    ),
+                )
+            )
+    return rsi_points, macd_points
+
+
+def _kd_indicator_points(
+    *,
+    bars: Sequence[IndexDailyBar],
+    requested_offset: int,
+) -> list[IndexKdPointResponse]:
+    """Calculate Taiwan-style stochastic KD (9-day RSV, 1/3 smoothing)."""
+    points: list[IndexKdPointResponse] = []
+    window: list[IndexDailyBar] = []
+    k_value = Decimal(50)
+    d_value = Decimal(50)
+    smoothing = Decimal(KD_SMOOTHING_PERIOD)
+
+    for index, bar in enumerate(bars):
+        window.append(bar)
+        if len(window) > KD_LOOKBACK_PERIOD:
+            window.pop(0)
+
+        k: Decimal | None = None
+        d: Decimal | None = None
+        if len(window) == KD_LOOKBACK_PERIOD and all(
+            item.high is not None and item.low is not None for item in window
+        ):
+            highest = max(item.high for item in window if item.high is not None)
+            lowest = min(item.low for item in window if item.low is not None)
+            raw_rsv = (
+                Decimal(50)
+                if highest == lowest
+                else (bar.close - lowest) / (highest - lowest) * Decimal(100)
+            )
+            rsv = min(Decimal(100), max(Decimal(0), raw_rsv))
+            k_value = (k_value * (smoothing - 1) + rsv) / smoothing
+            d_value = (d_value * (smoothing - 1) + k_value) / smoothing
+            k = k_value
+            d = d_value
+
+        if index >= requested_offset:
+            points.append(
+                IndexKdPointResponse(
+                    trade_date=bar.trade_date,
+                    k=(
+                        k.quantize(MOVING_AVERAGE_QUANTUM, rounding=ROUND_HALF_EVEN)
+                        if k is not None
+                        else None
+                    ),
+                    d=(
+                        d.quantize(MOVING_AVERAGE_QUANTUM, rounding=ROUND_HALF_EVEN)
+                        if d is not None
+                        else None
+                    ),
+                )
+            )
+    return points
 
 
 async def index_moving_averages(
@@ -380,8 +581,13 @@ async def store_index_daily_bars(
     provider: str,
     contract_version: str,
     source_fetched_at: datetime,
+    preserve_existing_activity: bool = False,
 ) -> int:
     """Upsert settled daily bars, keyed on (symbol, trade_date).
+
+    ``preserve_existing_activity`` is reserved for TWSE enrichment: if its
+    activity report temporarily omits a session, a price refresh must not erase
+    volume or trade value that was stored by an earlier successful response.
 
     Re-fetching an overlapping window rewrites the same rows instead of adding
     duplicates, so a nightly 7d run and the original 2y backfill can coexist.
@@ -409,6 +615,7 @@ async def store_index_daily_bars(
                 "low": bar.low,
                 "close": bar.close,
                 "volume": bar.volume,
+                "trade_value": bar.trade_value,
                 "provider": provider,
                 "contract_version": contract_version,
                 "source_fetched_at": source_fetched_at,
@@ -475,7 +682,16 @@ async def store_index_daily_bars(
                     "high": statement.excluded.high,
                     "low": statement.excluded.low,
                     "close": statement.excluded.close,
-                    "volume": statement.excluded.volume,
+                    "volume": (
+                        func.coalesce(statement.excluded.volume, IndexDailyBar.volume)
+                        if preserve_existing_activity
+                        else statement.excluded.volume
+                    ),
+                    "trade_value": (
+                        func.coalesce(statement.excluded.trade_value, IndexDailyBar.trade_value)
+                        if preserve_existing_activity
+                        else statement.excluded.trade_value
+                    ),
                     "contract_version": statement.excluded.contract_version,
                     "source_fetched_at": statement.excluded.source_fetched_at,
                     "updated_at": func.now(),
@@ -570,19 +786,22 @@ async def select_taiex_refresh_months(
     if requested_months != TAIEX_INCREMENTAL_MONTHS:
         return requested
 
-    stored_dates = (
-        await database.scalars(
-            select(IndexDailyBar.trade_date).where(
+    stored_rows = (
+        await database.execute(
+            select(IndexDailyBar.trade_date, IndexDailyBar.trade_value).where(
                 IndexDailyBar.symbol == TAIEX_SYMBOL,
                 IndexDailyBar.trade_date >= start,
                 IndexDailyBar.trade_date <= today,
             )
         )
     ).all()
-    stored_months = {trade_date.replace(day=1) for trade_date in stored_dates}
+    stored_months: dict[date, bool] = {}
+    for trade_date, trade_value in stored_rows:
+        month = trade_date.replace(day=1)
+        stored_months[month] = stored_months.get(month, True) and trade_value is not None
     recent = requested[-TAIEX_INCREMENTAL_MONTHS:]
     missing = tuple(
-        month for month in requested if month not in stored_months and month not in recent
+        month for month in requested if not stored_months.get(month, False) and month not in recent
     )
     return (*recent, *missing)
 
@@ -649,6 +868,7 @@ async def refresh_taiex_daily_bars(
                 low=bar.low,
                 close=bar.close,
                 volume=bar.volume,
+                trade_value=bar.trade_value,
                 source=TAIEX_PROVIDER,
             )
             for bar in fetched.items
@@ -664,6 +884,7 @@ async def refresh_taiex_daily_bars(
                     provider=TAIEX_PROVIDER,
                     contract_version=TAIEX_CONTRACT_VERSION,
                     source_fetched_at=fetched.fetched_at,
+                    preserve_existing_activity=True,
                 )
         except (IntegrityError, DataError) as error:
             # A value the adapter let through that the schema will not hold.

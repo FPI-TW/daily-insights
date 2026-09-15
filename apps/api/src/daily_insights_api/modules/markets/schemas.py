@@ -37,6 +37,7 @@ class IndexDailyBarResponse(BaseModel):
     low: PriceDecimal | None
     close: PriceDecimal
     volume: int | None
+    trade_value: int | None
 
 
 class IndexLatestBarResponse(IndexDailyBarResponse):
@@ -70,8 +71,46 @@ class IndexMovingAverage240SeriesResponse(BaseModel):
     points: list[IndexMovingAveragePointResponse]
 
 
+class IndexRsiSeriesResponse(BaseModel):
+    period: Literal[14]
+    method: Literal["wilder"]
+    formula_version: Literal["rsi-wilder-close-v1"]
+    points: list[IndexMovingAveragePointResponse]
+
+
+class IndexMacdPointResponse(BaseModel):
+    trade_date: date
+    macd: PriceDecimal | None
+    signal: PriceDecimal | None
+    histogram: PriceDecimal | None
+
+
+class IndexMacdSeriesResponse(BaseModel):
+    fast_period: Literal[12]
+    slow_period: Literal[26]
+    signal_period: Literal[9]
+    method: Literal["ema"]
+    formula_version: Literal["macd-ema-close-v1"]
+    points: list[IndexMacdPointResponse]
+
+
+class IndexKdPointResponse(BaseModel):
+    trade_date: date
+    k: PriceDecimal | None
+    d: PriceDecimal | None
+
+
+class IndexKdSeriesResponse(BaseModel):
+    lookback_period: Literal[9]
+    k_smoothing_period: Literal[3]
+    d_smoothing_period: Literal[3]
+    method: Literal["smoothed-rsv"]
+    formula_version: Literal["stochastic-kd-9-3-3-v1"]
+    points: list[IndexKdPointResponse]
+
+
 class IndexMovingAveragesResponse(BaseModel):
-    """Read-time simple moving averages of settled daily closing prices."""
+    """Read-time close-based technical indicators for settled index bars."""
 
     symbol: str
     market_code: str
@@ -85,6 +124,9 @@ class IndexMovingAveragesResponse(BaseModel):
         IndexMovingAverage120SeriesResponse,
         IndexMovingAverage240SeriesResponse,
     ]
+    rsi: IndexRsiSeriesResponse
+    macd: IndexMacdSeriesResponse
+    kd: IndexKdSeriesResponse
 
 
 class InstitutionalFlowPointResponse(BaseModel):

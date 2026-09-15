@@ -86,6 +86,7 @@ class IndexDailyBar(TimestampMixin, Base):
     __table_args__ = (
         CheckConstraint("close > 0", name="close_positive"),
         CheckConstraint("volume IS NULL OR volume >= 0", name="volume_nonnegative"),
+        CheckConstraint("trade_value IS NULL OR trade_value >= 0", name="trade_value_nonnegative"),
         CheckConstraint(
             "high IS NULL OR low IS NULL OR high >= low",
             name="high_not_below_low",
@@ -108,6 +109,7 @@ class IndexDailyBar(TimestampMixin, Base):
     low: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
     close: Mapped[Decimal] = mapped_column(Numeric(20, 10), nullable=False)
     volume: Mapped[int | None] = mapped_column(BigInteger)
+    trade_value: Mapped[int | None] = mapped_column(BigInteger)
     provider: Mapped[str] = mapped_column(String(50), nullable=False)
     contract_version: Mapped[str] = mapped_column(String(100), nullable=False)
     source_fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

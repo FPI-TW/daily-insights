@@ -50,7 +50,7 @@ TAIEX_INDEX_FIELDS = (
     "Lowest Index",
     "Closing Index",
 )
-TAIEX_TRADING_FIELDS = ("Date", "Trade Volume", "TAIEX")
+TAIEX_TRADING_FIELDS = ("Date", "Trade Volume", "Trade Value", "TAIEX")
 # `ALL` also returns ~15k warrant rows; this keeps the ~1.3k securities.
 STOCK_FLOWS_SELECT_TYPE = "ALLBUT0999"
 # TWSE answers both "that date had no trading" and "that date is not published
@@ -118,7 +118,7 @@ TWSE_CONTRACT_HASH = hashlib.sha256(
 # which report it came from. There is no matching hash: the institutional
 # endpoints have one because their responses carry a Provenance to the API,
 # and index_daily_bars stores only the version.
-TAIEX_CONTRACT_VERSION = "twse-taiex-v1"
+TAIEX_CONTRACT_VERSION = "twse-taiex-v2"
 
 Sleep = Callable[[float], Awaitable[None]]
 Monotonic = Callable[[], float]
@@ -168,6 +168,9 @@ class TaiexDailyBar:
     # have not; the column is nullable and a missing volume must not cost us an
     # otherwise complete bar.
     volume: int | None
+    # TWD from FMTQIK. Kept separate from share volume so the chart cannot
+    # accidentally relabel one measure as the other.
+    trade_value: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,13 +298,13 @@ def parse_taiex_index_history(
 
 def parse_taiex_trading_volumes(
     payload: Mapping[str, Any], *, month: date
-) -> dict[date, tuple[int, Decimal]]:
-    """Volume and the close it belongs to, per trade date, from FMTQIK."""
+) -> dict[date, tuple[int, int, Decimal]]:
+    """Volume, trade value, and their close per trade date from FMTQIK."""
     rows = _month_rows(payload, month)
     if rows is None:
         return {}
     indexes = _field_indexes(payload, TAIEX_TRADING_FIELDS)
-    volumes: dict[date, tuple[int, Decimal]] = {}
+    volumes: dict[date, tuple[int, int, Decimal]] = {}
     for row in rows:
         if not isinstance(row, list):
             raise DataSourceContractError("trading highlights row is not a list")
@@ -313,8 +316,12 @@ def parse_taiex_trading_volumes(
         volume = _parse_int(_cell(row, indexes["Trade Volume"], "Trade Volume"), "Trade Volume")
         if volume < 0:
             raise DataSourceContractError(f"{trade_date} has a negative trade volume")
+        trade_value = _parse_int(_cell(row, indexes["Trade Value"], "Trade Value"), "Trade Value")
+        if trade_value < 0:
+            raise DataSourceContractError(f"{trade_date} has a negative trade value")
         volumes[trade_date] = (
             volume,
+            trade_value,
             _parse_decimal(_cell(row, indexes["TAIEX"], "TAIEX"), "TAIEX"),
         )
     return volumes
@@ -324,7 +331,7 @@ def build_taiex_daily_bars(
     *,
     month: date,
     index_history: Mapping[date, tuple[Decimal, Decimal, Decimal, Decimal]],
-    trading_volumes: Mapping[date, tuple[int, Decimal]],
+    trading_volumes: Mapping[date, tuple[int, int, Decimal]],
     fetched_at: datetime,
 ) -> TaiexDailyBars:
     """Join the two reports on trade date.
@@ -342,9 +349,10 @@ def build_taiex_daily_bars(
         if high < low:
             raise DataSourceContractError(f"{trade_date} has high {high} below low {low}")
         volume: int | None = None
+        trade_value: int | None = None
         published = trading_volumes.get(trade_date)
         if published is not None:
-            volume, reported_close = published
+            volume, trade_value, reported_close = published
             if reported_close != close:
                 raise DataSourceContractError(
                     f"{trade_date} closed at {close} in the index report but "
@@ -358,6 +366,7 @@ def build_taiex_daily_bars(
                 low=low,
                 close=close,
                 volume=volume,
+                trade_value=trade_value,
             )
         )
     return TaiexDailyBars(month=month, items=tuple(items), fetched_at=fetched_at)

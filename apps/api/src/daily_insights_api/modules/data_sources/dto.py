@@ -76,6 +76,7 @@ class DailyBar(ImmutableDTO):
     low: Decimal | None = None
     close: Decimal | None = None
     volume: int | None = None
+    trade_value: int | None = None
     total_ticks: int | None = None
     turnover: Decimal | None = None
     source: str | None = None

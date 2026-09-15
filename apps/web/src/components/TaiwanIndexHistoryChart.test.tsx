@@ -57,6 +57,7 @@ const history: MarketIndexHistory = {
         low: "80",
         close: String([90, 120, 100, 110][i]),
         volume: 100_000_000,
+        trade_value: 50_000_000_000,
       })),
     },
   ],
@@ -78,15 +79,43 @@ const averages: IndexMovingAverageMap = {
       { period: 120, points: [] },
       { period: 240, points: [] },
     ],
+    rsi: {
+      period: 14,
+      method: "wilder",
+      formula_version: "rsi-wilder-close-v1",
+      points: dates.map((trade_date, index) => ({
+        trade_date,
+        value: String(45 + index),
+      })),
+    },
+    macd: {
+      fast_period: 12,
+      slow_period: 26,
+      signal_period: 9,
+      method: "ema",
+      formula_version: "macd-ema-close-v1",
+      points: dates.map((trade_date, index) => ({
+        trade_date,
+        macd: String(index + 1),
+        signal: String(index + 0.5),
+        histogram: "0.5",
+      })),
+    },
+    kd: {
+      lookback_period: 9,
+      k_smoothing_period: 3,
+      d_smoothing_period: 3,
+      method: "smoothed-rsv",
+      formula_version: "stochastic-kd-9-3-3-v1",
+      points: [],
+    },
   },
 }
 function show(ui: React.ReactNode) {
   return render(<I18nextProvider i18n={createI18n("en")}>{ui}</I18nextProvider>)
 }
-function candles() {
-  return screen
-    .getByRole("heading", { name: "Taiwan Weighted Index" })
-    .closest("section")!
+function candles(name = "Taiwan Weighted Index") {
+  return screen.getByRole("heading", { name }).closest("section")!
 }
 
 describe("TaiwanIndexHistoryChart", () => {
@@ -129,7 +158,19 @@ describe("TaiwanIndexHistoryChart", () => {
       '"type":"candlestick"'
     )
     expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
-      '"xAxisIndex":[0,1]'
+      '"xAxisIndex":[0,1,2,3]'
+    )
+    expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
+      '"name":"MACD","type":"line"'
+    )
+    expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
+      '"name":"RSI 14","type":"line"'
+    )
+    expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
+      '"coordinateSystem":"matrix"'
+    )
+    expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
+      '"coord":[[0,0],[0,3]],"mergeCells":true'
     )
     expect(
       within(candles()).queryByText("Last 2 years · daily OHLC")
@@ -177,9 +218,9 @@ describe("TaiwanIndexHistoryChart", () => {
       screen.getByRole("meter", { name: "120MA bias" })
     ).not.toHaveAttribute("aria-valuenow")
   })
-  it("omits missing OHLC rather than filling it with close and preserves null volume", () => {
+  it("uses TWII trade value bars and preserves missing activity", () => {
     const bars = history.series[0]!.bars.map((bar, i) =>
-      i === 0 ? { ...bar, open: null, volume: null } : bar
+      i === 0 ? { ...bar, open: null, trade_value: null } : bar
     )
     show(
       <TaiwanIndexHistoryChart
@@ -193,10 +234,11 @@ describe("TaiwanIndexHistoryChart", () => {
       '"data":[[null,null,null,null],[100,120,80,130]'
     )
     expect(chart).toHaveTextContent('"value":null')
-    expect(chart).toHaveTextContent('"value":1')
-    expect(screen.getAllByText("Volume (100M shares)").length).toBeGreaterThan(
-      0
-    )
+    expect(chart).toHaveTextContent("Trade value (TWD 100M)")
+    expect(chart).toHaveTextContent('"value":500')
+    expect(
+      screen.getAllByText("Trade value (TWD 100M)").length
+    ).toBeGreaterThan(0)
   })
   it("preserves the US symbol selector and partial failures", () => {
     show(
@@ -224,6 +266,19 @@ describe("TaiwanIndexHistoryChart", () => {
         name: "S&P 500 Index — daily candles + MA + volume",
       })
     ).toBeVisible()
+    const chart = within(
+      candles("S&P 500 Index — daily candles + MA + volume")
+    ).getByTestId("index-chart")
+    expect(chart).toHaveTextContent("Volume (100M shares)")
+    expect(chart).toHaveTextContent('"value":1')
+    expect(chart).not.toHaveTextContent("Trade value (TWD 100M)")
+    expect(chart).toHaveTextContent('"coordinateSystem":"matrix"')
+    expect(chart).toHaveTextContent('"coord":[[0,0],[4,5]],"mergeCells":true')
+    expect(chart).toHaveTextContent('"coord":[[0,0],[6,8]],"mergeCells":true')
+    expect(chart).toHaveTextContent('"coord":[[0,0],[9,11]],"mergeCells":true')
+    expect(chart).toHaveTextContent(
+      '"gridIndex":2,"scale":true,"splitNumber":3'
+    )
   })
   it("has explicit loading, failure and empty states", () => {
     show(<TaiwanIndexHistoryLoading />)

@@ -1417,8 +1417,52 @@ export interface components {
        * Format: date
        */
       trade_date: string
+      /** Trade Value */
+      trade_value: number | null
       /** Volume */
       volume: number | null
+    }
+    /** IndexKdPointResponse */
+    IndexKdPointResponse: {
+      /** D */
+      d: string | null
+      /** K */
+      k: string | null
+      /**
+       * Trade Date
+       * Format: date
+       */
+      trade_date: string
+    }
+    /** IndexKdSeriesResponse */
+    IndexKdSeriesResponse: {
+      /**
+       * D Smoothing Period
+       * @constant
+       */
+      d_smoothing_period: 3
+      /**
+       * Formula Version
+       * @constant
+       */
+      formula_version: "stochastic-kd-9-3-3-v1"
+      /**
+       * K Smoothing Period
+       * @constant
+       */
+      k_smoothing_period: 3
+      /**
+       * Lookback Period
+       * @constant
+       */
+      lookback_period: 9
+      /**
+       * Method
+       * @constant
+       */
+      method: "smoothed-rsv"
+      /** Points */
+      points: components["schemas"]["IndexKdPointResponse"][]
     }
     /**
      * IndexLatestBarResponse
@@ -1444,8 +1488,54 @@ export interface components {
        * Format: date
        */
       trade_date: string
+      /** Trade Value */
+      trade_value: number | null
       /** Volume */
       volume: number | null
+    }
+    /** IndexMacdPointResponse */
+    IndexMacdPointResponse: {
+      /** Histogram */
+      histogram: string | null
+      /** Macd */
+      macd: string | null
+      /** Signal */
+      signal: string | null
+      /**
+       * Trade Date
+       * Format: date
+       */
+      trade_date: string
+    }
+    /** IndexMacdSeriesResponse */
+    IndexMacdSeriesResponse: {
+      /**
+       * Fast Period
+       * @constant
+       */
+      fast_period: 12
+      /**
+       * Formula Version
+       * @constant
+       */
+      formula_version: "macd-ema-close-v1"
+      /**
+       * Method
+       * @constant
+       */
+      method: "ema"
+      /** Points */
+      points: components["schemas"]["IndexMacdPointResponse"][]
+      /**
+       * Signal Period
+       * @constant
+       */
+      signal_period: 9
+      /**
+       * Slow Period
+       * @constant
+       */
+      slow_period: 26
     }
     /** IndexMovingAverage120SeriesResponse */
     IndexMovingAverage120SeriesResponse: {
@@ -1499,7 +1589,7 @@ export interface components {
     }
     /**
      * IndexMovingAveragesResponse
-     * @description Read-time simple moving averages of settled daily closing prices.
+     * @description Read-time close-based technical indicators for settled index bars.
      */
     IndexMovingAveragesResponse: {
       /** As Of */
@@ -1509,6 +1599,8 @@ export interface components {
        * @constant
        */
       formula_version: "sma-close-v1"
+      kd: components["schemas"]["IndexKdSeriesResponse"]
+      macd: components["schemas"]["IndexMacdSeriesResponse"]
       /** Market Code */
       market_code: string
       /**
@@ -1521,6 +1613,7 @@ export interface components {
        * @constant
        */
       price_field: "close"
+      rsi: components["schemas"]["IndexRsiSeriesResponse"]
       /** Series */
       series: [
         components["schemas"]["IndexMovingAverage20SeriesResponse"],
@@ -1530,6 +1623,26 @@ export interface components {
       ]
       /** Symbol */
       symbol: string
+    }
+    /** IndexRsiSeriesResponse */
+    IndexRsiSeriesResponse: {
+      /**
+       * Formula Version
+       * @constant
+       */
+      formula_version: "rsi-wilder-close-v1"
+      /**
+       * Method
+       * @constant
+       */
+      method: "wilder"
+      /**
+       * Period
+       * @constant
+       */
+      period: 14
+      /** Points */
+      points: components["schemas"]["IndexMovingAveragePointResponse"][]
     }
     /** IndexYahooRunCreate */
     IndexYahooRunCreate: {
