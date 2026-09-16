@@ -150,6 +150,17 @@ describe("IndexHistoryChart", () => {
     )
     expect(screen.getByRole("combobox")).not.toHaveTextContent("^DJI")
     expect(screen.getByRole("combobox")).not.toHaveTextContent("^GSPC")
+    const summary = screen.getByTestId("index-latest-summary")
+    expect(summary).toHaveTextContent("Close45,050.50—Volume (100M shares)1.00")
+    expect(
+      screen.getByRole("combobox").compareDocumentPosition(summary) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      summary.compareDocumentPosition(screen.getByTestId("index-chart")) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(screen.queryByText("Closing level:")).toBeNull()
 
     fireEvent.change(screen.getByRole("combobox"), {
       target: { value: "^GSPC" },
@@ -158,6 +169,7 @@ describe("IndexHistoryChart", () => {
     expect(screen.getByTestId("index-chart")).toHaveTextContent("6525.25")
     expect(screen.getByTestId("index-chart")).toHaveTextContent('"value":2')
     expect(screen.getByTestId("index-chart")).not.toHaveTextContent("45050.5")
+    expect(summary).toHaveTextContent("Close6,525.25—Volume (100M shares)2.00")
   })
 
   it("has accessible loading and unavailable states", async () => {
@@ -176,6 +188,37 @@ describe("IndexHistoryChart", () => {
       />
     )
     expect(screen.getByRole("status")).toHaveTextContent("no index daily bars")
+  })
+
+  it("shows the latest direction and percentage above the chart", async () => {
+    const latestBar = history.series[0]!.bars[0]!
+    await renderLocalized(
+      <IndexHistoryChart
+        history={{
+          ...history,
+          failedSymbols: [],
+          series: [
+            {
+              ...history.series[0]!,
+              bars: [
+                {
+                  ...latestBar,
+                  trade_date: "2026-09-01",
+                  close: "45000.0",
+                  volume: 50_000_000,
+                },
+                latestBar,
+              ],
+            },
+          ],
+        }}
+        locale="en"
+      />
+    )
+
+    expect(screen.getByTestId("index-latest-summary")).toHaveTextContent(
+      "Close45,050.50▲0.11%Volume (100M shares)1.00"
+    )
   })
 
   it("adds aligned available SMA lines without treating absent averages as a bar failure", async () => {
