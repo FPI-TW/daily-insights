@@ -34,6 +34,9 @@ test("customer login opens reports, then a market detail without mobile overflow
     })
   ).toBeVisible()
   await expect(
+    page.getByRole("heading", { name: /equities news/i })
+  ).toHaveCount(0)
+  await expect(
     page.getByRole("heading", { name: "Today", exact: true })
   ).toHaveCount(0)
   await expect(
@@ -110,6 +113,30 @@ test("US market renders a responsive VIX chart with MACD and KD", async ({
   await expect(
     page.getByRole("heading", { name: "Index performance", exact: true })
   ).toBeVisible()
+  const newsHeading = page.getByRole("heading", {
+    name: "US equities news",
+    exact: true,
+  })
+  const viewpointHeading = page.getByRole("heading", {
+    name: "Analyst viewpoint",
+    exact: true,
+  })
+  const marketHeading = page.getByRole("heading", {
+    name: "US five-index performance",
+    exact: true,
+  })
+  await expect(newsHeading).toBeVisible()
+  await expect(viewpointHeading).toBeVisible()
+  const [newsBox, viewpointBox, marketBox] = await Promise.all([
+    newsHeading.boundingBox(),
+    viewpointHeading.boundingBox(),
+    marketHeading.boundingBox(),
+  ])
+  expect(newsBox).not.toBeNull()
+  expect(viewpointBox).not.toBeNull()
+  expect(marketBox).not.toBeNull()
+  expect(newsBox!.y).toBeLessThan(viewpointBox!.y)
+  expect(viewpointBox!.y).toBeLessThan(marketBox!.y)
   const indexPanel = page
     .getByRole("heading", { name: "Index performance", exact: true })
     .locator("xpath=ancestor::section[1]")
@@ -159,16 +186,49 @@ test("US market renders a responsive VIX chart with MACD and KD", async ({
     .toBe(true)
 })
 
-for (const [locale, heading, cumulative, foreign, days60, bias] of [
-  ["zh-hant", "三大法人每日買賣超", "累積", "外資", "近 60 日", "台股乖離率"],
-  ["zh-hans", "三大法人每日买卖超", "累积", "外资", "近 60 日", "台股乖离率"],
+for (const [
+  locale,
+  heading,
+  cumulative,
+  foreign,
+  days60,
+  indexTitle,
+  bias,
+  newsTitle,
+  viewpointTitle,
+] of [
+  [
+    "zh-hant",
+    "三大法人每日買賣超",
+    "累積",
+    "外資",
+    "近 60 日",
+    "台灣加權指數",
+    "台股乖離率",
+    "台股重點新聞",
+    "分析師觀點",
+  ],
+  [
+    "zh-hans",
+    "三大法人每日买卖超",
+    "累积",
+    "外资",
+    "近 60 日",
+    "台湾加权指数",
+    "台股乖离率",
+    "台股重点新闻",
+    "分析师观点",
+  ],
   [
     "en",
     "Daily institutional net buying",
     "Cumulative",
     "Foreign",
     "Last 60d",
+    "Taiwan Weighted Index",
     "TAIEX bias",
+    "Taiwan equities news",
+    "Analyst viewpoint",
   ],
 ] as const) {
   test(`Taiwan institutional flows render correctly in ${locale}`, async ({
@@ -216,14 +276,38 @@ for (const [locale, heading, cumulative, foreign, days60, bias] of [
     await expect(section.getByText(/layout placeholder|版面示意/)).toHaveCount(
       0
     )
-    // The institutional panels read before the bias chart.
+    const newsHeading = page.getByRole("heading", {
+      name: newsTitle,
+      exact: true,
+    })
+    const viewpointHeading = page.getByRole("heading", {
+      name: viewpointTitle,
+      exact: true,
+    })
+    const indexHeading = page.getByRole("heading", {
+      name: indexTitle,
+      exact: true,
+    })
     const biasHeading = page.getByRole("heading", { name: bias, exact: true })
+    await expect(newsHeading).toBeVisible()
+    await expect(viewpointHeading).toBeVisible()
+    await expect(indexHeading).toBeVisible()
     await expect(biasHeading).toBeVisible()
-    const sectionBox = await section.boundingBox()
-    const biasBox = await biasHeading.boundingBox()
-    expect(sectionBox).not.toBeNull()
-    expect(biasBox).not.toBeNull()
-    expect(sectionBox!.y).toBeLessThan(biasBox!.y)
+    const [newsBox, viewpointBox, indexBox, biasBox, sectionBox] =
+      await Promise.all([
+        newsHeading.boundingBox(),
+        viewpointHeading.boundingBox(),
+        indexHeading.boundingBox(),
+        biasHeading.boundingBox(),
+        section.boundingBox(),
+      ])
+    for (const box of [newsBox, viewpointBox, indexBox, biasBox, sectionBox]) {
+      expect(box).not.toBeNull()
+    }
+    expect(newsBox!.y).toBeLessThan(viewpointBox!.y)
+    expect(viewpointBox!.y).toBeLessThan(indexBox!.y)
+    expect(indexBox!.y).toBeLessThan(biasBox!.y)
+    expect(biasBox!.y).toBeLessThan(sectionBox!.y)
     await page.setViewportSize({ width: 375, height: 720 })
     await expect
       .poll(() =>

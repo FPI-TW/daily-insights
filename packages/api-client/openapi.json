@@ -876,6 +876,14 @@
             "title": "News Markets",
             "type": "array"
           },
+          "rerunnable_providers": {
+            "items": {
+              "enum": ["twelve_data", "yahoo_finance", "twse"],
+              "type": "string"
+            },
+            "title": "Rerunnable Providers",
+            "type": "array"
+          },
           "taipei_date": {
             "format": "date",
             "title": "Taipei Date",
@@ -896,6 +904,7 @@
           "yfinance_enabled",
           "twse_enabled",
           "markets",
+          "rerunnable_providers",
           "daily_news_enabled",
           "news_markets",
           "macro_dashboard_enabled"
@@ -905,7 +914,7 @@
       },
       "DataManagementRunList": {
         "properties": {
-          "items": {
+          "active_runs": {
             "items": {
               "discriminator": {
                 "mapping": {
@@ -916,7 +925,8 @@
                   "morning_market": "#/components/schemas/MorningMarketRunResponse",
                   "news_all": "#/components/schemas/NewsAllRunResponse",
                   "news_market": "#/components/schemas/NewsMarketRunResponse",
-                  "news_publish": "#/components/schemas/NewsPublishRunResponse"
+                  "news_publish": "#/components/schemas/NewsPublishRunResponse",
+                  "provider_rerun": "#/components/schemas/ProviderRerunResponse"
                 },
                 "propertyName": "operation"
               },
@@ -944,14 +954,142 @@
                 },
                 {
                   "$ref": "#/components/schemas/MacroDashboardRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/ProviderRerunResponse"
+                }
+              ]
+            },
+            "title": "Active Runs",
+            "type": "array"
+          },
+          "current_day_runs": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
+                  "institutional_twse": "#/components/schemas/InstitutionalTwseRunResponse",
+                  "macro_dashboard": "#/components/schemas/MacroDashboardRunResponse",
+                  "morning_all": "#/components/schemas/MorningAllRunResponse",
+                  "morning_market": "#/components/schemas/MorningMarketRunResponse",
+                  "news_all": "#/components/schemas/NewsAllRunResponse",
+                  "news_market": "#/components/schemas/NewsMarketRunResponse",
+                  "news_publish": "#/components/schemas/NewsPublishRunResponse",
+                  "provider_rerun": "#/components/schemas/ProviderRerunResponse"
+                },
+                "propertyName": "operation"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/MorningAllRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/MorningMarketRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/IndexYahooRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/InstitutionalTwseRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/NewsAllRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/NewsMarketRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/NewsPublishRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/MacroDashboardRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/ProviderRerunResponse"
+                }
+              ]
+            },
+            "title": "Current Day Runs",
+            "type": "array"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
+                  "institutional_twse": "#/components/schemas/InstitutionalTwseRunResponse",
+                  "macro_dashboard": "#/components/schemas/MacroDashboardRunResponse",
+                  "morning_all": "#/components/schemas/MorningAllRunResponse",
+                  "morning_market": "#/components/schemas/MorningMarketRunResponse",
+                  "news_all": "#/components/schemas/NewsAllRunResponse",
+                  "news_market": "#/components/schemas/NewsMarketRunResponse",
+                  "news_publish": "#/components/schemas/NewsPublishRunResponse",
+                  "provider_rerun": "#/components/schemas/ProviderRerunResponse"
+                },
+                "propertyName": "operation"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/MorningAllRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/MorningMarketRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/IndexYahooRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/InstitutionalTwseRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/NewsAllRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/NewsMarketRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/NewsPublishRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/MacroDashboardRunResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/ProviderRerunResponse"
                 }
               ]
             },
             "title": "Items",
             "type": "array"
+          },
+          "page": {
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "const": 10,
+            "default": 10,
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
           }
         },
-        "required": ["items"],
+        "required": [
+          "items",
+          "page",
+          "total",
+          "has_more",
+          "active_runs",
+          "current_day_runs"
+        ],
         "title": "DataManagementRunList",
         "type": "object"
       },
@@ -1711,23 +1849,6 @@
         "title": "IndexRsiSeriesResponse",
         "type": "object"
       },
-      "IndexYahooRunCreate": {
-        "additionalProperties": false,
-        "properties": {
-          "market_code": {
-            "title": "Market Code",
-            "type": "null"
-          },
-          "operation": {
-            "const": "index_yahoo",
-            "title": "Operation",
-            "type": "string"
-          }
-        },
-        "required": ["operation"],
-        "title": "IndexYahooRunCreate",
-        "type": "object"
-      },
       "IndexYahooRunResponse": {
         "properties": {
           "completed_at": {
@@ -2040,24 +2161,6 @@
           "rows"
         ],
         "title": "InstitutionalStocksResponse",
-        "type": "object"
-      },
-      "InstitutionalTwseRunCreate": {
-        "additionalProperties": false,
-        "description": "Fetch TWSE institutional flows: per-stock for the edition date, market\ntotals back to a rolling window of trading days.",
-        "properties": {
-          "market_code": {
-            "title": "Market Code",
-            "type": "null"
-          },
-          "operation": {
-            "const": "institutional_twse",
-            "title": "Operation",
-            "type": "string"
-          }
-        },
-        "required": ["operation"],
-        "title": "InstitutionalTwseRunCreate",
         "type": "object"
       },
       "InstitutionalTwseRunResponse": {
@@ -3088,24 +3191,6 @@
           "market_code"
         ],
         "title": "MorningAllRunResponse",
-        "type": "object"
-      },
-      "MorningMarketRunCreate": {
-        "additionalProperties": false,
-        "properties": {
-          "market_code": {
-            "enum": ["global_macro_bonds", "crypto", "us_equity"],
-            "title": "Market Code",
-            "type": "string"
-          },
-          "operation": {
-            "const": "morning_market",
-            "title": "Operation",
-            "type": "string"
-          }
-        },
-        "required": ["operation", "market_code"],
-        "title": "MorningMarketRunCreate",
         "type": "object"
       },
       "MorningMarketRunResponse": {
@@ -5395,6 +5480,181 @@
         "title": "PresentationContract",
         "type": "object"
       },
+      "ProviderRerunCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "provider_rerun",
+            "title": "Operation",
+            "type": "string"
+          },
+          "provider": {
+            "enum": ["twelve_data", "yahoo_finance", "twse"],
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": ["operation", "provider"],
+        "title": "ProviderRerunCreate",
+        "type": "object"
+      },
+      "ProviderRerunResponse": {
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "market_code": {
+            "title": "Market Code",
+            "type": "null"
+          },
+          "news": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/NewsProgress"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "News"
+          },
+          "operation": {
+            "const": "provider_rerun",
+            "title": "Operation",
+            "type": "string"
+          },
+          "provider": {
+            "enum": ["twelve_data", "yahoo_finance", "twse"],
+            "title": "Provider",
+            "type": "string"
+          },
+          "requested_by_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By User Id"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "scheduled_for": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled For"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "succeeded",
+              "partial",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "edition_date",
+          "status",
+          "requested_by_user_id",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "result",
+          "error",
+          "operation",
+          "provider"
+        ],
+        "title": "ProviderRerunResponse",
+        "type": "object"
+      },
       "ProvisionedInternalUserResponse": {
         "properties": {
           "display_name": {
@@ -6623,13 +6883,12 @@
         "parameters": [
           {
             "in": "query",
-            "name": "limit",
+            "name": "page",
             "required": false,
             "schema": {
-              "default": 20,
-              "maximum": 20,
+              "default": 1,
               "minimum": 1,
-              "title": "Limit",
+              "title": "Page",
               "type": "integer"
             }
           },
@@ -6702,28 +6961,17 @@
               "schema": {
                 "discriminator": {
                   "mapping": {
-                    "index_yahoo": "#/components/schemas/IndexYahooRunCreate",
-                    "institutional_twse": "#/components/schemas/InstitutionalTwseRunCreate",
                     "macro_dashboard": "#/components/schemas/MacroDashboardRunCreate",
                     "morning_all": "#/components/schemas/MorningAllRunCreate",
-                    "morning_market": "#/components/schemas/MorningMarketRunCreate",
                     "news_all": "#/components/schemas/NewsAllRunCreate",
-                    "news_market": "#/components/schemas/NewsMarketRunCreate"
+                    "news_market": "#/components/schemas/NewsMarketRunCreate",
+                    "provider_rerun": "#/components/schemas/ProviderRerunCreate"
                   },
                   "propertyName": "operation"
                 },
                 "oneOf": [
                   {
                     "$ref": "#/components/schemas/MorningAllRunCreate"
-                  },
-                  {
-                    "$ref": "#/components/schemas/MorningMarketRunCreate"
-                  },
-                  {
-                    "$ref": "#/components/schemas/IndexYahooRunCreate"
-                  },
-                  {
-                    "$ref": "#/components/schemas/InstitutionalTwseRunCreate"
                   },
                   {
                     "$ref": "#/components/schemas/NewsAllRunCreate"
@@ -6733,6 +6981,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/MacroDashboardRunCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ProviderRerunCreate"
                   }
                 ],
                 "title": "Payload"
@@ -6755,7 +7006,8 @@
                       "morning_market": "#/components/schemas/MorningMarketRunResponse",
                       "news_all": "#/components/schemas/NewsAllRunResponse",
                       "news_market": "#/components/schemas/NewsMarketRunResponse",
-                      "news_publish": "#/components/schemas/NewsPublishRunResponse"
+                      "news_publish": "#/components/schemas/NewsPublishRunResponse",
+                      "provider_rerun": "#/components/schemas/ProviderRerunResponse"
                     },
                     "propertyName": "operation"
                   },
@@ -6783,6 +7035,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/MacroDashboardRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ProviderRerunResponse"
                     }
                   ],
                   "title": "Response Create Run Api Admin Data Management Runs Post"
@@ -6840,7 +7095,8 @@
                       "morning_market": "#/components/schemas/MorningMarketRunResponse",
                       "news_all": "#/components/schemas/NewsAllRunResponse",
                       "news_market": "#/components/schemas/NewsMarketRunResponse",
-                      "news_publish": "#/components/schemas/NewsPublishRunResponse"
+                      "news_publish": "#/components/schemas/NewsPublishRunResponse",
+                      "provider_rerun": "#/components/schemas/ProviderRerunResponse"
                     },
                     "propertyName": "operation"
                   },
@@ -6868,6 +7124,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/MacroDashboardRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ProviderRerunResponse"
                     }
                   ],
                   "title": "Response Get Run Api Admin Data Management Runs  Run Id  Get"
@@ -6935,7 +7194,8 @@
                       "morning_market": "#/components/schemas/MorningMarketRunResponse",
                       "news_all": "#/components/schemas/NewsAllRunResponse",
                       "news_market": "#/components/schemas/NewsMarketRunResponse",
-                      "news_publish": "#/components/schemas/NewsPublishRunResponse"
+                      "news_publish": "#/components/schemas/NewsPublishRunResponse",
+                      "provider_rerun": "#/components/schemas/ProviderRerunResponse"
                     },
                     "propertyName": "operation"
                   },
@@ -6963,6 +7223,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/MacroDashboardRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ProviderRerunResponse"
                     }
                   ],
                   "title": "Response Cancel Existing Run Api Admin Data Management Runs  Run Id  Cancel Post"
@@ -7043,7 +7306,8 @@
                       "morning_market": "#/components/schemas/MorningMarketRunResponse",
                       "news_all": "#/components/schemas/NewsAllRunResponse",
                       "news_market": "#/components/schemas/NewsMarketRunResponse",
-                      "news_publish": "#/components/schemas/NewsPublishRunResponse"
+                      "news_publish": "#/components/schemas/NewsPublishRunResponse",
+                      "provider_rerun": "#/components/schemas/ProviderRerunResponse"
                     },
                     "propertyName": "operation"
                   },
@@ -7071,6 +7335,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/MacroDashboardRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ProviderRerunResponse"
                     }
                   ],
                   "title": "Response Resume Run Api Admin Data Management Runs  Run Id  Resume Post"
@@ -7276,7 +7543,8 @@
                       "morning_market": "#/components/schemas/MorningMarketRunResponse",
                       "news_all": "#/components/schemas/NewsAllRunResponse",
                       "news_market": "#/components/schemas/NewsMarketRunResponse",
-                      "news_publish": "#/components/schemas/NewsPublishRunResponse"
+                      "news_publish": "#/components/schemas/NewsPublishRunResponse",
+                      "provider_rerun": "#/components/schemas/ProviderRerunResponse"
                     },
                     "propertyName": "operation"
                   },
@@ -7304,6 +7572,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/MacroDashboardRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ProviderRerunResponse"
                     }
                   ],
                   "title": "Response Publish Candidates Api Admin News Candidates Publish Post"

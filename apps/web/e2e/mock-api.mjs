@@ -501,7 +501,61 @@ const server = createServer(async (request, response) => {
   ) {
     const role = requireRole(request, response, reportViewerRoles)
     if (!role) return
-    sendJson(response, 200, [])
+    sendJson(response, 200, [
+      {
+        viewpoint_date: "2026-08-30",
+        market_code: "us_equity",
+        source_market_code: "us_stocks",
+        points: ["US stocks advanced on broad-based buying."],
+        fetched_at: "2026-08-30T08:00:00+08:00",
+      },
+      {
+        viewpoint_date: "2026-08-30",
+        market_code: "tw_equity",
+        source_market_code: "tw_stocks",
+        points: ["Taiwan stocks tracked semiconductor demand."],
+        fetched_at: "2026-08-30T08:00:00+08:00",
+      },
+    ])
+    return
+  }
+
+  const marketNewsMatch = /^\/api\/news\/(tw_equity|us_equity)\/latest$/.exec(
+    url.pathname
+  )
+  if (marketNewsMatch && request.method === "GET") {
+    const role = requireRole(request, response, reportViewerRoles)
+    if (!role) return
+    const marketCode = marketNewsMatch[1]
+    const locale = url.searchParams.get("locale") || "zh-hant"
+    sendJson(response, 200, {
+      market_code: marketCode,
+      target_items: 5,
+      edition_id: "20000000-0000-4000-8000-000000000001",
+      edition_date: "2026-08-30",
+      revision: 1,
+      generated_at: "2026-08-30T07:30:00+08:00",
+      status: "complete",
+      locale,
+      caveat: null,
+      items: [
+        {
+          id: "30000000-0000-4000-8000-000000000001",
+          rank: 1,
+          importance: 4,
+          topic: "markets",
+          headline: "Markets respond to the latest economic signals",
+          summary: "Investors assessed new data before the opening bell.",
+          source_name: "Example Wire",
+          source_hostname: "example.com",
+          source_url: "https://example.com/markets",
+          source_published_at: "2026-08-30T06:30:00+08:00",
+          numeric_facts: [],
+          market: marketCode === "tw_equity" ? "taiwan" : "us",
+          event_key: "market-open",
+        },
+      ],
+    })
     return
   }
 

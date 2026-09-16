@@ -123,12 +123,22 @@ describe("API client trust boundary", () => {
   })
 
   it("requests the server-filtered news run history", async () => {
-    const transport = vi.fn().mockResolvedValue(Response.json({ items: [] }))
+    const transport = vi.fn().mockResolvedValue(
+      Response.json({
+        items: [],
+        page: 1,
+        page_size: 10,
+        total: 0,
+        has_more: false,
+        active_runs: [],
+        current_day_runs: [],
+      })
+    )
 
     await createAdministrationClient(transport).listNewsDataManagementRuns()
 
     expect(transport).toHaveBeenCalledWith(
-      "/api/admin/data-management/runs?limit=20&operation_group=news"
+      "/api/admin/data-management/runs?page=1&operation_group=news"
     )
   })
 
@@ -260,6 +270,117 @@ describe("API client trust boundary", () => {
       dataManagementRunCreateSchema.safeParse({ operation: "news_publish" })
         .success
     ).toBe(false)
+  })
+
+  it.each(["twelve_data", "yahoo_finance", "twse"] as const)(
+    "validates the %s provider rerun contract",
+    provider => {
+      const base = {
+        id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
+        edition_date: "2026-09-15",
+        status: "pending",
+        requested_by_user_id: "9322a09a-6a02-421b-a966-a5cd5f44056e",
+        created_at: "2026-09-15T00:00:00Z",
+        started_at: null,
+        completed_at: null,
+        result: null,
+        error: null,
+      }
+      expect(
+        dataManagementRunCreateSchema.safeParse({
+          operation: "provider_rerun",
+          provider,
+        }).success
+      ).toBe(true)
+      expect(
+        dataManagementRunSchema.safeParse({
+          ...base,
+          operation: "provider_rerun",
+          provider,
+          market_code: null,
+        }).success
+      ).toBe(true)
+    }
+  )
+
+  it("creates, lists, and cancels provider reruns through the runtime client", async () => {
+    const run = {
+      id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
+      edition_date: "2026-09-15",
+      status: "pending",
+      requested_by_user_id: "9322a09a-6a02-421b-a966-a5cd5f44056e",
+      created_at: "2026-09-15T00:00:00Z",
+      started_at: null,
+      completed_at: null,
+      result: null,
+      error: null,
+      operation: "provider_rerun",
+      provider: "twse",
+      market_code: null,
+    }
+    const transport = vi.fn(async (path: string, _init?: RequestInit) =>
+      Response.json(
+        path.includes("?page=")
+          ? {
+              items: [run],
+              page: 1,
+              page_size: 10,
+              total: 1,
+              has_more: false,
+              active_runs: [run],
+              current_day_runs: [],
+            }
+          : run,
+        { status: path.includes("?page=") ? 200 : 202 }
+      )
+    )
+    const client = createAdministrationClient(transport)
+
+    await expect(
+      client.createDataManagementRun(
+        { operation: "provider_rerun", provider: "twse" },
+        "csrf-token"
+      )
+    ).resolves.toMatchObject({ provider: "twse" })
+    await expect(client.listDataManagementRuns()).resolves.toMatchObject({
+      page_size: 10,
+      items: [{ provider: "twse" }],
+    })
+    await expect(
+      client.cancelDataManagementRun(run.id, "csrf-token")
+    ).resolves.toMatchObject({ provider: "twse" })
+    expect(JSON.parse(String(transport.mock.calls[0]?.[1]?.body))).toEqual({
+      operation: "provider_rerun",
+      provider: "twse",
+    })
+  })
+
+  it("accepts paginated run responses from before active context fields", async () => {
+    const transport = vi.fn(async () =>
+      Response.json({
+        items: [],
+        page: 1,
+        page_size: 10,
+        total: 0,
+        has_more: false,
+      })
+    )
+    const client = createAdministrationClient(transport)
+
+    await expect(client.listDataManagementRuns()).resolves.toEqual({
+      items: [],
+      page: 1,
+      page_size: 10,
+      total: 0,
+      has_more: false,
+    })
+    await expect(client.listNewsDataManagementRuns()).resolves.toEqual({
+      items: [],
+      page: 1,
+      page_size: 10,
+      total: 0,
+      has_more: false,
+    })
   })
 
   it("uses same-origin credentials in the browser", async () => {

@@ -1,5 +1,7 @@
 import asyncio
 from argparse import Namespace
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path as FileSystemPath
 from typing import cast
@@ -28,6 +30,11 @@ from daily_insights_api.scripts.run_morning_reports import (
     run_scheduled_morning_report_edition,
     run_with_heartbeat,
 )
+
+
+@asynccontextmanager
+async def _unlocked_provider(_: object) -> AsyncIterator[None]:
+    yield
 
 
 def test_due_edition_uses_taipei_day_boundary() -> None:
@@ -156,6 +163,7 @@ async def test_scheduled_restart_skips_all_published_markets_before_provider_wor
         raise AssertionError("provider-backed report generation must not run")
 
     monkeypatch.setattr(run_morning_reports, "unpublished_morning_report_markets", all_published)
+    monkeypatch.setattr(run_morning_reports, "_provider_execution_lock", _unlocked_provider)
     monkeypatch.setattr(
         run_morning_reports, "run_scheduled_morning_report_markets", provider_must_not_run
     )
@@ -202,6 +210,7 @@ async def test_scheduled_restart_processes_only_missing_markets(
         return ("crypto",)
 
     monkeypatch.setattr(run_morning_reports, "unpublished_morning_report_markets", missing_subset)
+    monkeypatch.setattr(run_morning_reports, "_provider_execution_lock", _unlocked_provider)
     monkeypatch.setattr(run_morning_reports, "run_scheduled_morning_report_markets", record_run)
     monkeypatch.setattr(
         run_morning_reports,
@@ -233,6 +242,7 @@ async def test_manual_once_path_bypasses_durable_publication_guard(
         calls.append(edition)
 
     monkeypatch.setattr(run_morning_reports, "unpublished_morning_report_markets", unexpected_guard)
+    monkeypatch.setattr(run_morning_reports, "_provider_execution_lock", _unlocked_provider)
     monkeypatch.setattr(run_morning_reports, "run_morning_report_edition", record_run)
 
     outcome = await run_manual_morning_report_edition(

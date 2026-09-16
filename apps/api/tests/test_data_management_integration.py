@@ -3,10 +3,13 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
+from typing import cast
 from zoneinfo import ZoneInfo
 
 import pytest
 import pytest_asyncio
+from anyio import Path as AsyncPath
 from conftest import remigrate_database
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select, update
@@ -21,6 +24,7 @@ from daily_insights_api.modules.data_management import service as data_managemen
 from daily_insights_api.modules.data_management.models import DataManagementRun
 from daily_insights_api.modules.data_management.service import (
     MACRO_EXECUTION_LOCK_KEY,
+    TWELVE_DATA_EXECUTION_LOCK_KEY,
     RunAlreadyActiveError,
     cancel_run,
     claim_next_run,
@@ -35,6 +39,7 @@ from daily_insights_api.modules.data_management.service import (
     resume_news_run,
     worker_loop,
 )
+from daily_insights_api.modules.data_sources.api import TwelveDataAdapter
 from daily_insights_api.modules.identity.api import (
     AuthContext,
     require_csrf,
@@ -53,9 +58,236 @@ from daily_insights_api.modules.news.models import (
     NewsItem,
     NewsPresentation,
 )
+from daily_insights_api.scripts import run_institutional_flows, run_morning_reports
 from daily_insights_api.web.app import create_app
 
 pytestmark = pytest.mark.integration
+
+
+async def test_same_edition_twse_lookup_ignores_newer_terminal_history(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    edition = date(2026, 9, 15)
+    active = DataManagementRun(
+        operation="provider_rerun",
+        market_code="twse",
+        edition_date=edition,
+        status="running",
+        created_at=datetime(2026, 9, 15, 8, tzinfo=UTC),
+    )
+    newer_terminal = DataManagementRun(
+        operation="institutional_twse",
+        market_code=None,
+        edition_date=edition,
+        status="failed",
+        created_at=datetime(2026, 9, 15, 9, tzinfo=UTC),
+    )
+    async with data_management_database.begin() as database:
+        database.add_all((active, newer_terminal))
+
+    observed = await run_institutional_flows._same_edition_run(data_management_database, edition)
+
+    assert observed == (active.id, True)
+
+
+async def test_provider_enqueue_order_resolves_without_deadlock(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(data_management_database)
+
+    async def automatic_twse() -> DataManagementRun:
+        async with data_management_database() as database:
+            return await enqueue_run(
+                database,
+                operation="institutional_twse",
+                market_code=None,
+                requester_id=None,
+                request_id=None,
+            )
+
+    async def manual_twse() -> DataManagementRun | RunAlreadyActiveError:
+        try:
+            async with data_management_database() as database:
+                return await enqueue_run(
+                    database,
+                    operation="provider_rerun",
+                    market_code="twse",
+                    requester_id=user.id,
+                    request_id="manual-twse",
+                )
+        except RunAlreadyActiveError as error:
+            return error
+
+    automatic, manual = await asyncio.wait_for(
+        asyncio.gather(automatic_twse(), manual_twse()), timeout=5
+    )
+    assert isinstance(automatic, DataManagementRun)
+    assert isinstance(manual, (DataManagementRun, RunAlreadyActiveError))
+
+
+async def test_automatic_twse_reuses_full_run_only_when_twse_succeeded(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    edition = date(2026, 9, 15)
+    full = DataManagementRun(
+        operation="morning_all",
+        market_code=None,
+        edition_date=edition,
+        status="partial",
+        result={
+            "providers": {
+                "twelve_data": {"status": "failed"},
+                "yahoo_finance": {"status": "succeeded"},
+                "twse": {"status": "succeeded"},
+            }
+        },
+    )
+    async with data_management_database.begin() as database:
+        database.add(full)
+    async with data_management_database() as database:
+        observed = await enqueue_run(
+            database,
+            operation="institutional_twse",
+            market_code=None,
+            requester_id=None,
+            request_id=None,
+            edition_date=edition,
+        )
+    assert observed.id == full.id
+
+    failed_edition = date(2026, 9, 16)
+    failed_full = DataManagementRun(
+        operation="morning_all",
+        market_code=None,
+        edition_date=failed_edition,
+        status="partial",
+        result={"providers": {"twse": {"status": "failed"}}},
+    )
+    async with data_management_database.begin() as database:
+        database.add(failed_full)
+    async with data_management_database() as database:
+        retry = await enqueue_run(
+            database,
+            operation="institutional_twse",
+            market_code=None,
+            requester_id=None,
+            request_id=None,
+            edition_date=failed_edition,
+        )
+    assert retry.id != failed_full.id
+    assert retry.operation == "institutional_twse"
+
+
+async def test_automatic_twse_observes_active_work_before_terminal_success(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(data_management_database)
+    edition = date(2026, 9, 15)
+    completed_full = DataManagementRun(
+        operation="morning_all",
+        market_code=None,
+        edition_date=edition,
+        status="succeeded",
+        result={"providers": {"twse": {"status": "succeeded"}}},
+        created_at=datetime(2026, 9, 15, 8, tzinfo=UTC),
+    )
+    active_twse = DataManagementRun(
+        operation="provider_rerun",
+        market_code="twse",
+        edition_date=edition,
+        status="running",
+        requested_by_user_id=user.id,
+        created_at=datetime(2026, 9, 15, 9, tzinfo=UTC),
+    )
+    async with data_management_database.begin() as database:
+        database.add_all((completed_full, active_twse))
+
+    async with data_management_database() as database:
+        observed = await enqueue_run(
+            database,
+            operation="institutional_twse",
+            market_code=None,
+            requester_id=None,
+            request_id=None,
+            edition_date=edition,
+        )
+
+    assert observed.id == active_twse.id
+
+
+async def test_automatic_twse_waits_for_cancelled_manual_lease_before_retry(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(data_management_database)
+    edition = date(2026, 9, 15)
+    cancelled = DataManagementRun(
+        operation="provider_rerun",
+        market_code="twse",
+        edition_date=edition,
+        status="cancelled",
+        requested_by_user_id=user.id,
+        lease_owner="worker-1",
+        completed_at=datetime.now(UTC),
+        error="cancelled_by_admin",
+    )
+    async with data_management_database.begin() as database:
+        database.add(cancelled)
+
+    async def release_lease(_: float) -> None:
+        async with data_management_database.begin() as database:
+            await database.execute(
+                update(DataManagementRun)
+                .where(DataManagementRun.id == cancelled.id)
+                .values(lease_owner=None, lease_expires_at=None)
+            )
+
+    outcome = await run_institutional_flows.queue_run(
+        data_management_database,
+        run_date=edition + timedelta(days=1),
+        sleep=release_lease,
+        poll_seconds=0.01,
+        timeout_seconds=1,
+    )
+
+    assert outcome == "failed"
+
+
+async def test_scheduled_morning_waits_for_provider_execution_lock(
+    data_management_database: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    provider_started = asyncio.Event()
+
+    async def missing(*_: object) -> tuple[str, ...]:
+        return ("crypto",)
+
+    async def execute(*_: object) -> tuple[()]:
+        provider_started.set()
+        return ()
+
+    monkeypatch.setattr(run_morning_reports, "unpublished_morning_report_markets", missing)
+    monkeypatch.setattr(run_morning_reports, "run_scheduled_morning_report_markets", execute)
+    heartbeat = AsyncPath(str(tmp_path) + "/morning-heartbeat")
+    lock_session = data_management_database()
+    await lock_session.execute(select(func.pg_advisory_lock(TWELVE_DATA_EXECUTION_LOCK_KEY)))
+    scheduled = asyncio.create_task(
+        run_morning_reports.run_scheduled_morning_report_edition(
+            data_management_database,
+            cast(TwelveDataAdapter, object()),
+            date(2026, 9, 15),
+            heartbeat,
+        )
+    )
+    try:
+        await asyncio.sleep(0.1)
+        assert not provider_started.is_set()
+    finally:
+        await lock_session.execute(select(func.pg_advisory_unlock(TWELVE_DATA_EXECUTION_LOCK_KEY)))
+        await lock_session.rollback()
+        await lock_session.close()
+    await asyncio.wait_for(scheduled, timeout=5)
+    assert provider_started.is_set()
 
 
 async def test_concurrent_resume_creates_one_probe_and_cancel_revokes_it(
@@ -203,7 +435,7 @@ def _admin_client(
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-async def test_enqueue_partial_indexes_allow_index_but_reject_second_morning(
+async def test_full_morning_conflicts_with_every_legacy_provider_operation(
     data_management_database: async_sessionmaker[AsyncSession],
 ) -> None:
     user = await _admin(data_management_database)
@@ -225,14 +457,14 @@ async def test_enqueue_partial_indexes_allow_index_but_reject_second_morning(
                 request_id="b",
             )
     async with data_management_database() as database:
-        index = await enqueue_run(
-            database,
-            operation="index_yahoo",
-            market_code=None,
-            requester_id=user.id,
-            request_id="c",
-        )
-    assert index.operation == "index_yahoo"
+        with pytest.raises(RunAlreadyActiveError):
+            await enqueue_run(
+                database,
+                operation="index_yahoo",
+                market_code=None,
+                requester_id=user.id,
+                request_id="c",
+            )
 
 
 async def test_a_scheduled_run_is_stored_without_a_requester_and_still_locks_its_class(
@@ -1030,6 +1262,32 @@ async def test_expired_live_execution_lock_is_not_reclaimed_until_worker_session
     assert provider_calls == [queued.id]
 
 
+async def test_expired_cancelled_lease_is_released_after_worker_death(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    now = datetime.now(UTC)
+    user = await _admin(data_management_database)
+    run = DataManagementRun(
+        operation="provider_rerun",
+        market_code="yahoo_finance",
+        edition_date=now.date(),
+        status="cancelled",
+        requested_by_user_id=user.id,
+        completed_at=now - timedelta(minutes=11),
+        lease_owner="dead-worker",
+        lease_expires_at=now - timedelta(minutes=1),
+    )
+    async with data_management_database.begin() as database:
+        database.add(run)
+
+    assert await claim_next_run(data_management_database, "recovery-worker", now=now) is None
+    async with data_management_database() as database:
+        recovered = await database.get(DataManagementRun, run.id)
+    assert recovered is not None
+    assert recovered.status == "cancelled"
+    assert recovered.lease_owner is None and recovered.lease_expires_at is None
+
+
 async def test_admin_api_enqueues_lists_gets_conflicts_and_audits(
     data_management_database: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -1040,23 +1298,22 @@ async def test_admin_api_enqueues_lists_gets_conflicts_and_audits(
             "/api/admin/data-management/runs", json={"operation": "morning_all"}
         )
         listed = await client.get("/api/admin/data-management/runs")
-        duplicate = await client.post(
+        legacy_morning = await client.post(
             "/api/admin/data-management/runs",
             json={"operation": "morning_market", "market_code": "crypto"},
         )
-        macro = await client.post(
+        taiwan = await client.post(
             "/api/admin/data-management/runs",
-            json={"operation": "morning_market", "market_code": "global_macro_bonds"},
+            json={"operation": "provider_rerun", "provider": "twse"},
         )
         fetched = await client.get(f"/api/admin/data-management/runs/{created.json()['id']}")
 
     assert catalog.status_code == 200
     assert created.status_code == 202, created.text
     assert listed.status_code == 200 and len(listed.json()["items"]) == 1
-    assert duplicate.status_code == 409
-    assert macro.status_code == 202
-    assert macro.json()["operation"] == "macro_dashboard"
-    assert macro.json()["market_code"] is None
+    assert legacy_morning.status_code == 422
+    # The full run owns all provider families until it becomes terminal.
+    assert taiwan.status_code == 409, taiwan.text
     assert fetched.status_code == 200 and fetched.json()["operation"] == "morning_all"
     async with data_management_database() as database:
         actions = list(
@@ -1067,7 +1324,7 @@ async def test_admin_api_enqueues_lists_gets_conflicts_and_audits(
     assert actions == ["data_management.run_enqueued"]
 
 
-async def test_admin_api_filters_news_runs_before_applying_limit(
+async def test_admin_api_paginates_ten_runs_and_filters_news_before_pagination(
     data_management_database: async_sessionmaker[AsyncSession],
 ) -> None:
     user = await _admin(data_management_database)
@@ -1098,11 +1355,19 @@ async def test_admin_api_filters_news_runs_before_applying_limit(
         )
 
     async with _admin_client(data_management_database, user, enabled=True) as client:
-        all_runs = await client.get("/api/admin/data-management/runs?limit=20")
-        news_runs = await client.get("/api/admin/data-management/runs?limit=1&operation_group=news")
+        all_runs = await client.get("/api/admin/data-management/runs?page=1")
+        last_page = await client.get("/api/admin/data-management/runs?page=3")
+        news_runs = await client.get("/api/admin/data-management/runs?page=1&operation_group=news")
         invalid_filter = await client.get("/api/admin/data-management/runs?operation_group=morning")
 
+    assert all_runs.status_code == 200
+    assert len(all_runs.json()["items"]) == 10
+    assert all_runs.json()["page"] == 1
+    assert all_runs.json()["page_size"] == 10
+    assert all_runs.json()["total"] == 21
     assert all(run["operation"] != "news_all" for run in all_runs.json()["items"])
+    assert [run["operation"] for run in last_page.json()["items"]] == ["news_all"]
+    assert last_page.json()["has_more"] is False
     assert news_runs.status_code == 200
     assert [run["operation"] for run in news_runs.json()["items"]] == ["news_all"]
     assert invalid_filter.status_code == 422
@@ -1132,7 +1397,8 @@ async def test_admin_api_rejects_unauthenticated_writes_and_disabled_providers(
     user = await _admin(data_management_database)
     async with _admin_client(data_management_database, user, enabled=False) as client:
         unavailable = await client.post(
-            "/api/admin/data-management/runs", json={"operation": "index_yahoo"}
+            "/api/admin/data-management/runs",
+            json={"operation": "provider_rerun", "provider": "yahoo_finance"},
         )
     assert unauthenticated.status_code == 401
     assert unavailable.status_code == 503

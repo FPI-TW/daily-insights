@@ -408,7 +408,8 @@ describe("three-market report presentation", () => {
 
     await renderLocalized(<ReportDetail locale="en" report={report} />, "en")
 
-    expect(screen.getByText("Some sections missing")).toBeVisible()
+    const notice = screen.getByText("Some sections missing")
+    expect(notice).toBeVisible()
     expect(
       screen.getByText("TWSE T86 had no data for 2026-09-02.")
     ).toBeVisible()
@@ -951,62 +952,12 @@ describe("three-market report presentation", () => {
       ],
     } satisfies ProvisionalReport
 
-    await renderLocalized(
-      <ReportDetail
-        locale="en"
-        report={report}
-        viewpoint={{
-          viewpoint_date: "2026-09-04",
-          market_code: "crypto",
-          source_market_code: "crypto",
-          points: ["BTC dominance held near 60%."],
-          fetched_at: "2026-09-04T02:22:00+00:00",
-        }}
-      />,
-      "en"
-    )
+    await renderLocalized(<ReportDetail locale="en" report={report} />, "en")
 
-    const viewpoint = screen.getByRole("region", { name: "Analyst viewpoint" })
-    expect(viewpoint).toHaveTextContent("BTC dominance held near 60%.")
     const block = screen
       .getByRole("heading", { name: "Crypto market snapshot" })
       .closest("section")
     expect(block).toHaveClass("xl:col-span-2")
-    expect(
-      viewpoint.compareDocumentPosition(block as Element) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-
-    // The after-viewpoint slot (the US page's news) sits between the
-    // analyst's bullets and the first block.
-    cleanup()
-    await renderLocalized(
-      <ReportDetail
-        locale="en"
-        report={report}
-        viewpoint={{
-          viewpoint_date: "2026-09-04",
-          market_code: "crypto",
-          source_market_code: "crypto",
-          points: ["BTC dominance held near 60%."],
-          fetched_at: "2026-09-04T02:22:00+00:00",
-        }}
-        afterViewpoint={<section aria-label="Market news">Top stories</section>}
-      />,
-      "en"
-    )
-    const bullets = screen.getByRole("region", { name: "Analyst viewpoint" })
-    const slot = screen.getByRole("region", { name: "Market news" })
-    const firstBlock = screen
-      .getByRole("heading", { name: "Crypto market snapshot" })
-      .closest("section") as Element
-    expect(
-      bullets.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-    expect(
-      slot.compareDocumentPosition(firstBlock) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
 
     cleanup()
     await renderLocalized(

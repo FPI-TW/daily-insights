@@ -206,6 +206,7 @@ export const dataManagementOperationSchema = z.enum([
   "news_market",
   "news_publish",
   "macro_dashboard",
+  "provider_rerun",
 ])
 export const dataManagementRunOperationGroupSchema = z.enum(["news"])
 export type DataManagementRunOperationGroup = z.infer<
@@ -226,18 +227,16 @@ export const dataManagementRunStatusSchema = z.enum([
 ])
 export const dataManagementRunCreateSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("morning_all") }),
-  z.object({
-    operation: z.literal("morning_market"),
-    market_code: launchMarketCodeSchema,
-  }),
-  z.object({ operation: z.literal("index_yahoo") }),
-  z.object({ operation: z.literal("institutional_twse") }),
   z.object({ operation: z.literal("news_all") }),
   z.object({
     operation: z.literal("news_market"),
     market_code: dataManagementNewsMarketCodeSchema,
   }),
   z.object({ operation: z.literal("macro_dashboard") }),
+  z.object({
+    operation: z.literal("provider_rerun"),
+    provider: z.enum(["twelve_data", "yahoo_finance", "twse"]),
+  }),
 ])
 export type DataManagementRunCreateInput = z.infer<
   typeof dataManagementRunCreateSchema
@@ -248,6 +247,9 @@ export const dataManagementCatalogSchema = z.object({
   yfinance_enabled: z.boolean(),
   twse_enabled: z.boolean(),
   markets: z.array(launchMarketCodeSchema),
+  rerunnable_providers: z.array(
+    z.enum(["twelve_data", "yahoo_finance", "twse"])
+  ),
   daily_news_enabled: z.boolean(),
   news_markets: z.array(dataManagementNewsMarketCodeSchema),
   macro_dashboard_enabled: z.boolean(),
@@ -365,10 +367,21 @@ export const dataManagementRunSchema = z.discriminatedUnion("operation", [
     operation: z.literal("news_publish"),
     market_code: z.null(),
   }),
+  dataManagementRunBaseSchema.extend({
+    operation: z.literal("provider_rerun"),
+    provider: z.enum(["twelve_data", "yahoo_finance", "twse"]),
+    market_code: z.null(),
+  }),
 ])
 export type DataManagementRun = z.infer<typeof dataManagementRunSchema>
 export const dataManagementRunListSchema = z.object({
   items: z.array(dataManagementRunSchema),
+  page: z.number().int().min(1),
+  page_size: z.literal(10),
+  total: z.number().int().nonnegative(),
+  has_more: z.boolean(),
+  active_runs: z.array(dataManagementRunSchema).optional(),
+  current_day_runs: z.array(dataManagementRunSchema).optional(),
 })
 const chartPointSchema = z.object({
   x: z.string().min(1),

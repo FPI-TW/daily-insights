@@ -9,6 +9,7 @@ from daily_insights_api.modules.news.api import NewsProgress
 from daily_insights_api.modules.reports.api import LaunchMarketCode
 
 NewsMarketCode = Literal["global", "tw_equity", "us_equity"]
+ProviderRerunCode = Literal["twelve_data", "yahoo_finance", "twse"]
 RunOperation = Literal[
     "morning_all",
     "morning_market",
@@ -18,6 +19,7 @@ RunOperation = Literal[
     "news_market",
     "news_publish",
     "macro_dashboard",
+    "provider_rerun",
 ]
 RunOperationGroup = Literal["news"]
 RunStatus = Literal["pending", "running", "succeeded", "partial", "failed", "cancelled"]
@@ -65,14 +67,17 @@ class MacroDashboardRunCreate(_DataManagementRunCreate):
     market_code: None = None
 
 
+class ProviderRerunCreate(_DataManagementRunCreate):
+    operation: Literal["provider_rerun"]
+    provider: ProviderRerunCode
+
+
 DataManagementRunCreate = Annotated[
     MorningAllRunCreate
-    | MorningMarketRunCreate
-    | IndexYahooRunCreate
-    | InstitutionalTwseRunCreate
     | NewsAllRunCreate
     | NewsMarketRunCreate
-    | MacroDashboardRunCreate,
+    | MacroDashboardRunCreate
+    | ProviderRerunCreate,
     Field(discriminator="operation"),
 ]
 
@@ -83,6 +88,7 @@ class DataManagementCatalog(BaseModel):
     yfinance_enabled: bool
     twse_enabled: bool
     markets: list[LaunchMarketCode]
+    rerunnable_providers: list[ProviderRerunCode]
     daily_news_enabled: bool
     news_markets: list[NewsMarketCode]
     macro_dashboard_enabled: bool
@@ -151,6 +157,12 @@ class MacroDashboardRunResponse(_DataManagementRunResponse):
     market_code: None
 
 
+class ProviderRerunResponse(_DataManagementRunResponse):
+    operation: Literal["provider_rerun"]
+    provider: ProviderRerunCode
+    market_code: None = None
+
+
 DataManagementRunResponse = Annotated[
     MorningAllRunResponse
     | MorningMarketRunResponse
@@ -159,13 +171,21 @@ DataManagementRunResponse = Annotated[
     | NewsAllRunResponse
     | NewsMarketRunResponse
     | NewsPublishRunResponse
-    | MacroDashboardRunResponse,
+    | MacroDashboardRunResponse
+    | ProviderRerunResponse,
     Field(discriminator="operation"),
 ]
 
 
 class DataManagementRunList(BaseModel):
     items: list[DataManagementRunResponse]
+    page: int = Field(ge=1)
+    page_size: Literal[10] = 10
+    total: int = Field(ge=0)
+    has_more: bool
+    active_runs: list[DataManagementRunResponse]
+    # News management uses this unpaginated, narrow slice for today's market
+    current_day_runs: list[DataManagementRunResponse]
 
 
 def run_response(
@@ -207,4 +227,11 @@ def run_response(
         return NewsPublishRunResponse(operation="news_publish", market_code=None, **values)
     if run.operation == "macro_dashboard":
         return MacroDashboardRunResponse(operation="macro_dashboard", market_code=None, **values)
+    if run.operation == "provider_rerun":
+        return ProviderRerunResponse(
+            operation="provider_rerun",
+            provider=cast(str, run.market_code),
+            market_code=None,
+            **values,
+        )
     return IndexYahooRunResponse(operation="index_yahoo", market_code=None, **values)

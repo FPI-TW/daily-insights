@@ -1309,6 +1309,8 @@ export interface components {
       morning_reports_enabled: boolean
       /** News Markets */
       news_markets: ("global" | "tw_equity" | "us_equity")[]
+      /** Rerunnable Providers */
+      rerunnable_providers: ("twelve_data" | "yahoo_finance" | "twse")[]
       /**
        * Taipei Date
        * Format: date
@@ -1321,6 +1323,32 @@ export interface components {
     }
     /** DataManagementRunList */
     DataManagementRunList: {
+      /** Active Runs */
+      active_runs: (
+        | components["schemas"]["MorningAllRunResponse"]
+        | components["schemas"]["MorningMarketRunResponse"]
+        | components["schemas"]["IndexYahooRunResponse"]
+        | components["schemas"]["InstitutionalTwseRunResponse"]
+        | components["schemas"]["NewsAllRunResponse"]
+        | components["schemas"]["NewsMarketRunResponse"]
+        | components["schemas"]["NewsPublishRunResponse"]
+        | components["schemas"]["MacroDashboardRunResponse"]
+        | components["schemas"]["ProviderRerunResponse"]
+      )[]
+      /** Current Day Runs */
+      current_day_runs: (
+        | components["schemas"]["MorningAllRunResponse"]
+        | components["schemas"]["MorningMarketRunResponse"]
+        | components["schemas"]["IndexYahooRunResponse"]
+        | components["schemas"]["InstitutionalTwseRunResponse"]
+        | components["schemas"]["NewsAllRunResponse"]
+        | components["schemas"]["NewsMarketRunResponse"]
+        | components["schemas"]["NewsPublishRunResponse"]
+        | components["schemas"]["MacroDashboardRunResponse"]
+        | components["schemas"]["ProviderRerunResponse"]
+      )[]
+      /** Has More */
+      has_more: boolean
       /** Items */
       items: (
         | components["schemas"]["MorningAllRunResponse"]
@@ -1331,7 +1359,18 @@ export interface components {
         | components["schemas"]["NewsMarketRunResponse"]
         | components["schemas"]["NewsPublishRunResponse"]
         | components["schemas"]["MacroDashboardRunResponse"]
+        | components["schemas"]["ProviderRerunResponse"]
       )[]
+      /** Page */
+      page: number
+      /**
+       * Page Size
+       * @default 10
+       * @constant
+       */
+      page_size: 10
+      /** Total */
+      total: number
     }
     /** EconomicEvent */
     EconomicEvent: {
@@ -1644,16 +1683,6 @@ export interface components {
       /** Points */
       points: components["schemas"]["IndexMovingAveragePointResponse"][]
     }
-    /** IndexYahooRunCreate */
-    IndexYahooRunCreate: {
-      /** Market Code */
-      market_code?: null
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      operation: "index_yahoo"
-    }
     /** IndexYahooRunResponse */
     IndexYahooRunResponse: {
       /** Completed At */
@@ -1761,20 +1790,6 @@ export interface components {
       endpoint: string
       /** Rows */
       rows: components["schemas"]["InstitutionalStockFlowResponse"][]
-    }
-    /**
-     * InstitutionalTwseRunCreate
-     * @description Fetch TWSE institutional flows: per-stock for the edition date, market
-     *     totals back to a rolling window of trading days.
-     */
-    InstitutionalTwseRunCreate: {
-      /** Market Code */
-      market_code?: null
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      operation: "institutional_twse"
     }
     /** InstitutionalTwseRunResponse */
     InstitutionalTwseRunResponse: {
@@ -2144,19 +2159,6 @@ export interface components {
        */
       status:
         "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
-    }
-    /** MorningMarketRunCreate */
-    MorningMarketRunCreate: {
-      /**
-       * Market Code
-       * @enum {string}
-       */
-      market_code: "global_macro_bonds" | "crypto" | "us_equity"
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      operation: "morning_market"
     }
     /** MorningMarketRunResponse */
     MorningMarketRunResponse: {
@@ -3057,6 +3059,75 @@ export interface components {
       /** Title */
       title: string
     }
+    /** ProviderRerunCreate */
+    ProviderRerunCreate: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      operation: "provider_rerun"
+      /**
+       * Provider
+       * @enum {string}
+       */
+      provider: "twelve_data" | "yahoo_finance" | "twse"
+    }
+    /** ProviderRerunResponse */
+    ProviderRerunResponse: {
+      /** Completed At */
+      completed_at: string | null
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /** Error */
+      error: string | null
+      /** Heartbeat At */
+      heartbeat_at?: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Market Code */
+      market_code?: null
+      /** News */
+      news?: {
+        [key: string]: components["schemas"]["NewsProgress"]
+      } | null
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      operation: "provider_rerun"
+      /**
+       * Provider
+       * @enum {string}
+       */
+      provider: "twelve_data" | "yahoo_finance" | "twse"
+      /** Requested By User Id */
+      requested_by_user_id: string | null
+      /** Result */
+      result: {
+        [key: string]: unknown
+      } | null
+      /** Scheduled For */
+      scheduled_for?: string | null
+      /** Started At */
+      started_at: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status:
+        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
+    }
     /** ProvisionedInternalUserResponse */
     ProvisionedInternalUserResponse: {
       /** Display Name */
@@ -3650,7 +3721,7 @@ export interface operations {
   list_runs_api_admin_data_management_runs_get: {
     parameters: {
       query?: {
-        limit?: number
+        page?: number
         operation_group?: "news" | null
       }
       header?: never
@@ -3692,12 +3763,10 @@ export interface operations {
       content: {
         "application/json":
           | components["schemas"]["MorningAllRunCreate"]
-          | components["schemas"]["MorningMarketRunCreate"]
-          | components["schemas"]["IndexYahooRunCreate"]
-          | components["schemas"]["InstitutionalTwseRunCreate"]
           | components["schemas"]["NewsAllRunCreate"]
           | components["schemas"]["NewsMarketRunCreate"]
           | components["schemas"]["MacroDashboardRunCreate"]
+          | components["schemas"]["ProviderRerunCreate"]
       }
     }
     responses: {
@@ -3716,6 +3785,7 @@ export interface operations {
             | components["schemas"]["NewsMarketRunResponse"]
             | components["schemas"]["NewsPublishRunResponse"]
             | components["schemas"]["MacroDashboardRunResponse"]
+            | components["schemas"]["ProviderRerunResponse"]
         }
       }
       /** @description An operation class is already active. */
@@ -3769,6 +3839,7 @@ export interface operations {
             | components["schemas"]["NewsMarketRunResponse"]
             | components["schemas"]["NewsPublishRunResponse"]
             | components["schemas"]["MacroDashboardRunResponse"]
+            | components["schemas"]["ProviderRerunResponse"]
         }
       }
       /** @description Validation Error */
@@ -3810,6 +3881,7 @@ export interface operations {
             | components["schemas"]["NewsMarketRunResponse"]
             | components["schemas"]["NewsPublishRunResponse"]
             | components["schemas"]["MacroDashboardRunResponse"]
+            | components["schemas"]["ProviderRerunResponse"]
         }
       }
       /** @description Run is terminal already or no longer exists. */
@@ -3862,6 +3934,7 @@ export interface operations {
             | components["schemas"]["NewsMarketRunResponse"]
             | components["schemas"]["NewsPublishRunResponse"]
             | components["schemas"]["MacroDashboardRunResponse"]
+            | components["schemas"]["ProviderRerunResponse"]
         }
       }
       /** @description Validation Error */
@@ -3995,6 +4068,7 @@ export interface operations {
             | components["schemas"]["NewsMarketRunResponse"]
             | components["schemas"]["NewsPublishRunResponse"]
             | components["schemas"]["MacroDashboardRunResponse"]
+            | components["schemas"]["ProviderRerunResponse"]
         }
       }
       /** @description Edition not found. */

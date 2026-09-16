@@ -1,7 +1,10 @@
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import date, datetime
 
 from anyio import Path
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api import models as registered_models  # noqa: F401
@@ -9,6 +12,7 @@ from daily_insights_api.core.config import get_settings, is_placeholder_value
 from daily_insights_api.core.database import create_engine, create_session_factory
 from daily_insights_api.core.logging import configure_logging
 from daily_insights_api.core.observability import emit_event
+from daily_insights_api.modules.data_management.service import TWELVE_DATA_EXECUTION_LOCK_KEY
 from daily_insights_api.modules.data_sources.api import (
     RetryPolicy,
     TwelveDataAdapter,
@@ -44,6 +48,21 @@ __all__ = [
 RETRY_POLICY = SameDayRetry()
 
 
+@asynccontextmanager
+async def _provider_execution_lock(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[None]:
+    async with session_factory() as lock_database:
+        await lock_database.execute(select(func.pg_advisory_lock(TWELVE_DATA_EXECUTION_LOCK_KEY)))
+        try:
+            yield
+        finally:
+            await lock_database.execute(
+                select(func.pg_advisory_unlock(TWELVE_DATA_EXECUTION_LOCK_KEY))
+            )
+            await lock_database.rollback()
+
+
 async def run_manual_morning_report_edition(
     session_factory: async_sessionmaker[AsyncSession],
     adapter: TwelveDataAdapter,
@@ -55,11 +74,12 @@ async def run_manual_morning_report_edition(
     async def run_manual(target_date: date) -> None:
         await run_morning_report_edition(session_factory, adapter, target_date)
 
-    await run_with_heartbeat(
-        run_manual,
-        edition_date,
-        heartbeat,
-    )
+    async with _provider_execution_lock(session_factory):
+        await run_with_heartbeat(
+            run_manual,
+            edition_date,
+            heartbeat,
+        )
     return "complete"
 
 
@@ -70,27 +90,28 @@ async def run_scheduled_morning_report_edition(
     heartbeat: Path,
 ) -> str:
     """Run only launch markets without an immutable publication for this date."""
-    market_codes = await unpublished_morning_report_markets(session_factory, edition_date)
-    skipped = [
-        market.market_code
-        for market in ACTIVE_LAUNCH_MANIFEST.markets
-        if market.market_code not in market_codes
-    ]
-    if not market_codes:
-        if skipped:
-            emit_event(
-                "scheduler.edition.already_published",
-                edition_date=edition_date.isoformat(),
-                skipped_market_codes=skipped,
+    async with _provider_execution_lock(session_factory):
+        market_codes = await unpublished_morning_report_markets(session_factory, edition_date)
+        skipped = [
+            market.market_code
+            for market in ACTIVE_LAUNCH_MANIFEST.markets
+            if market.market_code not in market_codes
+        ]
+        if not market_codes:
+            if skipped:
+                emit_event(
+                    "scheduler.edition.already_published",
+                    edition_date=edition_date.isoformat(),
+                    skipped_market_codes=skipped,
+                )
+            await heartbeat.touch()
+            return "complete"
+        try:
+            locked_skips = await run_scheduled_morning_report_markets(
+                session_factory, adapter, edition_date, market_codes
             )
-        await heartbeat.touch()
-        return "complete"
-    try:
-        locked_skips = await run_scheduled_morning_report_markets(
-            session_factory, adapter, edition_date, market_codes
-        )
-    finally:
-        await heartbeat.touch()
+        finally:
+            await heartbeat.touch()
     skipped.extend(locked_skips)
     if skipped:
         emit_event(
