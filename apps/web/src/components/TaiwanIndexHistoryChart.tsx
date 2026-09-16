@@ -400,8 +400,8 @@ function CandlesPanel({
   const name = t(indexNameKey(selected.symbol) ?? selected.symbol)
   const isTaiex = selected.symbol === "^TWII"
   const title = isTaiex ? t("kTitle") : t("kTitleIndex", { index: name })
-  const activityLabel = t(isTaiex ? "tradeValueLabel" : "volumeLabel")
-  const activityLegend = t(isTaiex ? "tradeValueLegend" : "volumeLegend")
+  const activityLabel = t("volumeLabel")
+  const activityLegend = t("volumeLegend")
   const formatActivity = (value: number | null) =>
     value === null
       ? "—"
@@ -437,10 +437,9 @@ function CandlesPanel({
       },
     ]
   })
-  const activityValues = bars.map(bar => {
-    const value = isTaiex ? bar.trade_value : bar.volume
-    return value === null ? null : value / 100_000_000
-  })
+  const activityValues = bars.map(bar =>
+    bar.volume === null ? null : bar.volume / 100_000_000
+  )
   const rsiByDate = new Map(
     (averages?.rsi.points ?? []).map(point => [point.trade_date, point.value])
   )
@@ -496,7 +495,7 @@ function CandlesPanel({
           </span>
           <span>{activityLabel}</span>
           <strong className="font-mono text-[13px] text-sea-ink tabular-nums">
-            {formatActivity(isTaiex ? latest.trade_value : latest.volume)}
+            {formatActivity(latest.volume)}
           </strong>
         </div>
       }
@@ -668,7 +667,7 @@ function CandlesPanel({
                       `${t("kHigh")}: ${formatNumber(bar.high, null, locale)}`,
                       `${t("kLow")}: ${formatNumber(bar.low, null, locale)}`,
                       `${t("kClose")}: ${formatNumber(bar.close, null, locale)}`,
-                      `${activityLabel}: ${formatActivity(isTaiex ? bar.trade_value : bar.volume)}`,
+                      `${activityLabel}: ${formatActivity(bar.volume)}`,
                       `${macdLabel}: ${formatNumber(macdValues[parsed.data[0].dataIndex], null, locale)}`,
                       `${signalLabel}: ${formatNumber(signalValues[parsed.data[0].dataIndex], null, locale)}`,
                       `${histogramLabel}: ${formatNumber(histogramValues[parsed.data[0].dataIndex], null, locale)}`,
@@ -952,9 +951,7 @@ function CandlesPanel({
                 <td>{formatNumber(bar.high, null, locale)}</td>
                 <td>{formatNumber(bar.low, null, locale)}</td>
                 <td>{formatNumber(bar.close, null, locale)}</td>
-                <td>
-                  {formatActivity(isTaiex ? bar.trade_value : bar.volume)}
-                </td>
+                <td>{formatActivity(bar.volume)}</td>
                 <td>{formatNumber(macdValues[i], null, locale)}</td>
                 <td>{formatNumber(signalValues[i], null, locale)}</td>
                 <td>{formatNumber(histogramValues[i], null, locale)}</td>

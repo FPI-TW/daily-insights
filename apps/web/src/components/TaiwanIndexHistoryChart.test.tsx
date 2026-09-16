@@ -23,11 +23,25 @@ vi.mock("echarts-for-react", () => ({
     option,
     onEvents,
   }: {
-    option: { aria?: { description?: string } }
+    option: {
+      aria?: { description?: string }
+      tooltip?: { formatter?: (input: unknown) => string }
+    }
     onEvents?: { datazoom: (event: unknown) => void }
   }) => (
     <div data-testid="index-chart">
       {JSON.stringify(option)}
+      {option.tooltip?.formatter ? (
+        <span data-testid="index-tooltip">
+          {option.tooltip.formatter([
+            {
+              axisValue: "2025-02-01",
+              seriesName: "Close",
+              dataIndex: 0,
+            },
+          ])}
+        </span>
+      ) : null}
       {onEvents ? (
         <button
           onClick={() => onEvents.datazoom({ batch: [{ start: 0, end: 50 }] })}
@@ -218,9 +232,9 @@ describe("TaiwanIndexHistoryChart", () => {
       screen.getByRole("meter", { name: "120MA bias" })
     ).not.toHaveAttribute("aria-valuenow")
   })
-  it("uses TWII trade value bars and preserves missing activity", () => {
+  it("uses TWII volume bars and preserves missing activity", () => {
     const bars = history.series[0]!.bars.map((bar, i) =>
-      i === 0 ? { ...bar, open: null, trade_value: null } : bar
+      i === 0 ? { ...bar, open: null, volume: null } : bar
     )
     show(
       <TaiwanIndexHistoryChart
@@ -234,11 +248,16 @@ describe("TaiwanIndexHistoryChart", () => {
       '"data":[[null,null,null,null],[100,120,80,130]'
     )
     expect(chart).toHaveTextContent('"value":null')
-    expect(chart).toHaveTextContent("Trade value (TWD 100M)")
-    expect(chart).toHaveTextContent('"value":500')
-    expect(
-      screen.getAllByText("Trade value (TWD 100M)").length
-    ).toBeGreaterThan(0)
+    expect(chart).toHaveTextContent("Volume (100M shares)")
+    expect(chart).toHaveTextContent('"value":1')
+    expect(chart).not.toHaveTextContent("Trade value (TWD 100M)")
+    const tooltip = within(candles()).getByTestId("index-tooltip")
+    expect(tooltip).toHaveTextContent("Open: —")
+    expect(tooltip).toHaveTextContent("High: 130.00")
+    expect(tooltip).toHaveTextContent("Low: 80.00")
+    expect(tooltip).toHaveTextContent("Close: 90.00")
+    expect(tooltip).toHaveTextContent("Volume (100M shares): —")
+    expect(tooltip.textContent?.match(/2025-02-01/g)).toHaveLength(1)
   })
   it("preserves the US symbol selector and partial failures", () => {
     show(

@@ -51,6 +51,13 @@ const zoomEventSchema = z.union([
   zoomRangeSchema,
   z.object({ batch: z.array(zoomRangeSchema).min(1) }),
 ])
+const tooltipSchema = z.array(
+  z.object({
+    axisValue: z.union([z.string(), z.number()]),
+    seriesName: z.string(),
+    dataIndex: z.number(),
+  })
+)
 
 export function IndexHistoryChart({
   history,
@@ -127,6 +134,10 @@ export function IndexHistoryChart({
   }
 
   const latest = selected.bars.at(-1)!
+  const previous = selected.bars.at(-2)
+  const change = previous
+    ? (Number(latest.close) / Number(previous.close) - 1) * 100
+    : null
   const label = symbolLabel(selected.symbol, t)
   const selectedMovingAverages =
     movingAverageState.source === movingAverages
@@ -214,7 +225,7 @@ export function IndexHistoryChart({
         <h2 id="index-history-title" className="m-0 text-base font-extrabold">
           {t("indexChartTitle")}
         </h2>
-        <div className="mt-3 flex justify-end">
+        <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
           <label className="grid gap-1 text-xs font-bold text-sea-ink-soft">
             {t("indexChartSelect")}
             <select
@@ -229,6 +240,37 @@ export function IndexHistoryChart({
               ))}
             </select>
           </label>
+          <div
+            className="flex flex-wrap items-baseline justify-end gap-x-3 gap-y-1 text-xs text-sea-ink-soft"
+            data-testid="index-latest-summary"
+          >
+            <span>{closeLabel}</span>
+            <strong className="font-mono text-[17px] text-sea-ink tabular-nums">
+              {formatNumber(latest.close, null, locale)}
+            </strong>
+            <span
+              className={`inline-flex items-baseline gap-2 whitespace-nowrap font-mono font-bold ${change === null || Math.abs(change) < 0.005 ? "text-sea-ink-soft" : change > 0 ? "text-market-up" : "text-market-down"}`}
+            >
+              {change !== null && Math.abs(change) >= 0.005 ? (
+                <span>{change > 0 ? "▲" : "▼"}</span>
+              ) : null}
+              <span>
+                {change === null
+                  ? "—"
+                  : `${new Intl.NumberFormat(numberLocales[locale], {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                      signDisplay: "never",
+                    }).format(
+                      Math.abs(change) < 0.005 ? 0 : Math.abs(change)
+                    )}%`}
+              </span>
+            </span>
+            <span>{activityLabel}</span>
+            <strong className="font-mono text-[13px] text-sea-ink tabular-nums">
+              {formatNumber(activityValues.at(-1), null, locale)}
+            </strong>
+          </div>
         </div>
       </div>
       {history.failedSymbols.length > 0 ? (
@@ -389,8 +431,28 @@ export function IndexHistoryChart({
               tooltip: {
                 trigger: "axis",
                 appendToBody: true,
-                valueFormatter: (value: number | string) =>
-                  formatNumber(value, null, locale),
+                renderMode: "richText",
+                axisPointer: { type: "cross" },
+                formatter: (input: unknown) => {
+                  const parsed = tooltipSchema.safeParse(input)
+                  if (!parsed.success || !parsed.data[0]) return ""
+                  const index = parsed.data[0].dataIndex
+                  const bar = selected.bars[index]
+                  if (!bar) return ""
+                  return [
+                    bar.trade_date,
+                    `${closeLabel}: ${formatNumber(bar.close, null, locale)}`,
+                    `${activityLabel}: ${formatNumber(activityValues[index], null, locale)}`,
+                    `${macdLabel}: ${formatNumber(macdValues[index], null, locale)}`,
+                    `${signalLabel}: ${formatNumber(signalValues[index], null, locale)}`,
+                    `${histogramLabel}: ${formatNumber(histogramValues[index], null, locale)}`,
+                    `${rsiLabel}: ${formatNumber(rsiValues[index], null, locale)}`,
+                    ...availableMovingAverages.map(
+                      item =>
+                        `${t("indexChartSma", { period: item.period })}: ${formatNumber(item.values[index], null, locale)}`
+                    ),
+                  ].join("\n")
+                },
               },
               legend: {
                 type: "scroll",
@@ -604,14 +666,6 @@ export function IndexHistoryChart({
           />
         </ClientOnly>
       </div>
-      <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs text-sea-ink-soft">
-        <div className="flex gap-1">
-          <dt>{t("indexChartLatestClose")}</dt>
-          <dd className="m-0 font-mono font-semibold text-sea-ink tabular-nums">
-            {formatNumber(latest.close, null, locale)}
-          </dd>
-        </div>
-      </dl>
       <div className="sr-only">
         <table>
           <caption>{t("indexChartAccessibleSummary")}</caption>
