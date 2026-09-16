@@ -19,7 +19,9 @@ vi.mock("echarts-for-react", () => ({
     option,
     onEvents,
   }: {
-    option: unknown
+    option: {
+      tooltip?: { formatter?: (input: unknown) => string }
+    }
     onEvents?: { datazoom?: (event: unknown) => void }
   }) => (
     <button
@@ -27,6 +29,15 @@ vi.mock("echarts-for-react", () => ({
       onClick={() => onEvents?.datazoom?.({ start: 25, end: 75 })}
     >
       {JSON.stringify(option)}
+      <span data-testid="index-tooltip">
+        {option.tooltip?.formatter?.([
+          {
+            axisValue: "2026-09-02",
+            seriesName: "Close",
+            dataIndex: 0,
+          },
+        ])}
+      </span>
     </button>
   ),
 }))
@@ -121,6 +132,15 @@ describe("IndexHistoryChart", () => {
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
       '"name":"Volume (100M shares)","type":"bar"'
     )
+    expect(screen.getByTestId("index-tooltip")).toHaveTextContent(
+      "Close: 45,050.50"
+    )
+    expect(screen.getByTestId("index-tooltip")).toHaveTextContent(
+      "Volume (100M shares): 1.00"
+    )
+    expect(
+      screen.getByTestId("index-tooltip").textContent?.match(/2026-09-02/g)
+    ).toHaveLength(1)
     expect(screen.getByRole("status")).toHaveTextContent("^SOX")
     expect(
       screen.getByRole("option", { name: "Dow Jones Industrial Average" })

@@ -51,6 +51,13 @@ const zoomEventSchema = z.union([
   zoomRangeSchema,
   z.object({ batch: z.array(zoomRangeSchema).min(1) }),
 ])
+const tooltipSchema = z.array(
+  z.object({
+    axisValue: z.union([z.string(), z.number()]),
+    seriesName: z.string(),
+    dataIndex: z.number(),
+  })
+)
 
 export function IndexHistoryChart({
   history,
@@ -389,8 +396,28 @@ export function IndexHistoryChart({
               tooltip: {
                 trigger: "axis",
                 appendToBody: true,
-                valueFormatter: (value: number | string) =>
-                  formatNumber(value, null, locale),
+                renderMode: "richText",
+                axisPointer: { type: "cross" },
+                formatter: (input: unknown) => {
+                  const parsed = tooltipSchema.safeParse(input)
+                  if (!parsed.success || !parsed.data[0]) return ""
+                  const index = parsed.data[0].dataIndex
+                  const bar = selected.bars[index]
+                  if (!bar) return ""
+                  return [
+                    bar.trade_date,
+                    `${closeLabel}: ${formatNumber(bar.close, null, locale)}`,
+                    `${activityLabel}: ${formatNumber(activityValues[index], null, locale)}`,
+                    `${macdLabel}: ${formatNumber(macdValues[index], null, locale)}`,
+                    `${signalLabel}: ${formatNumber(signalValues[index], null, locale)}`,
+                    `${histogramLabel}: ${formatNumber(histogramValues[index], null, locale)}`,
+                    `${rsiLabel}: ${formatNumber(rsiValues[index], null, locale)}`,
+                    ...availableMovingAverages.map(
+                      item =>
+                        `${t("indexChartSma", { period: item.period })}: ${formatNumber(item.values[index], null, locale)}`
+                    ),
+                  ].join("\n")
+                },
               },
               legend: {
                 type: "scroll",
