@@ -299,15 +299,11 @@ export function ReportDetail({
   locale = "zh-hant",
   report,
   viewpoint = null,
-  afterViewpoint = null,
   leadingBlock = null,
 }: {
   locale?: Locale
   report: ProvisionalReport
   viewpoint?: AnalystViewpoint | null
-  // Content that reads before the numbers, directly under the analyst's
-  // bullets: the US page places its market news here.
-  afterViewpoint?: ReactNode
   leadingBlock?: ReactNode
 }) {
   // A lone metric or table block spans the full width; half-width panels
@@ -318,9 +314,8 @@ export function ReportDetail({
   const loneNarrowBlock = narrowBlocks.length === 1 && !leadingBlock
   return (
     <>
-      <ReportNotices report={report} />
       {viewpoint ? <MarketViewpoint viewpoint={viewpoint} /> : null}
-      {afterViewpoint ? <div className="mb-6">{afterViewpoint}</div> : null}
+      <ReportNotices report={report} />
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">
         {leadingBlock ? <div className="min-w-0">{leadingBlock}</div> : null}
         {report.blocks.map((block, index) => (

@@ -34,6 +34,9 @@ test("customer login opens reports, then a market detail without mobile overflow
     })
   ).toBeVisible()
   await expect(
+    page.getByRole("heading", { name: /equities news/i })
+  ).toHaveCount(0)
+  await expect(
     page.getByRole("heading", { name: "Today", exact: true })
   ).toHaveCount(0)
   await expect(
@@ -110,6 +113,30 @@ test("US market renders a responsive VIX chart with MACD and KD", async ({
   await expect(
     page.getByRole("heading", { name: "Index performance", exact: true })
   ).toBeVisible()
+  const newsHeading = page.getByRole("heading", {
+    name: "US equities news",
+    exact: true,
+  })
+  const viewpointHeading = page.getByRole("heading", {
+    name: "Analyst viewpoint",
+    exact: true,
+  })
+  const marketHeading = page.getByRole("heading", {
+    name: "US five-index performance",
+    exact: true,
+  })
+  await expect(newsHeading).toBeVisible()
+  await expect(viewpointHeading).toBeVisible()
+  const [newsBox, viewpointBox, marketBox] = await Promise.all([
+    newsHeading.boundingBox(),
+    viewpointHeading.boundingBox(),
+    marketHeading.boundingBox(),
+  ])
+  expect(newsBox).not.toBeNull()
+  expect(viewpointBox).not.toBeNull()
+  expect(marketBox).not.toBeNull()
+  expect(newsBox!.y).toBeLessThan(viewpointBox!.y)
+  expect(viewpointBox!.y).toBeLessThan(marketBox!.y)
   const indexPanel = page
     .getByRole("heading", { name: "Index performance", exact: true })
     .locator("xpath=ancestor::section[1]")

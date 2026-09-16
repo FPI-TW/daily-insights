@@ -301,9 +301,6 @@ function ReportPage() {
       ? { kind: "report_detail", publication_id: report.report.publicationId }
       : null
   )
-  // The US page reads top-down: the analyst's bullets, the stories behind
-  // them, then the numbers and charts. Other markets open with the news.
-  const newsUnderViewpoint = marketCode === "us_equity"
   const newsSection = news ? (
     <DailyNews
       news={news.latest}
@@ -314,11 +311,10 @@ function ReportPage() {
   ) : null
   return (
     <>
-      {newsUnderViewpoint ? null : newsSection}
+      {newsSection}
       {(report.kind !== "report" || macroDashboard) && viewpoint ? (
         <MarketViewpoint viewpoint={viewpoint} />
       ) : null}
-      {newsUnderViewpoint && report.kind !== "report" ? newsSection : null}
       {macroDashboard ? (
         <Suspense fallback={<MacroDashboardLoading />}>
           <Await promise={macroDashboard}>
@@ -340,7 +336,6 @@ function ReportPage() {
           locale={locale}
           report={report.report}
           viewpoint={viewpoint}
-          afterViewpoint={newsUnderViewpoint ? newsSection : null}
           leadingBlock={
             marketCode === "us_equity" && indexHistory ? (
               <Suspense fallback={<UsIndexPerformanceTableLoading />}>
@@ -423,17 +418,12 @@ function MarketPageLoading() {
   const { marketCode } = Route.useParams()
   return (
     <>
-      {isNewsMarketCode(marketCode) && marketCode !== "us_equity" ? (
-        <DailyNewsLoading />
-      ) : null}
+      {isNewsMarketCode(marketCode) ? <DailyNewsLoading /> : null}
       <ReportLoadingScreen />
       {marketCode === "us_equity" ? (
-        <>
-          <DailyNewsLoading />
-          <div className="mt-6">
-            <UsIndexPerformanceTableLoading />
-          </div>
-        </>
+        <div className="mt-6">
+          <UsIndexPerformanceTableLoading />
+        </div>
       ) : null}
       {marketCode === "tw_equity" ? (
         <>
