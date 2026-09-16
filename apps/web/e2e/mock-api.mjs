@@ -509,6 +509,13 @@ const server = createServer(async (request, response) => {
         points: ["US stocks advanced on broad-based buying."],
         fetched_at: "2026-08-30T08:00:00+08:00",
       },
+      {
+        viewpoint_date: "2026-08-30",
+        market_code: "tw_equity",
+        source_market_code: "tw_stocks",
+        points: ["Taiwan stocks tracked semiconductor demand."],
+        fetched_at: "2026-08-30T08:00:00+08:00",
+      },
     ])
     return
   }

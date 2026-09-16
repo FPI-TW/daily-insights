@@ -3,45 +3,24 @@ import type {
   LatestNews,
   Locale,
 } from "@daily-insights/api-client"
-import {
-  Await,
-  createFileRoute,
-  notFound,
-  redirect,
-} from "@tanstack/react-router"
-import { Suspense } from "react"
-import {
-  TaiwanIndexHistoryChart,
-  TaiwanIndexHistoryLoading,
-} from "#/components/TaiwanIndexHistoryChart"
-import {
-  MacroDashboard,
-  MacroDashboardLoading,
-} from "#/components/MacroDashboard"
+import { createFileRoute, notFound, redirect } from "@tanstack/react-router"
 import { getMacroDashboard } from "#/lib/macro-dashboard.functions"
 import type { MacroDashboardData } from "#/lib/macro-dashboard"
 import { getVisibleMarkets } from "#/lib/markets"
 import { DailyNews, DailyNewsLoading } from "#/components/DailyNews"
 import {
-  IndexHistoryChart,
-  IndexHistoryLoading,
-} from "#/components/IndexHistoryChart"
-import {
-  UsIndexPerformanceTable,
-  UsIndexPerformanceTableLoading,
-} from "#/components/UsIndexPerformanceTable"
-import {
-  VixHistoryChart,
-  VixHistoryLoading,
-} from "#/components/VixHistoryChart"
-import {
-  MarketViewpoint,
-  ReportDetail,
-  ReportErrorScreen,
-  ReportLoadingScreen,
-  ReportNotGeneratedScreen,
-  ReportNotLaunchedScreen,
-} from "#/components/Reports"
+  CryptoMarketInformation,
+  CryptoMarketInformationLoading,
+  GlobalMacroMarketInformation,
+  GlobalMacroMarketInformationLoading,
+  OtherMarketInformation,
+  OtherMarketInformationLoading,
+  TaiwanEquityMarketInformation,
+  TaiwanEquityMarketInformationLoading,
+  UsEquityMarketInformation,
+  UsEquityMarketInformationLoading,
+} from "#/components/MarketInformation"
+import { MarketViewpoint, ReportErrorScreen } from "#/components/Reports"
 import { getTodayAnalystViewpoints } from "#/lib/analyst-viewpoints"
 import { getMarketNews } from "#/lib/news"
 import {
@@ -60,10 +39,6 @@ import {
   type VixHistory,
 } from "#/lib/indices"
 import { useChatPageContext } from "#/components/PageContextChat"
-import {
-  TaiwanInstitutionalFlows,
-  TaiwanInstitutionalFlowsLoading,
-} from "#/components/TaiwanInstitutionalFlows"
 import {
   getTaiwanInstitutionalFlows,
   getTaiwanInstitutionalStocks,
@@ -309,107 +284,38 @@ function ReportPage() {
       groupByMarket={false}
     />
   ) : null
+  const marketInformation =
+    marketCode === "global_macro_bonds" && macroDashboard ? (
+      <GlobalMacroMarketInformation
+        dashboard={macroDashboard}
+        locale={locale}
+      />
+    ) : marketCode === "crypto" ? (
+      <CryptoMarketInformation locale={locale} report={report} />
+    ) : marketCode === "us_equity" ? (
+      <UsEquityMarketInformation
+        indexHistory={indexHistory}
+        indexMovingAverages={indexMovingAverages}
+        locale={locale}
+        report={report}
+        vixHistory={vixHistory}
+      />
+    ) : marketCode === "tw_equity" ? (
+      <TaiwanEquityMarketInformation
+        indexHistory={indexHistory}
+        indexMovingAverages={indexMovingAverages}
+        institutionalData={institutionalData}
+        locale={locale}
+        report={report}
+      />
+    ) : (
+      <OtherMarketInformation locale={locale} report={report} />
+    )
   return (
     <>
       {newsSection}
-      {(report.kind !== "report" || macroDashboard) && viewpoint ? (
-        <MarketViewpoint viewpoint={viewpoint} />
-      ) : null}
-      {macroDashboard ? (
-        <Suspense fallback={<MacroDashboardLoading />}>
-          <Await promise={macroDashboard}>
-            {data => <MacroDashboard data={data} locale={locale} />}
-          </Await>
-        </Suspense>
-      ) : report.kind === "not-generated" ? (
-        <ReportNotGeneratedScreen
-          locale={locale}
-          marketCode={report.marketCode}
-        />
-      ) : report.kind === "not-launched" ? (
-        <ReportNotLaunchedScreen
-          locale={locale}
-          marketCode={report.marketCode}
-        />
-      ) : (
-        <ReportDetail
-          locale={locale}
-          report={report.report}
-          viewpoint={viewpoint}
-          leadingBlock={
-            marketCode === "us_equity" && indexHistory ? (
-              <Suspense fallback={<UsIndexPerformanceTableLoading />}>
-                <Await promise={indexHistory}>
-                  {history => (
-                    <UsIndexPerformanceTable
-                      history={history}
-                      locale={locale}
-                    />
-                  )}
-                </Await>
-              </Suspense>
-            ) : null
-          }
-        />
-      )}
-      {(chartMarketCodes as readonly string[]).includes(marketCode) &&
-      indexHistory ? (
-        <Suspense
-          fallback={
-            marketCode === "tw_equity" ? (
-              <>
-                <TaiwanInstitutionalFlowsLoading />
-                <TaiwanIndexHistoryLoading />
-              </>
-            ) : (
-              <IndexHistoryLoading />
-            )
-          }
-        >
-          <Await promise={indexHistory}>
-            {history => (
-              <>
-                {/* Taiwan reads the institutional flows and their top stocks
-                    first; the bias chart follows them. Both need the index
-                    history, so they share this Await. */}
-                {marketCode === "tw_equity" && institutionalData ? (
-                  <Suspense fallback={<TaiwanInstitutionalFlowsLoading />}>
-                    <Await promise={institutionalData}>
-                      {data => (
-                        <TaiwanInstitutionalFlows
-                          data={data}
-                          history={history}
-                          locale={locale}
-                        />
-                      )}
-                    </Await>
-                  </Suspense>
-                ) : null}
-                {marketCode === "tw_equity" ? (
-                  <TaiwanIndexHistoryChart
-                    history={history}
-                    locale={locale}
-                    movingAverages={indexMovingAverages}
-                  />
-                ) : (
-                  <IndexHistoryChart
-                    history={history}
-                    locale={locale}
-                    movingAverages={indexMovingAverages}
-                  />
-                )}
-              </>
-            )}
-          </Await>
-        </Suspense>
-      ) : null}
-      {marketCode === "us_equity" && vixHistory ? (
-        <Suspense fallback={<VixHistoryLoading />}>
-          <Await promise={vixHistory}>
-            {history => <VixHistoryChart history={history} locale={locale} />}
-          </Await>
-        </Suspense>
-      ) : null}
+      {viewpoint ? <MarketViewpoint viewpoint={viewpoint} /> : null}
+      {marketInformation}
     </>
   )
 }
@@ -419,21 +325,17 @@ function MarketPageLoading() {
   return (
     <>
       {isNewsMarketCode(marketCode) ? <DailyNewsLoading /> : null}
-      <ReportLoadingScreen />
-      {marketCode === "us_equity" ? (
-        <div className="mt-6">
-          <UsIndexPerformanceTableLoading />
-        </div>
-      ) : null}
-      {marketCode === "tw_equity" ? (
-        <>
-          <TaiwanInstitutionalFlowsLoading />
-          <TaiwanIndexHistoryLoading />
-        </>
+      {marketCode === "global_macro_bonds" ? (
+        <GlobalMacroMarketInformationLoading />
+      ) : marketCode === "crypto" ? (
+        <CryptoMarketInformationLoading />
+      ) : marketCode === "us_equity" ? (
+        <UsEquityMarketInformationLoading />
+      ) : marketCode === "tw_equity" ? (
+        <TaiwanEquityMarketInformationLoading />
       ) : (
-        <IndexHistoryLoading />
+        <OtherMarketInformationLoading />
       )}
-      {marketCode === "us_equity" ? <VixHistoryLoading /> : null}
     </>
   )
 }

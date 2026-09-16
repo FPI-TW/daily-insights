@@ -406,28 +406,10 @@ describe("three-market report presentation", () => {
       ],
     } satisfies ProvisionalReport
 
-    await renderLocalized(
-      <ReportDetail
-        locale="en"
-        report={report}
-        viewpoint={{
-          viewpoint_date: "2026-09-03",
-          market_code: "tw_equity",
-          source_market_code: "tw_stocks",
-          points: ["Taiwan stocks traded cautiously."],
-          fetched_at: "2026-09-03T08:00:00+08:00",
-        }}
-      />,
-      "en"
-    )
+    await renderLocalized(<ReportDetail locale="en" report={report} />, "en")
 
-    const viewpoint = screen.getByRole("region", { name: "Analyst viewpoint" })
     const notice = screen.getByText("Some sections missing")
     expect(notice).toBeVisible()
-    expect(
-      viewpoint.compareDocumentPosition(notice) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
     expect(
       screen.getByText("TWSE T86 had no data for 2026-09-02.")
     ).toBeVisible()
@@ -970,31 +952,12 @@ describe("three-market report presentation", () => {
       ],
     } satisfies ProvisionalReport
 
-    await renderLocalized(
-      <ReportDetail
-        locale="en"
-        report={report}
-        viewpoint={{
-          viewpoint_date: "2026-09-04",
-          market_code: "crypto",
-          source_market_code: "crypto",
-          points: ["BTC dominance held near 60%."],
-          fetched_at: "2026-09-04T02:22:00+00:00",
-        }}
-      />,
-      "en"
-    )
+    await renderLocalized(<ReportDetail locale="en" report={report} />, "en")
 
-    const viewpoint = screen.getByRole("region", { name: "Analyst viewpoint" })
-    expect(viewpoint).toHaveTextContent("BTC dominance held near 60%.")
     const block = screen
       .getByRole("heading", { name: "Crypto market snapshot" })
       .closest("section")
     expect(block).toHaveClass("xl:col-span-2")
-    expect(
-      viewpoint.compareDocumentPosition(block as Element) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
 
     cleanup()
     await renderLocalized(

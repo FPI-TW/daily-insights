@@ -298,12 +298,10 @@ function ReportNotices({ report }: { report: ProvisionalReport }) {
 export function ReportDetail({
   locale = "zh-hant",
   report,
-  viewpoint = null,
   leadingBlock = null,
 }: {
   locale?: Locale
   report: ProvisionalReport
-  viewpoint?: AnalystViewpoint | null
   leadingBlock?: ReactNode
 }) {
   // A lone metric or table block spans the full width; half-width panels
@@ -314,7 +312,6 @@ export function ReportDetail({
   const loneNarrowBlock = narrowBlocks.length === 1 && !leadingBlock
   return (
     <>
-      {viewpoint ? <MarketViewpoint viewpoint={viewpoint} /> : null}
       <ReportNotices report={report} />
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">
         {leadingBlock ? <div className="min-w-0">{leadingBlock}</div> : null}
