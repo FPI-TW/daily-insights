@@ -212,37 +212,6 @@ export function OtherMarketInformation({
   return <ReportInformation locale={locale} report={report} />
 }
 
-export function GlobalMacroMarketInformationLoading() {
-  return <MacroDashboardLoading />
-}
-
-export function CryptoMarketInformationLoading() {
-  return <ReportLoadingScreen />
-}
-
-export function UsEquityMarketInformationLoading() {
-  return (
-    <>
-      <ReportLoadingScreen />
-      <div className="mt-6">
-        <UsIndexPerformanceTableLoading />
-      </div>
-      <IndexHistoryLoading />
-      <VixHistoryLoading />
-    </>
-  )
-}
-
-export function TaiwanEquityMarketInformationLoading() {
-  return (
-    <>
-      <ReportLoadingScreen />
-      <TaiwanIndexHistoryLoading />
-      <TaiwanInstitutionalFlowsLoading />
-    </>
-  )
-}
-
-export function OtherMarketInformationLoading() {
+export function MarketInformationLoading() {
   return <ReportLoadingScreen />
 }

@@ -10,15 +10,11 @@ import { getVisibleMarkets } from "#/lib/markets"
 import { DailyNews, DailyNewsLoading } from "#/components/DailyNews"
 import {
   CryptoMarketInformation,
-  CryptoMarketInformationLoading,
   GlobalMacroMarketInformation,
-  GlobalMacroMarketInformationLoading,
+  MarketInformationLoading,
   OtherMarketInformation,
-  OtherMarketInformationLoading,
   TaiwanEquityMarketInformation,
-  TaiwanEquityMarketInformationLoading,
   UsEquityMarketInformation,
-  UsEquityMarketInformationLoading,
 } from "#/components/MarketInformation"
 import { MarketViewpoint, ReportErrorScreen } from "#/components/Reports"
 import { getTodayAnalystViewpoints } from "#/lib/analyst-viewpoints"
@@ -325,17 +321,7 @@ function MarketPageLoading() {
   return (
     <>
       {isNewsMarketCode(marketCode) ? <DailyNewsLoading /> : null}
-      {marketCode === "global_macro_bonds" ? (
-        <GlobalMacroMarketInformationLoading />
-      ) : marketCode === "crypto" ? (
-        <CryptoMarketInformationLoading />
-      ) : marketCode === "us_equity" ? (
-        <UsEquityMarketInformationLoading />
-      ) : marketCode === "tw_equity" ? (
-        <TaiwanEquityMarketInformationLoading />
-      ) : (
-        <OtherMarketInformationLoading />
-      )}
+      <MarketInformationLoading />
     </>
   )
 }
