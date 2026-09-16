@@ -12,6 +12,7 @@ export const macroHistorySchema = z.object({
   source: z.string(),
   status: z.enum(["ok", "unavailable", "disabled"]),
   points: z.array(z.object({ date: z.iso.date(), value: decimal })),
+  base_dates: z.record(z.string(), z.iso.date()),
 })
 export const macroDashboardSchema = z.object({
   fetched_at: z.iso.datetime({ offset: true }),
@@ -101,6 +102,27 @@ export function recentPoints(history: MacroHistory | undefined, days: number) {
   if (!history || !latest) return []
   const start = Date.parse(latest.date) - (days - 1) * 86_400_000
   return history.points.filter(point => Date.parse(point.date) >= start)
+}
+
+/** Normalize one history to its own first valid observation in the selected window. */
+export function normalizedPoints(
+  history: MacroHistory | undefined,
+  days: number
+) {
+  const points = recentPoints(history, days)
+  const requestedBaseDate = history?.base_dates[String(days)]
+  const base = requestedBaseDate
+    ? points.find(point => point.date === requestedBaseDate)
+    : points.find(point => Number(point.value) > 0)
+  if (!base || Number(base.value) <= 0)
+    return { baseDate: undefined, points: [] }
+  return {
+    baseDate: base.date,
+    points: points.map(point => ({
+      date: point.date,
+      value: (Number(point.value) / Number(base.value)) * 100,
+    })),
+  }
 }
 
 export function formatTaipeiTimestamp(value: string) {

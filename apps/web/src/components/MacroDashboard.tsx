@@ -8,6 +8,7 @@ import { useChartColors } from "#/lib/chart"
 import { numberLocales, unitLabel } from "#/lib/format"
 import {
   alignedRatioAxes,
+  normalizedPoints,
   periodChange,
   ratioPoints,
   recentPoints,
@@ -28,7 +29,14 @@ const fxIds = [
   "usd_chf",
   "usd_cad",
   "usd_twd",
+  "usd_krw",
+  "usd_hkd",
+  "usd_cnh",
+  "usd_sgd",
+  "eur_jpy",
+  "aud_jpy",
 ]
+const normalizedFxIds = ["usd_twd", "usd_jpy", "usd_krw", "usd_sgd", "usd_cnh"]
 const tenorIds = ["3m", "2y", "5y", "10y", "30y"]
 const periods = ["day", "week", "month", "year"] as const
 
@@ -134,6 +142,7 @@ type ChartLine = {
   unit: string | undefined
   points: { date: string; value: number | null }[]
   change?: number | null
+  baseDate?: string
 }
 function Chart({
   lines,
@@ -220,6 +229,9 @@ function Chart({
               <span>
                 {line.unit ? (unitLabel(line.unit, t) ?? line.unit) : ""}
               </span>
+              {line.baseDate ? (
+                <span>{t("macroBaseDate", { date: line.baseDate })}</span>
+              ) : null}
               {line.change !== undefined ? (
                 <Change value={line.change} locale={locale} />
               ) : null}
@@ -433,6 +445,7 @@ export function MacroDashboard({
   const [copperGoldDays, setCopperGoldDays] = useState(365)
   const [dxyDays, setDxyDays] = useState(90)
   const [fxDays, setFxDays] = useState(90)
+  const [normalizedFxDays, setNormalizedFxDays] = useState(90)
   const [compare, setCompare] = useState<Period>("week")
   const histories = data?.histories ?? []
   const byId = new Map(histories.map(item => [item.id, item]))
@@ -448,6 +461,15 @@ export function MacroDashboard({
     })),
     change: byId.has(id) ? periodChange(byId.get(id)!, "day") : null,
   })
+  const normalizedLine = (id: string): ChartLine => {
+    const normalized = normalizedPoints(byId.get(id), normalizedFxDays)
+    return {
+      name: t(`macroAsset_${id}`),
+      unit: undefined,
+      points: normalized.points,
+      ...(normalized.baseDate ? { baseDate: normalized.baseDate } : {}),
+    }
+  }
   function slicedRatio(
     points: { date: string; value: number }[],
     days: number
@@ -602,6 +624,21 @@ export function MacroDashboard({
               lines={[line(selectedFx, fxDays)]}
               days={fxDays}
               height={224}
+            />
+          </DashboardPanel>
+        </div>
+        <div className="mt-4">
+          <DashboardPanel
+            title={t("macroAsianFxNormalized")}
+            controls={
+              <Range value={normalizedFxDays} onChange={setNormalizedFxDays} />
+            }
+          >
+            <Chart
+              locale={locale}
+              label={t("macroAsianFxNormalized")}
+              lines={normalizedFxIds.map(normalizedLine)}
+              days={normalizedFxDays}
             />
           </DashboardPanel>
         </div>

@@ -34,6 +34,7 @@ const data: MacroDashboardData = {
     unit: "USD",
     source: "Yahoo Finance",
     status: "ok",
+    base_dates: { "30": "2026-09-04", "90": "2026-09-04", "365": "2026-01-02" },
     points: [
       { date: "2026-01-02", value: "100" },
       { date: "2026-09-04", value: index ? "145" : "1.17" },
@@ -76,6 +77,52 @@ describe("integrated macro dashboard", () => {
     ).toHaveTextContent("2026-01-02")
     expect(
       within(fxPanel).getByRole("button", { name: "365 days" })
+    ).toHaveAttribute("aria-pressed", "true")
+  })
+  it("renders the independent Base 100 FX chart with each line's base date", () => {
+    show(<MacroDashboard data={data} locale="en" />)
+    const chart = screen.getByRole("img", {
+      name: "Asian currency relative performance (Base 100)",
+    })
+    expect(chart).toHaveTextContent("100")
+    expect(screen.getAllByText("Base date 2026-09-04")).not.toHaveLength(0)
+  })
+  it("rebuilds every Base 100 line from its matching range base date", () => {
+    const normalizedData: MacroDashboardData = {
+      ...data,
+      histories: ["usd_twd", "usd_jpy", "usd_krw", "usd_sgd", "usd_cnh"].map(
+        id => ({
+          id,
+          symbol: id,
+          unit: "USD",
+          source: "Twelve Data",
+          status: "ok" as const,
+          base_dates: {
+            "30": "2026-08-10",
+            "90": "2026-08-10",
+            "365": "2025-10-01",
+          },
+          points: [
+            { date: "2025-10-01", value: "10" },
+            { date: "2026-08-10", value: "20" },
+            { date: "2026-09-04", value: "30" },
+          ],
+        })
+      ),
+    }
+    show(<MacroDashboard data={normalizedData} locale="en" />)
+    const panel = screen
+      .getByRole("heading", {
+        name: "Asian currency relative performance (Base 100)",
+      })
+      .closest("section")!
+    expect(within(panel).getAllByText("Base date 2026-08-10")).toHaveLength(5)
+
+    fireEvent.click(within(panel).getByRole("button", { name: "365 days" }))
+
+    expect(within(panel).getAllByText("Base date 2025-10-01")).toHaveLength(5)
+    expect(
+      within(panel).getByRole("button", { name: "365 days" })
     ).toHaveAttribute("aria-pressed", "true")
   })
   it("shows no per-panel timestamps, methodology or chart-data toggles", () => {

@@ -407,6 +407,55 @@ async def test_commodity_daily_bars_accept_hg1_iso_usd_quote_currency() -> None:
     assert result.items[0].symbol == "HG1"
 
 
+@pytest.mark.parametrize(
+    ("symbol", "expected_currency", "currency_quote"),
+    [
+        ("USD/JPY", "JPY", "Japanese Yen"),
+        ("USD/CHF", "CHF", "Swiss Franc"),
+        ("USD/CAD", "CAD", "Canadian Dollar"),
+        ("USD/TWD", "TWD", "Taiwan Dollar"),
+        ("USD/KRW", "KRW", "Korean Won"),
+        ("USD/HKD", "HKD", "Hong Kong Dollar"),
+        ("USD/CNH", "CNH", "Chinese Yuan (Offshore)"),
+        ("USD/SGD", "SGD", "Singapore Dollar"),
+        ("EUR/JPY", "JPY", "Japanese Yen"),
+        ("AUD/JPY", "JPY", "Japanese Yen"),
+    ],
+)
+async def test_daily_bars_accept_verified_forex_quote_currencies(
+    symbol: str, expected_currency: str, currency_quote: str
+) -> None:
+    request_params: dict[str, str] = {}
+    payload = {
+        "meta": {
+            "symbol": symbol,
+            "interval": "1day",
+            "currency_quote": currency_quote,
+            "type": "Physical Currency",
+        },
+        "values": [{"datetime": "2026-08-29", "open": "1", "high": "2", "low": "1", "close": "2"}],
+        "status": "ok",
+    }
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        request_params.update(request.url.params)
+        return httpx.Response(200, json=payload, request=request)
+
+    adapter = TwelveDataAdapter(transport(httpx.MockTransport(respond)))
+    result = await adapter.get_daily_bars(
+        market="global_macro_bonds",
+        symbol=symbol,
+        expected_currency=expected_currency,
+        outputsize=1,
+        end_date=date(2026, 8, 30),
+        timezone="Australia/Sydney",
+    )
+
+    assert result.items[0].symbol == symbol
+    assert request_params["end_date"] == "2026-08-30"
+    assert request_params["timezone"] == "Australia/Sydney"
+
+
 @pytest.mark.parametrize("currency_quote", [None, "Euro", "US Dollars"])
 async def test_daily_bars_reject_quote_currency_drift(currency_quote: object) -> None:
     payload = {

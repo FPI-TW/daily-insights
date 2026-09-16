@@ -1421,6 +1421,10 @@ export interface components {
     }
     /** History */
     History: {
+      /** Base Dates */
+      base_dates?: {
+        [key: string]: string
+      }
       /** Id */
       id: string
       /** Points */

@@ -10,7 +10,8 @@
 - 殖利率曲線：五個公債天期最後共同日期的觀察值，SOFR 不加入期限曲線。
 - 經濟日曆目前未在前台顯示；Nasdaq 抓取已移除，僅保留停用的空 calendar payload 以維持 API 相容。
 - 美元指數：DXY（DX-Y.NYB）最近 90 個日曆日的已完成收盤。
-- 外匯：EUR/USD、GBP/USD、AUD/USD、NZD/USD、USD/JPY、USD/CHF、USD/CAD、USD/TWD，可選擇 30／90／365 日與貨幣對，切換不重送請求。
+- 外匯：EUR/USD、GBP/USD、AUD/USD、NZD/USD、USD/JPY、USD/CHF、USD/CAD、USD/TWD、USD/KRW、USD/HKD、USD/CNH、USD/SGD、EUR/JPY、AUD/JPY，可選擇 30／90／365 日與貨幣對，切換不重送請求。
+- 亞洲貨幣相對走勢：USD/TWD、USD/JPY、USD/KRW、USD/SGD、USD/CNH 各自以顯示期間內第一筆有效值設為 Base 100；每條線的基期日期由 API 的 `base_dates` 回傳並標示於圖例，期間改變時五條線各自重算。
 
 原有不可變晨間報告保留在可展開區塊，其中的 Twelve Data 現貨與 ETF 代理資料，不與新儀表板的期貨、實際殖利率或 DXY 混用。
 
@@ -18,11 +19,12 @@
 
 `GET /api/reports/global_macro_bonds/dashboard` 回傳獨立的市場補充資料，不建立或變更報告 publication。
 
-- `DAILY_INSIGHTS_YFINANCE_ENABLED=true`：沿用既有 Yahoo Finance 開關與 adapter，讀取 DXY、外匯歷史。來源為延遲日資料，排除尚未完成的當日交易。DXY 的週末隔夜列沒有正式日收盤，排除該列並保留工作日收盤；工作日缺收盤仍視為資料錯誤。
+- `DAILY_INSIGHTS_TWELVE_DATA_API_KEY`：讀取上述外匯貨幣對的 Twelve Data 日線；明確指定 `Australia/Sydney` 時區並使用同一時區的 provider 當日作為 exclusive `end_date`，排除尚未完成的當日 bar。每條外匯 history 另回傳 30／90／365 日視窗的 `base_dates`。
+- `DAILY_INSIGHTS_YFINANCE_ENABLED=true`：僅讀取 DXY。來源為延遲日資料，排除尚未完成的當日交易。DXY 的週末隔夜列沒有正式日收盤，排除該列並保留工作日收盤；工作日缺收盤仍視為資料錯誤。
 - 美國財政部：[Daily Treasury XML](https://home.treasury.gov/treasury-daily-interest-rate-xml-feed)，不需金鑰。讀取當年及前兩年，單一年度失敗不丟棄其他成功年度。
 - 紐約聯準銀行：[SOFR](https://www.newyorkfed.org/markets/reference-rates/sofr)，不需金鑰。
 
-HTTP 從資料庫讀取最後保存的 dashboard snapshot，不直接呼叫來源。排程器或管理操作建立 durable job，由 data-management worker 抓取與保存。Yahoo 請求最多四個並行，各商品失敗獨立處理。
+HTTP 從資料庫讀取最後保存的 dashboard snapshot，不直接呼叫來源。排程器或管理操作建立 durable job，由 data-management worker 抓取與保存。Twelve Data 與 Yahoo 請求最多四個並行，各商品失敗獨立處理。
 
 每筆宏觀作業的 `result.sources` 記錄四個來源的 `code`、`name`、`status`、`fetched_at`、`affected_items` 與 `failures`。每個 failure 保存固定 endpoint 名称、項目、分類和可取得的 HTTP 狀態碼；不保存原始例外、金鑰或回應內容。來源狀態為 `ok/degraded/unavailable/disabled`。同一來源可以包含多種失敗；adapter 沒有提供可辨識原因時顯示「原因未能確認」。診斷只供後台，不加入前台 dashboard API。
 
