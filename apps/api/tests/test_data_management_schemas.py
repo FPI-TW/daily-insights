@@ -20,12 +20,13 @@ response_adapter: TypeAdapter[DataManagementRunResponse] = TypeAdapter(DataManag
     ("payload", "operation"),
     [
         ({"operation": "morning_all"}, "morning_all"),
-        ({"operation": "morning_market", "market_code": "crypto"}, "morning_market"),
-        ({"operation": "index_yahoo"}, "index_yahoo"),
-        ({"operation": "institutional_twse"}, "institutional_twse"),
         ({"operation": "news_all"}, "news_all"),
         ({"operation": "news_market", "market_code": "global"}, "news_market"),
         ({"operation": "macro_dashboard"}, "macro_dashboard"),
+        (
+            {"operation": "provider_rerun", "provider": "twse"},
+            "provider_rerun",
+        ),
     ],
 )
 def test_run_create_discriminator_accepts_only_valid_scope(
@@ -38,13 +39,20 @@ def test_run_create_discriminator_accepts_only_valid_scope(
     "payload",
     [
         {"operation": "morning_all", "market_code": "crypto"},
+        # Legacy queue operations remain readable as history but are no longer
+        # accepted by the generic admin create endpoint.
+        {"operation": "morning_market", "market_code": "crypto"},
         {"operation": "morning_market"},
         {"operation": "morning_market", "market_code": "tw_equity"},
+        {"operation": "index_yahoo"},
         {"operation": "index_yahoo", "market_code": "crypto"},
+        {"operation": "institutional_twse"},
         {"operation": "news_all", "market_code": "global"},
         {"operation": "news_market"},
         # Manual publishes are created only through the news management API.
         {"operation": "news_publish"},
+        {"operation": "provider_rerun", "provider": "yfinance"},
+        {"operation": "provider_rerun", "market_code": "twse"},
     ],
 )
 def test_run_create_discriminator_rejects_invalid_scope(payload: dict[str, str]) -> None:
@@ -80,6 +88,17 @@ def test_run_response_discriminator_preserves_market_scope() -> None:
         {**base, "operation": "macro_dashboard", "market_code": None, "status": "cancelled"}
     )
     assert macro_response.operation == "macro_dashboard" and macro_response.status == "cancelled"
+    provider_response = response_adapter.validate_python(
+        {
+            **base,
+            "operation": "provider_rerun",
+            "provider": "yahoo_finance",
+            "market_code": None,
+        }
+    )
+    assert provider_response.operation == "provider_rerun"
+    assert provider_response.provider == "yahoo_finance"
+    assert provider_response.market_code is None
     publish_response = response_adapter.validate_python(
         {**base, "operation": "news_publish", "market_code": None}
     )
@@ -97,6 +116,14 @@ def test_openapi_declares_discriminated_responses_conflicts_and_legacy_deprecati
     assert {"202", "409", "503"} <= set(run_post["responses"])
     response_schema = run_post["responses"]["202"]["content"]["application/json"]["schema"]
     assert response_schema["discriminator"]["propertyName"] == "operation"
+    create_schema = run_post["requestBody"]["content"]["application/json"]["schema"]
+    assert set(create_schema["discriminator"]["mapping"]) == {
+        "morning_all",
+        "provider_rerun",
+        "news_all",
+        "news_market",
+        "macro_dashboard",
+    }
     operation_group = next(
         parameter for parameter in run_get["parameters"] if parameter["name"] == "operation_group"
     )
@@ -147,6 +174,16 @@ def test_macro_snapshot_and_automatic_edition_indexes_are_registered() -> None:
     assert "automatic_macro_dashboard_edition" in migration
     downgrade = migration[migration.index("def downgrade()") :]
     assert "EXISTS (SELECT 1 FROM macro_dashboard_snapshots)" in downgrade
+
+
+def test_provider_rerun_migration_preserves_legacy_indexes_and_guards_downgrade() -> None:
+    migration = (
+        Path(__file__).parents[1] / "migrations/versions/20260915_0027_provider_reruns.py"
+    ).read_text()
+    assert "20260915_0026" in migration
+    assert "provider_rerun" in migration
+    assert "uq_data_management_runs_active_provider_rerun" in migration
+    assert "cannot downgrade while provider rerun history exists" in migration
 
 
 def test_news_scheduler_state_is_durable_and_has_historical_uniqueness() -> None:

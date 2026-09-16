@@ -494,6 +494,8 @@ async def test_data_management_requires_real_admin_session_and_csrf(harness: Har
         )
     ).status_code == 403
     harness.settings.morning_reports_enabled = True
+    harness.settings.yfinance_enabled = True
+    harness.settings.twse_enabled = True
     accepted = await harness.client.post(
         path,
         headers={"X-CSRF-Token": admin_csrf},

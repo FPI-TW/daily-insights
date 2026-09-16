@@ -140,6 +140,82 @@ def execution_lock_key(run_id: uuid.UUID) -> int:
 # provider call itself, so cancelling a run cannot free the DB `running` slot
 # and let another macro fetch start before the cancelled task has unwound.
 MACRO_EXECUTION_LOCK_KEY = 5_239_842_371_114_209
+US_MARKET_ENQUEUE_LOCK_KEY = 5_239_842_371_114_211
+# Keep the TWSE family enqueue lock identical to the existing scheduler lock:
+# completion and cancellation already use it, so every state transition for
+# legacy and unified Taiwan runs is serialized by the same transaction lock.
+TWSE_ENQUEUE_LOCK_KEY = INSTITUTIONAL_SCHEDULE_LOCK_KEY
+MACRO_ENQUEUE_LOCK_KEY = 5_239_842_371_114_213
+US_MARKET_EXECUTION_LOCK_KEY = 5_239_842_371_114_214
+TWSE_EXECUTION_LOCK_KEY = 5_239_842_371_114_215
+TWELVE_DATA_EXECUTION_LOCK_KEY = 5_239_842_371_114_216
+MORNING_PROVIDER_ENQUEUE_LOCK_KEY = 5_239_842_371_114_217
+TWELVE_DATA_ENQUEUE_LOCK_KEY = 5_239_842_371_114_218
+
+
+def _is_provider_rerun(run: DataManagementRun, provider: str) -> bool:
+    return run.operation == "provider_rerun" and run.market_code == provider
+
+
+def _is_provider_rerun_condition(provider: str) -> Any:
+    return and_(
+        DataManagementRun.operation == "provider_rerun",
+        DataManagementRun.market_code == provider,
+    )
+
+
+def _is_macro_run(run: DataManagementRun) -> bool:
+    return run.operation == "macro_dashboard"
+
+
+def _is_twse_run(run: DataManagementRun) -> bool:
+    return run.operation == "institutional_twse" or _is_provider_rerun(run, "twse")
+
+
+def _is_us_run(run: DataManagementRun) -> bool:
+    return run.operation == "index_yahoo" or _is_provider_rerun(run, "yahoo_finance")
+
+
+def _is_twelve_data_run(run: DataManagementRun) -> bool:
+    return run.operation in {"morning_market"} or _is_provider_rerun(run, "twelve_data")
+
+
+def _is_full_morning_run(run: DataManagementRun) -> bool:
+    return run.operation == "morning_all"
+
+
+def _is_provider_operation(operation: str, market_code: str | None) -> bool:
+    return (
+        operation
+        in {
+            "morning_all",
+            "morning_market",
+            "index_yahoo",
+            "institutional_twse",
+        }
+        or operation == "provider_rerun"
+    )
+
+
+def _family_for_operation(operation: str, market_code: str | None) -> tuple[str, int] | None:
+    if operation == "provider_rerun":
+        if market_code == "twse":
+            return "twse", TWSE_ENQUEUE_LOCK_KEY
+        if market_code == "yahoo_finance":
+            return "us", US_MARKET_ENQUEUE_LOCK_KEY
+        if market_code == "twelve_data":
+            return "twelve_data", TWELVE_DATA_ENQUEUE_LOCK_KEY
+    if operation == "macro_dashboard":
+        return "macro", MACRO_ENQUEUE_LOCK_KEY
+    if operation == "institutional_twse":
+        return "twse", TWSE_ENQUEUE_LOCK_KEY
+    if operation == "morning_market":
+        return "twelve_data", TWELVE_DATA_ENQUEUE_LOCK_KEY
+    if operation == "index_yahoo":
+        return "us", US_MARKET_ENQUEUE_LOCK_KEY
+    if operation == "morning_all":
+        return "all", MORNING_PROVIDER_ENQUEUE_LOCK_KEY
+    return None
 
 
 ACTIVE_RUN_UNIQUE_CONSTRAINTS = frozenset(
@@ -151,6 +227,7 @@ ACTIVE_RUN_UNIQUE_CONSTRAINTS = frozenset(
         "uq_data_management_runs_active_news_publish",
         "uq_data_management_runs_active_manual_macro_dashboard",
         "uq_data_management_runs_running_macro_dashboard",
+        "uq_data_management_runs_active_provider_rerun",
     }
 )
 AUTOMATIC_MACRO_EDITION_CONSTRAINT = "uq_data_management_runs_automatic_macro_dashboard_edition"
@@ -203,50 +280,146 @@ async def enqueue_run(
         market.market_code for market in ACTIVE_LAUNCH_MANIFEST.markets
     }:
         raise ValueError("market_code is not in the active launch manifest")
+    if operation == "provider_rerun" and market_code not in {
+        "twelve_data",
+        "yahoo_finance",
+        "twse",
+    }:
+        raise ValueError("provider is not rerunnable")
     if operation == "news_market" and market_code not in EDITION_ORDER:
         raise ValueError("market_code is not a configured news edition")
-    if operation not in {"morning_market", "news_market"} and market_code is not None:
+    if (
+        operation not in {"morning_market", "news_market", "provider_rerun"}
+        and market_code is not None
+    ):
         raise ValueError("market_code is only allowed for market operations")
     if (operation == "news_publish") != (payload is not None):
         raise ValueError("payload is required for, and only for, news_publish")
     effective_edition = edition_date or taipei_today()
-    if operation == "institutional_twse":
-        await database.execute(select(func.pg_advisory_xact_lock(INSTITUTIONAL_SCHEDULE_LOCK_KEY)))
-        if requester_id is None:
-            # This check and the insert below share the same lock as worker
-            # completion and cancellation. A scheduler restart therefore
-            # cannot insert between "no final row" and a same-edition run
-            # becoming final.
-            final = await database.scalar(
+    family = _family_for_operation(operation, market_code)
+    if family is not None:
+        family_name, family_lock_key = family
+        if _is_provider_operation(operation, market_code):
+            # Full morning reruns and provider reruns must see one consistent
+            # queue snapshot. A common xact lock also makes their conflict
+            # check race-free across all provider families.
+            await database.execute(
+                select(func.pg_advisory_xact_lock(MORNING_PROVIDER_ENQUEUE_LOCK_KEY))
+            )
+        await database.execute(select(func.pg_advisory_xact_lock(family_lock_key)))
+        automatic_twse = operation == "institutional_twse" and requester_id is None
+        if automatic_twse:
+            # Every provider-family enqueue takes the common lock first and its
+            # family lock second. Keeping this preflight inside that order
+            # prevents an automatic-TWSE/provider-rerun ABBA deadlock.
+            twse_equivalent = or_(
+                DataManagementRun.operation == operation,
+                _is_provider_rerun_condition("twse"),
+                DataManagementRun.operation == "morning_all",
+            )
+            twse_completed = or_(
+                and_(
+                    DataManagementRun.operation != "morning_all",
+                    DataManagementRun.status == "succeeded",
+                ),
+                and_(
+                    DataManagementRun.operation == "morning_all",
+                    DataManagementRun.result["providers"]["twse"]["status"].as_string()
+                    == "succeeded",
+                ),
+                and_(
+                    DataManagementRun.status == "cancelled",
+                    DataManagementRun.requested_by_user_id.is_(None),
+                ),
+            )
+            active = await database.scalar(
                 select(DataManagementRun)
                 .where(
-                    DataManagementRun.operation == operation,
+                    twse_equivalent,
                     DataManagementRun.edition_date == effective_edition,
                     or_(
-                        DataManagementRun.status == "succeeded",
+                        DataManagementRun.status.in_(("pending", "running")),
                         and_(
                             DataManagementRun.status == "cancelled",
-                            DataManagementRun.requested_by_user_id.is_(None),
+                            DataManagementRun.lease_owner.is_not(None),
                         ),
                     ),
                 )
                 .order_by(DataManagementRun.created_at.desc())
                 .limit(1)
             )
-            if final is not None:
-                return final
-            active = await database.scalar(
+            if active is not None:
+                return active
+            final = await database.scalar(
                 select(DataManagementRun)
                 .where(
-                    DataManagementRun.operation == operation,
+                    twse_equivalent,
                     DataManagementRun.edition_date == effective_edition,
-                    DataManagementRun.status.in_(("pending", "running")),
+                    twse_completed,
                 )
                 .order_by(DataManagementRun.created_at.desc())
                 .limit(1)
             )
-            if active is not None:
-                return active
+            if final is not None:
+                return final
+        # Automatic macro editions intentionally coexist with manual macro
+        # work. They retain their own historical uniqueness key and wait for
+        # manual work in claim_next_run.
+        automatic_macro = operation == "macro_dashboard" and requester_id is None
+        if not automatic_macro:
+            if family_name == "all":
+                family_condition = and_(
+                    DataManagementRun.operation.in_(
+                        (
+                            "morning_all",
+                            "morning_market",
+                            "index_yahoo",
+                            "institutional_twse",
+                            "provider_rerun",
+                        )
+                    )
+                )
+            elif family_name == "us":
+                family_condition = or_(
+                    DataManagementRun.operation == "index_yahoo",
+                    _is_provider_rerun_condition("yahoo_finance"),
+                    DataManagementRun.operation == "morning_all",
+                )
+            elif family_name == "twse":
+                family_condition = or_(
+                    DataManagementRun.operation == "institutional_twse",
+                    _is_provider_rerun_condition("twse"),
+                    DataManagementRun.operation == "morning_all",
+                )
+            elif family_name == "twelve_data":
+                family_condition = or_(
+                    DataManagementRun.operation == "morning_market",
+                    _is_provider_rerun_condition("twelve_data"),
+                    DataManagementRun.operation == "morning_all",
+                )
+            else:
+                family_condition = or_(
+                    and_(
+                        DataManagementRun.operation == "macro_dashboard",
+                        DataManagementRun.requested_by_user_id.is_not(None),
+                    ),
+                )
+            active_condition = (
+                DataManagementRun.status.in_(("pending", "running"))
+                if family_name == "macro"
+                else or_(
+                    DataManagementRun.status.in_(("pending", "running")),
+                    and_(
+                        DataManagementRun.status == "cancelled",
+                        DataManagementRun.lease_owner.is_not(None),
+                    ),
+                )
+            )
+            conflict = await database.scalar(
+                select(DataManagementRun.id).where(family_condition, active_condition).limit(1)
+            )
+            if conflict is not None:
+                raise RunAlreadyActiveError
     run = DataManagementRun(
         operation=operation,
         market_code=market_code,
@@ -356,10 +529,14 @@ async def cancel_run(
         await database.rollback()
         return None
     now = datetime.now(UTC)
+    was_running = run.status == "running"
     run.status = "cancelled"
     run.completed_at = now
-    run.lease_owner = None
-    run.lease_expires_at = None
+    if was_running:
+        run.lease_expires_at = now + LEASE_FOR
+    else:
+        run.lease_owner = None
+        run.lease_expires_at = None
     run.result = {
         "cancelled": True,
         "cancelled_at": now.isoformat(),
@@ -471,7 +648,7 @@ async def claim_next_run(
                 await database.scalars(
                     select(DataManagementRun)
                     .where(
-                        DataManagementRun.status == "running",
+                        DataManagementRun.status.in_(("running", "cancelled")),
                         DataManagementRun.lease_expires_at < now,
                     )
                     .with_for_update(skip_locked=True)
@@ -482,7 +659,8 @@ async def claim_next_run(
                     select(func.pg_try_advisory_xact_lock(execution_lock_key(expired_run.id)))
                 )
                 if available:
-                    expired_run.status = "pending"
+                    if expired_run.status == "running":
+                        expired_run.status = "pending"
                     expired_run.lease_owner = None
                     expired_run.lease_expires_at = None
             local_now = now.astimezone(TAIPEI)
@@ -521,12 +699,18 @@ async def claim_next_run(
                     ),
                 }
             manual_macro_active = select(DataManagementRun.id).where(
-                DataManagementRun.operation == "macro_dashboard",
-                DataManagementRun.requested_by_user_id.is_not(None),
+                or_(
+                    and_(
+                        DataManagementRun.operation == "macro_dashboard",
+                        DataManagementRun.requested_by_user_id.is_not(None),
+                    ),
+                ),
                 DataManagementRun.status.in_(("pending", "running")),
             )
             macro_running = select(DataManagementRun.id).where(
-                DataManagementRun.operation == "macro_dashboard",
+                or_(
+                    DataManagementRun.operation == "macro_dashboard",
+                ),
                 DataManagementRun.status == "running",
             )
             due_automatic_news = (
@@ -547,11 +731,18 @@ async def claim_next_run(
                     # execution; the DB unique index handles races between
                     # workers without losing the pending row.
                     (
-                        (DataManagementRun.operation != "macro_dashboard")
+                        ~or_(
+                            DataManagementRun.operation == "macro_dashboard",
+                        )
                         | (DataManagementRun.requested_by_user_id.is_not(None))
                         | ~manual_macro_active.exists()
                     ),
-                    ((DataManagementRun.operation != "macro_dashboard") | ~macro_running.exists()),
+                    or_(
+                        ~or_(
+                            DataManagementRun.operation == "macro_dashboard",
+                        ),
+                        ~macro_running.exists(),
+                    ),
                 )
                 .order_by(
                     # The automatic news chain has a hard noon deadline, so
@@ -560,7 +751,9 @@ async def claim_next_run(
                     # tie-breaker for every other claimable run.
                     due_automatic_news.desc(),
                     # Prefer a manual macro run over its scheduled companion.
-                    (DataManagementRun.operation == "macro_dashboard").desc(),
+                    or_(
+                        DataManagementRun.operation == "macro_dashboard",
+                    ).desc(),
                     DataManagementRun.requested_by_user_id.is_(None),
                     DataManagementRun.created_at,
                 )
@@ -608,14 +801,26 @@ async def complete_run(
 ) -> None:
     now = datetime.now(UTC)
     async with session_factory.begin() as database:
-        if run.operation == "institutional_twse":
+        if _is_twse_run(run):
             await database.execute(
                 select(func.pg_advisory_xact_lock(INSTITUTIONAL_SCHEDULE_LOCK_KEY))
             )
         current = await database.scalar(
             select(DataManagementRun).where(DataManagementRun.id == run.id).with_for_update()
         )
-        if current is None or current.lease_owner != owner or current.status != "running":
+        if (
+            current is None
+            or current.lease_owner != owner
+            or current.status
+            not in {
+                "running",
+                "cancelled",
+            }
+        ):
+            return
+        if current.status == "cancelled":
+            current.lease_owner = None
+            current.lease_expires_at = None
             return
         current.status = status
         current.result = result
@@ -630,6 +835,21 @@ async def complete_run(
             target_type="data_management_run",
             target_id=str(run.id),
             after={"status": status, "operation": run.operation},
+        )
+
+
+async def release_cancelled_run(
+    session_factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID, owner: str
+) -> None:
+    async with session_factory.begin() as database:
+        await database.execute(
+            update(DataManagementRun)
+            .where(
+                DataManagementRun.id == run_id,
+                DataManagementRun.status == "cancelled",
+                DataManagementRun.lease_owner == owner,
+            )
+            .values(lease_owner=None, lease_expires_at=None)
         )
 
 
@@ -750,7 +970,19 @@ async def complete_macro_run(
         current = await database.scalar(
             select(DataManagementRun).where(DataManagementRun.id == run.id).with_for_update()
         )
-        if current is None or current.status != "running" or current.lease_owner != owner:
+        if (
+            current is None
+            or current.lease_owner != owner
+            or current.status
+            not in {
+                "running",
+                "cancelled",
+            }
+        ):
+            return
+        if current.status == "cancelled":
+            current.lease_owner = None
+            current.lease_expires_at = None
             return
         await database.execute(
             insert(MacroDashboardSnapshot)
@@ -1411,9 +1643,71 @@ async def _execute_macro(
     )
 
 
+async def _execute_provider_rerun(
+    run: DataManagementRun,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> tuple[str, dict[str, object], str | None]:
+    if run.market_code == "twelve_data":
+        return await _execute_morning(run, session_factory, settings)
+    if run.market_code == "twse":
+        return await _execute_institutional_twse(run, session_factory, settings)
+    return await _execute_index_refresh(run, session_factory, settings)
+
+
+async def _execute_full_morning(
+    run: DataManagementRun,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> tuple[str, dict[str, object], str | None]:
+    """Run every morning-report provider and retain each provider outcome."""
+    ProviderExecution = Callable[[], Awaitable[tuple[str, dict[str, object], str | None]]]
+    executions: list[tuple[str, ProviderExecution]] = [
+        (
+            "twelve_data",
+            lambda: _execute_morning(run, session_factory, settings),
+        ),
+        (
+            "yahoo_finance",
+            lambda: _execute_index_refresh(run, session_factory, settings),
+        ),
+        (
+            "twse",
+            lambda: _execute_institutional_twse(run, session_factory, settings),
+        ),
+    ]
+    providers: dict[str, object] = {}
+    statuses: list[str] = []
+    for provider, execute in executions:
+        try:
+            provider_status, details, error = await execute()
+        except Exception as caught:
+            provider_status, details, error = "failed", {}, sanitize_error(caught)
+        statuses.append(provider_status)
+        providers[provider] = {
+            "status": provider_status,
+            "details": details,
+            "error": error,
+        }
+    failed = sum(status == "failed" for status in statuses)
+    status = (
+        "failed"
+        if failed == len(statuses)
+        else "partial"
+        if failed or "partial" in statuses
+        else "succeeded"
+    )
+    error = "full_morning_failures" if status != "succeeded" else None
+    return status, {"providers": providers}, error
+
+
 async def execute_run(
     run: DataManagementRun, session_factory: async_sessionmaker[AsyncSession], settings: Settings
 ) -> tuple[str, dict[str, object], str | None]:
+    if run.operation == "morning_all":
+        return await _execute_full_morning(run, session_factory, settings)
+    if run.operation == "provider_rerun":
+        return await _execute_provider_rerun(run, session_factory, settings)
     if run.operation == "index_yahoo":
         return await _execute_index_refresh(run, session_factory, settings)
     if run.operation == "institutional_twse":
@@ -1450,12 +1744,38 @@ async def worker_loop(
             key = execution_lock_key(run_id)
             await execution_database.execute(select(func.pg_advisory_lock(key)))
             macro_lock_held = False
+            family_lock_keys: list[int] = []
             try:
-                if claimed_run.operation == "macro_dashboard":
+                if _is_macro_run(claimed_run):
                     await execution_database.execute(
                         select(func.pg_advisory_lock(MACRO_EXECUTION_LOCK_KEY))
                     )
                     macro_lock_held = True
+                elif _is_full_morning_run(claimed_run):
+                    family_lock_keys = [
+                        TWELVE_DATA_EXECUTION_LOCK_KEY,
+                        US_MARKET_EXECUTION_LOCK_KEY,
+                        TWSE_EXECUTION_LOCK_KEY,
+                    ]
+                    for family_lock_key in family_lock_keys:
+                        await execution_database.execute(
+                            select(func.pg_advisory_lock(family_lock_key))
+                        )
+                elif _is_twelve_data_run(claimed_run):
+                    family_lock_keys = [TWELVE_DATA_EXECUTION_LOCK_KEY]
+                    await execution_database.execute(
+                        select(func.pg_advisory_lock(TWELVE_DATA_EXECUTION_LOCK_KEY))
+                    )
+                elif _is_twse_run(claimed_run):
+                    family_lock_keys = [TWSE_EXECUTION_LOCK_KEY]
+                    await execution_database.execute(
+                        select(func.pg_advisory_lock(TWSE_EXECUTION_LOCK_KEY))
+                    )
+                elif _is_us_run(claimed_run):
+                    family_lock_keys = [US_MARKET_EXECUTION_LOCK_KEY]
+                    await execution_database.execute(
+                        select(func.pg_advisory_lock(US_MARKET_EXECUTION_LOCK_KEY))
+                    )
                 still_owned = await execution_database.scalar(
                     select(DataManagementRun.id).where(
                         DataManagementRun.id == run_id,
@@ -1464,6 +1784,7 @@ async def worker_loop(
                     )
                 )
                 if still_owned is None:
+                    await release_cancelled_run(session_factory, run_id, owner)
                     continue
                 stop = asyncio.Event()
                 ownership_lost = asyncio.Event()
@@ -1492,7 +1813,7 @@ async def worker_loop(
                 dashboard: MacroDashboard | None = None
                 execution_task = asyncio.create_task(
                     _execute_macro(settings)
-                    if claimed_run.operation == "macro_dashboard"
+                    if _is_macro_run(claimed_run)
                     else execute_run(claimed_run, session_factory, settings)
                 )
                 ownership_task = asyncio.create_task(ownership_lost.wait())
@@ -1510,9 +1831,10 @@ async def worker_loop(
                         except asyncio.CancelledError:
                             pass
                     if execution_task.cancelled():
+                        await release_cancelled_run(session_factory, run_id, owner)
                         continue
                     execution = await execution_task
-                    if claimed_run.operation == "macro_dashboard":
+                    if _is_macro_run(claimed_run):
                         outcome, result, error, dashboard = cast(
                             tuple[str, dict[str, object], str | None, MacroDashboard], execution
                         )
@@ -1526,7 +1848,7 @@ async def worker_loop(
                     stop.set()
                     await task
                     ownership_task.cancel()
-                if claimed_run.operation == "macro_dashboard" and dashboard is not None:
+                if _is_macro_run(claimed_run) and dashboard is not None:
                     await complete_macro_run(
                         session_factory,
                         claimed_run,
@@ -1558,6 +1880,10 @@ async def worker_loop(
                 if macro_lock_held:
                     await execution_database.execute(
                         select(func.pg_advisory_unlock(MACRO_EXECUTION_LOCK_KEY))
+                    )
+                for family_lock_key in reversed(family_lock_keys):
+                    await execution_database.execute(
+                        select(func.pg_advisory_unlock(family_lock_key))
                     )
                 await execution_database.execute(select(func.pg_advisory_unlock(key)))
                 await execution_database.rollback()

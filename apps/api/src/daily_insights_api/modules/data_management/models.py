@@ -26,7 +26,7 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
             (
                 "operation IN ('morning_all', 'morning_market', 'index_yahoo', "
                 "'institutional_twse', 'news_all', 'news_market', 'news_publish', "
-                "'macro_dashboard')"
+                "'macro_dashboard', 'provider_rerun')"
             ),
             name="operation_valid",
         ),
@@ -38,6 +38,8 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
             "("
             "(operation = 'morning_market' AND market_code IN "
             "('global_macro_bonds', 'crypto', 'us_equity')) OR "
+            "(operation = 'provider_rerun' AND market_code IN "
+            "('twelve_data', 'yahoo_finance', 'twse')) OR "
             "(operation = 'news_market' AND market_code IN "
             "('global', 'tw_equity', 'us_equity')) OR "
             "(operation IN ('morning_all', 'index_yahoo', 'institutional_twse', 'news_all', "
@@ -118,6 +120,14 @@ class DataManagementRun(UUIDPrimaryKeyMixin, Base):
             postgresql_where=text(
                 "status IN ('pending', 'running') AND operation = 'macro_dashboard' "
                 "AND requested_by_user_id IS NOT NULL"
+            ),
+        ),
+        Index(
+            "uq_data_management_runs_active_provider_rerun",
+            "market_code",
+            unique=True,
+            postgresql_where=text(
+                "status IN ('pending', 'running') AND operation = 'provider_rerun'"
             ),
         ),
         Index(

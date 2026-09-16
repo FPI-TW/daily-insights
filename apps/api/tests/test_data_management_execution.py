@@ -189,9 +189,31 @@ async def test_cancel_run_terminalizes_pending_or_running_work_without_a_lease()
     )
     assert cancelled is run
     assert run.status == "cancelled"
-    assert run.lease_owner is None and run.lease_expires_at is None
+    assert run.lease_owner is None and run.lease_expires_at is not None
     assert run.completed_at is not None
     assert run.result is not None and run.result["cancelled"] is True
+
+
+@pytest.mark.asyncio
+async def test_provider_rerun_routes_to_the_selected_complete_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.modules.data_management import service
+
+    async def index(*_: object, **__: object) -> tuple[str, dict[str, object], str | None]:
+        return "partial", {"symbols": [{"symbol": "^GSPC"}]}, "index_partial"
+
+    monkeypatch.setattr(service, "_execute_index_refresh", index)
+
+    status, result, error = await execute_run(
+        _run("provider_rerun", "yahoo_finance"),
+        cast(Any, None),
+        Settings(environment="test"),
+    )
+
+    assert status == "partial"
+    assert error == "index_partial"
+    assert result == {"symbols": [{"symbol": "^GSPC"}]}
 
 
 @pytest.mark.asyncio
@@ -247,7 +269,7 @@ async def test_morning_execution_preserves_no_change_dataset_provenance(
 
 
 @pytest.mark.asyncio
-async def test_morning_full_classifies_degraded_and_failed_markets(
+async def test_twelve_data_provider_classifies_degraded_and_failed_markets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from daily_insights_api.modules.data_management import service
@@ -271,7 +293,7 @@ async def test_morning_full_classifies_degraded_and_failed_markets(
     monkeypatch.setattr(service, "TwelveDataAdapter", _NoopAdapter)
     monkeypatch.setattr(service, "run_morning_report_edition", execute)
     status, result, error = await execute_run(
-        _run("morning_all"),
+        _run("provider_rerun", "twelve_data"),
         cast(Any, None),
         Settings(environment="test", morning_reports_enabled=True, twelve_data_api_key="key"),
     )
@@ -286,13 +308,44 @@ async def test_morning_full_classifies_degraded_and_failed_markets(
 
     monkeypatch.setattr(service, "run_morning_report_edition", all_fail)
     failed_status, failed_result, failed_error = await execute_run(
-        _run("morning_all"),
+        _run("provider_rerun", "twelve_data"),
         cast(Any, None),
         Settings(environment="test", morning_reports_enabled=True, twelve_data_api_key="key"),
     )
     assert failed_status == "failed" and failed_error == "runtimeerror"
     failed_markets = cast(list[dict[str, object]], failed_result["markets"])
     assert all(item["publication_action"] == "failed" for item in failed_markets)
+
+
+@pytest.mark.asyncio
+async def test_full_morning_aggregates_all_provider_outcomes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.modules.data_management import service
+
+    async def twelve(*_: object) -> tuple[str, dict[str, object], str | None]:
+        return "succeeded", {"markets": ["global_macro_bonds", "crypto", "us_equity"]}, None
+
+    async def yahoo(*_: object) -> tuple[str, dict[str, object], str | None]:
+        return "partial", {"symbols": ["^GSPC"]}, "index_partial"
+
+    async def twse(*_: object) -> tuple[str, dict[str, object], str | None]:
+        return "succeeded", {"taiex": {}, "market_flows": {}, "stock_flows": {}}, None
+
+    monkeypatch.setattr(service, "_execute_morning", twelve)
+    monkeypatch.setattr(service, "_execute_index_refresh", yahoo)
+    monkeypatch.setattr(service, "_execute_institutional_twse", twse)
+
+    status, result, error = await execute_run(
+        _run("morning_all"), cast(Any, None), Settings(environment="test")
+    )
+
+    assert (status, error) == ("partial", "full_morning_failures")
+    assert set(cast(dict[str, object], result["providers"])) == {
+        "twelve_data",
+        "yahoo_finance",
+        "twse",
+    }
 
 
 @pytest.mark.asyncio

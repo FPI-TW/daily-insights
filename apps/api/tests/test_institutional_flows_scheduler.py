@@ -119,7 +119,9 @@ async def test_queue_run_returns_the_workers_terminal_outcome(
     run_id = uuid.uuid4()
 
     class SessionFactory(_SessionFactory):
-        async def scalar(self, _: object) -> str:
+        async def scalar(self, statement: object) -> str | None:
+            if "lease_owner" in str(statement):
+                return None
             return terminal_status
 
     async def enqueue(_: object, **__: object) -> object:
@@ -222,7 +224,9 @@ async def test_cancelled_manual_active_run_does_not_cancel_the_automatic_obligat
     run_id = uuid.uuid4()
 
     class SessionFactory(_SessionFactory):
-        async def scalar(self, _: object) -> str:
+        async def scalar(self, statement: object) -> str | None:
+            if "lease_owner" in str(statement):
+                return None
             return "cancelled"
 
     async def enqueue(_: object, **__: object) -> object:

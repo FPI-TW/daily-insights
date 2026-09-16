@@ -329,16 +329,16 @@ export function createAdministrationClient(transport: ApiTransport) {
         dataManagementCatalogSchema
       )
     },
-    async listDataManagementRuns() {
+    async listDataManagementRuns(page = 1) {
       return parseResponse(
-        await transport("/api/admin/data-management/runs?limit=20"),
+        await transport(`/api/admin/data-management/runs?page=${page}`),
         dataManagementRunListSchema
       )
     },
-    async listNewsDataManagementRuns() {
+    async listNewsDataManagementRuns(page = 1) {
       return parseResponse(
         await transport(
-          "/api/admin/data-management/runs?limit=20&operation_group=news"
+          `/api/admin/data-management/runs?page=${page}&operation_group=news`
         ),
         dataManagementRunListSchema
       )

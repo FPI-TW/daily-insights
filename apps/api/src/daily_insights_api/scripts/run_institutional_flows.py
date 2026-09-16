@@ -64,8 +64,20 @@ async def _same_edition_run(
             await database.scalar(
                 select(DataManagementRun)
                 .where(
-                    DataManagementRun.operation == "institutional_twse",
+                    (DataManagementRun.operation == "institutional_twse")
+                    | (
+                        (DataManagementRun.operation == "provider_rerun")
+                        & (DataManagementRun.market_code == "twse")
+                    )
+                    | (DataManagementRun.operation == "morning_all"),
                     DataManagementRun.edition_date == edition_date,
+                    (
+                        DataManagementRun.status.in_(("pending", "running"))
+                        | (
+                            (DataManagementRun.status == "cancelled")
+                            & DataManagementRun.lease_owner.is_not(None)
+                        )
+                    ),
                 )
                 .order_by(DataManagementRun.created_at.desc())
                 .limit(1)
@@ -90,15 +102,47 @@ async def _wait_for_outcome(
             status = await database.scalar(
                 select(DataManagementRun.status).where(DataManagementRun.id == run_id)
             )
+            lease_owner = (
+                await database.scalar(
+                    select(DataManagementRun.lease_owner).where(DataManagementRun.id == run_id)
+                )
+                if status == "cancelled"
+                else None
+            )
+            result = (
+                await database.scalar(
+                    select(DataManagementRun.result).where(DataManagementRun.id == run_id)
+                )
+                if status == "partial"
+                else None
+            )
         if heartbeat is not None:
             await heartbeat.touch()
-        if status == "succeeded":
+        twse_status = (
+            result.get("providers", {}).get("twse", {}).get("status")
+            if isinstance(result, dict)
+            and isinstance(result.get("providers"), dict)
+            and isinstance(result["providers"].get("twse"), dict)
+            else None
+        )
+        if status == "succeeded" or twse_status == "succeeded":
             emit_event("institutional_flows.completed", run_id=str(run_id), status=status)
             return "complete"
         if status in {"partial", "failed"}:
             emit_event("institutional_flows.completed", run_id=str(run_id), status=status)
             return "failed"
         if status == "cancelled":
+            if lease_owner is not None:
+                if elapsed >= timeout_seconds:
+                    emit_event(
+                        "institutional_flows.wait_failed",
+                        run_id=str(run_id),
+                        status=status,
+                    )
+                    return "failed"
+                await sleep(poll_seconds)
+                elapsed += poll_seconds
+                continue
             # Cancellation is an operator decision, not a provider failure.
             emit_event("institutional_flows.completed", run_id=str(run_id), status=status)
             return "failed" if retry_cancelled else "complete"
@@ -151,7 +195,14 @@ async def queue_run(
                 edition_date=edition,
             )
         run_id = run.id
-        if run.status in {"succeeded", "cancelled"}:
+        providers = (getattr(run, "result", None) or {}).get("providers")
+        twse = providers.get("twse") if isinstance(providers, dict) else None
+        twse_succeeded = isinstance(twse, dict) and twse.get("status") == "succeeded"
+        if (
+            run.status == "succeeded"
+            or (run.status == "cancelled" and getattr(run, "lease_owner", None) is None)
+            or twse_succeeded
+        ):
             emit_event(
                 "institutional_flows.already_recorded",
                 edition_date=edition.isoformat(),

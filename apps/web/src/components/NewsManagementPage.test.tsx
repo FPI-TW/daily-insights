@@ -289,6 +289,40 @@ describe("NewsManagementPage", () => {
     expect(listRuns).not.toHaveBeenCalled()
   })
 
+  it("keeps today's market progress when browsing a later history page", async () => {
+    catalog.mockResolvedValue(enabledCatalog)
+    listEditions.mockResolvedValue(editions)
+    const todayRun = {
+      id: "c744cb20-bf7c-4f4a-8e7b-1e0c69a91adf",
+      operation: "news_all",
+      market_code: null,
+      status: "succeeded",
+      edition_date: enabledCatalog.taipei_date,
+      requested_by_user_id: null,
+      error: null,
+      result: null,
+    }
+    listNewsRuns.mockImplementation(async (requestedPage = 1) => ({
+      items: requestedPage === 1 ? [] : [todayRun],
+      page: requestedPage,
+      page_size: 10,
+      total: 11,
+      has_more: requestedPage === 1,
+      active_runs: [],
+      current_day_runs: [todayRun],
+    }))
+    renderPage()
+
+    fireEvent.click(await screen.findByRole("button", { name: "Next" }))
+    await screen.findByText("Page 2")
+
+    const progress = screen.getByRole("region", { name: "Progress by market" })
+    expect(
+      within(progress).queryByText("Today's run has not been created")
+    ).toBeNull()
+    expect(within(progress).getAllByText("Completed").length).toBeGreaterThan(0)
+  })
+
   it("keeps refresh controls enabled while an automatic news run is active", async () => {
     catalog.mockResolvedValue({
       taipei_date: "2026-09-07",
@@ -340,6 +374,36 @@ describe("NewsManagementPage", () => {
         },
       ],
     })
+    renderPage()
+
+    expect(
+      await screen.findByRole("button", { name: "Refresh all markets" })
+    ).toBeDisabled()
+    expect(
+      within(marketRerunRegion()).getByRole("button", {
+        name: "Taiwan equities",
+      })
+    ).toBeDisabled()
+  })
+
+  it("keeps refresh controls disabled for cancelled manual work that remains active", async () => {
+    catalog.mockResolvedValue(enabledCatalog)
+    const cancelledButLeased = {
+      id: "c744cb20-bf7c-4f4a-8e7b-1e0c69a91adf",
+      operation: "news_market",
+      market_code: "global",
+      status: "cancelled",
+      edition_date: "2026-09-07",
+      requested_by_user_id: "ee77eab0-3910-4706-803c-ffaf979f1ff7",
+      error: "cancelled_by_admin",
+      result: null,
+    }
+    listNewsRuns.mockResolvedValue({
+      items: [cancelledButLeased],
+      active_runs: [cancelledButLeased],
+    })
+    listEditions.mockResolvedValue(editions)
+
     renderPage()
 
     expect(

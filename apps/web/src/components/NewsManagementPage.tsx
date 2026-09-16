@@ -52,6 +52,7 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
   const queryClient = useQueryClient()
   const redirectExpired = useSessionExpiryRedirect(locale, "admin")
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [page, setPage] = useState(1)
   const cancelRef = useRef<HTMLButtonElement>(null)
   const allRef = useRef<HTMLButtonElement>(null)
   const catalog = useQuery({
@@ -61,13 +62,17 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
     retryDelay: newsAdminRetryDelay,
   })
   const runs = useQuery({
-    queryKey: runsKey,
-    queryFn: () => browserAdministrationClient().listNewsDataManagementRuns(),
+    queryKey: [...runsKey, { operationGroup: "news", page }],
+    queryFn: () =>
+      browserAdministrationClient().listNewsDataManagementRuns(page),
     retry: retryNewsAdminGet,
     retryDelay: newsAdminRetryDelay,
     refetchInterval: query =>
       !query.state.error &&
-      query.state.data?.items.some(run => isNewsRun(run) && isActiveRun(run))
+      query.state.data?.active_runs?.some(
+        run =>
+          isNewsRun(run) && (isActiveRun(run) || run.status === "cancelled")
+      )
         ? 2_000
         : false,
   })
@@ -78,10 +83,23 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
     if (runs.error) void redirectExpired(runs.error)
   }, [redirectExpired, runs.error])
   const newsRuns = runs.data?.items.filter(isNewsRun) ?? []
+  const activeNewsRuns = (
+    runs.data?.active_runs ?? (runs.data?.items ?? []).filter(isActiveRun)
+  ).filter(isNewsRun)
+  const activeNewsRunsOutsidePage = activeNewsRuns.filter(
+    run => !newsRuns.some(item => item.id === run.id)
+  )
+  const relevantNewsRuns = [
+    ...activeNewsRuns,
+    ...newsRuns.filter(
+      run => !activeNewsRuns.some(active => active.id === run.id)
+    ),
+  ]
+  const currentDayNewsRuns = runs.data?.current_day_runs ?? relevantNewsRuns
   // Only an administrator's own run blocks the rerun buttons: the scheduled
   // 08:00 run and its retries coexist with manual requests.
-  const manualActive = newsRuns.some(
-    run => run.requested_by_user_id !== null && isActiveRun(run)
+  const manualActive = activeNewsRuns.some(
+    run => run.requested_by_user_id !== null
   )
   const enqueue = useMutation({
     retry: false,
@@ -93,6 +111,7 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: runsKey })
       setConfirmOpen(false)
+      setPage(1)
     },
   })
   const cancelRun = useMutation({
@@ -244,7 +263,7 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
         </section>
       </div>
       <NewsMarketProgress
-        runs={newsRuns}
+        runs={currentDayNewsRuns}
         markets={catalog.data.news_markets}
         locale={locale}
         taipeiDate={catalog.data.taipei_date}
@@ -256,6 +275,33 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
         <h2 id="news-runs-title" className="m-0 text-lg font-extrabold">
           {t("newsManagementLatest")}
         </h2>
+        {activeNewsRunsOutsidePage.length > 0 ? (
+          <div className="mb-5 border-b border-line pb-5" aria-live="polite">
+            <h3 className="m-0 text-base font-extrabold">
+              {t("newsManagementActive")}
+            </h3>
+            <div className="mt-3 grid gap-2">
+              {activeNewsRunsOutsidePage.map(run => (
+                <div key={run.id} className="rounded-md border border-line p-3">
+                  <p className="m-0 font-bold">
+                    {t(`newsRecoveryState_${newsRunState(run)}`)} ·{" "}
+                    <RunLabel run={run} /> · {run.edition_date}
+                  </p>
+                  <button
+                    type="button"
+                    className="secondary-action mt-3"
+                    disabled={cancelRun.isPending}
+                    onClick={() =>
+                      void cancelRun.mutateAsync(run.id).catch(redirectExpired)
+                    }
+                  >
+                    {t("dataManagementCancel")}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div className="mt-4 grid gap-2">
           {newsRuns.map(run => (
             <details key={run.id} className="rounded-md border border-line p-3">
@@ -285,7 +331,7 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
                 <button
                   type="button"
                   className="mt-3 min-h-11 rounded-lg border border-line px-4 py-2 font-bold hover:bg-link-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lagoon-deep"
-                  disabled={resume.isPending || newsRuns.some(isActiveRun)}
+                  disabled={resume.isPending || activeNewsRuns.length > 0}
                   onClick={() =>
                     void resume.mutateAsync(run).catch(redirectExpired)
                   }
@@ -308,17 +354,28 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
             </details>
           ))}
         </div>
+        <RunPagination
+          page={runs.data?.page ?? 1}
+          hasMore={runs.data?.has_more ?? false}
+          onPrevious={() => setPage(current => Math.max(1, current - 1))}
+          onNext={() => setPage(current => current + 1)}
+          previousLabel={t("newsManagementPagePrevious")}
+          nextLabel={t("newsManagementPageNext")}
+          statusLabel={t("newsManagementPageStatus", {
+            page: runs.data?.page ?? 1,
+          })}
+        />
       </section>
       <NewsDependencies
         locale={locale}
-        active={newsRuns.some(isActiveRun)}
+        active={activeNewsRuns.length > 0}
         redirectExpired={redirectExpired}
       />
       <NewsCuration
         taipeiDate={catalog.data.taipei_date}
         dailyNewsEnabled={catalog.data.daily_news_enabled}
         markets={catalog.data.news_markets}
-        runs={newsRuns}
+        runs={relevantNewsRuns}
         redirectExpired={redirectExpired}
       />
       <Dialog
@@ -362,6 +419,50 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
         </div>
       </Dialog>
     </main>
+  )
+}
+
+function RunPagination({
+  page,
+  hasMore,
+  onPrevious,
+  onNext,
+  previousLabel,
+  nextLabel,
+  statusLabel,
+}: {
+  page: number
+  hasMore: boolean
+  onPrevious: () => void
+  onNext: () => void
+  previousLabel: string
+  nextLabel: string
+  statusLabel: string
+}) {
+  if (page === 1 && !hasMore) return null
+  return (
+    <nav
+      className="mt-5 flex items-center justify-between gap-3"
+      aria-label={statusLabel}
+    >
+      <button
+        type="button"
+        className="secondary-action"
+        disabled={page === 1}
+        onClick={onPrevious}
+      >
+        {previousLabel}
+      </button>
+      <span className="text-sm font-bold text-sea-ink-soft">{statusLabel}</span>
+      <button
+        type="button"
+        className="secondary-action"
+        disabled={!hasMore}
+        onClick={onNext}
+      >
+        {nextLabel}
+      </button>
+    </nav>
   )
 }
 
