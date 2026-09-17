@@ -38,6 +38,7 @@ from daily_insights_api.modules.markets.api import (
 )
 from daily_insights_api.modules.orchestration.facts import (
     fence_is_current,
+    interest_rate_month_coverage,
     latest_market_date,
     store_interest_rates,
     store_market_bars,
@@ -52,6 +53,7 @@ from daily_insights_api.modules.orchestration.worker import (
 )
 from daily_insights_api.modules.reports.api import (
     FX_INSTRUMENTS,
+    TENORS,
     diagnostics,
     load_sofr,
     load_treasury,
@@ -59,6 +61,29 @@ from daily_insights_api.modules.reports.api import (
 
 TwelveManifest = tuple[tuple[str, str, str, str | None, str | None], ...]
 TREASURY_REQUEST_TIMEOUT_SECONDS = 30.0
+
+
+def _treasury_fetch_periods(
+    today: date, coverage: dict[tuple[int, int], set[str]]
+) -> tuple[tuple[int, ...], tuple[tuple[int, int], ...]]:
+    expected_symbols = {symbol for _, symbol in TENORS}
+    years = {
+        year
+        for year in range(today.year - 2, today.year)
+        if any(coverage.get((year, month), set()) != expected_symbols for month in range(1, 13))
+    }
+    current_year_is_partial = any(
+        coverage.get((today.year, month), set()) != expected_symbols
+        for month in range(1, today.month)
+    )
+    if current_year_is_partial or (not coverage and years):
+        years.add(today.year)
+
+    months = {(today.year, today.month)} if today.year not in years else set()
+    current_year_has_data = any(year == today.year for year, _ in coverage)
+    if not current_year_has_data and today.month == 1 and today.year - 1 not in years:
+        months.add((today.year - 1, 12))
+    return tuple(sorted(years)), tuple(sorted(months))
 
 
 def _safe_error_detail(error: BaseException) -> str:
@@ -617,6 +642,17 @@ async def _run_treasury(
 ) -> FunctionOutcome:
     del settings
     today = claimed.edition_date
+    symbols = tuple(symbol for _, symbol in TENORS)
+    async with session_factory() as database:
+        coverage = await interest_rate_month_coverage(
+            database,
+            provider_key="us_treasury",
+            dataset_key=claimed.function_key,
+            symbols=symbols,
+            start_year=today.year - 2,
+            end_year=today.year,
+        )
+    fetch_years, fetch_months = _treasury_fetch_periods(today, coverage)
     diagnostic_entries: list[Any] = []
     token = diagnostics.set(diagnostic_entries)
     try:
@@ -624,7 +660,12 @@ async def _run_treasury(
             timeout=TREASURY_REQUEST_TIMEOUT_SECONDS,
             follow_redirects=False,
         ) as client:
-            histories = await load_treasury(client, today)
+            histories = await load_treasury(
+                client,
+                today,
+                years=fetch_years,
+                months=fetch_months,
+            )
     finally:
         diagnostics.reset(token)
     inserted = 0
@@ -675,6 +716,10 @@ async def _run_treasury(
         record_count=inserted,
         result={
             "symbols": successes,
+            "fetched_periods": [
+                *[str(year) for year in fetch_years],
+                *[f"{year:04d}-{month:02d}" for year, month in fetch_months],
+            ],
             "failed_symbols": missing,
             "failure_reasons": failure_reasons,
         },

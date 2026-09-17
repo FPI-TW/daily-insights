@@ -100,6 +100,39 @@ def test_partial_news_result_keeps_batch_with_more_prepared_items() -> None:
     assert _merge_partial_results(previous, current) == previous
 
 
+def _complete_treasury_coverage(*, through: date) -> dict[tuple[int, int], set[str]]:
+    symbols = {symbol for _, symbol in TENORS}
+    return {
+        (year, month): symbols
+        for year in range(through.year - 2, through.year + 1)
+        for month in range(1, 13 if year < through.year else through.month + 1)
+    }
+
+
+def test_treasury_fetch_periods_uses_only_current_month_when_coverage_is_complete() -> None:
+    today = date(2026, 9, 17)
+
+    assert orchestration_functions._treasury_fetch_periods(
+        today, _complete_treasury_coverage(through=today)
+    ) == ((), ((2026, 9),))
+
+
+def test_treasury_fetch_periods_backfills_missing_year_and_new_year_baseline() -> None:
+    symbols = {symbol for _, symbol in TENORS}
+    today = date(2026, 9, 17)
+    coverage = _complete_treasury_coverage(through=today)
+    coverage.pop((2025, 6))
+
+    assert orchestration_functions._treasury_fetch_periods(today, coverage) == (
+        (2025,),
+        ((2026, 9),),
+    )
+    assert orchestration_functions._treasury_fetch_periods(
+        date(2026, 1, 1),
+        {(year, month): symbols for year in (2024, 2025) for month in range(1, 13)},
+    ) == ((), ((2025, 12), (2026, 1)))
+
+
 @pytest_asyncio.fixture
 async def orchestration_database() -> AsyncIterator[
     tuple[AsyncEngine, async_sessionmaker[AsyncSession]]
