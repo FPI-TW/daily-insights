@@ -29,7 +29,18 @@ TWELVE_DATA_CONTRACT_HASH = hashlib.sha256(
 # "US Dollar", while HG1 (with type=commodity) returns the ISO code. Both
 # are reviewed representations of the same manifest currency; no other alias
 # is accepted at this trust boundary.
-TWELVE_DATA_CURRENCY_NAMES = {"USD": frozenset(("US Dollar", "USD"))}
+TWELVE_DATA_CURRENCY_NAMES = {
+    "USD": frozenset(("US Dollar", "USD")),
+    "JPY": frozenset(("Japanese Yen", "JPY")),
+    "CHF": frozenset(("Swiss Franc", "CHF")),
+    "CAD": frozenset(("Canadian Dollar", "CAD")),
+    "TWD": frozenset(("Taiwan Dollar", "TWD")),
+    "KRW": frozenset(("Korean Won", "KRW")),
+    "HKD": frozenset(("Hong Kong Dollar", "HKD")),
+    "CNH": frozenset(("Chinese Yuan (Offshore)", "CNH")),
+    "SGD": frozenset(("Singapore Dollar", "SGD")),
+    "GBP": frozenset(("British Pound", "GBP")),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +184,8 @@ class TwelveDataAdapter:
         expected_asset_type: str | None = None,
         symbol_type: str | None = None,
         dp: int | None = None,
+        end_date: date | None = None,
+        timezone: str | None = None,
     ) -> DailyBarsResult:
         if not 1 <= outputsize <= 5_000:
             raise ValueError("outputsize must be between 1 and 5000")
@@ -188,6 +201,10 @@ class TwelveDataAdapter:
             params["type"] = symbol_type
         if dp is not None:
             params["dp"] = dp
+        if end_date is not None:
+            params["end_date"] = end_date.isoformat()
+        if timezone is not None:
+            params["timezone"] = timezone
         response = await self._transport.get("/time_series", params=params)
         payload = _parse(response, TwelveDataTimeSeries, "/time_series")
         if payload.status != "ok" or payload.meta.symbol != symbol:

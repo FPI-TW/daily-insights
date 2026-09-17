@@ -47,6 +47,7 @@ class History(BaseModel):
     source: str
     status: Literal["ok", "unavailable", "disabled"]
     points: list[Point] = Field(default_factory=list)
+    base_dates: dict[str, date] = Field(default_factory=dict)
 
 
 class EconomicEvent(BaseModel):
@@ -92,18 +93,26 @@ COMMODITIES = (
 )
 # Enough sessions to cover the one-year ratio window with margin.
 COMMODITY_HISTORY = 400
-# Explicit quote directions and units for the Yahoo Finance FX histories.
-INSTRUMENTS = (
-    ("dxy", "DX-Y.NYB", "index"),
-    ("eur_usd", "EURUSD=X", "USD"),
-    ("gbp_usd", "GBPUSD=X", "USD"),
-    ("aud_usd", "AUDUSD=X", "USD"),
-    ("nzd_usd", "NZDUSD=X", "USD"),
-    ("usd_jpy", "JPY=X", "JPY"),
-    ("usd_chf", "CHF=X", "CHF"),
-    ("usd_cad", "CAD=X", "CAD"),
-    ("usd_twd", "TWD=X", "TWD"),
+# DXY remains on Yahoo Finance because it is an index rather than a currency
+# pair. All FX pairs below use Twelve Data's physical-currency daily series.
+INSTRUMENTS = (("dxy", "DX-Y.NYB", "index"),)
+FX_INSTRUMENTS = (
+    ("eur_usd", "EUR/USD", "USD"),
+    ("gbp_usd", "GBP/USD", "USD"),
+    ("aud_usd", "AUD/USD", "USD"),
+    ("nzd_usd", "NZD/USD", "USD"),
+    ("usd_jpy", "USD/JPY", "JPY"),
+    ("usd_chf", "USD/CHF", "CHF"),
+    ("usd_cad", "USD/CAD", "CAD"),
+    ("usd_twd", "USD/TWD", "TWD"),
+    ("usd_krw", "USD/KRW", "KRW"),
+    ("usd_hkd", "USD/HKD", "HKD"),
+    ("usd_cnh", "USD/CNH", "CNH"),
+    ("usd_sgd", "USD/SGD", "SGD"),
+    ("eur_jpy", "EUR/JPY", "JPY"),
+    ("aud_jpy", "AUD/JPY", "JPY"),
 )
+FX_TIMEZONE = ZoneInfo("Australia/Sydney")
 TENORS = (
     ("3m", "BC_3MONTH"),
     ("2y", "BC_2YEAR"),
@@ -323,13 +332,13 @@ async def load_commodity_histories(settings: Settings) -> list[History]:
 
 
 async def load_market_histories(settings: Settings) -> list[History]:
-    commodities, fx = await asyncio.gather(
-        load_commodity_histories(settings), load_fx_histories(settings)
+    commodities, dxy, fx = await asyncio.gather(
+        load_commodity_histories(settings), load_dxy_history(settings), load_fx_histories(settings)
     )
-    return [*commodities, *fx]
+    return [*commodities, *dxy, *fx]
 
 
-async def load_fx_histories(settings: Settings) -> list[History]:
+async def load_dxy_history(settings: Settings) -> list[History]:
     if not settings.yfinance_enabled:
         return [
             History(id=key, symbol=symbol, unit=unit, source="Yahoo Finance", status="disabled")
@@ -366,6 +375,88 @@ async def load_fx_histories(settings: Settings) -> list[History]:
                 )
 
     return list(await asyncio.gather(*(fetch(*instrument) for instrument in INSTRUMENTS)))
+
+
+def fx_base_dates(points: list[Point]) -> dict[str, date]:
+    if not points:
+        return {}
+    latest = points[-1].date
+    return {
+        str(days): next(
+            point.date for point in points if point.date >= latest - timedelta(days=days - 1)
+        )
+        for days in (30, 90, 365)
+    }
+
+
+def fx_provider_end_date(now: datetime) -> date:
+    """Return Twelve Data's exclusive FX cutoff in its requested timezone."""
+    return now.astimezone(FX_TIMEZONE).date()
+
+
+async def load_fx_histories(settings: Settings) -> list[History]:
+    if settings.twelve_data_api_key is None:
+        return [
+            History(id=key, symbol=symbol, unit=unit, source="Twelve Data", status="disabled")
+            for key, symbol, unit in FX_INSTRUMENTS
+        ]
+
+    async def fetch(adapter: TwelveDataAdapter, key: str, symbol: str, unit: str) -> History:
+        try:
+            # Twelve Data's end_date is exclusive. Requesting the same timezone
+            # used to derive it keeps the still-forming provider day out.
+            result = await adapter.get_daily_bars(
+                market="global_macro_bonds",
+                symbol=symbol,
+                expected_currency=unit,
+                outputsize=400,
+                end_date=fx_provider_end_date(datetime.now(UTC)),
+                timezone="Australia/Sydney",
+            )
+            points = [
+                Point(date=item.trade_date, value=item.close)
+                for item in result.items
+                if item.close is not None
+            ]
+            if not points:
+                raise EmptySourceResponse("FX history is empty")
+            if any(point.value <= 0 for point in points):
+                raise ValueError("market history must contain positive closes")
+            return History(
+                id=key,
+                symbol=symbol,
+                unit=unit,
+                source="Twelve Data",
+                status="ok",
+                points=points,
+                base_dates=fx_base_dates(points),
+            )
+        except Exception as error:
+            record_failure("twelve_data", "forex_history", [symbol], error)
+            return History(
+                id=key, symbol=symbol, unit=unit, source="Twelve Data", status="unavailable"
+            )
+
+    try:
+        async with TwelveDataTransport(
+            base_url=settings.twelve_data_base_url,
+            api_key=settings.twelve_data_api_key,
+            timeout_seconds=min(settings.twelve_data_timeout_seconds, 10),
+            retry_policy=RetryPolicy(max_attempts=settings.twelve_data_retry_attempts),
+            max_concurrency=settings.twelve_data_max_concurrency,
+        ) as transport:
+            adapter = TwelveDataAdapter(transport)
+            return list(
+                await asyncio.gather(
+                    *(fetch(adapter, *instrument) for instrument in FX_INSTRUMENTS)
+                )
+            )
+    except Exception as error:
+        record_failure("twelve_data", "forex_history", [item[1] for item in FX_INSTRUMENTS], error)
+        return [
+            History(id=key, symbol=symbol, unit=unit, source="Twelve Data", status="unavailable")
+            for key, symbol, unit in FX_INSTRUMENTS
+        ]
 
 
 async def refresh_macro_dashboard(settings: Settings) -> MacroDashboard:

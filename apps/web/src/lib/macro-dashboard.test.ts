@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   formatTaipeiTimestamp,
   periodChange,
+  normalizedPoints,
   ratioPoints,
   recentPoints,
   macroDashboardSchema,
@@ -15,6 +16,7 @@ function history(points: [string, string][]): MacroHistory {
     source: "Yahoo Finance",
     unit: "USD",
     status: "ok",
+    base_dates: {},
     points: points.map(([date, value]) => ({ date, value })),
   }
 }
@@ -122,6 +124,21 @@ describe("macro dashboard calculations", () => {
       )
     ).toHaveLength(2)
     expect(recentPoints(undefined, 90)).toEqual([])
+  })
+  it("normalizes each series from its own API-provided base date", () => {
+    const data = {
+      ...history([
+        ["2026-08-01", "80"],
+        ["2026-08-31", "100"],
+        ["2026-09-04", "110"],
+      ]),
+      base_dates: { "30": "2026-08-31" },
+    }
+    const normalized = normalizedPoints(data, 30)
+    expect(normalized.baseDate).toBe("2026-08-31")
+    expect(normalized.points).toHaveLength(2)
+    expect(normalized.points[0]).toEqual({ date: "2026-08-31", value: 100 })
+    expect(normalized.points[1]?.value).toBeCloseTo(110)
   })
   it("rejects non-finite untrusted numeric values", () => {
     expect(

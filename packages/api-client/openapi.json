@@ -1228,6 +1228,14 @@
       },
       "History": {
         "properties": {
+          "base_dates": {
+            "additionalProperties": {
+              "format": "date",
+              "type": "string"
+            },
+            "title": "Base Dates",
+            "type": "object"
+          },
           "id": {
             "title": "Id",
             "type": "string"

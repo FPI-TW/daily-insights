@@ -61,11 +61,59 @@ async def test_disabled_providers_make_no_provider_calls(monkeypatch: pytest.Mon
     histories = await macro.load_market_histories(
         Settings(yfinance_enabled=False, twelve_data_api_key=None)
     )
-    assert len(histories) == len(macro.COMMODITIES) + len(macro.INSTRUMENTS)
+    assert len(histories) == len(macro.COMMODITIES) + len(macro.INSTRUMENTS) + len(
+        macro.FX_INSTRUMENTS
+    )
     assert all(item.status == "disabled" for item in histories)
     assert [item.source for item in histories[: len(macro.COMMODITIES)]] == ["Twelve Data"] * len(
         macro.COMMODITIES
     )
+
+
+async def test_fx_histories_use_twelve_data_and_publish_base_dates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    calls: list[dict[str, object]] = []
+
+    class FakeAdapter:
+        def __init__(self, transport: object) -> None:
+            assert isinstance(transport, _FakeTransport)
+
+        async def get_daily_bars(self, **kwargs: object) -> object:
+            calls.append(kwargs)
+            symbol = kwargs["symbol"]
+            assert isinstance(symbol, str)
+            return SimpleNamespace(
+                items=(
+                    _bar(symbol, date(2025, 9, 5), Decimal("100")),
+                    _bar(symbol, date(2026, 8, 10), Decimal("110")),
+                    _bar(symbol, date(2026, 9, 4), Decimal("120")),
+                )
+            )
+
+    monkeypatch.setattr(macro, "TwelveDataTransport", _FakeTransport)
+    monkeypatch.setattr(macro, "TwelveDataAdapter", FakeAdapter)
+    histories = await macro.load_fx_histories(Settings(twelve_data_api_key=SecretStr("key")))
+
+    assert [history.symbol for history in histories] == [item[1] for item in macro.FX_INSTRUMENTS]
+    assert all(history.source == "Twelve Data" and history.status == "ok" for history in histories)
+    assert all(
+        history.base_dates
+        == {"30": date(2026, 8, 10), "90": date(2026, 8, 10), "365": date(2025, 9, 5)}
+        for history in histories
+    )
+    assert all(
+        call["outputsize"] == 400
+        and isinstance(call["end_date"], date)
+        and call["timezone"] == "Australia/Sydney"
+        for call in calls
+    )
+
+
+def test_fx_provider_end_date_uses_the_requested_twelve_data_timezone() -> None:
+    assert macro.fx_provider_end_date(datetime(2026, 9, 4, 15, 30, tzinfo=UTC)) == date(2026, 9, 5)
 
 
 def _eod(symbol: str, as_of: date, close: Decimal) -> object:
