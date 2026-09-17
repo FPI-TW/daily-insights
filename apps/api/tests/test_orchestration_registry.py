@@ -15,12 +15,16 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionm
 
 import daily_insights_api.scripts.run_orchestration_worker as orchestration_worker_script
 from daily_insights_api.core.config import Settings
+from daily_insights_api.modules.news.contracts import SelectedCandidate, Selection
+from daily_insights_api.modules.news.llm import ModelCall
 from daily_insights_api.modules.news.models import NewsCandidateBatch, PreparedNewsItem
 from daily_insights_api.modules.orchestration import worker
 from daily_insights_api.modules.orchestration.models import JobRun
 from daily_insights_api.modules.orchestration.news_functions import (
     _publication_digest,
     _refresh_status,
+    _restore_model_call,
+    _serialize_model_call,
 )
 from daily_insights_api.modules.orchestration.projections import (
     FrozenObservation,
@@ -115,11 +119,40 @@ def test_news_daily_job_refreshes_all_markets_before_publish() -> None:
     assert publish.dependency_policy == "terminal"
 
 
-def test_news_summary_failures_are_terminal_partial_and_change_publication_digest() -> None:
+def test_news_generation_failures_and_editorial_shortfalls_are_terminal() -> None:
     assert _refresh_status(2, 1) == ("partial", "partial", False)
     assert _refresh_status(2, 0) == ("succeeded", "ready", False)
     assert _refresh_status(0, 1) == ("unavailable", "unavailable", False)
-    assert _refresh_status(0, 0) == ("unavailable", "unavailable", True)
+    assert _refresh_status(0, 0) == ("unavailable", "unavailable", False)
+
+
+def test_selection_checkpoint_preserves_returned_and_rejected_candidates() -> None:
+    kept = SelectedCandidate(
+        id="a" * 64,
+        topic="markets",
+        event_key="kept-event",
+        market="global",
+        importance=5,
+    )
+    rejected = kept.model_copy(
+        update={"id": "b" * 64, "event_key": "rejected-event", "market": "asia"}
+    )
+    original = ModelCall(
+        Selection(selections=(kept,)),
+        "request-id",
+        10,
+        5,
+        1,
+        "c" * 64,
+        rejected=((rejected, "off_market"),),
+        returned=(kept, rejected),
+    )
+
+    restored = _restore_model_call(_serialize_model_call(original), stage="selection")
+
+    assert restored.reused is True
+    assert restored.returned == original.returned
+    assert restored.rejected == original.rejected
 
     batch = NewsCandidateBatch(
         function_attempt_id=uuid.uuid4(),

@@ -22,7 +22,7 @@
 | 模型 401／402／403                                       | 暫停共享新聞供應商，保留 provider 安全錯誤碼，修復後人工恢復                       |
 | 新聞功能停用、模型金鑰缺失或 placeholder                 | 記錄 `news_model_configuration_missing` 共享 block，停止尚未執行的市場             |
 | 模型 408／5xx／暫時連線                                  | 停止後續模型碰撞，保存已驗證語系，退避恢復                                         |
-| JSON／欄位／摘要或翻譯數字驗證                           | 同輸入至多修正一次；次數先保存，續跑不重置。摘要／翻譯再失敗略過遞補，選題停止該批 |
+| JSON／欄位驗證                                           | 同輸入至多修正一次；次數先保存，續跑不重置。摘要／翻譯再失敗略過遞補，選題停止該批 |
 | 模型參數錯誤／未知例外                                   | 安全錯誤代碼與請求編號，交人工處理，不盲目重試                                     |
 | Worker／資料庫中斷                                       | 付費請求前檢查持久化及所有權；租約到期且 execution lock 釋放後續跑                 |
 | 正常 0、1、4 則或其他不足額                              | 作業可為 succeeded；不因此重試。全面來源故障另外標示                               |
@@ -82,15 +82,17 @@
 - 統一編排在模型送出前，於 `FunctionRun.result._news_model_attempts` 保存以輸入 fingerprint
   為鍵的呼叫預約與已驗證結構化結果；相同候選、正文、模型、prompt、語系與繁中基準摘要
   在 worker 重啟後直接重用成功結果，且仍共用最多一次修正額度。所有文章皆因內容驗證
-  耗盡時不建立自動重試；人工上架的 `summary_failed`／`fetch_failed` 亦為終態，不排入
+  耗盡時不建立自動重試；人工上架的 `summary_failed`／`translation_failed`／
+  `fetch_failed` 亦為終態，不排入
   技術性 retry。
 - 選題 key 包含候選內容、模型、prompt 摘要與市場政策；摘要 key 包含文章內容、候選、
   模型與摘要 prompt 版本；翻譯 key 另包含候選 identity、已驗證繁中摘要、目標語系及翻譯
   prompt 版本。變動僅使受影響階段失效；相同正文的不同候選不共用翻譯失敗狀態。
 - Feed 成功中繼資料可重用；全文 feed 和必要文章正文會重新取得。失敗 feed 才再探索。
 - 每次外部呼叫後短交易保存，不在付費呼叫期間持有長交易。文章必須三語都通過才發布。
-- 翻譯沿用摘要的嚴格 JSON schema 與原文數字忠實度檢查；失敗分別記錄
-  `translation_invalid_json` 或 `translation_ungrounded_number`，不得只因繁中摘要已通過就略過。
+- 翻譯沿用摘要的嚴格 JSON schema，但不再執行逐字數字比對；結構失敗記錄
+  `translation_invalid_json` 並分類為 `translation_failed`，不得只因繁中摘要已通過就略過。
+  歷史紀錄中的 `translation_ungrounded_number` 仍保留原安全分類。
 - 人工上架亦限當日，並於模型呼叫前與發布交易中檢查目前版本、人工隱藏、事件去重及
   配額；五星不設上限，四星最多十則，一至三星合計最多五則，不為湊足下限放寬品質。
 - 市場／日期 advisory lock 隔離版本；發布交易再次鎖定作業並確認租約所有權。隱藏的

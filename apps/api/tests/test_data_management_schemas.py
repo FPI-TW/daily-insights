@@ -241,3 +241,16 @@ def test_news_curation_migration_registers_indexes_and_refuses_lossy_downgrade()
     assert preflight < downgrade.index("op.drop_")
     assert "operation = 'news_publish'" in downgrade
     assert "EXISTS (SELECT 1 FROM {CANDIDATES})" in downgrade
+
+
+def test_news_candidate_generation_state_migration_guards_downgrade() -> None:
+    migration = (
+        Path(__file__).parents[1]
+        / "migrations/versions/20260918_0029_news_candidate_generation_states.py"
+    ).read_text()
+    assert 'down_revision: str | None = "20260916_0028"' in migration
+    assert "'prepared'" in migration
+    assert "'translation_failed'" in migration
+    downgrade = migration[migration.index("def downgrade()") :]
+    assert "stage = 'prepared' OR drop_reason = 'translation_failed'" in downgrade
+    assert downgrade.index("RAISE EXCEPTION") < downgrade.index("op.drop_constraint")

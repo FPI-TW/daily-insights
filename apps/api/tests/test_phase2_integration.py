@@ -580,7 +580,7 @@ async def test_older_backfill_failure_does_not_stale_latest_publication(
 async def test_report_api_filters_hidden_market_localizes_and_marks_stale(
     phase2_harness: Phase2Harness,
 ) -> None:
-    stale_as_of = date.today() - timedelta(days=4)
+    stale_as_of = datetime.now(UTC).date() - timedelta(days=4)
     visible_publication_id = await _publish(
         phase2_harness.session_factory,
         market_code="us_equity",

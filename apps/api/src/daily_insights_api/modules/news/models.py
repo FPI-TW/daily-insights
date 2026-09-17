@@ -119,8 +119,23 @@ class NewsItem(UUIDPrimaryKeyMixin, Base):
     )
 
 
-CANDIDATE_STAGES = ("discovered", "fetch_failed", "unused", "reviewed", "dropped", "published")
-CANDIDATE_DROP_REASONS = ("off_market", "policy", "duplicate_event", "summary_failed", "reserve")
+CANDIDATE_STAGES = (
+    "discovered",
+    "fetch_failed",
+    "unused",
+    "reviewed",
+    "prepared",
+    "dropped",
+    "published",
+)
+CANDIDATE_DROP_REASONS = (
+    "off_market",
+    "policy",
+    "duplicate_event",
+    "summary_failed",
+    "translation_failed",
+    "reserve",
+)
 
 
 class NewsCandidate(UUIDPrimaryKeyMixin, Base):
@@ -134,12 +149,14 @@ class NewsCandidate(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "news_candidates"
     __table_args__ = (
         CheckConstraint(
-            "stage IN ('discovered','fetch_failed','unused','reviewed','dropped','published')",
+            "stage IN "
+            "('discovered','fetch_failed','unused','reviewed','prepared','dropped','published')",
             name="stage_valid",
         ),
         CheckConstraint(
             "drop_reason IS NULL OR drop_reason IN "
-            "('off_market','policy','duplicate_event','summary_failed','reserve')",
+            "('off_market','policy','duplicate_event','summary_failed','translation_failed',"
+            "'reserve')",
             name="drop_reason_valid",
         ),
         UniqueConstraint("edition_id", "candidate_id", name="uq_news_candidate_edition"),

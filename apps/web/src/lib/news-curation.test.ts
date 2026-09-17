@@ -14,6 +14,7 @@ const stages = [
   "fetch_failed",
   "unused",
   "reviewed",
+  "prepared",
   "dropped",
   "published",
 ] as const
@@ -24,20 +25,21 @@ const candidates = stages.map(
 )
 
 describe("news curation helpers", () => {
-  it("groups the six stages into the three editor filters", () => {
+  it("groups the seven stages into the three editor filters", () => {
     expect(stages.map(candidateFilterOf)).toEqual([
       "other",
       "other",
       "other",
       "reviewed",
+      "other",
       "dropped",
       "other",
     ])
-    expect(filterCandidates(candidates, "all")).toHaveLength(6)
+    expect(filterCandidates(candidates, "all")).toHaveLength(7)
     expect(filterCandidates(candidates, "dropped").map(c => c.stage)).toEqual([
       "dropped",
     ])
-    expect(filterCandidates(candidates, "other")).toHaveLength(4)
+    expect(filterCandidates(candidates, "other")).toHaveLength(5)
   })
 
   it("collects only active manual publish runs", () => {

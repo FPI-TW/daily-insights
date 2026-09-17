@@ -6,6 +6,7 @@ from daily_insights_api.modules.news.contracts import (
     LocalizedSummary,
     NewsProgress,
     NewsStatus,
+    SelectedCandidate,
     Selection,
 )
 from daily_insights_api.modules.news.editions import (
@@ -19,6 +20,7 @@ from daily_insights_api.modules.news.failures import (
     NewsFailure,
     NewsOperationError,
     classify_failure,
+    generation_drop_reason,
 )
 from daily_insights_api.modules.news.feeds import (
     discover_feed_candidates,
@@ -26,6 +28,7 @@ from daily_insights_api.modules.news.feeds import (
     feed_client,
 )
 from daily_insights_api.modules.news.llm import (
+    CoveredEvent,
     DeepSeekClient,
     ModelCall,
     ModelCallError,
@@ -59,9 +62,11 @@ from daily_insights_api.modules.news.service import (
     LOCALES,
     SUMMARY_PROMPT_VERSION,
     TRANSLATION_PROMPT_VERSION,
+    ExtractionOutcome,
     _cap_discovery,
     _digest,
     _edition_status,
+    _extract_candidate_outcomes,
     _fetch_usable_candidates,
     _limit_candidates,
     _lock_key,
@@ -97,8 +102,10 @@ __all__ = [
     "PROVIDER_SCOPE",
     "SUMMARY_PROMPT_VERSION",
     "TRANSLATION_PROMPT_VERSION",
+    "CoveredEvent",
     "DeepSeekClient",
     "EditionSpec",
+    "ExtractionOutcome",
     "FetchedCandidate",
     "Locale",
     "LocalizedSummary",
@@ -119,10 +126,12 @@ __all__ = [
     "NewsStatus",
     "NewsWorkflow",
     "PreparedNewsItem",
+    "SelectedCandidate",
     "Selection",
     "_cap_discovery",
     "_digest",
     "_edition_status",
+    "_extract_candidate_outcomes",
     "_fetch_usable_candidates",
     "_limit_candidates",
     "_lock_key",
@@ -135,6 +144,7 @@ __all__ = [
     "edition_spec",
     "effective_hostnames",
     "feed_client",
+    "generation_drop_reason",
     "load_selection_criteria",
     "news_execution",
     "publish_candidates",

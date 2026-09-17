@@ -39,9 +39,16 @@ class LatestNewsResponse(BaseModel):
     items: list[NewsItemResponse]
 
 
-CandidateStage = Literal["discovered", "fetch_failed", "unused", "reviewed", "dropped", "published"]
+CandidateStage = Literal[
+    "discovered", "fetch_failed", "unused", "reviewed", "prepared", "dropped", "published"
+]
 CandidateDropReason = Literal[
-    "off_market", "policy", "duplicate_event", "summary_failed", "reserve"
+    "off_market",
+    "policy",
+    "duplicate_event",
+    "summary_failed",
+    "translation_failed",
+    "reserve",
 ]
 ItemOrigin = Literal["model", "manual"]
 
@@ -53,6 +60,7 @@ class NewsAdminCounts(BaseModel):
     fetch_failed: int
     unused: int
     reviewed: int
+    prepared: int
     dropped: int
     published: int
     hidden: int

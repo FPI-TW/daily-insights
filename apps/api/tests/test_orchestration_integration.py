@@ -26,7 +26,13 @@ from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.analyst_viewpoints.api import AnalystViewpointSyncError
 from daily_insights_api.modules.analyst_viewpoints.models import AnalystViewpointSyncRun
 from daily_insights_api.modules.data_sources.api import TaiexDailyBar, TaiexDailyBars
-from daily_insights_api.modules.news.contracts import LocalizedSummary, Selection
+from daily_insights_api.modules.news.contracts import (
+    Candidate,
+    LocalizedSummary,
+    SelectedCandidate,
+    Selection,
+)
+from daily_insights_api.modules.news.extraction import FetchedCandidate
 from daily_insights_api.modules.news.failures import NewsFailure, NewsOperationError
 from daily_insights_api.modules.news.llm import ModelCall, ModelCallError
 from daily_insights_api.modules.news.models import (
@@ -37,6 +43,7 @@ from daily_insights_api.modules.news.models import (
     NewsItem,
     PreparedNewsItem,
 )
+from daily_insights_api.modules.news.service import ExtractionOutcome
 from daily_insights_api.modules.orchestration.models import (
     FunctionAttempt,
     FunctionDependency,
@@ -152,7 +159,7 @@ async def test_terminal_partial_news_refresh_allows_publish_dependency(
             status="partial",
             result={"prepared": 2, "summary_failed": 1},
             missing_scopes=("global",),
-            error_code="news_summary_partial",
+            error_code="news_generation_partial",
             retryable=False,
         )
 
@@ -694,6 +701,211 @@ async def test_legacy_data_management_archive_rejects_writes(
             )
 
 
+async def test_news_refresh_screens_full_pool_refills_and_classifies_failures(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, sessions = orchestration_database
+    now = datetime.now(UTC)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_global_refresh_job",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            status="pending",
+        )
+        database.add(job)
+        await database.flush()
+        database.add(
+            FunctionRun(
+                job_run_id=job.id,
+                function_key="news_global_refresh",
+                provider_key="internal_services",
+                scope={},
+                status="pending",
+            )
+        )
+
+    candidates = [
+        Candidate(
+            id=f"{index:064x}",
+            url=f"https://source{index}.example/story",
+            hostname=f"source{index}.example",
+            source_name=f"Source {index}",
+            headline=f"Story {index}",
+        )
+        for index in range(23)
+    ]
+    fetched = [
+        FetchedCandidate(
+            candidate,
+            str(candidate.url),
+            f"Article body {index}",
+            f"{index + 100:064x}",
+        )
+        for index, candidate in enumerate(candidates[:-1])
+    ]
+    extraction = [ExtractionOutcome(item.candidate, fetched=item) for item in fetched]
+    extraction.append(
+        ExtractionOutcome(
+            candidates[-1],
+            failure=NewsFailure(
+                code="source_access_denied",
+                action="skip",
+                stage="article",
+                scope=f"source:{candidates[-1].hostname}",
+                candidate_id=candidates[-1].id,
+            ),
+        )
+    )
+
+    async def discover(*_: object, **__: object) -> list[Candidate]:
+        return candidates
+
+    async def extract(*_: object, **__: object) -> list[ExtractionOutcome]:
+        return extraction
+
+    class Client:
+        model_name = "test-news-model"
+        selection_prompt_digest = "a" * 64
+        selection_prompt_version = "selection-test"
+
+        def __init__(self) -> None:
+            self.selection_batches: list[list[str]] = []
+            self.translation_failures = 0
+            self.failed_candidate_id: str | None = None
+            self.closed = False
+
+        async def select(
+            self,
+            batch: list[FetchedCandidate],
+            **_: object,
+        ) -> ModelCall:
+            self.selection_batches.append([item.candidate.id for item in batch])
+            chosen = batch[0].candidate
+            if len(self.selection_batches) == 2:
+                self.failed_candidate_id = chosen.id
+            selected = SelectedCandidate(
+                id=chosen.id,
+                topic="markets",
+                event_key=f"event-{int(chosen.id, 16)}",
+                market="global",
+                importance=5,
+            )
+            selection = Selection(selections=(selected,))
+            return ModelCall(
+                selection,
+                None,
+                None,
+                None,
+                1,
+                f"{len(self.selection_batches):064x}",
+                returned=selection.selections,
+            )
+
+        async def summarize(
+            self,
+            candidate: Candidate,
+            article_text: str,
+            locale: str,
+            **_: object,
+        ) -> ModelCall:
+            del article_text
+            summary = LocalizedSummary(
+                headline=f"{locale} {candidate.headline}", summary=f"{locale} summary"
+            )
+            return ModelCall(summary, None, None, None, 1, candidate.id)
+
+        async def translate(
+            self,
+            candidate: Candidate,
+            article_text: str,
+            source_summary: LocalizedSummary,
+            locale: str,
+            **_: object,
+        ) -> ModelCall:
+            del article_text, source_summary
+            if candidate.id == self.failed_candidate_id and locale == "en":
+                self.translation_failures += 1
+                raise ModelCallError(
+                    "invalid translation JSON",
+                    input_digest=candidate.id,
+                    latency_ms=1,
+                    error_code="translation_invalid_json",
+                )
+            summary = LocalizedSummary(
+                headline=f"{locale} {candidate.headline}", summary=f"{locale} summary"
+            )
+            return ModelCall(summary, None, None, None, 1, candidate.id)
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    client = Client()
+    monkeypatch.setattr(orchestration_news_functions, "_client", lambda _: client)
+    monkeypatch.setattr(orchestration_news_functions, "discover_feed_candidates", discover)
+    monkeypatch.setattr(orchestration_news_functions, "_extract_candidate_outcomes", extract)
+    claimed = await claim_ready_function(engine, sessions, owner="news-refresh-test", now=now)
+    assert claimed is not None
+
+    outcome = await orchestration_news_functions.refresh_news(
+        Settings(environment="test", daily_news_enabled=True), sessions, claimed
+    )
+
+    assert outcome.status == "partial"
+    assert outcome.error_code == "news_generation_partial"
+    assert outcome.retryable is False
+    assert outcome.result is not None
+    assert outcome.result["summary_failed"] == 0
+    assert outcome.result["translation_failed"] == 1
+    assert outcome.result["generation_failed"] == 1
+    assert outcome.result["fetch_failed"] == 1
+    assert len(client.selection_batches) == 3
+    assert [len(batch) for batch in client.selection_batches] == [20, 2, 20]
+    assert client.translation_failures == 2
+    assert client.closed is True
+    assert client.failed_candidate_id is not None
+    first_selected_id = client.selection_batches[0][0]
+    refill_selected_id = client.selection_batches[2][0]
+    batch_id = uuid.UUID(cast(str, outcome.result["batch_id"]))
+    async with sessions() as database:
+        rows = {
+            row.candidate_id: row
+            for row in await database.scalars(
+                select(NewsCandidate).where(NewsCandidate.batch_id == batch_id)
+            )
+        }
+        prepared = list(
+            await database.scalars(
+                select(PreparedNewsItem)
+                .where(PreparedNewsItem.batch_id == batch_id)
+                .order_by(PreparedNewsItem.rank)
+            )
+        )
+    assert [item.candidate_id for item in prepared] == [
+        rows[first_selected_id].id,
+        rows[refill_selected_id].id,
+    ]
+    assert rows[first_selected_id].stage == "prepared"
+    assert rows[refill_selected_id].stage == "prepared"
+    assert (
+        rows[client.failed_candidate_id].stage,
+        rows[client.failed_candidate_id].drop_reason,
+    ) == (
+        "dropped",
+        "translation_failed",
+    )
+    assert rows[candidates[22].id].stage == "fetch_failed"
+    assert outcome.result["failure_reasons"][candidates[22].id] == {
+        "stage": "article",
+        "locale": None,
+        "code": "source_access_denied",
+    }
+
+
 async def test_news_model_contract_failure_is_audited_then_repaired_once(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
@@ -793,8 +1005,8 @@ async def test_news_model_contract_failure_is_audited_then_repaired_once(
 @pytest.mark.parametrize(
     ("stage", "locale", "prompt_version"),
     [
-        ("summary", "zh-hant", "summary-v4"),
-        ("translation", "en", "translation-v1"),
+        ("summary", "zh-hant", "summary-v5"),
+        ("translation", "en", "translation-v2"),
     ],
 )
 async def test_successful_news_model_result_is_reused_after_function_retry(

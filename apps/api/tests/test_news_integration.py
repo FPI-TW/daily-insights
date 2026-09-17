@@ -459,8 +459,8 @@ async def test_partial_editions_regenerate_and_revisions_are_prompt_sensitive(
             == 0
         )
         audit_versions = set(await database.scalars(select(NewsGenerationAudit.prompt_version)))
-        assert "summary-v4" in audit_versions
-        assert "translation-v1" in audit_versions
+        assert "summary-v5" in audit_versions
+        assert "translation-v2" in audit_versions
         assert "selection-v6:aaaaaaaaaaaa" in audit_versions
         assert "selection-v6:bbbbbbbbbbbb" in audit_versions
 
@@ -1571,7 +1571,7 @@ async def test_edition_records_every_candidate_with_the_stage_it_reached(
         (1, "published", None),
         (2, "published", None),
         (3, "dropped", "off_market"),
-        (4, "dropped", "summary_failed"),
+        (4, "dropped", "translation_failed"),
         (5, "reviewed", None),
         (6, "fetch_failed", None),
         (7, "discovered", None),

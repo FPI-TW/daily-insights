@@ -3096,6 +3096,7 @@
                   "policy",
                   "duplicate_event",
                   "summary_failed",
+                  "translation_failed",
                   "reserve"
                 ],
                 "type": "string"
@@ -3200,6 +3201,7 @@
               "fetch_failed",
               "unused",
               "reviewed",
+              "prepared",
               "dropped",
               "published"
             ],
@@ -3253,6 +3255,10 @@
             "title": "Hidden",
             "type": "integer"
           },
+          "prepared": {
+            "title": "Prepared",
+            "type": "integer"
+          },
           "published": {
             "title": "Published",
             "type": "integer"
@@ -3271,6 +3277,7 @@
           "fetch_failed",
           "unused",
           "reviewed",
+          "prepared",
           "dropped",
           "published",
           "hidden"

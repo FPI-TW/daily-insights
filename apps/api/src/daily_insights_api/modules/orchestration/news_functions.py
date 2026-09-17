@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
 from typing import Any, Literal, cast
@@ -16,6 +17,7 @@ from daily_insights_api.modules.news.api import (
     LOCALES,
     SUMMARY_PROMPT_VERSION,
     TRANSLATION_PROMPT_VERSION,
+    CoveredEvent,
     DeepSeekClient,
     FetchedCandidate,
     LocalizedSummary,
@@ -32,11 +34,12 @@ from daily_insights_api.modules.news.api import (
     NewsOperationError,
     NewsPresentation,
     PreparedNewsItem,
+    SelectedCandidate,
     Selection,
     _cap_discovery,
     _digest,
     _edition_status,
-    _fetch_usable_candidates,
+    _extract_candidate_outcomes,
     _limit_candidates,
     _lock_key,
     classify_failure,
@@ -44,6 +47,7 @@ from daily_insights_api.modules.news.api import (
     edition_spec,
     effective_hostnames,
     feed_client,
+    generation_drop_reason,
     load_selection_criteria,
     news_execution,
     publish_candidates,
@@ -119,6 +123,7 @@ async def _model_call_with_repair(
     call: Callable[[str | None], Awaitable[ModelCall]],
     candidate_id: str | None = None,
     attempt_key: str | None = None,
+    guard: Callable[[], Awaitable[bool]] | None = None,
 ) -> ModelCall:
     durable_key = (
         attempt_key
@@ -130,6 +135,16 @@ async def _model_call_with_repair(
         ).hexdigest()
     )
     for _ in range(2):
+        if guard is not None and not await guard():
+            raise NewsOperationError(
+                NewsFailure(
+                    code="cancelled",
+                    action="cancelled",
+                    stage=stage,
+                    candidate_id=candidate_id,
+                    locale=locale,
+                )
+            )
         attempt, feedback, previous_action, cached_call = await _reserve_model_attempt(
             session_factory, batch_id=batch_id, attempt_key=durable_key
         )
@@ -168,6 +183,16 @@ async def _model_call_with_repair(
                     locale=locale,
                 )
             raise NewsOperationError(failure)
+        if guard is not None and not await guard():
+            raise NewsOperationError(
+                NewsFailure(
+                    code="cancelled",
+                    action="cancelled",
+                    stage=stage,
+                    candidate_id=candidate_id,
+                    locale=locale,
+                )
+            )
         try:
             model_call = await call(feedback)
         except Exception as error:
@@ -293,6 +318,11 @@ def _serialize_model_call(model_call: ModelCall) -> dict[str, Any]:
         "output_tokens": model_call.output_tokens,
         "latency_ms": model_call.latency_ms,
         "input_digest": model_call.input_digest,
+        "rejected": [
+            {"item": item.model_dump(mode="json"), "reason": reason}
+            for item, reason in model_call.rejected
+        ],
+        "returned": [item.model_dump(mode="json") for item in model_call.returned],
     }
 
 
@@ -306,6 +336,13 @@ def _restore_model_call(payload: dict[str, Any], *, stage: ModelStage) -> ModelC
         value = LocalizedSummary.model_validate(value_payload)
     else:
         raise ValueError("model checkpoint stage mismatch")
+    rejected = tuple(
+        (SelectedCandidate.model_validate(entry["item"]), str(entry["reason"]))
+        for entry in payload.get("rejected", [])
+    )
+    returned = tuple(
+        SelectedCandidate.model_validate(entry) for entry in payload.get("returned", [])
+    )
     return ModelCall(
         value=value,
         request_id=payload.get("request_id"),
@@ -313,6 +350,8 @@ def _restore_model_call(payload: dict[str, Any], *, stage: ModelStage) -> ModelC
         output_tokens=payload.get("output_tokens"),
         latency_ms=int(payload["latency_ms"]),
         input_digest=str(payload["input_digest"]),
+        rejected=rejected,
+        returned=returned,
         reused=True,
     )
 
@@ -397,14 +436,14 @@ def _translation_call(
     return call
 
 
-def _refresh_status(prepared: int, summary_failures: int) -> tuple[AttemptStatus, str, bool]:
-    if prepared and summary_failures:
+def _refresh_status(prepared: int, generation_failures: int) -> tuple[AttemptStatus, str, bool]:
+    if prepared and generation_failures:
         return "partial", "partial", False
     if prepared:
         return "succeeded", "ready", False
-    if summary_failures:
+    if generation_failures:
         return "unavailable", "unavailable", False
-    return "unavailable", "unavailable", True
+    return "unavailable", "unavailable", False
 
 
 def build_news_handlers(
@@ -468,6 +507,15 @@ async def refresh_news(
         market_code=market,
         status="collecting",
     )
+
+    async def guard() -> bool:
+        async with session_factory.begin() as database:
+            return await fence_is_current(
+                database,
+                function_run_id=claimed.function_run_id,
+                fence_token=claimed.fence_token,
+            )
+
     try:
         async with session_factory.begin() as database:
             if not await fence_is_current(
@@ -491,12 +539,15 @@ async def refresh_news(
             interleave=spec.interleave_sources,
             impact_patterns=spec.headline_impact_patterns,
         )
-        extracted = await _fetch_usable_candidates(
+        extraction_outcomes = await _extract_candidate_outcomes(
             capped, allowed, settings.news_fetch_timeout_seconds, bodies
         )
+        extracted = [
+            outcome.fetched for outcome in extraction_outcomes if outcome.fetched is not None
+        ]
         usable = _limit_candidates(
             extracted,
-            total=spec.max_candidates,
+            total=spec.max_candidates * 2,
             per_source=spec.max_per_source,
             interleave=spec.interleave_sources,
             impact_patterns=spec.headline_impact_patterns,
@@ -523,12 +574,21 @@ async def refresh_news(
             )
             for candidate in discovered
         }
+        failure_reasons: dict[str, dict[str, str | None]] = {}
+        for outcome in extraction_outcomes:
+            row = candidate_rows[outcome.candidate.id]
+            if outcome.fetched is not None:
+                row.stage = "unused"
+                row.content_digest = outcome.fetched.content_digest
+                row.source_published_at = outcome.fetched.source_published_at
+            elif outcome.failure is not None:
+                row.stage = "fetch_failed"
+                failure_reasons[outcome.candidate.id] = {
+                    "stage": "article",
+                    "locale": None,
+                    "code": sanitize_error_code(outcome.failure.code),
+                }
         fetched_by_id = {item.candidate.id: item for item in usable}
-        for item in usable:
-            row = candidate_rows[item.candidate.id]
-            row.stage = "reviewed"
-            row.content_digest = item.content_digest
-            row.source_published_at = item.source_published_at
         async with session_factory.begin() as database:
             if not await fence_is_current(
                 database,
@@ -539,33 +599,76 @@ async def refresh_news(
                 return FunctionOutcome(status="cancelled", error_code="cancelled")
             database.add_all(candidate_rows.values())
             await database.flush()
-        prepared = 0
         summary_failures = 0
-        summary_failure_reasons: dict[str, dict[str, str]] = {}
-        selection_call: ModelCall | None = None
-        if usable:
+        translation_failures = 0
+        selection_calls = 0
+        screened: set[str] = set()
+        returned: set[str] = set()
+        generation_attempted: set[str] = set()
+        successful: list[SelectedCandidate] = []
+        localized: dict[str, dict[str, LocalizedSummary]] = {}
+
+        def covered_events(items: list[SelectedCandidate]) -> tuple[CoveredEvent, ...]:
+            return tuple(
+                CoveredEvent(
+                    item.event_key,
+                    fetched_by_id[item.id].candidate.headline,
+                    fetched_by_id[item.id].candidate.hostname,
+                    item.topic,
+                )
+                for item in items
+            )
+
+        async def select_batch(
+            batch_items: list[FetchedCandidate], previous_events: tuple[CoveredEvent, ...]
+        ) -> list[SelectedCandidate]:
+            nonlocal selection_calls
+            selection_calls += 1
+            screened.update(item.candidate.id for item in batch_items)
+            for item in batch_items:
+                row = candidate_rows[item.candidate.id]
+                if row.stage == "unused":
+                    row.stage = "reviewed"
+            batch_digest = _digest(
+                batch_items,
+                client.model_name,
+                client.selection_prompt_digest,
+                market,
+                spec.selection,
+            )
             selection_call = await _model_call_with_repair(
                 session_factory,
                 batch_id=batch.id,
                 stage="selection",
                 locale=None,
-                fallback_digest=digest,
+                fallback_digest=batch_digest,
                 model=client.model_name,
                 prompt_version=client.selection_prompt_version,
                 call=lambda feedback: client.select(
-                    usable,
+                    batch_items,
                     policy=spec.selection,
-                    previous_events=(),
+                    previous_events=previous_events,
                     retry_feedback=feedback,
                 ),
                 attempt_key=_model_attempt_fingerprint(
                     [
                         "selection",
-                        digest,
+                        batch_digest,
+                        [
+                            {
+                                "event_key": event.event_key,
+                                "headline": event.headline,
+                                "hostname": event.hostname,
+                                "topic": event.topic,
+                            }
+                            for event in previous_events
+                        ],
+                        selection_calls,
                         client.model_name,
                         client.selection_prompt_version,
                     ]
                 ),
+                guard=guard,
             )
             assert isinstance(selection_call.value, Selection)
             if not selection_call.reused:
@@ -580,14 +683,71 @@ async def refresh_news(
                         client.selection_prompt_version,
                     ),
                 )
-            publication = publishable_selection(
-                list(selection_call.value.selections), usable, spec.selection
+            original = selection_call.returned or (
+                *selection_call.value.selections,
+                *(rejected for rejected, _ in selection_call.rejected),
             )
-            for rank, selected in enumerate(publication.selections, start=1):
+            returned.update(selected.id for selected in original)
+            for rank, returned_item in enumerate(original, start=1):
+                returned_row = candidate_rows.get(returned_item.id)
+                if returned_row is None:
+                    continue
+                if returned_row.ai_rank is None:
+                    returned_row.ai_rank = rank
+                    returned_row.ai_topic = returned_item.topic
+                    returned_row.ai_market = returned_item.market
+                    returned_row.ai_importance = returned_item.importance
+                    returned_row.ai_event_key = returned_item.event_key
+                returned_row.stage = "dropped"
+                returned_row.drop_reason = "reserve"
+            for rejected_item, reason in selection_call.rejected:
+                rejected_row = candidate_rows.get(rejected_item.id)
+                if rejected_row is not None:
+                    rejected_row.stage = "dropped"
+                    rejected_row.drop_reason = reason
+            return list(selection_call.value.selections)
+
+        async def summarize_picks(picks: list[SelectedCandidate]) -> None:
+            nonlocal summary_failures, translation_failures
+            event_keys = {item.event_key for item in successful}
+            publication = publishable_selection(
+                sorted(successful, key=lambda item: -item.importance), usable, spec.selection
+            )
+            for selected in picks:
+                row = candidate_rows[selected.id]
+                if selected.id in generation_attempted:
+                    continue
+                if selected.event_key in event_keys:
+                    row.stage = "dropped"
+                    row.drop_reason = "duplicate_event"
+                    continue
+                four_star_count = sum(item.importance == 4 for item in publication.selections)
+                low_importance_count = sum(item.importance <= 3 for item in publication.selections)
+                if (
+                    selected.importance == 4
+                    and four_star_count >= spec.selection.max_four_star_items
+                ) or (
+                    selected.importance <= 3
+                    and low_importance_count >= spec.selection.max_low_importance_items
+                ):
+                    row.stage = "dropped"
+                    row.drop_reason = "reserve"
+                    continue
                 fetched = fetched_by_id[selected.id]
+                domain_count = sum(
+                    1
+                    for item in successful
+                    if item.importance < 5
+                    and fetched_by_id[item.id].candidate.hostname == fetched.candidate.hostname
+                )
+                if selected.importance < 5 and domain_count >= spec.selection.max_per_domain:
+                    row.stage = "dropped"
+                    row.drop_reason = "policy"
+                    continue
+                generation_attempted.add(selected.id)
                 summaries: dict[str, LocalizedSummary] = {}
+                locale = "zh-hant"
                 try:
-                    locale = "zh-hant"
                     summary_call = await _model_call_with_repair(
                         session_factory,
                         batch_id=batch.id,
@@ -608,6 +768,7 @@ async def refresh_news(
                                 SUMMARY_PROMPT_VERSION,
                             ]
                         ),
+                        guard=guard,
                     )
                     assert isinstance(summary_call.value, LocalizedSummary)
                     summaries[locale] = summary_call.value
@@ -651,6 +812,7 @@ async def refresh_news(
                                     TRANSLATION_PROMPT_VERSION,
                                 ]
                             ),
+                            guard=guard,
                         )
                         assert isinstance(translation.value, LocalizedSummary)
                         summaries[locale] = translation.value
@@ -672,57 +834,105 @@ async def refresh_news(
                         and error.failure.stage in {"summary", "translation"}
                     ):
                         raise
-                    summary_failures += 1
-                    summary_failure_reasons[selected.id] = {
+                    if error.failure.stage == "summary":
+                        summary_failures += 1
+                    else:
+                        translation_failures += 1
+                    failure_reasons[selected.id] = {
                         "stage": error.failure.stage,
                         "locale": error.failure.locale or locale,
                         "code": sanitize_error_code(error.failure.code),
                     }
-                    candidate_rows[selected.id].stage = "dropped"
-                    candidate_rows[selected.id].drop_reason = "summary_failed"
-                    async with session_factory.begin() as database:
-                        if not await fence_is_current(
-                            database,
-                            function_run_id=claimed.function_run_id,
-                            fence_token=claimed.fence_token,
-                        ):
-                            await _cancel_candidate_batch(database, batch.id)
-                            return FunctionOutcome(status="cancelled", error_code="cancelled")
-                        database.add(candidate_rows[selected.id])
+                    row.stage = "dropped"
+                    row.drop_reason = generation_drop_reason(error.failure.stage)
                     continue
+                successful.append(selected)
+                localized[selected.id] = summaries
+                event_keys.add(selected.event_key)
+                publication = publishable_selection(
+                    sorted(successful, key=lambda item: -item.importance),
+                    usable,
+                    spec.selection,
+                )
+
+        screening_picks: list[SelectedCandidate] = []
+        for start in range(0, len(usable), spec.max_candidates):
+            if selection_calls >= 3:
+                break
+            screening_picks.extend(
+                await select_batch(
+                    usable[start : start + spec.max_candidates],
+                    covered_events(screening_picks),
+                )
+            )
+        await summarize_picks(sorted(screening_picks, key=lambda item: -item.importance))
+
+        publication = publishable_selection(
+            sorted(successful, key=lambda item: -item.importance), usable, spec.selection
+        )
+        while selection_calls < 3 and (
+            len(publication.selections) < spec.target_items
+            or sum(item.importance == 4 for item in publication.selections)
+            < spec.selection.min_four_star_items
+        ):
+            covered_sources = Counter(
+                fetched_by_id[item.id].candidate.hostname for item in successful
+            )
+            remaining = [
+                item
+                for item in usable
+                if item.candidate.id not in returned
+                and item.candidate.id not in generation_attempted
+            ]
+            remaining.sort(
+                key=lambda item: (
+                    item.candidate.id in screened,
+                    covered_sources[item.candidate.hostname],
+                )
+            )
+            refill_batch = remaining[: spec.max_candidates]
+            if not refill_batch:
+                break
+            refill_picks = await select_batch(refill_batch, covered_events(successful))
+            await summarize_picks(sorted(refill_picks, key=lambda item: -item.importance))
+            publication = publishable_selection(
+                sorted(successful, key=lambda item: -item.importance), usable, spec.selection
+            )
+
+        final_ids = {item.id for item in publication.selections}
+        for selected in successful:
+            if selected.id not in final_ids:
                 row = candidate_rows[selected.id]
-                row.ai_rank = rank
-                row.ai_topic = selected.topic
-                row.ai_market = selected.market
-                row.ai_importance = selected.importance
-                row.ai_event_key = selected.event_key
-                async with session_factory.begin() as database:
-                    if not await fence_is_current(
-                        database,
-                        function_run_id=claimed.function_run_id,
-                        fence_token=claimed.fence_token,
-                    ):
-                        await _cancel_candidate_batch(database, batch.id)
-                        return FunctionOutcome(status="cancelled", error_code="cancelled")
-                    database.add(row)
-                    database.add(
-                        PreparedNewsItem(
-                            batch_id=batch.id,
-                            candidate_id=row.id,
-                            rank=rank,
-                            topic=selected.topic,
-                            importance=selected.importance,
-                            market=selected.market,
-                            event_key=selected.event_key,
-                            numeric_facts=list(summaries["en"].numeric_facts),
-                            presentations={
-                                locale: summary.model_dump(mode="json")
-                                for locale, summary in summaries.items()
-                            },
-                            content_digest=fetched.content_digest,
-                        )
-                    )
-                prepared += 1
+                row.stage = "dropped"
+                row.drop_reason = "policy"
+
+        prepared_items: list[PreparedNewsItem] = []
+        for rank, selected in enumerate(publication.selections, start=1):
+            row = candidate_rows[selected.id]
+            fetched = fetched_by_id[selected.id]
+            summaries = localized[selected.id]
+            row.stage = "prepared"
+            row.drop_reason = None
+            prepared_items.append(
+                PreparedNewsItem(
+                    batch_id=batch.id,
+                    candidate_id=row.id,
+                    rank=rank,
+                    topic=selected.topic,
+                    importance=selected.importance,
+                    market=selected.market,
+                    event_key=selected.event_key,
+                    numeric_facts=list(summaries["en"].numeric_facts),
+                    presentations={
+                        locale: summary.model_dump(mode="json")
+                        for locale, summary in summaries.items()
+                    },
+                    content_digest=fetched.content_digest,
+                )
+            )
+        prepared = len(prepared_items)
+        generation_failures = summary_failures + translation_failures
+        fetch_failures = sum(row.stage == "fetch_failed" for row in candidate_rows.values())
         async with session_factory.begin() as database:
             if not await fence_is_current(
                 database,
@@ -733,7 +943,7 @@ async def refresh_news(
                 return FunctionOutcome(status="cancelled", error_code="cancelled")
             stored = await database.get(NewsCandidateBatch, batch.id, with_for_update=True)
             assert stored is not None
-            outcome_status, batch_status, retryable = _refresh_status(prepared, summary_failures)
+            outcome_status, batch_status, retryable = _refresh_status(prepared, generation_failures)
             stored.status = batch_status
             stored.input_digest = digest
             stored.source_as_of = max(
@@ -744,8 +954,11 @@ async def refresh_news(
                 "discovered": len(discovered),
                 "usable": len(usable),
                 "prepared": prepared,
+                "fetch_failed": fetch_failures,
                 "summary_failed": summary_failures,
-                "failure_reasons": summary_failure_reasons,
+                "translation_failed": translation_failures,
+                "generation_failed": generation_failures,
+                "failure_reasons": failure_reasons,
                 "model_name": client.model_name,
                 "prompt_version": (
                     f"{client.selection_prompt_version}+{SUMMARY_PROMPT_VERSION}"
@@ -753,6 +966,8 @@ async def refresh_news(
                 ),
             }
             stored.finalized_at = datetime.now(UTC)
+            database.add_all(candidate_rows.values())
+            database.add_all(prepared_items)
         return FunctionOutcome(
             status=outcome_status,
             source_as_of=batch.edition_date,
@@ -763,20 +978,41 @@ async def refresh_news(
                 "batch_id": str(batch.id),
                 "market_code": market,
                 "prepared": prepared,
+                "fetch_failed": fetch_failures,
                 "summary_failed": summary_failures,
-                "failure_reasons": summary_failure_reasons,
+                "translation_failed": translation_failures,
+                "generation_failed": generation_failures,
+                "failure_reasons": failure_reasons,
             },
-            missing_scopes=(market,) if summary_failures else (),
-            error_code="news_summary_partial" if summary_failures else None,
+            missing_scopes=(market,) if generation_failures else (),
+            error_code=(
+                "news_generation_partial"
+                if prepared and generation_failures
+                else "news_generation_unavailable"
+                if generation_failures
+                else None
+            ),
             error_detail=(
                 "; ".join(
                     f"{candidate_id}={reason['stage']}:{reason['locale']}:{reason['code']}"
-                    for candidate_id, reason in summary_failure_reasons.items()
+                    for candidate_id, reason in failure_reasons.items()
+                    if reason["stage"] in {"summary", "translation"}
                 )[:500]
                 or None
             ),
             retryable=retryable,
         )
+    except NewsOperationError as error:
+        if error.failure.action == "cancelled":
+            async with session_factory.begin() as database:
+                await _cancel_candidate_batch(database, batch.id)
+            return FunctionOutcome(status="cancelled", error_code="cancelled")
+        async with session_factory.begin() as database:
+            stored = await database.get(NewsCandidateBatch, batch.id, with_for_update=True)
+            if stored is not None:
+                stored.status = "failed"
+                stored.finalized_at = datetime.now(UTC)
+        raise
     except Exception:
         async with session_factory.begin() as database:
             stored = await database.get(NewsCandidateBatch, batch.id, with_for_update=True)

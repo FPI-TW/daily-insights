@@ -703,6 +703,7 @@ export const newsCandidateStageSchema = z.enum([
   "fetch_failed",
   "unused",
   "reviewed",
+  "prepared",
   "dropped",
   "published",
 ])
@@ -712,6 +713,7 @@ export const newsCandidateDropReasonSchema = z.enum([
   "policy",
   "duplicate_event",
   "summary_failed",
+  "translation_failed",
   "reserve",
 ])
 export type NewsCandidateDropReason = z.infer<
@@ -766,6 +768,7 @@ export const newsAdminEditionCountsSchema = z.object({
   fetch_failed: z.number().int().nonnegative(),
   unused: z.number().int().nonnegative(),
   reviewed: z.number().int().nonnegative(),
+  prepared: z.number().int().nonnegative(),
   dropped: z.number().int().nonnegative(),
   published: z.number().int().nonnegative(),
   hidden: z.number().int().nonnegative(),
