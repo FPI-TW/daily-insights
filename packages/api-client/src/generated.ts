@@ -2329,6 +2329,7 @@ export interface components {
         | "article"
         | "selection"
         | "summary"
+        | "translation"
         | "publication"
         | "complete"
     }
