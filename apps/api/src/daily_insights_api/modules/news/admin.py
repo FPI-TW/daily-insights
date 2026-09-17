@@ -51,9 +51,10 @@ AdminRead = Annotated[AuthContext, Depends(require_roles(SystemRole.ADMIN))]
 AdminWrite = Annotated[AuthContext, Depends(require_csrf_roles(SystemRole.ADMIN))]
 Database = Annotated[AsyncSession, Depends(get_database_session)]
 ADMIN_LOCALE = "zh-hant"
-# Published stories lead, then what the model returned but the edition
-# dropped, then what it reviewed and passed over, then everything it never saw.
-STAGE_ORDER = {"published": 0, "dropped": 1, "reviewed": 2}
+# Published stories lead, followed by the final prepared selection, what the
+# edition dropped, what the model reviewed and passed over, then everything it
+# never saw.
+STAGE_ORDER = {"published": 0, "prepared": 1, "dropped": 2, "reviewed": 3}
 
 
 @router.get("/recovery", response_model=NewsRecoveryResponse)
@@ -168,12 +169,12 @@ def _ordered_candidates(
     candidates: list[NewsCandidate], item_ranks: dict[uuid.UUID, int]
 ) -> list[NewsCandidate]:
     def sort_key(candidate: NewsCandidate) -> tuple[int, int, float, str]:
-        group = STAGE_ORDER.get(candidate.stage, 3)
+        group = STAGE_ORDER.get(candidate.stage, 4)
         within = (
             item_ranks.get(candidate.item_id or uuid.UUID(int=0), 0)
             if group == 0
             else candidate.ai_rank or 0
-            if group == 1
+            if group in {1, 2}
             else 0
         )
         seen = candidate.seen_at.timestamp() if candidate.seen_at is not None else 0.0
@@ -244,6 +245,7 @@ async def _edition_entry(
         fetch_failed=stages["fetch_failed"],
         unused=stages["unused"],
         reviewed=stages["reviewed"],
+        prepared=stages["prepared"],
         dropped=stages["dropped"],
         published=stages["published"],
         hidden=sum(1 for item in items if item.hidden),

@@ -36,8 +36,10 @@ from daily_insights_api.modules.news.extraction import (
     safe_article_client,
 )
 from daily_insights_api.modules.news.failures import (
+    NewsFailure,
     NewsOperationError,
     classify_failure,
+    generation_drop_reason,
     source_failure_is_systemic,
 )
 from daily_insights_api.modules.news.feeds import discover_feed_candidates, feed_client
@@ -70,9 +72,9 @@ from daily_insights_api.modules.news.recovery import (
 )
 from daily_insights_api.modules.operations.api import sanitize_error_code
 
-DERIVATION_VERSION = "feeds-deepseek-news.v13"
-SUMMARY_PROMPT_VERSION = "summary-v4"
-TRANSLATION_PROMPT_VERSION = "translation-v1"
+DERIVATION_VERSION = "feeds-deepseek-news.v14"
+SUMMARY_PROMPT_VERSION = "summary-v5"
+TRANSLATION_PROMPT_VERSION = "translation-v2"
 LOCALES = ("zh-hant", "zh-hans", "en")
 TAIPEI = ZoneInfo("Asia/Taipei")
 # Only a complete edition is final; partial and unavailable editions may be
@@ -622,12 +624,30 @@ async def _fetch_usable_candidates(
     timeout_seconds: float = 25,
     bodies: dict[str, str] | None = None,
 ) -> list[FetchedCandidate]:
-    """Extract article text, using feed-supplied bodies where a feed carries them."""
+    """Compatibility adapter returning only successfully extracted articles."""
+    outcomes = await _extract_candidate_outcomes(candidates, allowed, timeout_seconds, bodies)
+    return [outcome.fetched for outcome in outcomes if outcome.fetched is not None]
+
+
+@dataclass(frozen=True)
+class ExtractionOutcome:
+    candidate: Candidate
+    fetched: FetchedCandidate | None = None
+    failure: NewsFailure | None = None
+
+
+async def _extract_candidate_outcomes(
+    candidates: list[Candidate],
+    allowed: frozenset[str],
+    timeout_seconds: float = 25,
+    bodies: dict[str, str] | None = None,
+) -> list[ExtractionOutcome]:
+    """Extract articles and retain each candidate's safe terminal outcome."""
     semaphore = asyncio.Semaphore(6)
     supplied = bodies or {}
     async with safe_article_client(allowed, timeout_seconds) as http:
 
-        async def fetch_one(candidate: Candidate) -> FetchedCandidate | None:
+        async def fetch_one(candidate: Candidate) -> ExtractionOutcome:
             workflow = current_workflow()
             checkpoint = None
             if workflow is not None:
@@ -653,13 +673,12 @@ async def _fetch_usable_candidates(
                 )
                 if workflow is not None and checkpoint is not None:
                     await _record_article_success(workflow, checkpoint, fetched)
-                return fetched
+                return ExtractionOutcome(candidate, fetched=fetched)
             if workflow is not None and checkpoint is not None:
                 if checkpoint.failure is not None and checkpoint.failure.get("action") == "skip":
-                    from daily_insights_api.modules.news.failures import NewsFailure
-
-                    await workflow.record(NewsFailure.model_validate(checkpoint.failure))
-                    return None
+                    failure = NewsFailure.model_validate(checkpoint.failure)
+                    await workflow.record(failure)
+                    return ExtractionOutcome(candidate, failure=failure)
             async with semaphore:
                 try:
                     if workflow is not None:
@@ -682,7 +701,7 @@ async def _fetch_usable_candidates(
                             checkpoint,
                             fetched,
                         )
-                    return fetched
+                    return ExtractionOutcome(candidate, fetched=fetched)
                 except Exception as error:
                     failure = classify_failure(
                         error,
@@ -706,10 +725,9 @@ async def _fetch_usable_candidates(
                         hostname=candidate.hostname,
                         error_code=failure.code,
                     )
-                    return None
+                    return ExtractionOutcome(candidate, failure=failure)
 
-        fetched = await asyncio.gather(*(fetch_one(candidate) for candidate in candidates))
-    return [item for item in fetched if item is not None]
+        return list(await asyncio.gather(*(fetch_one(candidate) for candidate in candidates)))
 
 
 async def _record_article_success(
@@ -1075,7 +1093,10 @@ async def _generate_news_edition(
                     if not _article_local_model_failure(error):
                         raise
                     operation_error = cast(NewsOperationError, error)
-                    ledger.drop(selected_item.id, "summary_failed")
+                    ledger.drop(
+                        selected_item.id,
+                        generation_drop_reason(operation_error.failure.stage),
+                    )
                     emit_event(
                         "news.summary.failed",
                         hostname=fetched.candidate.hostname,
@@ -1521,8 +1542,9 @@ async def _publish_candidate(
             hostname=candidate.hostname,
             error_code=operation_error.error_code,
         )
-        await _record_publish_failure(session_factory, candidate.id, "summary_failed", audits)
-        return "summary_failed"
+        drop_reason = generation_drop_reason(operation_error.failure.stage)
+        await _record_publish_failure(session_factory, candidate.id, drop_reason, audits)
+        return drop_reason
     selection = _manual_selection(candidate, target.market_code)
     if workflow is not None:
         await workflow.check("publication", external=False)

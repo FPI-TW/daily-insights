@@ -76,6 +76,7 @@ const newsAdminEditions = {
           fetch_failed: 1,
           unused: 2,
           reviewed: 3,
+          prepared: 0,
           dropped: 1,
           published: 1,
           hidden: 0,
@@ -260,6 +261,24 @@ describe("API client trust boundary", () => {
           stage: "dropped",
           drop_reason: "reserve",
           item_id: null,
+        })
+      ).success
+    ).toBe(true)
+    expect(
+      newsAdminEditionsSchema.safeParse(
+        withCandidate({
+          ...newsAdminCandidate,
+          stage: "dropped",
+          drop_reason: "translation_failed",
+        })
+      ).success
+    ).toBe(true)
+    expect(
+      newsAdminEditionsSchema.safeParse(
+        withCandidate({
+          ...newsAdminCandidate,
+          stage: "prepared",
+          drop_reason: null,
         })
       ).success
     ).toBe(true)

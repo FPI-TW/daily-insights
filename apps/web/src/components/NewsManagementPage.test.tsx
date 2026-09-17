@@ -125,6 +125,7 @@ const globalEdition = {
       fetch_failed: 1,
       unused: 2,
       reviewed: 3,
+      prepared: 0,
       dropped: 1,
       published: 1,
       hidden: 0,

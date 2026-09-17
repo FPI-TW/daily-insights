@@ -722,6 +722,7 @@ const countKeys = [
   "fetch_failed",
   "unused",
   "reviewed",
+  "prepared",
   "dropped",
   "published",
   "hidden",

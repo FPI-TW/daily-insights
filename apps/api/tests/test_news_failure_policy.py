@@ -10,6 +10,7 @@ from daily_insights_api.modules.news.failures import (
     NewsFailure,
     NewsOperationError,
     classify_failure,
+    generation_drop_reason,
     retry_time,
 )
 from daily_insights_api.modules.news.llm import ModelCallError
@@ -20,6 +21,13 @@ def response_error(status: int, headers: dict[str, str] | None = None) -> httpx.
         status, headers=headers, request=httpx.Request("GET", "https://example.test/news")
     )
     return httpx.HTTPStatusError("request failed", request=response.request, response=response)
+
+
+def test_generation_failures_keep_their_stage_specific_drop_reason() -> None:
+    assert generation_drop_reason("summary") == "summary_failed"
+    assert generation_drop_reason("translation") == "translation_failed"
+    with pytest.raises(ValueError, match="unsupported generation stage"):
+        generation_drop_reason("article")
 
 
 @pytest.mark.parametrize("status", [401, 402, 403])

@@ -2114,6 +2114,7 @@ export interface components {
             | "policy"
             | "duplicate_event"
             | "summary_failed"
+            | "translation_failed"
             | "reserve"
           )
         | null
@@ -2149,6 +2150,7 @@ export interface components {
         | "fetch_failed"
         | "unused"
         | "reviewed"
+        | "prepared"
         | "dropped"
         | "published"
       /** Url */
@@ -2167,6 +2169,8 @@ export interface components {
       fetch_failed: number
       /** Hidden */
       hidden: number
+      /** Prepared */
+      prepared: number
       /** Published */
       published: number
       /** Reviewed */

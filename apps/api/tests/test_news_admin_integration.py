@@ -193,7 +193,7 @@ def _candidate(edition_id: uuid.UUID, index: int, **overrides: object) -> NewsCa
 async def _seed_global_edition(
     factory: async_sessionmaker[AsyncSession], edition_date: date
 ) -> tuple[uuid.UUID, list[uuid.UUID], list[uuid.UUID]]:
-    """A global edition with two published stories and four other candidates."""
+    """A global edition with two published stories and five other candidates."""
     async with factory.begin() as database:
         edition = NewsEdition(
             edition_date=edition_date,
@@ -222,8 +222,23 @@ async def _seed_global_edition(
         candidates = [
             _candidate(edition.id, 1, stage="published", item_id=items[0].id, ai_rank=2),
             _candidate(edition.id, 2, stage="published", item_id=items[1].id, ai_rank=1),
-            _candidate(edition.id, 3, stage="dropped", drop_reason="off_market", ai_rank=4),
-            _candidate(edition.id, 4, stage="dropped", drop_reason="summary_failed", ai_rank=3),
+            _candidate(edition.id, 7, stage="prepared", ai_rank=5),
+            _candidate(
+                edition.id,
+                3,
+                stage="dropped",
+                drop_reason="off_market",
+                ai_rank=4,
+                seen_at=datetime(2026, 9, 8, 0, 10, tzinfo=UTC),
+            ),
+            _candidate(
+                edition.id,
+                4,
+                stage="dropped",
+                drop_reason="summary_failed",
+                ai_rank=3,
+                seen_at=datetime(2026, 9, 8, 0, 1, tzinfo=UTC),
+            ),
             _candidate(edition.id, 5),
             _candidate(edition.id, 6, stage="discovered", seen_at=None),
         ]
@@ -266,6 +281,7 @@ async def test_admin_editions_list_every_market_with_counts_and_ordered_candidat
         "fetch_failed": 0,
         "unused": 0,
         "reviewed": 1,
+        "prepared": 1,
         "dropped": 2,
         "published": 2,
         "hidden": 0,
@@ -274,11 +290,12 @@ async def test_admin_editions_list_every_market_with_counts_and_ordered_candidat
     first = entry["items"][0]
     assert first["headline"] == "zh-hant headline 1" and first["origin"] == "model"
     assert first["hidden"] is False and first["candidate_id"] == str(candidate_ids[0])
-    # Published by item rank, dropped by model rank, reviewed, then the rest.
+    # Published by item rank, prepared and dropped by model rank, then the rest.
     assert [candidate["id"] for candidate in entry["candidates"]] == [
-        str(candidate_ids[index]) for index in (0, 1, 3, 2, 4, 5)
+        str(candidate_ids[index]) for index in (0, 1, 2, 4, 3, 5, 6)
     ]
-    assert entry["candidates"][3]["drop_reason"] == "off_market"
+    assert entry["candidates"][3]["drop_reason"] == "summary_failed"
+    assert entry["candidates"][4]["drop_reason"] == "off_market"
     for other in body["editions"][1:]:
         assert other == {
             "market_code": other["market_code"],

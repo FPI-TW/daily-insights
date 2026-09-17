@@ -5,7 +5,7 @@ import {
   type NewsCandidateStage,
 } from "@daily-insights/api-client"
 
-// The admin table groups the six pipeline stages into the three questions an
+// The admin table groups the seven pipeline stages into the three questions an
 // editor asks: what did the model reject, what did it never pick, and what
 // never reached it. "all" keeps the raw list.
 export type CandidateFilter = "all" | "dropped" | "reviewed" | "other"

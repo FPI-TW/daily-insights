@@ -22,6 +22,7 @@ NewsStage = Literal[
     "complete",
 ]
 FailureAction = Literal["retry", "block", "repair", "skip", "attention", "expired", "cancelled"]
+GenerationDropReason = Literal["summary_failed", "translation_failed"]
 
 
 class NewsFailure(BaseModel):
@@ -43,6 +44,15 @@ class NewsOperationError(Exception):
         super().__init__(failure.code)
         self.failure = failure
         self.error_code = failure.code
+
+
+def generation_drop_reason(stage: NewsStage) -> GenerationDropReason:
+    """Map an article-local generation failure to its persisted category."""
+    if stage == "summary":
+        return "summary_failed"
+    if stage == "translation":
+        return "translation_failed"
+    raise ValueError(f"unsupported generation stage: {stage}")
 
 
 def source_failure_is_systemic(failure: NewsFailure) -> bool:
@@ -153,6 +163,8 @@ def classify_failure(
         "selection_invalid_json",
         "selection_invalid_candidate",
         "summary_invalid_json",
+        # Historical checkpoints may contain these pre-v5 validation codes.
+        # New prompts no longer produce them, but recovery must classify them safely.
         "summary_ungrounded_number",
         "translation_invalid_json",
         "translation_ungrounded_number",

@@ -18,7 +18,6 @@ from daily_insights_api.modules.news.llm import (
     ModelCall,
     ModelCallError,
     ModelOutputError,
-    numeric_facts_grounded,
 )
 from daily_insights_api.modules.news.prompts import SelectionCriteria
 from daily_insights_api.modules.news.service import _failed_audit
@@ -153,7 +152,7 @@ async def test_selection_retry_adds_fixed_safe_contract_guidance(
     assert "selection_invalid_json" not in guidance
 
 
-async def test_selection_rejects_unknown_id_and_summary_rejects_fabricated_number(
+async def test_selection_rejects_unknown_id_and_summary_does_not_validate_numbers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = DeepSeekClient(
@@ -205,8 +204,8 @@ async def test_selection_rejects_unknown_id_and_summary_rejects_fabricated_numbe
             )
         ),
     )
-    with pytest.raises(ModelOutputError, match="ungrounded"):
-        await client.summarize(_candidate(), "Source body gained 10%.", "en")
+    summary = await client.summarize(_candidate(), "Source body gained 10%.", "en")
+    assert summary.value == LocalizedSummary(headline="Gain 20%", summary="No basis.")
 
 
 async def test_translation_uses_validated_zh_hant_summary_and_original_source_grounding(
@@ -249,7 +248,7 @@ async def test_translation_uses_validated_zh_hant_summary_and_original_source_gr
     assert "untrusted quoted data" in str(captured["task"])
 
 
-async def test_translation_rejects_number_not_grounded_in_original_article(
+async def test_translation_does_not_validate_numbers_against_original_article(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = DeepSeekClient(
@@ -274,15 +273,15 @@ async def test_translation_rejects_number_not_grounded_in_original_article(
         ),
     )
 
-    with pytest.raises(ModelCallError) as raised:
-        await client.translate(
-            _candidate(),
-            "The market gained 10%.",
-            LocalizedSummary(headline="市場上漲10%", summary="市場漲幅為10%。"),
-            "en",
-        )
-
-    assert raised.value.error_code == "translation_ungrounded_number"
+    translated = await client.translate(
+        _candidate(),
+        "The market gained 10%.",
+        LocalizedSummary(headline="市場上漲10%", summary="市場漲幅為10%。"),
+        "en",
+    )
+    assert translated.value == LocalizedSummary(
+        headline="Markets gain 20%", summary="The move was 20%.", numeric_facts=("20%",)
+    )
 
 
 class _FakeAsyncClient:
@@ -337,7 +336,7 @@ async def test_provider_http_and_invalid_json_failures_keep_digest_and_latency_f
         assert audit.provider_request_id == error.request_id
 
 
-async def test_grounding_failure_keeps_original_call_digest_and_latency_for_audit(
+async def test_summary_with_changed_number_keeps_call_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = DeepSeekClient(
@@ -358,29 +357,26 @@ async def test_grounding_failure_keeps_original_call_digest_and_latency_for_audi
             )
         ),
     )
-    with pytest.raises(ModelCallError, match="ungrounded") as raised:
-        await client.summarize(_candidate(), "Source body gained 10%.", "en")
-    audit = _failed_audit(uuid.uuid4(), "summary", "en", "f" * 64, "deepseek-chat", raised.value)
-    assert audit.input_digest == digest
-    assert audit.latency_ms == 12
-    assert audit.provider_request_id == "request-grounding"
+    call = await client.summarize(_candidate(), "Source body gained 10%.", "en")
+    assert call.input_digest == digest
+    assert call.latency_ms == 12
+    assert call.request_id == "request-grounding"
 
 
 @pytest.mark.parametrize(
-    ("headline", "summary", "source", "valid"),
+    ("headline", "summary", "source"),
     [
-        ("市場成長20%", "市場反應平穩。", "市場成長10%。", False),
-        ("公司投資3億元", "資金已到位。", "公司投資30億元。", False),
-        ("市場成長20%", "資金為3億元。", "市場成長20%，資金為3億元。", True),  # noqa: RUF001
-        ("市場成長3%", "表現穩定。", "市場成長30%。", False),
+        ("市場成長20%", "市場反應平穩。", "市場成長10%。"),
+        ("公司投資3億元", "資金已到位。", "公司投資30億元。"),
+        ("市場成長20%", "資金為3億元。", "市場成長20%，資金為3億元。"),  # noqa: RUF001
+        ("市場成長3%", "表現穩定。", "市場成長30%。"),
     ],
 )
-async def test_numeric_grounding_handles_chinese_adjacent_numbers_without_substrings(
+async def test_summary_does_not_compare_chinese_adjacent_numbers(
     monkeypatch: pytest.MonkeyPatch,
     headline: str,
     summary: str,
     source: str,
-    valid: bool,
 ) -> None:
     client = DeepSeekClient(
         base_url="https://api.deepseek.com", api_key="secret", model="deepseek-chat"
@@ -399,13 +395,9 @@ async def test_numeric_grounding_handles_chinese_adjacent_numbers_without_substr
             )
         ),
     )
-    if valid:
-        result = await client.summarize(_candidate(), source, "zh-hant")
-        assert isinstance(result.value, LocalizedSummary)
-        assert result.value.headline == headline
-    else:
-        with pytest.raises(ModelCallError, match="ungrounded"):
-            await client.summarize(_candidate(), source, "zh-hans")
+    result = await client.summarize(_candidate(), source, "zh-hant")
+    assert isinstance(result.value, LocalizedSummary)
+    assert result.value.headline == headline
 
 
 async def test_client_reuses_one_transport_and_closes_it(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -432,21 +424,6 @@ async def test_client_reuses_one_transport_and_closes_it(monkeypatch: pytest.Mon
     assert len(created) == 1
     assert created[0].posts == 2
     assert created[0].closed is True
-
-
-def test_numeric_grounding_matches_values_across_formats_and_magnitudes() -> None:
-    source = (
-        "Bitcoin ETFs took in $731 million on Thursday as gold rose 2% to $4,510 and "
-        "turnover reached NT$993.3 billion; the 10-year yield touched 4.8%."
-    )
-    assert numeric_facts_grounded("比特幣 ETF 單日流入 7.31 億美元, 黃金漲 2% 至 4510 美元", source)
-    assert numeric_facts_grounded("成交額 9933 億元, 十年期殖利率 4.8%", source)
-    assert numeric_facts_grounded("流入 \uff17\uff13\uff11 million 美元", source)
-    # A number the source never states, in any form, is still fabrication.
-    assert not numeric_facts_grounded("比特幣 ETF 流入 7.5 億美元", source)
-    assert not numeric_facts_grounded("黃金漲 3%", source)
-    # Percent and plain values are different facts: 2% is not "2".
-    assert not numeric_facts_grounded("2 家公司", "Turnover rose 2% today.")
 
 
 async def test_selection_salvages_valid_stories_when_model_exceeds_domain_cap(
@@ -490,7 +467,7 @@ async def test_selection_salvages_valid_stories_when_model_exceeds_domain_cap(
     assert complete.await_count == 1
 
 
-async def test_summary_retry_adds_safe_feedback_and_audits_specific_failure(
+async def test_summary_retry_adds_safe_feedback_and_audits_invalid_json(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from daily_insights_api.modules.news.service import _summarize_with_retry
@@ -500,9 +477,13 @@ async def test_summary_retry_adds_safe_feedback_and_audits_specific_failure(
 
     async def complete(prompt: dict[str, Any]):  # type: ignore[no-untyped-def]
         captured.append(prompt)
-        amount = "20%" if len(captured) == 1 else "10%"
+        amount = "10%"
         return (
-            {"headline": f"Gain {amount}", "summary": "Markets move.", "numeric_facts": [amount]},
+            {
+                "headline": "" if len(captured) == 1 else f"Gain {amount}",
+                "summary": "Markets move.",
+                "numeric_facts": [amount],
+            },
             "request",
             10,
             10,
@@ -522,10 +503,10 @@ async def test_summary_retry_adds_safe_feedback_and_audits_specific_failure(
     assert result.value.headline == "Gain 10%"
     assert len(failures) == 1
     audit = _failed_audit(uuid.uuid4(), "summary", "en", "f" * 64, "test", failures[0])
-    assert audit.error_code == "summary_ungrounded_number"
+    assert audit.error_code == "summary_invalid_json"
     assert audit.input_digest == "d" * 64
     assert "RETRY_GUIDANCE" not in captured[0]
-    assert "Use only numbers explicitly present" in captured[1]["RETRY_GUIDANCE"]
+    assert "exact OUTPUT_CONTRACT" in captured[1]["RETRY_GUIDANCE"]
 
 
 async def test_refill_prompt_provides_covered_events_without_relaxing_market_policy(
