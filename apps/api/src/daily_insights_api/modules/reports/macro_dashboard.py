@@ -184,13 +184,19 @@ async def load_treasury(client: httpx.AsyncClient, today: date) -> list[History]
     try:
         # A third year covers the previous observation when the one-year
         # comparison falls on a New Year holiday.
-        payloads = await asyncio.gather(
-            *(fetch(year) for year in range(today.year - 2, today.year + 1)),
-            return_exceptions=True,
-        )
+        # Treasury intermittently stalls every request when several yearly XML
+        # feeds are opened concurrently from the same client/IP. Fetching the
+        # three bounded years sequentially is both faster in production and
+        # keeps each year's failure independently diagnosable.
+        payloads: list[bytes | Exception] = []
+        for year in range(today.year - 2, today.year + 1):
+            try:
+                payloads.append(await fetch(year))
+            except Exception as error:
+                payloads.append(error)
         valid = []
         for year, payload in zip(range(today.year - 2, today.year + 1), payloads, strict=True):
-            if isinstance(payload, BaseException):
+            if isinstance(payload, Exception):
                 record_failure("us_treasury", "yield_curve_xml", [str(year)], payload)
                 continue
             try:

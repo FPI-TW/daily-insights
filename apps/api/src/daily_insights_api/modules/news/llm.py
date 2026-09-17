@@ -245,6 +245,7 @@ class DeepSeekClient:
         *,
         policy: SelectionPolicy = GLOBAL_SPEC.selection,
         previous_events: tuple[CoveredEvent, ...] = (),
+        retry_feedback: str | None = None,
     ) -> ModelCall:
         remaining_budget = 100_000
         allowed = []
@@ -318,6 +319,15 @@ class DeepSeekClient:
                 "Prefer underrepresented source domains and topics so the combined edition "
                 "satisfies OUTPUT_CONTRACT. Keep the same relevance, credibility "
                 "and market requirements."
+            )
+        if retry_feedback is not None:
+            # The failure code only enables fixed guidance. Never echo provider
+            # output or validation text back into the trusted instruction area.
+            prompt["RETRY_GUIDANCE"] = (
+                "The previous selection failed validation. Re-read CANDIDATES and return "
+                "exactly the OUTPUT_CONTRACT as valid JSON. Use only candidate IDs and the "
+                "closed topic and market vocabularies shown in OUTPUT_CONTRACT; keep IDs and "
+                "event_keys unique, and omit a candidate if its classification is uncertain."
             )
         if policy.market_focus:
             single_market = bool(policy.allowed_markets) and "global" not in (

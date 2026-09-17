@@ -1372,7 +1372,12 @@ async def test_orchestration_admin_api_enqueues_lists_gets_and_queues_conflicts(
             ).all()
         )
     assert len(manual_runs) == 3
-    assert all(run.deadline_at is None for run in manual_runs)
+    deadlines = {run.deadline_at for run in manual_runs}
+    assert None not in deadlines
+    assert len(deadlines) == 1
+    deadline = deadlines.pop()
+    assert deadline is not None
+    assert timedelta(minutes=59) <= deadline - datetime.now(UTC) <= timedelta(hours=1)
     async with data_management_database() as database:
         created_event = await database.scalar(
             select(AuditEvent).where(

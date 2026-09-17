@@ -186,6 +186,42 @@ async def test_daily_bars_accept_provider_crypto_shape_without_volume_or_timezon
     assert result.items[0].close == Decimal("2")
 
 
+@pytest.mark.parametrize("symbol,asset_type", [("AAPL", "Common Stock"), ("TLT", "ETF")])
+async def test_daily_bars_accept_equity_currency_field(symbol: str, asset_type: str) -> None:
+    payload = {
+        "meta": {
+            "symbol": symbol,
+            "interval": "1day",
+            "currency": "USD",
+            "type": asset_type,
+        },
+        "values": [
+            {
+                "datetime": "2026-09-16",
+                "open": "1",
+                "high": "2",
+                "low": "1",
+                "close": "2",
+            }
+        ],
+        "status": "ok",
+    }
+    adapter = TwelveDataAdapter(
+        transport(
+            httpx.MockTransport(lambda request: httpx.Response(200, json=payload, request=request))
+        )
+    )
+
+    result = await adapter.get_daily_bars(
+        market="us_equity",
+        symbol=symbol,
+        expected_currency="USD",
+        outputsize=1,
+    )
+
+    assert result.items[0].symbol == symbol
+
+
 async def test_daily_bars_enforce_expected_provider_asset_type() -> None:
     requests: list[dict[str, str]] = []
     payload = {

@@ -29,6 +29,7 @@ from daily_insights_api.modules.orchestration.registry import (
 
 TAIPEI = ZoneInfo("Asia/Taipei")
 RETRY_INTERVAL = timedelta(minutes=30)
+MANUAL_RETRY_WINDOW = timedelta(hours=1)
 LEASE_DURATION = timedelta(minutes=10)
 ROUTINE_ENQUEUE_LOCK = 5_239_842_371_114_300
 RECONCILIATION_BATCH_SIZE = 100
@@ -130,8 +131,8 @@ async def enqueue_manual_job(
     if definition is None or "manual" not in definition.triggers:
         raise ValueError("job_key is not manually triggerable")
     effective_date = edition_date or taipei_today()
+    deadline_at = datetime.now(UTC) + MANUAL_RETRY_WINDOW
     snapshot = registry_snapshot()
-    deadline_at = None
     job = _new_job_run(
         definition,
         edition_date=effective_date,
@@ -323,7 +324,11 @@ async def terminalize_expired_automatic_functions(
                         FunctionRun.lease_expires_at <= effective_now,
                     ),
                 ),
-                FunctionRun.function_key != "news_publish",
+                ~and_(
+                    FunctionRun.function_key == "news_publish",
+                    FunctionRun.status == "pending",
+                    FunctionRun.attempt_count == 0,
+                ),
                 FunctionRun.job_run_id.in_(
                     select(JobRun.id).where(
                         JobRun.deadline_at.is_not(None),

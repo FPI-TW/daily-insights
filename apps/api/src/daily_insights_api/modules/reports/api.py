@@ -35,6 +35,7 @@ from daily_insights_api.modules.reports.macro_dashboard import (
     refresh_macro_dashboard,
 )
 from daily_insights_api.modules.reports.macro_dashboard_models import MacroDashboardSnapshot
+from daily_insights_api.modules.reports.macro_diagnostics import diagnostics
 from daily_insights_api.modules.reports.models import ReportPublication
 from daily_insights_api.modules.reports.morning_report import (
     MORNING_REPORT_DERIVATION_VERSION,
@@ -93,6 +94,7 @@ __all__ = [
     "_ratio_common_date_points",
     "block_precision",
     "block_rounding",
+    "diagnostics",
     "load_sofr",
     "load_treasury",
     "refresh_macro_dashboard",

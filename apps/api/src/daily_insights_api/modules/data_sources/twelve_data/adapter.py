@@ -207,7 +207,8 @@ class TwelveDataAdapter:
         expected_currency_names = TWELVE_DATA_CURRENCY_NAMES.get(expected_currency)
         if expected_currency_names is None:
             raise ValueError("expected_currency is not supported by the Twelve Data contract")
-        if payload.meta.currency_quote not in expected_currency_names:
+        actual_currency = payload.meta.currency_quote or payload.meta.currency
+        if actual_currency not in expected_currency_names:
             raise DataSourceContractError(
                 "Twelve Data time-series quote currency did not match the launch manifest"
             )

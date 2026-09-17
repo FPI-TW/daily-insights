@@ -14,6 +14,7 @@ from daily_insights_api.modules.news.editions import (
     EditionSpec,
     edition_spec,
 )
+from daily_insights_api.modules.news.extraction import FetchedCandidate
 from daily_insights_api.modules.news.failures import NewsFailure, classify_failure
 from daily_insights_api.modules.news.feeds import (
     discover_feed_candidates,
@@ -23,6 +24,7 @@ from daily_insights_api.modules.news.feeds import (
 from daily_insights_api.modules.news.llm import (
     DeepSeekClient,
     ModelCall,
+    ModelCallError,
     publishable_selection,
 )
 from daily_insights_api.modules.news.models import (
@@ -91,9 +93,11 @@ __all__ = [
     "SUMMARY_PROMPT_VERSION",
     "DeepSeekClient",
     "EditionSpec",
+    "FetchedCandidate",
     "Locale",
     "LocalizedSummary",
     "ModelCall",
+    "ModelCallError",
     "NewsCandidate",
     "NewsCandidateBatch",
     "NewsCandidatePublication",

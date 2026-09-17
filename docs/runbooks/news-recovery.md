@@ -46,8 +46,10 @@
    與 automatic work 或相同 Provider 衝突時排隊，不回傳 409。
 5. 供應商暫停時一次只允許一個 worker 試做一筆待處理模型請求。成功才解除暫停；
    失敗記錄新原因，JSON 失敗也不在 probe 內額外修正。
-6. Manual jobs 僅限當日，含 10:00 後，且不受 automatic soft deadline 限制。失敗保留
-   進度；跨日由新日作業處理。
+6. Manual jobs 僅限當日，含 10:00 後；建立後使用一小時 soft deadline，允許立即執行
+   與一次 30 分鐘重試。截止後不再開始 refresh attempt，已執行工作可完成，隨後
+   `news_publish` 依 terminal dependencies 以可用批次取得一次發布機會；若該發布失敗，
+   不再跨越 deadline 重試。失敗保留進度；跨日由新日作業處理。
    「重新抓取」是新執行，不是 checkpoint 續跑；修正預算是各恢復鏈中每個輸入獨立。
 7. 心跳超過 90 秒顯示無回應，但不直接搶工作；仍需租約與鎖允許。取消撤銷發布權，
    未完成 probe 退回暫停，取消作業不得續建重試。
@@ -60,6 +62,8 @@
 
 - `news_checkpoints` 保存候選中繼資料、內容 SHA-256、成功選題及驗證完成的各語系摘要；
   不保存正文、完整 prompt 或原始例外訊息。模型 audit 與正式新聞維持原保存政策。
+- 每次模型修正嘗試皆保存安全 `error_code`、request id、token/latency metadata；
+  FunctionAttempt 另保存候選對應的 bounded failure reason，不保存模型原始輸出。
 - 選題 key 包含候選內容、模型、prompt 摘要與市場政策；摘要 key 包含文章內容、候選、
   語系、模型與 prompt 版本。變動僅使受影響階段失效；新候選選題仍可重用既有摘要。
 - Feed 成功中繼資料可重用；全文 feed 和必要文章正文會重新取得。失敗 feed 才再探索。

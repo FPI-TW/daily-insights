@@ -129,6 +129,30 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
     ] * len(values)
 
 
+async def test_selection_retry_adds_fixed_safe_contract_guidance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = DeepSeekClient(
+        base_url="https://api.deepseek.com", api_key="secret", model="deepseek-chat"
+    )
+    captured: dict[str, Any] = {}
+
+    async def complete(
+        prompt: dict[str, Any],
+    ) -> tuple[dict[str, Any], str | None, int | None, int | None, int, str]:
+        captured.update(prompt)
+        return ({"selections": []}, None, None, None, 1, "a" * 64)
+
+    monkeypatch.setattr(client, "_complete", complete)
+
+    await client.select([], retry_feedback="selection_invalid_json")
+
+    guidance = str(captured["RETRY_GUIDANCE"])
+    assert "previous selection failed validation" in guidance
+    assert "exactly the OUTPUT_CONTRACT" in guidance
+    assert "selection_invalid_json" not in guidance
+
+
 async def test_selection_rejects_unknown_id_and_summary_rejects_fabricated_number(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

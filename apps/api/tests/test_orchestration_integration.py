@@ -3,7 +3,7 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import cast
+from typing import Any, cast
 
 import pytest
 import pytest_asyncio
@@ -24,10 +24,14 @@ import daily_insights_api.modules.orchestration.projections as orchestration_pro
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.analyst_viewpoints.api import AnalystViewpointSyncError
 from daily_insights_api.modules.analyst_viewpoints.models import AnalystViewpointSyncRun
+from daily_insights_api.modules.data_sources.api import TaiexDailyBar, TaiexDailyBars
+from daily_insights_api.modules.news.contracts import Selection
+from daily_insights_api.modules.news.llm import ModelCall, ModelCallError
 from daily_insights_api.modules.news.models import (
     NewsCandidate,
     NewsCandidateBatch,
     NewsEdition,
+    NewsGenerationAudit,
     NewsItem,
     PreparedNewsItem,
 )
@@ -71,7 +75,9 @@ from daily_insights_api.modules.orchestration.worker import (
     execute_claimed,
     reconcile_function_jobs,
 )
+from daily_insights_api.modules.reports.api import TENORS, History, Point
 from daily_insights_api.modules.reports.macro_dashboard_models import MacroDashboardSnapshot
+from daily_insights_api.modules.reports.macro_diagnostics import record_failure
 from daily_insights_api.modules.reports.models import ReportPublication
 
 pytestmark = pytest.mark.integration
@@ -128,6 +134,226 @@ async def test_legacy_data_management_archive_rejects_writes(
                 ),
                 {"id": uuid.uuid4(), "edition_date": date(2026, 9, 17)},
             )
+
+
+async def test_news_model_contract_failure_is_audited_then_repaired_once(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, sessions = orchestration_database
+    edition = date(2026, 9, 17)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_global_refresh_job",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=edition,
+            status="running",
+        )
+        database.add(job)
+        await database.flush()
+        function = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_global_refresh",
+            provider_key="internal_services",
+            scope={},
+            status="running",
+        )
+        database.add(function)
+        await database.flush()
+        attempt = FunctionAttempt(
+            function_run_id=function.id,
+            attempt_number=1,
+            provider_key="internal_services",
+            function_key="news_global_refresh",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="running",
+            request_metadata=[],
+        )
+        database.add(attempt)
+        await database.flush()
+        batch = NewsCandidateBatch(
+            function_attempt_id=attempt.id,
+            edition_date=edition,
+            market_code="global",
+            status="collecting",
+        )
+        database.add(batch)
+        await database.flush()
+        batch_id = batch.id
+
+    feedback_seen: list[str | None] = []
+
+    async def call(feedback: str | None) -> ModelCall:
+        feedback_seen.append(feedback)
+        if feedback is None:
+            raise ModelCallError(
+                "invalid JSON",
+                input_digest="a" * 64,
+                latency_ms=12,
+                error_code="selection_invalid_json",
+                request_id="failed-request",
+            )
+        return ModelCall(
+            value=Selection(selections=()),
+            request_id="repaired-request",
+            input_tokens=10,
+            output_tokens=5,
+            latency_ms=8,
+            input_digest="b" * 64,
+        )
+
+    result = await orchestration_news_functions._model_call_with_repair(
+        sessions,
+        batch_id=batch_id,
+        stage="selection",
+        locale=None,
+        fallback_digest="f" * 64,
+        model="test-model",
+        prompt_version="test-prompt",
+        call=call,
+    )
+
+    assert result.request_id == "repaired-request"
+    assert feedback_seen == [None, "selection_invalid_json"]
+    async with sessions() as database:
+        audits = list(
+            await database.scalars(
+                select(NewsGenerationAudit).where(
+                    NewsGenerationAudit.candidate_batch_id == batch_id
+                )
+            )
+        )
+    assert len(audits) == 1
+    assert audits[0].status == "failed"
+    assert audits[0].error_code == "selection_invalid_json"
+    assert audits[0].provider_request_id == "failed-request"
+
+
+async def test_taiex_missing_month_retry_keeps_latest_stored_source_date(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, sessions = orchestration_database
+    latest = date(2026, 9, 16)
+    old_month = date(2025, 2, 1)
+    token = uuid.uuid4()
+
+    async def latest_date(*_: object, **__: object) -> date:
+        return latest
+
+    async def select_months(*_: object, **__: object) -> tuple[date, ...]:
+        return (old_month,)
+
+    async def store(*_: object, **__: object) -> int:
+        return 1
+
+    async def current(*_: object, **__: object) -> bool:
+        return True
+
+    class Adapter:
+        async def get_taiex_daily_bars(self, month: date) -> TaiexDailyBars:
+            assert month == old_month
+            return TaiexDailyBars(
+                month=month,
+                items=(
+                    TaiexDailyBar(
+                        trade_date=date(2025, 2, 27),
+                        open=Decimal("23000"),
+                        high=Decimal("23100"),
+                        low=Decimal("22900"),
+                        close=Decimal("23050"),
+                        volume=1,
+                        trade_value=1,
+                    ),
+                ),
+                fetched_at=datetime(2026, 9, 17, tzinfo=UTC),
+            )
+
+    monkeypatch.setattr(orchestration_functions, "latest_market_date", latest_date)
+    monkeypatch.setattr(orchestration_functions, "select_taiex_refresh_months", select_months)
+    monkeypatch.setattr(orchestration_functions, "store_market_bars", store)
+    monkeypatch.setattr(orchestration_functions, "store_index_daily_bars", store)
+    monkeypatch.setattr(orchestration_functions, "fence_is_current", current)
+    claimed = ClaimedFunction(
+        connection=cast(AsyncConnection, None),
+        function_run_id=uuid.uuid4(),
+        job_run_id=uuid.uuid4(),
+        attempt_id=uuid.uuid4(),
+        function_key="taiex_daily_bars",
+        provider_key="twse",
+        edition_date=date(2026, 9, 17),
+        fence_token=token,
+        deadline_at=None,
+        scope={"missing_scopes": [old_month.isoformat()]},
+    )
+
+    outcome = await orchestration_functions._run_twse_taiex(
+        Settings(environment="test", twse_enabled=True),
+        sessions,
+        claimed,
+        cast(Any, Adapter()),
+    )
+
+    assert outcome.status == "succeeded"
+    assert outcome.source_as_of == latest
+
+
+async def test_treasury_failed_year_is_partial_and_retryable(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, sessions = orchestration_database
+    current_year = date(2026, 9, 17).year
+
+    async def load(*_: object, **__: object) -> list[History]:
+        record_failure(
+            "us_treasury",
+            "yield_curve_xml",
+            [str(current_year)],
+            TimeoutError("current year timed out"),
+        )
+        return [
+            History(
+                id=tenor,
+                symbol=symbol,
+                unit="percent",
+                source="U.S. Treasury",
+                status="ok",
+                points=[Point(date=date(2025, 12, 31), value=Decimal("4.0"))],
+            )
+            for tenor, symbol in TENORS
+        ]
+
+    async def store(*_: object, **__: object) -> int:
+        return 1
+
+    monkeypatch.setattr(orchestration_functions, "load_treasury", load)
+    monkeypatch.setattr(orchestration_functions, "store_interest_rates", store)
+    claimed = ClaimedFunction(
+        connection=cast(AsyncConnection, None),
+        function_run_id=uuid.uuid4(),
+        job_run_id=uuid.uuid4(),
+        attempt_id=uuid.uuid4(),
+        function_key="treasury_yield_curve",
+        provider_key="us_treasury",
+        edition_date=date(2026, 9, 17),
+        fence_token=uuid.uuid4(),
+        deadline_at=None,
+        scope={},
+    )
+
+    outcome = await orchestration_functions._run_treasury(
+        Settings(environment="test"), sessions, claimed
+    )
+
+    assert outcome.status == "partial"
+    assert outcome.retryable is True
+    assert str(current_year) in outcome.missing_scopes
+    assert outcome.result is not None
+    assert outcome.result["failure_reasons"] == {str(current_year): "timeout"}
 
 
 async def test_daily_routine_is_idempotent_and_worker_persists_attempts(
@@ -256,8 +482,9 @@ async def test_projection_fence_token_rejects_stale_worker_with_same_owner(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
     _, sessions = orchestration_database
+    edition = datetime.now(UTC).date() + timedelta(days=2)
     async with sessions() as database:
-        await create_daily_routine(database, edition_date=date(2026, 9, 17))
+        await create_daily_routine(database, edition_date=edition)
     async with sessions.begin() as database:
         projection = await database.scalar(
             select(JobRun).where(JobRun.job_key == "market_reports_publish")
@@ -310,7 +537,7 @@ async def test_projection_transient_failure_retries_same_job(
             registry_version="test",
             registry_snapshot={},
             edition_date=now.date(),
-            deadline_at=now - timedelta(seconds=1),
+            deadline_at=now + timedelta(hours=1),
             status="pending",
         )
         database.add(job)
@@ -367,6 +594,49 @@ async def test_projection_transient_failure_retries_same_job(
         assert stored.next_attempt_at is None
     assert freeze_calls == 2
     assert publish_calls == 1
+
+
+async def test_projection_failure_after_deadline_is_terminal(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, sessions = orchestration_database
+    now = datetime.now(UTC)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="market_reports_publish",
+            kind="projection",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now - timedelta(seconds=1),
+            status="pending",
+        )
+        database.add(job)
+        await database.flush()
+        job_id = job.id
+
+    async def fail(*_: object, **__: object) -> tuple[FrozenObservation, ...]:
+        raise ConnectionError("temporary database disconnect")
+
+    monkeypatch.setattr(orchestration_projections, "freeze_projection_inputs", fail)
+
+    claimed = await claim_ready_projection(sessions, owner="projection-deadline-worker")
+    assert claimed is not None
+    await execute_projection(
+        sessions,
+        job_run_id=claimed.job_run_id,
+        owner="projection-deadline-worker",
+        fence_token=claimed.fence_token,
+    )
+
+    async with sessions() as database:
+        stored = await database.get(JobRun, job_id)
+        assert stored is not None
+        assert stored.status == "failed"
+        assert stored.next_attempt_at is None
+        assert stored.completed_at is not None
 
 
 async def test_older_macro_projection_cannot_overwrite_newer_freeze(
@@ -541,7 +811,7 @@ async def test_news_publish_handler_exception_retries_same_function(
             registry_version="test",
             registry_snapshot={},
             edition_date=now.date(),
-            deadline_at=now - timedelta(seconds=1),
+            deadline_at=now + timedelta(hours=1),
             status="pending",
         )
         database.add(job)
@@ -1742,7 +2012,7 @@ async def test_news_publish_can_be_claimed_after_manual_source_deadline(
     await execute_claimed(claimed, sessions, succeed)
 
 
-async def test_expired_news_publish_lease_is_reclaimed_after_deadline(
+async def test_expired_news_publish_lease_is_terminal_after_deadline(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
     engine, sessions = orchestration_database
@@ -1791,10 +2061,9 @@ async def test_expired_news_publish_lease_is_reclaimed_after_deadline(
 
     claimed = await claim_ready_function(engine, sessions, owner="recovery-worker", now=now)
 
-    assert claimed is not None
-    assert claimed.function_run_id == publish_id
-    assert claimed.fence_token != expired_token
+    assert claimed is None
     async with sessions() as database:
+        function = await database.get(FunctionRun, publish_id)
         attempts = list(
             await database.scalars(
                 select(FunctionAttempt)
@@ -1802,16 +2071,14 @@ async def test_expired_news_publish_lease_is_reclaimed_after_deadline(
                 .order_by(FunctionAttempt.attempt_number)
             )
         )
-        assert [attempt.status for attempt in attempts] == ["failed", "running"]
+        assert function is not None
+        assert function.status == "unavailable"
+        assert function.error == "deadline_reached"
+        assert [attempt.status for attempt in attempts] == ["failed"]
         assert attempts[0].error_code == "lease_expired"
 
-    async def succeed(_: ClaimedFunction) -> FunctionOutcome:
-        return FunctionOutcome(status="succeeded")
 
-    await execute_claimed(claimed, sessions, succeed)
-
-
-async def test_news_publish_retry_remains_runnable_after_provider_deadline(
+async def test_news_publish_retry_is_not_runnable_after_provider_deadline(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
     _, sessions = orchestration_database
@@ -1844,4 +2111,4 @@ async def test_news_publish_retry_remains_runnable_after_provider_deadline(
 
     candidates = await _ready_candidates(sessions, now)
 
-    assert (publish_id, "internal_services") in candidates
+    assert (publish_id, "internal_services") not in candidates

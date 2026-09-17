@@ -3,8 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -15,8 +16,10 @@ from daily_insights_api.modules.news.api import (
     LOCALES,
     SUMMARY_PROMPT_VERSION,
     DeepSeekClient,
+    FetchedCandidate,
     LocalizedSummary,
     ModelCall,
+    ModelCallError,
     NewsCandidate,
     NewsCandidateBatch,
     NewsCandidatePublication,
@@ -33,6 +36,7 @@ from daily_insights_api.modules.news.api import (
     _fetch_usable_candidates,
     _limit_candidates,
     _lock_key,
+    classify_failure,
     discover_feed_candidates,
     edition_spec,
     effective_hostnames,
@@ -55,6 +59,100 @@ FUNCTION_MARKETS = {
     "news_tw_equity_refresh": "tw_equity",
     "news_us_equity_refresh": "us_equity",
 }
+
+ModelStage = Literal["selection", "summary"]
+
+
+def _news_error_code(error: Exception) -> str:
+    code = getattr(error, "error_code", None)
+    return code if isinstance(code, str) else type(error).__name__
+
+
+def _failed_audit(
+    batch_id: uuid.UUID,
+    stage: ModelStage,
+    locale: str | None,
+    fallback_digest: str,
+    model: str,
+    prompt_version: str,
+    error: Exception,
+) -> NewsGenerationAudit:
+    metadata = error if isinstance(error, ModelCallError) else None
+    return NewsGenerationAudit(
+        edition_id=None,
+        candidate_batch_id=batch_id,
+        stage=stage,
+        locale=locale,
+        provider="deepseek",
+        model=model,
+        prompt_version=prompt_version,
+        input_digest=metadata.input_digest if metadata is not None else fallback_digest,
+        status="failed",
+        provider_request_id=metadata.request_id if metadata is not None else None,
+        input_tokens=metadata.input_tokens if metadata is not None else None,
+        output_tokens=metadata.output_tokens if metadata is not None else None,
+        latency_ms=metadata.latency_ms if metadata is not None else 0,
+        error_code=_news_error_code(error),
+    )
+
+
+async def _model_call_with_repair(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    batch_id: uuid.UUID,
+    stage: ModelStage,
+    locale: str | None,
+    fallback_digest: str,
+    model: str,
+    prompt_version: str,
+    call: Callable[[str | None], Awaitable[ModelCall]],
+) -> ModelCall:
+    feedback: str | None = None
+    for attempt in range(2):
+        try:
+            return await call(feedback)
+        except Exception as error:
+            async with session_factory.begin() as database:
+                database.add(
+                    _failed_audit(
+                        batch_id,
+                        stage,
+                        locale,
+                        fallback_digest,
+                        model,
+                        prompt_version,
+                        error,
+                    )
+                )
+            failure = classify_failure(error, stage=stage)
+            if attempt or failure.action != "repair":
+                raise
+            feedback = failure.code
+    raise AssertionError("bounded news model repair loop exited unexpectedly")
+
+
+async def _persist_successful_audit(
+    session_factory: async_sessionmaker[AsyncSession],
+    audit: NewsGenerationAudit,
+) -> None:
+    async with session_factory.begin() as database:
+        database.add(audit)
+
+
+def _summary_call(
+    client: DeepSeekClient,
+    fetched: FetchedCandidate,
+    locale: str,
+) -> Callable[[str | None], Awaitable[ModelCall]]:
+    async def call(feedback: str | None) -> ModelCall:
+        return await client.summarize(
+            fetched.candidate,
+            fetched.body,
+            locale,
+            retry_feedback=feedback,
+        )
+
+    return call
 
 
 def _refresh_status(prepared: int, summary_failures: int) -> tuple[AttemptStatus, str, bool]:
@@ -192,25 +290,74 @@ async def refresh_news(
             await database.flush()
         prepared = 0
         summary_failures = 0
+        summary_failure_reasons: dict[str, str] = {}
         selection_call: ModelCall | None = None
         if usable:
-            selection_call = await client.select(usable, policy=spec.selection, previous_events=())
+            selection_call = await _model_call_with_repair(
+                session_factory,
+                batch_id=batch.id,
+                stage="selection",
+                locale=None,
+                fallback_digest=digest,
+                model=client.model_name,
+                prompt_version=client.selection_prompt_version,
+                call=lambda feedback: client.select(
+                    usable,
+                    policy=spec.selection,
+                    previous_events=(),
+                    retry_feedback=feedback,
+                ),
+            )
             assert isinstance(selection_call.value, Selection)
+            await _persist_successful_audit(
+                session_factory,
+                _audit(
+                    batch.id,
+                    "selection",
+                    None,
+                    selection_call,
+                    client.model_name,
+                    client.selection_prompt_version,
+                ),
+            )
             publication = publishable_selection(
                 list(selection_call.value.selections), usable, spec.selection
             )
             for rank, selected in enumerate(publication.selections, start=1):
                 fetched = fetched_by_id[selected.id]
                 summaries: dict[str, LocalizedSummary] = {}
-                summary_calls: list[tuple[str, ModelCall]] = []
                 try:
                     for locale in LOCALES:
-                        call = await client.summarize(fetched.candidate, fetched.body, locale)
+                        call = await _model_call_with_repair(
+                            session_factory,
+                            batch_id=batch.id,
+                            stage="summary",
+                            locale=locale,
+                            fallback_digest=hashlib.sha256(
+                                fetched.content_digest.encode()
+                            ).hexdigest(),
+                            model=client.model_name,
+                            prompt_version=SUMMARY_PROMPT_VERSION,
+                            call=_summary_call(client, fetched, locale),
+                        )
                         assert isinstance(call.value, LocalizedSummary)
                         summaries[locale] = call.value
-                        summary_calls.append((locale, call))
-                except Exception:
+                        await _persist_successful_audit(
+                            session_factory,
+                            _audit(
+                                batch.id,
+                                "summary",
+                                locale,
+                                call,
+                                client.model_name,
+                                SUMMARY_PROMPT_VERSION,
+                            ),
+                        )
+                except Exception as error:
                     summary_failures += 1
+                    summary_failure_reasons[selected.id] = f"{_news_error_code(error)}: {error!s}"[
+                        :500
+                    ]
                     candidate_rows[selected.id].stage = "dropped"
                     candidate_rows[selected.id].drop_reason = "summary_failed"
                     async with session_factory.begin() as database:
@@ -255,17 +402,6 @@ async def refresh_news(
                             content_digest=fetched.content_digest,
                         )
                     )
-                    database.add_all(
-                        _audit(
-                            batch.id,
-                            "summary",
-                            locale,
-                            call,
-                            client.model_name,
-                            SUMMARY_PROMPT_VERSION,
-                        )
-                        for locale, call in summary_calls
-                    )
                 prepared += 1
         async with session_factory.begin() as database:
             if not await fence_is_current(
@@ -277,17 +413,6 @@ async def refresh_news(
                 return FunctionOutcome(status="cancelled", error_code="cancelled")
             stored = await database.get(NewsCandidateBatch, batch.id, with_for_update=True)
             assert stored is not None
-            if selection_call is not None:
-                database.add(
-                    _audit(
-                        batch.id,
-                        "selection",
-                        None,
-                        selection_call,
-                        client.model_name,
-                        client.selection_prompt_version,
-                    )
-                )
             outcome_status, batch_status, retryable = _refresh_status(prepared, summary_failures)
             stored.status = batch_status
             stored.input_digest = digest
@@ -300,6 +425,7 @@ async def refresh_news(
                 "usable": len(usable),
                 "prepared": prepared,
                 "summary_failed": summary_failures,
+                "failure_reasons": summary_failure_reasons,
                 "model_name": client.model_name,
                 "prompt_version": (f"{client.selection_prompt_version}+{SUMMARY_PROMPT_VERSION}"),
             }
@@ -315,9 +441,17 @@ async def refresh_news(
                 "market_code": market,
                 "prepared": prepared,
                 "summary_failed": summary_failures,
+                "failure_reasons": summary_failure_reasons,
             },
             missing_scopes=(market,) if summary_failures else (),
             error_code="news_summary_partial" if summary_failures else None,
+            error_detail=(
+                "; ".join(
+                    f"{candidate_id}={reason}"
+                    for candidate_id, reason in summary_failure_reasons.items()
+                )[:500]
+                or None
+            ),
             retryable=retryable,
         )
     except Exception:

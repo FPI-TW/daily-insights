@@ -8,16 +8,22 @@ on routine/provider edition identity makes dispatcher restarts idempotent.
 `orchestration-worker` executes functions under a process-wide provider lock.
 Functions sharing Twelve Data, Yahoo Finance, or TWSE reuse the same provider
 client; TWSE also retains one pacing context. Failures retry every 30 minutes,
-only for missing scopes. The 10:00 deadline is soft: no new automatic attempt
+only for missing scopes. Attempts persist a bounded safe reason for every failed
+symbol, month, source, or model stage; operators must not infer a cause from
+record counts alone. The 10:00 deadline is soft: no new automatic attempt
 starts at or after the deadline, but an in-flight attempt may finish.
 The Compose definitions start the worker with
 `DAILY_INSIGHTS_RUNTIME_ROLE=orchestration-worker`; API containers do not run the
 claim loop. The worker entry point does not independently reject a missing or
 incorrect role, so operators must verify both the command and environment rather
 than treating a heartbeat alone as proof of the least-privilege boundary.
-Manual jobs have no automatic deadline and keep retrying until they complete or
-an operator cancels them. Provider-specific
-HTTP refresh endpoints are removed, so operators start only the three market
+Manual jobs use a one-hour soft deadline. This allows the immediate attempt and
+one 30-minute retry without leaving the admin UI permanently pending. An
+in-flight attempt may finish; after the deadline remaining retryable functions
+become terminal and dependent degraded publications may proceed. Publication
+functions and projection jobs that only become ready at the deadline
+receive one initial attempt, but a failed publication attempt is not retried past
+the deadline. Provider-specific HTTP refresh endpoints are removed, so operators start only the three market
 jobs or the feature-specific news and analyst jobs.
 
 Market reports, the Macro Dashboard, and news publish as soon as their upstream

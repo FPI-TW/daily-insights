@@ -146,7 +146,11 @@ async def _ready_candidates(
                 or_(
                     JobRun.deadline_at.is_(None),
                     JobRun.deadline_at > now,
-                    FunctionRun.function_key == "news_publish",
+                    and_(
+                        FunctionRun.function_key == "news_publish",
+                        FunctionRun.status == "pending",
+                        FunctionRun.attempt_count == 0,
+                    ),
                 ),
             )
             .distinct(FunctionRun.provider_key)
@@ -281,7 +285,11 @@ def _claimable(function_run: FunctionRun, job_run: JobRun, now: datetime) -> boo
     if (
         job_run.deadline_at is not None
         and now >= job_run.deadline_at
-        and function_run.function_key != "news_publish"
+        and not (
+            function_run.function_key == "news_publish"
+            and function_run.status == "pending"
+            and function_run.attempt_count == 0
+        )
     ):
         return False
     if function_run.status == "running":
@@ -385,7 +393,7 @@ async def finish_function(
             retry_at = (
                 next_retry_at(
                     effective_now,
-                    None if function_run.function_key == "news_publish" else job_run.deadline_at,
+                    job_run.deadline_at,
                 )
                 if outcome.retryable and outcome.status in {"partial", "unavailable", "failed"}
                 else None
@@ -643,9 +651,14 @@ async def execute_claimed(
             outcome = FunctionOutcome(status="cancelled", error_code="cancelled")
             cancelled = True
         except Exception as error:
+            provider_error_code = getattr(error, "error_code", None)
             outcome = FunctionOutcome(
                 status="failed",
-                error_code=type(error).__name__.lower(),
+                error_code=(
+                    provider_error_code
+                    if isinstance(provider_error_code, str)
+                    else type(error).__name__.lower()
+                )[:100],
                 error_detail=str(error)[:500],
                 retryable=True,
             )

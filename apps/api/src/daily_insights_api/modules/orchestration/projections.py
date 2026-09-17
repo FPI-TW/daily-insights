@@ -9,7 +9,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -119,6 +119,32 @@ async def claim_ready_projection(
 ) -> ClaimedProjection | None:
     now = datetime.now(UTC)
     async with session_factory.begin() as database:
+        await database.execute(
+            update(JobRun)
+            .where(
+                JobRun.kind == "projection",
+                JobRun.deadline_at.is_not(None),
+                JobRun.deadline_at <= now,
+                or_(
+                    and_(JobRun.status == "pending", JobRun.started_at.is_not(None)),
+                    and_(
+                        JobRun.status == "running",
+                        JobRun.lease_expires_at.is_not(None),
+                        JobRun.lease_expires_at < now,
+                    ),
+                ),
+            )
+            .values(
+                status="failed",
+                error="deadline_reached",
+                next_attempt_at=None,
+                completed_at=now,
+                lease_owner=None,
+                lease_token=None,
+                lease_expires_at=None,
+                heartbeat_at=now,
+            )
+        )
         candidates = (
             await database.scalars(
                 select(JobRun)
@@ -127,6 +153,11 @@ async def claim_ready_projection(
                     JobRun.status.in_(("pending", "running")),
                     (JobRun.next_attempt_at.is_(None) | (JobRun.next_attempt_at <= now)),
                     (JobRun.lease_expires_at.is_(None) | (JobRun.lease_expires_at < now)),
+                    or_(
+                        JobRun.deadline_at.is_(None),
+                        JobRun.deadline_at > now,
+                        and_(JobRun.status == "pending", JobRun.started_at.is_(None)),
+                    ),
                 )
                 .order_by(JobRun.created_at, JobRun.id)
                 .with_for_update(skip_locked=True)
@@ -239,7 +270,7 @@ async def execute_projection(
         )
         if job is None:
             return
-        retry_at = next_retry_at(now, None) if status == "failed" else None
+        retry_at = next_retry_at(now, job.deadline_at) if status == "failed" else None
         job.status = "pending" if retry_at is not None else status
         job.result = result
         job.error = error
