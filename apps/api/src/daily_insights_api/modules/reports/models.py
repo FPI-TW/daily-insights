@@ -30,6 +30,10 @@ class ReportPublication(UUIDPrimaryKeyMixin, Base):
         CheckConstraint("revision > 0", name="revision_positive"),
         CheckConstraint("char_length(input_digest) = 64", name="input_digest_sha256"),
         CheckConstraint("char_length(manifest_hash) = 64", name="manifest_hash_sha256"),
+        CheckConstraint(
+            "(pipeline_run_id IS NULL) <> (projection_job_run_id IS NULL)",
+            name="exactly_one_owner",
+        ),
         CheckConstraint("jsonb_typeof(content) = 'object'", name="content_is_object"),
         CheckConstraint(
             "jsonb_typeof(presentations) = 'object' "
@@ -54,10 +58,12 @@ class ReportPublication(UUIDPrimaryKeyMixin, Base):
         ),
     )
 
-    pipeline_run_id: Mapped[uuid.UUID] = mapped_column(
+    pipeline_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("report_pipeline_runs.id", ondelete="RESTRICT"),
-        nullable=False,
+    )
+    projection_job_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("job_runs.id", ondelete="RESTRICT")
     )
     report_key: Mapped[str] = mapped_column(String(100), nullable=False)
     market_code: Mapped[str] = mapped_column(

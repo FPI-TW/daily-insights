@@ -60,7 +60,7 @@ services:
       - app
       - data
 
-  data-management-worker:
+  orchestration-worker:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -70,8 +70,11 @@ services:
         required: false
     environment:
       DAILY_INSIGHTS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-daily_insights}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-daily_insights}
+      DAILY_INSIGHTS_RUNTIME_ROLE: orchestration-worker
+      DAILY_INSIGHTS_ORCHESTRATION_ENABLED: ${DAILY_INSIGHTS_ORCHESTRATION_ENABLED:-true}
+      DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE: ${DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE:-1970-01-01}
     command:
-      ["python", "-m", "daily_insights_api.scripts.run_data_management_worker"]
+      ["python", "-m", "daily_insights_api.scripts.run_orchestration_worker"]
     depends_on:
       api:
         condition: service_healthy
@@ -83,7 +86,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import time; from pathlib import Path; p = Path('/tmp/data-management-worker-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 90",
+          "import time; from pathlib import Path; p = Path('/tmp/orchestration-worker-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 90",
         ]
       interval: 30s
       timeout: 5s
@@ -92,7 +95,7 @@ services:
       - app
       - data
 
-  macro-dashboard-scheduler:
+  orchestration-dispatcher:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -102,11 +105,13 @@ services:
         required: false
     environment:
       DAILY_INSIGHTS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-daily_insights}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-daily_insights}
+      DAILY_INSIGHTS_ORCHESTRATION_ENABLED: ${DAILY_INSIGHTS_ORCHESTRATION_ENABLED:-true}
+      DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE: ${DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE:-1970-01-01}
     command:
       [
         "python",
         "-m",
-        "daily_insights_api.scripts.run_macro_dashboard_scheduler",
+        "daily_insights_api.scripts.run_orchestration_dispatcher",
       ]
     depends_on:
       api:
@@ -117,111 +122,11 @@ services:
           "CMD",
           "python",
           "-c",
-          "import time; from pathlib import Path; p = Path('/tmp/macro-dashboard-scheduler-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 93600",
+          "import time; from pathlib import Path; p = Path('/tmp/orchestration-dispatcher-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 90",
         ]
       interval: 30s
       timeout: 5s
       retries: 3
-    networks:
-      - app
-      - data
-
-  index-daily-bars-scheduler:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-    restart: unless-stopped
-    env_file:
-      - path: apps/api/.env
-        required: false
-    environment:
-      DAILY_INSIGHTS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-daily_insights}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-daily_insights}
-    command: ["python", "-m", "daily_insights_api.scripts.run_index_daily_bars"]
-    depends_on:
-      api:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import time; from pathlib import Path; p = Path('/tmp/index-daily-bars-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 93600",
-        ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    stop_grace_period: 45s
-    networks:
-      - app
-      - data
-
-  institutional-flows-scheduler:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-    restart: unless-stopped
-    env_file:
-      - path: apps/api/.env
-        required: false
-    environment:
-      DAILY_INSIGHTS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-daily_insights}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-daily_insights}
-    command:
-      ["python", "-m", "daily_insights_api.scripts.run_institutional_flows"]
-    depends_on:
-      api:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import time; from pathlib import Path; p = Path('/tmp/institutional-flows-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 93600",
-        ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    stop_grace_period: 45s
-    networks:
-      - app
-      - data
-
-  daily-news-scheduler:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-    restart: unless-stopped
-    env_file:
-      - path: apps/api/.env
-        required: false
-    environment:
-      DAILY_INSIGHTS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-daily_insights}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-daily_insights}
-    command:
-      ["python", "-m", "daily_insights_api.scripts.run_daily_news_scheduler"]
-    depends_on:
-      api:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import time; from pathlib import Path; p = Path('/tmp/daily-news-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 93600",
-        ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
     networks:
       - app
       - data

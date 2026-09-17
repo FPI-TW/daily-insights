@@ -17,9 +17,9 @@ diagnose_cutover_failure() {
   message=$1
   echo "$message" >&2
   if quiesce_schema_boundary_services; then
-    echo "Schema-boundary services are confirmed quiescent. Inspect the diagnostics, correct the failure, then rerun deploy.sh; do not start the schedulers before data-management-worker is healthy." >&2
+    echo "Legacy schedulers are confirmed quiescent. Inspect the diagnostics, correct the failure, then rerun deploy.sh; do not start orchestration-dispatcher before orchestration-worker is healthy." >&2
   else
-    echo "Schema-boundary services could not be confirmed quiescent. Keep the deployment halted, stop daily-news-scheduler, index-daily-bars-scheduler, institutional-flows-scheduler, and data-management-worker manually, inspect the diagnostics, then rerun deploy.sh." >&2
+    echo "Legacy schedulers could not be confirmed quiescent. Keep the deployment halted, stop every legacy scheduler and data-management-worker manually, inspect the diagnostics, then rerun deploy.sh." >&2
   fi
   "$script_dir/diagnose.sh" >&2 || true
   exit 1
@@ -39,22 +39,25 @@ confirm_stopped() {
 
 quiesce_schema_boundary_services() {
   quiesce_failed=false
-  if ! compose stop daily-news-scheduler index-daily-bars-scheduler institutional-flows-scheduler data-management-worker; then
-    echo "failed to stop schema-boundary services" >&2
-    quiesce_failed=true
-  fi
-  if ! confirm_stopped daily-insights-daily-news-scheduler; then
-    quiesce_failed=true
-  fi
-  if ! confirm_stopped daily-insights-index-daily-bars-scheduler; then
-    quiesce_failed=true
-  fi
-  if ! confirm_stopped daily-insights-institutional-flows-scheduler; then
-    quiesce_failed=true
-  fi
-  if ! confirm_stopped daily-insights-data-management-worker; then
-    quiesce_failed=true
-  fi
+  for container in \
+    daily-insights-api \
+    daily-insights-orchestration-dispatcher \
+    daily-insights-orchestration-worker \
+    daily-insights-morning-report-scheduler \
+    daily-insights-daily-news-scheduler \
+    daily-insights-analyst-viewpoints-scheduler \
+    daily-insights-index-daily-bars-scheduler \
+    daily-insights-institutional-flows-scheduler \
+    daily-insights-macro-dashboard-scheduler \
+    daily-insights-data-management-worker; do
+    if docker inspect "$container" >/dev/null 2>&1 && ! docker stop "$container"; then
+      echo "failed to stop $container" >&2
+      quiesce_failed=true
+    fi
+    if ! confirm_stopped "$container"; then
+      quiesce_failed=true
+    fi
+  done
   [ "$quiesce_failed" = false ]
 }
 
@@ -101,6 +104,8 @@ DAILY_INSIGHTS_PASSWORD_PEPPER
 DAILY_INSIGHTS_MORNING_REPORTS_ENABLED
 DAILY_INSIGHTS_DAILY_NEWS_ENABLED
 DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED
+DAILY_INSIGHTS_ORCHESTRATION_ENABLED
+DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE
 DAILY_INSIGHTS_R2_ENDPOINT_URL
 DAILY_INSIGHTS_R2_BUCKET_NAME
 DAILY_INSIGHTS_R2_ACCESS_KEY_ID
@@ -113,6 +118,18 @@ for name in $required_environment; do
     exit 1
   fi
 done
+
+if [ "$DAILY_INSIGHTS_ORCHESTRATION_ENABLED" != true ]; then
+  echo "DAILY_INSIGHTS_ORCHESTRATION_ENABLED must be true for unified cutover" >&2
+  exit 1
+fi
+taipei_now=${DAILY_INSIGHTS_CUTOVER_TAIPEI_NOW:-$(TZ=Asia/Taipei date +%FT%T%z)}
+taipei_date=${taipei_now%%T*}
+if expected_activation_date=$(TZ=Asia/Taipei date -d "$taipei_date +1 day" +%F 2>/dev/null); then
+  :
+else
+  expected_activation_date=$(TZ=Asia/Taipei date -j -v+1d -f "%Y-%m-%d" "$taipei_date" +%F)
+fi
 
 case "$DAILY_INSIGHTS_MORNING_REPORTS_ENABLED" in
   true | false) ;;
@@ -187,32 +204,76 @@ sudo -n "$script_dir/preflight.sh" "$PUBLIC_HOSTNAME"
 compose config --quiet
 compose pull
 
+# The after-10:00/next-day guard is a one-time cutover invariant. A retry after
+# migration but before the first routine stays in activation-pending state.
+# Once a routine exists, later releases preserve the original activation date.
+cutover_state=0
+compose run --rm --no-deps api \
+  python -m daily_insights_api.scripts.check_orchestration_cutover || cutover_state=$?
+case "$cutover_state" in
+  0)
+    if [ "$DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE" \> "$taipei_date" ]; then
+      echo "steady-state orchestration activation date must not be in the future" >&2
+      exit 1
+    fi
+    ;;
+  10)
+    taipei_time=${taipei_now#*T}
+    taipei_hour=${taipei_time%%:*}
+    if [ "$taipei_hour" -lt 10 ]; then
+      echo "unified orchestration cutover must run after 10:00 Asia/Taipei" >&2
+      exit 1
+    fi
+    if [ "$DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE" != "$expected_activation_date" ]; then
+      echo "DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE must be the next Taipei date: $expected_activation_date" >&2
+      exit 1
+    fi
+    ;;
+  11)
+    if [ "$DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE" \< "$taipei_date" ] ||
+      [ "$DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE" \> "$expected_activation_date" ]; then
+      echo "activation-pending orchestration date must be today or the next Taipei date" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "could not determine unified orchestration cutover state" >&2
+    exit 1
+    ;;
+esac
+
 # Validate the official-entrypoint-rendered template before replacing the
 # production proxy. Recreate nginx while the old upstreams are still present so
 # it is using Docker's runtime resolver before API/Web receive new addresses.
 compose run --rm --no-deps nginx nginx -t
 compose up -d --no-build --force-recreate --no-deps nginx
 
-# The old direct-fetch scheduler and old queue worker must not cross the schema
-# boundary: either could execute new automatic rows with predecessor semantics.
+# Neither API mutations nor any old/new worker may cross the schema boundary.
 if ! quiesce_schema_boundary_services; then
   diagnose_cutover_failure "schema-boundary services could not be confirmed quiescent; migration was not attempted"
+fi
+
+legacy_queue_state=0
+compose run --rm --no-deps api \
+  python -m daily_insights_api.scripts.check_legacy_queues_quiescent || legacy_queue_state=$?
+if [ "$legacy_queue_state" -ne 0 ]; then
+  diagnose_cutover_failure "legacy queues still contain pending or running work; migration was not attempted"
 fi
 
 if ! compose run --rm --no-deps api alembic upgrade head; then
   diagnose_cutover_failure "database migration failed after schema-boundary services were stopped"
 fi
 
-# Only the replacement worker may observe rows created under the new schema.
-# Keep the scheduler stopped until that worker is confirmed healthy.
-if ! compose up -d --no-build --force-recreate --no-deps data-management-worker; then
-  diagnose_cutover_failure "replacement data-management-worker failed to start"
+# Only the unified worker may observe rows created under the new schema. Keep
+# the dispatcher stopped until that worker is confirmed healthy.
+if ! compose up -d --no-build --force-recreate --no-deps orchestration-worker; then
+  diagnose_cutover_failure "orchestration-worker failed to start"
 fi
-if ! wait_for_healthy_container daily-insights-data-management-worker; then
-  diagnose_cutover_failure "replacement data-management-worker did not become healthy"
+if ! wait_for_healthy_container daily-insights-orchestration-worker; then
+  diagnose_cutover_failure "orchestration-worker did not become healthy"
 fi
 
-if ! compose up -d --no-build --remove-orphans api web morning-report-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler institutional-flows-scheduler macro-dashboard-scheduler daily-news-scheduler; then
+if ! compose up -d --no-build --remove-orphans api web orchestration-dispatcher; then
   diagnose_cutover_failure "final service convergence failed after the replacement worker started"
 fi
 

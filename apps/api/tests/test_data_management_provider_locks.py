@@ -3,7 +3,6 @@ from typing import Any, cast
 
 import pytest
 
-from daily_insights_api.modules.admin import router as admin_router
 from daily_insights_api.modules.data_management import service as data_management_service
 from daily_insights_api.modules.data_sources.api import TwelveDataAdapter
 from daily_insights_api.modules.markets import service as markets_service
@@ -103,10 +102,6 @@ async def test_yahoo_shared_lock_wraps_work_and_releases_after_success_or_error(
         cast(Any, data_management_service).refresh_index_daily_bars
         is markets_service.refresh_index_daily_bars
     )
-    assert (
-        cast(Any, admin_router).refresh_index_daily_bars is markets_service.refresh_index_daily_bars
-    )
-
     events.clear()
 
     async def fails(*_: object, **__: object) -> tuple[list[object], list[object]]:

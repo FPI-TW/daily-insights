@@ -28,7 +28,6 @@ import {
   reportListSchema,
   latestNewsSchema,
   analystViewpointListSchema,
-  analystViewpointSyncSchema,
   analystViewpointSyncStatusSchema,
   type LaunchMarketCode,
   indexDailyBarListSchema,
@@ -37,15 +36,15 @@ import {
   institutionalFlowsSchema,
   institutionalStocksSchema,
   marketListSchema,
-  yfinanceDailyBarsResponseSchema,
   dataManagementCatalogSchema,
-  dataManagementRunListSchema,
-  dataManagementRunSchema,
-  type DataManagementRun,
-  type DataManagementRunCreateInput,
   newsAdminEditionsSchema,
   newsAdminItemSchema,
   newsRecoverySchema,
+  jobRunListSchema,
+  jobRunSchema,
+  orchestrationCatalogSchema,
+  routineRunListSchema,
+  routineRunSchema,
   type NewsCandidatePublishInput,
   userSchema,
 } from "./schemas"
@@ -323,50 +322,81 @@ function mutationHeaders(csrfToken: string) {
 
 export function createAdministrationClient(transport: ApiTransport) {
   return {
-    async dataManagementCatalog() {
+    async orchestrationCatalog() {
       return parseResponse(
-        await transport("/api/admin/data-management/catalog"),
-        dataManagementCatalogSchema
+        await transport("/api/admin/orchestration/catalog"),
+        orchestrationCatalogSchema
       )
     },
-    async listDataManagementRuns(page = 1) {
+    async listJobRuns(page = 1, jobKey?: string, jobGroup?: "news") {
+      const query = new URLSearchParams({ page: String(page) })
+      if (jobKey) query.set("job_key", jobKey)
+      if (jobGroup) query.set("job_group", jobGroup)
       return parseResponse(
-        await transport(`/api/admin/data-management/runs?page=${page}`),
-        dataManagementRunListSchema
+        await transport(`/api/admin/orchestration/job-runs?${query}`),
+        jobRunListSchema
       )
     },
-    async listNewsDataManagementRuns(page = 1) {
+    async getJobRun(runId: string) {
       return parseResponse(
         await transport(
-          `/api/admin/data-management/runs?page=${page}&operation_group=news`
+          `/api/admin/orchestration/job-runs/${encodeURIComponent(runId)}`
         ),
-        dataManagementRunListSchema
+        jobRunSchema
       )
     },
-    async createDataManagementRun(
-      input: DataManagementRunCreateInput,
-      csrfToken: string
-    ): Promise<DataManagementRun> {
+    async listRoutineRuns(page = 1) {
+      const query = new URLSearchParams({ page: String(page) })
       return parseResponse(
-        await transport("/api/admin/data-management/runs", {
+        await transport(`/api/admin/orchestration/routine-runs?${query}`),
+        routineRunListSchema
+      )
+    },
+    async getRoutineRun(runId: string) {
+      return parseResponse(
+        await transport(
+          `/api/admin/orchestration/routine-runs/${encodeURIComponent(runId)}`
+        ),
+        routineRunSchema
+      )
+    },
+    async createJobRun(jobKey: string, csrfToken: string) {
+      return parseResponse(
+        await transport("/api/admin/orchestration/job-runs", {
           method: "POST",
           headers: mutationHeaders(csrfToken),
-          body: JSON.stringify(input),
+          body: JSON.stringify({ job_key: jobKey }),
         }),
-        dataManagementRunSchema
+        jobRunSchema
       )
     },
-    async cancelDataManagementRun(runId: string, csrfToken: string) {
+    async cancelJobRun(runId: string, csrfToken: string) {
       return parseResponse(
         await transport(
-          `/api/admin/data-management/runs/${encodeURIComponent(runId)}/cancel`,
-          {
-            method: "POST",
-            headers: mutationHeaders(csrfToken),
-          }
+          `/api/admin/orchestration/job-runs/${encodeURIComponent(runId)}/cancel`,
+          { method: "POST", headers: mutationHeaders(csrfToken) }
         ),
-        dataManagementRunSchema
+        jobRunSchema
       )
+    },
+    async dataManagementCatalog() {
+      const catalog = await parseResponse(
+        await transport("/api/admin/orchestration/catalog"),
+        orchestrationCatalogSchema
+      )
+      const ready = (key: string) =>
+        catalog.providers.find(provider => provider.key === key)?.ready ?? false
+      return dataManagementCatalogSchema.parse({
+        taipei_date: catalog.taipei_date,
+        morning_reports_enabled: ready("twelve_data"),
+        yfinance_enabled: ready("yahoo_finance"),
+        twse_enabled: ready("twse"),
+        markets: ["global_macro_bonds", "crypto", "us_equity"],
+        rerunnable_providers: [],
+        daily_news_enabled: catalog.features.daily_news ?? false,
+        news_markets: ["global", "tw_equity", "us_equity"],
+        macro_dashboard_enabled: true,
+      })
     },
     async listNewsEditions(date?: string) {
       const query = new URLSearchParams()
@@ -383,26 +413,6 @@ export function createAdministrationClient(transport: ApiTransport) {
       return parseResponse(
         await transport("/api/admin/news/recovery"),
         newsRecoverySchema
-      )
-    },
-    async resumeNewsRun(
-      runId: string,
-      resumeProvider: boolean,
-      csrfToken: string
-    ) {
-      return parseResponse(
-        await transport(
-          `/api/admin/data-management/runs/${encodeURIComponent(runId)}/resume`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-CSRF-Token": csrfToken,
-            },
-            body: JSON.stringify({ resume_provider: resumeProvider }),
-          }
-        ),
-        dataManagementRunSchema
       )
     },
     async hideNewsItem(itemId: string, csrfToken: string) {
@@ -427,24 +437,14 @@ export function createAdministrationClient(transport: ApiTransport) {
     async publishNewsCandidates(
       input: NewsCandidatePublishInput,
       csrfToken: string
-    ): Promise<DataManagementRun> {
+    ) {
       return parseResponse(
         await transport("/api/admin/news/candidates/publish", {
           method: "POST",
           headers: mutationHeaders(csrfToken),
           body: JSON.stringify(input),
         }),
-        dataManagementRunSchema
-      )
-    },
-    async refreshIndexDailyBars(csrfToken: string) {
-      return parseResponse(
-        await transport("/api/admin/data-sources/yfinance/daily-bars", {
-          method: "POST",
-          headers: mutationHeaders(csrfToken),
-          body: JSON.stringify({ period: "7d" }),
-        }),
-        yfinanceDailyBarsResponseSchema
+        jobRunSchema
       )
     },
     async analystViewpointStatus() {
@@ -459,7 +459,7 @@ export function createAdministrationClient(transport: ApiTransport) {
           method: "POST",
           headers: { "X-CSRF-Token": csrfToken },
         }),
-        analystViewpointSyncSchema
+        jobRunSchema
       )
     },
     async listOrganizations() {

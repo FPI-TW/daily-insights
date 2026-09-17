@@ -112,12 +112,12 @@ def test_manifest_keeps_atomic_dataset_contracts() -> None:
     }
     assert tuple(dataset.key for dataset in _market_datasets("global_macro_bonds")) == (
         "macro.commodity_eod",
-        "macro.rates_fx_quotes",
+        "macro.rates_fx_daily_bars",
     )
     rates = next(
         dataset
         for dataset in ACTIVE_LAUNCH_MANIFEST.datasets
-        if dataset.key == "macro.rates_fx_quotes"
+        if dataset.key == "macro.rates_fx_daily_bars"
     )
     assert rates.symbol_units["USD/TWD"] == "TWD" and rates.symbol_units["TLT"] == "USD"
 
@@ -161,12 +161,12 @@ def test_manifest_freezes_commodity_ratio_labels_and_precision() -> None:
 def test_us_equity_uses_fixed_mega_cap_basket_instead_of_provider_movers() -> None:
     keys = {dataset.key: dataset for dataset in ACTIVE_LAUNCH_MANIFEST.datasets}
     assert "us.market_movers" not in keys
-    mega_caps = keys["us.mega_cap_quotes"]
-    assert mega_caps.endpoint == "/quote"
+    mega_caps = keys["us.mega_cap_daily_bars"]
+    assert mega_caps.endpoint == "/time_series"
     assert len(mega_caps.symbols) == 8 and "NVDA" in mega_caps.symbols
     assert set(mega_caps.symbol_units.values()) == {"USD"}
     assert tuple(dataset.key for dataset in _market_datasets("us_equity")) == (
-        "us.mega_cap_quotes",
+        "us.mega_cap_daily_bars",
     )
     formulas = [
         block.formula
@@ -196,7 +196,7 @@ def test_manifest_rejects_blocks_with_multiple_dataset_references() -> None:
     payload = ACTIVE_LAUNCH_MANIFEST.model_dump(mode="json")
     payload["markets"][0]["blocks"][0]["datasets"] = (
         "macro.commodity_eod",
-        "macro.rates_fx_quotes",
+        "macro.rates_fx_daily_bars",
     )
 
     with pytest.raises(ValueError, match="every block must reference exactly one dataset"):

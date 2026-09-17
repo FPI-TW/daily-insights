@@ -20,11 +20,11 @@ from daily_insights_api.modules.data_sources.api import (
     Provenance,
 )
 from daily_insights_api.modules.data_sources.twelve_data.adapter import (
+    CompletedPriceResult,
+    CompletedPricesResult,
     DailyBarsResult,
     EodResult,
     EodsResult,
-    QuoteResult,
-    QuotesResult,
     TwelveDataAdapter,
 )
 from daily_insights_api.modules.markets.catalog import MARKETS
@@ -118,46 +118,74 @@ class DeterministicMacroAdapter:
             provenance=provenance,
         )
 
-    async def get_quotes(
+    async def get_completed_prices(
         self,
         *,
         market: str,
         symbols: tuple[str, ...],
         expected_currencies: dict[str, str],
         symbol_types: dict[str, str] | None = None,
-    ) -> QuotesResult:
+        expected_asset_types: dict[str, str] | None = None,
+        outputsize: int = 2,
+    ) -> CompletedPricesResult:
         assert market == "global_macro_bonds"
         assert set(expected_currencies) == set(symbols)
         assert symbol_types == (
             {symbol: "commodity" for symbol in symbols} if "HG1" in symbols else {}
         )
+        assert expected_asset_types is None
+        assert outputsize == 2
         if self.quote_mode == "failed":
             raise DataSourceContractError("api_key=quote-secret")
         as_of = date(2026, 8, 30)
         items = tuple(
-            QuoteResult(
+            CompletedPriceResult(
                 symbol=symbol,
-                name=None,
                 currency=expected_currencies[symbol],
                 as_of=as_of,
                 close=Decimal("1"),
-                open=Decimal("1"),
-                high=Decimal("1"),
-                low=Decimal("1"),
-                volume=None,
                 previous_close=Decimal("1"),
-                change=Decimal("0"),
-                percent_change=Decimal("0"),
-                provenance=_provenance(
-                    endpoint="/quote",
-                    marker=f"{self.quote_marker}:{symbol}",
-                    as_of=as_of,
-                    record_count=1,
+                bars=(
+                    DailyBar(
+                        instrument_source_id=symbol,
+                        market=market,
+                        symbol=symbol,
+                        trade_date=as_of - timedelta(days=1),
+                        open=Decimal("1"),
+                        high=Decimal("1"),
+                        low=Decimal("1"),
+                        close=Decimal("1"),
+                        volume=None,
+                        source="twelve_data",
+                    ),
+                    DailyBar(
+                        instrument_source_id=symbol,
+                        market=market,
+                        symbol=symbol,
+                        trade_date=as_of,
+                        open=Decimal("1"),
+                        high=Decimal("1"),
+                        low=Decimal("1"),
+                        close=Decimal("1"),
+                        volume=None,
+                        source="twelve_data",
+                    ),
+                ),
+                provenances=(
+                    _provenance(
+                        endpoint="/time_series",
+                        marker=f"{self.quote_marker}:{symbol}",
+                        as_of=as_of,
+                        record_count=2,
+                    ),
                 ),
             )
             for symbol in symbols
         )
-        return QuotesResult(items=items, provenances=tuple(item.provenance for item in items))
+        return CompletedPricesResult(
+            items=items,
+            provenances=tuple(provenance for item in items for provenance in item.provenances),
+        )
 
     async def get_daily_bars(
         self,
@@ -326,14 +354,14 @@ async def test_macro_orchestration_persists_all_dataset_outcomes_and_revisions(
     assert [block["status"] for block in _blocks(complete)] == ["ok", "ok", "ok"]
     assert [source.dataset_key for source in complete_sources] == [
         "macro.commodity_eod",
-        "macro.rates_fx_quotes",
+        "macro.rates_fx_daily_bars",
     ]
     assert all(source.status == "succeeded" for source in complete_sources)
     assert {
         source.dataset_key: (source.provider, source.endpoint) for source in complete_sources
     } == {
         "macro.commodity_eod": ("twelve_data", "/eod"),
-        "macro.rates_fx_quotes": ("twelve_data", "/quote"),
+        "macro.rates_fx_daily_bars": ("twelve_data", "/time_series"),
     }
     assert all(source.payload_sha256 is not None for source in complete_sources)
     assert all(
@@ -369,7 +397,7 @@ async def test_macro_orchestration_persists_all_dataset_outcomes_and_revisions(
     assert [block["status"] for block in _blocks(partial)] == ["error", "ok", "error"]
     assert {source.dataset_key: source.status for source in partial_sources} == {
         "macro.commodity_eod": "failed",
-        "macro.rates_fx_quotes": "succeeded",
+        "macro.rates_fx_daily_bars": "succeeded",
     }
     failed_history = next(
         source for source in partial_sources if source.dataset_key == "macro.commodity_eod"

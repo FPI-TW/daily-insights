@@ -19,7 +19,7 @@ class ManifestModel(BaseModel):
 
 class DatasetManifest(ManifestModel):
     key: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,99}$")
-    endpoint: Literal["/quote", "/eod", "/time_series", "/market_movers/stocks"]
+    endpoint: Literal["/eod", "/time_series", "/market_movers/stocks"]
     symbols: tuple[str, ...]
     symbol_units: dict[str, str]
     # Provider "type" query parameter per symbol. Twelve Data reuses tickers
@@ -150,10 +150,10 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
                 BlockManifest(
                     id="macro.rates_fx",
                     kind="metric",
-                    datasets=("macro.rates_fx_quotes",),
+                    datasets=("macro.rates_fx_daily_bars",),
                     formula=(
                         "fixed basket of Treasury and dollar-index ETFs plus USD/TWD, USD/JPY "
-                        "and EUR/USD spot; latest provider quote close; percent change="
+                        "and EUR/USD spot; latest completed daily close; percent change="
                         "(close-previous_close)/previous_close*100"
                     ),
                     unit_code="provider_quote_currency",
@@ -234,10 +234,10 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
                 BlockManifest(
                     id="us.mega_caps",
                     kind="table",
-                    datasets=("us.mega_cap_quotes",),
+                    datasets=("us.mega_cap_daily_bars",),
                     formula=(
                         "fixed basket of eight mega-cap stocks sorted by percent change "
-                        "descending; latest provider quote close; percent change="
+                        "descending; latest completed daily close; percent change="
                         "(close-previous_close)/previous_close*100"
                     ),
                     unit_code="usd_percent",
@@ -293,8 +293,8 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
         # symbols) and UUP for the dollar index; FX pairs quote in the second
         # currency of the pair.
         DatasetManifest(
-            key="macro.rates_fx_quotes",
-            endpoint="/quote",
+            key="macro.rates_fx_daily_bars",
+            endpoint="/time_series",
             symbols=("TLT", "IEF", "UUP", "USD/TWD", "USD/JPY", "EUR/USD"),
             symbol_units={
                 "TLT": "USD",
@@ -304,10 +304,11 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
                 "USD/JPY": "JPY",
                 "EUR/USD": "USD",
             },
-            required_fields=("close", "previous_close", "timestamp"),
-            timezone="UTC derived from provider Unix timestamp",
-            day_boundary="UTC calendar date of provider timestamp",
-            freshness="latest completed provider quote",
+            required_fields=("datetime", "open", "high", "low", "close"),
+            minimum_history=2,
+            timezone="provider daily-series calendar date",
+            day_boundary="latest /eod-anchored completed session",
+            freshness="latest two completed provider sessions",
         ),
         DatasetManifest(
             key="crypto.daily_bars",
@@ -327,8 +328,8 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
             freshness="latest completed 1day bar",
         ),
         DatasetManifest(
-            key="us.mega_cap_quotes",
-            endpoint="/quote",
+            key="us.mega_cap_daily_bars",
+            endpoint="/time_series",
             symbols=("AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "AVGO", "TSLA"),
             symbol_units={
                 "AAPL": "USD",
@@ -340,10 +341,11 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
                 "AVGO": "USD",
                 "TSLA": "USD",
             },
-            required_fields=("close", "previous_close", "timestamp"),
-            timezone="UTC derived from provider Unix timestamp",
-            day_boundary="UTC calendar date of provider timestamp",
-            freshness="latest completed provider quote",
+            required_fields=("datetime", "open", "high", "low", "close"),
+            minimum_history=2,
+            timezone="provider exchange daily-series calendar date",
+            day_boundary="latest /eod-anchored completed session",
+            freshness="latest two completed provider sessions",
         ),
     ),
 )

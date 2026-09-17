@@ -1,15 +1,19 @@
+import hashlib
+import json
+import uuid
 from datetime import UTC, date, datetime
 from typing import Final, Protocol
 
 import httpx
 from pydantic import SecretStr, ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.modules.analyst_viewpoints.models import (
     AnalystViewpoint,
     AnalystViewpointSyncRun,
+    AnalystViewpointVersion,
 )
 from daily_insights_api.modules.analyst_viewpoints.schemas import (
     AnalystViewpointExecutionResponse,
@@ -18,6 +22,7 @@ from daily_insights_api.modules.analyst_viewpoints.schemas import (
     SyncMarketStatus,
     UpstreamSummary,
 )
+from daily_insights_api.modules.orchestration.api import FunctionAttempt, FunctionRun
 
 MARKET_MAPPING: Final[dict[str, str]] = {
     "us_macro": "global_macro_bonds",
@@ -101,6 +106,9 @@ async def sync_viewpoints(
     database: AsyncSession,
     client: AnalystViewpointReader,
     viewpoint_date: date,
+    *,
+    function_attempt_id: uuid.UUID | None = None,
+    fence_token: uuid.UUID | None = None,
 ) -> AnalystViewpointSyncResponse:
     """Persist only present valid values; an empty/failed market never deletes a prior value."""
 
@@ -115,20 +123,62 @@ async def sync_viewpoints(
                 )
             )
             continue
+        current_version_id: uuid.UUID | None = None
+        if function_attempt_id is not None:
+            if fence_token is None or not await _analyst_fence_is_current(
+                database, function_attempt_id, fence_token
+            ):
+                statuses.append(
+                    SyncMarketStatus(
+                        source_market_code=source_market_code,
+                        market_code=market_code,
+                        status="stale",
+                    )
+                )
+                continue
+            version_number = (
+                await database.scalar(
+                    select(func.max(AnalystViewpointVersion.version)).where(
+                        AnalystViewpointVersion.viewpoint_date == viewpoint_date,
+                        AnalystViewpointVersion.market_code == market_code,
+                    )
+                )
+                or 0
+            ) + 1
+            digest = hashlib.sha256(
+                json.dumps(points, ensure_ascii=False, separators=(",", ":")).encode()
+            ).hexdigest()
+            version = AnalystViewpointVersion(
+                viewpoint_date=viewpoint_date,
+                market_code=market_code,
+                source_market_code=source_market_code,
+                version=version_number,
+                points=points,
+                fetched_at=fetched_at,
+                content_digest=digest,
+                function_attempt_id=function_attempt_id,
+            )
+            database.add(version)
+            await database.flush()
+            current_version_id = version.id
         statement = insert(AnalystViewpoint).values(
             viewpoint_date=viewpoint_date,
             market_code=market_code,
             source_market_code=source_market_code,
             points=points,
             fetched_at=fetched_at,
+            current_version_id=current_version_id,
         )
+        update_values = {
+            "source_market_code": statement.excluded.source_market_code,
+            "points": statement.excluded.points,
+            "fetched_at": statement.excluded.fetched_at,
+        }
+        if function_attempt_id is not None:
+            update_values["current_version_id"] = statement.excluded.current_version_id
         upsert_statement = statement.on_conflict_do_update(
             constraint="uq_analyst_viewpoint_date_market",
-            set_={
-                "source_market_code": statement.excluded.source_market_code,
-                "points": statement.excluded.points,
-                "fetched_at": statement.excluded.fetched_at,
-            },
+            set_=update_values,
             where=statement.excluded.fetched_at >= AnalystViewpoint.fetched_at,
         ).returning(AnalystViewpoint.id)
         result = await database.execute(upsert_statement)
@@ -167,6 +217,7 @@ async def record_sync_execution(
     trigger: str,
     result: AnalystViewpointSyncResponse | None = None,
     error_code: str | None = None,
+    function_attempt_id: uuid.UUID | None = None,
 ) -> AnalystViewpointExecutionResponse:
     """Persist a scheduler-safe execution result without an identity dependency."""
 
@@ -180,10 +231,30 @@ async def record_sync_execution(
         markets=(
             [item.model_dump(mode="json") for item in result.markets] if result is not None else []
         ),
+        function_attempt_id=function_attempt_id,
     )
     database.add(run)
     await database.flush()
     return _execution_response(run)
+
+
+async def _analyst_fence_is_current(
+    database: AsyncSession, function_attempt_id: uuid.UUID, fence_token: uuid.UUID
+) -> bool:
+    return bool(
+        await database.scalar(
+            select(FunctionRun.id)
+            .join(FunctionAttempt, FunctionAttempt.function_run_id == FunctionRun.id)
+            .where(
+                FunctionAttempt.id == function_attempt_id,
+                FunctionAttempt.fence_token == fence_token,
+                FunctionAttempt.status == "running",
+                FunctionRun.status == "running",
+                FunctionRun.lease_token == fence_token,
+            )
+            .with_for_update(of=FunctionRun)
+        )
+    )
 
 
 async def latest_sync_execution(

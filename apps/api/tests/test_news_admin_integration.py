@@ -17,7 +17,6 @@ from daily_insights_api.core.config import Settings
 from daily_insights_api.core.enums import SystemRole, UserStatus
 from daily_insights_api.core.security import hash_password
 from daily_insights_api.modules.audit.models import AuditEvent
-from daily_insights_api.modules.data_management.models import DataManagementRun
 from daily_insights_api.modules.identity.api import (
     AuthContext,
     require_csrf,
@@ -28,12 +27,14 @@ from daily_insights_api.modules.identity.session_models import Session
 from daily_insights_api.modules.news.editions import GLOBAL_SPEC
 from daily_insights_api.modules.news.models import (
     NewsCandidate,
+    NewsCandidateBatch,
     NewsEdition,
     NewsItem,
     NewsPresentation,
 )
 from daily_insights_api.modules.news.router import _latest_response
 from daily_insights_api.modules.news.service import TAIPEI
+from daily_insights_api.modules.orchestration.models import FunctionAttempt, FunctionRun, JobRun
 from daily_insights_api.web.app import create_app
 
 pytestmark = pytest.mark.integration
@@ -333,7 +334,7 @@ async def test_hide_and_unhide_are_idempotent_audited_and_hide_from_readers(
     assert actions == ["news.item_hidden", "news.item_unhidden"]
 
 
-async def test_publish_request_validates_and_queues_one_news_publish_run(
+async def test_publish_request_validates_and_queues_independent_news_publish_runs(
     news_admin_database: async_sessionmaker[AsyncSession],
 ) -> None:
     user = await _admin(news_admin_database)
@@ -361,11 +362,11 @@ async def test_publish_request_validates_and_queues_one_news_publish_run(
             "/api/admin/news/candidates/publish",
             json={"edition_id": str(edition_id), "candidate_ids": chosen},
         )
-        conflict = await client.post(
+        queued = await client.post(
             "/api/admin/news/candidates/publish",
             json={"edition_id": str(edition_id), "candidate_ids": [str(candidate_ids[3])]},
         )
-        listed = await client.get("/api/admin/data-management/runs?operation_group=news")
+        listed = await client.get("/api/admin/orchestration/job-runs")
         editions = await client.get("/api/admin/news/editions")
 
     assert unknown_edition.status_code == 404
@@ -374,11 +375,14 @@ async def test_publish_request_validates_and_queues_one_news_publish_run(
     assert duplicate_ids.status_code == 422
     assert accepted.status_code == 202, accepted.text
     run = accepted.json()
-    assert run["operation"] == "news_publish" and run["market_code"] is None
+    assert run["job_key"] == "news_publish_job" and run["trigger"] == "manual"
     assert run["status"] == "pending" and run["requested_by_user_id"] == str(user.id)
     assert run["edition_date"] == today.isoformat()
-    assert conflict.status_code == 409
-    assert [item["operation"] for item in listed.json()["items"]] == ["news_publish"]
+    assert queued.status_code == 202
+    assert [item["job_key"] for item in listed.json()["items"]] == [
+        "news_publish_job",
+        "news_publish_job",
+    ]
     candidates = {
         candidate["id"]: candidate for candidate in editions.json()["editions"][0]["candidates"]
     }
@@ -386,10 +390,10 @@ async def test_publish_request_validates_and_queues_one_news_publish_run(
         assert candidates[candidate_id]["publish_run_id"] == run["id"]
         assert candidates[candidate_id]["publish_requested_at"] is not None
         assert candidates[candidate_id]["publish_error"] is None
-    assert candidates[str(candidate_ids[3])]["publish_run_id"] is None
+    assert candidates[str(candidate_ids[3])]["publish_run_id"] == queued.json()["id"]
 
     async with news_admin_database() as database:
-        stored = await database.get(DataManagementRun, uuid.UUID(run["id"]))
+        stored = await database.get(JobRun, uuid.UUID(run["id"]))
         assert stored is not None
         assert stored.payload == {"edition_id": str(edition_id), "candidate_ids": chosen}
         requested = list(
@@ -397,8 +401,224 @@ async def test_publish_request_validates_and_queues_one_news_publish_run(
                 select(AuditEvent).where(AuditEvent.action == "news.candidate_publish_requested")
             )
         )
-    assert len(requested) == 1 and requested[0].target_id == str(edition_id)
+    assert len(requested) == 2 and all(item.target_id == str(edition_id) for item in requested)
     assert cast(dict[str, Any], requested[0].after)["candidate_ids"] == chosen
+
+
+async def test_candidates_remain_manageable_when_automatic_publish_created_no_edition(
+    news_admin_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(news_admin_database)
+    today = datetime.now(TAIPEI).date()
+    async with news_admin_database.begin() as database:
+        job = JobRun(
+            job_key="news_global_refresh_job",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=today,
+            status="partial",
+        )
+        database.add(job)
+        await database.flush()
+        function = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_global_refresh",
+            provider_key="internal_services",
+            scope={},
+            status="partial",
+            attempt_count=1,
+        )
+        database.add(function)
+        await database.flush()
+        attempt = FunctionAttempt(
+            function_run_id=function.id,
+            attempt_number=1,
+            provider_key="internal_services",
+            function_key="news_global_refresh",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="partial",
+            request_metadata=[],
+        )
+        database.add(attempt)
+        await database.flush()
+        batch = NewsCandidateBatch(
+            function_attempt_id=attempt.id,
+            edition_date=today,
+            market_code="global",
+            status="failed",
+            input_digest="f" * 64,
+            result={"discovered": 1, "prepared": 0},
+        )
+        database.add(batch)
+        await database.flush()
+        candidate = NewsCandidate(
+            edition_id=None,
+            batch_id=batch.id,
+            candidate_id="8" * 64,
+            source_name="Retained Source",
+            hostname="retained.example",
+            url="https://retained.example/story",
+            headline="Candidate retained without an edition",
+            seen_at=datetime.now(UTC),
+            stage="reviewed",
+        )
+        database.add(candidate)
+        await database.flush()
+        candidate_id = candidate.id
+
+    async with _client(news_admin_database, user) as client:
+        listed = await client.get(f"/api/admin/news/editions?date={today.isoformat()}")
+        published = await client.post(
+            "/api/admin/news/candidates/publish",
+            json={
+                "edition_date": today.isoformat(),
+                "market_code": "global",
+                "candidate_ids": [str(candidate_id)],
+            },
+        )
+
+    assert listed.status_code == 200
+    entry = listed.json()["editions"][0]
+    assert entry["edition"] is None
+    assert [item["id"] for item in entry["candidates"]] == [str(candidate_id)]
+    assert published.status_code == 202, published.text
+    async with news_admin_database() as database:
+        edition = await database.scalar(
+            select(NewsEdition).where(
+                NewsEdition.edition_date == today,
+                NewsEdition.market_code == "global",
+            )
+        )
+        assert edition is not None
+        assert edition.status == "unavailable"
+        run = await database.get(JobRun, uuid.UUID(published.json()["id"]))
+        assert run is not None
+        assert cast(dict[str, Any], run.payload)["edition_id"] == str(edition.id)
+
+
+async def test_admin_uses_published_best_batch_instead_of_newer_failed_retry(
+    news_admin_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(news_admin_database)
+    today = datetime.now(TAIPEI).date()
+    async with news_admin_database.begin() as database:
+        job = JobRun(
+            job_key="internal_services_daily_update",
+            kind="function",
+            trigger="automatic",
+            automatic_key="best-batch-admin-test",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=today,
+            status="partial",
+        )
+        database.add(job)
+        await database.flush()
+        function = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_global_refresh",
+            provider_key="internal_services",
+            scope={},
+            status="partial",
+            attempt_count=2,
+        )
+        database.add(function)
+        await database.flush()
+        best_attempt = FunctionAttempt(
+            function_run_id=function.id,
+            attempt_number=1,
+            provider_key="internal_services",
+            function_key="news_global_refresh",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="partial",
+            request_metadata=[],
+        )
+        failed_attempt = FunctionAttempt(
+            function_run_id=function.id,
+            attempt_number=2,
+            provider_key="internal_services",
+            function_key="news_global_refresh",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="failed",
+            request_metadata=[],
+        )
+        database.add_all((best_attempt, failed_attempt))
+        await database.flush()
+        best_batch = NewsCandidateBatch(
+            function_attempt_id=best_attempt.id,
+            edition_date=today,
+            market_code="global",
+            status="partial",
+            input_digest="a" * 64,
+            result={"prepared": 5},
+            created_at=datetime(2026, 9, 17, 8, tzinfo=UTC),
+        )
+        failed_batch = NewsCandidateBatch(
+            function_attempt_id=failed_attempt.id,
+            edition_date=today,
+            market_code="global",
+            status="failed",
+            input_digest="b" * 64,
+            result={"prepared": 1},
+            created_at=datetime(2026, 9, 17, 9, tzinfo=UTC),
+        )
+        database.add_all((best_batch, failed_batch))
+        await database.flush()
+        edition = NewsEdition(
+            edition_date=today,
+            market_code="global",
+            revision=1,
+            input_digest="a" * 64,
+            derivation_version="test",
+            prompt_version="test",
+            candidate_batch_id=best_batch.id,
+            status="partial",
+        )
+        database.add(edition)
+        best_candidate = NewsCandidate(
+            batch_id=best_batch.id,
+            candidate_id="c" * 64,
+            source_name="Best Batch Source",
+            hostname="best.example",
+            url="https://best.example/story",
+            headline="Candidate from retained best batch",
+            stage="reviewed",
+        )
+        failed_candidate = NewsCandidate(
+            batch_id=failed_batch.id,
+            candidate_id="d" * 64,
+            source_name="Failed Retry Source",
+            hostname="failed.example",
+            url="https://failed.example/story",
+            headline="Candidate from newer failed retry",
+            stage="reviewed",
+        )
+        database.add_all((best_candidate, failed_candidate))
+        await database.flush()
+        edition_id = edition.id
+        best_candidate_id = best_candidate.id
+        failed_candidate_id = failed_candidate.id
+
+    async with _client(news_admin_database, user) as client:
+        listed = await client.get(f"/api/admin/news/editions?date={today.isoformat()}")
+        published = await client.post(
+            "/api/admin/news/candidates/publish",
+            json={
+                "edition_id": str(edition_id),
+                "candidate_ids": [str(best_candidate_id)],
+            },
+        )
+
+    assert listed.status_code == 200
+    candidate_ids = {item["id"] for item in listed.json()["editions"][0]["candidates"]}
+    assert str(best_candidate_id) in candidate_ids
+    assert str(failed_candidate_id) not in candidate_ids
+    assert published.status_code == 202, published.text
 
 
 async def test_publish_request_is_refused_for_superseded_editions_and_when_disabled(
@@ -433,5 +653,189 @@ async def test_publish_request_is_refused_for_superseded_editions_and_when_disab
     assert listed.json()["editions"][0]["edition"]["revision"] == 2
     assert listed.json()["editions"][0]["candidates"] == []
     async with news_admin_database() as database:
-        runs = list(await database.scalars(select(DataManagementRun)))
+        runs = list(await database.scalars(select(JobRun)))
     assert runs == []
+
+
+async def test_unavailable_refresh_candidates_remain_visible_and_publishable(
+    news_admin_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(news_admin_database)
+    today = datetime.now(TAIPEI).date()
+    edition_id, _, _ = await _seed_global_edition(news_admin_database, today)
+    async with news_admin_database.begin() as database:
+        job = JobRun(
+            job_key="news_global_refresh_job",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=today,
+            status="partial",
+        )
+        database.add(job)
+        await database.flush()
+        function = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_global_refresh",
+            provider_key="internal_services",
+            scope={},
+            status="unavailable",
+            attempt_count=1,
+        )
+        database.add(function)
+        await database.flush()
+        attempt = FunctionAttempt(
+            function_run_id=function.id,
+            attempt_number=1,
+            provider_key="internal_services",
+            function_key="news_global_refresh",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="unavailable",
+            request_metadata=[],
+        )
+        database.add(attempt)
+        await database.flush()
+        batch = NewsCandidateBatch(
+            function_attempt_id=attempt.id,
+            edition_date=today,
+            market_code="global",
+            status="unavailable",
+            input_digest="a" * 64,
+            result={"discovered": 1, "prepared": 0},
+        )
+        database.add(batch)
+        await database.flush()
+        candidate = NewsCandidate(
+            edition_id=None,
+            batch_id=batch.id,
+            candidate_id="9" * 64,
+            source_name="Unavailable Batch Source",
+            hostname="unavailable.example",
+            url="https://unavailable.example/story",
+            headline="Candidate retained after automatic failure",
+            seen_at=datetime(2026, 9, 8, 0, 9, tzinfo=UTC),
+            stage="discovered",
+        )
+        database.add(candidate)
+        await database.flush()
+        candidate_id = candidate.id
+
+    async with _client(news_admin_database, user) as client:
+        listed = await client.get(f"/api/admin/news/editions?date={today.isoformat()}")
+        published = await client.post(
+            "/api/admin/news/candidates/publish",
+            json={"edition_id": str(edition_id), "candidate_ids": [str(candidate_id)]},
+        )
+
+    assert listed.status_code == 200
+    global_entry = listed.json()["editions"][0]
+    assert str(candidate_id) in {item["id"] for item in global_entry["candidates"]}
+    assert published.status_code == 202
+    assert published.json()["job_key"] == "news_publish_job"
+
+
+async def test_cancelled_newer_batch_does_not_hide_latest_ready_candidates(
+    news_admin_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(news_admin_database)
+    today = datetime.now(TAIPEI).date()
+    edition_id, _, _ = await _seed_global_edition(news_admin_database, today)
+    async with news_admin_database.begin() as database:
+        job = JobRun(
+            job_key="news_refresh_test",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=today,
+            status="partial",
+        )
+        database.add(job)
+        await database.flush()
+        function = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_global_refresh",
+            provider_key="internal_services",
+            scope={},
+            status="partial",
+            attempt_count=2,
+        )
+        database.add(function)
+        await database.flush()
+        ready_attempt = FunctionAttempt(
+            function_run_id=function.id,
+            attempt_number=1,
+            provider_key="internal_services",
+            function_key="news_global_refresh",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="partial",
+            request_metadata=[],
+        )
+        cancelled_attempt = FunctionAttempt(
+            function_run_id=function.id,
+            attempt_number=2,
+            provider_key="internal_services",
+            function_key="news_global_refresh",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="cancelled",
+            request_metadata=[],
+        )
+        database.add_all((ready_attempt, cancelled_attempt))
+        await database.flush()
+        ready_batch = NewsCandidateBatch(
+            function_attempt_id=ready_attempt.id,
+            edition_date=today,
+            market_code="global",
+            status="ready",
+            finalized_at=datetime(2026, 9, 16, 8, tzinfo=UTC),
+            created_at=datetime(2026, 9, 16, 8, tzinfo=UTC),
+        )
+        cancelled_batch = NewsCandidateBatch(
+            function_attempt_id=cancelled_attempt.id,
+            edition_date=today,
+            market_code="global",
+            status="cancelled",
+            finalized_at=datetime(2026, 9, 16, 9, tzinfo=UTC),
+            created_at=datetime(2026, 9, 16, 9, tzinfo=UTC),
+        )
+        database.add_all((ready_batch, cancelled_batch))
+        await database.flush()
+        ready_candidate = NewsCandidate(
+            edition_id=None,
+            batch_id=ready_batch.id,
+            candidate_id="a" * 64,
+            source_name="Ready Source",
+            hostname="ready.example",
+            url="https://ready.example/story",
+            headline="Ready candidate",
+            stage="reviewed",
+        )
+        cancelled_candidate = NewsCandidate(
+            edition_id=None,
+            batch_id=cancelled_batch.id,
+            candidate_id="b" * 64,
+            source_name="Cancelled Source",
+            hostname="cancelled.example",
+            url="https://cancelled.example/story",
+            headline="Cancelled candidate",
+            stage="reviewed",
+        )
+        database.add_all((ready_candidate, cancelled_candidate))
+        await database.flush()
+        ready_candidate_id = ready_candidate.id
+
+    async with _client(news_admin_database, user) as client:
+        listed = await client.get(f"/api/admin/news/editions?date={today.isoformat()}")
+        published = await client.post(
+            "/api/admin/news/candidates/publish",
+            json={"edition_id": str(edition_id), "candidate_ids": [str(ready_candidate_id)]},
+        )
+
+    candidates = listed.json()["editions"][0]["candidates"]
+    assert any(item["id"] == str(ready_candidate_id) for item in candidates)
+    assert all(item["headline"] != "Cancelled candidate" for item in candidates)
+    assert published.status_code == 202, published.text

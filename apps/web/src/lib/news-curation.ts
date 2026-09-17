@@ -1,6 +1,6 @@
 import {
   ApiError,
-  type DataManagementRun,
+  type JobRun,
   type NewsAdminCandidate,
   type NewsCandidateStage,
 } from "@daily-insights/api-client"
@@ -34,20 +34,23 @@ export function filterCandidates(
   )
 }
 
-export function isActiveRun(run: Pick<DataManagementRun, "status">) {
+export function isActiveRun(run: Pick<JobRun, "status">) {
   return run.status === "pending" || run.status === "running"
 }
 
 // news_all, news_market and news_publish all share the prefix; the curation
 // view polls while any of them can still change an edition.
-export function isNewsRun(run: Pick<DataManagementRun, "operation">) {
-  return run.operation.startsWith("news")
+export function isNewsRun(run: Pick<JobRun, "job_key">) {
+  return (
+    run.job_key.startsWith("news_") ||
+    run.job_key === "internal_services_daily_update"
+  )
 }
 
-export function activePublishRunIds(runs: readonly DataManagementRun[]) {
+export function activePublishRunIds(runs: readonly JobRun[]) {
   return new Set(
     runs
-      .filter(run => run.operation === "news_publish" && isActiveRun(run))
+      .filter(run => run.job_key === "news_publish_job" && isActiveRun(run))
       .map(run => run.id)
   )
 }

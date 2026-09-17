@@ -82,213 +82,26 @@ services:
     networks:
       - app
 
-  morning-report-scheduler:
+  orchestration-worker:
     image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}
-    container_name: daily-insights-morning-report-scheduler
+    container_name: daily-insights-orchestration-worker
     restart: unless-stopped
     environment:
       DAILY_INSIGHTS_ENVIRONMENT: production
+      DAILY_INSIGHTS_RUNTIME_ROLE: orchestration-worker
       DAILY_INSIGHTS_DATABASE_URL: ${DAILY_INSIGHTS_DATABASE_URL:?set DAILY_INSIGHTS_DATABASE_URL from GitHub Secrets}
-      DAILY_INSIGHTS_SESSION_SECRET: ${DAILY_INSIGHTS_SESSION_SECRET:?set DAILY_INSIGHTS_SESSION_SECRET from GitHub Secrets}
-      DAILY_INSIGHTS_PASSWORD_PEPPER: ${DAILY_INSIGHTS_PASSWORD_PEPPER:?set DAILY_INSIGHTS_PASSWORD_PEPPER from GitHub Secrets}
+      DAILY_INSIGHTS_ORCHESTRATION_ENABLED: ${DAILY_INSIGHTS_ORCHESTRATION_ENABLED:-false}
+      DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE: ${DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE:-}
       DAILY_INSIGHTS_MORNING_REPORTS_ENABLED: ${DAILY_INSIGHTS_MORNING_REPORTS_ENABLED:-false}
+      DAILY_INSIGHTS_YFINANCE_ENABLED: ${DAILY_INSIGHTS_YFINANCE_ENABLED:-false}
+      DAILY_INSIGHTS_TWSE_ENABLED: ${DAILY_INSIGHTS_TWSE_ENABLED:-false}
       DAILY_INSIGHTS_TWELVE_DATA_BASE_URL: ${DAILY_INSIGHTS_TWELVE_DATA_BASE_URL:-https://api.twelvedata.com}
       DAILY_INSIGHTS_TWELVE_DATA_API_KEY: ${DAILY_INSIGHTS_TWELVE_DATA_API_KEY:-}
-      DAILY_INSIGHTS_R2_ENDPOINT_URL: ${DAILY_INSIGHTS_R2_ENDPOINT_URL:?set DAILY_INSIGHTS_R2_ENDPOINT_URL}
-      DAILY_INSIGHTS_R2_BUCKET_NAME: ${DAILY_INSIGHTS_R2_BUCKET_NAME:?set DAILY_INSIGHTS_R2_BUCKET_NAME}
-      DAILY_INSIGHTS_R2_ACCESS_KEY_ID: ${DAILY_INSIGHTS_R2_ACCESS_KEY_ID:?set DAILY_INSIGHTS_R2_ACCESS_KEY_ID from GitHub Secrets}
-      DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY: ${DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY:?set DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY from GitHub Secrets}
-    command: ["python", "-m", "daily_insights_api.scripts.run_morning_reports"]
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import time; from pathlib import Path; p = Path('/tmp/morning-report-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 93600",
-        ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    stop_grace_period: 45s
-    read_only: true
-    tmpfs:
-      - /tmp:size=32m,mode=1777
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    networks:
-      - app
-
-  daily-news-scheduler:
-    image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}
-    container_name: daily-insights-daily-news-scheduler
-    restart: unless-stopped
-    environment:
-      DAILY_INSIGHTS_ENVIRONMENT: production
-      DAILY_INSIGHTS_DATABASE_URL: ${DAILY_INSIGHTS_DATABASE_URL:?set DAILY_INSIGHTS_DATABASE_URL from GitHub Secrets}
       DAILY_INSIGHTS_DAILY_NEWS_ENABLED: ${DAILY_INSIGHTS_DAILY_NEWS_ENABLED:-false}
-    command:
-      ["python", "-m", "daily_insights_api.scripts.run_daily_news_scheduler"]
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import time; from pathlib import Path; p = Path('/tmp/daily-news-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 93600",
-        ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    stop_grace_period: 45s
-    read_only: true
-    tmpfs:
-      - /tmp:size=32m,mode=1777
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    networks:
-      - app
-
-  analyst-viewpoints-scheduler:
-    image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}
-    container_name: daily-insights-analyst-viewpoints-scheduler
-    restart: unless-stopped
-    environment:
-      DAILY_INSIGHTS_ENVIRONMENT: production
-      DAILY_INSIGHTS_DATABASE_URL: ${DAILY_INSIGHTS_DATABASE_URL:?set DAILY_INSIGHTS_DATABASE_URL from GitHub Secrets}
-      DAILY_INSIGHTS_SESSION_SECRET: ${DAILY_INSIGHTS_SESSION_SECRET:?set DAILY_INSIGHTS_SESSION_SECRET from GitHub Secrets}
-      DAILY_INSIGHTS_PASSWORD_PEPPER: ${DAILY_INSIGHTS_PASSWORD_PEPPER:?set DAILY_INSIGHTS_PASSWORD_PEPPER from GitHub Secrets}
       DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED:-false}
       DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL:-https://analyst-viewpoints.invalid}
       DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY:-}
       DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS:-10}
-      DAILY_INSIGHTS_R2_ENDPOINT_URL: ${DAILY_INSIGHTS_R2_ENDPOINT_URL:?set DAILY_INSIGHTS_R2_ENDPOINT_URL}
-      DAILY_INSIGHTS_R2_BUCKET_NAME: ${DAILY_INSIGHTS_R2_BUCKET_NAME:?set DAILY_INSIGHTS_R2_BUCKET_NAME}
-      DAILY_INSIGHTS_R2_ACCESS_KEY_ID: ${DAILY_INSIGHTS_R2_ACCESS_KEY_ID:?set DAILY_INSIGHTS_R2_ACCESS_KEY_ID from GitHub Secrets}
-      DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY: ${DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY:?set DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY from GitHub Secrets}
-    command:
-      ["python", "-m", "daily_insights_api.scripts.run_analyst_viewpoints"]
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import time; from pathlib import Path; p = Path('/tmp/analyst-viewpoints-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 93600",
-        ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    stop_grace_period: 45s
-    read_only: true
-    tmpfs:
-      - /tmp:size=32m,mode=1777
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    networks:
-      - app
-
-  index-daily-bars-scheduler:
-    image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}
-    container_name: daily-insights-index-daily-bars-scheduler
-    restart: unless-stopped
-    environment:
-      DAILY_INSIGHTS_ENVIRONMENT: production
-      DAILY_INSIGHTS_DATABASE_URL: ${DAILY_INSIGHTS_DATABASE_URL:?set DAILY_INSIGHTS_DATABASE_URL from GitHub Secrets}
-      DAILY_INSIGHTS_SESSION_SECRET: ${DAILY_INSIGHTS_SESSION_SECRET:?set DAILY_INSIGHTS_SESSION_SECRET from GitHub Secrets}
-      DAILY_INSIGHTS_PASSWORD_PEPPER: ${DAILY_INSIGHTS_PASSWORD_PEPPER:?set DAILY_INSIGHTS_PASSWORD_PEPPER from GitHub Secrets}
-      DAILY_INSIGHTS_YFINANCE_ENABLED: ${DAILY_INSIGHTS_YFINANCE_ENABLED:-false}
-      DAILY_INSIGHTS_R2_ENDPOINT_URL: ${DAILY_INSIGHTS_R2_ENDPOINT_URL:?set DAILY_INSIGHTS_R2_ENDPOINT_URL}
-      DAILY_INSIGHTS_R2_BUCKET_NAME: ${DAILY_INSIGHTS_R2_BUCKET_NAME:?set DAILY_INSIGHTS_R2_BUCKET_NAME}
-      DAILY_INSIGHTS_R2_ACCESS_KEY_ID: ${DAILY_INSIGHTS_R2_ACCESS_KEY_ID:?set DAILY_INSIGHTS_R2_ACCESS_KEY_ID from GitHub Secrets}
-      DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY: ${DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY:?set DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY from GitHub Secrets}
-    command: ["python", "-m", "daily_insights_api.scripts.run_index_daily_bars"]
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import time; from pathlib import Path; p = Path('/tmp/index-daily-bars-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 93600",
-        ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    stop_grace_period: 45s
-    read_only: true
-    tmpfs:
-      - /tmp:size=32m,mode=1777
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    networks:
-      - app
-
-  institutional-flows-scheduler:
-    image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}
-    container_name: daily-insights-institutional-flows-scheduler
-    restart: unless-stopped
-    environment:
-      DAILY_INSIGHTS_ENVIRONMENT: production
-      DAILY_INSIGHTS_DATABASE_URL: ${DAILY_INSIGHTS_DATABASE_URL:?set DAILY_INSIGHTS_DATABASE_URL from GitHub Secrets}
-      DAILY_INSIGHTS_SESSION_SECRET: ${DAILY_INSIGHTS_SESSION_SECRET:?set DAILY_INSIGHTS_SESSION_SECRET from GitHub Secrets}
-      DAILY_INSIGHTS_PASSWORD_PEPPER: ${DAILY_INSIGHTS_PASSWORD_PEPPER:?set DAILY_INSIGHTS_PASSWORD_PEPPER from GitHub Secrets}
-      DAILY_INSIGHTS_TWSE_ENABLED: ${DAILY_INSIGHTS_TWSE_ENABLED:-false}
-      DAILY_INSIGHTS_R2_ENDPOINT_URL: ${DAILY_INSIGHTS_R2_ENDPOINT_URL:?set DAILY_INSIGHTS_R2_ENDPOINT_URL}
-      DAILY_INSIGHTS_R2_BUCKET_NAME: ${DAILY_INSIGHTS_R2_BUCKET_NAME:?set DAILY_INSIGHTS_R2_BUCKET_NAME}
-      DAILY_INSIGHTS_R2_ACCESS_KEY_ID: ${DAILY_INSIGHTS_R2_ACCESS_KEY_ID:?set DAILY_INSIGHTS_R2_ACCESS_KEY_ID from GitHub Secrets}
-      DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY: ${DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY:?set DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY from GitHub Secrets}
-    command:
-      ["python", "-m", "daily_insights_api.scripts.run_institutional_flows"]
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import time; from pathlib import Path; p = Path('/tmp/institutional-flows-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 93600",
-        ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    stop_grace_period: 45s
-    read_only: true
-    tmpfs:
-      - /tmp:size=32m,mode=1777
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    networks:
-      - app
-
-  data-management-worker:
-    image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}
-    container_name: daily-insights-data-management-worker
-    restart: unless-stopped
-    environment:
-      DAILY_INSIGHTS_ENVIRONMENT: production
-      DAILY_INSIGHTS_DATABASE_URL: ${DAILY_INSIGHTS_DATABASE_URL:?set DAILY_INSIGHTS_DATABASE_URL from GitHub Secrets}
-      DAILY_INSIGHTS_SESSION_SECRET: ${DAILY_INSIGHTS_SESSION_SECRET:?set DAILY_INSIGHTS_SESSION_SECRET from GitHub Secrets}
-      DAILY_INSIGHTS_PASSWORD_PEPPER: ${DAILY_INSIGHTS_PASSWORD_PEPPER:?set DAILY_INSIGHTS_PASSWORD_PEPPER from GitHub Secrets}
-      DAILY_INSIGHTS_MORNING_REPORTS_ENABLED: ${DAILY_INSIGHTS_MORNING_REPORTS_ENABLED:-false}
-      DAILY_INSIGHTS_YFINANCE_ENABLED: ${DAILY_INSIGHTS_YFINANCE_ENABLED:-false}
-      DAILY_INSIGHTS_TWSE_ENABLED: ${DAILY_INSIGHTS_TWSE_ENABLED:-false}
-      DAILY_INSIGHTS_TWELVE_DATA_BASE_URL: ${DAILY_INSIGHTS_TWELVE_DATA_BASE_URL:-https://api.twelvedata.com}
-      DAILY_INSIGHTS_TWELVE_DATA_API_KEY: ${DAILY_INSIGHTS_TWELVE_DATA_API_KEY:-}
-      DAILY_INSIGHTS_DAILY_NEWS_ENABLED: ${DAILY_INSIGHTS_DAILY_NEWS_ENABLED:-false}
       DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES: ${DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES:-}
       DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES: ${DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES:-}
       DAILY_INSIGHTS_GUARDIAN_API_KEY: ${DAILY_INSIGHTS_GUARDIAN_API_KEY:-}
@@ -300,19 +113,14 @@ services:
       DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS:-120}
       DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS:-25}
       DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS:-30}
-      DAILY_INSIGHTS_R2_ENDPOINT_URL: ${DAILY_INSIGHTS_R2_ENDPOINT_URL:?set DAILY_INSIGHTS_R2_ENDPOINT_URL}
-      DAILY_INSIGHTS_R2_BUCKET_NAME: ${DAILY_INSIGHTS_R2_BUCKET_NAME:?set DAILY_INSIGHTS_R2_BUCKET_NAME}
-      DAILY_INSIGHTS_R2_ACCESS_KEY_ID: ${DAILY_INSIGHTS_R2_ACCESS_KEY_ID:?set DAILY_INSIGHTS_R2_ACCESS_KEY_ID from GitHub Secrets}
-      DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY: ${DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY:?set DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY from GitHub Secrets}
-    command:
-      ["python", "-m", "daily_insights_api.scripts.run_data_management_worker"]
+    command: ["python", "-m", "daily_insights_api.scripts.run_orchestration_worker"]
     healthcheck:
       test:
         [
           "CMD",
           "python",
           "-c",
-          "import time; from pathlib import Path; p = Path('/tmp/data-management-worker-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 90",
+          "import time; from pathlib import Path; p = Path('/tmp/orchestration-worker-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 90",
         ]
       interval: 30s
       timeout: 5s
@@ -329,18 +137,20 @@ services:
     networks:
       - app
 
-  macro-dashboard-scheduler:
+  orchestration-dispatcher:
     image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}
-    container_name: daily-insights-macro-dashboard-scheduler
+    container_name: daily-insights-orchestration-dispatcher
     restart: unless-stopped
     environment:
       DAILY_INSIGHTS_ENVIRONMENT: production
       DAILY_INSIGHTS_DATABASE_URL: ${DAILY_INSIGHTS_DATABASE_URL:?set DAILY_INSIGHTS_DATABASE_URL from GitHub Secrets}
+      DAILY_INSIGHTS_ORCHESTRATION_ENABLED: ${DAILY_INSIGHTS_ORCHESTRATION_ENABLED:-false}
+      DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE: ${DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE:-}
     command:
       [
         "python",
         "-m",
-        "daily_insights_api.scripts.run_macro_dashboard_scheduler",
+        "daily_insights_api.scripts.run_orchestration_dispatcher",
       ]
     healthcheck:
       test:
@@ -348,7 +158,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import time; from pathlib import Path; p = Path('/tmp/macro-dashboard-scheduler-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 93600",
+          "import time; from pathlib import Path; p = Path('/tmp/orchestration-dispatcher-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 90",
         ]
       interval: 30s
       timeout: 5s

@@ -39,7 +39,7 @@ if grep -q 'postgres:' "$compose_file"; then
   exit 1
 fi
 
-production_services="api web nginx morning-report-scheduler daily-news-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler institutional-flows-scheduler data-management-worker macro-dashboard-scheduler"
+production_services="api web nginx orchestration-worker orchestration-dispatcher"
 for service in $production_services; do
   grep -q "^  ${service}:" "$compose_file"
   grep -q "container_name: daily-insights-${service}" "$compose_file"
@@ -49,7 +49,7 @@ done
 [ "$(grep -c 'restart: unless-stopped' "$compose_file")" -eq "$(printf '%s\n' $production_services | wc -l | tr -d ' ')" ]
 grep -q 'stop_grace_period:' "$compose_file"
 grep -q 'healthcheck:' "$compose_file"
-grep -Fq "st_mtime < 93600" "$compose_file"
+grep -Fq "st_mtime < 90" "$compose_file"
 grep -q 'read_only: true' "$compose_file"
 
 for name in \
@@ -66,31 +66,24 @@ done
 grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_BASE_URL: ${DAILY_INSIGHTS_TWELVE_DATA_BASE_URL:-https://api.twelvedata.com}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_API_KEY: ${DAILY_INSIGHTS_TWELVE_DATA_API_KEY:-}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_DAILY_NEWS_ENABLED: ${DAILY_INSIGHTS_DAILY_NEWS_ENABLED:-false}' "$compose_file"
-grep -Fq 'daily_insights_api.scripts.run_daily_news_scheduler' "$compose_file"
-grep -Fq '/tmp/daily-news-heartbeat' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED:-false}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL:-https://analyst-viewpoints.invalid}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY:-}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS:-10}' "$compose_file"
-grep -Fq 'daily_insights_api.scripts.run_analyst_viewpoints' "$compose_file"
-grep -Fq '/tmp/analyst-viewpoints-heartbeat' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_YFINANCE_ENABLED: ${DAILY_INSIGHTS_YFINANCE_ENABLED:-false}' "$compose_file"
-grep -Fq 'daily_insights_api.scripts.run_index_daily_bars' "$compose_file"
-grep -Fq '/tmp/index-daily-bars-heartbeat' "$compose_file"
-# The API gates the request and reports the flag to the admin page, the worker
-# gates the execution, and the scheduler gates the queueing: all three need it.
-# The index scheduler is deliberately not among them -- ^TWII is refreshed by
-# the TWSE run, so that container never talks to the exchange.
 twse_flag_services=$(grep -c 'DAILY_INSIGHTS_TWSE_ENABLED: ${DAILY_INSIGHTS_TWSE_ENABLED:-false}' "$compose_file")
-if [ "$twse_flag_services" -ne 3 ]; then
-  echo "expected DAILY_INSIGHTS_TWSE_ENABLED on 3 services (api, data-management-worker," >&2
-  echo "institutional-flows-scheduler); found $twse_flag_services" >&2
+if [ "$twse_flag_services" -ne 2 ]; then
+  echo "expected DAILY_INSIGHTS_TWSE_ENABLED on api and orchestration-worker; found $twse_flag_services" >&2
   exit 1
 fi
-grep -Fq 'daily_insights_api.scripts.run_institutional_flows' "$compose_file"
-grep -Fq '/tmp/institutional-flows-heartbeat' "$compose_file"
-grep -Fq 'daily_insights_api.scripts.run_macro_dashboard_scheduler' "$compose_file"
-grep -Fq '/tmp/macro-dashboard-scheduler-heartbeat' "$compose_file"
+grep -Fq 'daily_insights_api.scripts.run_orchestration_worker' "$compose_file"
+grep -Fq 'daily_insights_api.scripts.run_orchestration_dispatcher' "$compose_file"
+grep -Fq '/tmp/orchestration-worker-heartbeat' "$compose_file"
+grep -Fq '/tmp/orchestration-dispatcher-heartbeat' "$compose_file"
+if grep -Eq '^  (morning-report-scheduler|daily-news-scheduler|analyst-viewpoints-scheduler|index-daily-bars-scheduler|institutional-flows-scheduler|macro-dashboard-scheduler|data-management-worker):' "$compose_file"; then
+  echo "legacy scheduler services must be removed from production Compose" >&2
+  exit 1
+fi
 grep -Fq 'DAILY_INSIGHTS_CHAT_ENABLED: ${DAILY_INSIGHTS_CHAT_ENABLED:-false}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_PROVIDER: ${DAILY_INSIGHTS_CHAT_MODEL_PROVIDER:-deepseek}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_NAME: ${DAILY_INSIGHTS_CHAT_MODEL_NAME:-deepseek-chat}' "$compose_file"
@@ -164,6 +157,15 @@ if ! bash -n "$validation_script"; then
   exit 1
 fi
 rm -f "$validation_script"
+for name in \
+  DAILY_INSIGHTS_ORCHESTRATION_ENABLED \
+  DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE; do
+  grep -Fq "${name}: \${{ vars.${name} }}" "$workflow_file"
+  grep -Fq "${name} \\" "$workflow_file"
+  grep -Fq ",${name}" "$workflow_file"
+done
+grep -Fq 'DAILY_INSIGHTS_ORCHESTRATION_ENABLED must be true for unified cutover' "$workflow_file"
+grep -Fq 'DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE must use YYYY-MM-DD' "$workflow_file"
 for name in \
   DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED \
   DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL \
@@ -270,6 +272,9 @@ export DAILY_INSIGHTS_TWELVE_DATA_BASE_URL=
 export DAILY_INSIGHTS_TWELVE_DATA_API_KEY=
 export DAILY_INSIGHTS_DAILY_NEWS_ENABLED=false
 export DAILY_INSIGHTS_NEWS_MODEL_API_KEY=
+export DAILY_INSIGHTS_ORCHESTRATION_ENABLED=true
+export DAILY_INSIGHTS_CUTOVER_TAIPEI_NOW=2026-09-16T10:00:00+0800
+export DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE=2026-09-17
 export DAILY_INSIGHTS_R2_ENDPOINT_URL=https://tenant.r2.cloudflarestorage.com
 export DAILY_INSIGHTS_R2_BUCKET_NAME=production-podcast-assets
 export DAILY_INSIGHTS_R2_ACCESS_KEY_ID=contract-r2-access
@@ -295,6 +300,14 @@ if [ -n "${DOCKER_FAIL_MATCH:-}" ]; then
     *"$DOCKER_FAIL_MATCH"*) exit 1 ;;
   esac
 fi
+case "$*" in
+  *daily_insights_api.scripts.check_legacy_queues_quiescent*)
+    exit "${LEGACY_QUEUE_STATE_EXIT:-0}"
+    ;;
+  *daily_insights_api.scripts.check_orchestration_cutover*)
+    exit "${CUTOVER_STATE_EXIT:-10}"
+    ;;
+esac
 if [ "${1:-}" = "inspect" ]; then
   case "${3:-}" in
     '{{.State.Status}}') echo "${DOCKER_STOPPED_STATE:-exited}" ;;
@@ -322,29 +335,36 @@ grep -q 'compose .* config --quiet' "$temporary_dir/deployment.log"
 grep -q 'compose .* pull' "$temporary_dir/deployment.log"
 grep -q 'compose .* run --rm --no-deps nginx nginx -t' "$temporary_dir/deployment.log"
 grep -q 'compose .* up -d --no-build --force-recreate --no-deps nginx' "$temporary_dir/deployment.log"
-grep -q 'compose .* stop daily-news-scheduler index-daily-bars-scheduler institutional-flows-scheduler data-management-worker' "$temporary_dir/deployment.log"
+grep -q 'compose .* run --rm --no-deps api python -m daily_insights_api.scripts.check_orchestration_cutover' "$temporary_dir/deployment.log"
+grep -q 'compose .* run --rm --no-deps api python -m daily_insights_api.scripts.check_legacy_queues_quiescent' "$temporary_dir/deployment.log"
+grep -q 'stop daily-insights-api' "$temporary_dir/deployment.log"
+grep -q 'stop daily-insights-orchestration-worker' "$temporary_dir/deployment.log"
+grep -q 'stop daily-insights-daily-news-scheduler' "$temporary_dir/deployment.log"
 grep -q 'inspect --format {{.State.Status}} daily-insights-daily-news-scheduler' "$temporary_dir/deployment.log"
 grep -q 'inspect --format {{.State.Status}} daily-insights-index-daily-bars-scheduler' "$temporary_dir/deployment.log"
 grep -q 'inspect --format {{.State.Status}} daily-insights-institutional-flows-scheduler' "$temporary_dir/deployment.log"
 grep -q 'inspect --format {{.State.Status}} daily-insights-data-management-worker' "$temporary_dir/deployment.log"
 grep -q 'compose .* run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log"
-grep -q 'compose .* up -d --no-build --force-recreate --no-deps data-management-worker' "$temporary_dir/deployment.log"
-grep -q 'inspect --format {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} daily-insights-data-management-worker' "$temporary_dir/deployment.log"
-grep -q 'compose .* up -d --no-build --remove-orphans api web morning-report-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler institutional-flows-scheduler macro-dashboard-scheduler daily-news-scheduler' "$temporary_dir/deployment.log"
+grep -q 'compose .* up -d --no-build --force-recreate --no-deps orchestration-worker' "$temporary_dir/deployment.log"
+grep -q 'inspect --format {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} daily-insights-orchestration-worker' "$temporary_dir/deployment.log"
+grep -q 'compose .* up -d --no-build --remove-orphans api web orchestration-dispatcher' "$temporary_dir/deployment.log"
 grep -q 'exec daily-insights-nginx wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/api' "$temporary_dir/deployment.log"
 grep -q 'exec daily-insights-nginx wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/web' "$temporary_dir/deployment.log"
 
 nginx_validate_line=$(grep -n 'run --rm --no-deps nginx nginx -t' "$temporary_dir/deployment.log" | cut -d: -f1)
 nginx_recreate_line=$(grep -n 'up -d --no-build --force-recreate --no-deps nginx' "$temporary_dir/deployment.log" | cut -d: -f1)
-news_stop_line=$(grep -n 'stop daily-news-scheduler index-daily-bars-scheduler institutional-flows-scheduler data-management-worker' "$temporary_dir/deployment.log" | cut -d: -f1)
+api_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-api' "$temporary_dir/deployment.log" | head -n 1 | cut -d: -f1)
+orchestration_worker_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-orchestration-worker' "$temporary_dir/deployment.log" | head -n 1 | cut -d: -f1)
+news_stop_line=$(grep -n 'stop daily-insights-daily-news-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
 scheduler_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-daily-news-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
 index_scheduler_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-index-daily-bars-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
 institutional_scheduler_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-institutional-flows-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
 worker_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-data-management-worker' "$temporary_dir/deployment.log" | cut -d: -f1)
 migration_line=$(grep -n 'run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log" | cut -d: -f1)
-worker_start_line=$(grep -n 'up -d --no-build --force-recreate --no-deps data-management-worker' "$temporary_dir/deployment.log" | cut -d: -f1)
-worker_healthy_line=$(grep -n 'inspect --format {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} daily-insights-data-management-worker' "$temporary_dir/deployment.log" | head -n 1 | cut -d: -f1)
-backend_converge_line=$(grep -n 'up -d --no-build --remove-orphans api web morning-report-scheduler analyst-viewpoints-scheduler index-daily-bars-scheduler institutional-flows-scheduler macro-dashboard-scheduler daily-news-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
+legacy_queue_check_line=$(grep -n 'run --rm --no-deps api python -m daily_insights_api.scripts.check_legacy_queues_quiescent' "$temporary_dir/deployment.log" | cut -d: -f1)
+worker_start_line=$(grep -n 'up -d --no-build --force-recreate --no-deps orchestration-worker' "$temporary_dir/deployment.log" | cut -d: -f1)
+worker_healthy_line=$(grep -n 'inspect --format {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} daily-insights-orchestration-worker' "$temporary_dir/deployment.log" | head -n 1 | cut -d: -f1)
+backend_converge_line=$(grep -n 'up -d --no-build --remove-orphans api web orchestration-dispatcher' "$temporary_dir/deployment.log" | cut -d: -f1)
 if [ "$nginx_validate_line" -ge "$nginx_recreate_line" ] ||
   [ "$nginx_recreate_line" -ge "$news_stop_line" ] ||
   [ "$news_stop_line" -ge "$scheduler_stopped_line" ] ||
@@ -355,14 +375,58 @@ if [ "$nginx_validate_line" -ge "$nginx_recreate_line" ] ||
   [ "$index_scheduler_stopped_line" -ge "$migration_line" ] ||
   [ "$institutional_scheduler_stopped_line" -ge "$migration_line" ] ||
   [ "$worker_stopped_line" -ge "$migration_line" ] ||
+  [ "$api_stopped_line" -ge "$migration_line" ] ||
+  [ "$orchestration_worker_stopped_line" -ge "$migration_line" ] ||
+  [ "$orchestration_worker_stopped_line" -ge "$legacy_queue_check_line" ] ||
+  [ "$legacy_queue_check_line" -ge "$migration_line" ] ||
   [ "$migration_line" -ge "$worker_start_line" ] ||
   [ "$worker_start_line" -ge "$worker_healthy_line" ] ||
   [ "$worker_healthy_line" -ge "$backend_converge_line" ]; then
   echo "deployment must quiesce schema-boundary services before migration and verify the new worker before restarting schedulers" >&2
   exit 1
 fi
+
+# A migration-complete deployment that has not created its first routine must
+# remain retryable before 10:00 while preserving today's or tomorrow's
+# activation date.
+: >"$temporary_dir/deployment.log"
+PATH="$temporary_dir/stubs:$PATH" \
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  CUTOVER_STATE_EXIT=11 \
+  DAILY_INSIGHTS_CUTOVER_TAIPEI_NOW=2026-09-16T09:00:00+0800 \
+  DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE=2026-09-17 \
+  scripts/production/deploy.sh >/dev/null
+grep -q 'compose .* run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log"
+
+# Once routine_runs exists, deployments are steady-state: the original
+# activation date remains in the past and the one-time time window no longer
+# applies.
+: >"$temporary_dir/deployment.log"
+PATH="$temporary_dir/stubs:$PATH" \
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  CUTOVER_STATE_EXIT=0 \
+  DAILY_INSIGHTS_CUTOVER_TAIPEI_NOW=2026-09-16T09:00:00+0800 \
+  DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE=2026-09-15 \
+  scripts/production/deploy.sh >/dev/null
+grep -q 'stop daily-insights-api' "$temporary_dir/deployment.log"
+grep -q 'stop daily-insights-orchestration-worker' "$temporary_dir/deployment.log"
+grep -q 'compose .* run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log"
 if grep -Eq -- '--env-file|systemctl|daily-insights[.]service' "$temporary_dir/deployment.log"; then
   echo "deployment unexpectedly used a host env file or app systemd unit" >&2
+  exit 1
+fi
+
+: >"$temporary_dir/deployment.log"
+if PATH="$temporary_dir/stubs:$PATH" \
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  LEGACY_QUEUE_STATE_EXIT=12 \
+  scripts/production/deploy.sh >"$temporary_dir/legacy-queue.out" 2>"$temporary_dir/legacy-queue.err"; then
+  echo "deployment must fail while a legacy queue still has active work" >&2
+  exit 1
+fi
+grep -q 'legacy queues still contain pending or running work' "$temporary_dir/legacy-queue.err"
+if grep -q 'run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log"; then
+  echo "active legacy queues must block migration" >&2
   exit 1
 fi
 
@@ -382,9 +446,9 @@ if PATH="$temporary_dir/stubs:$PATH" \
   echo "deployment must fail when migration fails after quiescing automatic news" >&2
   exit 1
 fi
-grep -q 'Schema-boundary services are confirmed quiescent' "$temporary_dir/migration-failure.err"
-if grep -q 'up -d --no-build --force-recreate --no-deps data-management-worker' "$temporary_dir/deployment.log" ||
-  grep -q 'up -d --no-build --remove-orphans .*daily-news-scheduler' "$temporary_dir/deployment.log"; then
+grep -q 'Legacy schedulers are confirmed quiescent' "$temporary_dir/migration-failure.err"
+if grep -q 'up -d --no-build --force-recreate --no-deps orchestration-worker' "$temporary_dir/deployment.log" ||
+  grep -q 'up -d --no-build --remove-orphans .*orchestration-dispatcher' "$temporary_dir/deployment.log"; then
   echo "migration failure must not restart the worker or scheduler" >&2
   exit 1
 fi
@@ -392,28 +456,31 @@ fi
 : >"$temporary_dir/deployment.log"
 if PATH="$temporary_dir/stubs:$PATH" \
   DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
-  DOCKER_FAIL_MATCH='up -d --no-build --force-recreate --no-deps data-management-worker' \
+  DOCKER_FAIL_MATCH='up -d --no-build --force-recreate --no-deps orchestration-worker' \
   scripts/production/deploy.sh >"$temporary_dir/worker-failure.out" 2>"$temporary_dir/worker-failure.err"; then
   echo "deployment must fail when the replacement worker cannot start" >&2
   exit 1
 fi
-grep -q 'Schema-boundary services are confirmed quiescent' "$temporary_dir/worker-failure.err"
-if grep -q 'up -d --no-build --remove-orphans .*daily-news-scheduler' "$temporary_dir/deployment.log"; then
-  echo "worker startup failure must not restart the daily-news scheduler" >&2
+grep -q 'Legacy schedulers are confirmed quiescent' "$temporary_dir/worker-failure.err"
+if grep -q 'up -d --no-build --remove-orphans .*orchestration-dispatcher' "$temporary_dir/deployment.log"; then
+  echo "worker startup failure must not start the orchestration dispatcher" >&2
   exit 1
 fi
 
 assert_requiesced_after_scheduler_attempt() {
   deployment_log=$1
-  scheduler_attempt_line=$(grep -n 'up -d --no-build --remove-orphans .*daily-news-scheduler' "$deployment_log" | tail -n 1 | cut -d: -f1)
+  scheduler_attempt_line=$(grep -n 'up -d --no-build --remove-orphans .*orchestration-dispatcher' "$deployment_log" | tail -n 1 | cut -d: -f1)
   post_attempt_log="$temporary_dir/post-scheduler-attempt.log"
   tail -n "+$((scheduler_attempt_line + 1))" "$deployment_log" >"$post_attempt_log"
-  stop_line=$(grep -n 'compose .* stop daily-news-scheduler index-daily-bars-scheduler institutional-flows-scheduler data-management-worker' "$post_attempt_log" | head -n 1 | cut -d: -f1)
+  dispatcher_stop_line=$(grep -n 'stop daily-insights-orchestration-dispatcher' "$post_attempt_log" | head -n 1 | cut -d: -f1)
+  dispatcher_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-orchestration-dispatcher' "$post_attempt_log" | head -n 1 | cut -d: -f1)
+  stop_line=$(grep -n 'stop daily-insights-daily-news-scheduler' "$post_attempt_log" | head -n 1 | cut -d: -f1)
   scheduler_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-daily-news-scheduler' "$post_attempt_log" | head -n 1 | cut -d: -f1)
   index_scheduler_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-index-daily-bars-scheduler' "$post_attempt_log" | head -n 1 | cut -d: -f1)
   institutional_scheduler_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-institutional-flows-scheduler' "$post_attempt_log" | head -n 1 | cut -d: -f1)
   worker_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-data-management-worker' "$post_attempt_log" | head -n 1 | cut -d: -f1)
-  if [ "$stop_line" -ge "$scheduler_confirmed_line" ] ||
+  if [ "$dispatcher_stop_line" -ge "$dispatcher_confirmed_line" ] ||
+    [ "$stop_line" -ge "$scheduler_confirmed_line" ] ||
     [ "$stop_line" -ge "$index_scheduler_confirmed_line" ] ||
     [ "$stop_line" -ge "$institutional_scheduler_confirmed_line" ] ||
     [ "$stop_line" -ge "$worker_confirmed_line" ]; then
@@ -425,12 +492,12 @@ assert_requiesced_after_scheduler_attempt() {
 : >"$temporary_dir/deployment.log"
 if PATH="$temporary_dir/stubs:$PATH" \
   DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
-  DOCKER_FAIL_MATCH='up -d --no-build --remove-orphans api web morning-report-scheduler' \
+  DOCKER_FAIL_MATCH='up -d --no-build --remove-orphans api web orchestration-dispatcher' \
   scripts/production/deploy.sh >"$temporary_dir/convergence-failure.out" 2>"$temporary_dir/convergence-failure.err"; then
   echo "deployment must fail when final service convergence fails" >&2
   exit 1
 fi
-grep -q 'Schema-boundary services are confirmed quiescent' "$temporary_dir/convergence-failure.err"
+grep -q 'Legacy schedulers are confirmed quiescent' "$temporary_dir/convergence-failure.err"
 assert_requiesced_after_scheduler_attempt "$temporary_dir/deployment.log"
 
 : >"$temporary_dir/deployment.log"
@@ -442,7 +509,7 @@ if PATH="$temporary_dir/stubs:$PATH" \
   echo "deployment must fail when the final health check fails" >&2
   exit 1
 fi
-grep -q 'Schema-boundary services are confirmed quiescent' "$temporary_dir/deployment-health-failure.err"
+grep -q 'Legacy schedulers are confirmed quiescent' "$temporary_dir/deployment-health-failure.err"
 assert_requiesced_after_scheduler_attempt "$temporary_dir/deployment.log"
 
 if PATH="$temporary_dir/stubs:$PATH" \

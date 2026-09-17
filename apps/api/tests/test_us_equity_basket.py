@@ -5,10 +5,11 @@ from decimal import Decimal
 import pytest
 
 from daily_insights_api.modules.data_sources.api import (
+    CompletedPriceResult,
+    CompletedPricesResult,
+    DailyBar,
     DataSourceContractError,
     Provenance,
-    QuoteResult,
-    QuotesResult,
 )
 from daily_insights_api.modules.reports.contracts import TableBlock
 from daily_insights_api.modules.reports.morning_report import (
@@ -19,31 +20,44 @@ from daily_insights_api.modules.reports.morning_report import (
 )
 
 
-def _quote(symbol: str, close: str, previous_close: str) -> QuoteResult:
-    return QuoteResult(
+def _price(symbol: str, close: str, previous_close: str) -> CompletedPriceResult:
+    provenance = Provenance(
+        provider="twelve_data",
+        contract_version="test",
+        contract_hash="a" * 64,
+        endpoint="/time_series",
+        query_fingerprint="b" * 64,
+        fetched_at=datetime(2026, 9, 3, tzinfo=UTC),
+        as_of=date(2026, 9, 2),
+        response_digest="c" * 64,
+        record_count=2,
+    )
+    bars = tuple(
+        DailyBar(
+            instrument_source_id=symbol,
+            market="us_equity",
+            symbol=symbol,
+            trade_date=day,
+            open=value,
+            high=value,
+            low=value,
+            close=value,
+            volume=None,
+            source="twelve_data",
+        )
+        for day, value in (
+            (date(2026, 9, 1), Decimal(previous_close)),
+            (date(2026, 9, 2), Decimal(close)),
+        )
+    )
+    return CompletedPriceResult(
         symbol=symbol,
-        name=None,
         currency="USD",
         as_of=date(2026, 9, 2),
         close=Decimal(close),
-        open=Decimal(close),
-        high=Decimal(close),
-        low=Decimal(close),
-        volume=None,
         previous_close=Decimal(previous_close),
-        change=None,
-        percent_change=Decimal("999"),
-        provenance=Provenance(
-            provider="twelve_data",
-            contract_version="test",
-            contract_hash="a" * 64,
-            endpoint="/quote",
-            query_fingerprint="b" * 64,
-            fetched_at=datetime(2026, 9, 3, tzinfo=UTC),
-            as_of=date(2026, 9, 2),
-            response_digest="c" * 64,
-            record_count=1,
-        ),
+        bars=bars,
+        provenances=(provenance,),
     )
 
 
@@ -63,19 +77,23 @@ PRICES = {
 class BasketAdapter:
     calls: list[tuple[tuple[str, ...], dict[str, str]]]
 
-    async def get_quotes(
+    async def get_completed_prices(
         self,
         *,
         market: str,
         symbols: tuple[str, ...],
         expected_currencies: dict[str, str],
         symbol_types: dict[str, str] | None = None,
-    ) -> QuotesResult:
+        outputsize: int = 2,
+        expected_asset_types: dict[str, str] | None = None,
+    ) -> CompletedPricesResult:
         assert market == "us_equity"
         assert symbol_types == {}
+        assert outputsize == 2
+        assert expected_asset_types is None
         self.calls.append((symbols, expected_currencies))
-        items = tuple(_quote(symbol, *PRICES[symbol]) for symbol in symbols)
-        return QuotesResult(items=items, provenances=(items[0].provenance,))
+        items = tuple(_price(symbol, *PRICES[symbol]) for symbol in symbols)
+        return CompletedPricesResult(items=items, provenances=items[0].provenances)
 
 
 async def test_us_equity_block_comes_from_fixed_mega_cap_basket() -> None:

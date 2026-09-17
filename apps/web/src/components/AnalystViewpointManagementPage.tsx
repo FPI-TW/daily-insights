@@ -1,10 +1,12 @@
 import { formatTimestamp } from "#/lib/format"
 import type {
   AnalystViewpointSyncStatus,
+  JobRun,
   Locale,
 } from "@daily-insights/api-client"
+import { useQuery } from "@tanstack/react-query"
 import { useRouter } from "@tanstack/react-router"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { browserAdministrationClient } from "#/lib/admin-members"
 import { requireCsrfToken } from "#/lib/auth"
@@ -20,24 +22,59 @@ export function AnalystViewpointManagementPage({
   const { t } = useTranslation()
   const router = useRouter()
   const redirectExpiredSession = useSessionExpiryRedirect(locale, "admin")
-  const [pending, setPending] = useState(false)
+  const [runId, setRunId] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
+  const run = useQuery({
+    queryKey: ["orchestration", "job-run", runId],
+    queryFn: () => browserAdministrationClient().getJobRun(runId!),
+    enabled: runId !== null,
+    refetchInterval: query =>
+      query.state.data?.status === "pending" ||
+      query.state.data?.status === "running"
+        ? 2_000
+        : false,
+  })
+
+  useEffect(() => {
+    if (
+      !run.data ||
+      run.data.status === "pending" ||
+      run.data.status === "running"
+    )
+      return
+    void router.invalidate({ sync: true }).finally(() => setRunId(null))
+  }, [router, run.data])
+
+  useEffect(() => {
+    if (!run.error) return
+    void (async () => {
+      if (!(await redirectExpiredSession(run.error))) {
+        setError(t("analystViewpointsSyncError"))
+      }
+      setRunId(null)
+    })()
+  }, [redirectExpiredSession, run.error, t])
 
   async function sync() {
-    setPending(true)
+    if (submitting || runId !== null) return
+    setSubmitting(true)
     setError("")
     try {
-      await browserAdministrationClient().syncAnalystViewpoints(
-        await requireCsrfToken()
-      )
-      await router.invalidate({ sync: true })
+      const queued: JobRun =
+        await browserAdministrationClient().syncAnalystViewpoints(
+          await requireCsrfToken()
+        )
+      setRunId(queued.id)
     } catch (caught) {
       if (await redirectExpiredSession(caught)) return
       setError(t("analystViewpointsSyncError"))
     } finally {
-      setPending(false)
+      setSubmitting(false)
     }
   }
+
+  const pending = submitting || runId !== null
 
   return (
     <main className="page-shell">

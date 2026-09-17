@@ -1,8 +1,7 @@
 import hashlib
 import json
-import re
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date
 from decimal import Decimal
 from itertools import pairwise
 
@@ -12,7 +11,6 @@ from daily_insights_api.modules.data_sources.dto import DailyBar, MarketCode, Pr
 from daily_insights_api.modules.data_sources.errors import DataSourceContractError
 from daily_insights_api.modules.data_sources.twelve_data.schemas import (
     TwelveDataEod,
-    TwelveDataQuote,
     TwelveDataTimeSeries,
 )
 from daily_insights_api.modules.data_sources.twelve_data.transport import (
@@ -21,9 +19,9 @@ from daily_insights_api.modules.data_sources.twelve_data.transport import (
     TwelveDataTransportResponse,
 )
 
-TWELVE_DATA_CONTRACT_VERSION = "2026-09-07.v5"
+TWELVE_DATA_CONTRACT_VERSION = "2026-09-16.v6"
 TWELVE_DATA_CONTRACT_HASH = hashlib.sha256(
-    b"twelve-data:quote,eod,time_series,market_movers/stocks,commodity-eod:2026-09-07.v5"
+    b"twelve-data:eod,time_series,completed-daily-bars:2026-09-16.v6"
 ).hexdigest()
 # Commodity 1day metadata is inconsistent: most USD commodities spell out
 # "US Dollar", while HG1 (with type=commodity) returns the ISO code. Both
@@ -44,29 +42,21 @@ TWELVE_DATA_CURRENCY_NAMES = {
 
 
 @dataclass(frozen=True, slots=True)
-class QuoteResult:
+class CompletedPriceResult:
     symbol: str
-    name: str | None
     currency: str
     as_of: date
     close: Decimal
-    open: Decimal
-    high: Decimal
-    low: Decimal
-    volume: int | None
-    previous_close: Decimal | None
-    change: Decimal | None
-    # The provider's own figure, kept for provenance; reports derive their
-    # change from previous_close so the definition is ours.
-    percent_change: Decimal | None
-    provenance: Provenance
+    previous_close: Decimal
+    bars: tuple[DailyBar, ...]
+    provenances: tuple[Provenance, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class QuotesResult:
-    """Quotes in the requested symbol order plus one provenance per request made."""
+class CompletedPricesResult:
+    """Completed closes in requested order, anchored by official EOD."""
 
-    items: tuple[QuoteResult, ...]
+    items: tuple[CompletedPriceResult, ...]
     provenances: tuple[Provenance, ...]
 
 
@@ -93,7 +83,6 @@ class EodsResult:
     provenance: Provenance
 
 
-_BATCH_QUOTES = TypeAdapter(dict[str, TwelveDataQuote])
 _BATCH_EODS = TypeAdapter(dict[str, TwelveDataEod])
 
 
@@ -101,37 +90,22 @@ class TwelveDataAdapter:
     def __init__(self, transport: TwelveDataTransport) -> None:
         self._transport = transport
 
-    async def get_quote(
-        self,
-        *,
-        market: MarketCode,
-        symbol: str,
-        expected_currency: str,
-        symbol_type: str | None = None,
-    ) -> QuoteResult:
-        result = await self.get_quotes(
-            market=market,
-            symbols=(symbol,),
-            expected_currencies={symbol: expected_currency},
-            symbol_types={symbol: symbol_type} if symbol_type else {},
-        )
-        return result.items[0]
-
-    async def get_quotes(
+    async def get_completed_prices(
         self,
         *,
         market: MarketCode,
         symbols: tuple[str, ...],
         expected_currencies: dict[str, str],
         symbol_types: dict[str, str] | None = None,
-    ) -> QuotesResult:
-        """Fetch several quotes with one request per asset-class group.
+        expected_asset_types: dict[str, str] | None = None,
+        outputsize: int = 2,
+    ) -> CompletedPricesResult:
+        """Return only completed sessions and cross-check latest `/eod`.
 
-        The provider's ``type`` parameter applies to a whole request, so
-        symbols that pin a type (commodities) are requested apart from the
-        rest. Every quote passes the same contract checks as a single request.
+        `/time_series` supplies both the current and previous completed
+        sessions. `/eod` validates only the latest official close because it
+        has no historical observation in its contract.
         """
-        del market
         if not symbols or len(set(symbols)) != len(symbols):
             raise ValueError("symbols must be a non-empty tuple of distinct symbols")
         if set(expected_currencies) != set(symbols):
@@ -140,37 +114,53 @@ class TwelveDataAdapter:
         groups: dict[str | None, list[str]] = {}
         for symbol in symbols:
             groups.setdefault(types.get(symbol), []).append(symbol)
-        quotes: dict[str, QuoteResult] = {}
+        eods: dict[str, EodResult] = {}
         provenances: list[Provenance] = []
         for symbol_type, group in groups.items():
-            params: dict[str, QueryValue] = {"symbol": ",".join(group)}
-            if symbol_type is not None:
-                params["type"] = symbol_type
-            response = await self._transport.get("/quote", params=params)
-            payloads = _parse_quotes(response, group)
-            parsed = {
-                symbol: _quote_result(
-                    payloads[symbol],
-                    symbol,
-                    expected_currencies[symbol],
-                    symbol_type,
-                    response,
-                    params,
-                )
-                for symbol in group
-            }
-            quotes.update(parsed)
-            provenances.append(
-                _provenance(
-                    response,
-                    "/quote",
-                    params,
-                    min(item.as_of for item in parsed.values()),
-                    len(parsed),
-                )
+            group_eods = await self.get_eods(
+                market=market,
+                symbols=tuple(group),
+                expected_currencies={symbol: expected_currencies[symbol] for symbol in group},
+                symbol_type=symbol_type,
             )
-        return QuotesResult(
-            items=tuple(quotes[symbol] for symbol in symbols),
+            eods.update({item.symbol: item for item in group_eods.items})
+            provenances.append(group_eods.provenance)
+        results: dict[str, CompletedPriceResult] = {}
+        for symbol in symbols:
+            series = await self.get_daily_bars(
+                market=market,
+                symbol=symbol,
+                expected_currency=expected_currencies[symbol],
+                outputsize=max(2, outputsize),
+                expected_asset_type=(expected_asset_types or {}).get(symbol),
+                symbol_type=types.get(symbol),
+                minimum_items=2,
+            )
+            completed = tuple(
+                item for item in series.items if item.trade_date <= eods[symbol].as_of
+            )
+            if len(completed) < 2:
+                raise DataSourceContractError(
+                    "Twelve Data returned fewer than two completed sessions"
+                )
+            latest = completed[-1]
+            if latest.trade_date != eods[symbol].as_of or latest.close != eods[symbol].close:
+                raise DataSourceContractError(
+                    "Twelve Data EOD date or close did not match the daily series"
+                )
+            assert latest.close is not None and completed[-2].close is not None
+            results[symbol] = CompletedPriceResult(
+                symbol=symbol,
+                currency=expected_currencies[symbol],
+                as_of=latest.trade_date,
+                close=latest.close,
+                previous_close=completed[-2].close,
+                bars=completed,
+                provenances=(eods[symbol].provenance, series.provenance),
+            )
+            provenances.append(series.provenance)
+        return CompletedPricesResult(
+            items=tuple(results[symbol] for symbol in symbols),
             provenances=tuple(provenances),
         )
 
@@ -186,6 +176,7 @@ class TwelveDataAdapter:
         dp: int | None = None,
         end_date: date | None = None,
         timezone: str | None = None,
+        minimum_items: int | None = None,
     ) -> DailyBarsResult:
         if not 1 <= outputsize <= 5_000:
             raise ValueError("outputsize must be between 1 and 5000")
@@ -241,7 +232,10 @@ class TwelveDataAdapter:
         )
         if not items:
             raise DataSourceContractError("Twelve Data returned an empty time series")
-        if len(items) < outputsize:
+        required_items = outputsize if minimum_items is None else minimum_items
+        if required_items < 1 or required_items > outputsize:
+            raise ValueError("minimum_items must be between 1 and outputsize")
+        if len(items) < required_items:
             raise DataSourceContractError("Twelve Data returned less than the required history")
         if any(
             value is None
@@ -263,6 +257,7 @@ class TwelveDataAdapter:
         market: MarketCode,
         symbols: tuple[str, ...],
         expected_currencies: dict[str, str],
+        symbol_type: str | None = "commodity",
     ) -> EodsResult:
         """Fetch commodity EOD closes in one exact-coverage request.
 
@@ -274,13 +269,12 @@ class TwelveDataAdapter:
             raise ValueError("symbols must be a non-empty tuple of distinct symbols")
         if set(expected_currencies) != set(symbols):
             raise ValueError("expected_currencies must cover every requested symbol")
-        if any(currency != "USD" for currency in expected_currencies.values()):
-            raise ValueError("commodity EOD currency must be pinned to USD")
         params: dict[str, QueryValue] = {
             "symbol": ",".join(symbols),
-            "type": "commodity",
             "dp": 11,
         }
+        if symbol_type is not None:
+            params["type"] = symbol_type
         response = await self._transport.get("/eod", params=params)
         payloads = _parse_eods(response, symbols)
         items = tuple(
@@ -305,30 +299,6 @@ class TwelveDataAdapter:
         )
 
 
-def _quote_currency(symbol: str) -> str | None:
-    parts = symbol.split("/", maxsplit=1)
-    return parts[1] if len(parts) == 2 else None
-
-
-def _parse_quotes(
-    response: TwelveDataTransportResponse, symbols: list[str]
-) -> dict[str, TwelveDataQuote]:
-    """A single-symbol request answers with one flat quote; a batch answers with
-    a symbol-keyed object whose entries may individually be error objects,
-    which fail validation and therefore the whole request."""
-    if len(symbols) == 1:
-        return {symbols[0]: _parse(response, TwelveDataQuote, "/quote")}
-    try:
-        payloads = _BATCH_QUOTES.validate_json(response.content)
-    except ValidationError as error:
-        raise DataSourceContractError(
-            "Twelve Data response no longer matches the reviewed contract for /quote"
-        ) from error
-    if set(payloads) != set(symbols):
-        raise DataSourceContractError("Twelve Data batch quote did not cover every symbol")
-    return payloads
-
-
 def _parse_eods(
     response: TwelveDataTransportResponse, symbols: tuple[str, ...]
 ) -> dict[str, TwelveDataEod]:
@@ -343,47 +313,6 @@ def _parse_eods(
     if set(payloads) != set(symbols):
         raise DataSourceContractError("Twelve Data batch EOD did not cover every symbol")
     return payloads
-
-
-def _quote_result(
-    payload: TwelveDataQuote,
-    symbol: str,
-    expected_currency: str,
-    symbol_type: str | None,
-    response: TwelveDataTransportResponse,
-    params: dict[str, QueryValue],
-) -> QuoteResult:
-    if payload.symbol != symbol:
-        raise DataSourceContractError("Twelve Data quote symbol did not match the request")
-    if payload.previous_close is None or payload.previous_close <= 0:
-        raise DataSourceContractError("Twelve Data quote omitted a usable previous close")
-    currency = payload.currency or _quote_currency(symbol)
-    # Commodity quotes carry no currency field; the manifest pins their unit,
-    # and the type parameter already guarantees the asset class.
-    if currency is None and symbol_type == "commodity":
-        currency = expected_currency
-    if currency is None or re.fullmatch(r"[A-Z]{3}", currency) is None:
-        raise DataSourceContractError("Twelve Data quote returned an invalid currency unit")
-    if currency != expected_currency:
-        raise DataSourceContractError(
-            "Twelve Data quote currency did not match the launch manifest"
-        )
-    as_of = datetime.fromtimestamp(payload.timestamp, UTC).date()
-    return QuoteResult(
-        symbol=payload.symbol,
-        name=payload.name,
-        currency=currency,
-        as_of=as_of,
-        close=payload.close,
-        open=payload.open,
-        high=payload.high,
-        low=payload.low,
-        volume=payload.volume,
-        previous_close=payload.previous_close,
-        change=payload.change,
-        percent_change=payload.percent_change,
-        provenance=_provenance(response, "/quote", params, as_of, 1),
-    )
 
 
 def _eod_result(

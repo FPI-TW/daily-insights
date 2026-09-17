@@ -4,6 +4,7 @@ import {
   activePublishRunIds,
   candidateFilterOf,
   filterCandidates,
+  isNewsRun,
   newsMutationErrorKey,
   publishRunCounts,
 } from "./news-curation"
@@ -40,15 +41,19 @@ describe("news curation helpers", () => {
   })
 
   it("collects only active manual publish runs", () => {
-    const run = (id: string, operation: string, status: string) =>
-      ({ id, operation, status }) as never
+    const run = (id: string, job_key: string, status: string) =>
+      ({ id, job_key, status }) as never
     expect(
       activePublishRunIds([
-        run("a", "news_publish", "running"),
-        run("b", "news_publish", "succeeded"),
-        run("c", "news_all", "pending"),
+        run("a", "news_publish_job", "running"),
+        run("b", "news_publish_job", "succeeded"),
+        run("c", "news_daily_update", "pending"),
       ])
     ).toEqual(new Set(["a"]))
+  })
+
+  it("includes the automatic mixed internal-services job in news polling", () => {
+    expect(isNewsRun({ job_key: "internal_services_daily_update" })).toBe(true)
   })
 
   it("maps conflict and unavailable statuses to their messages", () => {

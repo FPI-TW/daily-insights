@@ -24,7 +24,12 @@
 - 美國財政部：[Daily Treasury XML](https://home.treasury.gov/treasury-daily-interest-rate-xml-feed)，不需金鑰。讀取當年及前兩年，單一年度失敗不丟棄其他成功年度。
 - 紐約聯準銀行：[SOFR](https://www.newyorkfed.org/markets/reference-rates/sofr)，不需金鑰。
 
-HTTP 從資料庫讀取最後保存的 dashboard snapshot，不直接呼叫來源。排程器或管理操作建立 durable job，由 data-management worker 抓取與保存。Twelve Data 與 Yahoo 請求最多四個並行，各商品失敗獨立處理。
+HTTP 從資料庫讀取最後保存的 dashboard snapshot，不直接呼叫來源。每日
+RoutineRun 或後台 `global_macro_refresh` 建立 durable JobRuns；
+`orchestration-worker` 執行各 Provider 的 functions，同 Provider 依序、不同 Provider
+可平行，且部分失敗只重試缺失 scopes。`macro_dashboard_publish` 只讀取已保存的 typed
+facts 與 provenance，不再次呼叫外部來源。Twelve Data 與 Yahoo 請求最多四個並行，
+各商品失敗獨立處理。
 
 每筆宏觀作業的 `result.sources` 記錄四個來源的 `code`、`name`、`status`、`fetched_at`、`affected_items` 與 `failures`。每個 failure 保存固定 endpoint 名称、項目、分類和可取得的 HTTP 狀態碼；不保存原始例外、金鑰或回應內容。來源狀態為 `ok/degraded/unavailable/disabled`。同一來源可以包含多種失敗；adapter 沒有提供可辨識原因時顯示「原因未能確認」。診斷只供後台，不加入前台 dashboard API。
 

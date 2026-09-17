@@ -1,6 +1,5 @@
 import { ApiError } from "@daily-insights/api-client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act } from "react"
 import {
   cleanup,
   fireEvent,
@@ -9,26 +8,33 @@ import {
   waitFor,
 } from "@testing-library/react"
 import { I18nextProvider } from "react-i18next"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createI18n } from "#/lib/i18n"
 import { DataManagementPage } from "./DataManagementPage"
 
-const { catalog, listRuns, createRun, cancelRun, redirectExpired } = vi.hoisted(
-  () => ({
-    catalog: vi.fn(),
-    listRuns: vi.fn(),
-    createRun: vi.fn(),
-    cancelRun: vi.fn(),
-    redirectExpired: vi.fn().mockResolvedValue(false),
-  })
-)
+const {
+  catalog,
+  listRuns,
+  listRoutines,
+  createRun,
+  cancelRun,
+  redirectExpired,
+} = vi.hoisted(() => ({
+  catalog: vi.fn(),
+  listRuns: vi.fn(),
+  listRoutines: vi.fn(),
+  createRun: vi.fn(),
+  cancelRun: vi.fn(),
+  redirectExpired: vi.fn().mockResolvedValue(false),
+}))
 
 vi.mock("#/lib/admin-members", () => ({
   browserAdministrationClient: () => ({
-    dataManagementCatalog: catalog,
-    listDataManagementRuns: listRuns,
-    createDataManagementRun: createRun,
-    cancelDataManagementRun: cancelRun,
+    orchestrationCatalog: catalog,
+    listJobRuns: listRuns,
+    listRoutineRuns: listRoutines,
+    createJobRun: createRun,
+    cancelJobRun: cancelRun,
   }),
 }))
 vi.mock("#/lib/auth", () => ({
@@ -40,14 +46,18 @@ vi.mock("#/lib/useSessionExpiry", () => ({
 
 const catalogResult = {
   taipei_date: "2026-09-07",
-  morning_reports_enabled: true,
-  yfinance_enabled: true,
-  twse_enabled: true,
-  daily_news_enabled: true,
-  markets: ["global_macro_bonds", "crypto", "us_equity"],
-  rerunnable_providers: ["twelve_data", "yahoo_finance", "twse"],
-  news_markets: ["global", "tw_equity", "us_equity"],
-  macro_dashboard_enabled: true,
+  registry_version: "orchestration.v1",
+  registry_digest: "a".repeat(64),
+  providers: [],
+  functions: [],
+  jobs: [],
+  routine_key: "daily_market_update_v1",
+  manual_market_jobs: [
+    "global_macro_refresh",
+    "us_equity_refresh",
+    "tw_equity_refresh",
+  ],
+  features: { daily_news: true, analyst_viewpoints: true },
 }
 const emptyRuns = {
   items: [],
@@ -55,8 +65,31 @@ const emptyRuns = {
   page_size: 10,
   total: 0,
   has_more: false,
-  active_runs: [],
-  current_day_runs: [],
+}
+const emptyRoutines = { ...emptyRuns }
+
+function jobRun(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "c744cb20-bf7c-4f4a-8e7b-1e0c69a91adf",
+    routine_run_id: null,
+    job_key: "global_macro_refresh",
+    kind: "function",
+    trigger: "manual",
+    edition_date: "2026-09-07",
+    deadline_at: null,
+    status: "pending",
+    requested_by_user_id: "9322a09a-6a02-421b-a966-a5cd5f44056e",
+    payload: null,
+    started_at: null,
+    completed_at: null,
+    result: null,
+    error: null,
+    created_at: "2026-09-07T00:00:00+00:00",
+    functions: [],
+    depends_on: [],
+    downstream_jobs: [],
+    ...overrides,
+  }
 }
 
 function renderPage() {
@@ -77,11 +110,15 @@ afterEach(() => {
   cleanup()
   catalog.mockReset()
   listRuns.mockReset()
+  listRoutines.mockReset()
   createRun.mockReset()
   cancelRun.mockReset()
   redirectExpired.mockReset()
   redirectExpired.mockResolvedValue(false)
-  vi.useRealTimers()
+})
+
+beforeEach(() => {
+  listRoutines.mockResolvedValue(emptyRoutines)
 })
 
 describe("DataManagementPage", () => {
@@ -94,335 +131,149 @@ describe("DataManagementPage", () => {
     )
   })
 
-  it("shows exactly the full and single-provider rerun blocks", async () => {
+  it("offers only the three market refresh jobs", async () => {
     catalog.mockResolvedValue(catalogResult)
     listRuns.mockResolvedValue(emptyRuns)
     renderPage()
-    expect(await screen.findByText("Full morning rerun")).toBeInTheDocument()
-    expect(screen.getByText("Single-provider rerun")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Twelve Data" })).toBeEnabled()
-    expect(screen.getByRole("button", { name: "Yahoo Finance" })).toBeEnabled()
-    expect(screen.getByRole("button", { name: "TWSE" })).toBeEnabled()
-    expect(screen.queryByText("Single-market rerun")).not.toBeInTheDocument()
-
-    const full = screen.getByRole("button", {
-      name: "Rerun full morning report",
-    })
-    fireEvent.click(full)
-    expect(screen.getByRole("alertdialog")).toHaveTextContent(
-      "Twelve Data, Yahoo Finance, TWSE"
-    )
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
-    expect(createRun).not.toHaveBeenCalled()
-    await waitFor(() => expect(full).toHaveFocus())
+    expect(
+      await screen.findByRole("button", { name: "Refresh global macro data" })
+    ).toBeEnabled()
+    expect(
+      screen.getByRole("button", { name: "Update international indices" })
+    ).toBeEnabled()
+    expect(
+      screen.getByRole("button", { name: "Update exchange data" })
+    ).toBeEnabled()
+    expect(screen.queryByRole("button", { name: "Twelve Data" })).toBeNull()
   })
 
-  it("submits the confirmed full rerun only once while pending", async () => {
-    let resolve: (value: object) => void = () => undefined
-    createRun.mockReturnValue(new Promise<object>(done => (resolve = done)))
+  it.each([
+    ["Refresh global macro data", "global_macro_refresh"],
+    ["Update international indices", "us_equity_refresh"],
+    ["Update exchange data", "tw_equity_refresh"],
+  ])("queues %s as a native job run", async (label, key) => {
     catalog.mockResolvedValue(catalogResult)
     listRuns.mockResolvedValue(emptyRuns)
+    createRun.mockResolvedValue(jobRun({ job_key: key }))
+    renderPage()
+    fireEvent.click(await screen.findByRole("button", { name: label }))
+    await waitFor(() => expect(createRun).toHaveBeenCalledWith(key, "csrf"))
+  })
+
+  it("shows and cancels an active native job run", async () => {
+    const active = jobRun({ status: "running" })
+    catalog.mockResolvedValue(catalogResult)
+    listRuns.mockResolvedValue({ ...emptyRuns, items: [active], total: 1 })
+    cancelRun.mockResolvedValue(jobRun({ status: "cancelled" }))
+    createRun.mockResolvedValue(jobRun())
+    renderPage()
+    const repeat = await screen.findByRole("button", {
+      name: "Refresh global macro data",
+    })
+    expect(repeat).toBeEnabled()
+    fireEvent.click(repeat)
+    await waitFor(() =>
+      expect(createRun).toHaveBeenCalledWith("global_macro_refresh", "csrf")
+    )
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }))
+    await waitFor(() =>
+      expect(cancelRun).toHaveBeenCalledWith(active.id, "csrf")
+    )
+  })
+
+  it("shows the daily routine job graph, attempts and projection dependencies", async () => {
+    const providerJob = jobRun({
+      id: "11111111-1111-4111-8111-111111111111",
+      routine_run_id: "33333333-3333-4333-8333-333333333333",
+      job_key: "twelve_data_daily_update",
+      trigger: "automatic",
+      status: "succeeded",
+      functions: [
+        {
+          id: "44444444-4444-4444-8444-444444444444",
+          function_key: "commodity_daily_bars",
+          provider_key: "twelve_data",
+          scope: {},
+          status: "succeeded",
+          missing_scopes: null,
+          attempt_count: 1,
+          next_attempt_at: null,
+          started_at: "2026-09-07T00:00:00+00:00",
+          completed_at: "2026-09-07T00:01:00+00:00",
+          result: null,
+          error: null,
+          attempts: [
+            {
+              id: "55555555-5555-4555-8555-555555555555",
+              attempt_number: 1,
+              status: "succeeded",
+            },
+          ],
+          depends_on: [],
+        },
+      ],
+      downstream_jobs: ["22222222-2222-4222-8222-222222222222"],
+    })
+    const projection = jobRun({
+      id: "22222222-2222-4222-8222-222222222222",
+      routine_run_id: "33333333-3333-4333-8333-333333333333",
+      job_key: "market_reports_publish",
+      kind: "projection",
+      trigger: "automatic",
+      status: "running",
+      depends_on: [providerJob.id],
+    })
+    catalog.mockResolvedValue(catalogResult)
+    listRuns.mockResolvedValue(emptyRuns)
+    listRoutines.mockResolvedValue({
+      ...emptyRoutines,
+      total: 1,
+      items: [
+        {
+          id: "33333333-3333-4333-8333-333333333333",
+          routine_key: "daily_market_update_v1",
+          registry_version: "orchestration.v1",
+          edition_date: "2026-09-07",
+          scheduled_for: "2026-09-07T00:00:00+00:00",
+          deadline_at: "2026-09-07T02:00:00+00:00",
+          status: "running",
+          started_at: "2026-09-07T00:00:00+00:00",
+          completed_at: null,
+          result: null,
+          created_at: "2026-09-07T00:00:00+00:00",
+          jobs: [providerJob, projection],
+        },
+      ],
+    })
+    renderPage()
+
+    expect(
+      await screen.findByText("daily_market_update_v1", { exact: false })
+    ).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByText("daily_market_update_v1", { exact: false })
+    )
+    expect(
+      screen.getByText(/^function · twelve_data_daily_update · succeeded$/)
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("commodity_daily_bars", { exact: false })
+    ).toBeInTheDocument()
+    expect(screen.getByText("Attempt 1 · succeeded")).toBeInTheDocument()
+    expect(
+      screen.getByText("Depends on: twelve_data_daily_update")
+    ).toBeInTheDocument()
+  })
+
+  it("redirects expired mutations", async () => {
+    const expired = new ApiError(401, null, "expired")
+    catalog.mockResolvedValue(catalogResult)
+    listRuns.mockResolvedValue(emptyRuns)
+    createRun.mockRejectedValue(expired)
     renderPage()
     fireEvent.click(
-      await screen.findByRole("button", { name: "Rerun full morning report" })
+      await screen.findByRole("button", { name: "Update exchange data" })
     )
-    const confirm = screen.getByRole("button", { name: "Queue rerun" })
-    fireEvent.click(confirm)
-    await waitFor(() =>
-      expect(createRun).toHaveBeenCalledWith(
-        { operation: "morning_all" },
-        "csrf"
-      )
-    )
-    expect(confirm).toBeDisabled()
-    resolve({})
-  })
-
-  it("queues each provider using the provider contract", async () => {
-    catalog.mockResolvedValue(catalogResult)
-    listRuns.mockResolvedValue(emptyRuns)
-    createRun.mockResolvedValue({})
-    renderPage()
-    for (const [label, provider] of [
-      ["Twelve Data", "twelve_data"],
-      ["Yahoo Finance", "yahoo_finance"],
-      ["TWSE", "twse"],
-    ] as const) {
-      fireEvent.click(await screen.findByRole("button", { name: label }))
-      await waitFor(() =>
-        expect(createRun).toHaveBeenCalledWith(
-          { operation: "provider_rerun", provider },
-          "csrf"
-        )
-      )
-    }
-    expect(createRun).toHaveBeenCalledTimes(3)
-  })
-
-  it("gates providers independently and requires all providers for a full run", async () => {
-    catalog.mockResolvedValue({ ...catalogResult, yfinance_enabled: false })
-    listRuns.mockResolvedValue(emptyRuns)
-    renderPage()
-    expect(
-      await screen.findByRole("button", { name: "Yahoo Finance" })
-    ).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Twelve Data" })).toBeEnabled()
-    expect(screen.getByRole("button", { name: "TWSE" })).toBeEnabled()
-    expect(
-      screen.getByRole("button", { name: "Rerun full morning report" })
-    ).toBeDisabled()
-  })
-
-  it("blocks full reruns for active provider work and only the matching provider", async () => {
-    catalog.mockResolvedValue(catalogResult)
-    const active = {
-      id: "provider-run",
-      status: "running",
-      operation: "provider_rerun",
-      provider: "twse",
-      market_code: null,
-      edition_date: "2026-09-07",
-      requested_by_user_id: "admin",
-      created_at: "2026-09-07T00:00:00Z",
-      started_at: "2026-09-07T00:01:00Z",
-      completed_at: null,
-      result: null,
-      error: null,
-    }
-    listRuns.mockResolvedValue({
-      ...emptyRuns,
-      items: [active],
-      active_runs: [active],
-    })
-    renderPage()
-    expect(
-      await screen.findByRole("button", { name: "Rerun full morning report" })
-    ).toBeDisabled()
-    expect(screen.getByRole("button", { name: "TWSE" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Twelve Data" })).toBeEnabled()
-    expect(screen.getByRole("button", { name: "Yahoo Finance" })).toBeEnabled()
-  })
-
-  it("keeps matching controls blocked for cancelled work that still has a lease", async () => {
-    catalog.mockResolvedValue(catalogResult)
-    const cancelledButLeased = {
-      id: "cancelled-provider-run",
-      status: "cancelled",
-      operation: "provider_rerun",
-      provider: "twse",
-      market_code: null,
-      edition_date: "2026-09-07",
-      requested_by_user_id: "admin",
-      created_at: "2026-09-07T00:00:00Z",
-      started_at: "2026-09-07T00:01:00Z",
-      completed_at: "2026-09-07T00:02:00Z",
-      result: null,
-      error: "cancelled_by_admin",
-    }
-    listRuns.mockResolvedValue({
-      ...emptyRuns,
-      items: [cancelledButLeased],
-      active_runs: [cancelledButLeased],
-    })
-
-    renderPage()
-
-    expect(
-      await screen.findByRole("button", { name: "Rerun full morning report" })
-    ).toBeDisabled()
-    expect(screen.getByRole("button", { name: "TWSE" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Twelve Data" })).toBeEnabled()
-    expect(screen.getByRole("button", { name: "Yahoo Finance" })).toBeEnabled()
-  })
-
-  it("renders provider-separated full-run details", async () => {
-    catalog.mockResolvedValue(catalogResult)
-    listRuns.mockResolvedValue({
-      ...emptyRuns,
-      items: [
-        {
-          id: "full-run",
-          status: "partial",
-          operation: "morning_all",
-          market_code: null,
-          edition_date: "2026-09-07",
-          completed_at: "2026-09-07T09:00:00Z",
-          result: {
-            providers: {
-              twelve_data: {
-                status: "succeeded",
-                details: { markets: [] },
-                error: null,
-              },
-              yahoo_finance: {
-                status: "partial",
-                details: { symbols: [{ symbol: "^GSPC", status: "failed" }] },
-                error: "index_partial",
-              },
-              twse: {
-                status: "failed",
-                details: {},
-                error: "twse_unavailable",
-              },
-            },
-          },
-          error: "full_morning_failures",
-        },
-      ],
-    })
-    renderPage()
-    fireEvent.click(await screen.findByText(/partial · morning_all/))
-    expect(screen.getByText(/Twelve Data · succeeded/)).toBeInTheDocument()
-    expect(screen.getByText(/Yahoo Finance · partial/)).toBeInTheDocument()
-    expect(screen.getByText(/TWSE · failed/)).toBeInTheDocument()
-    expect(screen.getByText(/error: index_partial/)).toBeInTheDocument()
-  })
-
-  it("renders TWSE provider coverage details", async () => {
-    catalog.mockResolvedValue(catalogResult)
-    listRuns.mockResolvedValue({
-      ...emptyRuns,
-      items: [
-        {
-          id: "twse-run",
-          status: "partial",
-          operation: "provider_rerun",
-          provider: "twse",
-          market_code: null,
-          edition_date: "2026-09-07",
-          completed_at: "2026-09-07T09:00:00Z",
-          result: {
-            index: { symbol: "^TWII", status: "succeeded", record_count: 21 },
-            stock_flows: {
-              lookback_trading_days: 1,
-              covered_trading_days: 1,
-              aborted: false,
-              days: [
-                {
-                  trade_date: "2026-09-04",
-                  status: "stored",
-                  record_count: 6700,
-                },
-              ],
-            },
-            market_flows: {
-              lookback_trading_days: 40,
-              covered_trading_days: 39,
-              aborted: false,
-              days: [
-                { trade_date: "2026-09-04", status: "failed", error: "boom" },
-              ],
-            },
-          },
-          error: null,
-        },
-      ],
-    })
-    renderPage()
-    expect(
-      await screen.findByText("Covered 1 / 1 trading days")
-    ).toBeInTheDocument()
-    expect(screen.getByText("Covered 39 / 40 trading days")).toBeInTheDocument()
-    expect(screen.getByText("6700")).toBeInTheDocument()
-    expect(screen.getByText("boom")).toBeInTheDocument()
-    expect(
-      screen.getByText(/TWSE · \^TWII · Taiwan Weighted Index/)
-    ).toBeInTheDocument()
-  })
-
-  it("paginates history while keeping off-page active runs visible", async () => {
-    catalog.mockResolvedValue(catalogResult)
-    const active = {
-      id: "active-run",
-      status: "running",
-      operation: "provider_rerun",
-      provider: "twse",
-      market_code: null,
-      edition_date: "2026-09-07",
-      requested_by_user_id: "admin",
-      created_at: "2026-09-07T00:00:00Z",
-      started_at: null,
-      completed_at: null,
-      result: null,
-      error: null,
-    }
-    listRuns
-      .mockResolvedValueOnce({
-        ...emptyRuns,
-        total: 11,
-        has_more: true,
-        active_runs: [active],
-      })
-      .mockResolvedValue({
-        ...emptyRuns,
-        page: 2,
-        total: 11,
-        active_runs: [active],
-      })
-    renderPage()
-    expect(await screen.findByText("Active runs")).toBeInTheDocument()
-    expect(
-      screen.getByText(/running · provider_rerun · TWSE/)
-    ).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Next" }))
-    await waitFor(() => expect(listRuns).toHaveBeenLastCalledWith(2))
-    expect(await screen.findByText("Page 2")).toBeInTheDocument()
-  })
-
-  it("polls only while the API reports an active run", async () => {
-    vi.useFakeTimers()
-    catalog.mockResolvedValue(catalogResult)
-    const pending = {
-      id: "pending-run",
-      status: "pending",
-      operation: "morning_all",
-      market_code: null,
-      edition_date: "2026-09-07",
-      completed_at: null,
-      result: null,
-      error: null,
-    }
-    listRuns
-      .mockResolvedValueOnce({
-        ...emptyRuns,
-        items: [pending],
-        total: 1,
-        active_runs: [pending],
-      })
-      .mockResolvedValue({
-        ...emptyRuns,
-        items: [{ ...pending, status: "succeeded" }],
-        total: 1,
-      })
-    renderPage()
-    await act(async () => vi.advanceTimersByTimeAsync(0))
-    expect(
-      screen.getByRole("button", { name: "Rerun full morning report" })
-    ).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Twelve Data" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Yahoo Finance" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "TWSE" })).toBeDisabled()
-    await act(async () => vi.advanceTimersByTimeAsync(2_000))
-    expect(listRuns).toHaveBeenCalledTimes(2)
-    await act(async () => vi.advanceTimersByTimeAsync(2_000))
-    expect(listRuns).toHaveBeenCalledTimes(2)
-  })
-
-  it("reports conflict, unavailable, and session expiry distinctly", async () => {
-    catalog.mockResolvedValue(catalogResult)
-    listRuns.mockResolvedValue(emptyRuns)
-    createRun.mockRejectedValueOnce(new ApiError(409, null, "conflict"))
-    renderPage()
-    const twse = await screen.findByRole("button", { name: "TWSE" })
-    fireEvent.click(twse)
-    expect(await screen.findByRole("alert")).toHaveTextContent("already active")
-    createRun.mockRejectedValueOnce(new ApiError(503, null, "unavailable"))
-    fireEvent.click(twse)
-    expect(await screen.findByRole("alert")).toHaveTextContent("unavailable")
-    createRun.mockRejectedValueOnce(new ApiError(401, null, "expired"))
-    fireEvent.click(twse)
-    await waitFor(() =>
-      expect(redirectExpired).toHaveBeenCalledWith(expect.any(ApiError))
-    )
+    await waitFor(() => expect(redirectExpired).toHaveBeenCalledWith(expired))
   })
 })

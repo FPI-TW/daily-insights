@@ -12,12 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from daily_insights_api.modules.data_sources.api import (
     TWELVE_DATA_CONTRACT_HASH,
     TWELVE_DATA_CONTRACT_VERSION,
+    CompletedPriceResult,
+    CompletedPricesResult,
     DailyBar,
     DataSourceContractError,
     EodResult,
     Provenance,
-    QuoteResult,
-    QuotesResult,
     TwelveDataAdapter,
 )
 from daily_insights_api.modules.operations.api import (
@@ -570,8 +570,8 @@ async def _build_dataset_blocks(
                 as_of=min(item.as_of for item in eods.items),
             ),
         )
-    if dataset.key == "macro.rates_fx_quotes":
-        quotes = await _dataset_quotes(adapter, market_code, dataset)
+    if dataset.key == "macro.rates_fx_daily_bars":
+        quotes = await _dataset_completed_prices(adapter, market_code, dataset)
         rates_block = MetricBlock(
             id="macro.rates_fx",
             status="ok",
@@ -582,8 +582,8 @@ async def _build_dataset_blocks(
             ),
         )
         return (rates_block,), _aggregate_provenance(quotes.provenances)
-    if dataset.key == "us.mega_cap_quotes":
-        quotes = await _dataset_quotes(adapter, market_code, dataset)
+    if dataset.key == "us.mega_cap_daily_bars":
+        quotes = await _dataset_completed_prices(adapter, market_code, dataset)
         # The basket is fixed, so ranking by move only orders the rows; it
         # cannot pull low-priced names in the way provider movers did.
         ranked = sorted(
@@ -689,12 +689,12 @@ async def _build_dataset_blocks(
     raise DataSourceContractError(f"unsupported report dataset {dataset.key}")
 
 
-async def _dataset_quotes(
+async def _dataset_completed_prices(
     adapter: TwelveDataAdapter,
     market_code: LaunchMarketCode,
     dataset: DatasetManifest,
-) -> QuotesResult:
-    return await adapter.get_quotes(
+) -> CompletedPricesResult:
+    return await adapter.get_completed_prices(
         market=market_code,
         symbols=dataset.symbols,
         expected_currencies=dict(dataset.symbol_units),
@@ -707,7 +707,7 @@ def _metric_id(symbol: str) -> str:
     return symbol.lower().replace("/", "_")
 
 
-def _metric_item(identifier: str, item: QuoteResult, block_id: str) -> MetricItem:
+def _metric_item(identifier: str, item: CompletedPriceResult, block_id: str) -> MetricItem:
     return MetricItem(
         id=identifier,
         value=_quantize(item.close, block_precision(block_id), block_rounding(block_id)),
@@ -1058,23 +1058,6 @@ def adapter_contract_hash() -> str:
 
 
 _ENDPOINT_FIELDS: dict[str, frozenset[str]] = {
-    "/quote": frozenset(
-        {
-            "symbol",
-            "name",
-            "currency",
-            "datetime",
-            "timestamp",
-            "open",
-            "high",
-            "low",
-            "close",
-            "volume",
-            "previous_close",
-            "change",
-            "percent_change",
-        }
-    ),
     "/time_series": frozenset({"datetime", "open", "high", "low", "close", "volume"}),
     "/eod": frozenset({"symbol", "exchange", "datetime", "close"}),
     "/market_movers/stocks": frozenset(

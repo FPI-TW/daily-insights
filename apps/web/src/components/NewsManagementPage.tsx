@@ -1,9 +1,10 @@
 import {
-  type DataManagementRun,
+  type JobRun,
   type Locale,
   type NewsAdminCandidate,
   type NewsAdminEdition,
   type NewsAdminItem,
+  type NewsCandidatePublishInput,
 } from "@daily-insights/api-client"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { LoaderCircle } from "lucide-react"
@@ -13,16 +14,8 @@ import { Dialog } from "#/components/Dialog"
 import {
   NewsAdminLoadError,
   NewsDependencies,
-  NewsMarketProgress,
-  NewsProgressDetails,
 } from "#/components/NewsRecoveryStatus"
-import {
-  canResumeNews,
-  formatNewsTime,
-  newsAdminRetryDelay,
-  newsRunState,
-  retryNewsAdminGet,
-} from "#/lib/news-recovery"
+import { newsAdminRetryDelay, retryNewsAdminGet } from "#/lib/news-recovery"
 import { browserAdministrationClient } from "#/lib/admin-members"
 import { requireCsrfToken } from "#/lib/auth"
 import { formatTimestamp } from "#/lib/format"
@@ -43,9 +36,11 @@ const runsKey = ["data-management", "runs"] as const
 const editionsKey = (date: string) => ["news-admin", "editions", date] as const
 
 type NewsMarketCode = "global" | "tw_equity" | "us_equity"
-type RerunInput =
-  | { operation: "news_all" }
-  | { operation: "news_market"; market_code: NewsMarketCode }
+const NEWS_MARKET_JOBS: Record<NewsMarketCode, string> = {
+  global: "news_global_refresh_job",
+  tw_equity: "news_tw_equity_refresh_job",
+  us_equity: "news_us_equity_refresh_job",
+}
 
 export function NewsManagementPage({ locale }: { locale: Locale }) {
   const { t } = useTranslation()
@@ -64,15 +59,12 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
   const runs = useQuery({
     queryKey: [...runsKey, { operationGroup: "news", page }],
     queryFn: () =>
-      browserAdministrationClient().listNewsDataManagementRuns(page),
+      browserAdministrationClient().listJobRuns(page, undefined, "news"),
     retry: retryNewsAdminGet,
     retryDelay: newsAdminRetryDelay,
     refetchInterval: query =>
       !query.state.error &&
-      query.state.data?.active_runs?.some(
-        run =>
-          isNewsRun(run) && (isActiveRun(run) || run.status === "cancelled")
-      )
+      query.state.data?.items.some(run => isNewsRun(run) && isActiveRun(run))
         ? 2_000
         : false,
   })
@@ -83,29 +75,12 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
     if (runs.error) void redirectExpired(runs.error)
   }, [redirectExpired, runs.error])
   const newsRuns = runs.data?.items.filter(isNewsRun) ?? []
-  const activeNewsRuns = (
-    runs.data?.active_runs ?? (runs.data?.items ?? []).filter(isActiveRun)
-  ).filter(isNewsRun)
-  const activeNewsRunsOutsidePage = activeNewsRuns.filter(
-    run => !newsRuns.some(item => item.id === run.id)
-  )
-  const relevantNewsRuns = [
-    ...activeNewsRuns,
-    ...newsRuns.filter(
-      run => !activeNewsRuns.some(active => active.id === run.id)
-    ),
-  ]
-  const currentDayNewsRuns = runs.data?.current_day_runs ?? relevantNewsRuns
-  // Only an administrator's own run blocks the rerun buttons: the scheduled
-  // 08:00 run and its retries coexist with manual requests.
-  const manualActive = activeNewsRuns.some(
-    run => run.requested_by_user_id !== null
-  )
+  const activeNewsRuns = newsRuns.filter(isActiveRun)
   const enqueue = useMutation({
     retry: false,
-    mutationFn: async (input: RerunInput) =>
-      browserAdministrationClient().createDataManagementRun(
-        input,
+    mutationFn: async (jobKey: string) =>
+      browserAdministrationClient().createJobRun(
+        jobKey,
         await requireCsrfToken()
       ),
     onSuccess: () => {
@@ -117,31 +92,18 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
   const cancelRun = useMutation({
     retry: false,
     mutationFn: async (runId: string) =>
-      browserAdministrationClient().cancelDataManagementRun(
+      browserAdministrationClient().cancelJobRun(
         runId,
         await requireCsrfToken()
       ),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: runsKey }),
   })
-  const resume = useMutation({
-    retry: false,
-    mutationFn: async (run: DataManagementRun) =>
-      browserAdministrationClient().resumeNewsRun(
-        run.id,
-        true,
-        await requireCsrfToken()
-      ),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: runsKey })
-      void queryClient.invalidateQueries({ queryKey: ["news-admin"] })
-    },
-  })
   const errorMessage = enqueue.error
     ? t(newsMutationErrorKey(enqueue.error, "newsManagementFailed"))
     : ""
-  const submit = async (input: RerunInput) => {
+  const submit = async (jobKey: string) => {
     try {
-      await enqueue.mutateAsync(input)
+      await enqueue.mutateAsync(jobKey)
     } catch (caught) {
       await redirectExpired(caught)
     }
@@ -197,11 +159,10 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
           }}
         />
       ) : null}
-      {resume.error || cancelRun.error ? (
+      {cancelRun.error ? (
         <NewsAdminLoadError
-          error={resume.error ?? cancelRun.error}
+          error={cancelRun.error}
           reload={() => {
-            resume.reset()
             cancelRun.reset()
             void runs.refetch()
           }}
@@ -224,11 +185,7 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
             ref={allRef}
             type="button"
             className="primary-action mt-4"
-            disabled={
-              manualActive ||
-              enqueue.isPending ||
-              !catalog.data?.daily_news_enabled
-            }
+            disabled={enqueue.isPending || !catalog.data?.daily_news_enabled}
             onClick={() => setConfirmOpen(true)}
           >
             {t("newsManagementAllAction")}
@@ -248,13 +205,9 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
                 type="button"
                 className="secondary-action text-left"
                 disabled={
-                  manualActive ||
-                  enqueue.isPending ||
-                  !catalog.data?.daily_news_enabled
+                  enqueue.isPending || !catalog.data?.daily_news_enabled
                 }
-                onClick={() =>
-                  void submit({ operation: "news_market", market_code: market })
-                }
+                onClick={() => void submit(NEWS_MARKET_JOBS[market])}
               >
                 {t(`newsEdition_${market}`)}
               </button>
@@ -262,12 +215,6 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
           </div>
         </section>
       </div>
-      <NewsMarketProgress
-        runs={currentDayNewsRuns}
-        markets={catalog.data.news_markets}
-        locale={locale}
-        taipeiDate={catalog.data.taipei_date}
-      />
       <section
         className="surface-panel mt-6 max-w-4xl p-5"
         aria-labelledby="news-runs-title"
@@ -275,70 +222,19 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
         <h2 id="news-runs-title" className="m-0 text-lg font-extrabold">
           {t("newsManagementLatest")}
         </h2>
-        {activeNewsRunsOutsidePage.length > 0 ? (
-          <div className="mb-5 border-b border-line pb-5" aria-live="polite">
-            <h3 className="m-0 text-base font-extrabold">
-              {t("newsManagementActive")}
-            </h3>
-            <div className="mt-3 grid gap-2">
-              {activeNewsRunsOutsidePage.map(run => (
-                <div key={run.id} className="rounded-md border border-line p-3">
-                  <p className="m-0 font-bold">
-                    {t(`newsRecoveryState_${newsRunState(run)}`)} ·{" "}
-                    <RunLabel run={run} /> · {run.edition_date}
-                  </p>
-                  <button
-                    type="button"
-                    className="secondary-action mt-3"
-                    disabled={cancelRun.isPending}
-                    onClick={() =>
-                      void cancelRun.mutateAsync(run.id).catch(redirectExpired)
-                    }
-                  >
-                    {t("dataManagementCancel")}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
         <div className="mt-4 grid gap-2">
           {newsRuns.map(run => (
             <details key={run.id} className="rounded-md border border-line p-3">
               <summary className="cursor-pointer font-bold">
-                {t(`newsRecoveryState_${newsRunState(run)}`)} ·{" "}
-                <RunLabel run={run} /> · {run.edition_date}
+                {run.status} · <RunLabel run={run} /> · {run.edition_date}
               </summary>
               <p className="mt-3 text-sm text-sea-ink-soft">
                 <RunOutcome run={run} />
               </p>
               <p className="mt-2 text-sm text-sea-ink-soft">
-                {t("newsRecoveryScheduled", {
-                  time: run.scheduled_for
-                    ? formatNewsTime(run.scheduled_for, locale)
-                    : t("newsRecoveryNotRecorded"),
-                })}
+                {formatTimestamp(run.created_at)}
               </p>
-              {Object.entries(run.news ?? {}).map(([market, progress]) => (
-                <div key={market} className="mt-3 border-t border-line pt-3">
-                  <h3 className="m-0 text-base font-bold">
-                    {t(`newsEdition_${market}`)}
-                  </h3>
-                  <NewsProgressDetails progress={progress} locale={locale} />
-                </div>
-              ))}
-              {canResumeNews(run, catalog.data.taipei_date) ? (
-                <button
-                  type="button"
-                  className="mt-3 min-h-11 rounded-lg border border-line px-4 py-2 font-bold hover:bg-link-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lagoon-deep"
-                  disabled={resume.isPending || activeNewsRuns.length > 0}
-                  onClick={() =>
-                    void resume.mutateAsync(run).catch(redirectExpired)
-                  }
-                >
-                  {t("newsRecoveryResume")}
-                </button>
-              ) : null}
+              <FunctionSummary run={run} />
               {isActiveRun(run) ? (
                 <button
                   type="button"
@@ -375,7 +271,7 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
         taipeiDate={catalog.data.taipei_date}
         dailyNewsEnabled={catalog.data.daily_news_enabled}
         markets={catalog.data.news_markets}
-        runs={relevantNewsRuns}
+        runs={newsRuns}
         redirectExpired={redirectExpired}
       />
       <Dialog
@@ -406,7 +302,7 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
             type="button"
             className="primary-action"
             disabled={enqueue.isPending}
-            onClick={() => void submit({ operation: "news_all" })}
+            onClick={() => void submit("news_daily_update")}
           >
             {enqueue.isPending ? (
               <LoaderCircle
@@ -466,28 +362,47 @@ function RunPagination({
   )
 }
 
-function RunLabel({ run }: { run: DataManagementRun }) {
+function RunLabel({ run }: { run: JobRun }) {
   const { t } = useTranslation()
-  if (run.operation === "news_all") return t("newsManagementAllMarkets")
-  if (run.operation === "news_publish") return t("newsManagementPublishRun")
-  return t(`newsEdition_${run.market_code}`)
+  if (
+    run.job_key === "news_daily_update" ||
+    run.job_key === "internal_services_daily_update"
+  )
+    return t("newsManagementAllMarkets")
+  if (run.job_key === "news_publish_job") return t("newsManagementPublishRun")
+  if (run.job_key.includes("tw_equity")) return t("newsEdition_tw_equity")
+  if (run.job_key.includes("us_equity")) return t("newsEdition_us_equity")
+  return t("newsEdition_global")
 }
 
-function RunOutcome({ run }: { run: DataManagementRun }) {
+function RunOutcome({ run }: { run: JobRun }) {
   const { t } = useTranslation()
   if (run.error) return run.error
-  if (run.operation === "news_publish") {
+  if (run.job_key === "news_publish_job") {
     const counts = publishRunCounts(run.result)
     return counts ? t("newsCurationPublishResult", counts) : ""
   }
   return String(run.result?.outcome ?? "")
 }
 
+function FunctionSummary({ run }: { run: JobRun }) {
+  if (run.functions.length === 0) return null
+  return (
+    <ul className="mt-3 grid gap-1 border-t border-line pt-3 text-sm text-sea-ink-soft">
+      {run.functions.map(functionRun => (
+        <li key={functionRun.id}>
+          {functionRun.function_key}: {functionRun.status}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 type NewsCurationProps = {
   taipeiDate: string
   dailyNewsEnabled: boolean
   markets: readonly NewsMarketCode[]
-  runs: readonly DataManagementRun[]
+  runs: readonly JobRun[]
   redirectExpired: (error: unknown) => Promise<boolean>
 }
 
@@ -550,10 +465,7 @@ function NewsCuration({
   })
   const publish = useMutation({
     retry: false,
-    mutationFn: async (input: {
-      edition_id: string
-      candidate_ids: string[]
-    }) =>
+    mutationFn: async (input: NewsCandidatePublishInput) =>
       browserAdministrationClient().publishNewsCandidates(
         input,
         await requireCsrfToken()
@@ -579,9 +491,12 @@ function NewsCuration({
   // A rerun can replace the edition (new revision, new candidate ids) under
   // an open selection; ids from the old revision must not be submitted.
   const editionId = edition?.edition?.id
+  const candidateSetId = edition?.candidates
+    .map(candidate => candidate.id)
+    .join(":")
   useEffect(() => {
     setSelected(new Set())
-  }, [editionId])
+  }, [editionId, candidateSetId])
   const changeDate = (value: string) => {
     setDate(value)
     setSelected(new Set())
@@ -599,10 +514,12 @@ function NewsCuration({
     })
   }
   const submitPublish = async () => {
-    if (!edition?.edition) return
+    if (!edition) return
     try {
       await publish.mutateAsync({
-        edition_id: edition.edition.id,
+        ...(edition.edition
+          ? { edition_id: edition.edition.id }
+          : { edition_date: date, market_code: market }),
         candidate_ids: [...selected],
       })
     } catch (caught) {
@@ -622,7 +539,7 @@ function NewsCuration({
     publishActive ||
     !dailyNewsEnabled ||
     date !== taipeiDate ||
-    !edition?.edition
+    !edition
 
   return (
     <section
@@ -687,18 +604,20 @@ function NewsCuration({
           pending={editions.isFetching}
           reload={() => void editions.refetch()}
         />
-      ) : !edition?.edition ? (
+      ) : !edition || (!edition.edition && edition.candidates.length === 0) ? (
         <p className="mt-4 text-sm text-sea-ink-soft">
           {t("newsCurationEmpty")}
         </p>
       ) : (
         <>
-          <EditionSummary edition={edition} />
-          <PublishedItems
-            items={edition.items}
-            pending={toggleHidden.isPending}
-            onToggleHidden={item => void submitToggleHidden(item)}
-          />
+          {edition.edition ? <EditionSummary edition={edition} /> : null}
+          {edition.edition ? (
+            <PublishedItems
+              items={edition.items}
+              pending={toggleHidden.isPending}
+              onToggleHidden={item => void submitToggleHidden(item)}
+            />
+          ) : null}
           <h3 className="mt-6 mb-0 text-base font-extrabold">
             {t("newsCurationCandidatesTitle")}
           </h3>

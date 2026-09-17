@@ -176,27 +176,6 @@ export const institutionalStocksSchema = z.object({
   rows: z.array(institutionalStockFlowSchema),
 })
 export type InstitutionalStocks = z.infer<typeof institutionalStocksSchema>
-export const yfinanceSymbolBarsSchema = z.object({
-  symbol: indexSymbolSchema,
-  market: marketCodeSchema,
-  as_of: z.iso.date(),
-  stored_count: z.number().int().nonnegative(),
-  dropped_unsettled_trade_date: z.iso.date().nullable(),
-})
-export const yfinanceSymbolFailureSchema = z.object({
-  symbol: indexSymbolSchema,
-  market: marketCodeSchema,
-  error: z.string().min(1),
-})
-export const yfinanceDailyBarsResponseSchema = z.object({
-  period: z.literal("7d"),
-  fetched_at: z.iso.datetime({ offset: true }),
-  succeeded: z.array(yfinanceSymbolBarsSchema),
-  failed: z.array(yfinanceSymbolFailureSchema),
-})
-export type YfinanceDailyBarsResponse = z.infer<
-  typeof yfinanceDailyBarsResponseSchema
->
 export const dataManagementOperationSchema = z.enum([
   "morning_all",
   "morning_market",
@@ -383,6 +362,127 @@ export const dataManagementRunListSchema = z.object({
   active_runs: z.array(dataManagementRunSchema).optional(),
   current_day_runs: z.array(dataManagementRunSchema).optional(),
 })
+
+export const functionAttemptSchema = z.object({
+  id: z.uuid(),
+  attempt_number: z.number().int().positive(),
+  status: z.string(),
+  started_at: z.iso.datetime({ offset: true }),
+  finished_at: z.iso.datetime({ offset: true }).nullable(),
+  source_as_of: z.iso.date().nullable(),
+  fetched_at: z.iso.datetime({ offset: true }).nullable(),
+  record_count: z.number().int().nonnegative().nullable(),
+  payload_digest: z.string().nullable(),
+  request_metadata: z.array(z.record(z.string(), z.unknown())),
+  result: z.record(z.string(), z.unknown()).nullable(),
+  error_code: z.string().nullable(),
+  error_detail: z.string().nullable(),
+})
+export const functionRunSchema = z.object({
+  id: z.uuid(),
+  function_key: z.string(),
+  provider_key: z.string(),
+  scope: z.record(z.string(), z.unknown()),
+  status: z.string(),
+  missing_scopes: z.array(z.string()).nullable(),
+  attempt_count: z.number().int().nonnegative(),
+  next_attempt_at: z.iso.datetime({ offset: true }).nullable(),
+  started_at: z.iso.datetime({ offset: true }).nullable(),
+  completed_at: z.iso.datetime({ offset: true }).nullable(),
+  result: z.record(z.string(), z.unknown()).nullable(),
+  error: z.string().nullable(),
+  attempts: z.array(functionAttemptSchema),
+  depends_on: z.array(z.uuid()),
+})
+export const jobRunSchema = z.object({
+  id: z.uuid(),
+  routine_run_id: z.uuid().nullable(),
+  job_key: z.string(),
+  kind: z.enum(["function", "projection"]),
+  trigger: z.enum(["automatic", "manual"]),
+  edition_date: z.iso.date(),
+  deadline_at: z.iso.datetime({ offset: true }).nullable(),
+  status: dataManagementRunStatusSchema,
+  requested_by_user_id: z.uuid().nullable(),
+  payload: z.record(z.string(), z.unknown()).nullable(),
+  started_at: z.iso.datetime({ offset: true }).nullable(),
+  completed_at: z.iso.datetime({ offset: true }).nullable(),
+  result: z.record(z.string(), z.unknown()).nullable(),
+  error: z.string().nullable(),
+  created_at: z.iso.datetime({ offset: true }),
+  functions: z.array(functionRunSchema),
+  depends_on: z.array(z.uuid()),
+  downstream_jobs: z.array(z.uuid()),
+})
+export type JobRun = z.infer<typeof jobRunSchema>
+export const jobRunListSchema = z.object({
+  items: z.array(jobRunSchema),
+  page: z.number().int().min(1),
+  page_size: z.number().int().positive(),
+  total: z.number().int().nonnegative(),
+  has_more: z.boolean(),
+})
+export const routineRunSchema = z.object({
+  id: z.uuid(),
+  routine_key: z.string(),
+  registry_version: z.string(),
+  edition_date: z.iso.date(),
+  scheduled_for: z.iso.datetime({ offset: true }),
+  deadline_at: z.iso.datetime({ offset: true }),
+  status: dataManagementRunStatusSchema,
+  started_at: z.iso.datetime({ offset: true }).nullable(),
+  completed_at: z.iso.datetime({ offset: true }).nullable(),
+  result: z.record(z.string(), z.unknown()).nullable(),
+  created_at: z.iso.datetime({ offset: true }),
+  jobs: z.array(jobRunSchema),
+})
+export type RoutineRun = z.infer<typeof routineRunSchema>
+export const routineRunListSchema = z.object({
+  items: z.array(routineRunSchema),
+  page: z.number().int().min(1),
+  page_size: z.number().int().positive(),
+  total: z.number().int().nonnegative(),
+  has_more: z.boolean(),
+})
+export const orchestrationCatalogSchema = z.object({
+  taipei_date: z.iso.date(),
+  registry_version: z.string(),
+  registry_digest: z.string(),
+  providers: z.array(
+    z.object({
+      key: z.string(),
+      display_name: z.string(),
+      ready: z.boolean(),
+      functions: z.array(z.string()),
+      last_status: z.string().nullable(),
+      last_attempt_at: z.iso.datetime({ offset: true }).nullable(),
+    })
+  ),
+  functions: z.array(
+    z.object({
+      key: z.string(),
+      provider_key: z.string(),
+      freshness_days: z.number().int().nonnegative(),
+      retryable: z.boolean(),
+      resources: z.array(z.string()),
+      last_status: z.string().nullable(),
+      last_attempt_at: z.iso.datetime({ offset: true }).nullable(),
+    })
+  ),
+  jobs: z.array(
+    z.object({
+      key: z.string(),
+      kind: z.string(),
+      triggers: z.array(z.string()),
+      functions: z.array(z.string()),
+      projection_handler: z.string().nullable(),
+    })
+  ),
+  routine_key: z.string(),
+  manual_market_jobs: z.array(z.string()),
+  features: z.record(z.string(), z.boolean()),
+})
+export type OrchestrationCatalog = z.infer<typeof orchestrationCatalogSchema>
 const chartPointSchema = z.object({
   x: z.string().min(1),
   value: decimalSchema.nullable(),
@@ -696,10 +796,20 @@ export const newsAdminEditionsSchema = z.object({
   editions: z.array(newsAdminEditionSchema),
 })
 export type NewsAdminEditions = z.infer<typeof newsAdminEditionsSchema>
-export const newsCandidatePublishInputSchema = z.object({
-  edition_id: z.uuid(),
-  candidate_ids: z.array(z.uuid()).min(1).max(10),
-})
+export const newsCandidatePublishInputSchema = z
+  .object({
+    edition_id: z.uuid().optional(),
+    edition_date: z.iso.date().optional(),
+    market_code: dataManagementNewsMarketCodeSchema.optional(),
+    candidate_ids: z.array(z.uuid()).min(1).max(10),
+  })
+  .refine(
+    value =>
+      value.edition_id !== undefined
+        ? value.edition_date === undefined && value.market_code === undefined
+        : value.edition_date !== undefined && value.market_code !== undefined,
+    { message: "Provide edition_id or edition_date and market_code" }
+  )
 export type NewsCandidatePublishInput = z.infer<
   typeof newsCandidatePublishInputSchema
 >

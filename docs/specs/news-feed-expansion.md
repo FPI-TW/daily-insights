@@ -118,7 +118,7 @@
 @dataclass(frozen=True)
 class FeedSource:
     ...
-    max_age_hours: int = 24      # 最新一則超過此值即視為失效
+    max_age_hours: int = 24  # 最新一則超過此值即視為失效
     provides_full_text: bool = False
 ```
 
@@ -153,14 +153,14 @@ class FeedSource:
 ```python
 @dataclass(frozen=True)
 class JsonListMapping:
-    items_path: tuple[str, ...]      # 例如 ("data", "roll_data")
-    id_field: str | None             # 有些來源用 id 組 URL
-    url_field: str | None            # 直接給 URL 的來源用這個
-    url_template: str | None         # 需要用 id 組 URL 時用這個
+    items_path: tuple[str, ...]  # 例如 ("data", "roll_data")
+    id_field: str | None  # 有些來源用 id 組 URL
+    url_field: str | None  # 直接給 URL 的來源用這個
+    url_template: str | None  # 需要用 id 組 URL 時用這個
     title_field: str
     time_field: str
-    time_format: str                 # "unix_s" | "unix_ms" | "iso" | "datetime_str"
-    body_field: str | None = None    # 快訊全文欄位，有的話設 provides_full_text=True
+    time_format: str  # "unix_s" | "unix_ms" | "iso" | "datetime_str"
+    body_field: str | None = None  # 快訊全文欄位，有的話設 provides_full_text=True
 ```
 
 欄位名一律支援 **dot-notation** 以存取巢狀結構（例如 Guardian 的 `fields.bodyText`），
@@ -169,8 +169,8 @@ class JsonListMapping:
 需要金鑰的來源（目前只有 Guardian）另外在 `FeedSource` 上加：
 
 ```python
-    api_key_setting: str | None = None   # Settings 上的屬性名，例如 "guardian_api_key"
-    api_key_param: str = "api-key"       # 金鑰要放進哪個 query 參數
+api_key_setting: str | None = None  # Settings 上的屬性名，例如 "guardian_api_key"
+api_key_param: str = "api-key"  # 金鑰要放進哪個 query 參數
 ```
 
 金鑰**不得寫死在 `FEED_SOURCES`**，由 `discover_feed_candidates` 在組 URL 時

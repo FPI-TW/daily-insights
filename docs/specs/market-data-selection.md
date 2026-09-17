@@ -49,7 +49,7 @@ TableCell(value=...) 搭配 TableColumn(id="change", unit_code="percent")
 manifest 對此其實很誠實：
 
 ```python
-formula="top two gainers followed by top two losers as returned by provider"
+formula = "top two gainers followed by top two losers as returned by provider"
 ```
 
 `as returned by provider` —— 定義外包給了供應商。

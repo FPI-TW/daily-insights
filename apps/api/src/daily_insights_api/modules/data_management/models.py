@@ -20,7 +20,7 @@ from daily_insights_api.core.models import Base, UUIDPrimaryKeyMixin
 class DataManagementRun(UUIDPrimaryKeyMixin, Base):
     """A restart-safe requested provider operation."""
 
-    __tablename__ = "data_management_runs"
+    __tablename__ = "legacy_data_management_runs"
     __table_args__ = (
         CheckConstraint(
             (
