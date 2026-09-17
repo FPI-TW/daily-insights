@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import aliased
 
-from daily_insights_api.modules.news.failures import NewsOperationError, classify_failure
+from daily_insights_api.modules.news.api import NewsOperationError, classify_failure
 from daily_insights_api.modules.orchestration.models import (
     FunctionAttempt,
     FunctionDependency,
