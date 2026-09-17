@@ -634,9 +634,6 @@ def _expand_news() -> None:
         sa.PrimaryKeyConstraint(
             "publish_job_run_id", "candidate_id", name=op.f("pk_news_candidate_publications")
         ),
-        sa.UniqueConstraint(
-            "publish_job_run_id", "candidate_id", name="uq_news_candidate_publish_job"
-        ),
     )
 
 

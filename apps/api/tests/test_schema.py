@@ -74,6 +74,15 @@ def test_schema_registers_all_foundation_tables() -> None:
     assert set(Base.metadata.tables) == EXPECTED_TABLES
 
 
+def test_news_candidate_publication_identity_is_the_composite_primary_key() -> None:
+    table = Base.metadata.tables["news_candidate_publications"]
+
+    assert tuple(table.primary_key.columns.keys()) == ("publish_job_run_id", "candidate_id")
+    assert not any(
+        constraint.name == "uq_news_candidate_publish_job" for constraint in table.constraints
+    )
+
+
 def test_fixed_market_catalog_has_eight_unique_codes() -> None:
     codes = [market.code for market in MARKETS]
     assert len(codes) == 8

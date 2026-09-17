@@ -733,7 +733,9 @@ async def test_deadline_preserves_partial_result_from_retry_wait(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
     engine, sessions = orchestration_database
-    edition = date(2026, 9, 17)
+    # Keep the first attempt before its deadline regardless of the wall-clock
+    # date on which the suite runs; the terminalization step advances explicitly.
+    edition = datetime.now(UTC).date() + timedelta(days=2)
     async with sessions() as database:
         await create_daily_routine(database, edition_date=edition)
     claimed = await claim_ready_function(engine, sessions, owner="partial-worker")

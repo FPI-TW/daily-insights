@@ -333,11 +333,6 @@ class NewsCandidatePublication(Base):
     """Immutable edge allowing one candidate to appear in later revisions."""
 
     __tablename__ = "news_candidate_publications"
-    __table_args__ = (
-        UniqueConstraint(
-            "publish_job_run_id", "candidate_id", name="uq_news_candidate_publish_job"
-        ),
-    )
 
     publish_job_run_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("job_runs.id", ondelete="RESTRICT"), primary_key=True
