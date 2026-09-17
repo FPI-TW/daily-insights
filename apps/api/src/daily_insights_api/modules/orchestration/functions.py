@@ -58,6 +58,7 @@ from daily_insights_api.modules.reports.api import (
 )
 
 TwelveManifest = tuple[tuple[str, str, str, str | None, str | None], ...]
+TREASURY_REQUEST_TIMEOUT_SECONDS = 30.0
 
 
 def _safe_error_detail(error: BaseException) -> str:
@@ -619,7 +620,10 @@ async def _run_treasury(
     diagnostic_entries: list[Any] = []
     token = diagnostics.set(diagnostic_entries)
     try:
-        async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+        async with httpx.AsyncClient(
+            timeout=TREASURY_REQUEST_TIMEOUT_SECONDS,
+            follow_redirects=False,
+        ) as client:
             histories = await load_treasury(client, today)
     finally:
         diagnostics.reset(token)

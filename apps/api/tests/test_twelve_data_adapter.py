@@ -462,12 +462,15 @@ def _series_payload(symbol: str, latest_close: str = "100.12345678901") -> dict[
 
 async def test_completed_prices_use_two_sessions_and_validate_latest_eod() -> None:
     endpoints: list[str] = []
+    time_series_params: dict[str, str] = {}
 
     def respond(request: httpx.Request) -> httpx.Response:
         endpoints.append(request.url.path)
         if request.url.path == "/eod":
             return httpx.Response(200, json=_eod_payload("AAPL"), request=request)
-        return httpx.Response(200, json=_series_payload("AAPL"), request=request)
+        time_series_params.update(request.url.params)
+        close = "100.12345678901" if request.url.params.get("dp") == "11" else "100.12346"
+        return httpx.Response(200, json=_series_payload("AAPL", close), request=request)
 
     result = await TwelveDataAdapter(transport(httpx.MockTransport(respond))).get_completed_prices(
         market="us_equity",
@@ -477,6 +480,7 @@ async def test_completed_prices_use_two_sessions_and_validate_latest_eod() -> No
     )
 
     assert endpoints == ["/eod", "/time_series"]
+    assert time_series_params["dp"] == "11"
     assert result.items[0].close == Decimal("100.12345678901")
     assert result.items[0].previous_close == Decimal("99")
     assert len(result.items[0].bars) == 2
