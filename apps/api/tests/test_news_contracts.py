@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from typing import cast
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -16,6 +17,7 @@ from daily_insights_api.modules.news.service import run_news_edition
 ALLOWED = configured_hostnames(
     "www.reuters.com,apnews.com,www.bbc.com,www.cnbc.com,news.cnyes.com,finance.eastmoney.com"
 )
+TAIPEI = ZoneInfo("Asia/Taipei")
 
 
 def test_only_exact_allowlisted_hostname_is_allowed() -> None:
@@ -90,7 +92,7 @@ async def test_news_runner_refuses_to_backfill_yesterday() -> None:
         await run_news_edition(
             cast(async_sessionmaker[AsyncSession], None),
             cast(DeepSeekClient, None),
-            datetime.now().date() - timedelta(days=1),
+            datetime.now(TAIPEI).date() - timedelta(days=1),
             allowed_hostnames=ALLOWED,
         )
 
@@ -100,6 +102,6 @@ async def test_news_runner_refuses_future_edition() -> None:
         await run_news_edition(
             cast(async_sessionmaker[AsyncSession], None),
             cast(DeepSeekClient, None),
-            datetime.now().date() + timedelta(days=1),
+            datetime.now(TAIPEI).date() + timedelta(days=1),
             allowed_hostnames=ALLOWED,
         )
