@@ -62,7 +62,12 @@ flowchart LR
    後執行，即使跨過 soft deadline 也不讓 DAG 永久等待。市場／日期鎖、租約與
    checkpoint 支援重啟續跑：只重抓失敗 feed，重新
    取得必要原文，重用符合指紋的選題、繁中摘要與已驗證翻譯，不再以 edition 是否存在
-   判斷可跳過。模型設定或金鑰缺失屬共享 block，不產生 `unavailable` 後繼續其他市場。
+   判斷可跳過。模型設定、功能停用或金鑰缺失／placeholder 屬共享 block，安全錯誤碼為
+   `news_model_configuration_missing`；作業以 `failed`／`outcome=interrupted` 結束，停止尚未
+   執行的市場，不合成三市場 `unavailable` 結果。相容的 DataManagementRun 回傳
+   `outcomes={}`，並只在 `news` 保存已進入的首個市場失敗紀錄。`news_recovery_required`
+   僅代表沒有系統性例外、但正常 workflow 結算後仍有未完成項目，不得用來取代上述設定
+   錯誤碼。
    詳細分類、操作與限制見 [新聞恢復操作手冊](../runbooks/news-recovery.md)。
 3. `discover_feed_candidates` 依序讀取標記給該市場、且文章主機在白名單內的 feed，
    只保留符合各來源 `link_pattern` 的連結，並以 URL 與標題去重；任一 feed 失敗只

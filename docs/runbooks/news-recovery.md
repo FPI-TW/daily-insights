@@ -19,7 +19,8 @@
 | Feed 無新內容／過舊                                      | 記錄最新文章時間；正常完成，不單獨重試                                             |
 | 404／410、付費牆、短正文、來源存取限制、缺設定、解析失敗 | 略過並記錄原因，同一恢復鏈不反覆抓永久失敗文章                                     |
 | SSRF／非白名單／超限                                     | 拒絕，不降低安全限制、不重試                                                       |
-| 模型 401／402／403、缺金鑰                               | 暫停共享新聞供應商，修復後人工恢復                                                 |
+| 模型 401／402／403                                       | 暫停共享新聞供應商，保留 provider 安全錯誤碼，修復後人工恢復                       |
+| 新聞功能停用、模型金鑰缺失或 placeholder                 | 記錄 `news_model_configuration_missing` 共享 block，停止尚未執行的市場             |
 | 模型 408／5xx／暫時連線                                  | 停止後續模型碰撞，保存已驗證語系，退避恢復                                         |
 | JSON／欄位／摘要或翻譯數字驗證                           | 同輸入至多修正一次；次數先保存，續跑不重置。摘要／翻譯再失敗略過遞補，選題停止該批 |
 | 模型參數錯誤／未知例外                                   | 安全錯誤代碼與請求編號，交人工處理，不盲目重試                                     |
@@ -28,6 +29,12 @@
 
 若 408／429／5xx 或暫時連線錯誤發生在已送出的唯一修正呼叫，修正額度不會因 worker
 重啟而重置；該輸入改列人工處理，不再發出第二次修正。
+
+`news_model_configuration_missing` 是不可重試的設定錯誤，不是正常的零篇新聞。
+作業結果必須為 `failed` 且 `outcome=interrupted`；相容的 DataManagementRun 回傳
+`outcomes={}`，只保存已進入的首個市場失敗紀錄，不得為未執行市場合成 `unavailable`。
+修復功能開關或金鑰後建立新的 manual JobRun。`news_recovery_required` 只用於沒有系統性
+例外、但 workflow 正常結算後仍有未完成項目的情況。
 
 `news_workflows.state` 與 `publication` 分離。edition `complete/partial/unavailable`
 保留相容性；自動重試只讀 `waiting_retry` 和 `next_retry_at`，不再讀 edition 篇數。
