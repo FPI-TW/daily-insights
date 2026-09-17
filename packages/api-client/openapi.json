@@ -104,35 +104,6 @@
         "title": "AnalystViewpointResponse",
         "type": "object"
       },
-      "AnalystViewpointSyncResponse": {
-        "properties": {
-          "fetched_at": {
-            "format": "date-time",
-            "title": "Fetched At",
-            "type": "string"
-          },
-          "markets": {
-            "items": {
-              "$ref": "#/components/schemas/SyncMarketStatus"
-            },
-            "title": "Markets",
-            "type": "array"
-          },
-          "status": {
-            "enum": ["complete", "partial"],
-            "title": "Status",
-            "type": "string"
-          },
-          "viewpoint_date": {
-            "format": "date",
-            "title": "Viewpoint Date",
-            "type": "string"
-          }
-        },
-        "required": ["viewpoint_date", "fetched_at", "status", "markets"],
-        "title": "AnalystViewpointSyncResponse",
-        "type": "object"
-      },
       "AnalystViewpointSyncStatusResponse": {
         "properties": {
           "enabled": {
@@ -846,253 +817,6 @@
         "title": "CsrfTokenResponse",
         "type": "object"
       },
-      "DataManagementCatalog": {
-        "properties": {
-          "daily_news_enabled": {
-            "title": "Daily News Enabled",
-            "type": "boolean"
-          },
-          "macro_dashboard_enabled": {
-            "title": "Macro Dashboard Enabled",
-            "type": "boolean"
-          },
-          "markets": {
-            "items": {
-              "enum": ["global_macro_bonds", "crypto", "us_equity"],
-              "type": "string"
-            },
-            "title": "Markets",
-            "type": "array"
-          },
-          "morning_reports_enabled": {
-            "title": "Morning Reports Enabled",
-            "type": "boolean"
-          },
-          "news_markets": {
-            "items": {
-              "enum": ["global", "tw_equity", "us_equity"],
-              "type": "string"
-            },
-            "title": "News Markets",
-            "type": "array"
-          },
-          "rerunnable_providers": {
-            "items": {
-              "enum": ["twelve_data", "yahoo_finance", "twse"],
-              "type": "string"
-            },
-            "title": "Rerunnable Providers",
-            "type": "array"
-          },
-          "taipei_date": {
-            "format": "date",
-            "title": "Taipei Date",
-            "type": "string"
-          },
-          "twse_enabled": {
-            "title": "Twse Enabled",
-            "type": "boolean"
-          },
-          "yfinance_enabled": {
-            "title": "Yfinance Enabled",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "taipei_date",
-          "morning_reports_enabled",
-          "yfinance_enabled",
-          "twse_enabled",
-          "markets",
-          "rerunnable_providers",
-          "daily_news_enabled",
-          "news_markets",
-          "macro_dashboard_enabled"
-        ],
-        "title": "DataManagementCatalog",
-        "type": "object"
-      },
-      "DataManagementRunList": {
-        "properties": {
-          "active_runs": {
-            "items": {
-              "discriminator": {
-                "mapping": {
-                  "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
-                  "institutional_twse": "#/components/schemas/InstitutionalTwseRunResponse",
-                  "macro_dashboard": "#/components/schemas/MacroDashboardRunResponse",
-                  "morning_all": "#/components/schemas/MorningAllRunResponse",
-                  "morning_market": "#/components/schemas/MorningMarketRunResponse",
-                  "news_all": "#/components/schemas/NewsAllRunResponse",
-                  "news_market": "#/components/schemas/NewsMarketRunResponse",
-                  "news_publish": "#/components/schemas/NewsPublishRunResponse",
-                  "provider_rerun": "#/components/schemas/ProviderRerunResponse"
-                },
-                "propertyName": "operation"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/MorningAllRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/MorningMarketRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/IndexYahooRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/InstitutionalTwseRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/NewsAllRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/NewsMarketRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/NewsPublishRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/MacroDashboardRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/ProviderRerunResponse"
-                }
-              ]
-            },
-            "title": "Active Runs",
-            "type": "array"
-          },
-          "current_day_runs": {
-            "items": {
-              "discriminator": {
-                "mapping": {
-                  "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
-                  "institutional_twse": "#/components/schemas/InstitutionalTwseRunResponse",
-                  "macro_dashboard": "#/components/schemas/MacroDashboardRunResponse",
-                  "morning_all": "#/components/schemas/MorningAllRunResponse",
-                  "morning_market": "#/components/schemas/MorningMarketRunResponse",
-                  "news_all": "#/components/schemas/NewsAllRunResponse",
-                  "news_market": "#/components/schemas/NewsMarketRunResponse",
-                  "news_publish": "#/components/schemas/NewsPublishRunResponse",
-                  "provider_rerun": "#/components/schemas/ProviderRerunResponse"
-                },
-                "propertyName": "operation"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/MorningAllRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/MorningMarketRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/IndexYahooRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/InstitutionalTwseRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/NewsAllRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/NewsMarketRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/NewsPublishRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/MacroDashboardRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/ProviderRerunResponse"
-                }
-              ]
-            },
-            "title": "Current Day Runs",
-            "type": "array"
-          },
-          "has_more": {
-            "title": "Has More",
-            "type": "boolean"
-          },
-          "items": {
-            "items": {
-              "discriminator": {
-                "mapping": {
-                  "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
-                  "institutional_twse": "#/components/schemas/InstitutionalTwseRunResponse",
-                  "macro_dashboard": "#/components/schemas/MacroDashboardRunResponse",
-                  "morning_all": "#/components/schemas/MorningAllRunResponse",
-                  "morning_market": "#/components/schemas/MorningMarketRunResponse",
-                  "news_all": "#/components/schemas/NewsAllRunResponse",
-                  "news_market": "#/components/schemas/NewsMarketRunResponse",
-                  "news_publish": "#/components/schemas/NewsPublishRunResponse",
-                  "provider_rerun": "#/components/schemas/ProviderRerunResponse"
-                },
-                "propertyName": "operation"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/MorningAllRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/MorningMarketRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/IndexYahooRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/InstitutionalTwseRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/NewsAllRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/NewsMarketRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/NewsPublishRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/MacroDashboardRunResponse"
-                },
-                {
-                  "$ref": "#/components/schemas/ProviderRerunResponse"
-                }
-              ]
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "page": {
-            "minimum": 1.0,
-            "title": "Page",
-            "type": "integer"
-          },
-          "page_size": {
-            "const": 10,
-            "default": 10,
-            "title": "Page Size",
-            "type": "integer"
-          },
-          "total": {
-            "minimum": 0.0,
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "items",
-          "page",
-          "total",
-          "has_more",
-          "active_runs",
-          "current_day_runs"
-        ],
-        "title": "DataManagementRunList",
-        "type": "object"
-      },
       "EconomicEvent": {
         "properties": {
           "actual": {
@@ -1183,6 +907,340 @@
         },
         "required": ["date", "country", "event"],
         "title": "EconomicEvent",
+        "type": "object"
+      },
+      "FunctionAttemptResponse": {
+        "properties": {
+          "attempt_number": {
+            "title": "Attempt Number",
+            "type": "integer"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Detail"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "payload_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload Digest"
+          },
+          "record_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Count"
+          },
+          "request_metadata": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Request Metadata",
+            "type": "array"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "source_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source As Of"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "attempt_number",
+          "status",
+          "started_at",
+          "finished_at",
+          "source_as_of",
+          "fetched_at",
+          "record_count",
+          "payload_digest",
+          "request_metadata",
+          "result",
+          "error_code",
+          "error_detail"
+        ],
+        "title": "FunctionAttemptResponse",
+        "type": "object"
+      },
+      "FunctionCatalogItem": {
+        "properties": {
+          "freshness_days": {
+            "title": "Freshness Days",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "last_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Attempt At"
+          },
+          "last_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Status"
+          },
+          "provider_key": {
+            "title": "Provider Key",
+            "type": "string"
+          },
+          "resources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Resources",
+            "type": "array"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "provider_key",
+          "freshness_days",
+          "retryable",
+          "resources"
+        ],
+        "title": "FunctionCatalogItem",
+        "type": "object"
+      },
+      "FunctionRunResponse": {
+        "properties": {
+          "attempt_count": {
+            "title": "Attempt Count",
+            "type": "integer"
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/FunctionAttemptResponse"
+            },
+            "title": "Attempts",
+            "type": "array"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "depends_on": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Depends On",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "function_key": {
+            "title": "Function Key",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "missing_scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Scopes"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
+          },
+          "provider_key": {
+            "title": "Provider Key",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "scope": {
+            "additionalProperties": true,
+            "title": "Scope",
+            "type": "object"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "function_key",
+          "provider_key",
+          "scope",
+          "status",
+          "missing_scopes",
+          "attempt_count",
+          "next_attempt_at",
+          "started_at",
+          "completed_at",
+          "result",
+          "error",
+          "attempts",
+          "depends_on"
+        ],
+        "title": "FunctionRunResponse",
         "type": "object"
       },
       "GenerationStatus": {
@@ -1857,158 +1915,6 @@
         "title": "IndexRsiSeriesResponse",
         "type": "object"
       },
-      "IndexYahooRunResponse": {
-        "properties": {
-          "completed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Completed At"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "edition_date": {
-            "format": "date",
-            "title": "Edition Date",
-            "type": "string"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "heartbeat_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Heartbeat At"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "market_code": {
-            "title": "Market Code",
-            "type": "null"
-          },
-          "news": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/NewsProgress"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "News"
-          },
-          "operation": {
-            "const": "index_yahoo",
-            "title": "Operation",
-            "type": "string"
-          },
-          "requested_by_user_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Requested By User Id"
-          },
-          "result": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Result"
-          },
-          "scheduled_for": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scheduled For"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
-          },
-          "status": {
-            "enum": [
-              "pending",
-              "running",
-              "succeeded",
-              "partial",
-              "failed",
-              "cancelled"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "edition_date",
-          "status",
-          "requested_by_user_id",
-          "created_at",
-          "started_at",
-          "completed_at",
-          "result",
-          "error",
-          "operation",
-          "market_code"
-        ],
-        "title": "IndexYahooRunResponse",
-        "type": "object"
-      },
       "InstitutionalFlowPointResponse": {
         "properties": {
           "dealer": {
@@ -2171,158 +2077,6 @@
         "title": "InstitutionalStocksResponse",
         "type": "object"
       },
-      "InstitutionalTwseRunResponse": {
-        "properties": {
-          "completed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Completed At"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "edition_date": {
-            "format": "date",
-            "title": "Edition Date",
-            "type": "string"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "heartbeat_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Heartbeat At"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "market_code": {
-            "title": "Market Code",
-            "type": "null"
-          },
-          "news": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/NewsProgress"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "News"
-          },
-          "operation": {
-            "const": "institutional_twse",
-            "title": "Operation",
-            "type": "string"
-          },
-          "requested_by_user_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Requested By User Id"
-          },
-          "result": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Result"
-          },
-          "scheduled_for": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scheduled For"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
-          },
-          "status": {
-            "enum": [
-              "pending",
-              "running",
-              "succeeded",
-              "partial",
-              "failed",
-              "cancelled"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "edition_date",
-          "status",
-          "requested_by_user_id",
-          "created_at",
-          "started_at",
-          "completed_at",
-          "result",
-          "error",
-          "operation",
-          "market_code"
-        ],
-        "title": "InstitutionalTwseRunResponse",
-        "type": "object"
-      },
       "InternalUserCreate": {
         "properties": {
           "display_name": {
@@ -2386,6 +2140,278 @@
           "must_change_password"
         ],
         "title": "InternalUserResponse",
+        "type": "object"
+      },
+      "JobCatalogItem": {
+        "properties": {
+          "functions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Functions",
+            "type": "array"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "projection_handler": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projection Handler"
+          },
+          "triggers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Triggers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "triggers",
+          "functions",
+          "projection_handler"
+        ],
+        "title": "JobCatalogItem",
+        "type": "object"
+      },
+      "JobRunCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "job_key": {
+            "enum": [
+              "global_macro_refresh",
+              "us_equity_refresh",
+              "tw_equity_refresh",
+              "news_daily_update",
+              "news_global_refresh_job",
+              "news_tw_equity_refresh_job",
+              "news_us_equity_refresh_job"
+            ],
+            "title": "Job Key",
+            "type": "string"
+          }
+        },
+        "required": ["job_key"],
+        "title": "JobRunCreate",
+        "type": "object"
+      },
+      "JobRunList": {
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/JobRunResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": ["items", "page", "page_size", "total", "has_more"],
+        "title": "JobRunList",
+        "type": "object"
+      },
+      "JobRunResponse": {
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "deadline_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline At"
+          },
+          "depends_on": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Depends On",
+            "type": "array"
+          },
+          "downstream_jobs": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Downstream Jobs",
+            "type": "array"
+          },
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "functions": {
+            "items": {
+              "$ref": "#/components/schemas/FunctionRunResponse"
+            },
+            "title": "Functions",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "job_key": {
+            "title": "Job Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload"
+          },
+          "requested_by_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By User Id"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "routine_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Routine Run Id"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "routine_run_id",
+          "job_key",
+          "kind",
+          "trigger",
+          "edition_date",
+          "deadline_at",
+          "status",
+          "requested_by_user_id",
+          "payload",
+          "started_at",
+          "completed_at",
+          "result",
+          "error",
+          "created_at",
+          "functions",
+          "depends_on",
+          "downstream_jobs"
+        ],
+        "title": "JobRunResponse",
         "type": "object"
       },
       "LatestNewsResponse": {
@@ -2489,6 +2515,148 @@
         "title": "LatestNewsResponse",
         "type": "object"
       },
+      "LegacyRunList": {
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LegacyRunResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": ["items", "page", "page_size", "total", "has_more"],
+        "title": "LegacyRunList",
+        "type": "object"
+      },
+      "LegacyRunResponse": {
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "market_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Code"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "requested_by_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By User Id"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "operation",
+          "market_code",
+          "edition_date",
+          "status",
+          "requested_by_user_id",
+          "started_at",
+          "completed_at",
+          "result",
+          "error",
+          "created_at"
+        ],
+        "title": "LegacyRunResponse",
+        "type": "object"
+      },
       "LocalizedElementText": {
         "additionalProperties": false,
         "properties": {
@@ -2574,175 +2742,6 @@
         },
         "required": ["fetched_at", "histories", "calendar"],
         "title": "MacroDashboard",
-        "type": "object"
-      },
-      "MacroDashboardRunCreate": {
-        "additionalProperties": false,
-        "properties": {
-          "market_code": {
-            "title": "Market Code",
-            "type": "null"
-          },
-          "operation": {
-            "const": "macro_dashboard",
-            "title": "Operation",
-            "type": "string"
-          }
-        },
-        "required": ["operation"],
-        "title": "MacroDashboardRunCreate",
-        "type": "object"
-      },
-      "MacroDashboardRunResponse": {
-        "properties": {
-          "completed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Completed At"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "edition_date": {
-            "format": "date",
-            "title": "Edition Date",
-            "type": "string"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "heartbeat_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Heartbeat At"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "market_code": {
-            "title": "Market Code",
-            "type": "null"
-          },
-          "news": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/NewsProgress"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "News"
-          },
-          "operation": {
-            "const": "macro_dashboard",
-            "title": "Operation",
-            "type": "string"
-          },
-          "requested_by_user_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Requested By User Id"
-          },
-          "result": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Result"
-          },
-          "scheduled_for": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scheduled For"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
-          },
-          "status": {
-            "enum": [
-              "pending",
-              "running",
-              "succeeded",
-              "partial",
-              "failed",
-              "cancelled"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "edition_date",
-          "status",
-          "requested_by_user_id",
-          "created_at",
-          "started_at",
-          "completed_at",
-          "result",
-          "error",
-          "operation",
-          "market_code"
-        ],
-        "title": "MacroDashboardRunResponse",
         "type": "object"
       },
       "MarketPolicyUpdate": {
@@ -3030,328 +3029,6 @@
         },
         "required": ["id", "value", "unit_code"],
         "title": "MetricValue",
-        "type": "object"
-      },
-      "MorningAllRunCreate": {
-        "additionalProperties": false,
-        "properties": {
-          "market_code": {
-            "title": "Market Code",
-            "type": "null"
-          },
-          "operation": {
-            "const": "morning_all",
-            "title": "Operation",
-            "type": "string"
-          }
-        },
-        "required": ["operation"],
-        "title": "MorningAllRunCreate",
-        "type": "object"
-      },
-      "MorningAllRunResponse": {
-        "properties": {
-          "completed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Completed At"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "edition_date": {
-            "format": "date",
-            "title": "Edition Date",
-            "type": "string"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "heartbeat_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Heartbeat At"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "market_code": {
-            "title": "Market Code",
-            "type": "null"
-          },
-          "news": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/NewsProgress"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "News"
-          },
-          "operation": {
-            "const": "morning_all",
-            "title": "Operation",
-            "type": "string"
-          },
-          "requested_by_user_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Requested By User Id"
-          },
-          "result": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Result"
-          },
-          "scheduled_for": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scheduled For"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
-          },
-          "status": {
-            "enum": [
-              "pending",
-              "running",
-              "succeeded",
-              "partial",
-              "failed",
-              "cancelled"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "edition_date",
-          "status",
-          "requested_by_user_id",
-          "created_at",
-          "started_at",
-          "completed_at",
-          "result",
-          "error",
-          "operation",
-          "market_code"
-        ],
-        "title": "MorningAllRunResponse",
-        "type": "object"
-      },
-      "MorningMarketRunResponse": {
-        "properties": {
-          "completed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Completed At"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "edition_date": {
-            "format": "date",
-            "title": "Edition Date",
-            "type": "string"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "heartbeat_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Heartbeat At"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "market_code": {
-            "enum": ["global_macro_bonds", "crypto", "us_equity"],
-            "title": "Market Code",
-            "type": "string"
-          },
-          "news": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/NewsProgress"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "News"
-          },
-          "operation": {
-            "const": "morning_market",
-            "title": "Operation",
-            "type": "string"
-          },
-          "requested_by_user_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Requested By User Id"
-          },
-          "result": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Result"
-          },
-          "scheduled_for": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scheduled For"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
-          },
-          "status": {
-            "enum": [
-              "pending",
-              "running",
-              "succeeded",
-              "partial",
-              "failed",
-              "cancelled"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "edition_date",
-          "status",
-          "requested_by_user_id",
-          "created_at",
-          "started_at",
-          "completed_at",
-          "result",
-          "error",
-          "operation",
-          "market_code"
-        ],
-        "title": "MorningMarketRunResponse",
         "type": "object"
       },
       "NewsAdminCandidate": {
@@ -3828,175 +3505,6 @@
         "title": "NewsAdminItem",
         "type": "object"
       },
-      "NewsAllRunCreate": {
-        "additionalProperties": false,
-        "properties": {
-          "market_code": {
-            "title": "Market Code",
-            "type": "null"
-          },
-          "operation": {
-            "const": "news_all",
-            "title": "Operation",
-            "type": "string"
-          }
-        },
-        "required": ["operation"],
-        "title": "NewsAllRunCreate",
-        "type": "object"
-      },
-      "NewsAllRunResponse": {
-        "properties": {
-          "completed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Completed At"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "edition_date": {
-            "format": "date",
-            "title": "Edition Date",
-            "type": "string"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "heartbeat_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Heartbeat At"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "market_code": {
-            "title": "Market Code",
-            "type": "null"
-          },
-          "news": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/NewsProgress"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "News"
-          },
-          "operation": {
-            "const": "news_all",
-            "title": "Operation",
-            "type": "string"
-          },
-          "requested_by_user_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Requested By User Id"
-          },
-          "result": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Result"
-          },
-          "scheduled_for": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scheduled For"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
-          },
-          "status": {
-            "enum": [
-              "pending",
-              "running",
-              "succeeded",
-              "partial",
-              "failed",
-              "cancelled"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "edition_date",
-          "status",
-          "requested_by_user_id",
-          "created_at",
-          "started_at",
-          "completed_at",
-          "result",
-          "error",
-          "operation",
-          "market_code"
-        ],
-        "title": "NewsAllRunResponse",
-        "type": "object"
-      },
       "NewsCandidatePublishRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4010,13 +3518,44 @@
             "title": "Candidate Ids",
             "type": "array"
           },
+          "edition_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edition Date"
+          },
           "edition_id": {
-            "format": "uuid",
-            "title": "Edition Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edition Id"
+          },
+          "market_code": {
+            "anyOf": [
+              {
+                "enum": ["global", "tw_equity", "us_equity"],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Code"
           }
         },
-        "required": ["edition_id", "candidate_ids"],
+        "required": ["candidate_ids"],
         "title": "NewsCandidatePublishRequest",
         "type": "object"
       },
@@ -4282,415 +3821,6 @@
         "title": "NewsItemResponse",
         "type": "object"
       },
-      "NewsMarketRunCreate": {
-        "additionalProperties": false,
-        "properties": {
-          "market_code": {
-            "enum": ["global", "tw_equity", "us_equity"],
-            "title": "Market Code",
-            "type": "string"
-          },
-          "operation": {
-            "const": "news_market",
-            "title": "Operation",
-            "type": "string"
-          }
-        },
-        "required": ["operation", "market_code"],
-        "title": "NewsMarketRunCreate",
-        "type": "object"
-      },
-      "NewsMarketRunResponse": {
-        "properties": {
-          "completed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Completed At"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "edition_date": {
-            "format": "date",
-            "title": "Edition Date",
-            "type": "string"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "heartbeat_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Heartbeat At"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "market_code": {
-            "enum": ["global", "tw_equity", "us_equity"],
-            "title": "Market Code",
-            "type": "string"
-          },
-          "news": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/NewsProgress"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "News"
-          },
-          "operation": {
-            "const": "news_market",
-            "title": "Operation",
-            "type": "string"
-          },
-          "requested_by_user_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Requested By User Id"
-          },
-          "result": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Result"
-          },
-          "scheduled_for": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scheduled For"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
-          },
-          "status": {
-            "enum": [
-              "pending",
-              "running",
-              "succeeded",
-              "partial",
-              "failed",
-              "cancelled"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "edition_date",
-          "status",
-          "requested_by_user_id",
-          "created_at",
-          "started_at",
-          "completed_at",
-          "result",
-          "error",
-          "operation",
-          "market_code"
-        ],
-        "title": "NewsMarketRunResponse",
-        "type": "object"
-      },
-      "NewsProgress": {
-        "properties": {
-          "attempt": {
-            "title": "Attempt",
-            "type": "integer"
-          },
-          "failures": {
-            "items": {
-              "$ref": "#/components/schemas/NewsFailure"
-            },
-            "title": "Failures",
-            "type": "array"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "next_retry_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Retry At"
-          },
-          "progress": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "title": "Progress",
-            "type": "object"
-          },
-          "publication": {
-            "enum": [
-              "technical_degradation",
-              "editorial_shortfall",
-              "available"
-            ],
-            "title": "Publication",
-            "type": "string"
-          },
-          "stage": {
-            "enum": [
-              "queued",
-              "feed",
-              "article",
-              "selection",
-              "summary",
-              "publication",
-              "complete"
-            ],
-            "title": "Stage",
-            "type": "string"
-          },
-          "state": {
-            "enum": [
-              "queued",
-              "running",
-              "waiting_retry",
-              "needs_attention",
-              "completed",
-              "expired",
-              "cancelled"
-            ],
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "state",
-          "stage",
-          "progress",
-          "failures",
-          "attempt",
-          "next_retry_at",
-          "publication"
-        ],
-        "title": "NewsProgress",
-        "type": "object"
-      },
-      "NewsPublishRunResponse": {
-        "description": "A manual publish of admin-chosen news candidates; created only through\nthe news management API, never through the generic run endpoint.",
-        "properties": {
-          "completed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Completed At"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "edition_date": {
-            "format": "date",
-            "title": "Edition Date",
-            "type": "string"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "heartbeat_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Heartbeat At"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "market_code": {
-            "title": "Market Code",
-            "type": "null"
-          },
-          "news": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/NewsProgress"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "News"
-          },
-          "operation": {
-            "const": "news_publish",
-            "title": "Operation",
-            "type": "string"
-          },
-          "requested_by_user_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Requested By User Id"
-          },
-          "result": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Result"
-          },
-          "scheduled_for": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scheduled For"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
-          },
-          "status": {
-            "enum": [
-              "pending",
-              "running",
-              "succeeded",
-              "partial",
-              "failed",
-              "cancelled"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "edition_date",
-          "status",
-          "requested_by_user_id",
-          "created_at",
-          "started_at",
-          "completed_at",
-          "result",
-          "error",
-          "operation",
-          "market_code"
-        ],
-        "title": "NewsPublishRunResponse",
-        "type": "object"
-      },
       "NewsRecoveryResponse": {
         "properties": {
           "dependencies": {
@@ -4705,16 +3835,73 @@
         "title": "NewsRecoveryResponse",
         "type": "object"
       },
-      "NewsResumeRequest": {
-        "additionalProperties": false,
+      "OrchestrationCatalog": {
         "properties": {
-          "resume_provider": {
-            "default": false,
-            "title": "Resume Provider",
-            "type": "boolean"
+          "features": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Features",
+            "type": "object"
+          },
+          "functions": {
+            "items": {
+              "$ref": "#/components/schemas/FunctionCatalogItem"
+            },
+            "title": "Functions",
+            "type": "array"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/JobCatalogItem"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "manual_market_jobs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Manual Market Jobs",
+            "type": "array"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderCatalogItem"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "registry_digest": {
+            "title": "Registry Digest",
+            "type": "string"
+          },
+          "registry_version": {
+            "title": "Registry Version",
+            "type": "string"
+          },
+          "routine_key": {
+            "title": "Routine Key",
+            "type": "string"
+          },
+          "taipei_date": {
+            "format": "date",
+            "title": "Taipei Date",
+            "type": "string"
           }
         },
-        "title": "NewsResumeRequest",
+        "required": [
+          "taipei_date",
+          "registry_version",
+          "registry_digest",
+          "providers",
+          "functions",
+          "jobs",
+          "routine_key",
+          "manual_market_jobs",
+          "features"
+        ],
+        "title": "OrchestrationCatalog",
         "type": "object"
       },
       "OrganizationCreate": {
@@ -5488,179 +4675,53 @@
         "title": "PresentationContract",
         "type": "object"
       },
-      "ProviderRerunCreate": {
-        "additionalProperties": false,
+      "ProviderCatalogItem": {
         "properties": {
-          "operation": {
-            "const": "provider_rerun",
-            "title": "Operation",
+          "display_name": {
+            "title": "Display Name",
             "type": "string"
           },
-          "provider": {
-            "enum": ["twelve_data", "yahoo_finance", "twse"],
-            "title": "Provider",
+          "functions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Functions",
+            "type": "array"
+          },
+          "key": {
+            "title": "Key",
             "type": "string"
+          },
+          "last_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Attempt At"
+          },
+          "last_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Status"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
           }
         },
-        "required": ["operation", "provider"],
-        "title": "ProviderRerunCreate",
-        "type": "object"
-      },
-      "ProviderRerunResponse": {
-        "properties": {
-          "completed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Completed At"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "edition_date": {
-            "format": "date",
-            "title": "Edition Date",
-            "type": "string"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "heartbeat_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Heartbeat At"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "market_code": {
-            "title": "Market Code",
-            "type": "null"
-          },
-          "news": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/NewsProgress"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "News"
-          },
-          "operation": {
-            "const": "provider_rerun",
-            "title": "Operation",
-            "type": "string"
-          },
-          "provider": {
-            "enum": ["twelve_data", "yahoo_finance", "twse"],
-            "title": "Provider",
-            "type": "string"
-          },
-          "requested_by_user_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Requested By User Id"
-          },
-          "result": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Result"
-          },
-          "scheduled_for": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scheduled For"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
-          },
-          "status": {
-            "enum": [
-              "pending",
-              "running",
-              "succeeded",
-              "partial",
-              "failed",
-              "cancelled"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "edition_date",
-          "status",
-          "requested_by_user_id",
-          "created_at",
-          "started_at",
-          "completed_at",
-          "result",
-          "error",
-          "operation",
-          "provider"
-        ],
-        "title": "ProviderRerunResponse",
+        "required": ["key", "display_name", "ready", "functions"],
+        "title": "ProviderCatalogItem",
         "type": "object"
       },
       "ProvisionedInternalUserResponse": {
@@ -6134,6 +5195,136 @@
         "title": "ReportsIndexContext",
         "type": "object"
       },
+      "RoutineRunList": {
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RoutineRunResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": ["items", "page", "page_size", "total", "has_more"],
+        "title": "RoutineRunList",
+        "type": "object"
+      },
+      "RoutineRunResponse": {
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "deadline_at": {
+            "format": "date-time",
+            "title": "Deadline At",
+            "type": "string"
+          },
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/JobRunResponse"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "registry_version": {
+            "title": "Registry Version",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "routine_key": {
+            "title": "Routine Key",
+            "type": "string"
+          },
+          "scheduled_for": {
+            "format": "date-time",
+            "title": "Scheduled For",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "routine_key",
+          "registry_version",
+          "edition_date",
+          "scheduled_for",
+          "deadline_at",
+          "status",
+          "started_at",
+          "completed_at",
+          "result",
+          "created_at",
+          "jobs"
+        ],
+        "title": "RoutineRunResponse",
+        "type": "object"
+      },
       "SeriesBlock": {
         "additionalProperties": false,
         "properties": {
@@ -6437,132 +5628,6 @@
         "required": ["loc", "msg", "type"],
         "title": "ValidationError",
         "type": "object"
-      },
-      "YfinanceDailyBarsFetch": {
-        "additionalProperties": false,
-        "properties": {
-          "period": {
-            "const": "7d",
-            "default": "7d",
-            "title": "Period",
-            "type": "string"
-          }
-        },
-        "title": "YfinanceDailyBarsFetch",
-        "type": "object"
-      },
-      "YfinanceDailyBarsResponse": {
-        "properties": {
-          "failed": {
-            "items": {
-              "$ref": "#/components/schemas/YfinanceSymbolFailure"
-            },
-            "title": "Failed",
-            "type": "array"
-          },
-          "fetched_at": {
-            "format": "date-time",
-            "title": "Fetched At",
-            "type": "string"
-          },
-          "period": {
-            "const": "7d",
-            "title": "Period",
-            "type": "string"
-          },
-          "succeeded": {
-            "items": {
-              "$ref": "#/components/schemas/YfinanceSymbolBars"
-            },
-            "title": "Succeeded",
-            "type": "array"
-          }
-        },
-        "required": ["period", "fetched_at", "succeeded", "failed"],
-        "title": "YfinanceDailyBarsResponse",
-        "type": "object"
-      },
-      "YfinanceSymbolBars": {
-        "description": "What one symbol's refresh did, not the rows themselves.\n\nThe bars live in index_daily_bars; repeating them here cost 717KB for a 2y\nrun and would be several megabytes for `max`, and a reader wants a symbol\nand a date range, not whatever one refresh happened to touch.",
-        "properties": {
-          "as_of": {
-            "format": "date",
-            "title": "As Of",
-            "type": "string"
-          },
-          "dropped_unsettled_trade_date": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dropped Unsettled Trade Date"
-          },
-          "market": {
-            "enum": [
-              "global_macro_bonds",
-              "crypto",
-              "forex",
-              "us_equity",
-              "hk_equity",
-              "cn_equity",
-              "tw_equity",
-              "tw_index_derivatives"
-            ],
-            "title": "Market",
-            "type": "string"
-          },
-          "stored_count": {
-            "title": "Stored Count",
-            "type": "integer"
-          },
-          "symbol": {
-            "title": "Symbol",
-            "type": "string"
-          }
-        },
-        "required": [
-          "symbol",
-          "market",
-          "as_of",
-          "stored_count",
-          "dropped_unsettled_trade_date"
-        ],
-        "title": "YfinanceSymbolBars",
-        "type": "object"
-      },
-      "YfinanceSymbolFailure": {
-        "properties": {
-          "error": {
-            "title": "Error",
-            "type": "string"
-          },
-          "market": {
-            "enum": [
-              "global_macro_bonds",
-              "crypto",
-              "forex",
-              "us_equity",
-              "hk_equity",
-              "cn_equity",
-              "tw_equity",
-              "tw_index_derivatives"
-            ],
-            "title": "Market",
-            "type": "string"
-          },
-          "symbol": {
-            "title": "Symbol",
-            "type": "string"
-          }
-        },
-        "required": ["symbol", "market", "error"],
-        "title": "YfinanceSymbolFailure",
-        "type": "object"
       }
     }
   },
@@ -6613,11 +5678,11 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AnalystViewpointSyncResponse"
+                  "$ref": "#/components/schemas/JobRunResponse"
                 }
               }
             },
@@ -6866,567 +5931,6 @@
         "tags": ["chat"]
       }
     },
-    "/api/admin/data-management/catalog": {
-      "get": {
-        "operationId": "catalog_api_admin_data_management_catalog_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataManagementCatalog"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Catalog",
-        "tags": ["data management"]
-      }
-    },
-    "/api/admin/data-management/runs": {
-      "get": {
-        "operationId": "list_runs_api_admin_data_management_runs_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "default": 1,
-              "minimum": 1,
-              "title": "Page",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "operation_group",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "const": "news",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Operation Group"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataManagementRunList"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Runs",
-        "tags": ["data management"]
-      },
-      "post": {
-        "operationId": "create_run_api_admin_data_management_runs_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-CSRF-Token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Csrf-Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "discriminator": {
-                  "mapping": {
-                    "macro_dashboard": "#/components/schemas/MacroDashboardRunCreate",
-                    "morning_all": "#/components/schemas/MorningAllRunCreate",
-                    "news_all": "#/components/schemas/NewsAllRunCreate",
-                    "news_market": "#/components/schemas/NewsMarketRunCreate",
-                    "provider_rerun": "#/components/schemas/ProviderRerunCreate"
-                  },
-                  "propertyName": "operation"
-                },
-                "oneOf": [
-                  {
-                    "$ref": "#/components/schemas/MorningAllRunCreate"
-                  },
-                  {
-                    "$ref": "#/components/schemas/NewsAllRunCreate"
-                  },
-                  {
-                    "$ref": "#/components/schemas/NewsMarketRunCreate"
-                  },
-                  {
-                    "$ref": "#/components/schemas/MacroDashboardRunCreate"
-                  },
-                  {
-                    "$ref": "#/components/schemas/ProviderRerunCreate"
-                  }
-                ],
-                "title": "Payload"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "discriminator": {
-                    "mapping": {
-                      "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
-                      "institutional_twse": "#/components/schemas/InstitutionalTwseRunResponse",
-                      "macro_dashboard": "#/components/schemas/MacroDashboardRunResponse",
-                      "morning_all": "#/components/schemas/MorningAllRunResponse",
-                      "morning_market": "#/components/schemas/MorningMarketRunResponse",
-                      "news_all": "#/components/schemas/NewsAllRunResponse",
-                      "news_market": "#/components/schemas/NewsMarketRunResponse",
-                      "news_publish": "#/components/schemas/NewsPublishRunResponse",
-                      "provider_rerun": "#/components/schemas/ProviderRerunResponse"
-                    },
-                    "propertyName": "operation"
-                  },
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/MorningAllRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/MorningMarketRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/IndexYahooRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InstitutionalTwseRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/NewsAllRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/NewsMarketRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/NewsPublishRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/MacroDashboardRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ProviderRerunResponse"
-                    }
-                  ],
-                  "title": "Response Create Run Api Admin Data Management Runs Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "409": {
-            "description": "An operation class is already active."
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "503": {
-            "description": "Requested provider is unavailable."
-          }
-        },
-        "summary": "Create Run",
-        "tags": ["data management"]
-      }
-    },
-    "/api/admin/data-management/runs/{run_id}": {
-      "get": {
-        "operationId": "get_run_api_admin_data_management_runs__run_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "run_id",
-            "required": true,
-            "schema": {
-              "title": "Run Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "discriminator": {
-                    "mapping": {
-                      "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
-                      "institutional_twse": "#/components/schemas/InstitutionalTwseRunResponse",
-                      "macro_dashboard": "#/components/schemas/MacroDashboardRunResponse",
-                      "morning_all": "#/components/schemas/MorningAllRunResponse",
-                      "morning_market": "#/components/schemas/MorningMarketRunResponse",
-                      "news_all": "#/components/schemas/NewsAllRunResponse",
-                      "news_market": "#/components/schemas/NewsMarketRunResponse",
-                      "news_publish": "#/components/schemas/NewsPublishRunResponse",
-                      "provider_rerun": "#/components/schemas/ProviderRerunResponse"
-                    },
-                    "propertyName": "operation"
-                  },
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/MorningAllRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/MorningMarketRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/IndexYahooRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InstitutionalTwseRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/NewsAllRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/NewsMarketRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/NewsPublishRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/MacroDashboardRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ProviderRerunResponse"
-                    }
-                  ],
-                  "title": "Response Get Run Api Admin Data Management Runs  Run Id  Get"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Run",
-        "tags": ["data management"]
-      }
-    },
-    "/api/admin/data-management/runs/{run_id}/cancel": {
-      "post": {
-        "operationId": "cancel_existing_run_api_admin_data_management_runs__run_id__cancel_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "run_id",
-            "required": true,
-            "schema": {
-              "title": "Run Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-CSRF-Token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Csrf-Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "discriminator": {
-                    "mapping": {
-                      "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
-                      "institutional_twse": "#/components/schemas/InstitutionalTwseRunResponse",
-                      "macro_dashboard": "#/components/schemas/MacroDashboardRunResponse",
-                      "morning_all": "#/components/schemas/MorningAllRunResponse",
-                      "morning_market": "#/components/schemas/MorningMarketRunResponse",
-                      "news_all": "#/components/schemas/NewsAllRunResponse",
-                      "news_market": "#/components/schemas/NewsMarketRunResponse",
-                      "news_publish": "#/components/schemas/NewsPublishRunResponse",
-                      "provider_rerun": "#/components/schemas/ProviderRerunResponse"
-                    },
-                    "propertyName": "operation"
-                  },
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/MorningAllRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/MorningMarketRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/IndexYahooRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InstitutionalTwseRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/NewsAllRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/NewsMarketRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/NewsPublishRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/MacroDashboardRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ProviderRerunResponse"
-                    }
-                  ],
-                  "title": "Response Cancel Existing Run Api Admin Data Management Runs  Run Id  Cancel Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "409": {
-            "description": "Run is terminal already or no longer exists."
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Cancel Existing Run",
-        "tags": ["data management"]
-      }
-    },
-    "/api/admin/data-management/runs/{run_id}/resume": {
-      "post": {
-        "operationId": "resume_run_api_admin_data_management_runs__run_id__resume_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "run_id",
-            "required": true,
-            "schema": {
-              "title": "Run Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-CSRF-Token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Csrf-Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NewsResumeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "discriminator": {
-                    "mapping": {
-                      "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
-                      "institutional_twse": "#/components/schemas/InstitutionalTwseRunResponse",
-                      "macro_dashboard": "#/components/schemas/MacroDashboardRunResponse",
-                      "morning_all": "#/components/schemas/MorningAllRunResponse",
-                      "morning_market": "#/components/schemas/MorningMarketRunResponse",
-                      "news_all": "#/components/schemas/NewsAllRunResponse",
-                      "news_market": "#/components/schemas/NewsMarketRunResponse",
-                      "news_publish": "#/components/schemas/NewsPublishRunResponse",
-                      "provider_rerun": "#/components/schemas/ProviderRerunResponse"
-                    },
-                    "propertyName": "operation"
-                  },
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/MorningAllRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/MorningMarketRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/IndexYahooRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InstitutionalTwseRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/NewsAllRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/NewsMarketRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/NewsPublishRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/MacroDashboardRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ProviderRerunResponse"
-                    }
-                  ],
-                  "title": "Response Resume Run Api Admin Data Management Runs  Run Id  Resume Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Resume Run",
-        "tags": ["data management"]
-      }
-    },
-    "/api/admin/data-sources/yfinance/daily-bars": {
-      "post": {
-        "deprecated": true,
-        "operationId": "fetch_yfinance_daily_bars_api_admin_data_sources_yfinance_daily_bars_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-CSRF-Token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Csrf-Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/YfinanceDailyBarsFetch"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/YfinanceDailyBarsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Fetch Yfinance Daily Bars",
-        "tags": ["administration"]
-      }
-    },
     "/api/admin/internal-users": {
       "get": {
         "operationId": "list_internal_users_api_admin_internal_users_get",
@@ -7542,50 +6046,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "discriminator": {
-                    "mapping": {
-                      "index_yahoo": "#/components/schemas/IndexYahooRunResponse",
-                      "institutional_twse": "#/components/schemas/InstitutionalTwseRunResponse",
-                      "macro_dashboard": "#/components/schemas/MacroDashboardRunResponse",
-                      "morning_all": "#/components/schemas/MorningAllRunResponse",
-                      "morning_market": "#/components/schemas/MorningMarketRunResponse",
-                      "news_all": "#/components/schemas/NewsAllRunResponse",
-                      "news_market": "#/components/schemas/NewsMarketRunResponse",
-                      "news_publish": "#/components/schemas/NewsPublishRunResponse",
-                      "provider_rerun": "#/components/schemas/ProviderRerunResponse"
-                    },
-                    "propertyName": "operation"
-                  },
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/MorningAllRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/MorningMarketRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/IndexYahooRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InstitutionalTwseRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/NewsAllRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/NewsMarketRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/NewsPublishRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/MacroDashboardRunResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ProviderRerunResponse"
-                    }
-                  ],
-                  "title": "Response Publish Candidates Api Admin News Candidates Publish Post"
+                  "$ref": "#/components/schemas/JobRunResponse"
                 }
               }
             },
@@ -7786,6 +6247,378 @@
         },
         "summary": "Recovery Status",
         "tags": ["news management"]
+      }
+    },
+    "/api/admin/orchestration/catalog": {
+      "get": {
+        "operationId": "catalog_api_admin_orchestration_catalog_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrchestrationCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Catalog",
+        "tags": ["orchestration"]
+      }
+    },
+    "/api/admin/orchestration/job-runs": {
+      "get": {
+        "operationId": "list_job_runs_api_admin_orchestration_job_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_group",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "news",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job Group"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobRunList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Job Runs",
+        "tags": ["orchestration"]
+      },
+      "post": {
+        "operationId": "create_job_run_api_admin_orchestration_job_runs_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobRunCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Job Run",
+        "tags": ["orchestration"]
+      }
+    },
+    "/api/admin/orchestration/job-runs/{job_run_id}": {
+      "get": {
+        "operationId": "get_job_run_api_admin_orchestration_job_runs__job_run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job Run",
+        "tags": ["orchestration"]
+      }
+    },
+    "/api/admin/orchestration/job-runs/{job_run_id}/cancel": {
+      "post": {
+        "operationId": "cancel_existing_job_run_api_admin_orchestration_job_runs__job_run_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Existing Job Run",
+        "tags": ["orchestration"]
+      }
+    },
+    "/api/admin/orchestration/legacy-runs": {
+      "get": {
+        "operationId": "list_legacy_runs_api_admin_orchestration_legacy_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacyRunList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Legacy Runs",
+        "tags": ["orchestration"]
+      }
+    },
+    "/api/admin/orchestration/routine-runs": {
+      "get": {
+        "operationId": "list_routine_runs_api_admin_orchestration_routine_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineRunList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Routine Runs",
+        "tags": ["orchestration"]
+      }
+    },
+    "/api/admin/orchestration/routine-runs/{routine_run_id}": {
+      "get": {
+        "operationId": "get_routine_run_api_admin_orchestration_routine_runs__routine_run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "routine_run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Routine Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Routine Run",
+        "tags": ["orchestration"]
       }
     },
     "/api/admin/organizations": {

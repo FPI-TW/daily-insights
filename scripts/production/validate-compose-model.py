@@ -12,13 +12,8 @@ SERVICES = (
     "api",
     "web",
     "nginx",
-    "morning-report-scheduler",
-    "daily-news-scheduler",
-    "analyst-viewpoints-scheduler",
-    "index-daily-bars-scheduler",
-    "institutional-flows-scheduler",
-    "data-management-worker",
-    "macro-dashboard-scheduler",
+    "orchestration-worker",
+    "orchestration-dispatcher",
 )
 API_ENVIRONMENT_KEYS = {
     "DAILY_INSIGHTS_DAILY_NEWS_ENABLED",
@@ -65,7 +60,7 @@ def main() -> None:
     services = model.get("services", {})
     require(
         set(services) == set(SERVICES),
-        "production Compose must contain api/web/nginx and all gated schedulers",
+        "production Compose must contain api/web/nginx and unified orchestration services",
     )
 
     for name in SERVICES:
@@ -103,103 +98,57 @@ def main() -> None:
         == EXPECTED_PROXY_NETWORK,
         "API trusted proxy setting must match the app network",
     )
-    for scheduler, flag, secret in (
-        (
-            "morning-report-scheduler",
-            "DAILY_INSIGHTS_MORNING_REPORTS_ENABLED",
-            "DAILY_INSIGHTS_TWELVE_DATA_API_KEY",
-        ),
-        (
-            "daily-news-scheduler",
-            "DAILY_INSIGHTS_DAILY_NEWS_ENABLED",
-            None,
-        ),
-        (
-            "analyst-viewpoints-scheduler",
-            "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED",
-            "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY",
-        ),
-        # Yahoo publishes no API, so this scheduler has no provider credential.
-        (
-            "index-daily-bars-scheduler",
-            "DAILY_INSIGHTS_YFINANCE_ENABLED",
-            None,
-        ),
-        # TWSE publishes no API either; the scheduler only queues the run
-        # that the worker below executes.
-        (
-            "institutional-flows-scheduler",
-            "DAILY_INSIGHTS_TWSE_ENABLED",
-            None,
-        ),
-        (
-            "data-management-worker",
-            "DAILY_INSIGHTS_YFINANCE_ENABLED",
-            None,
-        ),
-    ):
-        scheduler_environment = services[scheduler].get("environment", {})
-        require(
-            scheduler_environment.get("DAILY_INSIGHTS_ENVIRONMENT") == "production",
-            f"{scheduler} environment must be production",
-        )
-        required = {flag, "DAILY_INSIGHTS_DATABASE_URL"}
-        if secret is not None:
-            required.add(secret)
-        require(
-            required.issubset(scheduler_environment),
-            f"{scheduler} must receive its feature flag, database URL, and provider credential",
-        )
-        require(not services[scheduler].get("ports"), f"{scheduler} must not publish a host port")
-    analyst_scheduler_environment = services["analyst-viewpoints-scheduler"].get("environment", {})
-    require(
-        {
-            "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL",
-            "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS",
-        }.issubset(analyst_scheduler_environment),
-        "analyst-viewpoints-scheduler must receive its upstream URL and timeout",
-    )
-    macro_scheduler_environment = services["macro-dashboard-scheduler"].get("environment", {})
+    worker_environment = services["orchestration-worker"].get("environment", {})
     require(
         {
             "DAILY_INSIGHTS_ENVIRONMENT",
+            "DAILY_INSIGHTS_RUNTIME_ROLE",
             "DAILY_INSIGHTS_DATABASE_URL",
-        }.issubset(macro_scheduler_environment),
-        "macro-dashboard-scheduler must receive production database settings",
-    )
-    require(
-        not {
-            "DAILY_INSIGHTS_SESSION_SECRET",
-            "DAILY_INSIGHTS_PASSWORD_PEPPER",
-            "DAILY_INSIGHTS_R2_ENDPOINT_URL",
-            "DAILY_INSIGHTS_R2_BUCKET_NAME",
-            "DAILY_INSIGHTS_R2_ACCESS_KEY_ID",
-            "DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY",
-            "DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS",
-        }.intersection(macro_scheduler_environment),
-        "macro-dashboard-scheduler must not receive unrelated credentials",
-    )
-    require(
-        macro_scheduler_environment.get("DAILY_INSIGHTS_ENVIRONMENT") == "production",
-        "macro-dashboard-scheduler environment must be production",
-    )
-    require(
-        not services["macro-dashboard-scheduler"].get("ports"),
-        "macro-dashboard-scheduler must not publish a host port",
-    )
-    news_scheduler_environment = services["daily-news-scheduler"].get("environment", {})
-    require(
-        not {
-            "DAILY_INSIGHTS_SESSION_SECRET",
-            "DAILY_INSIGHTS_PASSWORD_PEPPER",
+            "DAILY_INSIGHTS_ORCHESTRATION_ENABLED",
+            "DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE",
+            "DAILY_INSIGHTS_TWELVE_DATA_API_KEY",
+            "DAILY_INSIGHTS_YFINANCE_ENABLED",
+            "DAILY_INSIGHTS_TWSE_ENABLED",
+            "DAILY_INSIGHTS_DAILY_NEWS_ENABLED",
             "DAILY_INSIGHTS_NEWS_MODEL_API_KEY",
+            "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED",
+            "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY",
+        }.issubset(worker_environment),
+        "orchestration-worker must receive provider, feature, and cutover settings",
+    )
+    require(
+        worker_environment.get("DAILY_INSIGHTS_RUNTIME_ROLE") == "orchestration-worker",
+        "orchestration-worker must use its least-privilege runtime role",
+    )
+    require(
+        not {
+            "DAILY_INSIGHTS_SESSION_SECRET",
+            "DAILY_INSIGHTS_PASSWORD_PEPPER",
             "DAILY_INSIGHTS_R2_ENDPOINT_URL",
             "DAILY_INSIGHTS_R2_BUCKET_NAME",
             "DAILY_INSIGHTS_R2_ACCESS_KEY_ID",
             "DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY",
-        }.intersection(news_scheduler_environment),
-        "daily-news-scheduler must only receive queueing configuration",
+        }.intersection(worker_environment),
+        "orchestration-worker must not receive API authentication or R2 credentials",
     )
+    dispatcher_environment = services["orchestration-dispatcher"].get("environment", {})
+    require(
+        set(dispatcher_environment)
+        == {
+            "DAILY_INSIGHTS_ENVIRONMENT",
+            "DAILY_INSIGHTS_DATABASE_URL",
+            "DAILY_INSIGHTS_ORCHESTRATION_ENABLED",
+            "DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE",
+        },
+        "orchestration-dispatcher must only receive queueing and activation settings",
+    )
+    for name in ("orchestration-worker", "orchestration-dispatcher"):
+        require(
+            services[name].get("environment", {}).get("DAILY_INSIGHTS_ENVIRONMENT")
+            == "production",
+            f"{name} environment must be production",
+        )
+        require(not services[name].get("ports"), f"{name} must not publish a host port")
     web_environment = services["web"].get("environment", {})
     require(web_environment.get("APP_ENV") == "production", "Web environment must be production")
     require(

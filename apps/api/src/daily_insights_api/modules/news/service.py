@@ -46,6 +46,7 @@ from daily_insights_api.modules.news.llm import (
 )
 from daily_insights_api.modules.news.models import (
     NewsCandidate,
+    NewsCandidateBatch,
     NewsCheckpoint,
     NewsEdition,
     NewsGenerationAudit,
@@ -1531,7 +1532,15 @@ async def _publish_candidates(
                 candidate.id: candidate
                 for candidate in await database.scalars(
                     select(NewsCandidate).where(
-                        NewsCandidate.edition_id == edition_id,
+                        or_(
+                            NewsCandidate.edition_id == edition_id,
+                            NewsCandidate.batch_id.in_(
+                                select(NewsCandidateBatch.id).where(
+                                    NewsCandidateBatch.edition_date == target.edition_date,
+                                    NewsCandidateBatch.market_code == target.market_code,
+                                )
+                            ),
+                        ),
                         NewsCandidate.id.in_(candidate_ids),
                     )
                 )

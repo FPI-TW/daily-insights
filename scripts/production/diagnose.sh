@@ -8,13 +8,8 @@ docker ps -a \
 for container in \
   daily-insights-api \
   daily-insights-web \
-  daily-insights-morning-report-scheduler \
-  daily-insights-daily-news-scheduler \
-  daily-insights-analyst-viewpoints-scheduler \
-  daily-insights-index-daily-bars-scheduler \
-  daily-insights-institutional-flows-scheduler \
-  daily-insights-data-management-worker \
-  daily-insights-macro-dashboard-scheduler \
+  daily-insights-orchestration-worker \
+  daily-insights-orchestration-dispatcher \
   daily-insights-nginx; do
   if ! docker inspect "$container" >/dev/null 2>&1; then
     echo "$container: not created"

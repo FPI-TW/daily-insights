@@ -89,112 +89,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  "/api/admin/data-management/catalog": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Catalog */
-    get: operations["catalog_api_admin_data_management_catalog_get"]
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/api/admin/data-management/runs": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** List Runs */
-    get: operations["list_runs_api_admin_data_management_runs_get"]
-    put?: never
-    /** Create Run */
-    post: operations["create_run_api_admin_data_management_runs_post"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/api/admin/data-management/runs/{run_id}": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Run */
-    get: operations["get_run_api_admin_data_management_runs__run_id__get"]
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/api/admin/data-management/runs/{run_id}/cancel": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Cancel Existing Run */
-    post: operations["cancel_existing_run_api_admin_data_management_runs__run_id__cancel_post"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/api/admin/data-management/runs/{run_id}/resume": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Resume Run */
-    post: operations["resume_run_api_admin_data_management_runs__run_id__resume_post"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/api/admin/data-sources/yfinance/daily-bars": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * Fetch Yfinance Daily Bars
-     * @deprecated
-     */
-    post: operations["fetch_yfinance_daily_bars_api_admin_data_sources_yfinance_daily_bars_post"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   "/api/admin/internal-users": {
     parameters: {
       query?: never
@@ -296,6 +190,126 @@ export interface paths {
     }
     /** Recovery Status */
     get: operations["recovery_status_api_admin_news_recovery_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/orchestration/catalog": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Catalog */
+    get: operations["catalog_api_admin_orchestration_catalog_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/orchestration/job-runs": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Job Runs */
+    get: operations["list_job_runs_api_admin_orchestration_job_runs_get"]
+    put?: never
+    /** Create Job Run */
+    post: operations["create_job_run_api_admin_orchestration_job_runs_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/orchestration/job-runs/{job_run_id}": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Job Run */
+    get: operations["get_job_run_api_admin_orchestration_job_runs__job_run_id__get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/orchestration/job-runs/{job_run_id}/cancel": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Cancel Existing Job Run */
+    post: operations["cancel_existing_job_run_api_admin_orchestration_job_runs__job_run_id__cancel_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/orchestration/legacy-runs": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Legacy Runs */
+    get: operations["list_legacy_runs_api_admin_orchestration_legacy_runs_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/orchestration/routine-runs": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Routine Runs */
+    get: operations["list_routine_runs_api_admin_orchestration_routine_runs_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/orchestration/routine-runs/{routine_run_id}": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Routine Run */
+    get: operations["get_routine_run_api_admin_orchestration_routine_runs__routine_run_id__get"]
     put?: never
     post?: never
     delete?: never
@@ -998,26 +1012,6 @@ export interface components {
        */
       viewpoint_date: string
     }
-    /** AnalystViewpointSyncResponse */
-    AnalystViewpointSyncResponse: {
-      /**
-       * Fetched At
-       * Format: date-time
-       */
-      fetched_at: string
-      /** Markets */
-      markets: components["schemas"]["SyncMarketStatus"][]
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: "complete" | "partial"
-      /**
-       * Viewpoint Date
-       * Format: date
-       */
-      viewpoint_date: string
-    }
     /** AnalystViewpointSyncStatusResponse */
     AnalystViewpointSyncStatusResponse: {
       /** Enabled */
@@ -1297,81 +1291,6 @@ export interface components {
       /** Csrf Token */
       csrf_token: string
     }
-    /** DataManagementCatalog */
-    DataManagementCatalog: {
-      /** Daily News Enabled */
-      daily_news_enabled: boolean
-      /** Macro Dashboard Enabled */
-      macro_dashboard_enabled: boolean
-      /** Markets */
-      markets: ("global_macro_bonds" | "crypto" | "us_equity")[]
-      /** Morning Reports Enabled */
-      morning_reports_enabled: boolean
-      /** News Markets */
-      news_markets: ("global" | "tw_equity" | "us_equity")[]
-      /** Rerunnable Providers */
-      rerunnable_providers: ("twelve_data" | "yahoo_finance" | "twse")[]
-      /**
-       * Taipei Date
-       * Format: date
-       */
-      taipei_date: string
-      /** Twse Enabled */
-      twse_enabled: boolean
-      /** Yfinance Enabled */
-      yfinance_enabled: boolean
-    }
-    /** DataManagementRunList */
-    DataManagementRunList: {
-      /** Active Runs */
-      active_runs: (
-        | components["schemas"]["MorningAllRunResponse"]
-        | components["schemas"]["MorningMarketRunResponse"]
-        | components["schemas"]["IndexYahooRunResponse"]
-        | components["schemas"]["InstitutionalTwseRunResponse"]
-        | components["schemas"]["NewsAllRunResponse"]
-        | components["schemas"]["NewsMarketRunResponse"]
-        | components["schemas"]["NewsPublishRunResponse"]
-        | components["schemas"]["MacroDashboardRunResponse"]
-        | components["schemas"]["ProviderRerunResponse"]
-      )[]
-      /** Current Day Runs */
-      current_day_runs: (
-        | components["schemas"]["MorningAllRunResponse"]
-        | components["schemas"]["MorningMarketRunResponse"]
-        | components["schemas"]["IndexYahooRunResponse"]
-        | components["schemas"]["InstitutionalTwseRunResponse"]
-        | components["schemas"]["NewsAllRunResponse"]
-        | components["schemas"]["NewsMarketRunResponse"]
-        | components["schemas"]["NewsPublishRunResponse"]
-        | components["schemas"]["MacroDashboardRunResponse"]
-        | components["schemas"]["ProviderRerunResponse"]
-      )[]
-      /** Has More */
-      has_more: boolean
-      /** Items */
-      items: (
-        | components["schemas"]["MorningAllRunResponse"]
-        | components["schemas"]["MorningMarketRunResponse"]
-        | components["schemas"]["IndexYahooRunResponse"]
-        | components["schemas"]["InstitutionalTwseRunResponse"]
-        | components["schemas"]["NewsAllRunResponse"]
-        | components["schemas"]["NewsMarketRunResponse"]
-        | components["schemas"]["NewsPublishRunResponse"]
-        | components["schemas"]["MacroDashboardRunResponse"]
-        | components["schemas"]["ProviderRerunResponse"]
-      )[]
-      /** Page */
-      page: number
-      /**
-       * Page Size
-       * @default 10
-       * @constant
-       */
-      page_size: 10
-      /** Total */
-      total: number
-    }
     /** EconomicEvent */
     EconomicEvent: {
       /** Actual */
@@ -1395,6 +1314,100 @@ export interface components {
       previous?: string | null
       /** Unit */
       unit?: string | null
+    }
+    /** FunctionAttemptResponse */
+    FunctionAttemptResponse: {
+      /** Attempt Number */
+      attempt_number: number
+      /** Error Code */
+      error_code: string | null
+      /** Error Detail */
+      error_detail: string | null
+      /** Fetched At */
+      fetched_at: string | null
+      /** Finished At */
+      finished_at: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Payload Digest */
+      payload_digest: string | null
+      /** Record Count */
+      record_count: number | null
+      /** Request Metadata */
+      request_metadata: {
+        [key: string]: unknown
+      }[]
+      /** Result */
+      result: {
+        [key: string]: unknown
+      } | null
+      /** Source As Of */
+      source_as_of: string | null
+      /**
+       * Started At
+       * Format: date-time
+       */
+      started_at: string
+      /** Status */
+      status: string
+    }
+    /** FunctionCatalogItem */
+    FunctionCatalogItem: {
+      /** Freshness Days */
+      freshness_days: number
+      /** Key */
+      key: string
+      /** Last Attempt At */
+      last_attempt_at?: string | null
+      /** Last Status */
+      last_status?: string | null
+      /** Provider Key */
+      provider_key: string
+      /** Resources */
+      resources: string[]
+      /** Retryable */
+      retryable: boolean
+    }
+    /** FunctionRunResponse */
+    FunctionRunResponse: {
+      /** Attempt Count */
+      attempt_count: number
+      /** Attempts */
+      attempts: components["schemas"]["FunctionAttemptResponse"][]
+      /** Completed At */
+      completed_at: string | null
+      /** Depends On */
+      depends_on: string[]
+      /** Error */
+      error: string | null
+      /** Function Key */
+      function_key: string
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Missing Scopes */
+      missing_scopes: string[] | null
+      /** Next Attempt At */
+      next_attempt_at: string | null
+      /** Provider Key */
+      provider_key: string
+      /** Result */
+      result: {
+        [key: string]: unknown
+      } | null
+      /** Scope */
+      scope: {
+        [key: string]: unknown
+      }
+      /** Started At */
+      started_at: string | null
+      /** Status */
+      status: string
     }
     /**
      * GenerationStatus
@@ -1687,57 +1700,6 @@ export interface components {
       /** Points */
       points: components["schemas"]["IndexMovingAveragePointResponse"][]
     }
-    /** IndexYahooRunResponse */
-    IndexYahooRunResponse: {
-      /** Completed At */
-      completed_at: string | null
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string
-      /**
-       * Edition Date
-       * Format: date
-       */
-      edition_date: string
-      /** Error */
-      error: string | null
-      /** Heartbeat At */
-      heartbeat_at?: string | null
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string
-      /** Market Code */
-      market_code: null
-      /** News */
-      news?: {
-        [key: string]: components["schemas"]["NewsProgress"]
-      } | null
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      operation: "index_yahoo"
-      /** Requested By User Id */
-      requested_by_user_id: string | null
-      /** Result */
-      result: {
-        [key: string]: unknown
-      } | null
-      /** Scheduled For */
-      scheduled_for?: string | null
-      /** Started At */
-      started_at: string | null
-      /**
-       * Status
-       * @enum {string}
-       */
-      status:
-        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
-    }
     /** InstitutionalFlowPointResponse */
     InstitutionalFlowPointResponse: {
       /** Dealer */
@@ -1795,57 +1757,6 @@ export interface components {
       /** Rows */
       rows: components["schemas"]["InstitutionalStockFlowResponse"][]
     }
-    /** InstitutionalTwseRunResponse */
-    InstitutionalTwseRunResponse: {
-      /** Completed At */
-      completed_at: string | null
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string
-      /**
-       * Edition Date
-       * Format: date
-       */
-      edition_date: string
-      /** Error */
-      error: string | null
-      /** Heartbeat At */
-      heartbeat_at?: string | null
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string
-      /** Market Code */
-      market_code: null
-      /** News */
-      news?: {
-        [key: string]: components["schemas"]["NewsProgress"]
-      } | null
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      operation: "institutional_twse"
-      /** Requested By User Id */
-      requested_by_user_id: string | null
-      /** Result */
-      result: {
-        [key: string]: unknown
-      } | null
-      /** Scheduled For */
-      scheduled_for?: string | null
-      /** Started At */
-      started_at: string | null
-      /**
-       * Status
-       * @enum {string}
-       */
-      status:
-        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
-    }
     /** InternalUserCreate */
     InternalUserCreate: {
       /** Display Name */
@@ -1871,6 +1782,99 @@ export interface components {
       must_change_password: boolean
       status: components["schemas"]["UserStatus"]
       system_role: components["schemas"]["SystemRole"]
+    }
+    /** JobCatalogItem */
+    JobCatalogItem: {
+      /** Functions */
+      functions: string[]
+      /** Key */
+      key: string
+      /** Kind */
+      kind: string
+      /** Projection Handler */
+      projection_handler: string | null
+      /** Triggers */
+      triggers: string[]
+    }
+    /** JobRunCreate */
+    JobRunCreate: {
+      /**
+       * Job Key
+       * @enum {string}
+       */
+      job_key:
+        | "global_macro_refresh"
+        | "us_equity_refresh"
+        | "tw_equity_refresh"
+        | "news_daily_update"
+        | "news_global_refresh_job"
+        | "news_tw_equity_refresh_job"
+        | "news_us_equity_refresh_job"
+    }
+    /** JobRunList */
+    JobRunList: {
+      /** Has More */
+      has_more: boolean
+      /** Items */
+      items: components["schemas"]["JobRunResponse"][]
+      /** Page */
+      page: number
+      /** Page Size */
+      page_size: number
+      /** Total */
+      total: number
+    }
+    /** JobRunResponse */
+    JobRunResponse: {
+      /** Completed At */
+      completed_at: string | null
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /** Deadline At */
+      deadline_at: string | null
+      /** Depends On */
+      depends_on: string[]
+      /** Downstream Jobs */
+      downstream_jobs: string[]
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /** Error */
+      error: string | null
+      /** Functions */
+      functions: components["schemas"]["FunctionRunResponse"][]
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Job Key */
+      job_key: string
+      /** Kind */
+      kind: string
+      /** Payload */
+      payload: {
+        [key: string]: unknown
+      } | null
+      /** Requested By User Id */
+      requested_by_user_id: string | null
+      /** Result */
+      result: {
+        [key: string]: unknown
+      } | null
+      /** Routine Run Id */
+      routine_run_id: string | null
+      /** Started At */
+      started_at: string | null
+      /** Status */
+      status: string
+      /** Trigger */
+      trigger: string
     }
     /** LatestNewsResponse */
     LatestNewsResponse: {
@@ -1900,6 +1904,55 @@ export interface components {
       status: "complete" | "partial" | "unavailable"
       /** Target Items */
       target_items: number
+    }
+    /** LegacyRunList */
+    LegacyRunList: {
+      /** Has More */
+      has_more: boolean
+      /** Items */
+      items: components["schemas"]["LegacyRunResponse"][]
+      /** Page */
+      page: number
+      /** Page Size */
+      page_size: number
+      /** Total */
+      total: number
+    }
+    /** LegacyRunResponse */
+    LegacyRunResponse: {
+      /** Completed At */
+      completed_at: string | null
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /** Error */
+      error: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Market Code */
+      market_code: string | null
+      /** Operation */
+      operation: string
+      /** Requested By User Id */
+      requested_by_user_id: string | null
+      /** Result */
+      result: {
+        [key: string]: unknown
+      } | null
+      /** Started At */
+      started_at: string | null
+      /** Status */
+      status: string
     }
     /** LocalizedElementText */
     LocalizedElementText: {
@@ -1931,67 +1984,6 @@ export interface components {
       fetched_at: string
       /** Histories */
       histories: components["schemas"]["History"][]
-    }
-    /** MacroDashboardRunCreate */
-    MacroDashboardRunCreate: {
-      /** Market Code */
-      market_code?: null
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      operation: "macro_dashboard"
-    }
-    /** MacroDashboardRunResponse */
-    MacroDashboardRunResponse: {
-      /** Completed At */
-      completed_at: string | null
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string
-      /**
-       * Edition Date
-       * Format: date
-       */
-      edition_date: string
-      /** Error */
-      error: string | null
-      /** Heartbeat At */
-      heartbeat_at?: string | null
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string
-      /** Market Code */
-      market_code: null
-      /** News */
-      news?: {
-        [key: string]: components["schemas"]["NewsProgress"]
-      } | null
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      operation: "macro_dashboard"
-      /** Requested By User Id */
-      requested_by_user_id: string | null
-      /** Result */
-      result: {
-        [key: string]: unknown
-      } | null
-      /** Scheduled For */
-      scheduled_for?: string | null
-      /** Started At */
-      started_at: string | null
-      /**
-       * Status
-       * @enum {string}
-       */
-      status:
-        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
     }
     /** MarketPolicyUpdate */
     MarketPolicyUpdate: {
@@ -2102,121 +2094,6 @@ export interface components {
       unit_code: string
       /** Value */
       value: string
-    }
-    /** MorningAllRunCreate */
-    MorningAllRunCreate: {
-      /** Market Code */
-      market_code?: null
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      operation: "morning_all"
-    }
-    /** MorningAllRunResponse */
-    MorningAllRunResponse: {
-      /** Completed At */
-      completed_at: string | null
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string
-      /**
-       * Edition Date
-       * Format: date
-       */
-      edition_date: string
-      /** Error */
-      error: string | null
-      /** Heartbeat At */
-      heartbeat_at?: string | null
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string
-      /** Market Code */
-      market_code: null
-      /** News */
-      news?: {
-        [key: string]: components["schemas"]["NewsProgress"]
-      } | null
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      operation: "morning_all"
-      /** Requested By User Id */
-      requested_by_user_id: string | null
-      /** Result */
-      result: {
-        [key: string]: unknown
-      } | null
-      /** Scheduled For */
-      scheduled_for?: string | null
-      /** Started At */
-      started_at: string | null
-      /**
-       * Status
-       * @enum {string}
-       */
-      status:
-        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
-    }
-    /** MorningMarketRunResponse */
-    MorningMarketRunResponse: {
-      /** Completed At */
-      completed_at: string | null
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string
-      /**
-       * Edition Date
-       * Format: date
-       */
-      edition_date: string
-      /** Error */
-      error: string | null
-      /** Heartbeat At */
-      heartbeat_at?: string | null
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string
-      /**
-       * Market Code
-       * @enum {string}
-       */
-      market_code: "global_macro_bonds" | "crypto" | "us_equity"
-      /** News */
-      news?: {
-        [key: string]: components["schemas"]["NewsProgress"]
-      } | null
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      operation: "morning_market"
-      /** Requested By User Id */
-      requested_by_user_id: string | null
-      /** Result */
-      result: {
-        [key: string]: unknown
-      } | null
-      /** Scheduled For */
-      scheduled_for?: string | null
-      /** Started At */
-      started_at: string | null
-      /**
-       * Status
-       * @enum {string}
-       */
-      status:
-        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
     }
     /** NewsAdminCandidate */
     NewsAdminCandidate: {
@@ -2383,76 +2260,16 @@ export interface components {
       /** Topic */
       topic: string
     }
-    /** NewsAllRunCreate */
-    NewsAllRunCreate: {
-      /** Market Code */
-      market_code?: null
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      operation: "news_all"
-    }
-    /** NewsAllRunResponse */
-    NewsAllRunResponse: {
-      /** Completed At */
-      completed_at: string | null
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string
-      /**
-       * Edition Date
-       * Format: date
-       */
-      edition_date: string
-      /** Error */
-      error: string | null
-      /** Heartbeat At */
-      heartbeat_at?: string | null
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string
-      /** Market Code */
-      market_code: null
-      /** News */
-      news?: {
-        [key: string]: components["schemas"]["NewsProgress"]
-      } | null
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      operation: "news_all"
-      /** Requested By User Id */
-      requested_by_user_id: string | null
-      /** Result */
-      result: {
-        [key: string]: unknown
-      } | null
-      /** Scheduled For */
-      scheduled_for?: string | null
-      /** Started At */
-      started_at: string | null
-      /**
-       * Status
-       * @enum {string}
-       */
-      status:
-        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
-    }
     /** NewsCandidatePublishRequest */
     NewsCandidatePublishRequest: {
       /** Candidate Ids */
       candidate_ids: string[]
-      /**
-       * Edition Id
-       * Format: uuid
-       */
-      edition_id: string
+      /** Edition Date */
+      edition_date?: string | null
+      /** Edition Id */
+      edition_id?: string | null
+      /** Market Code */
+      market_code?: ("global" | "tw_equity" | "us_equity") | null
     }
     /** NewsDependencyResponse */
     NewsDependencyResponse: {
@@ -2550,184 +2367,36 @@ export interface components {
       /** Topic */
       topic: string
     }
-    /** NewsMarketRunCreate */
-    NewsMarketRunCreate: {
-      /**
-       * Market Code
-       * @enum {string}
-       */
-      market_code: "global" | "tw_equity" | "us_equity"
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      operation: "news_market"
-    }
-    /** NewsMarketRunResponse */
-    NewsMarketRunResponse: {
-      /** Completed At */
-      completed_at: string | null
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string
-      /**
-       * Edition Date
-       * Format: date
-       */
-      edition_date: string
-      /** Error */
-      error: string | null
-      /** Heartbeat At */
-      heartbeat_at?: string | null
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string
-      /**
-       * Market Code
-       * @enum {string}
-       */
-      market_code: "global" | "tw_equity" | "us_equity"
-      /** News */
-      news?: {
-        [key: string]: components["schemas"]["NewsProgress"]
-      } | null
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      operation: "news_market"
-      /** Requested By User Id */
-      requested_by_user_id: string | null
-      /** Result */
-      result: {
-        [key: string]: unknown
-      } | null
-      /** Scheduled For */
-      scheduled_for?: string | null
-      /** Started At */
-      started_at: string | null
-      /**
-       * Status
-       * @enum {string}
-       */
-      status:
-        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
-    }
-    /** NewsProgress */
-    NewsProgress: {
-      /** Attempt */
-      attempt: number
-      /** Failures */
-      failures: components["schemas"]["NewsFailure"][]
-      /** Id */
-      id: string
-      /** Next Retry At */
-      next_retry_at: string | null
-      /** Progress */
-      progress: {
-        [key: string]: number
-      }
-      /**
-       * Publication
-       * @enum {string}
-       */
-      publication: "technical_degradation" | "editorial_shortfall" | "available"
-      /**
-       * Stage
-       * @enum {string}
-       */
-      stage:
-        | "queued"
-        | "feed"
-        | "article"
-        | "selection"
-        | "summary"
-        | "publication"
-        | "complete"
-      /**
-       * State
-       * @enum {string}
-       */
-      state:
-        | "queued"
-        | "running"
-        | "waiting_retry"
-        | "needs_attention"
-        | "completed"
-        | "expired"
-        | "cancelled"
-    }
-    /**
-     * NewsPublishRunResponse
-     * @description A manual publish of admin-chosen news candidates; created only through
-     *     the news management API, never through the generic run endpoint.
-     */
-    NewsPublishRunResponse: {
-      /** Completed At */
-      completed_at: string | null
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string
-      /**
-       * Edition Date
-       * Format: date
-       */
-      edition_date: string
-      /** Error */
-      error: string | null
-      /** Heartbeat At */
-      heartbeat_at?: string | null
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string
-      /** Market Code */
-      market_code: null
-      /** News */
-      news?: {
-        [key: string]: components["schemas"]["NewsProgress"]
-      } | null
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      operation: "news_publish"
-      /** Requested By User Id */
-      requested_by_user_id: string | null
-      /** Result */
-      result: {
-        [key: string]: unknown
-      } | null
-      /** Scheduled For */
-      scheduled_for?: string | null
-      /** Started At */
-      started_at: string | null
-      /**
-       * Status
-       * @enum {string}
-       */
-      status:
-        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
-    }
     /** NewsRecoveryResponse */
     NewsRecoveryResponse: {
       /** Dependencies */
       dependencies: components["schemas"]["NewsDependencyResponse"][]
     }
-    /** NewsResumeRequest */
-    NewsResumeRequest: {
+    /** OrchestrationCatalog */
+    OrchestrationCatalog: {
+      /** Features */
+      features: {
+        [key: string]: boolean
+      }
+      /** Functions */
+      functions: components["schemas"]["FunctionCatalogItem"][]
+      /** Jobs */
+      jobs: components["schemas"]["JobCatalogItem"][]
+      /** Manual Market Jobs */
+      manual_market_jobs: string[]
+      /** Providers */
+      providers: components["schemas"]["ProviderCatalogItem"][]
+      /** Registry Digest */
+      registry_digest: string
+      /** Registry Version */
+      registry_version: string
+      /** Routine Key */
+      routine_key: string
       /**
-       * Resume Provider
-       * @default false
+       * Taipei Date
+       * Format: date
        */
-      resume_provider: boolean
+      taipei_date: string
     }
     /** OrganizationCreate */
     OrganizationCreate: {
@@ -3063,74 +2732,20 @@ export interface components {
       /** Title */
       title: string
     }
-    /** ProviderRerunCreate */
-    ProviderRerunCreate: {
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      operation: "provider_rerun"
-      /**
-       * Provider
-       * @enum {string}
-       */
-      provider: "twelve_data" | "yahoo_finance" | "twse"
-    }
-    /** ProviderRerunResponse */
-    ProviderRerunResponse: {
-      /** Completed At */
-      completed_at: string | null
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string
-      /**
-       * Edition Date
-       * Format: date
-       */
-      edition_date: string
-      /** Error */
-      error: string | null
-      /** Heartbeat At */
-      heartbeat_at?: string | null
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string
-      /** Market Code */
-      market_code?: null
-      /** News */
-      news?: {
-        [key: string]: components["schemas"]["NewsProgress"]
-      } | null
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      operation: "provider_rerun"
-      /**
-       * Provider
-       * @enum {string}
-       */
-      provider: "twelve_data" | "yahoo_finance" | "twse"
-      /** Requested By User Id */
-      requested_by_user_id: string | null
-      /** Result */
-      result: {
-        [key: string]: unknown
-      } | null
-      /** Scheduled For */
-      scheduled_for?: string | null
-      /** Started At */
-      started_at: string | null
-      /**
-       * Status
-       * @enum {string}
-       */
-      status:
-        "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled"
+    /** ProviderCatalogItem */
+    ProviderCatalogItem: {
+      /** Display Name */
+      display_name: string
+      /** Functions */
+      functions: string[]
+      /** Key */
+      key: string
+      /** Last Attempt At */
+      last_attempt_at?: string | null
+      /** Last Status */
+      last_status?: string | null
+      /** Ready */
+      ready: boolean
     }
     /** ProvisionedInternalUserResponse */
     ProvisionedInternalUserResponse: {
@@ -3350,6 +2965,63 @@ export interface components {
       /** Publication Ids */
       publication_ids: string[]
     }
+    /** RoutineRunList */
+    RoutineRunList: {
+      /** Has More */
+      has_more: boolean
+      /** Items */
+      items: components["schemas"]["RoutineRunResponse"][]
+      /** Page */
+      page: number
+      /** Page Size */
+      page_size: number
+      /** Total */
+      total: number
+    }
+    /** RoutineRunResponse */
+    RoutineRunResponse: {
+      /** Completed At */
+      completed_at: string | null
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /**
+       * Deadline At
+       * Format: date-time
+       */
+      deadline_at: string
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Jobs */
+      jobs: components["schemas"]["JobRunResponse"][]
+      /** Registry Version */
+      registry_version: string
+      /** Result */
+      result: {
+        [key: string]: unknown
+      } | null
+      /** Routine Key */
+      routine_key: string
+      /**
+       * Scheduled For
+       * Format: date-time
+       */
+      scheduled_for: string
+      /** Started At */
+      started_at: string | null
+      /** Status */
+      status: string
+    }
     /** SeriesBlock */
     SeriesBlock: {
       /** Caveat */
@@ -3463,86 +3135,6 @@ export interface components {
       /** Error Type */
       type: string
     }
-    /** YfinanceDailyBarsFetch */
-    YfinanceDailyBarsFetch: {
-      /**
-       * Period
-       * @default 7d
-       * @constant
-       */
-      period: "7d"
-    }
-    /** YfinanceDailyBarsResponse */
-    YfinanceDailyBarsResponse: {
-      /** Failed */
-      failed: components["schemas"]["YfinanceSymbolFailure"][]
-      /**
-       * Fetched At
-       * Format: date-time
-       */
-      fetched_at: string
-      /**
-       * Period
-       * @constant
-       */
-      period: "7d"
-      /** Succeeded */
-      succeeded: components["schemas"]["YfinanceSymbolBars"][]
-    }
-    /**
-     * YfinanceSymbolBars
-     * @description What one symbol's refresh did, not the rows themselves.
-     *
-     *     The bars live in index_daily_bars; repeating them here cost 717KB for a 2y
-     *     run and would be several megabytes for `max`, and a reader wants a symbol
-     *     and a date range, not whatever one refresh happened to touch.
-     */
-    YfinanceSymbolBars: {
-      /**
-       * As Of
-       * Format: date
-       */
-      as_of: string
-      /** Dropped Unsettled Trade Date */
-      dropped_unsettled_trade_date: string | null
-      /**
-       * Market
-       * @enum {string}
-       */
-      market:
-        | "global_macro_bonds"
-        | "crypto"
-        | "forex"
-        | "us_equity"
-        | "hk_equity"
-        | "cn_equity"
-        | "tw_equity"
-        | "tw_index_derivatives"
-      /** Stored Count */
-      stored_count: number
-      /** Symbol */
-      symbol: string
-    }
-    /** YfinanceSymbolFailure */
-    YfinanceSymbolFailure: {
-      /** Error */
-      error: string
-      /**
-       * Market
-       * @enum {string}
-       */
-      market:
-        | "global_macro_bonds"
-        | "crypto"
-        | "forex"
-        | "us_equity"
-        | "hk_equity"
-        | "cn_equity"
-        | "tw_equity"
-        | "tw_index_derivatives"
-      /** Symbol */
-      symbol: string
-    }
   }
   responses: never
   parameters: never
@@ -3584,12 +3176,12 @@ export interface operations {
     requestBody?: never
     responses: {
       /** @description Successful Response */
-      200: {
+      202: {
         headers: {
           [name: string]: unknown
         }
         content: {
-          "application/json": components["schemas"]["AnalystViewpointSyncResponse"]
+          "application/json": components["schemas"]["JobRunResponse"]
         }
       }
       /** @description Validation Error */
@@ -3702,291 +3294,6 @@ export interface operations {
       }
     }
   }
-  catalog_api_admin_data_management_catalog_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["DataManagementCatalog"]
-        }
-      }
-    }
-  }
-  list_runs_api_admin_data_management_runs_get: {
-    parameters: {
-      query?: {
-        page?: number
-        operation_group?: "news" | null
-      }
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["DataManagementRunList"]
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"]
-        }
-      }
-    }
-  }
-  create_run_api_admin_data_management_runs_post: {
-    parameters: {
-      query?: never
-      header?: {
-        "X-CSRF-Token"?: string | null
-      }
-      path?: never
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        "application/json":
-          | components["schemas"]["MorningAllRunCreate"]
-          | components["schemas"]["NewsAllRunCreate"]
-          | components["schemas"]["NewsMarketRunCreate"]
-          | components["schemas"]["MacroDashboardRunCreate"]
-          | components["schemas"]["ProviderRerunCreate"]
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      202: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json":
-            | components["schemas"]["MorningAllRunResponse"]
-            | components["schemas"]["MorningMarketRunResponse"]
-            | components["schemas"]["IndexYahooRunResponse"]
-            | components["schemas"]["InstitutionalTwseRunResponse"]
-            | components["schemas"]["NewsAllRunResponse"]
-            | components["schemas"]["NewsMarketRunResponse"]
-            | components["schemas"]["NewsPublishRunResponse"]
-            | components["schemas"]["MacroDashboardRunResponse"]
-            | components["schemas"]["ProviderRerunResponse"]
-        }
-      }
-      /** @description An operation class is already active. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content?: never
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"]
-        }
-      }
-      /** @description Requested provider is unavailable. */
-      503: {
-        headers: {
-          [name: string]: unknown
-        }
-        content?: never
-      }
-    }
-  }
-  get_run_api_admin_data_management_runs__run_id__get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        run_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json":
-            | components["schemas"]["MorningAllRunResponse"]
-            | components["schemas"]["MorningMarketRunResponse"]
-            | components["schemas"]["IndexYahooRunResponse"]
-            | components["schemas"]["InstitutionalTwseRunResponse"]
-            | components["schemas"]["NewsAllRunResponse"]
-            | components["schemas"]["NewsMarketRunResponse"]
-            | components["schemas"]["NewsPublishRunResponse"]
-            | components["schemas"]["MacroDashboardRunResponse"]
-            | components["schemas"]["ProviderRerunResponse"]
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"]
-        }
-      }
-    }
-  }
-  cancel_existing_run_api_admin_data_management_runs__run_id__cancel_post: {
-    parameters: {
-      query?: never
-      header?: {
-        "X-CSRF-Token"?: string | null
-      }
-      path: {
-        run_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json":
-            | components["schemas"]["MorningAllRunResponse"]
-            | components["schemas"]["MorningMarketRunResponse"]
-            | components["schemas"]["IndexYahooRunResponse"]
-            | components["schemas"]["InstitutionalTwseRunResponse"]
-            | components["schemas"]["NewsAllRunResponse"]
-            | components["schemas"]["NewsMarketRunResponse"]
-            | components["schemas"]["NewsPublishRunResponse"]
-            | components["schemas"]["MacroDashboardRunResponse"]
-            | components["schemas"]["ProviderRerunResponse"]
-        }
-      }
-      /** @description Run is terminal already or no longer exists. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content?: never
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"]
-        }
-      }
-    }
-  }
-  resume_run_api_admin_data_management_runs__run_id__resume_post: {
-    parameters: {
-      query?: never
-      header?: {
-        "X-CSRF-Token"?: string | null
-      }
-      path: {
-        run_id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["NewsResumeRequest"]
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      202: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json":
-            | components["schemas"]["MorningAllRunResponse"]
-            | components["schemas"]["MorningMarketRunResponse"]
-            | components["schemas"]["IndexYahooRunResponse"]
-            | components["schemas"]["InstitutionalTwseRunResponse"]
-            | components["schemas"]["NewsAllRunResponse"]
-            | components["schemas"]["NewsMarketRunResponse"]
-            | components["schemas"]["NewsPublishRunResponse"]
-            | components["schemas"]["MacroDashboardRunResponse"]
-            | components["schemas"]["ProviderRerunResponse"]
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"]
-        }
-      }
-    }
-  }
-  fetch_yfinance_daily_bars_api_admin_data_sources_yfinance_daily_bars_post: {
-    parameters: {
-      query?: never
-      header?: {
-        "X-CSRF-Token"?: string | null
-      }
-      path?: never
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["YfinanceDailyBarsFetch"]
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["YfinanceDailyBarsResponse"]
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"]
-        }
-      }
-    }
-  }
   list_internal_users_api_admin_internal_users_get: {
     parameters: {
       query?: never
@@ -4063,16 +3370,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          "application/json":
-            | components["schemas"]["MorningAllRunResponse"]
-            | components["schemas"]["MorningMarketRunResponse"]
-            | components["schemas"]["IndexYahooRunResponse"]
-            | components["schemas"]["InstitutionalTwseRunResponse"]
-            | components["schemas"]["NewsAllRunResponse"]
-            | components["schemas"]["NewsMarketRunResponse"]
-            | components["schemas"]["NewsPublishRunResponse"]
-            | components["schemas"]["MacroDashboardRunResponse"]
-            | components["schemas"]["ProviderRerunResponse"]
+          "application/json": components["schemas"]["JobRunResponse"]
         }
       }
       /** @description Edition not found. */
@@ -4218,6 +3516,251 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["NewsRecoveryResponse"]
+        }
+      }
+    }
+  }
+  catalog_api_admin_orchestration_catalog_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["OrchestrationCatalog"]
+        }
+      }
+    }
+  }
+  list_job_runs_api_admin_orchestration_job_runs_get: {
+    parameters: {
+      query?: {
+        page?: number
+        job_key?: string | null
+        job_group?: "news" | null
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["JobRunList"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  create_job_run_api_admin_orchestration_job_runs_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["JobRunCreate"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["JobRunResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  get_job_run_api_admin_orchestration_job_runs__job_run_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        job_run_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["JobRunResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  cancel_existing_job_run_api_admin_orchestration_job_runs__job_run_id__cancel_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        job_run_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["JobRunResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  list_legacy_runs_api_admin_orchestration_legacy_runs_get: {
+    parameters: {
+      query?: {
+        page?: number
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["LegacyRunList"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  list_routine_runs_api_admin_orchestration_routine_runs_get: {
+    parameters: {
+      query?: {
+        page?: number
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["RoutineRunList"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  get_routine_run_api_admin_orchestration_routine_runs__routine_run_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        routine_run_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["RoutineRunResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
         }
       }
     }

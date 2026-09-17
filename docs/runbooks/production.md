@@ -15,11 +15,9 @@ The repository now includes an offline-verifiable deployment foundation and an
 Cloudflare, RDS, or R2 resources:
 
 - [`compose.production.yaml`](../../compose.production.yaml) runs only externally
-  built images pinned by digest across 10 containers: API, Web, nginx, six
-  schedulers (`morning-report`, `daily-news`, `analyst-viewpoints`,
-  `index-daily-bars`, `institutional-flows`, and `macro-dashboard`), and
-  `data-management-worker`; PostgreSQL is deliberately absent because
-  production uses RDS;
+  built images pinned by digest across five containers: API, Web, nginx, the
+  unified orchestration worker, and the 08:00 Asia/Taipei dispatcher;
+  PostgreSQL is deliberately absent because production uses RDS;
 - [`deploy.sh`](../../scripts/production/deploy.sh),
   [`preflight.sh`](../../scripts/production/preflight.sh),
   [`health.sh`](../../scripts/production/health.sh), and
@@ -41,14 +39,10 @@ files.
 ## Recommended topology
 
 - One x86_64 EC2 application instance in a private or tightly restricted subnet
-  runs the 10 production containers: `api`, `web`, `nginx`,
-  `morning-report-scheduler`, `daily-news-scheduler`,
-  `analyst-viewpoints-scheduler`, `index-daily-bars-scheduler`,
-  `institutional-flows-scheduler`, `macro-dashboard-scheduler`, and
-  `data-management-worker`. The daily-news scheduler persists the automatic
-  `news_all` obligation in the durable queue; the worker claims it and executes
-  provider work and targeted retries. Size from measured SSE memory and CPU,
-  not user count alone.
+  runs `api`, `web`, `nginx`, `orchestration-worker`, and
+  `orchestration-dispatcher`. The dispatcher persists one daily RoutineRun;
+  the worker claims provider functions, retries missing scopes, and publishes
+  projections. Size from measured SSE memory and CPU, not user count alone.
 - RDS PostgreSQL in private subnets is the durable store. A Single-AZ instance
   is compatible with accepted downtime and lower cost; Multi-AZ is the
   recommended upgrade if recovery time becomes stricter.
@@ -199,18 +193,27 @@ Compose while retaining immutable deployment inputs.
 2. Record current image digests, database migration, configuration version, and
    application configuration.
 3. Run pre-deploy database backup checks.
-4. Let the protected GitHub CD workflow send Secrets, Variables, and image
+4. For the one-time orchestration cutover, deploy only after 10:00 Asia/Taipei
+   and set `DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE` to the next Taipei
+   date. For later releases, preserve that activation date; the deploy script
+   detects the installed orchestration schema and permits normal deployment
+   hours. Let
+   the protected GitHub CD workflow send Secrets, Variables, and image
    digests to the SSH process and run
    `/opt/daily-insights/scripts/production/deploy.sh`. The script validates and
    pulls pinned images, renders and tests the nginx template in a disposable
    container, then recreates only nginx with Docker DNS re-resolution enabled
    while the previous API/Web containers are still available. It then stops
-   the old `daily-news-scheduler`, `index-daily-bars-scheduler`,
-   `institutional-flows-scheduler`, and `data-management-worker` and confirms
-   all four are stopped before running `alembic upgrade head`. After migration, it
-   force-recreates only the replacement worker and waits until that container
-   is healthy. Only then does it start the daily-news scheduler and converge
-   API, Web, and the remaining schedulers without recreating nginx again.
+   the API, orchestration dispatcher/worker, every legacy scheduler, and
+   `data-management-worker`, confirms they are stopped, verifies that the
+   legacy management and report queues have no pending/running rows, and runs
+   `alembic upgrade head`. After migration it starts and
+   health-checks `orchestration-worker`, then converges API, Web, and
+   `orchestration-dispatcher` without recreating nginx again.
+   A migrated installation with no RoutineRun is activation-pending, so a
+   failed first deployment can be retried before 10:00 with activation set to
+   today or the next Taipei date. Once a RoutineRun exists, normal deployments
+   require the preserved activation date not to be in the future.
 5. Require container health plus active API-readiness and Web-login probes
    through nginx before reporting deployment success. Replaced upstream
    addresses may take up to two seconds to re-resolve; a deployment remains
@@ -220,22 +223,17 @@ Compose while retaining immutable deployment inputs.
    playback, including locale fallback and browser-local progress restoration.
    Add report and SSE chat smoke tests only when those surfaces enter the
    deployed release.
-7. For routine recovery after a schema-boundary migration, keep
-   `daily-news-scheduler`, `index-daily-bars-scheduler`,
-   `institutional-flows-scheduler`, and `data-management-worker` quiesced,
-   apply a forward fix, and rerun `deploy.sh`. A prior image may be redeployed only when it is
-   schema-compatible with the current database; never run a pre-0022 worker or
-   scheduler against a post-0022 database.
+7. For routine recovery after this schema-boundary migration, keep every legacy
+   scheduler and worker quiesced, apply a forward fix, and rerun `deploy.sh`.
+   A prior image may be redeployed only when it is schema-compatible with the
+   current database; never run the legacy execution model after migration 0028.
 
 The host does not save rollback env files because they would duplicate GitHub
 Secrets. If migration, replacement-worker startup or health, final convergence,
-or final health fails, deployment re-stops `daily-news-scheduler`,
-`index-daily-bars-scheduler`, `institutional-flows-scheduler`, and
-`data-management-worker` and confirms all four are quiescent when Docker is able
-to do so. The operator uses the emitted container state and recent logs to correct
-the failure, then reruns `deploy.sh`; the deployment does not downgrade or roll
-back the migration. If Docker cannot confirm quiescence, the operator must stop
-and verify all four containers manually before recovery.
+or final health fails, deployment re-confirms all legacy schedulers and the old
+worker are quiescent. The operator uses emitted container state and recent logs
+to correct the failure, then reruns `deploy.sh`; the deployment does not
+downgrade or roll back the migration.
 
 Migration `20260909_0022` is a rollback fence. A true rollback across that fence
 is an incident procedure that restores a compatible pre-migration database

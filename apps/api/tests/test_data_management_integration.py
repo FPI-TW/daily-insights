@@ -12,7 +12,7 @@ import pytest_asyncio
 from anyio import Path as AsyncPath
 from conftest import remigrate_database
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from test_health import readiness
 
@@ -58,6 +58,11 @@ from daily_insights_api.modules.news.models import (
     NewsItem,
     NewsPresentation,
 )
+from daily_insights_api.modules.orchestration.models import FunctionRun, JobRun
+from daily_insights_api.modules.orchestration.service import (
+    terminalize_expired_automatic_functions,
+)
+from daily_insights_api.modules.orchestration.worker import _ready_candidates
 from daily_insights_api.scripts import run_institutional_flows, run_morning_reports
 from daily_insights_api.web.app import create_app
 
@@ -381,6 +386,16 @@ async def data_management_database() -> AsyncIterator[async_sessionmaker[AsyncSe
     engine = create_async_engine(database_url)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory.begin() as database:
+        # This module preserves pre-cutover execution-engine regression tests.
+        # Production archive immutability is tested independently in
+        # test_orchestration_integration; remove only the archive trigger in
+        # this isolated fixture so the retired engine can construct its rows.
+        await database.execute(
+            text(
+                "DROP TRIGGER legacy_data_management_runs_are_read_only "
+                "ON legacy_data_management_runs"
+            )
+        )
         database.add(
             User(
                 email="data-management@example.com",
@@ -407,7 +422,12 @@ async def _admin(factory: async_sessionmaker[AsyncSession]) -> User:
 
 
 def _admin_client(
-    factory: async_sessionmaker[AsyncSession], user: User, *, enabled: bool
+    factory: async_sessionmaker[AsyncSession],
+    user: User,
+    *,
+    enabled: bool,
+    daily_news_enabled: bool = False,
+    analyst_viewpoints_enabled: bool = False,
 ) -> AsyncClient:
     app = create_app(
         Settings(
@@ -418,6 +438,8 @@ def _admin_client(
             # The index run covers Yahoo and TWSE, so "no provider enabled"
             # now means both are off.
             twse_enabled=enabled,
+            daily_news_enabled=daily_news_enabled,
+            analyst_viewpoints_enabled=analyst_viewpoints_enabled,
         ),
         readiness(True),
         session_factory=factory,
@@ -1288,43 +1310,226 @@ async def test_expired_cancelled_lease_is_released_after_worker_death(
     assert recovered.lease_owner is None and recovered.lease_expires_at is None
 
 
-async def test_admin_api_enqueues_lists_gets_conflicts_and_audits(
+async def test_orchestration_admin_api_enqueues_lists_gets_and_queues_conflicts(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(data_management_database)
+    async with _admin_client(
+        data_management_database,
+        user,
+        enabled=True,
+        daily_news_enabled=False,
+        analyst_viewpoints_enabled=True,
+    ) as client:
+        catalog = await client.get("/api/admin/orchestration/catalog")
+        created = await client.post(
+            "/api/admin/orchestration/job-runs", json={"job_key": "global_macro_refresh"}
+        )
+        listed = await client.get("/api/admin/orchestration/job-runs")
+        invalid = await client.post(
+            "/api/admin/orchestration/job-runs", json={"job_key": "twelve_data_daily_update"}
+        )
+        forbidden_publish = await client.post(
+            "/api/admin/orchestration/job-runs", json={"job_key": "news_publish_job"}
+        )
+        disabled_news = await client.post(
+            "/api/admin/orchestration/job-runs", json={"job_key": "news_global_refresh_job"}
+        )
+        taiwan = await client.post(
+            "/api/admin/orchestration/job-runs", json={"job_key": "tw_equity_refresh"}
+        )
+        fetched = await client.get(f"/api/admin/orchestration/job-runs/{created.json()['id']}")
+
+    assert catalog.status_code == 200
+    assert catalog.json()["features"] == {
+        "daily_news": False,
+        "analyst_viewpoints": True,
+    }
+    assert created.status_code == 202, created.text
+    assert listed.status_code == 200
+    assert {item["job_key"] for item in listed.json()["items"]} == {
+        "global_macro_refresh",
+        "market_reports_publish",
+        "macro_dashboard_publish",
+    }
+    assert invalid.status_code == 422
+    assert forbidden_publish.status_code == 422
+    assert disabled_news.status_code == 503
+    assert taiwan.status_code == 202, taiwan.text
+    assert fetched.status_code == 200 and fetched.json()["job_key"] == "global_macro_refresh"
+    assert len(fetched.json()["functions"]) == 6
+    async with data_management_database() as database:
+        manual_runs = list(
+            (
+                await database.scalars(
+                    select(JobRun).where(
+                        or_(
+                            JobRun.id == uuid.UUID(created.json()["id"]),
+                            JobRun.payload["source_job_run_id"].astext == created.json()["id"],
+                        )
+                    )
+                )
+            ).all()
+        )
+    assert len(manual_runs) == 3
+    assert all(run.deadline_at is None for run in manual_runs)
+    async with data_management_database() as database:
+        created_event = await database.scalar(
+            select(AuditEvent).where(
+                AuditEvent.action == "orchestration.job_created",
+                AuditEvent.target_id == created.json()["id"],
+            )
+        )
+    assert created_event is not None
+    assert created_event.actor_user_id == user.id
+    assert created_event.request_id is not None
+    assert created_event.before is None
+    assert created_event.after == {
+        "job_key": "global_macro_refresh",
+        "edition_date": created.json()["edition_date"],
+        "status": "pending",
+        "trigger": "manual",
+    }
+
+
+async def test_orchestration_cancel_records_atomic_audit_event(
     data_management_database: async_sessionmaker[AsyncSession],
 ) -> None:
     user = await _admin(data_management_database)
     async with _admin_client(data_management_database, user, enabled=True) as client:
-        catalog = await client.get("/api/admin/data-management/catalog")
         created = await client.post(
-            "/api/admin/data-management/runs", json={"operation": "morning_all"}
+            "/api/admin/orchestration/job-runs",
+            json={"job_key": "tw_equity_refresh"},
         )
-        listed = await client.get("/api/admin/data-management/runs")
-        legacy_morning = await client.post(
-            "/api/admin/data-management/runs",
-            json={"operation": "morning_market", "market_code": "crypto"},
+        assert created.status_code == 202, created.text
+        cancelled = await client.post(
+            f"/api/admin/orchestration/job-runs/{created.json()['id']}/cancel"
         )
-        taiwan = await client.post(
-            "/api/admin/data-management/runs",
-            json={"operation": "provider_rerun", "provider": "twse"},
-        )
-        fetched = await client.get(f"/api/admin/data-management/runs/{created.json()['id']}")
 
-    assert catalog.status_code == 200
-    assert created.status_code == 202, created.text
-    assert listed.status_code == 200 and len(listed.json()["items"]) == 1
-    assert legacy_morning.status_code == 422
-    # The full run owns all provider families until it becomes terminal.
-    assert taiwan.status_code == 409, taiwan.text
-    assert fetched.status_code == 200 and fetched.json()["operation"] == "morning_all"
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
     async with data_management_database() as database:
-        actions = list(
-            await database.scalars(
-                select(AuditEvent.action).where(AuditEvent.target_id == created.json()["id"])
+        event = await database.scalar(
+            select(AuditEvent).where(
+                AuditEvent.action == "orchestration.job_cancelled",
+                AuditEvent.target_id == created.json()["id"],
             )
         )
-    assert actions == ["data_management.run_enqueued"]
+    assert event is not None
+    assert event.actor_user_id == user.id
+    assert event.request_id is not None
+    assert event.before == {"status": "pending"}
+    assert event.after == {"status": "cancelled", "job_key": "tw_equity_refresh"}
 
 
-async def test_admin_api_paginates_ten_runs_and_filters_news_before_pagination(
+async def test_manual_news_deadline_terminalizes_refresh_but_keeps_publish_runnable(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(data_management_database)
+    async with _admin_client(
+        data_management_database, user, enabled=True, daily_news_enabled=True
+    ) as client:
+        response = await client.post(
+            "/api/admin/orchestration/job-runs",
+            json={"job_key": "news_global_refresh_job"},
+        )
+    assert response.status_code == 202, response.text
+    job_id = uuid.UUID(response.json()["id"])
+    deadline = datetime.now(UTC) - timedelta(seconds=1)
+    async with data_management_database.begin() as database:
+        job = await database.get(JobRun, job_id)
+        assert job is not None
+        job.deadline_at = deadline
+        functions = list(
+            (
+                await database.scalars(select(FunctionRun).where(FunctionRun.job_run_id == job_id))
+            ).all()
+        )
+        refresh = next(item for item in functions if item.function_key == "news_global_refresh")
+        publish = next(item for item in functions if item.function_key == "news_publish")
+        refresh.status = "retry_wait"
+        refresh.next_attempt_at = deadline
+        publish_id = publish.id
+
+    async with data_management_database() as database:
+        assert await terminalize_expired_automatic_functions(database, now=datetime.now(UTC)) == 1
+    async with data_management_database() as database:
+        loaded_refresh = await database.scalar(
+            select(FunctionRun).where(
+                FunctionRun.job_run_id == job_id,
+                FunctionRun.function_key == "news_global_refresh",
+            )
+        )
+        loaded_publish = await database.get(FunctionRun, publish_id)
+    assert loaded_refresh is not None and loaded_refresh.status == "unavailable"
+    assert loaded_publish is not None and loaded_publish.status == "pending"
+    assert (publish_id, "internal_services") in await _ready_candidates(
+        data_management_database, datetime.now(UTC)
+    )
+
+
+async def test_news_all_markets_job_is_admin_triggerable(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(data_management_database)
+    async with _admin_client(
+        data_management_database, user, enabled=True, daily_news_enabled=True
+    ) as client:
+        response = await client.post(
+            "/api/admin/orchestration/job-runs",
+            json={"job_key": "news_daily_update"},
+        )
+
+    assert response.status_code == 202, response.text
+    functions = response.json()["functions"]
+    assert {item["function_key"] for item in functions} == {
+        "news_global_refresh",
+        "news_tw_equity_refresh",
+        "news_us_equity_refresh",
+        "news_publish",
+    }
+    publish = next(item for item in functions if item["function_key"] == "news_publish")
+    assert len(publish["depends_on"]) == 3
+
+
+async def test_news_job_group_includes_automatic_internal_services_job(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(data_management_database)
+    now = datetime.now(UTC)
+    async with data_management_database.begin() as database:
+        job = JobRun(
+            job_key="internal_services_daily_update",
+            kind="function",
+            trigger="automatic",
+            automatic_key="internal_services_daily_update:test",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            status="running",
+        )
+        database.add(job)
+        await database.flush()
+        database.add(
+            FunctionRun(
+                job_run_id=job.id,
+                function_key="news_global_refresh",
+                provider_key="internal_services",
+                scope={},
+                status="running",
+            )
+        )
+
+    async with _admin_client(data_management_database, user, enabled=True) as client:
+        response = await client.get("/api/admin/orchestration/job-runs?job_group=news")
+
+    assert response.status_code == 200
+    assert [item["job_key"] for item in response.json()["items"]] == [
+        "internal_services_daily_update"
+    ]
+
+
+async def test_orchestration_api_paginates_and_filters_job_runs_before_pagination(
     data_management_database: async_sessionmaker[AsyncSession],
 ) -> None:
     user = await _admin(data_management_database)
@@ -1332,9 +1537,12 @@ async def test_admin_api_paginates_ten_runs_and_filters_news_before_pagination(
     async with data_management_database.begin() as database:
         database.add_all(
             [
-                DataManagementRun(
-                    operation="morning_all",
-                    market_code=None,
+                JobRun(
+                    job_key="global_macro_refresh",
+                    kind="function",
+                    trigger="manual",
+                    registry_version="test",
+                    registry_snapshot={},
                     edition_date=newest.date(),
                     status="succeeded",
                     requested_by_user_id=user.id,
@@ -1343,9 +1551,12 @@ async def test_admin_api_paginates_ten_runs_and_filters_news_before_pagination(
                 for index in range(20)
             ]
             + [
-                DataManagementRun(
-                    operation="news_all",
-                    market_code=None,
+                JobRun(
+                    job_key="news_publish_job",
+                    kind="function",
+                    trigger="manual",
+                    registry_version="test",
+                    registry_snapshot={},
                     edition_date=newest.date(),
                     status="pending",
                     requested_by_user_id=user.id,
@@ -1355,25 +1566,25 @@ async def test_admin_api_paginates_ten_runs_and_filters_news_before_pagination(
         )
 
     async with _admin_client(data_management_database, user, enabled=True) as client:
-        all_runs = await client.get("/api/admin/data-management/runs?page=1")
-        last_page = await client.get("/api/admin/data-management/runs?page=3")
-        news_runs = await client.get("/api/admin/data-management/runs?page=1&operation_group=news")
-        invalid_filter = await client.get("/api/admin/data-management/runs?operation_group=morning")
+        all_runs = await client.get("/api/admin/orchestration/job-runs?page=1")
+        last_page = await client.get("/api/admin/orchestration/job-runs?page=3")
+        news_runs = await client.get("/api/admin/orchestration/job-runs?page=1&job_group=news")
+        invalid_page = await client.get("/api/admin/orchestration/job-runs?page=0")
 
     assert all_runs.status_code == 200
     assert len(all_runs.json()["items"]) == 10
     assert all_runs.json()["page"] == 1
     assert all_runs.json()["page_size"] == 10
     assert all_runs.json()["total"] == 21
-    assert all(run["operation"] != "news_all" for run in all_runs.json()["items"])
-    assert [run["operation"] for run in last_page.json()["items"]] == ["news_all"]
+    assert all(run["job_key"] != "news_publish_job" for run in all_runs.json()["items"])
+    assert [run["job_key"] for run in last_page.json()["items"]] == ["news_publish_job"]
     assert last_page.json()["has_more"] is False
     assert news_runs.status_code == 200
-    assert [run["operation"] for run in news_runs.json()["items"]] == ["news_all"]
-    assert invalid_filter.status_code == 422
+    assert [run["job_key"] for run in news_runs.json()["items"]] == ["news_publish_job"]
+    assert invalid_page.status_code == 422
 
 
-async def test_generic_run_endpoint_refuses_news_publish(
+async def test_legacy_create_run_contract_is_removed(
     data_management_database: async_sessionmaker[AsyncSession],
 ) -> None:
     user = await _admin(data_management_database)
@@ -1381,10 +1592,10 @@ async def test_generic_run_endpoint_refuses_news_publish(
         refused = await client.post(
             "/api/admin/data-management/runs", json={"operation": "news_publish"}
         )
-    assert refused.status_code == 422
+    assert refused.status_code == 404
 
 
-async def test_admin_api_rejects_unauthenticated_writes_and_disabled_providers(
+async def test_orchestration_admin_api_rejects_unauthenticated_and_non_manual_jobs(
     data_management_database: async_sessionmaker[AsyncSession],
 ) -> None:
     app = create_app(
@@ -1392,13 +1603,13 @@ async def test_admin_api_rejects_unauthenticated_writes_and_disabled_providers(
     )
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         unauthenticated = await client.post(
-            "/api/admin/data-management/runs", json={"operation": "morning_all"}
+            "/api/admin/orchestration/job-runs", json={"job_key": "global_macro_refresh"}
         )
     user = await _admin(data_management_database)
     async with _admin_client(data_management_database, user, enabled=False) as client:
-        unavailable = await client.post(
-            "/api/admin/data-management/runs",
-            json={"operation": "provider_rerun", "provider": "yahoo_finance"},
+        refused = await client.post(
+            "/api/admin/orchestration/job-runs",
+            json={"job_key": "yahoo_finance_daily_update"},
         )
     assert unauthenticated.status_code == 401
-    assert unavailable.status_code == 503
+    assert refused.status_code == 422

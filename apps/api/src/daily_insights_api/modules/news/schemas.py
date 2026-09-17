@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 from daily_insights_api.modules.news.contracts import Locale
 from daily_insights_api.modules.news.failures import NewsFailure
@@ -125,8 +125,17 @@ class NewsAdminEditionsResponse(BaseModel):
 class NewsCandidatePublishRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    edition_id: uuid.UUID
+    edition_id: uuid.UUID | None = None
+    edition_date: date | None = None
+    market_code: Literal["global", "tw_equity", "us_equity"] | None = None
     candidate_ids: list[uuid.UUID] = Field(min_length=1, max_length=10)
+
+    @model_validator(mode="after")
+    def identify_target(self) -> "NewsCandidatePublishRequest":
+        has_market_target = self.edition_date is not None and self.market_code is not None
+        if (self.edition_id is None) == (not has_market_target):
+            raise ValueError("provide edition_id or both edition_date and market_code")
+        return self
 
     @field_validator("candidate_ids")
     @classmethod

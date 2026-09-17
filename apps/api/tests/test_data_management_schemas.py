@@ -109,37 +109,21 @@ def test_run_response_discriminator_preserves_market_scope() -> None:
         )
 
 
-def test_openapi_declares_discriminated_responses_conflicts_and_legacy_deprecation() -> None:
+def test_openapi_exposes_unified_orchestration_and_read_only_legacy_archive() -> None:
     schema = create_app(Settings(environment="test")).openapi()
-    run_post = schema["paths"]["/api/admin/data-management/runs"]["post"]
-    run_get = schema["paths"]["/api/admin/data-management/runs"]["get"]
-    assert {"202", "409", "503"} <= set(run_post["responses"])
-    response_schema = run_post["responses"]["202"]["content"]["application/json"]["schema"]
-    assert response_schema["discriminator"]["propertyName"] == "operation"
-    create_schema = run_post["requestBody"]["content"]["application/json"]["schema"]
-    assert set(create_schema["discriminator"]["mapping"]) == {
-        "morning_all",
-        "provider_rerun",
-        "news_all",
-        "news_market",
-        "macro_dashboard",
-    }
-    operation_group = next(
-        parameter for parameter in run_get["parameters"] if parameter["name"] == "operation_group"
-    )
-    assert operation_group["schema"]["anyOf"][0]["const"] == "news"
-    assert (
-        schema["paths"]["/api/admin/data-sources/yfinance/daily-bars"]["post"]["deprecated"] is True
-    )
-    assert "/api/admin/data-management/runs/{run_id}/cancel" in schema["paths"]
-    cancel_post = schema["paths"]["/api/admin/data-management/runs/{run_id}/cancel"]["post"]
-    assert cancel_post["responses"]["409"]["description"] == (
-        "Run is terminal already or no longer exists."
-    )
+    create_job = schema["paths"]["/api/admin/orchestration/job-runs"]["post"]
+    assert "202" in create_job["responses"]
+    assert "/api/admin/orchestration/catalog" in schema["paths"]
+    assert "/api/admin/orchestration/routine-runs/{routine_run_id}" in schema["paths"]
+    assert "/api/admin/orchestration/legacy-runs" in schema["paths"]
+    assert "post" not in schema["paths"]["/api/admin/orchestration/legacy-runs"]
+    assert "/api/admin/data-management/runs" not in schema["paths"]
+    assert "/api/admin/data-sources/yfinance/daily-bars" not in schema["paths"]
+    assert "/api/admin/orchestration/job-runs/{job_run_id}/cancel" in schema["paths"]
 
 
 def test_run_market_scope_allows_global_news_without_a_market_catalog_foreign_key() -> None:
-    table = Base.metadata.tables["data_management_runs"]
+    table = Base.metadata.tables["legacy_data_management_runs"]
     checks = {
         str(constraint.sqltext)
         for constraint in table.constraints
@@ -158,7 +142,7 @@ def test_run_market_scope_allows_global_news_without_a_market_catalog_foreign_ke
 
 
 def test_macro_snapshot_and_automatic_edition_indexes_are_registered() -> None:
-    run_table = Base.metadata.tables["data_management_runs"]
+    run_table = Base.metadata.tables["legacy_data_management_runs"]
     checks = [str(getattr(item, "sqltext", "")) for item in run_table.constraints]
     assert any("macro_dashboard" in check and "operation IN" in check for check in checks)
     index_names = {index.name for index in run_table.indexes}
@@ -187,7 +171,7 @@ def test_provider_rerun_migration_preserves_legacy_indexes_and_guards_downgrade(
 
 
 def test_news_scheduler_state_is_durable_and_has_historical_uniqueness() -> None:
-    run_table = Base.metadata.tables["data_management_runs"]
+    run_table = Base.metadata.tables["legacy_data_management_runs"]
     assert "scheduled_for" in run_table.columns
     index_names = {index.name for index in run_table.indexes}
     assert "uq_data_management_runs_automatic_news_all_edition" in index_names
@@ -227,7 +211,7 @@ def test_news_migration_downgrade_preflights_without_deleting_runs() -> None:
 
 
 def test_news_curation_migration_registers_indexes_and_refuses_lossy_downgrade() -> None:
-    run_table = Base.metadata.tables["data_management_runs"]
+    run_table = Base.metadata.tables["legacy_data_management_runs"]
     checks = [str(getattr(item, "sqltext", "")) for item in run_table.constraints]
     assert any("'news_publish'" in check and "operation IN" in check for check in checks)
     assert "payload" in run_table.columns

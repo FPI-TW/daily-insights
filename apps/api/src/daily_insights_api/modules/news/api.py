@@ -1,7 +1,13 @@
 """Public contracts and execution helpers for the daily-news module."""
 
 from daily_insights_api.modules.news.access import visible_news_market_codes
-from daily_insights_api.modules.news.contracts import Locale, NewsProgress, NewsStatus
+from daily_insights_api.modules.news.contracts import (
+    Locale,
+    LocalizedSummary,
+    NewsProgress,
+    NewsStatus,
+    Selection,
+)
 from daily_insights_api.modules.news.editions import (
     EDITION_ORDER,
     GLOBAL_MARKET,
@@ -9,15 +15,27 @@ from daily_insights_api.modules.news.editions import (
     edition_spec,
 )
 from daily_insights_api.modules.news.failures import NewsFailure, classify_failure
-from daily_insights_api.modules.news.feeds import effective_hostnames
-from daily_insights_api.modules.news.llm import DeepSeekClient
+from daily_insights_api.modules.news.feeds import (
+    discover_feed_candidates,
+    effective_hostnames,
+    feed_client,
+)
+from daily_insights_api.modules.news.llm import (
+    DeepSeekClient,
+    ModelCall,
+    publishable_selection,
+)
 from daily_insights_api.modules.news.models import (
     NewsCandidate,
+    NewsCandidateBatch,
+    NewsCandidatePublication,
     NewsDependencyState,
     NewsEdition,
+    NewsGenerationAudit,
     NewsItem,
     NewsPresentation,
     NewsWorkflow,
+    PreparedNewsItem,
 )
 from daily_insights_api.modules.news.prompts import load_selection_criteria
 from daily_insights_api.modules.news.recovery import (
@@ -31,6 +49,15 @@ from daily_insights_api.modules.news.recovery import (
     workflow_scope,
 )
 from daily_insights_api.modules.news.service import (
+    DERIVATION_VERSION,
+    LOCALES,
+    SUMMARY_PROMPT_VERSION,
+    _cap_discovery,
+    _digest,
+    _edition_status,
+    _fetch_usable_candidates,
+    _limit_candidates,
+    _lock_key,
     publish_candidates,
     run_all_editions,
     run_all_editions_with_outcomes,
@@ -56,30 +83,51 @@ def create_news_client(
 
 
 __all__ = [
+    "DERIVATION_VERSION",
     "EDITION_ORDER",
     "GLOBAL_MARKET",
+    "LOCALES",
     "PROVIDER_SCOPE",
+    "SUMMARY_PROMPT_VERSION",
+    "DeepSeekClient",
     "EditionSpec",
     "Locale",
+    "LocalizedSummary",
+    "ModelCall",
     "NewsCandidate",
+    "NewsCandidateBatch",
+    "NewsCandidatePublication",
     "NewsDependencyState",
     "NewsEdition",
     "NewsExecution",
     "NewsFailure",
+    "NewsGenerationAudit",
     "NewsItem",
     "NewsPresentation",
     "NewsProgress",
     "NewsStatus",
     "NewsWorkflow",
+    "PreparedNewsItem",
+    "Selection",
+    "_cap_discovery",
+    "_digest",
+    "_edition_status",
+    "_fetch_usable_candidates",
+    "_limit_candidates",
+    "_lock_key",
     "automatic_window",
     "classify_failure",
     "cleanup_checkpoints",
     "create_news_client",
     "dependency_failure",
+    "discover_feed_candidates",
     "edition_spec",
     "effective_hostnames",
+    "feed_client",
+    "load_selection_criteria",
     "news_execution",
     "publish_candidates",
+    "publishable_selection",
     "run_all_editions",
     "run_all_editions_with_outcomes",
     "run_news_edition",

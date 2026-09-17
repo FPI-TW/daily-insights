@@ -21,10 +21,10 @@ from daily_insights_api.modules.data_sources.provider import (
 from daily_insights_api.modules.data_sources.twelve_data import (
     TWELVE_DATA_CONTRACT_HASH,
     TWELVE_DATA_CONTRACT_VERSION,
+    CompletedPriceResult,
+    CompletedPricesResult,
     EodResult,
     EodsResult,
-    QuoteResult,
-    QuotesResult,
     RetryPolicy,
     TwelveDataAdapter,
     TwelveDataTransport,
@@ -49,6 +49,7 @@ from daily_insights_api.modules.data_sources.yfinance import (
     YfinanceAdapter,
     YfinanceDailyBars,
 )
+from daily_insights_api.modules.data_sources.yfinance.adapter import YFINANCE_CONTRACT_VERSION
 
 __all__ = [
     "BFI82U_ENDPOINT",
@@ -59,6 +60,9 @@ __all__ = [
     "TWELVE_DATA_CONTRACT_VERSION",
     "TWSE_CONTRACT_HASH",
     "TWSE_CONTRACT_VERSION",
+    "YFINANCE_CONTRACT_VERSION",
+    "CompletedPriceResult",
+    "CompletedPricesResult",
     "DailyBar",
     "DailyBarQuery",
     "DataSourceAuthenticationError",
@@ -75,8 +79,6 @@ __all__ = [
     "PageInfo",
     "Provenance",
     "ProviderPage",
-    "QuoteResult",
-    "QuotesResult",
     "RetryPolicy",
     "TaiexDailyBar",
     "TaiexDailyBars",

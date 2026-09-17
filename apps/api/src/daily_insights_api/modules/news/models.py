@@ -44,6 +44,12 @@ class NewsEdition(UUIDPrimaryKeyMixin, Base):
     derivation_version: Mapped[str] = mapped_column(String(100), nullable=False)
     model_name: Mapped[str | None] = mapped_column(String(200))
     prompt_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    candidate_batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("news_candidate_batches.id", ondelete="RESTRICT")
+    )
+    publication_job_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("job_runs.id", ondelete="RESTRICT")
+    )
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     generated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -137,12 +143,22 @@ class NewsCandidate(UUIDPrimaryKeyMixin, Base):
             name="drop_reason_valid",
         ),
         UniqueConstraint("edition_id", "candidate_id", name="uq_news_candidate_edition"),
+        CheckConstraint("(edition_id IS NULL) <> (batch_id IS NULL)", name="exactly_one_owner"),
+        Index(
+            "uq_news_candidate_batch",
+            "batch_id",
+            "candidate_id",
+            unique=True,
+            postgresql_where="batch_id IS NOT NULL",
+        ),
     )
-    edition_id: Mapped[uuid.UUID] = mapped_column(
+    edition_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("news_editions.id", ondelete="RESTRICT"),
-        nullable=False,
         index=True,
+    )
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("news_candidate_batches.id", ondelete="RESTRICT"), index=True
     )
     # The pipeline's sha256 candidate id, unique within one edition.
     candidate_id: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -196,10 +212,16 @@ class NewsGenerationAudit(UUIDPrimaryKeyMixin, Base):
     __table_args__ = (
         CheckConstraint("char_length(input_digest) = 64", name="input_digest_sha256"),
         CheckConstraint("status IN ('succeeded', 'failed')", name="status_valid"),
+        CheckConstraint(
+            "(edition_id IS NULL) <> (candidate_batch_id IS NULL)", name="exactly_one_owner"
+        ),
         Index("ix_news_generation_audits_edition", "edition_id", "created_at"),
     )
-    edition_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("news_editions.id", ondelete="RESTRICT"), nullable=False
+    edition_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("news_editions.id", ondelete="RESTRICT")
+    )
+    candidate_batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("news_candidate_batches.id", ondelete="RESTRICT")
     )
     stage: Mapped[str] = mapped_column(String(50), nullable=False)
     locale: Mapped[str | None] = mapped_column(String(10))
@@ -238,6 +260,96 @@ class NewsWorkflow(UUIDPrimaryKeyMixin, Base):
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class NewsCandidateBatch(UUIDPrimaryKeyMixin, Base):
+    """Immutable candidate input owned by one refresh attempt."""
+
+    __tablename__ = "news_candidate_batches"
+    __table_args__ = (
+        CheckConstraint(
+            "market_code IN ('global','tw_equity','us_equity')", name="market_code_valid"
+        ),
+        CheckConstraint(
+            "status IN ('collecting','ready','partial','unavailable','failed','cancelled')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "input_digest IS NULL OR char_length(input_digest) = 64", name="input_digest_sha256"
+        ),
+        UniqueConstraint("function_attempt_id", name="uq_news_candidate_batch_attempt"),
+        Index("ix_news_candidate_batches_market_date", "market_code", "edition_date", "created_at"),
+    )
+
+    function_attempt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("function_attempts.id", ondelete="RESTRICT"), nullable=False
+    )
+    edition_date: Mapped[date] = mapped_column(Date, nullable=False)
+    market_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="collecting")
+    input_digest: Mapped[str | None] = mapped_column(String(64))
+    source_as_of: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PreparedNewsItem(UUIDPrimaryKeyMixin, Base):
+    """Publication-ready model output; article bodies are never stored."""
+
+    __tablename__ = "prepared_news_items"
+    __table_args__ = (
+        CheckConstraint("rank > 0", name="rank_positive"),
+        CheckConstraint("char_length(content_digest) = 64", name="content_digest_sha256"),
+        UniqueConstraint("batch_id", "rank", name="uq_prepared_news_item_rank"),
+        UniqueConstraint("batch_id", "candidate_id", name="uq_prepared_news_item_candidate"),
+    )
+
+    batch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("news_candidate_batches.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("news_candidates.id", ondelete="RESTRICT"), nullable=False
+    )
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    topic: Mapped[str] = mapped_column(String(50), nullable=False)
+    importance: Mapped[int] = mapped_column(Integer, nullable=False)
+    market: Mapped[str | None] = mapped_column(String(20))
+    event_key: Mapped[str | None] = mapped_column(String(80))
+    numeric_facts: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    presentations: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    content_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class NewsCandidatePublication(Base):
+    """Immutable edge allowing one candidate to appear in later revisions."""
+
+    __tablename__ = "news_candidate_publications"
+    __table_args__ = (
+        UniqueConstraint(
+            "publish_job_run_id", "candidate_id", name="uq_news_candidate_publish_job"
+        ),
+    )
+
+    publish_job_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("job_runs.id", ondelete="RESTRICT"), primary_key=True
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("news_candidates.id", ondelete="RESTRICT"), primary_key=True
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("news_items.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 

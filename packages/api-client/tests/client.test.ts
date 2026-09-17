@@ -12,14 +12,11 @@ import {
 } from "../src"
 import { createServerTransport } from "../src/server"
 import {
-  dataManagementRunCreateSchema,
-  dataManagementRunSchema,
   indexDailyBarSchema,
   indexMovingAveragesSchema,
   institutionalStocksSchema,
   newsAdminEditionsSchema,
   newsCandidatePublishInputSchema,
-  yfinanceDailyBarsResponseSchema,
 } from "../src/schemas"
 
 const newsAdminItem = {
@@ -94,16 +91,23 @@ const newsAdminEditions = {
 
 const newsPublishRun = {
   id: "c744cb20-bf7c-4f4a-8e7b-1e0c69a91adf",
-  operation: "news_publish",
-  market_code: null,
+  routine_run_id: null,
+  job_key: "news_publish_job",
+  kind: "function",
+  trigger: "manual",
   edition_date: "2026-09-08",
+  deadline_at: null,
   status: "pending",
   requested_by_user_id: "9322a09a-6a02-421b-a966-a5cd5f44056e",
+  payload: null,
   created_at: "2026-09-08T01:00:00+00:00",
   started_at: null,
   completed_at: null,
   result: null,
   error: null,
+  functions: [],
+  depends_on: [],
+  downstream_jobs: [],
 }
 
 describe("API client trust boundary", () => {
@@ -122,7 +126,7 @@ describe("API client trust boundary", () => {
     })
   })
 
-  it("requests the server-filtered news run history", async () => {
+  it("requests native job run history", async () => {
     const transport = vi.fn().mockResolvedValue(
       Response.json({
         items: [],
@@ -130,15 +134,81 @@ describe("API client trust boundary", () => {
         page_size: 10,
         total: 0,
         has_more: false,
-        active_runs: [],
-        current_day_runs: [],
       })
     )
 
-    await createAdministrationClient(transport).listNewsDataManagementRuns()
+    await createAdministrationClient(transport).listJobRuns()
 
     expect(transport).toHaveBeenCalledWith(
-      "/api/admin/data-management/runs?page=1&operation_group=news"
+      "/api/admin/orchestration/job-runs?page=1"
+    )
+  })
+
+  it("filters native job run history by group", async () => {
+    const transport = vi.fn().mockResolvedValue(
+      Response.json({
+        items: [],
+        page: 2,
+        page_size: 10,
+        total: 0,
+        has_more: false,
+      })
+    )
+
+    await createAdministrationClient(transport).listJobRuns(
+      2,
+      undefined,
+      "news"
+    )
+
+    expect(transport).toHaveBeenCalledWith(
+      "/api/admin/orchestration/job-runs?page=2&job_group=news"
+    )
+  })
+
+  it("lists and reads daily routine graphs", async () => {
+    const routine = {
+      id: "33333333-3333-4333-8333-333333333333",
+      routine_key: "daily_market_update_v1",
+      registry_version: "orchestration.v1",
+      edition_date: "2026-09-07",
+      scheduled_for: "2026-09-07T00:00:00+00:00",
+      deadline_at: "2026-09-07T02:00:00+00:00",
+      status: "running",
+      started_at: "2026-09-07T00:00:00+00:00",
+      completed_at: null,
+      result: null,
+      created_at: "2026-09-07T00:00:00+00:00",
+      jobs: [],
+    }
+    const transport = vi.fn(async (path: string) =>
+      Response.json(
+        path.includes("?page=")
+          ? {
+              items: [routine],
+              page: 1,
+              page_size: 10,
+              total: 1,
+              has_more: false,
+            }
+          : routine
+      )
+    )
+    const client = createAdministrationClient(transport)
+
+    await expect(client.listRoutineRuns()).resolves.toMatchObject({
+      items: [{ routine_key: "daily_market_update_v1" }],
+    })
+    await expect(client.getRoutineRun(routine.id)).resolves.toMatchObject({
+      id: routine.id,
+    })
+    expect(transport).toHaveBeenNthCalledWith(
+      1,
+      "/api/admin/orchestration/routine-runs?page=1"
+    )
+    expect(transport).toHaveBeenNthCalledWith(
+      2,
+      `/api/admin/orchestration/routine-runs/${routine.id}`
     )
   })
 
@@ -238,7 +308,10 @@ describe("API client trust boundary", () => {
       transport
     ).publishNewsCandidates(input, "csrf-token")
 
-    expect(run).toMatchObject({ operation: "news_publish", market_code: null })
+    expect(run).toMatchObject({
+      job_key: "news_publish_job",
+      trigger: "manual",
+    })
     expect(transport).toHaveBeenCalledWith(
       "/api/admin/news/candidates/publish",
       {
@@ -257,67 +330,8 @@ describe("API client trust boundary", () => {
     ).toBe(false)
   })
 
-  it("keeps news_publish out of the generic run form", () => {
-    // A publish run carries a candidate payload the generic form cannot
-    // express, so it is only created through the news admin endpoint.
-    expect(
-      dataManagementRunSchema.safeParse({
-        ...newsPublishRun,
-        market_code: "global",
-      }).success
-    ).toBe(false)
-    expect(
-      dataManagementRunCreateSchema.safeParse({ operation: "news_publish" })
-        .success
-    ).toBe(false)
-  })
-
-  it.each(["twelve_data", "yahoo_finance", "twse"] as const)(
-    "validates the %s provider rerun contract",
-    provider => {
-      const base = {
-        id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
-        edition_date: "2026-09-15",
-        status: "pending",
-        requested_by_user_id: "9322a09a-6a02-421b-a966-a5cd5f44056e",
-        created_at: "2026-09-15T00:00:00Z",
-        started_at: null,
-        completed_at: null,
-        result: null,
-        error: null,
-      }
-      expect(
-        dataManagementRunCreateSchema.safeParse({
-          operation: "provider_rerun",
-          provider,
-        }).success
-      ).toBe(true)
-      expect(
-        dataManagementRunSchema.safeParse({
-          ...base,
-          operation: "provider_rerun",
-          provider,
-          market_code: null,
-        }).success
-      ).toBe(true)
-    }
-  )
-
-  it("creates, lists, and cancels provider reruns through the runtime client", async () => {
-    const run = {
-      id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
-      edition_date: "2026-09-15",
-      status: "pending",
-      requested_by_user_id: "9322a09a-6a02-421b-a966-a5cd5f44056e",
-      created_at: "2026-09-15T00:00:00Z",
-      started_at: null,
-      completed_at: null,
-      result: null,
-      error: null,
-      operation: "provider_rerun",
-      provider: "twse",
-      market_code: null,
-    }
+  it("creates, lists, and cancels native job runs", async () => {
+    const run = { ...newsPublishRun, job_key: "tw_equity_refresh" }
     const transport = vi.fn(async (path: string, _init?: RequestInit) =>
       Response.json(
         path.includes("?page=")
@@ -327,8 +341,6 @@ describe("API client trust boundary", () => {
               page_size: 10,
               total: 1,
               has_more: false,
-              active_runs: [run],
-              current_day_runs: [],
             }
           : run,
         { status: path.includes("?page=") ? 200 : 202 }
@@ -337,25 +349,24 @@ describe("API client trust boundary", () => {
     const client = createAdministrationClient(transport)
 
     await expect(
-      client.createDataManagementRun(
-        { operation: "provider_rerun", provider: "twse" },
-        "csrf-token"
-      )
-    ).resolves.toMatchObject({ provider: "twse" })
-    await expect(client.listDataManagementRuns()).resolves.toMatchObject({
+      client.createJobRun("tw_equity_refresh", "csrf-token")
+    ).resolves.toMatchObject({ job_key: "tw_equity_refresh" })
+    await expect(client.listJobRuns()).resolves.toMatchObject({
       page_size: 10,
-      items: [{ provider: "twse" }],
+      items: [{ job_key: "tw_equity_refresh" }],
+    })
+    await expect(client.getJobRun(run.id)).resolves.toMatchObject({
+      job_key: "tw_equity_refresh",
     })
     await expect(
-      client.cancelDataManagementRun(run.id, "csrf-token")
-    ).resolves.toMatchObject({ provider: "twse" })
+      client.cancelJobRun(run.id, "csrf-token")
+    ).resolves.toMatchObject({ job_key: "tw_equity_refresh" })
     expect(JSON.parse(String(transport.mock.calls[0]?.[1]?.body))).toEqual({
-      operation: "provider_rerun",
-      provider: "twse",
+      job_key: "tw_equity_refresh",
     })
   })
 
-  it("accepts paginated run responses from before active context fields", async () => {
+  it("accepts paginated native job run responses", async () => {
     const transport = vi.fn(async () =>
       Response.json({
         items: [],
@@ -367,14 +378,7 @@ describe("API client trust boundary", () => {
     )
     const client = createAdministrationClient(transport)
 
-    await expect(client.listDataManagementRuns()).resolves.toEqual({
-      items: [],
-      page: 1,
-      page_size: 10,
-      total: 0,
-      has_more: false,
-    })
-    await expect(client.listNewsDataManagementRuns()).resolves.toEqual({
+    await expect(client.listJobRuns()).resolves.toEqual({
       items: [],
       page: 1,
       page_size: 10,
@@ -718,108 +722,18 @@ describe("API client trust boundary", () => {
     )
   })
 
-  it("refreshes the seven-day index window with CSRF protection", async () => {
-    const transport = vi.fn(async () =>
-      Response.json({
-        period: "7d",
-        fetched_at: "2026-09-04T00:00:00Z",
-        succeeded: [
-          {
-            symbol: "^TWII",
-            market: "tw_equity",
-            as_of: "2026-09-03",
-            stored_count: 5,
-            dropped_unsettled_trade_date: "2026-09-04",
-          },
-        ],
-        failed: [
-          {
-            symbol: "^HSI",
-            market: "hk_equity",
-            error: "provider unavailable",
-          },
-        ],
-      })
-    )
-
-    const result =
-      await createAdministrationClient(transport).refreshIndexDailyBars(
-        "csrf-token"
-      )
-
-    expect(result.failed).toHaveLength(1)
-    expect(transport).toHaveBeenCalledWith(
-      "/api/admin/data-sources/yfinance/daily-bars",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRF-Token": "csrf-token",
-        },
-        body: JSON.stringify({ period: "7d" }),
-      }
-    )
-  })
-
-  it("rejects a refresh response outside the fixed seven-day contract", async () => {
-    const client = createAdministrationClient(async () =>
-      Response.json({
-        period: "2y",
-        fetched_at: "2026-09-04T00:00:00Z",
-        succeeded: [],
-        failed: [],
-      })
-    )
-
-    await expect(
-      client.refreshIndexDailyBars("csrf-token")
-    ).rejects.toMatchObject({
-      status: 502,
-    })
-  })
-
-  it("publishes and validates the fixed seven-day refresh response period", () => {
-    const responseSchema = openapi.components.schemas.YfinanceDailyBarsResponse
-
-    expect(responseSchema.properties.period.const).toBe("7d")
-    expect(
-      yfinanceDailyBarsResponseSchema.safeParse({
-        period: "7d",
-        fetched_at: "2026-09-04T00:00:00Z",
-        succeeded: [],
-        failed: [],
-      }).success
-    ).toBe(true)
-    expect(
-      yfinanceDailyBarsResponseSchema.safeParse({
-        period: "2y",
-        fetched_at: "2026-09-04T00:00:00Z",
-        succeeded: [],
-        failed: [],
-      }).success
-    ).toBe(false)
-  })
-
   it("accepts a stale analyst viewpoint status without replacing stored data", async () => {
     const client = createAdministrationClient(async () =>
       Response.json({
-        viewpoint_date: "2026-09-02",
-        fetched_at: "2026-09-02T01:00:00Z",
-        status: "partial",
-        markets: [
-          {
-            source_market_code: "us_macro",
-            market_code: "global_macro_bonds",
-            status: "stale",
-          },
-        ],
+        ...newsPublishRun,
+        job_key: "analyst_viewpoints_sync_job",
       })
     )
 
     await expect(
       client.syncAnalystViewpoints("csrf-token")
     ).resolves.toMatchObject({
-      markets: [{ status: "stale" }],
+      job_key: "analyst_viewpoints_sync_job",
     })
   })
 

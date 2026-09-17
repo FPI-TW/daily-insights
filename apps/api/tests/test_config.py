@@ -35,6 +35,27 @@ def test_production_accepts_complete_external_configuration() -> None:
     assert settings.r2_signed_url_ttl_seconds == 900
 
 
+def test_orchestration_worker_does_not_require_api_or_r2_secrets() -> None:
+    settings = Settings.model_validate(
+        {
+            "environment": "production",
+            "runtime_role": "orchestration-worker",
+            "database_url": "postgresql+psycopg://worker:secret@example.invalid/app",
+            "session_secret": None,
+            "password_pepper": None,
+            "r2_endpoint_url": None,
+            "r2_bucket_name": None,
+            "r2_access_key_id": None,
+            "r2_secret_access_key": None,
+        }
+    )
+
+    assert settings.session_secret is None
+    assert settings.password_pepper is None
+    assert settings.r2_access_key_id is None
+    assert settings.r2_secret_access_key is None
+
+
 def test_macro_scheduler_requires_only_a_production_database_url() -> None:
     settings = MacroDashboardSchedulerSettings.model_validate(
         {

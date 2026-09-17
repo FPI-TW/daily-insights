@@ -1,3 +1,4 @@
+import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
@@ -6,11 +7,12 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from daily_insights_api.core.models import Base, UUIDPrimaryKeyMixin
@@ -33,6 +35,9 @@ class AnalystViewpoint(UUIDPrimaryKeyMixin, Base):
     source_market_code: Mapped[str] = mapped_column(String(50), nullable=False)
     points: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    current_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("analyst_viewpoint_versions.id", ondelete="RESTRICT")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -58,3 +63,40 @@ class AnalystViewpointSyncRun(UUIDPrimaryKeyMixin, Base):
     )
     error_code: Mapped[str | None] = mapped_column(String(100))
     markets: Mapped[list[dict[str, str]]] = mapped_column(JSONB, nullable=False)
+    function_attempt_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("function_attempts.id", ondelete="RESTRICT")
+    )
+
+
+class AnalystViewpointVersion(UUIDPrimaryKeyMixin, Base):
+    """Append-only analyst content owned by one orchestration attempt."""
+
+    __tablename__ = "analyst_viewpoint_versions"
+    __table_args__ = (
+        CheckConstraint("version > 0", name="version_positive"),
+        CheckConstraint("jsonb_typeof(points) = 'array'", name="points_are_array"),
+        CheckConstraint("char_length(content_digest) = 64", name="content_digest_sha256"),
+        UniqueConstraint(
+            "viewpoint_date",
+            "market_code",
+            "version",
+            name="uq_analyst_viewpoint_version",
+        ),
+        Index("ix_analyst_viewpoint_versions_latest", "viewpoint_date", "market_code", "version"),
+    )
+
+    viewpoint_date: Mapped[date] = mapped_column(Date, nullable=False)
+    market_code: Mapped[str] = mapped_column(
+        String(50), ForeignKey("markets.code", ondelete="RESTRICT"), nullable=False
+    )
+    source_market_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    points: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    content_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    function_attempt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("function_attempts.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

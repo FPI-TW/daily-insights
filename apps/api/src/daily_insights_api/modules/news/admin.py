@@ -8,7 +8,7 @@ a manual publish of candidates it did not pick.
 import uuid
 from collections import Counter
 from datetime import UTC, date, datetime
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import false, func, or_, select, update
@@ -16,17 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.enums import SystemRole
 from daily_insights_api.modules.audit.api import record_audit_event
-from daily_insights_api.modules.data_management.api import (
-    DataManagementRunResponse,
-    RunAlreadyActiveError,
-    enqueue_run,
-    run_response,
-    taipei_today,
-)
+from daily_insights_api.modules.data_management.api import taipei_today
 from daily_insights_api.modules.identity.api import AuthContext, require_csrf_roles, require_roles
 from daily_insights_api.modules.news.editions import EDITION_ORDER, edition_spec
 from daily_insights_api.modules.news.models import (
     NewsCandidate,
+    NewsCandidateBatch,
     NewsDependencyState,
     NewsEdition,
     NewsItem,
@@ -44,6 +39,11 @@ from daily_insights_api.modules.news.schemas import (
     NewsRecoveryResponse,
 )
 from daily_insights_api.modules.news.service import _lock_key
+from daily_insights_api.modules.orchestration.api import (
+    JobRunResponse,
+    enqueue_manual_job,
+    job_response,
+)
 from daily_insights_api.web.dependencies import get_database_session
 
 router = APIRouter(prefix="/api/admin/news", tags=["news management"])
@@ -92,6 +92,30 @@ async def _latest_edition(
 async def _is_latest_revision(database: AsyncSession, edition: NewsEdition) -> bool:
     latest = await _latest_edition(database, edition.edition_date, edition.market_code)
     return latest is not None and latest.id == edition.id
+
+
+async def _candidate_batch_id(
+    database: AsyncSession,
+    *,
+    edition_date: date,
+    market_code: str,
+    edition: NewsEdition | None,
+) -> uuid.UUID | None:
+    if edition is not None and edition.candidate_batch_id is not None:
+        return edition.candidate_batch_id
+    return cast(
+        uuid.UUID | None,
+        await database.scalar(
+            select(NewsCandidateBatch.id)
+            .where(
+                NewsCandidateBatch.edition_date == edition_date,
+                NewsCandidateBatch.market_code == market_code,
+                NewsCandidateBatch.status.in_(("ready", "partial", "unavailable", "failed")),
+            )
+            .order_by(NewsCandidateBatch.created_at.desc())
+            .limit(1)
+        ),
+    )
 
 
 def _item_response(
@@ -162,8 +186,30 @@ async def _edition_entry(
     database: AsyncSession, edition_date: date, market_code: str
 ) -> NewsAdminEditionEntry:
     edition = await _latest_edition(database, edition_date, market_code)
+    batch_id = await _candidate_batch_id(
+        database,
+        edition_date=edition_date,
+        market_code=market_code,
+        edition=edition,
+    )
     if edition is None:
-        return NewsAdminEditionEntry(market_code=market_code, edition=None, items=[], candidates=[])
+        candidates = (
+            list(
+                await database.scalars(
+                    select(NewsCandidate).where(NewsCandidate.batch_id == batch_id)
+                )
+            )
+            if batch_id is not None
+            else []
+        )
+        return NewsAdminEditionEntry(
+            market_code=market_code,
+            edition=None,
+            items=[],
+            candidates=[
+                _candidate_response(candidate) for candidate in _ordered_candidates(candidates, {})
+            ],
+        )
     rows = (
         await database.execute(
             select(NewsItem, NewsPresentation.headline)
@@ -177,7 +223,14 @@ async def _edition_entry(
         )
     ).all()
     candidates = list(
-        await database.scalars(select(NewsCandidate).where(NewsCandidate.edition_id == edition.id))
+        await database.scalars(
+            select(NewsCandidate).where(
+                or_(
+                    NewsCandidate.edition_id == edition.id,
+                    NewsCandidate.batch_id == batch_id if batch_id is not None else false(),
+                )
+            )
+        )
     )
     candidate_by_item = {
         candidate.item_id: candidate.id for candidate in candidates if candidate.item_id is not None
@@ -323,7 +376,7 @@ async def unhide_item(
 
 @router.post(
     "/candidates/publish",
-    response_model=DataManagementRunResponse,
+    response_model=JobRunResponse,
     status_code=status.HTTP_202_ACCEPTED,
     responses={
         status.HTTP_404_NOT_FOUND: {"description": "Edition not found."},
@@ -341,19 +394,53 @@ async def publish_candidates(
     request: Request,
     actor: AdminWrite,
     database: Database,
-) -> DataManagementRunResponse:
+) -> JobRunResponse:
     """Queue a manual publish; the worker fetches, summarises and publishes."""
     if not request.app.state.settings.daily_news_enabled:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "daily news is unavailable")
-    edition = await database.get(NewsEdition, payload.edition_id)
-    if edition is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "news edition not found")
-    if not await _is_latest_revision(database, edition):
-        raise HTTPException(status.HTTP_409_CONFLICT, "edition superseded")
+    if payload.edition_id is not None:
+        edition = await database.get(NewsEdition, payload.edition_id)
+        if edition is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "news edition not found")
+        await database.execute(
+            select(func.pg_advisory_xact_lock(_lock_key(edition.edition_date, edition.market_code)))
+        )
+        if not await _is_latest_revision(database, edition):
+            raise HTTPException(status.HTTP_409_CONFLICT, "edition superseded")
+    else:
+        assert payload.edition_date is not None and payload.market_code is not None
+        if payload.edition_date != taipei_today():
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "manual candidate publishing is limited to the current edition",
+            )
+        await database.execute(
+            select(func.pg_advisory_xact_lock(_lock_key(payload.edition_date, payload.market_code)))
+        )
+        edition = await _latest_edition(database, payload.edition_date, payload.market_code)
+    target_date = edition.edition_date if edition is not None else payload.edition_date
+    target_market = edition.market_code if edition is not None else payload.market_code
+    assert target_date is not None and target_market is not None
+    batch_id = await _candidate_batch_id(
+        database,
+        edition_date=target_date,
+        market_code=target_market,
+        edition=edition,
+    )
+    candidate_filter = (
+        or_(
+            NewsCandidate.edition_id == edition.id,
+            NewsCandidate.batch_id == batch_id if batch_id is not None else false(),
+        )
+        if edition is not None
+        else NewsCandidate.batch_id == batch_id
+        if batch_id is not None
+        else false()
+    )
     candidates = list(
         await database.scalars(
             select(NewsCandidate).where(
-                NewsCandidate.edition_id == edition.id,
+                candidate_filter,
                 NewsCandidate.id.in_(payload.candidate_ids),
             )
         )
@@ -364,32 +451,40 @@ async def publish_candidates(
         )
     if any(candidate.item_id is not None for candidate in candidates):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "candidate already published")
-    # The request bookkeeping rides in the run's own commit so the worker,
-    # which may claim the row within a second, never sees half of it and the
-    # error it writes cannot be overwritten by a later commit here. Only the
-    # run id, which the worker never writes, is set afterwards.
+    if edition is None:
+        assert payload.edition_date is not None and payload.market_code is not None
+        batch = await database.get(NewsCandidateBatch, batch_id) if batch_id is not None else None
+        edition = NewsEdition(
+            edition_date=payload.edition_date,
+            market_code=payload.market_code,
+            revision=1,
+            input_digest=(batch.input_digest if batch and batch.input_digest else "0" * 64),
+            derivation_version="manual-candidate-base.v1",
+            model_name=None,
+            prompt_version="manual-candidate-base.v1",
+            candidate_batch_id=batch_id,
+            status="unavailable",
+            caveat="Automatic publication was unavailable; manual candidate publication requested.",
+        )
+        database.add(edition)
+        await database.flush()
+    # Candidate bookkeeping, the orchestration run, and the audit record share
+    # one commit so a worker can never observe only part of the request.
     now = datetime.now(UTC)
     for candidate in candidates:
         candidate.publish_requested_at = now
         candidate.publish_requested_by_user_id = actor.user.id
         candidate.publish_error = None
-    try:
-        run = await enqueue_run(
-            database,
-            operation="news_publish",
-            market_code=None,
-            requester_id=actor.user.id,
-            request_id=request.state.request_id,
-            edition_date=edition.edition_date,
-            payload={
-                "edition_id": str(edition.id),
-                "candidate_ids": [str(candidate_id) for candidate_id in payload.candidate_ids],
-            },
-        )
-    except RunAlreadyActiveError:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "a manual publish is already active"
-        ) from None
+    run = await enqueue_manual_job(
+        database,
+        job_key="news_publish_job",
+        requester_id=actor.user.id,
+        payload={
+            "edition_id": str(edition.id),
+            "candidate_ids": [str(candidate_id) for candidate_id in payload.candidate_ids],
+        },
+        edition_date=edition.edition_date,
+    )
     for candidate in candidates:
         candidate.publish_run_id = run.id
     record_audit_event(
@@ -406,4 +501,4 @@ async def publish_candidates(
         request_id=request.state.request_id,
     )
     await database.commit()
-    return run_response(run)
+    return await job_response(database, run)

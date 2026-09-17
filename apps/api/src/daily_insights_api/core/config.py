@@ -1,4 +1,5 @@
 import re
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Self
@@ -25,6 +26,7 @@ class Settings(BaseSettings):
     )
 
     environment: Environment = "development"
+    runtime_role: Literal["api", "orchestration-worker"] = "api"
     database_url: str | None = None
     app_name: str = "Daily Insights API"
     session_secret: SecretStr | None = None
@@ -58,6 +60,10 @@ class Settings(BaseSettings):
     twse_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     twse_request_interval_seconds: float = Field(default=6.0, ge=0, le=60)
     twse_retry_attempts: int = Field(default=3, ge=1, le=5)
+    orchestration_enabled: bool = False
+    orchestration_activation_date: date | None = None
+    orchestration_worker_concurrency: int = Field(default=6, ge=1, le=20)
+    orchestration_poll_seconds: float = Field(default=2.0, ge=0.1, le=60)
     morning_reports_enabled: bool = False
     analyst_viewpoints_enabled: bool = False
     analyst_viewpoints_base_url: str = "https://analyst-viewpoints.invalid"
@@ -108,15 +114,22 @@ class Settings(BaseSettings):
             if self.environment not in {"development", "test"}:
                 raise ValueError("database_url is required outside development and test")
             self.database_url = LOCAL_DATABASE_URL
-        if self.session_secret is None:
+        if self.runtime_role == "orchestration-worker":
+            self.session_secret = None
+            self.password_pepper = None
+            self.r2_endpoint_url = None
+            self.r2_bucket_name = None
+            self.r2_access_key_id = None
+            self.r2_secret_access_key = None
+        if self.session_secret is None and self.runtime_role == "api":
             if self.environment not in {"development", "test"}:
                 raise ValueError("session_secret is required outside development and test")
             self.session_secret = SecretStr(LOCAL_SESSION_SECRET)
-        if self.password_pepper is None:
+        if self.password_pepper is None and self.runtime_role == "api":
             if self.environment not in {"development", "test"}:
                 raise ValueError("password_pepper is required outside development and test")
             self.password_pepper = SecretStr(LOCAL_PASSWORD_PEPPER)
-        if self.environment in {"staging", "production"}:
+        if self.environment in {"staging", "production"} and self.runtime_role == "api":
             assert self.session_secret is not None
             assert self.password_pepper is not None
             session_secret = self.session_secret.get_secret_value()
@@ -202,6 +215,8 @@ class Settings(BaseSettings):
                 or is_placeholder_value(self.chat_model_api_key.get_secret_value())
             ):
                 raise ValueError("chat_model_api_key is required and cannot be a placeholder")
+        if self.runtime_role != "api":
+            return
         required_r2_values = {
             "r2_endpoint_url": self.r2_endpoint_url,
             "r2_bucket_name": self.r2_bucket_name,

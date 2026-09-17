@@ -16,41 +16,38 @@ import { NewsManagementPage } from "./NewsManagementPage"
 
 const {
   catalog,
-  listRuns,
   listNewsRuns,
   createRun,
+  cancelRun,
   listEditions,
   hideItem,
   unhideItem,
   publishCandidates,
   redirectExpired,
-  resumeRun,
   recoveryStatus,
 } = vi.hoisted(() => ({
   catalog: vi.fn(),
-  listRuns: vi.fn(),
   listNewsRuns: vi.fn(),
   createRun: vi.fn(),
+  cancelRun: vi.fn(),
   listEditions: vi.fn(),
   hideItem: vi.fn(),
   unhideItem: vi.fn(),
   publishCandidates: vi.fn(),
   redirectExpired: vi.fn().mockResolvedValue(false),
-  resumeRun: vi.fn(),
   recoveryStatus: vi.fn().mockResolvedValue({ dependencies: [] }),
 }))
 
 vi.mock("#/lib/admin-members", () => ({
   browserAdministrationClient: () => ({
     dataManagementCatalog: catalog,
-    listDataManagementRuns: listRuns,
-    listNewsDataManagementRuns: listNewsRuns,
-    createDataManagementRun: createRun,
+    listJobRuns: listNewsRuns,
+    createJobRun: createRun,
+    cancelJobRun: cancelRun,
     listNewsEditions: listEditions,
     hideNewsItem: hideItem,
     unhideNewsItem: unhideItem,
     publishNewsCandidates: publishCandidates,
-    resumeNewsRun: resumeRun,
     newsRecoveryStatus: recoveryStatus,
   }),
 }))
@@ -59,6 +56,30 @@ const enabledCatalog = {
   taipei_date: "2026-09-07",
   daily_news_enabled: true,
   news_markets: ["global", "tw_equity", "us_equity"],
+}
+
+function jobRun(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "c744cb20-bf7c-4f4a-8e7b-1e0c69a91adf",
+    routine_run_id: null,
+    job_key: "news_daily_update",
+    kind: "function",
+    trigger: "manual",
+    edition_date: enabledCatalog.taipei_date,
+    deadline_at: null,
+    status: "pending",
+    requested_by_user_id: "ee77eab0-3910-4706-803c-ffaf979f1ff7",
+    payload: null,
+    started_at: null,
+    completed_at: null,
+    result: null,
+    error: null,
+    created_at: "2026-09-07T00:00:00+00:00",
+    functions: [],
+    depends_on: [],
+    downstream_jobs: [],
+    ...overrides,
+  }
 }
 
 const editionId = "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09"
@@ -194,14 +215,13 @@ function marketRerunRegion() {
 afterEach(() => {
   cleanup()
   catalog.mockReset()
-  listRuns.mockReset()
   listNewsRuns.mockReset()
   createRun.mockReset()
+  cancelRun.mockReset()
   listEditions.mockReset()
   hideItem.mockReset()
   unhideItem.mockReset()
   publishCandidates.mockReset()
-  resumeRun.mockReset()
   recoveryStatus.mockReset()
   recoveryStatus.mockResolvedValue({ dependencies: [] })
   redirectExpired.mockReset()
@@ -237,33 +257,29 @@ describe("NewsManagementPage", () => {
       ).not.toBeInTheDocument()
     )
   })
-  it("shows the recovery action and submits it once with CSRF", async () => {
+  it("shows native function status for a failed news job", async () => {
     catalog.mockResolvedValue(enabledCatalog)
     listEditions.mockResolvedValue(editions)
     listNewsRuns.mockResolvedValue({
       items: [
-        {
-          id: editionId,
-          operation: "news_market",
-          market_code: "us_equity",
-          edition_date: enabledCatalog.taipei_date,
+        jobRun({
+          job_key: "news_us_equity_refresh_job",
           status: "failed",
-          requested_by_user_id: null,
           error: "news_recovery_required",
-          result: null,
-        },
+          functions: [
+            {
+              id: editionId,
+              function_key: "news_us_equity_refresh",
+              status: "failed",
+            },
+          ],
+        }),
       ],
     })
-    resumeRun.mockResolvedValue({})
     renderPage()
-    const button = await screen.findByRole("button", {
-      name: "Resume / probe model",
-    })
-    fireEvent.click(button)
-    await waitFor(() =>
-      expect(resumeRun).toHaveBeenCalledWith(editionId, true, "csrf")
-    )
-    expect(resumeRun).toHaveBeenCalledOnce()
+    expect(
+      await screen.findByText("news_recovery_required")
+    ).toBeInTheDocument()
   })
   it("shows an accessible loading state", () => {
     catalog.mockReturnValue(new Promise(() => {}))
@@ -274,7 +290,7 @@ describe("NewsManagementPage", () => {
     )
   })
 
-  it("requests the server-filtered news run history", async () => {
+  it("requests native job run history", async () => {
     catalog.mockResolvedValue({
       taipei_date: "2026-09-07",
       daily_news_enabled: true,
@@ -286,41 +302,7 @@ describe("NewsManagementPage", () => {
 
     await screen.findByRole("button", { name: "Refresh all markets" })
     expect(listNewsRuns).toHaveBeenCalledOnce()
-    expect(listRuns).not.toHaveBeenCalled()
-  })
-
-  it("keeps today's market progress when browsing a later history page", async () => {
-    catalog.mockResolvedValue(enabledCatalog)
-    listEditions.mockResolvedValue(editions)
-    const todayRun = {
-      id: "c744cb20-bf7c-4f4a-8e7b-1e0c69a91adf",
-      operation: "news_all",
-      market_code: null,
-      status: "succeeded",
-      edition_date: enabledCatalog.taipei_date,
-      requested_by_user_id: null,
-      error: null,
-      result: null,
-    }
-    listNewsRuns.mockImplementation(async (requestedPage = 1) => ({
-      items: requestedPage === 1 ? [] : [todayRun],
-      page: requestedPage,
-      page_size: 10,
-      total: 11,
-      has_more: requestedPage === 1,
-      active_runs: [],
-      current_day_runs: [todayRun],
-    }))
-    renderPage()
-
-    fireEvent.click(await screen.findByRole("button", { name: "Next" }))
-    await screen.findByText("Page 2")
-
-    const progress = screen.getByRole("region", { name: "Progress by market" })
-    expect(
-      within(progress).queryByText("Today's run has not been created")
-    ).toBeNull()
-    expect(within(progress).getAllByText("Completed").length).toBeGreaterThan(0)
+    expect(listNewsRuns).toHaveBeenCalledWith(1, undefined, "news")
   })
 
   it("keeps refresh controls enabled while an automatic news run is active", async () => {
@@ -331,15 +313,11 @@ describe("NewsManagementPage", () => {
     })
     listNewsRuns.mockResolvedValue({
       items: [
-        {
-          id: "c744cb20-bf7c-4f4a-8e7b-1e0c69a91adf",
-          operation: "news_all",
+        jobRun({
           status: "running",
-          edition_date: "2026-09-07",
           requested_by_user_id: null,
-          error: null,
-          result: null,
-        },
+          trigger: "automatic",
+        }),
       ],
     })
     renderPage()
@@ -354,53 +332,36 @@ describe("NewsManagementPage", () => {
     ).toBeEnabled()
   })
 
-  it("keeps refresh controls disabled while a manual news run is active", async () => {
+  it("queues another refresh while a manual news run is active", async () => {
     catalog.mockResolvedValue({
       taipei_date: "2026-09-07",
       daily_news_enabled: true,
       news_markets: ["global", "tw_equity", "us_equity"],
     })
     listNewsRuns.mockResolvedValue({
-      items: [
-        {
-          id: "c744cb20-bf7c-4f4a-8e7b-1e0c69a91adf",
-          operation: "news_market",
-          market_code: "global",
-          status: "pending",
-          edition_date: "2026-09-07",
-          requested_by_user_id: "ee77eab0-3910-4706-803c-ffaf979f1ff7",
-          error: null,
-          result: null,
-        },
-      ],
+      items: [jobRun({ job_key: "news_global_refresh_job" })],
     })
     renderPage()
 
     expect(
       await screen.findByRole("button", { name: "Refresh all markets" })
-    ).toBeDisabled()
+    ).toBeEnabled()
     expect(
       within(marketRerunRegion()).getByRole("button", {
         name: "Taiwan equities",
       })
-    ).toBeDisabled()
+    ).toBeEnabled()
   })
 
-  it("keeps refresh controls disabled for cancelled manual work that remains active", async () => {
+  it("keeps refresh controls enabled after cancellation", async () => {
     catalog.mockResolvedValue(enabledCatalog)
-    const cancelledButLeased = {
-      id: "c744cb20-bf7c-4f4a-8e7b-1e0c69a91adf",
-      operation: "news_market",
-      market_code: "global",
+    const cancelledButLeased = jobRun({
+      job_key: "news_global_refresh_job",
       status: "cancelled",
-      edition_date: "2026-09-07",
-      requested_by_user_id: "ee77eab0-3910-4706-803c-ffaf979f1ff7",
       error: "cancelled_by_admin",
-      result: null,
-    }
+    })
     listNewsRuns.mockResolvedValue({
       items: [cancelledButLeased],
-      active_runs: [cancelledButLeased],
     })
     listEditions.mockResolvedValue(editions)
 
@@ -408,12 +369,12 @@ describe("NewsManagementPage", () => {
 
     expect(
       await screen.findByRole("button", { name: "Refresh all markets" })
-    ).toBeDisabled()
+    ).toBeEnabled()
     expect(
       within(marketRerunRegion()).getByRole("button", {
         name: "Taiwan equities",
       })
-    ).toBeDisabled()
+    ).toBeEnabled()
   })
 
   it("queues market directly and all markets only after confirmation", async () => {
@@ -434,7 +395,7 @@ describe("NewsManagementPage", () => {
     )
     await waitFor(() =>
       expect(createRun).toHaveBeenCalledWith(
-        { operation: "news_market", market_code: "tw_equity" },
+        "news_tw_equity_refresh_job",
         "csrf"
       )
     )
@@ -442,7 +403,7 @@ describe("NewsManagementPage", () => {
     expect(screen.getByRole("alertdialog")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Queue refresh" }))
     await waitFor(() =>
-      expect(createRun).toHaveBeenCalledWith({ operation: "news_all" }, "csrf")
+      expect(createRun).toHaveBeenCalledWith("news_daily_update", "csrf")
     )
   })
 
@@ -515,19 +476,52 @@ describe("NewsManagementPage", () => {
     await waitFor(() => expect(listEditions).toHaveBeenCalledTimes(2))
   })
 
+  it("publishes retained candidates when automatic publication made no edition", async () => {
+    catalog.mockResolvedValue(enabledCatalog)
+    listNewsRuns.mockResolvedValue({ items: [] })
+    listEditions.mockResolvedValue({
+      ...editions,
+      editions: [
+        {
+          market_code: "global",
+          edition: null,
+          items: [],
+          candidates: [candidate({ stage: "reviewed", drop_reason: null })],
+        },
+        emptyMarket("tw_equity"),
+        emptyMarket("us_equity"),
+      ],
+    })
+    publishCandidates.mockResolvedValue({})
+    renderPage()
+
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: "Fed holds rates" })
+    )
+    fireEvent.click(
+      screen.getByRole("button", { name: "Publish selected (1)" })
+    )
+
+    await waitFor(() =>
+      expect(publishCandidates).toHaveBeenCalledWith(
+        {
+          edition_date: "2026-09-07",
+          market_code: "global",
+          candidate_ids: [droppedId],
+        },
+        "csrf"
+      )
+    )
+  })
+
   it("blocks publishing while a manual publish run is active", async () => {
     catalog.mockResolvedValue(enabledCatalog)
     listNewsRuns.mockResolvedValue({
       items: [
-        {
-          id: "c744cb20-bf7c-4f4a-8e7b-1e0c69a91adf",
-          operation: "news_publish",
-          market_code: null,
+        jobRun({
+          job_key: "news_publish_job",
           status: "running",
-          edition_date: "2026-09-07",
-          error: null,
-          result: null,
-        },
+        }),
       ],
     })
     listEditions.mockResolvedValue({
