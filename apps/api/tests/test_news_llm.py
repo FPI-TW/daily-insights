@@ -129,6 +129,30 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
     ] * len(values)
 
 
+async def test_selection_retry_adds_fixed_safe_contract_guidance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = DeepSeekClient(
+        base_url="https://api.deepseek.com", api_key="secret", model="deepseek-chat"
+    )
+    captured: dict[str, Any] = {}
+
+    async def complete(
+        prompt: dict[str, Any],
+    ) -> tuple[dict[str, Any], str | None, int | None, int | None, int, str]:
+        captured.update(prompt)
+        return ({"selections": []}, None, None, None, 1, "a" * 64)
+
+    monkeypatch.setattr(client, "_complete", complete)
+
+    await client.select([], retry_feedback="selection_invalid_json")
+
+    guidance = str(captured["RETRY_GUIDANCE"])
+    assert "previous selection failed validation" in guidance
+    assert "exactly the OUTPUT_CONTRACT" in guidance
+    assert "selection_invalid_json" not in guidance
+
+
 async def test_selection_rejects_unknown_id_and_summary_rejects_fabricated_number(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -183,6 +207,82 @@ async def test_selection_rejects_unknown_id_and_summary_rejects_fabricated_numbe
     )
     with pytest.raises(ModelOutputError, match="ungrounded"):
         await client.summarize(_candidate(), "Source body gained 10%.", "en")
+
+
+async def test_translation_uses_validated_zh_hant_summary_and_original_source_grounding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = DeepSeekClient(
+        base_url="https://api.deepseek.com", api_key="secret", model="deepseek-chat"
+    )
+    captured: dict[str, Any] = {}
+
+    async def complete(
+        prompt: dict[str, Any],
+    ) -> tuple[dict[str, Any], str | None, int | None, int | None, int, str]:
+        captured.update(prompt)
+        return (
+            {
+                "headline": "Markets gain 10%",
+                "summary": "The move was 10%.",
+                "numeric_facts": ["10%"],
+            },
+            None,
+            None,
+            None,
+            1,
+            "a" * 64,
+        )
+
+    monkeypatch.setattr(client, "_complete", complete)
+    source_summary = LocalizedSummary(
+        headline="市場上漲10%", summary="市場漲幅為10%。", numeric_facts=("10%",)
+    )
+
+    result = await client.translate(_candidate(), "The market gained 10%.", source_summary, "en")
+
+    assert result.value == LocalizedSummary(
+        headline="Markets gain 10%", summary="The move was 10%.", numeric_facts=("10%",)
+    )
+    assert captured["BASE_SUMMARY"] == source_summary.model_dump(mode="json")
+    assert captured["ORIGINAL_SOURCE_BEGIN"] == "The market gained 10%."
+    assert "untrusted quoted data" in str(captured["task"])
+
+
+async def test_translation_rejects_number_not_grounded_in_original_article(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = DeepSeekClient(
+        base_url="https://api.deepseek.com", api_key="secret", model="deepseek-chat"
+    )
+    monkeypatch.setattr(
+        client,
+        "_complete",
+        AsyncMock(
+            return_value=(
+                {
+                    "headline": "Markets gain 20%",
+                    "summary": "The move was 20%.",
+                    "numeric_facts": ["20%"],
+                },
+                None,
+                None,
+                None,
+                1,
+                "b" * 64,
+            )
+        ),
+    )
+
+    with pytest.raises(ModelCallError) as raised:
+        await client.translate(
+            _candidate(),
+            "The market gained 10%.",
+            LocalizedSummary(headline="市場上漲10%", summary="市場漲幅為10%。"),
+            "en",
+        )
+
+    assert raised.value.error_code == "translation_ungrounded_number"
 
 
 class _FakeAsyncClient:

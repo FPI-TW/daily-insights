@@ -115,10 +115,11 @@ def test_news_daily_job_refreshes_all_markets_before_publish() -> None:
     assert publish.dependency_policy == "terminal"
 
 
-def test_news_summary_failures_are_partial_retries_and_change_publication_digest() -> None:
-    assert _refresh_status(2, 1) == ("partial", "partial", True)
+def test_news_summary_failures_are_terminal_partial_and_change_publication_digest() -> None:
+    assert _refresh_status(2, 1) == ("partial", "partial", False)
     assert _refresh_status(2, 0) == ("succeeded", "ready", False)
-    assert _refresh_status(0, 1) == ("unavailable", "unavailable", True)
+    assert _refresh_status(0, 1) == ("unavailable", "unavailable", False)
+    assert _refresh_status(0, 0) == ("unavailable", "unavailable", True)
 
     batch = NewsCandidateBatch(
         function_attempt_id=uuid.uuid4(),
@@ -432,7 +433,7 @@ async def test_heartbeat_error_still_releases_provider_lock(
     assert connection.closed
 
 
-async def test_publish_exception_remains_retryable(
+async def test_unexpected_news_publish_exception_is_safe_and_terminal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     connection = _FakeConnection()
@@ -475,7 +476,9 @@ async def test_publish_exception_remains_retryable(
 
     assert len(outcomes) == 1
     assert outcomes[0].status == "failed"
-    assert outcomes[0].retryable is True
+    assert outcomes[0].retryable is False
+    assert outcomes[0].error_code == "unexpected_error"
+    assert outcomes[0].error_detail == "unexpected_error"
     assert connection.closed
 
 

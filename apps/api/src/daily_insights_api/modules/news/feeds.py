@@ -830,15 +830,20 @@ async def discover_feed_candidates(
 ) -> list[Candidate]:
     """Read every feed tagged for ``market`` whose article host is allowlisted.
 
-    Failures are isolated per feed and reported as events; the function never
-    raises, so a broken publisher cannot take the whole edition down. When a
+    Expected source failures are isolated per feed and reported as events;
+    database, cancellation and unknown failures propagate. When a
     ``bodies`` dict is supplied, full-text feeds store each candidate's body
     there (keyed by candidate id) so extraction can skip fetching it. Bodies
     live in memory only; they are never persisted.
     """
     end = now or datetime.now(UTC)
     # Local import avoids coupling the pure feed parsers to model execution.
-    from daily_insights_api.modules.news.failures import NewsFailure, NewsOperationError
+    from daily_insights_api.modules.news.failures import (
+        NewsFailure,
+        NewsOperationError,
+        classify_failure,
+        source_failure_is_systemic,
+    )
     from daily_insights_api.modules.news.recovery import (
         check_dependency,
         current_workflow,
@@ -933,13 +938,16 @@ async def discover_feed_candidates(
             payload = await _read_capped(client, url, headers)
             entries = parse_feed(source, payload)
         except Exception as error:
+            failure = classify_failure(error, stage="feed", scope=f"source:{feed_host}")
             if workflow is not None and checkpoint is not None:
                 await source_failure(workflow, checkpoint, error, stage="feed", hostname=feed_host)
+            if source_failure_is_systemic(failure):
+                raise NewsOperationError(failure) from error
             emit_event(
                 "news.feed.failed",
                 hostname=source.hostname,
                 feed=source.url,
-                error_code=type(error).__name__,
+                error_code=failure.code,
             )
             continue
         dropped_language = 0

@@ -4,7 +4,7 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -49,6 +49,7 @@ from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.identity.session_models import Session
 from daily_insights_api.modules.news import service as news_service
 from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary
+from daily_insights_api.modules.news.failures import NewsFailure, NewsOperationError
 from daily_insights_api.modules.news.llm import ModelCall
 from daily_insights_api.modules.news.models import (
     NewsCandidate,
@@ -817,8 +818,88 @@ async def test_due_automatic_news_retry_is_claimed_ahead_of_pending_manual_work(
     assert pending_manual.status == "pending"
 
 
+@pytest.mark.parametrize(
+    ("raised", "expected_error"),
+    [
+        (
+            NewsOperationError(
+                NewsFailure(code="provider_http_429", action="retry", stage="selection")
+            ),
+            "provider_http_429",
+        ),
+        (RuntimeError("private runtime detail"), "unexpected_error"),
+    ],
+)
+async def test_data_management_news_stops_after_systemic_failure(
+    data_management_database: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    raised: Exception,
+    expected_error: str,
+) -> None:
+    run = DataManagementRun(
+        id=uuid.uuid4(),
+        operation="news_all",
+        market_code=None,
+        edition_date=data_management_service.taipei_today(),
+        status="running",
+        requested_by_user_id=uuid.uuid4(),
+    )
+    calls: list[str] = []
+    client = _PublishClient()
+
+    async def fail_first_market(*_: object, **kwargs: object) -> str:
+        spec = kwargs["spec"]
+        calls.append(cast(Any, spec).market_code)
+        raise raised
+
+    monkeypatch.setattr(data_management_service, "create_news_client", lambda **_: client)
+    monkeypatch.setattr(data_management_service, "run_news_edition", fail_first_market)
+
+    status, result, error = await execute_run(
+        run,
+        data_management_database,
+        Settings(
+            environment="test",
+            daily_news_enabled=True,
+            news_model_api_key="key",
+        ),
+    )
+
+    assert status == "failed"
+    assert error == expected_error
+    assert result == {"outcome": "interrupted", "outcomes": {}, "news": {}}
+    assert calls == ["global"]
+    assert client.closed
+
+
+async def test_data_management_missing_news_model_stops_after_first_market(
+    data_management_database: async_sessionmaker[AsyncSession],
+) -> None:
+    run = DataManagementRun(
+        id=uuid.uuid4(),
+        operation="news_all",
+        market_code=None,
+        edition_date=data_management_service.taipei_today(),
+        status="running",
+        requested_by_user_id=uuid.uuid4(),
+    )
+
+    status, result, error = await execute_run(
+        run,
+        data_management_database,
+        Settings(environment="test", daily_news_enabled=True, news_model_api_key=None),
+    )
+
+    assert status == "failed"
+    assert error == "news_model_configuration_missing"
+    assert result["outcome"] == "interrupted"
+    assert result["outcomes"] == {}
+    news = cast(dict[str, object], result["news"])
+    assert set(news) == {"global"}
+
+
 class _PublishClient:
-    """Summarises every locale; the provider is never contacted."""
+    """Summarises zh-hant and translates the other locales without provider I/O."""
 
     model_name = "deepseek-chat"
 
@@ -847,6 +928,30 @@ class _PublishClient:
             4,
             1,
             "c" * 64,
+        )
+
+    async def translate(
+        self,
+        candidate: Candidate,
+        article_text: str,
+        source_summary: LocalizedSummary,
+        locale: str,
+        *,
+        retry_feedback: str | None = None,
+    ) -> ModelCall:
+        del article_text, source_summary, retry_feedback
+        self.summarized.append((candidate.id, locale))
+        return ModelCall(
+            LocalizedSummary(
+                headline=f"{locale} manual headline",
+                summary=f"{locale} manual summary",
+                numeric_facts=("3%",),
+            ),
+            f"translation-{locale}",
+            6,
+            4,
+            1,
+            "d" * 64,
         )
 
     async def aclose(self) -> None:
@@ -952,6 +1057,83 @@ def _candidate(edition_id: uuid.UUID, index: int, **overrides: object) -> NewsCa
     )
     values.update(overrides)
     return NewsCandidate(**values)
+
+
+async def test_manual_news_publish_stops_after_unexpected_candidate_failure(
+    data_management_database: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await _admin(data_management_database)
+    today = data_management_service.taipei_today()
+    async with data_management_database.begin() as database:
+        edition = NewsEdition(
+            edition_date=today,
+            market_code="tw_equity",
+            revision=1,
+            input_digest="d" * 64,
+            derivation_version="test",
+            prompt_version="test",
+            status="complete",
+        )
+        database.add(edition)
+        await database.flush()
+        candidates = [
+            _candidate(
+                edition.id,
+                index,
+                ai_importance=4,
+                ai_event_key=f"event-{index}",
+                ai_market="taiwan",
+            )
+            for index in (1, 2)
+        ]
+        database.add_all(candidates)
+        await database.flush()
+        edition_id = edition.id
+        candidate_ids = [candidate.id for candidate in candidates]
+    async with data_management_database() as database:
+        run = await enqueue_run(
+            database,
+            operation="news_publish",
+            market_code=None,
+            requester_id=user.id,
+            request_id="unexpected-candidate-stop",
+            edition_date=today,
+            payload={
+                "edition_id": str(edition_id),
+                "candidate_ids": [str(candidate_id) for candidate_id in candidate_ids],
+            },
+        )
+
+    client = _PublishClient()
+    calls: list[uuid.UUID] = []
+
+    async def fail_candidate(
+        _sessions: object,
+        _client: object,
+        _target: object,
+        candidate: NewsCandidate,
+        **_: object,
+    ) -> str:
+        calls.append(candidate.id)
+        raise RuntimeError("private candidate failure")
+
+    monkeypatch.setattr(data_management_service, "create_news_client", lambda **_: client)
+    monkeypatch.setattr(news_service, "_publish_candidate", fail_candidate)
+
+    status, result, error = await execute_run(
+        run,
+        data_management_database,
+        Settings(
+            environment="test",
+            daily_news_enabled=True,
+            news_model_api_key="key",
+        ),
+    )
+
+    assert (status, result, error) == ("failed", {}, "unexpected_error")
+    assert calls == [candidate_ids[0]]
+    assert client.closed
 
 
 async def test_news_publish_run_publishes_candidates_end_to_end(
@@ -1117,7 +1299,11 @@ async def test_news_publish_run_publishes_candidates_end_to_end(
             )
         )
         assert len(audits) == 6
-        assert {audit.stage for audit in audits} == {"summary"}
+        assert [(audit.stage, audit.locale) for audit in audits].count(("summary", "zh-hant")) == 2
+        assert [(audit.stage, audit.locale) for audit in audits].count(
+            ("translation", "zh-hans")
+        ) == 2
+        assert [(audit.stage, audit.locale) for audit in audits].count(("translation", "en")) == 2
         assert all(audit.status == "succeeded" for audit in audits)
         published_events = list(
             await database.scalars(
@@ -1284,6 +1470,46 @@ async def test_expired_live_execution_lock_is_not_reclaimed_until_worker_session
     assert provider_calls == [queued.id]
 
 
+async def test_news_worker_records_structured_model_failure_code(
+    data_management_database: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await _admin(data_management_database)
+    async with data_management_database.begin() as database:
+        run = DataManagementRun(
+            operation="news_market",
+            market_code="global",
+            edition_date=data_management_service.taipei_today(),
+            status="pending",
+            requested_by_user_id=user.id,
+        )
+        database.add(run)
+        await database.flush()
+        run_id = run.id
+
+    async def provider_failure(*_: object) -> tuple[str, dict[str, object], str | None]:
+        raise NewsOperationError(
+            NewsFailure(
+                code="provider_http_429",
+                action="retry",
+                stage="translation",
+                scope="provider:news",
+                candidate_id="candidate-1",
+                locale="en",
+            )
+        )
+
+    monkeypatch.setattr(data_management_service, "execute_run", provider_failure)
+    await worker_loop(data_management_database, Settings(environment="test"), once=True)
+
+    async with data_management_database() as database:
+        stored = await database.get(DataManagementRun, run_id)
+    assert stored is not None
+    assert stored.status == "failed"
+    assert stored.error == "provider_http_429"
+    assert stored.result == {}
+
+
 async def test_expired_cancelled_lease_is_released_after_worker_death(
     data_management_database: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -1372,7 +1598,12 @@ async def test_orchestration_admin_api_enqueues_lists_gets_and_queues_conflicts(
             ).all()
         )
     assert len(manual_runs) == 3
-    assert all(run.deadline_at is None for run in manual_runs)
+    deadlines = {run.deadline_at for run in manual_runs}
+    assert None not in deadlines
+    assert len(deadlines) == 1
+    deadline = deadlines.pop()
+    assert deadline is not None
+    assert timedelta(minutes=59) <= deadline - datetime.now(UTC) <= timedelta(hours=1)
     async with data_management_database() as database:
         created_event = await database.scalar(
             select(AuditEvent).where(

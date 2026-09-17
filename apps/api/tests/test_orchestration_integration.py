@@ -3,13 +3,14 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import cast
+from typing import Any, cast
 
+import httpx
 import pytest
 import pytest_asyncio
 from conftest import remigrate_database
 from sqlalchemy import event, func, select, text, update
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -24,10 +25,15 @@ import daily_insights_api.modules.orchestration.projections as orchestration_pro
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.analyst_viewpoints.api import AnalystViewpointSyncError
 from daily_insights_api.modules.analyst_viewpoints.models import AnalystViewpointSyncRun
+from daily_insights_api.modules.data_sources.api import TaiexDailyBar, TaiexDailyBars
+from daily_insights_api.modules.news.contracts import LocalizedSummary, Selection
+from daily_insights_api.modules.news.failures import NewsFailure, NewsOperationError
+from daily_insights_api.modules.news.llm import ModelCall, ModelCallError
 from daily_insights_api.modules.news.models import (
     NewsCandidate,
     NewsCandidateBatch,
     NewsEdition,
+    NewsGenerationAudit,
     NewsItem,
     PreparedNewsItem,
 )
@@ -71,7 +77,9 @@ from daily_insights_api.modules.orchestration.worker import (
     execute_claimed,
     reconcile_function_jobs,
 )
+from daily_insights_api.modules.reports.api import TENORS, History, Point
 from daily_insights_api.modules.reports.macro_dashboard_models import MacroDashboardSnapshot
+from daily_insights_api.modules.reports.macro_diagnostics import record_failure
 from daily_insights_api.modules.reports.models import ReportPublication
 
 pytestmark = pytest.mark.integration
@@ -92,6 +100,562 @@ def test_partial_news_result_keeps_batch_with_more_prepared_items() -> None:
     }
 
     assert _merge_partial_results(previous, current) == previous
+
+
+async def test_terminal_partial_news_refresh_allows_publish_dependency(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    engine, sessions = orchestration_database
+    now = datetime.now(UTC)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_global_refresh_job",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now + timedelta(hours=1),
+            status="pending",
+        )
+        database.add(job)
+        await database.flush()
+        refresh = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_global_refresh",
+            provider_key="internal_services",
+            scope={},
+            status="pending",
+        )
+        publish = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_publish",
+            provider_key="internal_services",
+            scope={},
+            status="pending",
+        )
+        database.add_all((refresh, publish))
+        await database.flush()
+        database.add(
+            FunctionDependency(
+                upstream_function_run_id=refresh.id,
+                downstream_function_run_id=publish.id,
+                policy="terminal",
+            )
+        )
+
+    claimed = await claim_ready_function(engine, sessions, owner="news-partial", now=now)
+    assert claimed is not None and claimed.function_key == "news_global_refresh"
+
+    async def partial(_: ClaimedFunction) -> FunctionOutcome:
+        return FunctionOutcome(
+            status="partial",
+            result={"prepared": 2, "summary_failed": 1},
+            missing_scopes=("global",),
+            error_code="news_summary_partial",
+            retryable=False,
+        )
+
+    await execute_claimed(claimed, sessions, partial)
+    async with sessions() as database:
+        stored = await database.get(FunctionRun, claimed.function_run_id)
+        assert stored is not None and stored.status == "partial"
+        assert stored.next_attempt_at is None
+
+    publish_claim = await claim_ready_function(
+        engine, sessions, owner="news-publish", now=now + timedelta(seconds=1)
+    )
+    assert publish_claim is not None and publish_claim.function_key == "news_publish"
+    await publish_claim.connection.close()
+
+
+async def test_blocking_news_failure_is_terminal_in_the_generic_worker(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    engine, sessions = orchestration_database
+    now = datetime.now(UTC)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_global_refresh_job",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now + timedelta(hours=1),
+            status="pending",
+        )
+        database.add(job)
+        await database.flush()
+        function = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_global_refresh",
+            provider_key="internal_services",
+            scope={},
+            status="pending",
+        )
+        database.add(function)
+        await database.flush()
+        function_id = function.id
+
+    claimed = await claim_ready_function(engine, sessions, owner="news-block", now=now)
+    assert claimed is not None
+
+    async def blocked(_: ClaimedFunction) -> FunctionOutcome:
+        raise NewsOperationError(
+            NewsFailure(code="provider_http_401", action="block", stage="selection")
+        )
+
+    await execute_claimed(claimed, sessions, blocked)
+    async with sessions() as database:
+        stored = await database.get(FunctionRun, function_id)
+        attempt = await database.get(FunctionAttempt, claimed.attempt_id)
+    assert stored is not None
+    assert stored.status == "failed"
+    assert stored.next_attempt_at is None
+    assert stored.error == "provider_http_401"
+    assert attempt is not None
+    assert attempt.error_code == "provider_http_401"
+    assert attempt.error_detail == "provider_http_401"
+
+
+@pytest.mark.parametrize(
+    ("raised", "expected_code", "expected_status", "expects_retry"),
+    [
+        (RuntimeError("private runtime sentinel"), "unexpected_error", "failed", False),
+        (
+            OperationalError("private statement", {}, RuntimeError("private db sentinel")),
+            "database_unavailable",
+            "retry_wait",
+            True,
+        ),
+    ],
+)
+async def test_generic_worker_classifies_raw_news_failures_safely(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    raised: Exception,
+    expected_code: str,
+    expected_status: str,
+    expects_retry: bool,
+) -> None:
+    engine, sessions = orchestration_database
+    now = datetime.now(UTC)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_global_refresh_job",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now + timedelta(hours=1),
+            status="pending",
+        )
+        database.add(job)
+        await database.flush()
+        function = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_global_refresh",
+            provider_key="internal_services",
+            scope={},
+            status="pending",
+        )
+        database.add(function)
+        await database.flush()
+        function_id = function.id
+
+    claimed = await claim_ready_function(engine, sessions, owner="raw-news-failure", now=now)
+    assert claimed is not None
+
+    async def fail(_: ClaimedFunction) -> FunctionOutcome:
+        raise raised
+
+    await execute_claimed(claimed, sessions, fail)
+    async with sessions() as database:
+        stored = await database.get(FunctionRun, function_id)
+        attempt = await database.get(FunctionAttempt, claimed.attempt_id)
+    assert stored is not None
+    assert stored.status == expected_status
+    assert (stored.next_attempt_at is not None) is expects_retry
+    assert stored.error == expected_code
+    assert attempt is not None
+    assert attempt.error_code == expected_code
+    assert attempt.error_detail == expected_code
+    assert "private" not in str(attempt.error_detail)
+
+
+async def test_retryable_news_failure_pauses_sibling_markets_until_recovery(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    engine, sessions = orchestration_database
+    now = datetime.now(UTC)
+    refresh_keys = (
+        "news_global_refresh",
+        "news_tw_equity_refresh",
+        "news_us_equity_refresh",
+    )
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_daily_update",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now + timedelta(hours=1),
+            status="pending",
+        )
+        database.add(job)
+        await database.flush()
+        database.add_all(
+            FunctionRun(
+                job_run_id=job.id,
+                function_key=function_key,
+                provider_key="internal_services",
+                scope={},
+                status="pending",
+            )
+            for function_key in refresh_keys
+        )
+
+    claimed = await claim_ready_function(engine, sessions, owner="news-retry", now=now)
+    assert claimed is not None and claimed.function_key in refresh_keys
+
+    async def retryable(_: ClaimedFunction) -> FunctionOutcome:
+        raise NewsOperationError(
+            NewsFailure(code="provider_http_429", action="retry", stage="selection")
+        )
+
+    await execute_claimed(claimed, sessions, retryable)
+    assert (
+        await claim_ready_function(
+            engine, sessions, owner="news-sibling-blocked", now=now + timedelta(seconds=1)
+        )
+        is None
+    )
+
+    recovered = await claim_ready_function(
+        engine, sessions, owner="news-recovered", now=now + timedelta(minutes=31)
+    )
+    assert recovered is not None and recovered.function_run_id == claimed.function_run_id
+
+    async def succeeded(_: ClaimedFunction) -> FunctionOutcome:
+        return FunctionOutcome(status="succeeded")
+
+    await execute_claimed(recovered, sessions, succeeded)
+    sibling = await claim_ready_function(
+        engine, sessions, owner="news-next-market", now=now + timedelta(minutes=31, seconds=1)
+    )
+    assert sibling is not None and sibling.function_run_id != claimed.function_run_id
+    await sibling.connection.close()
+
+
+async def test_terminal_news_failure_stops_pending_sibling_markets(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    engine, sessions = orchestration_database
+    now = datetime.now(UTC)
+    refresh_keys = (
+        "news_global_refresh",
+        "news_tw_equity_refresh",
+        "news_us_equity_refresh",
+    )
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_daily_update",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now + timedelta(hours=1),
+            status="pending",
+        )
+        database.add(job)
+        await database.flush()
+        database.add_all(
+            FunctionRun(
+                job_run_id=job.id,
+                function_key=function_key,
+                provider_key="internal_services",
+                scope={},
+                status="pending",
+            )
+            for function_key in refresh_keys
+        )
+        job_id = job.id
+
+    claimed = await claim_ready_function(engine, sessions, owner="news-terminal", now=now)
+    assert claimed is not None and claimed.function_key in refresh_keys
+
+    async def terminal(_: ClaimedFunction) -> FunctionOutcome:
+        raise NewsOperationError(
+            NewsFailure(code="provider_http_401", action="block", stage="selection")
+        )
+
+    await execute_claimed(claimed, sessions, terminal)
+    async with sessions() as database:
+        runs = list(
+            await database.scalars(
+                select(FunctionRun)
+                .where(FunctionRun.job_run_id == job_id)
+                .order_by(FunctionRun.function_key)
+            )
+        )
+        stored_job = await database.get(JobRun, job_id)
+    assert len(runs) == 3
+    assert all(run.status == "failed" for run in runs)
+    assert all(run.error == "provider_http_401" for run in runs)
+    assert all(
+        run.id == claimed.function_run_id
+        or run.result
+        == {
+            "outcome": "blocked_by_news_sibling",
+            "upstream_function_key": claimed.function_key,
+            "error_code": "provider_http_401",
+        }
+        for run in runs
+    )
+    assert stored_job is not None and stored_job.status == "failed"
+    assert (
+        await claim_ready_function(
+            engine, sessions, owner="news-no-later-market", now=now + timedelta(seconds=1)
+        )
+        is None
+    )
+
+
+async def test_missing_news_model_configuration_does_not_publish_empty_editions(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    engine, sessions = orchestration_database
+    now = datetime.now(UTC)
+    refresh_keys = (
+        "news_global_refresh",
+        "news_tw_equity_refresh",
+        "news_us_equity_refresh",
+    )
+    async with sessions.begin() as database:
+        existing = NewsEdition(
+            edition_date=now.date(),
+            market_code="global",
+            revision=1,
+            input_digest="e" * 64,
+            derivation_version="test",
+            prompt_version="test",
+            status="complete",
+        )
+        job = JobRun(
+            job_key="news_daily_update",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now + timedelta(hours=1),
+            status="pending",
+        )
+        database.add_all((existing, job))
+        await database.flush()
+        refresh_runs = [
+            FunctionRun(
+                job_run_id=job.id,
+                function_key=function_key,
+                provider_key="internal_services",
+                scope={},
+                status="pending",
+            )
+            for function_key in refresh_keys
+        ]
+        publish_run = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_publish",
+            provider_key="internal_services",
+            scope={},
+            status="pending",
+        )
+        database.add_all([*refresh_runs, publish_run])
+        await database.flush()
+        database.add_all(
+            FunctionDependency(
+                upstream_function_run_id=refresh_run.id,
+                downstream_function_run_id=publish_run.id,
+                policy="terminal",
+            )
+            for refresh_run in refresh_runs
+        )
+        job_id = job.id
+        existing_id = existing.id
+        publish_id = publish_run.id
+
+    claimed = await claim_ready_function(engine, sessions, owner="news-no-model", now=now)
+    assert claimed is not None and claimed.function_key in refresh_keys
+    settings = Settings(environment="test", daily_news_enabled=True, news_model_api_key=None)
+
+    async def refresh(current: ClaimedFunction) -> FunctionOutcome:
+        return await orchestration_news_functions.refresh_news(settings, sessions, current)
+
+    await execute_claimed(claimed, sessions, refresh)
+    async with sessions() as database:
+        runs = list(
+            await database.scalars(
+                select(FunctionRun).where(
+                    FunctionRun.job_run_id == job_id,
+                    FunctionRun.function_key.in_(refresh_keys),
+                )
+            )
+        )
+    assert len(runs) == 3
+    assert all(run.status == "failed" for run in runs)
+    assert all(run.error == "news_model_configuration_missing" for run in runs)
+
+    publish_claim = await claim_ready_function(
+        engine, sessions, owner="news-blocked-publish", now=now + timedelta(seconds=1)
+    )
+    assert publish_claim is not None and publish_claim.function_run_id == publish_id
+    publish_outcomes: list[FunctionOutcome] = []
+
+    async def publish(current: ClaimedFunction) -> FunctionOutcome:
+        outcome = await orchestration_news_functions.publish_news(settings, sessions, current)
+        publish_outcomes.append(outcome)
+        return outcome
+
+    await execute_claimed(publish_claim, sessions, publish)
+    assert len(publish_outcomes) == 1
+    assert publish_outcomes[0].status == "failed"
+    assert publish_outcomes[0].result == {
+        "markets": {
+            "global": "blocked",
+            "tw_equity": "blocked",
+            "us_equity": "blocked",
+        },
+        "available": [],
+        "partial": [],
+        "unavailable": [],
+        "blocked": ["global", "tw_equity", "us_equity"],
+    }
+    async with sessions() as database:
+        editions = list(await database.scalars(select(NewsEdition)))
+        stored_publish = await database.get(FunctionRun, publish_id)
+    assert [edition.id for edition in editions] == [existing_id]
+    assert stored_publish is not None and stored_publish.status == "failed"
+    assert stored_publish.next_attempt_at is None
+
+
+@pytest.mark.parametrize(
+    ("publish_status", "candidate_codes", "expected_status"),
+    [
+        ("partial", ("published", "summary_failed"), "partial"),
+        ("failed", ("summary_failed",), "failed"),
+        ("failed", ("fetch_failed",), "failed"),
+    ],
+)
+async def test_manual_news_validation_exhaustion_is_terminal(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+    publish_status: str,
+    candidate_codes: tuple[str, ...],
+    expected_status: str,
+) -> None:
+    engine, sessions = orchestration_database
+    now = datetime.now(UTC)
+    candidate_ids = tuple(uuid.uuid4() for _ in candidate_codes)
+    edition_id = uuid.uuid4()
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_publish_job",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            status="pending",
+        )
+        database.add(job)
+        await database.flush()
+        function = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_publish",
+            provider_key="internal_services",
+            scope={
+                "edition_id": str(edition_id),
+                "candidate_ids": [str(candidate_id) for candidate_id in candidate_ids],
+            },
+            status="pending",
+        )
+        database.add(function)
+        await database.flush()
+        function_id = function.id
+
+    class _Client:
+        async def aclose(self) -> None:
+            return None
+
+    async def publish(*_: object, **__: object) -> tuple[str, dict[str, object], str]:
+        published = sum(code == "published" for code in candidate_codes)
+        return (
+            publish_status,
+            {
+                "published": published,
+                "failed": len(candidate_codes) - published,
+                "candidates": {
+                    str(candidate_id): code
+                    for candidate_id, code in zip(candidate_ids, candidate_codes, strict=True)
+                },
+            },
+            f"news_publish_{publish_status}",
+        )
+
+    monkeypatch.setattr(orchestration_news_functions, "_client", lambda _: _Client())
+    monkeypatch.setattr(orchestration_news_functions, "publish_candidates", publish)
+    claimed = await claim_ready_function(engine, sessions, owner="manual-news-validation", now=now)
+    assert claimed is not None and claimed.function_run_id == function_id
+
+    async def handler(current: ClaimedFunction) -> FunctionOutcome:
+        return await orchestration_news_functions.publish_news(
+            Settings(environment="test"), sessions, current
+        )
+
+    await execute_claimed(claimed, sessions, handler)
+    async with sessions() as database:
+        stored = await database.get(FunctionRun, function_id)
+    assert stored is not None
+    assert stored.status == expected_status
+    assert stored.next_attempt_at is None
+    assert stored.missing_scopes is None
+
+
+def _complete_treasury_coverage(*, through: date) -> dict[tuple[int, int], set[str]]:
+    symbols = {symbol for _, symbol in TENORS}
+    return {
+        (year, month): symbols
+        for year in range(through.year - 2, through.year + 1)
+        for month in range(1, 13 if year < through.year else through.month + 1)
+    }
+
+
+def test_treasury_fetch_periods_uses_only_current_month_when_coverage_is_complete() -> None:
+    today = date(2026, 9, 17)
+
+    assert orchestration_functions._treasury_fetch_periods(
+        today, _complete_treasury_coverage(through=today)
+    ) == ((), ((2026, 9),))
+
+
+def test_treasury_fetch_periods_backfills_missing_year_and_new_year_baseline() -> None:
+    symbols = {symbol for _, symbol in TENORS}
+    today = date(2026, 9, 17)
+    coverage = _complete_treasury_coverage(through=today)
+    coverage.pop((2025, 6))
+
+    assert orchestration_functions._treasury_fetch_periods(today, coverage) == (
+        (2025,),
+        ((2026, 9),),
+    )
+    assert orchestration_functions._treasury_fetch_periods(
+        date(2026, 1, 1),
+        {(year, month): symbols for year in (2024, 2025) for month in range(1, 13)},
+    ) == ((), ((2025, 12), (2026, 1)))
 
 
 @pytest_asyncio.fixture
@@ -128,6 +692,707 @@ async def test_legacy_data_management_archive_rejects_writes(
                 ),
                 {"id": uuid.uuid4(), "edition_date": date(2026, 9, 17)},
             )
+
+
+async def test_news_model_contract_failure_is_audited_then_repaired_once(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, sessions = orchestration_database
+    edition = date(2026, 9, 17)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_global_refresh_job",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=edition,
+            status="running",
+        )
+        database.add(job)
+        await database.flush()
+        function = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_global_refresh",
+            provider_key="internal_services",
+            scope={},
+            status="running",
+        )
+        database.add(function)
+        await database.flush()
+        attempt = FunctionAttempt(
+            function_run_id=function.id,
+            attempt_number=1,
+            provider_key="internal_services",
+            function_key="news_global_refresh",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="running",
+            request_metadata=[],
+        )
+        database.add(attempt)
+        await database.flush()
+        batch = NewsCandidateBatch(
+            function_attempt_id=attempt.id,
+            edition_date=edition,
+            market_code="global",
+            status="collecting",
+        )
+        database.add(batch)
+        await database.flush()
+        batch_id = batch.id
+
+    feedback_seen: list[str | None] = []
+
+    async def call(feedback: str | None) -> ModelCall:
+        feedback_seen.append(feedback)
+        if feedback is None:
+            raise ModelCallError(
+                "invalid JSON",
+                input_digest="a" * 64,
+                latency_ms=12,
+                error_code="selection_invalid_json",
+                request_id="failed-request",
+            )
+        return ModelCall(
+            value=Selection(selections=()),
+            request_id="repaired-request",
+            input_tokens=10,
+            output_tokens=5,
+            latency_ms=8,
+            input_digest="b" * 64,
+        )
+
+    result = await orchestration_news_functions._model_call_with_repair(
+        sessions,
+        batch_id=batch_id,
+        stage="selection",
+        locale=None,
+        fallback_digest="f" * 64,
+        model="test-model",
+        prompt_version="test-prompt",
+        call=call,
+    )
+
+    assert result.request_id == "repaired-request"
+    assert feedback_seen == [None, "selection_invalid_json"]
+    async with sessions() as database:
+        audits = list(
+            await database.scalars(
+                select(NewsGenerationAudit).where(
+                    NewsGenerationAudit.candidate_batch_id == batch_id
+                )
+            )
+        )
+    assert len(audits) == 1
+    assert audits[0].status == "failed"
+    assert audits[0].error_code == "selection_invalid_json"
+    assert audits[0].provider_request_id == "failed-request"
+
+
+@pytest.mark.parametrize(
+    ("stage", "locale", "prompt_version"),
+    [
+        ("summary", "zh-hant", "summary-v4"),
+        ("translation", "en", "translation-v1"),
+    ],
+)
+async def test_successful_news_model_result_is_reused_after_function_retry(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    stage: str,
+    locale: str,
+    prompt_version: str,
+) -> None:
+    _, sessions = orchestration_database
+    edition = date(2026, 9, 17)
+    attempt_key = f"durable-{stage}-success"
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_global_refresh_job",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=edition,
+            status="running",
+        )
+        database.add(job)
+        await database.flush()
+        function = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_global_refresh",
+            provider_key="internal_services",
+            scope={},
+            status="running",
+        )
+        database.add(function)
+        await database.flush()
+        first_attempt = FunctionAttempt(
+            function_run_id=function.id,
+            attempt_number=1,
+            provider_key="internal_services",
+            function_key="news_global_refresh",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="running",
+            request_metadata=[],
+        )
+        database.add(first_attempt)
+        await database.flush()
+        first_batch = NewsCandidateBatch(
+            function_attempt_id=first_attempt.id,
+            edition_date=edition,
+            market_code="global",
+            status="collecting",
+        )
+        database.add(first_batch)
+        await database.flush()
+        first_batch_id = first_batch.id
+        function_id = function.id
+
+    calls = 0
+
+    async def summarize(_: str | None) -> ModelCall:
+        nonlocal calls
+        calls += 1
+        return ModelCall(
+            value=LocalizedSummary(
+                headline="已驗證標題",
+                summary="已驗證摘要",
+                numeric_facts=("5%",),
+            ),
+            request_id="summary-request",
+            input_tokens=10,
+            output_tokens=5,
+            latency_ms=1,
+            input_digest="a" * 64,
+        )
+
+    first = await orchestration_news_functions._model_call_with_repair(
+        sessions,
+        batch_id=first_batch_id,
+        stage=cast(Any, stage),
+        locale=locale,
+        fallback_digest="f" * 64,
+        model="test-model",
+        prompt_version=prompt_version,
+        call=summarize,
+        candidate_id="candidate-1",
+        attempt_key=attempt_key,
+    )
+    assert calls == 1
+    assert not first.reused
+
+    async with sessions.begin() as database:
+        resumed_attempt = FunctionAttempt(
+            function_run_id=function_id,
+            attempt_number=2,
+            provider_key="internal_services",
+            function_key="news_global_refresh",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="running",
+            request_metadata=[],
+        )
+        database.add(resumed_attempt)
+        await database.flush()
+        resumed_batch = NewsCandidateBatch(
+            function_attempt_id=resumed_attempt.id,
+            edition_date=edition,
+            market_code="global",
+            status="collecting",
+        )
+        database.add(resumed_batch)
+        await database.flush()
+        resumed_batch_id = resumed_batch.id
+
+    reused = await orchestration_news_functions._model_call_with_repair(
+        sessions,
+        batch_id=resumed_batch_id,
+        stage=cast(Any, stage),
+        locale=locale,
+        fallback_digest="f" * 64,
+        model="test-model",
+        prompt_version=prompt_version,
+        call=summarize,
+        candidate_id="candidate-1",
+        attempt_key=attempt_key,
+    )
+    assert calls == 1
+    assert reused.reused
+    assert reused.value == first.value
+
+
+@pytest.mark.parametrize(
+    ("stage", "error_code", "expected_action", "expected_attempts"),
+    [
+        ("translation", "translation_invalid_json", "skip", 2),
+        ("selection", "selection_invalid_json", "attention", 2),
+        ("translation", "provider_http_429", "retry", 1),
+    ],
+)
+async def test_news_model_failure_policy_preserves_scope_after_repair(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    stage: str,
+    error_code: str,
+    expected_action: str,
+    expected_attempts: int,
+) -> None:
+    _, sessions = orchestration_database
+    edition = date(2026, 9, 17)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_global_refresh_job",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=edition,
+            status="running",
+        )
+        database.add(job)
+        await database.flush()
+        function = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_global_refresh",
+            provider_key="internal_services",
+            scope={},
+            status="running",
+        )
+        database.add(function)
+        await database.flush()
+        attempt = FunctionAttempt(
+            function_run_id=function.id,
+            attempt_number=1,
+            provider_key="internal_services",
+            function_key="news_global_refresh",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="running",
+            request_metadata=[],
+        )
+        database.add(attempt)
+        await database.flush()
+        batch = NewsCandidateBatch(
+            function_attempt_id=attempt.id,
+            edition_date=edition,
+            market_code="global",
+            status="collecting",
+        )
+        database.add(batch)
+        await database.flush()
+        batch_id = batch.id
+
+    calls = 0
+
+    async def fail(_: str | None) -> ModelCall:
+        nonlocal calls
+        calls += 1
+        raise ModelCallError(
+            "private provider response sentinel",
+            input_digest="a" * 64,
+            latency_ms=12,
+            error_code=error_code,
+        )
+
+    with pytest.raises(NewsOperationError) as captured:
+        await orchestration_news_functions._model_call_with_repair(
+            sessions,
+            batch_id=batch_id,
+            stage=cast(Any, stage),
+            locale="en" if stage == "translation" else None,
+            fallback_digest="f" * 64,
+            model="test-model",
+            prompt_version="test-prompt",
+            call=fail,
+            candidate_id="candidate-1",
+        )
+
+    failure = captured.value.failure
+    assert calls == expected_attempts
+    assert failure.action == expected_action
+    assert failure.stage == stage
+    assert failure.candidate_id == "candidate-1"
+    assert failure.locale == ("en" if stage == "translation" else None)
+    assert "private provider response sentinel" not in str(captured.value)
+    assert failure.code == (f"{error_code}_exhausted" if expected_attempts == 2 else error_code)
+
+
+async def test_news_translation_repair_budget_survives_function_retry(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, sessions = orchestration_database
+    edition = date(2026, 9, 17)
+    attempt_key = "translation-attempt-key"
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_global_refresh_job",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=edition,
+            status="running",
+        )
+        database.add(job)
+        await database.flush()
+        function = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_global_refresh",
+            provider_key="internal_services",
+            scope={},
+            status="running",
+            result={
+                "_news_model_attempts": {
+                    attempt_key: {
+                        "count": 1,
+                        "failure_code": "translation_invalid_json",
+                        "failure_action": "repair",
+                    }
+                }
+            },
+        )
+        database.add(function)
+        await database.flush()
+        first_attempt = FunctionAttempt(
+            function_run_id=function.id,
+            attempt_number=2,
+            provider_key="internal_services",
+            function_key="news_global_refresh",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="running",
+            request_metadata=[],
+        )
+        database.add(first_attempt)
+        await database.flush()
+        first_batch = NewsCandidateBatch(
+            function_attempt_id=first_attempt.id,
+            edition_date=edition,
+            market_code="global",
+            status="collecting",
+        )
+        database.add(first_batch)
+        await database.flush()
+        first_batch_id = first_batch.id
+        function_id = function.id
+
+    feedback_seen: list[str | None] = []
+
+    async def fail(feedback: str | None) -> ModelCall:
+        feedback_seen.append(feedback)
+        raise ModelCallError(
+            "private translation output",
+            input_digest="a" * 64,
+            latency_ms=1,
+            error_code="translation_invalid_json",
+        )
+
+    with pytest.raises(NewsOperationError, match="translation_invalid_json_exhausted"):
+        await orchestration_news_functions._model_call_with_repair(
+            sessions,
+            batch_id=first_batch_id,
+            stage="translation",
+            locale="en",
+            fallback_digest="f" * 64,
+            model="test-model",
+            prompt_version="translation-v1",
+            call=fail,
+            candidate_id="candidate-1",
+            attempt_key=attempt_key,
+        )
+    assert feedback_seen == ["translation_invalid_json"]
+
+    async with sessions.begin() as database:
+        second_attempt = FunctionAttempt(
+            function_run_id=function_id,
+            attempt_number=3,
+            provider_key="internal_services",
+            function_key="news_global_refresh",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="running",
+            request_metadata=[],
+        )
+        database.add(second_attempt)
+        await database.flush()
+        second_batch = NewsCandidateBatch(
+            function_attempt_id=second_attempt.id,
+            edition_date=edition,
+            market_code="global",
+            status="collecting",
+        )
+        database.add(second_batch)
+        await database.flush()
+        second_batch_id = second_batch.id
+
+    with pytest.raises(NewsOperationError, match="translation_invalid_json_exhausted"):
+        await orchestration_news_functions._model_call_with_repair(
+            sessions,
+            batch_id=second_batch_id,
+            stage="translation",
+            locale="en",
+            fallback_digest="f" * 64,
+            model="test-model",
+            prompt_version="translation-v1",
+            call=fail,
+            candidate_id="candidate-1",
+            attempt_key=attempt_key,
+        )
+    assert feedback_seen == ["translation_invalid_json"]
+
+
+async def test_retryable_failure_during_translation_repair_does_not_reset_budget(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, sessions = orchestration_database
+    edition = date(2026, 9, 17)
+    attempt_key = "translation-repair-transient-key"
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_global_refresh_job",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=edition,
+            status="running",
+        )
+        database.add(job)
+        await database.flush()
+        function = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_global_refresh",
+            provider_key="internal_services",
+            scope={},
+            status="running",
+            result={
+                "_news_model_attempts": {
+                    attempt_key: {
+                        "count": 1,
+                        "failure_code": "translation_invalid_json",
+                        "failure_action": "repair",
+                    }
+                }
+            },
+        )
+        database.add(function)
+        await database.flush()
+        repair_attempt = FunctionAttempt(
+            function_run_id=function.id,
+            attempt_number=2,
+            provider_key="internal_services",
+            function_key="news_global_refresh",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="running",
+            request_metadata=[],
+        )
+        database.add(repair_attempt)
+        await database.flush()
+        repair_batch = NewsCandidateBatch(
+            function_attempt_id=repair_attempt.id,
+            edition_date=edition,
+            market_code="global",
+            status="collecting",
+        )
+        database.add(repair_batch)
+        await database.flush()
+        repair_batch_id = repair_batch.id
+        function_id = function.id
+
+    calls = 0
+
+    async def transient(feedback: str | None) -> ModelCall:
+        nonlocal calls
+        calls += 1
+        assert feedback == "translation_invalid_json"
+        raise ModelCallError(
+            "private rate limit response",
+            input_digest="a" * 64,
+            latency_ms=1,
+            error_code="provider_http_429",
+        )
+
+    with pytest.raises(NewsOperationError) as first:
+        await orchestration_news_functions._model_call_with_repair(
+            sessions,
+            batch_id=repair_batch_id,
+            stage="translation",
+            locale="en",
+            fallback_digest="f" * 64,
+            model="test-model",
+            prompt_version="translation-v1",
+            call=transient,
+            candidate_id="candidate-1",
+            attempt_key=attempt_key,
+        )
+    assert first.value.failure.action == "retry"
+    assert calls == 1
+
+    async with sessions.begin() as database:
+        resumed_attempt = FunctionAttempt(
+            function_run_id=function_id,
+            attempt_number=3,
+            provider_key="internal_services",
+            function_key="news_global_refresh",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="running",
+            request_metadata=[],
+        )
+        database.add(resumed_attempt)
+        await database.flush()
+        resumed_batch = NewsCandidateBatch(
+            function_attempt_id=resumed_attempt.id,
+            edition_date=edition,
+            market_code="global",
+            status="collecting",
+        )
+        database.add(resumed_batch)
+        await database.flush()
+        resumed_batch_id = resumed_batch.id
+
+    with pytest.raises(NewsOperationError) as resumed:
+        await orchestration_news_functions._model_call_with_repair(
+            sessions,
+            batch_id=resumed_batch_id,
+            stage="translation",
+            locale="en",
+            fallback_digest="f" * 64,
+            model="test-model",
+            prompt_version="translation-v1",
+            call=transient,
+            candidate_id="candidate-1",
+            attempt_key=attempt_key,
+        )
+    assert resumed.value.failure.action == "attention"
+    assert resumed.value.failure.code == "provider_http_429_repair_exhausted"
+    assert calls == 1
+
+
+async def test_taiex_missing_month_retry_keeps_latest_stored_source_date(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, sessions = orchestration_database
+    latest = date(2026, 9, 16)
+    old_month = date(2025, 2, 1)
+    token = uuid.uuid4()
+
+    async def latest_date(*_: object, **__: object) -> date:
+        return latest
+
+    async def select_months(*_: object, **__: object) -> tuple[date, ...]:
+        return (old_month,)
+
+    async def store(*_: object, **__: object) -> int:
+        return 1
+
+    async def current(*_: object, **__: object) -> bool:
+        return True
+
+    class Adapter:
+        async def get_taiex_daily_bars(self, month: date) -> TaiexDailyBars:
+            assert month == old_month
+            return TaiexDailyBars(
+                month=month,
+                items=(
+                    TaiexDailyBar(
+                        trade_date=date(2025, 2, 27),
+                        open=Decimal("23000"),
+                        high=Decimal("23100"),
+                        low=Decimal("22900"),
+                        close=Decimal("23050"),
+                        volume=1,
+                        trade_value=1,
+                    ),
+                ),
+                fetched_at=datetime(2026, 9, 17, tzinfo=UTC),
+            )
+
+    monkeypatch.setattr(orchestration_functions, "latest_market_date", latest_date)
+    monkeypatch.setattr(orchestration_functions, "select_taiex_refresh_months", select_months)
+    monkeypatch.setattr(orchestration_functions, "store_market_bars", store)
+    monkeypatch.setattr(orchestration_functions, "store_index_daily_bars", store)
+    monkeypatch.setattr(orchestration_functions, "fence_is_current", current)
+    claimed = ClaimedFunction(
+        connection=cast(AsyncConnection, None),
+        function_run_id=uuid.uuid4(),
+        job_run_id=uuid.uuid4(),
+        attempt_id=uuid.uuid4(),
+        function_key="taiex_daily_bars",
+        provider_key="twse",
+        edition_date=date(2026, 9, 17),
+        fence_token=token,
+        deadline_at=None,
+        scope={"missing_scopes": [old_month.isoformat()]},
+    )
+
+    outcome = await orchestration_functions._run_twse_taiex(
+        Settings(environment="test", twse_enabled=True),
+        sessions,
+        claimed,
+        cast(Any, Adapter()),
+    )
+
+    assert outcome.status == "succeeded"
+    assert outcome.source_as_of == latest
+
+
+async def test_treasury_failed_year_is_partial_and_retryable(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, sessions = orchestration_database
+    current_year = date(2026, 9, 17).year
+
+    async def load(*_: object, **__: object) -> list[History]:
+        record_failure(
+            "us_treasury",
+            "yield_curve_xml",
+            [str(current_year)],
+            TimeoutError("current year timed out"),
+        )
+        return [
+            History(
+                id=tenor,
+                symbol=symbol,
+                unit="percent",
+                source="U.S. Treasury",
+                status="ok",
+                points=[Point(date=date(2025, 12, 31), value=Decimal("4.0"))],
+            )
+            for tenor, symbol in TENORS
+        ]
+
+    async def store(*_: object, **__: object) -> int:
+        return 1
+
+    monkeypatch.setattr(orchestration_functions, "load_treasury", load)
+    monkeypatch.setattr(orchestration_functions, "store_interest_rates", store)
+    claimed = ClaimedFunction(
+        connection=cast(AsyncConnection, None),
+        function_run_id=uuid.uuid4(),
+        job_run_id=uuid.uuid4(),
+        attempt_id=uuid.uuid4(),
+        function_key="treasury_yield_curve",
+        provider_key="us_treasury",
+        edition_date=date(2026, 9, 17),
+        fence_token=uuid.uuid4(),
+        deadline_at=None,
+        scope={},
+    )
+
+    outcome = await orchestration_functions._run_treasury(
+        Settings(environment="test"), sessions, claimed
+    )
+
+    assert outcome.status == "partial"
+    assert outcome.retryable is True
+    assert str(current_year) in outcome.missing_scopes
+    assert outcome.result is not None
+    assert outcome.result["failure_reasons"] == {str(current_year): "timeout"}
 
 
 async def test_daily_routine_is_idempotent_and_worker_persists_attempts(
@@ -256,8 +1521,9 @@ async def test_projection_fence_token_rejects_stale_worker_with_same_owner(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
     _, sessions = orchestration_database
+    edition = datetime.now(UTC).date() + timedelta(days=2)
     async with sessions() as database:
-        await create_daily_routine(database, edition_date=date(2026, 9, 17))
+        await create_daily_routine(database, edition_date=edition)
     async with sessions.begin() as database:
         projection = await database.scalar(
             select(JobRun).where(JobRun.job_key == "market_reports_publish")
@@ -310,7 +1576,7 @@ async def test_projection_transient_failure_retries_same_job(
             registry_version="test",
             registry_snapshot={},
             edition_date=now.date(),
-            deadline_at=now - timedelta(seconds=1),
+            deadline_at=now + timedelta(hours=1),
             status="pending",
         )
         database.add(job)
@@ -367,6 +1633,49 @@ async def test_projection_transient_failure_retries_same_job(
         assert stored.next_attempt_at is None
     assert freeze_calls == 2
     assert publish_calls == 1
+
+
+async def test_projection_failure_after_deadline_is_terminal(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, sessions = orchestration_database
+    now = datetime.now(UTC)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="market_reports_publish",
+            kind="projection",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now - timedelta(seconds=1),
+            status="pending",
+        )
+        database.add(job)
+        await database.flush()
+        job_id = job.id
+
+    async def fail(*_: object, **__: object) -> tuple[FrozenObservation, ...]:
+        raise ConnectionError("temporary database disconnect")
+
+    monkeypatch.setattr(orchestration_projections, "freeze_projection_inputs", fail)
+
+    claimed = await claim_ready_projection(sessions, owner="projection-deadline-worker")
+    assert claimed is not None
+    await execute_projection(
+        sessions,
+        job_run_id=claimed.job_run_id,
+        owner="projection-deadline-worker",
+        fence_token=claimed.fence_token,
+    )
+
+    async with sessions() as database:
+        stored = await database.get(JobRun, job_id)
+        assert stored is not None
+        assert stored.status == "failed"
+        assert stored.next_attempt_at is None
+        assert stored.completed_at is not None
 
 
 async def test_older_macro_projection_cannot_overwrite_newer_freeze(
@@ -541,7 +1850,7 @@ async def test_news_publish_handler_exception_retries_same_function(
             registry_version="test",
             registry_snapshot={},
             edition_date=now.date(),
-            deadline_at=now - timedelta(seconds=1),
+            deadline_at=now + timedelta(hours=1),
             status="pending",
         )
         database.add(job)
@@ -563,7 +1872,10 @@ async def test_news_publish_handler_exception_retries_same_function(
         nonlocal attempts
         attempts += 1
         if attempts == 1:
-            raise ConnectionError("temporary publication failure")
+            raise httpx.ConnectError(
+                "temporary publication failure",
+                request=httpx.Request("POST", "https://news.example.test/publish"),
+            )
         return FunctionOutcome(status="succeeded", result={"published": 1})
 
     first = await claim_ready_function(engine, sessions, owner="news-publish-retry")
@@ -1518,6 +2830,17 @@ async def test_news_publish_uses_preserved_partial_batch_after_terminal_failure(
             status="partial",
             attempt_count=2,
         )
+        failed_siblings = [
+            FunctionRun(
+                job_run_id=job.id,
+                function_key=function_key,
+                provider_key="internal_services",
+                scope={},
+                status="failed",
+                error="provider_http_401",
+            )
+            for function_key in ("news_tw_equity_refresh", "news_us_equity_refresh")
+        ]
         publish_function = FunctionRun(
             job_run_id=job.id,
             function_key="news_publish",
@@ -1526,7 +2849,7 @@ async def test_news_publish_uses_preserved_partial_batch_after_terminal_failure(
             status="running",
             lease_token=token,
         )
-        database.add_all((refresh, publish_function))
+        database.add_all((refresh, *failed_siblings, publish_function))
         await database.flush()
         partial_attempt = FunctionAttempt(
             function_run_id=refresh.id,
@@ -1619,10 +2942,177 @@ async def test_news_publish_uses_preserved_partial_batch_after_terminal_failure(
     )
 
     assert outcome.status == "partial"
+    assert outcome.result == {
+        "markets": {
+            "tw_equity": "blocked",
+            "us_equity": "blocked",
+            "global": "published",
+        },
+        "available": ["global"],
+        "partial": ["global"],
+        "unavailable": [],
+        "blocked": ["tw_equity", "us_equity"],
+    }
     async with sessions() as database:
-        edition = await database.scalar(select(NewsEdition))
-        assert edition is not None and edition.candidate_batch_id == partial_batch_id
+        editions = list(await database.scalars(select(NewsEdition)))
+        assert len(editions) == 1
+        assert editions[0].candidate_batch_id == partial_batch_id
+        assert editions[0].market_code == "global"
         assert await database.scalar(select(func.count()).select_from(NewsItem)) == 1
+
+
+async def test_news_publish_blocks_deadline_terminalized_system_failure(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, sessions = orchestration_database
+    now = datetime.now(UTC)
+    token = uuid.uuid4()
+    async with sessions.begin() as database:
+        prior_job = JobRun(
+            job_key="news_publish_job",
+            kind="function",
+            trigger="automatic",
+            automatic_key="news-prior-publication",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            status="succeeded",
+            created_at=now - timedelta(hours=1),
+        )
+        database.add(prior_job)
+        await database.flush()
+        prior_edition = NewsEdition(
+            edition_date=now.date(),
+            market_code="global",
+            revision=1,
+            input_digest="1" * 64,
+            derivation_version="test",
+            prompt_version="test",
+            publication_job_run_id=prior_job.id,
+            status="complete",
+        )
+        database.add(prior_edition)
+        await database.flush()
+
+        job = JobRun(
+            job_key="news_global_refresh_job",
+            kind="function",
+            trigger="automatic",
+            automatic_key="news-provider-deadline",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now,
+            status="running",
+            created_at=now,
+        )
+        database.add(job)
+        await database.flush()
+        global_refresh = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_global_refresh",
+            provider_key="internal_services",
+            scope={},
+            status="retry_wait",
+            attempt_count=1,
+            error="provider_http_429",
+            next_attempt_at=now + timedelta(minutes=5),
+        )
+        siblings = [
+            FunctionRun(
+                job_run_id=job.id,
+                function_key=function_key,
+                provider_key="internal_services",
+                scope={},
+                status="pending",
+            )
+            for function_key in ("news_tw_equity_refresh", "news_us_equity_refresh")
+        ]
+        publish_function = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_publish",
+            provider_key="internal_services",
+            scope={},
+            status="pending",
+        )
+        database.add_all((global_refresh, *siblings, publish_function))
+        await database.flush()
+        failed_attempt = FunctionAttempt(
+            function_run_id=global_refresh.id,
+            attempt_number=1,
+            provider_key="internal_services",
+            function_key="news_global_refresh",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="failed",
+            error_code="provider_http_429",
+            request_metadata=[],
+        )
+        database.add(failed_attempt)
+        await database.flush()
+        database.add(
+            NewsCandidateBatch(
+                function_attempt_id=failed_attempt.id,
+                edition_date=now.date(),
+                market_code="global",
+                status="failed",
+                input_digest="2" * 64,
+                result={"error_code": "provider_http_429"},
+            )
+        )
+        prior_edition_id = prior_edition.id
+        job_id = job.id
+        publish_id = publish_function.id
+
+    async with sessions() as database:
+        assert await terminalize_expired_automatic_functions(database, now=now) == 3
+    async with sessions.begin() as database:
+        refreshes = list(
+            await database.scalars(
+                select(FunctionRun).where(
+                    FunctionRun.id.in_([global_refresh.id, *(sibling.id for sibling in siblings)])
+                )
+            )
+        )
+        assert {refresh.status for refresh in refreshes} == {"unavailable"}
+        current_publish = await database.get(FunctionRun, publish_id)
+        assert current_publish is not None and current_publish.status == "pending"
+        current_publish.status = "running"
+        current_publish.lease_token = token
+
+    claimed = ClaimedFunction(
+        connection=cast(AsyncConnection, None),
+        function_run_id=publish_id,
+        job_run_id=job_id,
+        attempt_id=uuid.uuid4(),
+        function_key="news_publish",
+        provider_key="internal_services",
+        edition_date=now.date(),
+        fence_token=token,
+        deadline_at=now,
+        scope={},
+    )
+    outcome = await orchestration_news_functions.publish_news(
+        Settings(environment="test"), sessions, claimed
+    )
+
+    assert outcome.status == "failed"
+    assert outcome.error_code == "news_refresh_blocked"
+    assert outcome.result == {
+        "markets": {
+            "global": "blocked",
+            "tw_equity": "blocked",
+            "us_equity": "blocked",
+        },
+        "available": [],
+        "partial": [],
+        "unavailable": [],
+        "blocked": ["global", "tw_equity", "us_equity"],
+    }
+    async with sessions() as database:
+        editions = list(await database.scalars(select(NewsEdition)))
+        assert len(editions) == 1
+        assert editions[0].id == prior_edition_id
 
 
 async def test_ready_candidates_selects_oldest_run_per_provider_before_limit(
@@ -1742,7 +3232,7 @@ async def test_news_publish_can_be_claimed_after_manual_source_deadline(
     await execute_claimed(claimed, sessions, succeed)
 
 
-async def test_expired_news_publish_lease_is_reclaimed_after_deadline(
+async def test_expired_news_publish_lease_is_terminal_after_deadline(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
     engine, sessions = orchestration_database
@@ -1791,10 +3281,9 @@ async def test_expired_news_publish_lease_is_reclaimed_after_deadline(
 
     claimed = await claim_ready_function(engine, sessions, owner="recovery-worker", now=now)
 
-    assert claimed is not None
-    assert claimed.function_run_id == publish_id
-    assert claimed.fence_token != expired_token
+    assert claimed is None
     async with sessions() as database:
+        function = await database.get(FunctionRun, publish_id)
         attempts = list(
             await database.scalars(
                 select(FunctionAttempt)
@@ -1802,16 +3291,14 @@ async def test_expired_news_publish_lease_is_reclaimed_after_deadline(
                 .order_by(FunctionAttempt.attempt_number)
             )
         )
-        assert [attempt.status for attempt in attempts] == ["failed", "running"]
+        assert function is not None
+        assert function.status == "unavailable"
+        assert function.error == "deadline_reached"
+        assert [attempt.status for attempt in attempts] == ["failed"]
         assert attempts[0].error_code == "lease_expired"
 
-    async def succeed(_: ClaimedFunction) -> FunctionOutcome:
-        return FunctionOutcome(status="succeeded")
 
-    await execute_claimed(claimed, sessions, succeed)
-
-
-async def test_news_publish_retry_remains_runnable_after_provider_deadline(
+async def test_news_publish_retry_is_not_runnable_after_provider_deadline(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
     _, sessions = orchestration_database
@@ -1844,4 +3331,4 @@ async def test_news_publish_retry_remains_runnable_after_provider_deadline(
 
     candidates = await _ready_candidates(sessions, now)
 
-    assert (publish_id, "internal_services") in candidates
+    assert (publish_id, "internal_services") not in candidates

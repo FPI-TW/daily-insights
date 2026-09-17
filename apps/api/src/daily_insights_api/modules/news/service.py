@@ -1,13 +1,13 @@
 import asyncio
 import hashlib
 import json
-import logging
 import re
 import uuid
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
+from typing import cast
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import false, func, or_, select
@@ -35,7 +35,11 @@ from daily_insights_api.modules.news.extraction import (
     fetch_article,
     safe_article_client,
 )
-from daily_insights_api.modules.news.failures import classify_failure
+from daily_insights_api.modules.news.failures import (
+    NewsOperationError,
+    classify_failure,
+    source_failure_is_systemic,
+)
 from daily_insights_api.modules.news.feeds import discover_feed_candidates, feed_client
 from daily_insights_api.modules.news.llm import (
     CoveredEvent,
@@ -57,6 +61,7 @@ from daily_insights_api.modules.news.recovery import (
     Workflow,
     check_dependency,
     current_workflow,
+    exclusive,
     fingerprint,
     model_step,
     source_failure,
@@ -65,9 +70,9 @@ from daily_insights_api.modules.news.recovery import (
 )
 from daily_insights_api.modules.operations.api import sanitize_error_code
 
-logger = logging.getLogger("daily_insights")
-DERIVATION_VERSION = "feeds-deepseek-news.v12"
-SUMMARY_PROMPT_VERSION = "summary-v3"
+DERIVATION_VERSION = "feeds-deepseek-news.v13"
+SUMMARY_PROMPT_VERSION = "summary-v4"
+TRANSLATION_PROMPT_VERSION = "translation-v1"
 LOCALES = ("zh-hant", "zh-hans", "en")
 TAIPEI = ZoneInfo("Asia/Taipei")
 # Only a complete edition is final; partial and unavailable editions may be
@@ -85,6 +90,14 @@ MAX_DISCOVERY_PER_SOURCE = 10
 # Market tag a manually published story receives when the model never
 # classified it: the edition's own tag, which is the only one it publishes.
 MANUAL_MARKET_BY_EDITION = {"global": "global", "tw_equity": "taiwan", "us_equity": "us"}
+
+
+def _article_local_model_failure(error: Exception) -> bool:
+    return (
+        isinstance(error, NewsOperationError)
+        and error.failure.action == "skip"
+        and error.failure.stage in {"summary", "translation"}
+    )
 
 
 def _market_impact_score(headline: str, patterns: tuple[str, ...]) -> int:
@@ -147,6 +160,54 @@ async def _summarize_with_retry(
     )
 
 
+async def _translate_with_retry(
+    client: DeepSeekClient,
+    fetched: FetchedCandidate,
+    source_summary: LocalizedSummary,
+    locale: str,
+    on_failure: Callable[[Exception], None],
+    after_failure: Callable[[], Awaitable[None]] | None = None,
+) -> ModelCall:
+    feedback: str | None = None
+
+    async def attempt() -> ModelCall:
+        return await client.translate(
+            fetched.candidate,
+            fetched.body,
+            source_summary,
+            locale,
+            retry_feedback=feedback,
+        )
+
+    def failed(error: Exception) -> None:
+        nonlocal feedback
+        if isinstance(error, ModelCallError) and error.error_code.startswith("translation_"):
+            feedback = error.error_code
+        on_failure(error)
+
+    key = fingerprint(
+        [
+            "translation",
+            fetched.candidate.model_dump(mode="json"),
+            fetched.content_digest,
+            source_summary.model_dump(mode="json"),
+            locale,
+            client.model_name,
+            SUMMARY_PROMPT_VERSION,
+            TRANSLATION_PROMPT_VERSION,
+        ]
+    )
+    return await model_step(
+        key,
+        "translation",
+        attempt,
+        failed,
+        locale=locale,
+        candidate_id=fetched.candidate.id,
+        after_failure=after_failure,
+    )
+
+
 def _digest(
     candidates: list[FetchedCandidate],
     model_name: str,
@@ -177,6 +238,7 @@ def _digest(
             else None
         ),
         "summary_prompt": SUMMARY_PROMPT_VERSION,
+        "translation_prompt": TRANSLATION_PROMPT_VERSION,
         "model": model_name,
         "candidates": [
             {
@@ -258,8 +320,10 @@ async def _summarize_locales(
     edition_id: uuid.UUID,
     model_name: str,
     audits: list[NewsGenerationAudit],
+    *,
+    persist_immediately: bool = True,
 ) -> dict[str, LocalizedSummary]:
-    """Summarise one story in every locale, collecting audit rows as it goes.
+    """Summarise once in zh-hant, then translate into the remaining locales.
 
     Failed attempts are appended before the exception propagates so the
     caller can still persist them; a story is publishable only when all
@@ -270,34 +334,75 @@ async def _summarize_locales(
     workflow = current_workflow()
 
     async def persist_audits() -> None:
-        if workflow is not None and audits:
+        if persist_immediately and workflow is not None and audits:
             async with workflow.execution.sessions.begin() as database:
                 database.add_all(audits)
             audits.clear()
 
-    for locale in LOCALES:
+    locale = "zh-hant"
 
-        def audit_attempt_failure(error: Exception, locale: str = locale) -> None:
+    def audit_summary_failure(error: Exception) -> None:
+        audits.append(
+            _failed_audit(
+                edition_id,
+                "summary",
+                locale,
+                attempt_digest,
+                model_name,
+                error,
+                prompt_version=SUMMARY_PROMPT_VERSION,
+            )
+        )
+
+    call = await _summarize_with_retry(
+        client, fetched, locale, audit_summary_failure, persist_audits
+    )
+    assert isinstance(call.value, LocalizedSummary)
+    summaries[locale] = call.value
+    if not call.reused or not persist_immediately:
+        audits.append(
+            _audit(edition_id, "summary", locale, call, model_name, SUMMARY_PROMPT_VERSION)
+        )
+    await persist_audits()
+
+    source_summary = call.value
+    for locale in LOCALES:
+        if locale == "zh-hant":
+            continue
+
+        def audit_translation_failure(error: Exception, locale: str = locale) -> None:
             audits.append(
                 _failed_audit(
                     edition_id,
-                    "summary",
+                    "translation",
                     locale,
                     attempt_digest,
                     model_name,
                     error,
-                    prompt_version=SUMMARY_PROMPT_VERSION,
+                    prompt_version=TRANSLATION_PROMPT_VERSION,
                 )
             )
 
-        call = await _summarize_with_retry(
-            client, fetched, locale, audit_attempt_failure, persist_audits
+        translation = await _translate_with_retry(
+            client,
+            fetched,
+            source_summary,
+            locale,
+            audit_translation_failure,
+            persist_audits,
         )
-        assert isinstance(call.value, LocalizedSummary)
-        summaries[locale] = call.value
-        if not call.reused:
+        assert isinstance(translation.value, LocalizedSummary)
+        summaries[locale] = translation.value
+        if not translation.reused or not persist_immediately:
             audits.append(
-                _audit(edition_id, "summary", locale, call, model_name, SUMMARY_PROMPT_VERSION)
+                _audit(
+                    edition_id,
+                    "translation",
+                    locale,
+                    translation,
+                    model_name,
+                    TRANSLATION_PROMPT_VERSION,
+                )
             )
         await persist_audits()
     return summaries
@@ -579,6 +684,12 @@ async def _fetch_usable_candidates(
                         )
                     return fetched
                 except Exception as error:
+                    failure = classify_failure(
+                        error,
+                        stage="article",
+                        scope=f"source:{candidate.hostname}",
+                        candidate_id=candidate.id,
+                    )
                     if workflow is not None and checkpoint is not None:
                         await source_failure(
                             workflow,
@@ -588,10 +699,12 @@ async def _fetch_usable_candidates(
                             hostname=candidate.hostname,
                             candidate_id=candidate.id,
                         )
+                    if source_failure_is_systemic(failure):
+                        raise NewsOperationError(failure) from error
                     emit_event(
                         "news.source.failed",
                         hostname=candidate.hostname,
-                        error_code=type(error).__name__,
+                        error_code=failure.code,
                     )
                     return None
 
@@ -630,18 +743,44 @@ async def run_news_edition(
     discovery_timeout_seconds: float = 30,
     spec: EditionSpec = GLOBAL_SPEC,
 ) -> str:
+    return await _run_news_edition(
+        session_factory,
+        client,
+        edition_date,
+        allowed_hostnames=allowed_hostnames,
+        fetch_timeout_seconds=fetch_timeout_seconds,
+        discovery_timeout_seconds=discovery_timeout_seconds,
+        spec=spec,
+    )
+
+
+async def _run_news_edition(
+    session_factory: async_sessionmaker[AsyncSession],
+    client: DeepSeekClient,
+    edition_date: date,
+    *,
+    allowed_hostnames: frozenset[str],
+    fetch_timeout_seconds: float = 25,
+    discovery_timeout_seconds: float = 30,
+    spec: EditionSpec = GLOBAL_SPEC,
+) -> str:
     if edition_date != datetime.now(TAIPEI).date():
         raise ValueError("daily news only generates the current Taipei edition")
     async with workflow_scope(session_factory, edition_date, spec.market_code) as workflow:
-        result = await _generate_news_edition(
-            session_factory,
-            client,
-            edition_date,
-            allowed_hostnames=allowed_hostnames,
-            fetch_timeout_seconds=fetch_timeout_seconds,
-            discovery_timeout_seconds=discovery_timeout_seconds,
-            spec=spec,
-        )
+        # Keep the same lock order as manual publication: workflow first,
+        # edition second. The session-level edition lock shares its numeric
+        # key with admin/manual transaction locks, yet holds no transaction
+        # over feed or model I/O.
+        async with exclusive(session_factory, f"daily-news:{spec.market_code}:{edition_date}"):
+            result = await _generate_news_edition(
+                session_factory,
+                client,
+                edition_date,
+                allowed_hostnames=allowed_hostnames,
+                fetch_timeout_seconds=fetch_timeout_seconds,
+                discovery_timeout_seconds=discovery_timeout_seconds,
+                spec=spec,
+            )
         if result == "idempotent":
             async with session_factory() as database:
                 latest_id = (
@@ -733,7 +872,9 @@ async def _generate_news_edition(
     model_name = client.model_name
     selection_prompt_digest = client.selection_prompt_digest
     selection_prompt_version = client.selection_prompt_version
-    edition_prompt_version = f"{selection_prompt_version}+{SUMMARY_PROMPT_VERSION}"
+    edition_prompt_version = (
+        f"{selection_prompt_version}+{SUMMARY_PROMPT_VERSION}+{TRANSLATION_PROMPT_VERSION}"
+    )
     input_digest = _digest(
         usable,
         model_name,
@@ -741,10 +882,9 @@ async def _generate_news_edition(
         market_code,
         spec.selection,
     )
+    edition_id = uuid.uuid4()
+    pending_audits: list[NewsGenerationAudit] = []
     async with session_factory() as database:
-        await database.execute(
-            select(func.pg_advisory_xact_lock(_lock_key(edition_date, market_code)))
-        )
         latest = (
             await database.scalars(
                 select(NewsEdition)
@@ -754,7 +894,6 @@ async def _generate_news_edition(
                 )
                 .order_by(NewsEdition.revision.desc())
                 .limit(1)
-                .with_for_update()
             )
         ).first()
         if (
@@ -766,24 +905,27 @@ async def _generate_news_edition(
             await database.rollback()
             emit_event("news.edition.idempotent", edition_date=edition_date, market=market_code)
             return "idempotent"
-        edition = NewsEdition(
-            edition_date=edition_date,
-            market_code=market_code,
-            revision=(latest.revision + 1 if latest else 1),
-            input_digest=input_digest,
-            derivation_version=DERIVATION_VERSION,
-            model_name=model_name,
-            prompt_version=edition_prompt_version,
-            status="unavailable",
-            caveat=_edition_status(0, spec.target_items)[1],
-        )
-        database.add(edition)
-        await database.flush()
-        # Commit the immutable revision identity before calling the model.
-        # Audits and checkpoints use independent, short transactions thereafter.
-        await database.commit()
+        revision = latest.revision + 1 if latest else 1
+        await database.rollback()
         if not usable:
-            database.add_all(ledger.rows(edition.id))
+            if workflow is not None:
+                await workflow.check("publication", external=False)
+                await workflow.fence_publication(database)
+            edition = NewsEdition(
+                id=edition_id,
+                edition_date=edition_date,
+                market_code=market_code,
+                revision=revision,
+                input_digest=input_digest,
+                derivation_version=DERIVATION_VERSION,
+                model_name=model_name,
+                prompt_version=edition_prompt_version,
+                status="unavailable",
+                caveat=_edition_status(0, spec.target_items)[1],
+            )
+            database.add(edition)
+            await database.flush()
+            database.add_all(ledger.rows(edition_id))
             await database.commit()
             emit_event("news.shortfall", market=market_code, status="unavailable", count=0)
             return edition.status
@@ -809,8 +951,8 @@ async def _generate_news_edition(
 
         async def select_batch(
             batch: list[FetchedCandidate], previous_events: tuple[CoveredEvent, ...]
-        ) -> Selection | None:
-            """One rated selection call; None when the provider failed twice."""
+        ) -> Selection:
+            """Run one rated selection call and propagate classified failures."""
             nonlocal selection_calls
             selection_calls += 1
             reviewed.update(fetched.candidate.id for fetched in batch)
@@ -838,9 +980,9 @@ async def _generate_news_edition(
                     ),
                     "selection",
                     attempt,
-                    lambda error: database.add(
+                    lambda error: pending_audits.append(
                         _failed_audit(
-                            edition.id,
+                            edition_id,
                             "selection",
                             None,
                             input_digest,
@@ -849,31 +991,29 @@ async def _generate_news_edition(
                             prompt_version=selection_prompt_version,
                         )
                     ),
-                    after_failure=database.commit,
                 )
                 assert isinstance(call.value, Selection)
-                if not call.reused:
-                    database.add(
-                        _audit(
-                            edition.id,
-                            "selection",
-                            None,
-                            call,
-                            model_name,
-                            selection_prompt_version,
-                        )
+                pending_audits.append(
+                    _audit(
+                        edition_id,
+                        "selection",
+                        None,
+                        call,
+                        model_name,
+                        selection_prompt_version,
                     )
+                )
             except Exception as error:
                 emit_event(
                     "news.selection.failed",
                     market=market_code,
-                    error_code=error.error_code
-                    if isinstance(error, ModelCallError)
-                    else type(error).__name__,
+                    error_code=(
+                        error.error_code
+                        if isinstance(error, (ModelCallError, NewsOperationError))
+                        else type(error).__name__
+                    ),
                 )
-                return None
-            finally:
-                await database.commit()
+                raise
             ledger.returned(call)
             selection = call.value
             assert isinstance(selection, Selection)
@@ -919,7 +1059,12 @@ async def _generate_news_edition(
                 audits: list[NewsGenerationAudit] = []
                 try:
                     summaries = await _summarize_locales(
-                        client, fetched, edition.id, model_name, audits
+                        client,
+                        fetched,
+                        edition_id,
+                        model_name,
+                        audits,
+                        persist_immediately=False,
                     )
                     successful.append(selected_item)
                     localized[selected_item.id] = summaries
@@ -927,17 +1072,17 @@ async def _generate_news_edition(
                     publication = publishable_selection(successful, usable, spec.selection)
                     emit_event("news.summary.succeeded", locale_count=3, rank=len(successful))
                 except Exception as error:
+                    if not _article_local_model_failure(error):
+                        raise
+                    operation_error = cast(NewsOperationError, error)
                     ledger.drop(selected_item.id, "summary_failed")
                     emit_event(
                         "news.summary.failed",
                         hostname=fetched.candidate.hostname,
-                        error_code=error.error_code
-                        if isinstance(error, ModelCallError)
-                        else type(error).__name__,
+                        error_code=operation_error.error_code,
                     )
                 finally:
-                    database.add_all(audits)
-                    await database.commit()
+                    pending_audits.extend(audits)
                 if workflow is not None and workflow.model_stopped is not None:
                     break
 
@@ -952,8 +1097,6 @@ async def _generate_news_edition(
                 break
             batch = usable[start : start + spec.max_candidates]
             selection = await select_batch(batch, covered(picks))
-            if selection is None:
-                break
             # A second report of an event already picked from an earlier
             # window is kept: it only counts as a duplicate once the earlier
             # report has actually been published, and a higher-rated report
@@ -995,8 +1138,6 @@ async def _generate_news_edition(
             if not batch:
                 break
             selection = await select_batch(batch, covered(successful))
-            if selection is None:
-                break
             await summarise(sorted(selection.selections, key=lambda item: -item.importance))
             refill_round += 1
             emit_event(
@@ -1009,13 +1150,24 @@ async def _generate_news_edition(
         complete_count = len(publication.selections)
         if workflow is not None:
             await workflow.check("publication", external=False)
-        await database.execute(
-            select(func.pg_advisory_xact_lock(_lock_key(edition_date, market_code)))
-        )
         published_ids = {item.id for item in publication.selections}
         visible_count = 0
         if workflow is not None:
             await workflow.fence_publication(database)
+        edition = NewsEdition(
+            id=edition_id,
+            edition_date=edition_date,
+            market_code=market_code,
+            revision=revision,
+            input_digest=input_digest,
+            derivation_version=DERIVATION_VERSION,
+            model_name=model_name,
+            prompt_version=edition_prompt_version,
+            status="unavailable",
+            caveat=_edition_status(0, spec.target_items)[1],
+        )
+        database.add(edition)
+        await database.flush()
         for successful_item in successful:
             if successful_item.id not in published_ids:
                 # Summarised, but the publication could not keep it within the
@@ -1024,7 +1176,7 @@ async def _generate_news_edition(
         for rank, selected_item in enumerate(publication.selections, start=1):
             fetched = selected[selected_item.id]
             summaries = localized[selected_item.id]
-            item = _news_item(edition.id, rank, selected_item, fetched, summaries)
+            item = _news_item(edition_id, rank, selected_item, fetched, summaries)
             hidden = await _hidden_source(database, market_code, item.source_url, item.event_key)
             if hidden is not None:
                 item.hidden_at, item.hidden_by_user_id = hidden.hidden_at, hidden.hidden_by_user_id
@@ -1035,7 +1187,8 @@ async def _generate_news_edition(
             database.add_all(_presentations(item.id, summaries))
             ledger.published(selected_item.id, item.id)
         edition.status, edition.caveat = _edition_status(complete_count, spec.target_items)
-        database.add_all(ledger.rows(edition.id))
+        database.add_all(pending_audits)
+        database.add_all(ledger.rows(edition_id))
         await database.commit()
         if workflow is not None:
             workflow.progress["published"] = visible_count
@@ -1149,9 +1302,10 @@ async def run_all_editions_with_outcomes(
 ) -> tuple[str, dict[str, str]]:
     """Run every edition and retain each market's terminal outcome.
 
-    One edition's exception does not stop the others; it is reported as
-    ``failed`` so the durable queue can retry only that market.  The returned
-    aggregate keeps the historical ``failed -> unavailable`` normalization.
+    Any edition exception is converted to a safe classified failure and
+    propagates immediately so no later market can make another paid call. The
+    returned aggregate keeps the historical ``failed -> unavailable``
+    normalization for explicit terminal outcomes.
 
     ``only_missing`` is the automatic run's contract: a market that already
     has an edition for the date is left alone whatever its status, so a
@@ -1181,9 +1335,12 @@ async def run_all_editions_with_outcomes(
                 discovery_timeout_seconds=discovery_timeout_seconds,
                 spec=spec,
             )
+        except NewsOperationError:
+            raise
         except Exception as error:
-            emit_event("news.edition.failed", market=market_code, error_code=type(error).__name__)
-            outcome = "failed"
+            failure = classify_failure(error, stage="selection")
+            emit_event("news.edition.failed", market=market_code, error_code=failure.code)
+            raise NewsOperationError(failure) from error
         outcomes[market_code] = outcome
         if OUTCOME_SEVERITY[outcome] > OUTCOME_SEVERITY[worst]:
             worst = outcome
@@ -1331,6 +1488,12 @@ async def _publish_candidate(
         if workflow is not None and checkpoint is not None:
             await _record_article_success(workflow, checkpoint, fetched)
     except Exception as error:
+        failure = classify_failure(
+            error,
+            stage="article",
+            scope=f"source:{candidate.hostname}",
+            candidate_id=candidate.candidate_id,
+        )
         if workflow is not None and checkpoint is not None:
             await source_failure(
                 workflow,
@@ -1340,6 +1503,8 @@ async def _publish_candidate(
                 hostname=candidate.hostname,
                 candidate_id=candidate.candidate_id,
             )
+        if failure.action != "skip":
+            raise NewsOperationError(failure) from error
         emit_event(
             "news.source.failed", hostname=candidate.hostname, error_code=type(error).__name__
         )
@@ -1348,12 +1513,13 @@ async def _publish_candidate(
     try:
         summaries = await _summarize_locales(client, fetched, target.edition_id, model_name, audits)
     except Exception as error:
+        if not _article_local_model_failure(error):
+            raise
+        operation_error = cast(NewsOperationError, error)
         emit_event(
             "news.summary.failed",
             hostname=candidate.hostname,
-            error_code=error.error_code
-            if isinstance(error, ModelCallError)
-            else type(error).__name__,
+            error_code=operation_error.error_code,
         )
         await _record_publish_failure(session_factory, candidate.id, "summary_failed", audits)
         return "summary_failed"
@@ -1481,13 +1647,16 @@ async def publish_candidates(
     allowed_hostnames: frozenset[str],
     fetch_timeout_seconds: float,
 ) -> tuple[str, dict[str, object], str | None]:
-    async with session_factory() as database:
-        edition = await database.get(NewsEdition, edition_id)
-        if edition is None:
-            return "failed", {}, "edition_not_found"
-        edition_date, market = edition.edition_date, edition.market_code
-        if edition_date != datetime.now(TAIPEI).date():
-            return "failed", {"outcome": "expired"}, "news_resume_current_day_only"
+    try:
+        async with session_factory() as database:
+            edition = await database.get(NewsEdition, edition_id)
+            if edition is None:
+                return "failed", {}, "edition_not_found"
+            edition_date, market = edition.edition_date, edition.market_code
+            if edition_date != datetime.now(TAIPEI).date():
+                return "failed", {"outcome": "expired"}, "news_resume_current_day_only"
+    except Exception as error:
+        raise NewsOperationError(classify_failure(error, stage="publication")) from error
     async with workflow_scope(session_factory, edition_date, market) as workflow:
         result = await _publish_candidates(
             session_factory,
@@ -1572,33 +1741,19 @@ async def _publish_candidates(
             if published_urls[candidate.id]
             else None
         )
-        try:
-            if code is not None:
-                await _record_publish_failure(session_factory, candidate.id, code, [])
-            else:
-                code = await _publish_candidate(
-                    session_factory,
-                    client,
-                    target,
-                    candidate,
-                    run_id=run_id,
-                    actor_user_id=actor_user_id,
-                    allowed=allowed_hostnames,
-                    fetch_timeout_seconds=fetch_timeout_seconds,
-                )
-        except Exception as error:
-            # One candidate's unexpected failure must not discard the outcomes
-            # of the candidates already committed before it, nor stop the rest.
-            emit_event(
-                "news.publish.failed",
-                candidate_id=str(candidate.id),
-                error_code=type(error).__name__,
+        if code is not None:
+            await _record_publish_failure(session_factory, candidate.id, code, [])
+        else:
+            code = await _publish_candidate(
+                session_factory,
+                client,
+                target,
+                candidate,
+                run_id=run_id,
+                actor_user_id=actor_user_id,
+                allowed=allowed_hostnames,
+                fetch_timeout_seconds=fetch_timeout_seconds,
             )
-            code = "unexpected_error"
-            try:
-                await _record_publish_failure(session_factory, candidate.id, code, [])
-            except Exception:
-                logger.exception("could not record publish failure for %s", candidate.id)
         outcomes[str(candidate_id)] = code
     # Already published is success on a resumed request, never an instruction
     # to publish (or unhide) the same candidate again.

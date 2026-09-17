@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock
@@ -31,6 +32,46 @@ async def test_treasury_invalid_feed_degrades_without_inventing_a_curve() -> Non
     ) as client:
         histories = await macro.load_treasury(client, date(2026, 9, 4))
     assert all(item.status == "unavailable" and not item.points for item in histories)
+
+
+async def test_treasury_fetches_years_sequentially() -> None:
+    active = 0
+    maximum = 0
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal active, maximum
+        active += 1
+        maximum = max(maximum, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return httpx.Response(200, content=b"<feed />", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        await macro.load_treasury(client, date(2026, 9, 17))
+
+    assert maximum == 1
+
+
+async def test_treasury_fetches_only_requested_periods() -> None:
+    requested: list[tuple[str, str]] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        period_key = next(key for key in request.url.params if key != "data")
+        requested.append((period_key, request.url.params[period_key]))
+        return httpx.Response(200, content=b"<feed />", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        await macro.load_treasury(
+            client,
+            date(2026, 9, 17),
+            years=(2025,),
+            months=((2026, 9),),
+        )
+
+    assert requested == [
+        ("field_tdr_date_value", "2025"),
+        ("field_tdr_date_value_month", "202609"),
+    ]
 
 
 async def test_sofr_validates_type_and_sorts_observations() -> None:

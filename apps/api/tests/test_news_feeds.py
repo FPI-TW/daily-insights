@@ -7,6 +7,7 @@ from defusedxml import EntitiesForbidden
 
 import daily_insights_api.modules.news.feeds as feeds
 from daily_insights_api.modules.news.extraction import configured_hostnames
+from daily_insights_api.modules.news.failures import NewsOperationError
 from daily_insights_api.modules.news.feeds import (
     FEED_KINDS,
     FEED_SOURCES,
@@ -208,6 +209,32 @@ async def test_discovery_isolates_feed_failures_and_only_reads_allowlisted_hosts
         "https://feeds.bbci.co.uk/news/business/rss.xml",
     ]
     assert [str(item.url) for item in result] == ["https://www.bbc.com/news/articles/c1"]
+
+
+async def test_discovery_propagates_unknown_feed_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def robots(_: httpx.AsyncClient, __: str, ___: frozenset[str]) -> bool:
+        return True
+
+    async def fail_read(*_args: object, **_kwargs: object) -> bytes:
+        raise RuntimeError("private feed detail")
+
+    monkeypatch.setattr(feeds, "robots_allowed", robots)
+    monkeypatch.setattr(feeds, "_read_capped", fail_read)
+    monkeypatch.setattr(feeds, "FEED_SOURCES", (BBC,))
+
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(NewsOperationError) as captured:
+            await discover_feed_candidates(
+                client,
+                configured_hostnames("www.bbc.com"),
+                NOW,
+            )
+
+    assert captured.value.failure.code == "unexpected_error"
+    assert captured.value.failure.stage == "feed"
+    assert "private feed detail" not in str(captured.value)
 
 
 async def test_discovery_respects_robots_and_size_cap(monkeypatch: pytest.MonkeyPatch) -> None:

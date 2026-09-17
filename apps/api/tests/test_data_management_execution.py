@@ -608,12 +608,10 @@ async def test_news_execution_rejects_disabled_or_missing_model_key(
         news_database,
         Settings(environment="test", daily_news_enabled=False),
     )
-    assert (status, error) == ("failed", "news_recovery_required")
-    assert result["outcomes"] == {
-        "global": "unavailable",
-        "tw_equity": "unavailable",
-        "us_equity": "unavailable",
-    }
+    assert (status, error) == ("failed", "news_model_configuration_missing")
+    assert result["outcome"] == "interrupted"
+    assert result["outcomes"] == {}
+    assert set(cast(dict[str, object], result["news"])) == {"global"}
 
 
 @pytest.mark.asyncio

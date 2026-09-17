@@ -169,13 +169,22 @@ class SofrResponse(BaseModel):
     refRates: list[SofrRate]
 
 
-async def load_treasury(client: httpx.AsyncClient, today: date) -> list[History]:
-    async def fetch(year: int) -> bytes:
+async def load_treasury(
+    client: httpx.AsyncClient,
+    today: date,
+    *,
+    years: tuple[int, ...] | None = None,
+    months: tuple[tuple[int, int], ...] = (),
+) -> list[History]:
+    async def fetch(period_type: str, period: int) -> bytes:
+        period_parameter = (
+            "field_tdr_date_value" if period_type == "year" else "field_tdr_date_value_month"
+        )
         response = await client.get(
             TREASURY_URL,
             params={
                 "data": "daily_treasury_yield_curve",
-                "field_tdr_date_value": year,
+                period_parameter: period,
             },
         )
         response.raise_for_status()
@@ -184,20 +193,36 @@ async def load_treasury(client: httpx.AsyncClient, today: date) -> list[History]
     try:
         # A third year covers the previous observation when the one-year
         # comparison falls on a New Year holiday.
-        payloads = await asyncio.gather(
-            *(fetch(year) for year in range(today.year - 2, today.year + 1)),
-            return_exceptions=True,
+        # Treasury intermittently stalls when several XML feeds are opened
+        # concurrently from the same client/IP. Fetch the selected year/month
+        # periods sequentially so each failure remains independently diagnosable.
+        requested_periods = (
+            tuple(("year", year, str(year)) for year in range(today.year - 2, today.year + 1))
+            if years is None
+            else (
+                *tuple(("year", year, str(year)) for year in sorted(set(years))),
+                *tuple(
+                    ("month", year * 100 + month, f"{year:04d}-{month:02d}")
+                    for year, month in sorted(set(months))
+                ),
+            )
         )
+        payloads: list[bytes | Exception] = []
+        for period_type, period, _ in requested_periods:
+            try:
+                payloads.append(await fetch(period_type, period))
+            except Exception as error:
+                payloads.append(error)
         valid = []
-        for year, payload in zip(range(today.year - 2, today.year + 1), payloads, strict=True):
-            if isinstance(payload, BaseException):
-                record_failure("us_treasury", "yield_curve_xml", [str(year)], payload)
+        for (_, _, label), payload in zip(requested_periods, payloads, strict=True):
+            if isinstance(payload, Exception):
+                record_failure("us_treasury", "yield_curve_xml", [label], payload)
                 continue
             try:
                 fromstring(payload)
                 valid.append(payload)
             except Exception as error:
-                record_failure("us_treasury", "yield_curve_xml", [str(year)], error)
+                record_failure("us_treasury", "yield_curve_xml", [label], error)
         histories = treasury_histories(valid, today)
         for history in histories:
             if history.status != "ok":

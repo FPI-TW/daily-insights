@@ -36,7 +36,7 @@ flowchart LR
     M["後台新聞管理頁<br/>重新抓取 / 候選人工上架"] --> MJ["manual news JobRun"]
     MJ --> W["orchestration-worker"]
     J --> W
-    W --> F["feed 註冊表 + 安全正文擷取<br/>DeepSeek 選題與三語摘要"]
+    W --> F["feed 註冊表 + 安全正文擷取<br/>DeepSeek 選題、繁中摘要與翻譯"]
     W --> DB[("PostgreSQL<br/>news_* + orchestration tables")]
     LR["/reports loader<br/>Promise.allSettled"] --> A["GET /api/news/latest"]
     A --> DB
@@ -51,13 +51,23 @@ flowchart LR
    `news_publish`。Refresh 只準備候選與 workflow 成果，不負責發布。
 2. Worker 依結構化失敗分類決定恢復，與新聞篇數、edition `partial` 狀態分離。
    暫時故障每 30 分鐘重試缺失 scopes，並遵守更長的 `Retry-After`。
+   任一市場 refresh 因系統性錯誤進入 `retry_wait` 時，同一 JobRun 的其他市場暫停
+   claim，直到原市場恢復成功；若錯誤為不可重試的 block／attention，尚未執行的市場
+   會以相同安全錯誤代碼終止。單篇摘要／翻譯驗證耗盡形成的 `partial` 或
+   `unavailable` 不啟動此跨市場閘門。
    completion、ownership 驗證與下一筆 retry 寫入在同一交易完成。`next_attempt_at`
    未到不得 claim；10:00:00 起不再開始新的自動外部 attempt，已送出的單次請求可完成
    保存。Terminal-dependent function `news_publish` 不呼叫外部 provider，會在
    dependencies terminal
    後執行，即使跨過 soft deadline 也不讓 DAG 永久等待。市場／日期鎖、租約與
    checkpoint 支援重啟續跑：只重抓失敗 feed，重新
-   取得必要原文，重用符合指紋的選題與已驗證摘要，不再以 edition 是否存在判斷可跳過。
+   取得必要原文，重用符合指紋的選題、繁中摘要與已驗證翻譯，不再以 edition 是否存在
+   判斷可跳過。模型設定、功能停用或金鑰缺失／placeholder 屬共享 block，安全錯誤碼為
+   `news_model_configuration_missing`；作業以 `failed`／`outcome=interrupted` 結束，停止尚未
+   執行的市場，不合成三市場 `unavailable` 結果。相容的 DataManagementRun 回傳
+   `outcomes={}`，並只在 `news` 保存已進入的首個市場失敗紀錄。`news_recovery_required`
+   僅代表沒有系統性例外、但正常 workflow 結算後仍有未完成項目，不得用來取代上述設定
+   錯誤碼。
    詳細分類、操作與限制見 [新聞恢復操作手冊](../runbooks/news-recovery.md)。
 3. `discover_feed_candidates` 依序讀取標記給該市場、且文章主機在白名單內的 feed，
    只保留符合各來源 `link_pattern` 的連結，並以 URL 與標題去重；任一 feed 失敗只
@@ -85,9 +95,9 @@ flowchart LR
    同一星等內維持模型原本的排序。合併時不做跨批去重：同一事件的第二則報導會保留，只有
    在前一則摘要成功並採用後才記為 `duplicate_event`，因此前一則摘要失敗時仍有替代報導；
    星等較高的同事件報導也會排在前面。摘要前先檢查每網域上限，某網域已有足額摘要成功
-   的新聞時，後面同網域的候選直接以 `policy` 略過，不再花費摘要呼叫。接著依序對每則
-   產生 `zh-hant`、`zh-hans`、`en` 三語摘要，達到目標則數即停止；某則摘要驗證失敗時由
-   後面的候選遞補。整池篩選讓候選池跨兩個提示視窗的版本多一次選題呼叫（每版最多兩次
+   的新聞時，後面同網域的候選直接以 `policy` 略過，不再花費摘要呼叫。接著每則只從原文
+   產生一次 `zh-hant` 摘要；繁中摘要驗證成功後，再依序翻譯為 `zh-hans` 與 `en`。三語
+   全部驗證通過才可發布，任一語系驗證失敗時由後面的候選遞補。整池篩選讓候選池跨兩個提示視窗的版本多一次選題呼叫（每版最多兩次
    篩選呼叫），這是為了不漏掉第二批裡的五星新聞所付的成本。重要性採絕對尺度，且由各版
    `SelectionPolicy.importance_guidance` 定義（5 為對本版市場有立即且廣泛影響的事件、
    4 為主要產業或多數投資人重要、3 為單一公司或窄產業的重要事件、2 為次要、1 為瑣碎），
@@ -97,10 +107,14 @@ flowchart LR
    匯率、主權債、能源供給或貿易條件的企業交易、產品、支付科技與產業題材，直接不通過
    全球版相關性門檻。投行、分析師或企業主管的市場觀點若沒有新的官方行動或數據，至多
    三星；主要央行的官方前瞻指引或可信度高且顯示近期政策路徑改變的調查可評四星。摘要中的數字必
-   須能在原文找到：比對以數值為準，千分位、全形
+   須能在原文找到，翻譯結果亦套用相同檢查：比對以數值為準，千分位、全形
    數字與 million／億 這類量詞差異不算捏造，原文沒有的數字才算；JSON／欄位／數字
-   驗證失敗同一輸入最多修正一次，次數在送出修正前持久化，續跑不重置。網路、額度、
-   安全與未知程式錯誤不走這個立即修正迴圈。
+   驗證失敗同一輸入最多修正一次，次數在送出修正前持久化，續跑不重置。既有 workflow
+   使用 checkpoint；統一編排則在 `FunctionRun.result._news_model_attempts` 保存同一輸入的
+   呼叫預約及已驗證的結構化結果，程序中斷或新 attempt 會直接重用成功結果，也不會重新
+   取得一次修正額度。網路、額度、安全與未知
+   程式錯誤不走這個立即修正迴圈；若唯一的修正呼叫已送出後才遇到暫時供應商錯誤，該修正
+   額度仍視為已使用並轉人工處理，不再送出第二次修正。
 7. 結果以版本化的 `news_editions` revision 寫入，相容狀態為 `complete`（達到該版
    `target_items`）、`partial`（非零但未達目標）或 `unavailable`（0）；星等配額
    另行限制，這些狀態不決定重試。同一交易內，該版本看過的每個 feed 候選
@@ -118,7 +132,7 @@ flowchart LR
 
 選題 prompt 由三層組成：固定的 `task`（去重、交叉比對、來源分散、填滿名額與輸出格式等不可被覆寫的規則）、`OUTPUT_CONTRACT`（依各版本 `SelectionPolicy` 產生的封閉詞彙、數量限制與該市場自己的重要度尺度），以及部署時可調整的 `CUSTOM_SELECTION_CRITERIA`（`modules/news/prompts/selection_criteria.txt`，中文撰寫的共通排序準則與來源可信度判斷標準）。準則檔只影響共通排序與取捨，各市場的五星定義、分級配額、每網域上限與多樣性門檻都寫在 `OUTPUT_CONTRACT`；同一核心事件不論幾家媒體報導都只能選一則並共用 `event_key`，多家報導只用於交叉驗證。固定指令或準則檔任一變動都會改變 `prompt_version`（`selection-v11:<準則摘要>`）；完整的 `SelectionPolicy` 也會納入 edition 輸入摘要，市場專屬規則修改後即使候選池相同也會重新產生版本。
 
-各版本只讀取標記給該市場的 feed，選題 prompt 附帶該版本的 `MARKET_FOCUS` 提示，內容是該版的硬性相關性門檻：每則候選先過門檻再排序，全球版只收影響跨區域投資人的總經事件（央行、利率、匯率、商品、跨市場風險），台股版只收主體為上市櫃公司、加權指數與期貨、三大法人、台灣政策、半導體供應鏈或報導本身點明台股影響的海外事件；美股版則以「是否改變美股指數、重要產業或具足夠權重的上市公司定價」為準，候選足夠時讓低於五星的入選稿約 30～40% 為整體市場驅動、60～70% 為個股或產業催化劑。美股版另將正式政策或公司揭露排在分析師、投行與 CEO 預測之前，對批次中明顯較舊且沒有實質更新的公司稿施加時效折扣；例行發債、再融資、增發與 tender offer 原則上至多二星，除非規模相對公司異常、涉及財務壓力或重大稀釋、形成信用事件、用於重大收購，或報導證明股價有重大反應。門檻明列不得入選的類型（他國市場、無台股／美股影響的總經新聞、政治、天氣、娛樂、生活等），且寧可留空也不得以弱關聯新聞填滿名額。`OUTPUT_CONTRACT` 對每個版本都提供完整的 `market` 詞彙，並以 `market_rule` 說明本版只發布 `global`／`taiwan`／`us` 其中一個標記，模型必須依報導主要談論的市場誠實標記、不得改標遷就本版；標成其他市場的稿件會在限制檢查前被剔除並記錄 `news.selection.dropped_market`，因此模型自己判定為他國市場的新聞不會進入該版。市場頁的新聞不依市場分組，只有首頁的全球版分組顯示。worker 依序執行三個版本，任一版本例外不影響其他版本，最差結果決定
+各版本只讀取標記給該市場的 feed，選題 prompt 附帶該版本的 `MARKET_FOCUS` 提示，內容是該版的硬性相關性門檻：每則候選先過門檻再排序，全球版只收影響跨區域投資人的總經事件（央行、利率、匯率、商品、跨市場風險），台股版只收主體為上市櫃公司、加權指數與期貨、三大法人、台灣政策、半導體供應鏈或報導本身點明台股影響的海外事件；美股版則以「是否改變美股指數、重要產業或具足夠權重的上市公司定價」為準，候選足夠時讓低於五星的入選稿約 30～40% 為整體市場驅動、60～70% 為個股或產業催化劑。美股版另將正式政策或公司揭露排在分析師、投行與 CEO 預測之前，對批次中明顯較舊且沒有實質更新的公司稿施加時效折扣；例行發債、再融資、增發與 tender offer 原則上至多二星，除非規模相對公司異常、涉及財務壓力或重大稀釋、形成信用事件、用於重大收購，或報導證明股價有重大反應。門檻明列不得入選的類型（他國市場、無台股／美股影響的總經新聞、政治、天氣、娛樂、生活等），且寧可留空也不得以弱關聯新聞填滿名額。`OUTPUT_CONTRACT` 對每個版本都提供完整的 `market` 詞彙，並以 `market_rule` 說明本版只發布 `global`／`taiwan`／`us` 其中一個標記，模型必須依報導主要談論的市場誠實標記、不得改標遷就本版；標成其他市場的稿件會在限制檢查前被剔除並記錄 `news.selection.dropped_market`，因此模型自己判定為他國市場的新聞不會進入該版。市場頁的新聞不依市場分組，只有首頁的全球版分組顯示。worker 依序執行三個版本；個別 feed／文章來源錯誤依既有來源隔離政策記錄後繼續其他來源，模型供應商網路、認證、額度、資料庫、未知程式錯誤或 selection 耗盡則轉為安全分類錯誤並立即停止後續市場，避免再發出付費模型呼叫。最差結果決定
 執行紀錄的狀態依新聞 workflow 是否正常完成決定（正常 0、1、4 則也可為 `succeeded`），
 只有可恢復的技術失敗會建立同日自動重試。
 `make generate-daily-news MARKET=tw_equity` 可單獨產生一個版本。
@@ -184,6 +198,9 @@ JSON 清單（dot-notation 欄位、`unix_s`／`unix_ms`／`iso`／`datetime_str
   來源全面故障則不會被視為正常零則。
 - 每個 `edition_date` 可有多個 `revision`，不覆寫舊版正文／摘要或刪除正式版本；
   管理員隱藏／取消隱藏仍可更新各版的可見性。
+- Legacy 產生流程在選題、摘要與翻譯完成前不建立可見 revision；只有正常
+  `complete`／`partial`／`unavailable` 終態才以單一交易寫入 edition、候選、項目與模型
+  audit。模型或租約失敗因此不需刪除暫存版次，也不會讓人工上架誤用尚未完成的 revision。
 - `input_digest` 由候選集合、模型名稱與選題準則摘要計算。若最新版本為
   `complete` 且 `input_digest` 相同，重跑為 no-op；`partial` 與 `unavailable`
   允許以相同輸入建立新版本。checkpoint 續跑不使用上述 no-op 捷徑，因足額版本仍可能
@@ -228,14 +245,14 @@ revision、已上架新聞（含 zh-hant 標題、`origin`、`hidden`）與全�
 
 候選 `stage` 以走到的最遠階段為準：
 
-| `stage`        | 意義                                                                                                                                                                                                                                                      |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `discovered`   | feed 有列出，但被探索上限（`_cap_discovery`）截掉，未擷取                                                                                                                                                                                                 |
-| `fetch_failed` | 已送擷取，沒有可用正文                                                                                                                                                                                                                                    |
-| `unused`       | 擷取成功，但未進入任何一輪選題（被 `_limit_candidates` 截掉或輪次已結束）                                                                                                                                                                                 |
-| `reviewed`     | 曾送進模型，模型未回傳                                                                                                                                                                                                                                    |
-| `dropped`      | 模型有回傳但未發布，`drop_reason` 為 `off_market`（標成他市場）、`policy`（來源／多樣性規則剔除或最終組合未納入）、`duplicate_event`（同一事件已有另一則報導摘要成功並採用）、`summary_failed`（某語系摘要失敗）、`reserve`（超出目標則數的備選，未用到） |
-| `published`    | 進入最終發布，`item_id` 指向 `news_items`                                                                                                                                                                                                                 |
+| `stage`        | 意義                                                                                                                                                                                                                                                              |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `discovered`   | feed 有列出，但被探索上限（`_cap_discovery`）截掉，未擷取                                                                                                                                                                                                         |
+| `fetch_failed` | 已送擷取，沒有可用正文                                                                                                                                                                                                                                            |
+| `unused`       | 擷取成功，但未進入任何一輪選題（被 `_limit_candidates` 截掉或輪次已結束）                                                                                                                                                                                         |
+| `reviewed`     | 曾送進模型，模型未回傳                                                                                                                                                                                                                                            |
+| `dropped`      | 模型有回傳但未發布，`drop_reason` 為 `off_market`（標成他市場）、`policy`（來源／多樣性規則剔除或最終組合未納入）、`duplicate_event`（同一事件已有另一則報導摘要成功並採用）、`summary_failed`（繁中摘要或後續翻譯失敗）、`reserve`（超出目標則數的備選，未用到） |
+| `published`    | 進入最終發布，`item_id` 指向 `news_items`                                                                                                                                                                                                                         |
 
 模型回傳過的候選（任一輪）都會填 `ai_rank`（在模型原始清單中的位置，取第一次回傳的那輪）、
 `ai_topic`、`ai_market`、`ai_importance`、`ai_event_key`；來源是過濾與修復前的原始清單，
@@ -252,7 +269,7 @@ revision、已上架新聞（含 zh-hant 標題、`origin`、`hidden`）與全�
   不因已有 pending／running 工作回傳 409。版本不是該日該市場的最新 revision 時回 409、
   候選不屬於該版本或已上架回 422、旗標關閉回 503。請求成功時候選寫入 `publish_run_id`
   等欄位並記錄 `news.candidate_publish_requested` audit。
-- worker 執行 `news_publish`（`publish_candidates`）：逐一重新擷取文章、產生三語摘要、
+- worker 執行 `news_publish`（`publish_candidates`）：逐一重新擷取文章、產生繁中摘要及兩個翻譯、
   以「目前最大 rank + 1」建立 `origin='manual'` 的 `news_items` 與三語
   `news_presentations`，候選改為 `published` 並連結 `item_id`，記錄
   `news.candidate_published` audit；每則各自 commit，失敗的候選只寫入 `publish_error`
@@ -297,7 +314,7 @@ Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主�
 啟用步驟：
 
 1. 在開發環境的 `apps/api/.env` 設定 DeepSeek key，執行
-   `make generate-daily-news`，確認候選、擷取與三語摘要都正常。
+   `make generate-daily-news`，確認候選、擷取、繁中摘要與兩個翻譯都正常。
 2. 在 GitHub production 環境新增 `DAILY_INSIGHTS_NEWS_MODEL_API_KEY` secret。
 3. 把 `DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 改為 `true`，以 `workflow_dispatch`
    重新部署。
@@ -361,11 +378,29 @@ Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主�
 相同則數優先保留排名較前者。未知 ID、重複事件與結構錯誤仍拒絕。最多十個候選，
 搜尋不超過 1024 個子集，不增加模型呼叫。選題範例的 market 必須符合該版本允許值。
 
-摘要數字與 JSON 驗證失敗時，既有一次重試加入固定的修正指引；不放寬數字檢查。
+摘要或翻譯的數字與 JSON 驗證失敗時，既有一次重試加入固定的修正指引；不放寬數字檢查。
+翻譯不是單純接受模型文字：它沿用摘要的嚴格 JSON schema 與原文數字忠實度失敗條件，
+並以已驗證繁中摘要作為翻譯基準；任一條件失敗都依翻譯階段記錄安全錯誤代碼。
 Audit 與事件記錄區分 selection_invalid_json、selection_invalid_candidate、
-summary_invalid_json、summary_ungrounded_number、provider_http_<status>、
+summary_invalid_json、summary_ungrounded_number、translation_invalid_json、
+translation_ungrounded_number、provider_http_<status>、
 provider_invalid_json、provider_request_failed，不記錄 prompt、正文或原始例外內容。
 選題修復事件 news.selection.repaired 僅記錄原始與保留則數。
+
+Orchestration refresh 若已有至少一則可發布內容，另有摘要或翻譯驗證耗盡，會以終態
+`partial` 保存候選對應的 `stage`、`locale` 與安全錯誤代碼，並允許 `news_publish` 繼續；
+若所有入選文章都因摘要或翻譯驗證耗盡而失敗，則為不可重試的終態 `unavailable`，仍允許
+terminal dependency 繼續檢查其他可發布批次；
+provider timeout、429、5xx、認證或未知系統錯誤不會被降級為單篇 `partial`，而是停止後續
+模型呼叫並沿用 worker 既有失敗恢復流程。`news_publish` 只處理具正常終態或已保存
+partial 批次的市場；純 `failed`／`cancelled` 市場記為 blocked／skipped，不建立空的
+`unavailable` edition，也不覆蓋既有可用版本。
+因 retryable provider／系統錯誤或未執行 sibling 在 deadline 被通用終止器標為
+`unavailable` 時，必須同時具備最新 `unavailable` attempt 與正常完成的 unavailable batch
+才視為內容不足；failed batch、failed attempt 或無 batch 一律維持 blocked。
+人工上架中單篇文章的擷取永久失敗或摘要／翻譯驗證耗盡同樣是該次請求的終態結果；有其他
+文章成功時為 `partial`，全部失敗時為 `failed`，兩者皆不建立技術性 retry。只有已記錄為
+`waiting_recovery` 的共享暫時故障候選會進入後續恢復。
 
 ## 不足額補選
 
@@ -374,10 +409,10 @@ provider_invalid_json、provider_request_failed，不記錄 prompt、正文或�
 送入模型的候選上限仍為 20／30，因此整池篩選最多用掉兩次呼叫，剩下至少一次留給補選。
 補選只在篩選後版本仍不足時進行，排除已嘗試文章，並提供成功摘要事件的標題、event key、來源及主題，要求不同事件
 與不足的來源／主題；同一 event key 跨輪只摘要並採用一次，摘要失敗的文章不重複消耗
-後續輪次。每則摘要仍最多兩次嘗試，三語系全部驗證通過才可發布。
+後續輪次。每則繁中摘要與各翻譯皆最多兩次嘗試，三語系全部驗證通過才可發布。
 
 全份新聞的來源上限、主題與來源多樣性在摘要完成後重新驗證。成功但暫時無法組成
-合格版本的候選會留在該次執行的記憶體中，供下一輪補齊組合；五星候選全部發布，四星以 5 則為補選目標且最多發布 10 則，一至三星合計最多發布 5 則。三輪用盡、候選耗盡或補選服務失敗時，發布已完成的合格部分，既有
+合格版本的候選會留在該次執行的記憶體中，供下一輪補齊組合；五星候選全部發布，四星以 5 則為補選目標且最多發布 10 則，一至三星合計最多發布 5 則。三輪用盡或候選耗盡時，發布已完成的合格部分；補選階段的 selection 驗證耗盡或系統性錯誤則沿用整批失敗政策，不降級為單篇 `partial`。既有
 最近可用新聞回退策略不變。news.refill.round 記錄輪次、可發布則數與已嘗試文章數。
 
 本節補選是既有單次選題政策的一部分，不等於失敗重試。正常少量／零則結果不重跑；

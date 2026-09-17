@@ -29,13 +29,16 @@ from daily_insights_api.modules.data_sources.api import (
 )
 from daily_insights_api.modules.markets.api import (
     INSTITUTIONAL_MARKET_CODE,
+    TAIEX_INCREMENTAL_MONTHS,
     TAIEX_SYMBOL,
+    select_taiex_refresh_months,
     store_index_daily_bars,
     store_institutional_market_flows,
     store_institutional_stock_flows,
 )
 from daily_insights_api.modules.orchestration.facts import (
     fence_is_current,
+    interest_rate_month_coverage,
     latest_market_date,
     store_interest_rates,
     store_market_bars,
@@ -50,11 +53,49 @@ from daily_insights_api.modules.orchestration.worker import (
 )
 from daily_insights_api.modules.reports.api import (
     FX_INSTRUMENTS,
+    TENORS,
+    diagnostics,
     load_sofr,
     load_treasury,
 )
 
 TwelveManifest = tuple[tuple[str, str, str, str | None, str | None], ...]
+TREASURY_REQUEST_TIMEOUT_SECONDS = 30.0
+
+
+def _treasury_fetch_periods(
+    today: date, coverage: dict[tuple[int, int], set[str]]
+) -> tuple[tuple[int, ...], tuple[tuple[int, int], ...]]:
+    expected_symbols = {symbol for _, symbol in TENORS}
+    years = {
+        year
+        for year in range(today.year - 2, today.year)
+        if any(coverage.get((year, month), set()) != expected_symbols for month in range(1, 13))
+    }
+    current_year_is_partial = any(
+        coverage.get((today.year, month), set()) != expected_symbols
+        for month in range(1, today.month)
+    )
+    if current_year_is_partial or (not coverage and years):
+        years.add(today.year)
+
+    months = {(today.year, today.month)} if today.year not in years else set()
+    current_year_has_data = any(year == today.year for year, _ in coverage)
+    if not current_year_has_data and today.month == 1 and today.year - 1 not in years:
+        months.add((today.year - 1, 12))
+    return tuple(sorted(years)), tuple(sorted(months))
+
+
+def _safe_error_detail(error: BaseException) -> str:
+    """Bound provider errors before persisting them in admin-visible runs."""
+    return f"{type(error).__name__}: {error}"[:500]
+
+
+def _failure_detail(reasons: dict[str, str]) -> str | None:
+    if not reasons:
+        return None
+    return "; ".join(f"{scope}={reason}" for scope, reason in reasons.items())[:500]
+
 
 TWELVE_MANIFESTS: dict[str, TwelveManifest] = {
     "commodity_daily_bars": (
@@ -243,6 +284,7 @@ async def _run_twelve(
     )
     successes: list[str] = []
     failures: list[str] = []
+    failure_reasons: dict[str, str] = {}
     metadata: list[dict[str, Any]] = []
     inserted = 0
     as_of: date | None = None
@@ -283,8 +325,9 @@ async def _run_twelve(
             as_of = item.as_of if as_of is None else min(as_of, item.as_of)
             metadata.extend(_request_metadata(value) for value in result.provenances)
             fetched_at = max(value.fetched_at for value in result.provenances)
-        except Exception:
+        except Exception as error:
             failures.append(symbol)
+            failure_reasons[symbol] = _safe_error_detail(error)
     status: AttemptStatus = (
         "partial"
         if successes and failures
@@ -302,9 +345,14 @@ async def _run_twelve(
         record_count=inserted,
         payload_digest=digest,
         request_metadata=tuple(metadata),
-        result={"symbols": successes, "failed_symbols": failures},
+        result={
+            "symbols": successes,
+            "failed_symbols": failures,
+            "failure_reasons": failure_reasons,
+        },
         missing_scopes=tuple(failures),
         error_code="partial_symbols" if failures else None,
+        error_detail=_failure_detail(failure_reasons),
         retryable=bool(failures),
     )
 
@@ -319,6 +367,7 @@ async def _run_yahoo(
         return FunctionOutcome(status="unavailable", error_code="yfinance_disabled")
     successes: list[str] = []
     failures: list[str] = []
+    failure_reasons: dict[str, str] = {}
     metadata: list[dict[str, Any]] = []
     inserted = 0
     as_of: date | None = None
@@ -367,8 +416,9 @@ async def _run_yahoo(
             as_of = source_date if as_of is None else min(as_of, source_date)
             fetched_at = result.provenance.fetched_at
             metadata.append(_request_metadata(result.provenance))
-        except Exception:
+        except Exception as error:
             failures.append(symbol)
+            failure_reasons[symbol] = _safe_error_detail(error)
     status: AttemptStatus = (
         "partial"
         if successes and failures
@@ -385,9 +435,14 @@ async def _run_yahoo(
         record_count=inserted,
         payload_digest=_metadata_digest(metadata) if metadata else None,
         request_metadata=tuple(metadata),
-        result={"symbols": successes, "failed_symbols": failures},
+        result={
+            "symbols": successes,
+            "failed_symbols": failures,
+            "failure_reasons": failure_reasons,
+        },
         missing_scopes=tuple(failures),
         error_code="partial_symbols" if failures else None,
+        error_detail=_failure_detail(failure_reasons),
         retryable=bool(failures),
     )
 
@@ -411,26 +466,26 @@ async def _run_twse_taiex(
         return FunctionOutcome(status="unavailable", error_code="twse_disabled")
     today = claimed.edition_date
     async with session_factory() as database:
-        latest = await latest_market_date(
+        baseline_as_of = await latest_market_date(
             database,
             provider_key="twse",
             dataset_key=claimed.function_key,
             symbol=TAIEX_SYMBOL,
         )
-    months = 25 if latest is None else 2
-    first = today.replace(day=1)
-    requested: list[date] = []
-    cursor = first
-    for _ in range(months):
-        requested.append(cursor)
-        cursor = (cursor - timedelta(days=1)).replace(day=1)
-    requested.reverse()
+        requested = list(
+            await select_taiex_refresh_months(
+                database,
+                today=today,
+                requested_months=TAIEX_INCREMENTAL_MONTHS,
+            )
+        )
     retry_scopes = set(claimed.scope.get("missing_scopes", ()))
     if retry_scopes:
         requested = [month for month in requested if month.isoformat() in retry_scopes]
     inserted = 0
     failed: list[str] = []
-    as_of: date | None = None
+    failure_reasons: dict[str, str] = {}
+    as_of = baseline_as_of
     fetched_at: datetime | None = None
     for month in requested:
         try:
@@ -480,11 +535,28 @@ async def _run_twse_taiex(
                         preserve_existing_activity=True,
                     )
             if bars:
-                as_of = bars[-1].trade_date
+                month_as_of = bars[-1].trade_date
+                as_of = month_as_of if as_of is None else max(as_of, month_as_of)
                 fetched_at = result.fetched_at
-        except Exception:
-            failed.append(month.isoformat())
-    return _simple_outcome(inserted, as_of, fetched_at, failed)
+        except Exception as error:
+            scope = month.isoformat()
+            failed.append(scope)
+            failure_reasons[scope] = _safe_error_detail(error)
+    outcome = _simple_outcome(inserted, as_of, fetched_at, failed)
+    return FunctionOutcome(
+        status=outcome.status,
+        source_as_of=outcome.source_as_of,
+        fetched_at=outcome.fetched_at,
+        record_count=outcome.record_count,
+        result={
+            "failed_months": failed,
+            "failure_reasons": failure_reasons,
+        },
+        missing_scopes=outcome.missing_scopes,
+        error_code=outcome.error_code,
+        error_detail=_failure_detail(failure_reasons),
+        retryable=outcome.retryable,
+    )
 
 
 async def _latest_twse_result(
@@ -570,8 +642,32 @@ async def _run_treasury(
 ) -> FunctionOutcome:
     del settings
     today = claimed.edition_date
-    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
-        histories = await load_treasury(client, today)
+    symbols = tuple(symbol for _, symbol in TENORS)
+    async with session_factory() as database:
+        coverage = await interest_rate_month_coverage(
+            database,
+            provider_key="us_treasury",
+            dataset_key=claimed.function_key,
+            symbols=symbols,
+            start_year=today.year - 2,
+            end_year=today.year,
+        )
+    fetch_years, fetch_months = _treasury_fetch_periods(today, coverage)
+    diagnostic_entries: list[Any] = []
+    token = diagnostics.set(diagnostic_entries)
+    try:
+        async with httpx.AsyncClient(
+            timeout=TREASURY_REQUEST_TIMEOUT_SECONDS,
+            follow_redirects=False,
+        ) as client:
+            histories = await load_treasury(
+                client,
+                today,
+                years=fetch_years,
+                months=fetch_months,
+            )
+    finally:
+        diagnostics.reset(token)
     inserted = 0
     missing: list[str] = []
     successes: list[str] = []
@@ -597,11 +693,18 @@ async def _run_treasury(
             )
             source_date = history.points[-1].date
             as_of = source_date if as_of is None else min(as_of, source_date)
+    failure_reasons = {
+        item: failure.failure_type
+        for source, failure in diagnostic_entries
+        if source == "us_treasury"
+        for item in failure.affected_items
+    }
+    failed_scopes = tuple(dict.fromkeys((*missing, *failure_reasons)))
     status: AttemptStatus = (
         "partial"
-        if successes and missing
+        if successes and failed_scopes
         else "unavailable"
-        if missing
+        if failed_scopes
         else "succeeded"
         if inserted
         else "no_change"
@@ -611,10 +714,19 @@ async def _run_treasury(
         source_as_of=as_of,
         fetched_at=datetime.now(UTC),
         record_count=inserted,
-        result={"symbols": successes, "failed_symbols": missing},
-        missing_scopes=tuple(missing),
-        error_code="partial_scopes" if missing else None,
-        retryable=bool(missing),
+        result={
+            "symbols": successes,
+            "fetched_periods": [
+                *[str(year) for year in fetch_years],
+                *[f"{year:04d}-{month:02d}" for year, month in fetch_months],
+            ],
+            "failed_symbols": missing,
+            "failure_reasons": failure_reasons,
+        },
+        missing_scopes=failed_scopes,
+        error_code="partial_scopes" if failed_scopes else None,
+        error_detail=_failure_detail(failure_reasons),
+        retryable=bool(failed_scopes),
     )
 
 

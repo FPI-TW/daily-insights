@@ -136,6 +136,40 @@ async def latest_market_date(
     )
 
 
+async def interest_rate_month_coverage(
+    database: AsyncSession,
+    *,
+    provider_key: str,
+    dataset_key: str,
+    symbols: tuple[str, ...],
+    start_year: int,
+    end_year: int,
+) -> dict[tuple[int, int], set[str]]:
+    rows = await database.execute(
+        select(
+            func.extract("year", InterestRateObservation.observation_date).label("year"),
+            func.extract("month", InterestRateObservation.observation_date).label("month"),
+            InterestRateSeries.symbol,
+        )
+        .join(
+            InterestRateSeries,
+            InterestRateSeries.id == InterestRateObservation.series_id,
+        )
+        .where(
+            InterestRateSeries.provider_key == provider_key,
+            InterestRateSeries.dataset_key == dataset_key,
+            InterestRateSeries.symbol.in_(symbols),
+            InterestRateObservation.observation_date >= date(start_year, 1, 1),
+            InterestRateObservation.observation_date <= date(end_year, 12, 31),
+        )
+        .distinct()
+    )
+    coverage: dict[tuple[int, int], set[str]] = {}
+    for year, month, symbol in rows:
+        coverage.setdefault((int(year), int(month)), set()).add(cast(str, symbol))
+    return coverage
+
+
 async def store_interest_rates(
     database: AsyncSession,
     *,

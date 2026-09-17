@@ -6,7 +6,13 @@ import httpx
 import pytest
 from httpx._transports.default import map_httpcore_exceptions
 
-from daily_insights_api.modules.news.failures import classify_failure, retry_time
+from daily_insights_api.modules.news.failures import (
+    NewsFailure,
+    NewsOperationError,
+    classify_failure,
+    retry_time,
+)
+from daily_insights_api.modules.news.llm import ModelCallError
 
 
 def response_error(status: int, headers: dict[str, str] | None = None) -> httpx.HTTPStatusError:
@@ -52,6 +58,26 @@ def test_unknown_bug_is_not_automatically_retried() -> None:
     failure = classify_failure(RuntimeError("private detail"), stage="selection")
     assert failure.action == "attention"
     assert "private detail" not in failure.model_dump_json()
+
+
+def test_translation_validation_is_repairable_and_operation_error_exposes_safe_code() -> None:
+    failure = classify_failure(
+        ModelCallError(
+            "private provider output",
+            error_code="translation_invalid_json",
+            input_digest="a" * 64,
+            latency_ms=1,
+        ),
+        stage="translation",
+        locale="en",
+    )
+
+    assert failure.action == "repair"
+    error = NewsOperationError(
+        NewsFailure(code="translation_invalid_json_exhausted", action="skip", stage="translation")
+    )
+    assert error.error_code == "translation_invalid_json_exhausted"
+    assert str(error) == "translation_invalid_json_exhausted"
 
 
 @pytest.mark.parametrize(

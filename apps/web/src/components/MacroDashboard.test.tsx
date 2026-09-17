@@ -87,6 +87,29 @@ describe("integrated macro dashboard", () => {
     expect(chart).toHaveTextContent("100")
     expect(screen.getAllByText("Base date 2026-09-04")).not.toHaveLength(0)
   })
+  it("renders the foreign exchange panels as full-width rows in reading order", () => {
+    show(<MacroDashboard data={data} locale="en" />)
+    const headings = [
+      "US dollar index trend",
+      "Asian currency relative performance (Base 100)",
+      "Global foreign exchange price trends",
+      "Major currency exchange rates",
+    ].map(name => screen.getByRole("heading", { name }))
+
+    for (let index = 1; index < headings.length; index += 1) {
+      expect(
+        headings[index - 1]!.compareDocumentPosition(headings[index]!) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).not.toBe(0)
+    }
+    expect(
+      headings.map(heading => heading.closest("section")?.parentElement)
+    ).toEqual(
+      Array(headings.length).fill(
+        headings[0]!.closest("section")?.parentElement
+      )
+    )
+  })
   it("rebuilds every Base 100 line from its matching range base date", () => {
     const normalizedData: MacroDashboardData = {
       ...data,

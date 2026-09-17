@@ -79,7 +79,7 @@ const resources: Resource = {
       curveRef_week: "一週前",
       curveRef_month: "一個月前",
       curveRef_year: "一年前",
-      fxTableTitle: "主要貨幣對收盤與變動",
+      fxTableTitle: "主要貨幣匯率",
       fxTableNote: "點貨幣對可切換上方圖表",
 
       brand: brandTitles["zh-hant"],
@@ -964,7 +964,7 @@ const resources: Resource = {
       curveRef_week: "一周前",
       curveRef_month: "一个月前",
       curveRef_year: "一年前",
-      fxTableTitle: "主要货币对收盘与变动",
+      fxTableTitle: "主要货币汇率",
       fxTableNote: "点货币对可切换上方图表",
 
       brand: brandTitles["zh-hans"],
@@ -1850,7 +1850,7 @@ const resources: Resource = {
       curveRef_week: "One week ago",
       curveRef_month: "One month ago",
       curveRef_year: "One year ago",
-      fxTableTitle: "Major pairs: close and change",
+      fxTableTitle: "Major currency exchange rates",
       fxTableNote: "Pick a pair to drive the chart above",
 
       brand: brandTitles.en,

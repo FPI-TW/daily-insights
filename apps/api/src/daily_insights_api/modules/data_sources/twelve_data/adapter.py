@@ -19,9 +19,9 @@ from daily_insights_api.modules.data_sources.twelve_data.transport import (
     TwelveDataTransportResponse,
 )
 
-TWELVE_DATA_CONTRACT_VERSION = "2026-09-16.v6"
+TWELVE_DATA_CONTRACT_VERSION = "2026-09-17.v7"
 TWELVE_DATA_CONTRACT_HASH = hashlib.sha256(
-    b"twelve-data:eod,time_series,completed-daily-bars:2026-09-16.v6"
+    b"twelve-data:eod,time_series,completed-daily-bars,dp11:2026-09-17.v7"
 ).hexdigest()
 # Commodity 1day metadata is inconsistent: most USD commodities spell out
 # "US Dollar", while HG1 (with type=commodity) returns the ISO code. Both
@@ -134,6 +134,10 @@ class TwelveDataAdapter:
                 outputsize=max(2, outputsize),
                 expected_asset_type=(expected_asset_types or {}).get(symbol),
                 symbol_type=types.get(symbol),
+                # `/eod` is requested at 11 decimal places. Match that
+                # precision here so an identical official close is not
+                # rejected merely because `/time_series` defaults to 5 dp.
+                dp=11,
                 minimum_items=2,
             )
             completed = tuple(
@@ -207,7 +211,8 @@ class TwelveDataAdapter:
         expected_currency_names = TWELVE_DATA_CURRENCY_NAMES.get(expected_currency)
         if expected_currency_names is None:
             raise ValueError("expected_currency is not supported by the Twelve Data contract")
-        if payload.meta.currency_quote not in expected_currency_names:
+        actual_currency = payload.meta.currency_quote or payload.meta.currency
+        if actual_currency not in expected_currency_names:
             raise DataSourceContractError(
                 "Twelve Data time-series quote currency did not match the launch manifest"
             )

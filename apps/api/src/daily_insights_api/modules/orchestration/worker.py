@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import aliased
 
+from daily_insights_api.modules.news.api import NewsOperationError, classify_failure
 from daily_insights_api.modules.orchestration.models import (
     FunctionAttempt,
     FunctionDependency,
@@ -38,6 +39,14 @@ from daily_insights_api.modules.orchestration.service import (
 )
 
 AttemptStatus = Literal["succeeded", "no_change", "partial", "unavailable", "failed", "cancelled"]
+
+NEWS_REFRESH_FUNCTION_KEYS = frozenset(
+    {
+        "news_global_refresh",
+        "news_tw_equity_refresh",
+        "news_us_equity_refresh",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +111,7 @@ async def _ready_candidates(
 ) -> list[tuple[uuid.UUID, str]]:
     async with session_factory() as database:
         upstream = aliased(FunctionRun)
+        news_sibling = aliased(FunctionRun)
         blocked_by_dependency = exists(
             select(1)
             .select_from(FunctionDependency)
@@ -120,6 +130,16 @@ async def _ready_candidates(
                 ),
             )
         )
+        blocked_by_news_sibling = exists(
+            select(1)
+            .select_from(news_sibling)
+            .where(
+                news_sibling.job_run_id == FunctionRun.job_run_id,
+                news_sibling.id != FunctionRun.id,
+                news_sibling.function_key.in_(NEWS_REFRESH_FUNCTION_KEYS),
+                news_sibling.status.in_(("retry_wait", "failed")),
+            )
+        )
         per_provider = (
             select(
                 FunctionRun.id.label("function_run_id"),
@@ -130,6 +150,10 @@ async def _ready_candidates(
             .where(
                 JobRun.status.in_(("pending", "running")),
                 ~blocked_by_dependency,
+                or_(
+                    FunctionRun.function_key.not_in(NEWS_REFRESH_FUNCTION_KEYS),
+                    ~blocked_by_news_sibling,
+                ),
                 or_(
                     and_(
                         FunctionRun.status.in_(("pending", "retry_wait")),
@@ -146,7 +170,11 @@ async def _ready_candidates(
                 or_(
                     JobRun.deadline_at.is_(None),
                     JobRun.deadline_at > now,
-                    FunctionRun.function_key == "news_publish",
+                    and_(
+                        FunctionRun.function_key == "news_publish",
+                        FunctionRun.status == "pending",
+                        FunctionRun.attempt_count == 0,
+                    ),
                 ),
             )
             .distinct(FunctionRun.provider_key)
@@ -207,6 +235,8 @@ async def claim_ready_function(
                     if not await job_dependencies_ready(database, job_run.id):
                         raise _SkipClaim
                     if not await function_dependencies_ready(database, function_run.id):
+                        raise _SkipClaim
+                    if not await _news_siblings_allow_claim(database, function_run):
                         raise _SkipClaim
 
                     if function_run.status == "running":
@@ -281,7 +311,11 @@ def _claimable(function_run: FunctionRun, job_run: JobRun, now: datetime) -> boo
     if (
         job_run.deadline_at is not None
         and now >= job_run.deadline_at
-        and function_run.function_key != "news_publish"
+        and not (
+            function_run.function_key == "news_publish"
+            and function_run.status == "pending"
+            and function_run.attempt_count == 0
+        )
     ):
         return False
     if function_run.status == "running":
@@ -289,6 +323,22 @@ def _claimable(function_run: FunctionRun, job_run: JobRun, now: datetime) -> boo
     return function_run.status in {"pending", "retry_wait"} and (
         function_run.next_attempt_at is None or function_run.next_attempt_at <= now
     )
+
+
+async def _news_siblings_allow_claim(database: AsyncSession, function_run: FunctionRun) -> bool:
+    if function_run.function_key not in NEWS_REFRESH_FUNCTION_KEYS:
+        return True
+    blocking_sibling = await database.scalar(
+        select(FunctionRun.id)
+        .where(
+            FunctionRun.job_run_id == function_run.job_run_id,
+            FunctionRun.id != function_run.id,
+            FunctionRun.function_key.in_(NEWS_REFRESH_FUNCTION_KEYS),
+            FunctionRun.status.in_(("retry_wait", "failed")),
+        )
+        .limit(1)
+    )
+    return blocking_sibling is None
 
 
 async def _abandon_expired_attempt(
@@ -385,7 +435,7 @@ async def finish_function(
             retry_at = (
                 next_retry_at(
                     effective_now,
-                    None if function_run.function_key == "news_publish" else job_run.deadline_at,
+                    job_run.deadline_at,
                 )
                 if outcome.retryable and outcome.status in {"partial", "unavailable", "failed"}
                 else None
@@ -419,6 +469,16 @@ async def finish_function(
                 if not preserve_partial_result:
                     function_run.result = stored_result
                 function_run.error = outcome.error_code
+                if (
+                    function_run.function_key in NEWS_REFRESH_FUNCTION_KEYS
+                    and outcome.status == "failed"
+                ):
+                    await _fail_pending_news_siblings(
+                        database,
+                        function_run=function_run,
+                        error_code=outcome.error_code,
+                        now=effective_now,
+                    )
             function_run.lease_owner = None
             function_run.lease_token = None
             function_run.lease_expires_at = None
@@ -426,6 +486,36 @@ async def finish_function(
         await aggregate_job(session_factory, claimed.job_run_id, now=effective_now)
         await aggregate_routines(session_factory, now=effective_now)
         return True
+
+
+async def _fail_pending_news_siblings(
+    database: AsyncSession,
+    *,
+    function_run: FunctionRun,
+    error_code: str | None,
+    now: datetime,
+) -> None:
+    safe_code = error_code or "news_sibling_systemic_failure"
+    await database.execute(
+        update(FunctionRun)
+        .where(
+            FunctionRun.job_run_id == function_run.job_run_id,
+            FunctionRun.id != function_run.id,
+            FunctionRun.function_key.in_(NEWS_REFRESH_FUNCTION_KEYS),
+            FunctionRun.status.in_(("pending", "retry_wait")),
+        )
+        .values(
+            status="failed",
+            completed_at=now,
+            next_attempt_at=None,
+            error=safe_code,
+            result={
+                "outcome": "blocked_by_news_sibling",
+                "upstream_function_key": function_run.function_key,
+                "error_code": safe_code,
+            },
+        )
+    )
 
 
 def _merge_partial_results(
@@ -643,11 +733,34 @@ async def execute_claimed(
             outcome = FunctionOutcome(status="cancelled", error_code="cancelled")
             cancelled = True
         except Exception as error:
+            if claimed.function_key.startswith("news_"):
+                if not isinstance(error, NewsOperationError):
+                    error = NewsOperationError(
+                        classify_failure(
+                            error,
+                            stage=(
+                                "publication"
+                                if claimed.function_key == "news_publish"
+                                else "selection"
+                            ),
+                        )
+                    )
+            provider_error_code = getattr(error, "error_code", None)
+            failure = getattr(error, "failure", None)
+            failure_action = getattr(failure, "action", None)
             outcome = FunctionOutcome(
                 status="failed",
-                error_code=type(error).__name__.lower(),
+                error_code=(
+                    provider_error_code
+                    if isinstance(provider_error_code, str)
+                    else type(error).__name__.lower()
+                )[:100],
                 error_detail=str(error)[:500],
-                retryable=True,
+                retryable=(
+                    failure_action == "retry"
+                    if failure_action in {"retry", "block", "attention", "skip"}
+                    else True
+                ),
             )
         finally:
             heartbeat_stop.set()
