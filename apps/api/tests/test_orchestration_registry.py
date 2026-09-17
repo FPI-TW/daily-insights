@@ -1,4 +1,6 @@
 import asyncio
+import subprocess
+import sys
 import uuid
 from collections.abc import Awaitable
 from dataclasses import replace
@@ -78,6 +80,26 @@ def test_dispatcher_production_settings_require_only_database_orchestration_scop
 
     assert settings.environment == "production"
     assert settings.orchestration_enabled
+
+
+def test_dispatcher_registers_foreign_key_targets_in_an_isolated_process() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import daily_insights_api.scripts.run_orchestration_dispatcher; "
+                "from daily_insights_api.modules.orchestration.models import JobRun; "
+                "assert next(iter(JobRun.__table__.c.requested_by_user_id.foreign_keys))."
+                "column.table.name == 'users'"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_news_daily_job_refreshes_all_markets_before_publish() -> None:

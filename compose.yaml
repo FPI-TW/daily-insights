@@ -70,6 +70,9 @@ services:
         required: false
     environment:
       DAILY_INSIGHTS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-daily_insights}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-daily_insights}
+      DAILY_INSIGHTS_RUNTIME_ROLE: orchestration-worker
+      DAILY_INSIGHTS_ORCHESTRATION_ENABLED: ${DAILY_INSIGHTS_ORCHESTRATION_ENABLED:-true}
+      DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE: ${DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE:-1970-01-01}
     command:
       ["python", "-m", "daily_insights_api.scripts.run_orchestration_worker"]
     depends_on:
@@ -102,6 +105,8 @@ services:
         required: false
     environment:
       DAILY_INSIGHTS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-daily_insights}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-daily_insights}
+      DAILY_INSIGHTS_ORCHESTRATION_ENABLED: ${DAILY_INSIGHTS_ORCHESTRATION_ENABLED:-true}
+      DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE: ${DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE:-1970-01-01}
     command:
       [
         "python",

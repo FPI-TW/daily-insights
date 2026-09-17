@@ -6,6 +6,7 @@ from typing import Protocol
 from anyio import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from daily_insights_api import models as registered_models  # noqa: F401
 from daily_insights_api.core.config import Environment
 from daily_insights_api.core.database import create_engine, create_session_factory
 from daily_insights_api.modules.orchestration.service import (
