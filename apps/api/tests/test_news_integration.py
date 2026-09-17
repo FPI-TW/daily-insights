@@ -1,4 +1,5 @@
 import os
+import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import ClassVar, cast
@@ -16,6 +17,7 @@ from daily_insights_api.modules.news.contracts import (
     Selection,
 )
 from daily_insights_api.modules.news.extraction import FetchedCandidate, configured_hostnames
+from daily_insights_api.modules.news.failures import NewsOperationError
 from daily_insights_api.modules.news.llm import DeepSeekClient, ModelCall, ModelCallError
 from daily_insights_api.modules.news.models import (
     NewsCandidate,
@@ -23,7 +25,9 @@ from daily_insights_api.modules.news.models import (
     NewsGenerationAudit,
     NewsItem,
     NewsPresentation,
+    NewsWorkflow,
 )
+from daily_insights_api.modules.news.recovery import NewsExecution, news_execution
 from daily_insights_api.modules.news.service import TAIPEI, run_news_edition
 
 pytestmark = pytest.mark.integration
@@ -93,9 +97,32 @@ class _DeterministicNewsClient:
         retry_feedback: str | None = None,
     ) -> ModelCall:
         del article_text
+        assert locale == "zh-hant"
+        return ModelCall(
+            LocalizedSummary(
+                headline=f"{locale} headline",
+                summary=f"{locale} summary",
+            ),
+            f"summary-{locale}",
+            6,
+            4,
+            1,
+            "c" * 64,
+        )
+
+    async def translate(
+        self,
+        candidate: Candidate,
+        article_text: str,
+        source_summary: LocalizedSummary,
+        locale: str,
+        *,
+        retry_feedback: str | None = None,
+    ) -> ModelCall:
+        del article_text, source_summary, retry_feedback
         if candidate.id == "b" * 64 and locale == "en":
             raise ModelCallError(
-                "terminal English summary failure",
+                "terminal English translation failure",
                 input_digest="e" * 64,
                 latency_ms=1,
             )
@@ -141,6 +168,220 @@ def _fetched_candidates() -> list[FetchedCandidate]:
             datetime(2026, 9, 1, tzinfo=UTC),
         ),
     ]
+
+
+async def _seed_existing_edition(
+    database_factory: async_sessionmaker[AsyncSession], market_code: str = "global"
+) -> uuid.UUID:
+    async with database_factory.begin() as database:
+        edition = NewsEdition(
+            edition_date=datetime.now(TAIPEI).date(),
+            market_code=market_code,
+            revision=1,
+            input_digest="0" * 64,
+            derivation_version="test",
+            prompt_version="test",
+            status="partial",
+        )
+        database.add(edition)
+        await database.flush()
+        item = NewsItem(
+            edition_id=edition.id,
+            rank=1,
+            topic="markets",
+            source_name="Existing",
+            source_hostname="existing.example",
+            source_url=f"https://existing.example/{market_code}",
+            source_headline="Existing published story",
+            importance=4,
+            content_digest="1" * 64,
+            numeric_facts=[],
+            market="global",
+            event_key=f"existing-{market_code}",
+            origin="model",
+        )
+        database.add(item)
+        await database.flush()
+        database.add_all(
+            NewsPresentation(
+                item_id=item.id,
+                locale=locale,
+                headline="Existing published story",
+                summary="Existing published summary",
+            )
+            for locale in ("zh-hant", "zh-hans", "en")
+        )
+        return edition.id
+
+
+@pytest.mark.parametrize(
+    ("error_code", "expected_calls", "expected_action"),
+    [
+        ("provider_http_429", 1, "retry"),
+        ("selection_invalid_json", 2, "attention"),
+    ],
+)
+async def test_legacy_selection_systemic_failure_propagates_without_publication(
+    news_database: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    error_code: str,
+    expected_calls: int,
+    expected_action: str,
+) -> None:
+    candidates = _fetched_candidates()
+    existing_id = await _seed_existing_edition(news_database)
+
+    async def feeds(*_: object, **__: object) -> list[Candidate]:
+        return [item.candidate for item in candidates]
+
+    async def fetch(*_: object, **__: object) -> list[FetchedCandidate]:
+        return candidates
+
+    class FailingSelectionClient(_DeterministicNewsClient):
+        def __init__(self) -> None:
+            super().__init__("s")
+            self.calls = 0
+
+        async def select(self, candidates: list[FetchedCandidate], **kwargs: object) -> ModelCall:
+            del candidates, kwargs
+            self.calls += 1
+            raise ModelCallError(
+                "private provider response",
+                input_digest="a" * 64,
+                latency_ms=1,
+                error_code=error_code,
+            )
+
+    monkeypatch.setattr("daily_insights_api.modules.news.service.discover_feed_candidates", feeds)
+    monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
+    client = FailingSelectionClient()
+
+    with pytest.raises(NewsOperationError) as captured:
+        await run_news_edition(
+            news_database,
+            cast(DeepSeekClient, client),
+            datetime.now(TAIPEI).date(),
+            allowed_hostnames=configured_hostnames("www.reuters.com,news.cnyes.com"),
+        )
+
+    assert client.calls == expected_calls
+    assert captured.value.failure.action == expected_action
+    assert "private provider response" not in str(captured.value)
+    async with news_database() as database:
+        assert await database.scalar(select(func.count()).select_from(NewsEdition)) == 1
+        latest = await database.scalar(
+            select(NewsEdition).order_by(NewsEdition.revision.desc()).limit(1)
+        )
+        assert latest is not None and latest.id == existing_id
+        assert await database.scalar(select(func.count()).select_from(NewsItem)) == 1
+
+
+async def test_legacy_ownership_loss_never_exposes_an_inflight_edition(
+    news_database: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidates = _fetched_candidates()
+    existing_id = await _seed_existing_edition(news_database)
+    owned = True
+
+    async def feeds(*_: object, **__: object) -> list[Candidate]:
+        return [item.candidate for item in candidates]
+
+    async def fetch(*_: object, **__: object) -> list[FetchedCandidate]:
+        return candidates
+
+    async def guard() -> bool:
+        return owned
+
+    class LoseOwnershipClient(_DeterministicNewsClient):
+        async def select(self, candidates: list[FetchedCandidate], **kwargs: object) -> ModelCall:
+            nonlocal owned
+            from daily_insights_api.modules.news.service import _lock_key
+
+            async with news_database() as database:
+                editions = list(
+                    await database.scalars(
+                        select(NewsEdition).order_by(NewsEdition.revision.desc())
+                    )
+                )
+                assert [edition.id for edition in editions] == [existing_id]
+                assert not await database.scalar(
+                    select(func.pg_try_advisory_xact_lock(_lock_key(edition_date, "global")))
+                )
+            result = await super().select(candidates, **kwargs)
+            owned = False
+            return result
+
+    monkeypatch.setattr("daily_insights_api.modules.news.service.discover_feed_candidates", feeds)
+    monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
+    edition_date = datetime.now(TAIPEI).date()
+    execution = NewsExecution(
+        news_database,
+        root_run_id=uuid.uuid4(),
+        run_id=uuid.uuid4(),
+        edition_date=edition_date,
+        guard=guard,
+    )
+
+    with news_execution(execution), pytest.raises(NewsOperationError) as captured:
+        await run_news_edition(
+            news_database,
+            cast(DeepSeekClient, LoseOwnershipClient("o")),
+            edition_date,
+            allowed_hostnames=configured_hostnames("www.reuters.com,news.cnyes.com"),
+        )
+
+    assert captured.value.failure.code == "ownership_lost"
+    async with news_database() as database:
+        assert await database.scalar(select(func.count()).select_from(NewsEdition)) == 1
+        latest = await database.scalar(
+            select(NewsEdition).order_by(NewsEdition.revision.desc()).limit(1)
+        )
+        assert latest is not None and latest.id == existing_id
+
+
+async def test_legacy_empty_result_checks_ownership_before_publishing(
+    news_database: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidates = _fetched_candidates()
+    existing_id = await _seed_existing_edition(news_database)
+    owned = True
+
+    async def feeds(*_: object, **__: object) -> list[Candidate]:
+        return [item.candidate for item in candidates]
+
+    async def fetch(*_: object, **__: object) -> list[FetchedCandidate]:
+        nonlocal owned
+        owned = False
+        return []
+
+    async def guard() -> bool:
+        return owned
+
+    monkeypatch.setattr("daily_insights_api.modules.news.service.discover_feed_candidates", feeds)
+    monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
+    edition_date = datetime.now(TAIPEI).date()
+    execution = NewsExecution(
+        news_database,
+        root_run_id=uuid.uuid4(),
+        run_id=uuid.uuid4(),
+        edition_date=edition_date,
+        guard=guard,
+    )
+
+    with news_execution(execution), pytest.raises(NewsOperationError) as captured:
+        await run_news_edition(
+            news_database,
+            cast(DeepSeekClient, _DeterministicNewsClient("e")),
+            edition_date,
+            allowed_hostnames=configured_hostnames("www.reuters.com,news.cnyes.com"),
+        )
+
+    assert captured.value.failure.code == "ownership_lost"
+    async with news_database() as database:
+        editions = list(
+            await database.scalars(select(NewsEdition).order_by(NewsEdition.revision.desc()))
+        )
+        assert [edition.id for edition in editions] == [existing_id]
 
 
 async def test_partial_editions_regenerate_and_revisions_are_prompt_sensitive(
@@ -218,7 +459,8 @@ async def test_partial_editions_regenerate_and_revisions_are_prompt_sensitive(
             == 0
         )
         audit_versions = set(await database.scalars(select(NewsGenerationAudit.prompt_version)))
-        assert "summary-v3" in audit_versions
+        assert "summary-v4" in audit_versions
+        assert "translation-v1" in audit_versions
         assert "selection-v6:aaaaaaaaaaaa" in audit_versions
         assert "selection-v6:bbbbbbbbbbbb" in audit_versions
 
@@ -809,7 +1051,7 @@ async def test_domain_quota_is_settled_before_summaries_are_paid_for(
     )
     assert status == "complete"
     assert "4" in client.summarized
-    assert len(client.summarized) == 18
+    assert len(client.summarized) == 6
     async with news_database() as database:
         edition = (await database.scalars(select(NewsEdition))).one()
         items = list(
@@ -1037,22 +1279,24 @@ async def test_refill_deduplicates_events_across_rounds_before_summarizing(
     assert f"{4:064x}" not in client.summarized
 
 
-async def test_refill_outage_preserves_successful_stories_and_audits_failure(
+async def test_refill_selection_exhaustion_stops_publication_and_records_failure(
     news_database: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     await _assert_refill(
-        news_database, monkeypatch, _RefillNewsClient(fail_refill=True), "global", 2
+        news_database,
+        monkeypatch,
+        _RefillNewsClient(fail_refill=True),
+        "global",
+        0,
+        expected_error_code="model_output_invalid_exhausted",
+        preserve_existing=True,
     )
     async with news_database() as database:
-        failed = list(
-            await database.scalars(
-                select(NewsGenerationAudit).where(
-                    NewsGenerationAudit.stage == "selection", NewsGenerationAudit.status == "failed"
-                )
-            )
+        workflow = (await database.scalars(select(NewsWorkflow))).one()
+        assert any(
+            failure["code"] == "model_output_invalid_exhausted" for failure in workflow.failures
         )
-        assert len(failed) == 2
 
 
 async def _assert_refill(
@@ -1063,6 +1307,8 @@ async def _assert_refill(
     expected: int,
     *,
     max_candidates: int | None = None,
+    expected_error_code: str | None = None,
+    preserve_existing: bool = False,
 ) -> None:
     from dataclasses import replace
 
@@ -1094,15 +1340,40 @@ async def _assert_refill(
     monkeypatch.setattr("daily_insights_api.modules.news.service.discover_feed_candidates", feeds)
     monkeypatch.setattr("daily_insights_api.modules.news.service._fetch_usable_candidates", fetch)
     spec = edition_spec(market_code)
+    existing_id = (
+        await _seed_existing_edition(database_factory, market_code) if preserve_existing else None
+    )
     if max_candidates is not None:
         spec = replace(spec, max_candidates=max_candidates)
-    result = await run_news_edition(
-        database_factory,
-        cast(DeepSeekClient, client),
-        datetime.now(TAIPEI).date(),
-        allowed_hostnames=frozenset(f.candidate.hostname for f in candidates),
-        spec=spec,
-    )
+    try:
+        result = await run_news_edition(
+            database_factory,
+            cast(DeepSeekClient, client),
+            datetime.now(TAIPEI).date(),
+            allowed_hostnames=frozenset(f.candidate.hostname for f in candidates),
+            spec=spec,
+        )
+    except NewsOperationError as error:
+        if expected_error_code is None:
+            raise
+        assert error.failure.code == expected_error_code
+        async with database_factory() as database:
+            assert await database.scalar(select(func.count()).select_from(NewsEdition)) == (
+                1 if preserve_existing else 0
+            )
+            assert await database.scalar(select(func.count()).select_from(NewsItem)) == (
+                expected + (1 if preserve_existing else 0)
+            )
+            if existing_id is not None:
+                latest = await database.scalar(
+                    select(NewsEdition)
+                    .where(NewsEdition.market_code == market_code)
+                    .order_by(NewsEdition.revision.desc())
+                    .limit(1)
+                )
+                assert latest is not None and latest.id == existing_id
+        return
+    assert expected_error_code is None
     assert result == ("complete" if expected >= spec.target_items else "partial")
     assert 2 <= len(client.batches) <= 3
     assert f"{1:064x}" not in client.batches[1]
@@ -1207,10 +1478,11 @@ class _StageNewsClient(_CompleteNewsClient):
             returned=original.selections,
         )
 
-    async def summarize(
+    async def translate(
         self,
         candidate: Candidate,
         article_text: str,
+        source_summary: LocalizedSummary,
         locale: str,
         *,
         retry_feedback: str | None = None,
@@ -1220,10 +1492,14 @@ class _StageNewsClient(_CompleteNewsClient):
                 "ungrounded number",
                 input_digest="e" * 64,
                 latency_ms=1,
-                error_code="summary_ungrounded_number",
+                error_code="translation_ungrounded_number",
             )
-        return await super().summarize(
-            candidate, article_text, locale, retry_feedback=retry_feedback
+        return await super().translate(
+            candidate,
+            article_text,
+            source_summary,
+            locale,
+            retry_feedback=retry_feedback,
         )
 
 

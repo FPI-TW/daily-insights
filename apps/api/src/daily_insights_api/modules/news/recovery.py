@@ -306,8 +306,11 @@ async def workflow_scope(
             )
             raise
         except Exception as error:
-            await workflow.record(classify_failure(error, stage=workflow.stage))
-            raise
+            failure = classify_failure(error, stage=workflow.stage)
+            await workflow.record(failure)
+            if isinstance(error, NewsOperationError):
+                raise
+            raise NewsOperationError(failure) from error
         finally:
             try:
                 await workflow.finish()
@@ -437,8 +440,23 @@ async def model_step(
                 on_failure(error)
                 if after_failure is not None:
                     await after_failure()
-                if attempt or classify_failure(error, stage=stage).action != "repair":
-                    raise
+                failure = classify_failure(
+                    error,
+                    stage=stage,
+                    candidate_id=candidate_id,
+                    locale=locale,
+                )
+                if attempt or failure.action != "repair":
+                    if attempt and failure.action == "repair":
+                        failure = failure.model_copy(
+                            update={
+                                "action": "skip"
+                                if stage in {"summary", "translation"}
+                                else "attention",
+                                "code": f"{failure.code}_exhausted",
+                            }
+                        )
+                    raise NewsOperationError(failure) from error
         raise AssertionError("unreachable")
     await workflow.check(stage)
     checkpoint = await workflow.checkpoint(key, stage)
@@ -450,12 +468,21 @@ async def model_step(
         if failure.action == "repair" and checkpoint.repairs >= 1:
             failure = failure.model_copy(
                 update={
-                    "action": "skip" if stage == "summary" else "attention",
+                    "action": "skip" if stage in {"summary", "translation"} else "attention",
                     "code": f"{failure.code}_exhausted",
                 }
             )
             checkpoint.failure = failure.model_dump(mode="json")
             await workflow.store(checkpoint)
+        elif failure.action == "retry" and checkpoint.repairs >= 1:
+            # A correction was already reserved before dispatch. A transient
+            # provider failure from that paid correction may not turn into a
+            # fresh third call when the workflow resumes.
+            failure = failure.model_copy(update={"action": "attention"})
+            checkpoint.failure = failure.model_dump(mode="json")
+            await workflow.store(checkpoint)
+            await workflow.record(failure)
+            raise NewsOperationError(failure)
         if failure.action == "skip" or failure.code.endswith("_exhausted"):
             await workflow.record(failure)
             raise NewsOperationError(failure)
@@ -488,6 +515,11 @@ async def model_step(
                     locale=locale,
                     now=workflow.execution.clock(),
                 )
+                if checkpoint.repairs >= 1 and failure.action == "retry":
+                    # The current dispatch consumed the only correction. Keep
+                    # its provider reason but require operator attention; do
+                    # not schedule another paid model call.
+                    failure = failure.model_copy(update={"action": "attention"})
                 if probing:
                     # One admin-authorized probe, not a hidden retry loop.
                     # Keep repair eligibility in the input checkpoint while
@@ -505,7 +537,9 @@ async def model_step(
                     if checkpoint.repairs >= 1:
                         failure = failure.model_copy(
                             update={
-                                "action": "skip" if stage == "summary" else "attention",
+                                "action": "skip"
+                                if stage in {"summary", "translation"}
+                                else "attention",
                                 "code": f"{failure.code}_exhausted",
                             }
                         )

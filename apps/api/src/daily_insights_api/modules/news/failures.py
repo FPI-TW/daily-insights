@@ -11,7 +11,16 @@ from defusedxml.common import DefusedXmlException
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.exc import OperationalError
 
-NewsStage = Literal["queued", "feed", "article", "selection", "summary", "publication", "complete"]
+NewsStage = Literal[
+    "queued",
+    "feed",
+    "article",
+    "selection",
+    "summary",
+    "translation",
+    "publication",
+    "complete",
+]
 FailureAction = Literal["retry", "block", "repair", "skip", "attention", "expired", "cancelled"]
 
 
@@ -33,6 +42,17 @@ class NewsOperationError(Exception):
     def __init__(self, failure: NewsFailure) -> None:
         super().__init__(failure.code)
         self.failure = failure
+        self.error_code = failure.code
+
+
+def source_failure_is_systemic(failure: NewsFailure) -> bool:
+    """Return whether a feed/article failure must stop the whole news run."""
+    return failure.code in {"database_unavailable", "unexpected_error"} or failure.action in {
+        "block",
+        "attention",
+        "expired",
+        "cancelled",
+    }
 
 
 def parse_retry_after(value: str | None, now: datetime) -> datetime | None:
@@ -90,7 +110,7 @@ def classify_failure(
     request_id: str | None = None
     code = "unexpected_error"
     action: FailureAction = "attention"
-    is_model = stage in {"selection", "summary"}
+    is_model = stage in {"selection", "summary", "translation"}
     model_code = getattr(error, "error_code", None)
     response = error.response if isinstance(error, httpx.HTTPStatusError) else None
     if response is not None:
@@ -134,6 +154,8 @@ def classify_failure(
         "selection_invalid_candidate",
         "summary_invalid_json",
         "summary_ungrounded_number",
+        "translation_invalid_json",
+        "translation_ungrounded_number",
     }:
         code, action = str(model_code), "repair"
     elif is_model and model_code == "provider_request_failed":

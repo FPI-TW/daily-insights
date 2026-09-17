@@ -1,18 +1,21 @@
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
 
-from daily_insights_api.modules.news.contracts import Candidate
+from daily_insights_api.modules.news.contracts import Candidate, LocalizedSummary
 from daily_insights_api.modules.news.editions import GLOBAL_SPEC, TW_EQUITY_SPEC, US_EQUITY_SPEC
 from daily_insights_api.modules.news.extraction import FetchedCandidate
-from daily_insights_api.modules.news.models import NewsCheckpoint
+from daily_insights_api.modules.news.failures import NewsOperationError
+from daily_insights_api.modules.news.llm import ModelCall
+from daily_insights_api.modules.news.models import NewsCheckpoint, NewsGenerationAudit
 from daily_insights_api.modules.news.recovery import Workflow, source_success
-from daily_insights_api.modules.news.service import _limit_candidates
+from daily_insights_api.modules.news.service import _limit_candidates, _summarize_locales
 
 
 def _fetched(index: int, host: str, seen_at: datetime | None) -> FetchedCandidate:
@@ -30,6 +33,68 @@ def _fetched(index: int, host: str, seen_at: datetime | None) -> FetchedCandidat
         f"Body {index}",
         f"{index:064x}",
     )
+
+
+async def test_locales_summarize_zh_hant_once_then_translate_remaining_locales() -> None:
+    calls: list[tuple[str, str]] = []
+    source_summary = LocalizedSummary(headline="繁中標題", summary="繁中摘要")
+
+    class Client:
+        model_name = "test-model"
+
+        async def summarize(
+            self,
+            candidate: Candidate,
+            article_text: str,
+            locale: str,
+            *,
+            retry_feedback: str | None = None,
+        ) -> ModelCall:
+            del candidate, article_text, retry_feedback
+            calls.append(("summary", locale))
+            return ModelCall(source_summary, None, None, None, 1, "a" * 64)
+
+        async def translate(
+            self,
+            candidate: Candidate,
+            article_text: str,
+            base: LocalizedSummary,
+            locale: str,
+            *,
+            retry_feedback: str | None = None,
+        ) -> ModelCall:
+            del candidate, article_text, retry_feedback
+            assert base is source_summary
+            calls.append(("translation", locale))
+            return ModelCall(
+                LocalizedSummary(headline=f"{locale} headline", summary=f"{locale} summary"),
+                None,
+                None,
+                None,
+                1,
+                locale[0] * 64,
+            )
+
+    audits: list[NewsGenerationAudit] = []
+    summaries = await _summarize_locales(
+        cast(Any, Client()),
+        _fetched(1, "www.reuters.com", datetime(2026, 9, 14, tzinfo=UTC)),
+        uuid.uuid4(),
+        "test-model",
+        audits,
+    )
+
+    assert calls == [
+        ("summary", "zh-hant"),
+        ("translation", "zh-hans"),
+        ("translation", "en"),
+    ]
+    assert set(summaries) == {"zh-hant", "zh-hans", "en"}
+    assert [(audit.stage, audit.locale) for audit in audits] == [
+        ("summary", "zh-hant"),
+        ("translation", "zh-hans"),
+        ("translation", "en"),
+    ]
 
 
 async def test_article_success_clears_checkpoint_and_source_cooldown(
@@ -100,6 +165,35 @@ async def test_full_text_body_records_success_before_honoring_stale_skip(
         result[0],
     )
     workflow.record.assert_not_awaited()
+
+
+async def test_unknown_article_failure_stops_candidate_processing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from daily_insights_api.modules.news import service
+
+    candidate = _fetched(3, "www.reuters.com", datetime(2026, 9, 14, tzinfo=UTC)).candidate
+
+    @asynccontextmanager
+    async def article_client(*_args: object) -> AsyncIterator[object]:
+        yield object()
+
+    async def fail_fetch(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("private extraction detail")
+
+    monkeypatch.setattr(service, "safe_article_client", article_client)
+    monkeypatch.setattr(service, "fetch_article", fail_fetch)
+    monkeypatch.setattr(service, "current_workflow", lambda: None)
+
+    with pytest.raises(NewsOperationError) as captured:
+        await service._fetch_usable_candidates(
+            [candidate],
+            frozenset({candidate.hostname}),
+        )
+
+    assert captured.value.failure.code == "unexpected_error"
+    assert captured.value.failure.stage == "article"
+    assert "private extraction detail" not in str(captured.value)
 
 
 async def test_source_success_keeps_newest_article_timestamp_monotonic() -> None:

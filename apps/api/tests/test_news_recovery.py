@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 import httpx
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from test_news_integration import news_database as news_database
 
@@ -25,6 +26,35 @@ from daily_insights_api.modules.news.recovery import (
     workflow_scope,
 )
 from daily_insights_api.scripts.run_daily_news_scheduler import reconcile_news
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("error", "expected_code", "expected_action"),
+    [
+        (RuntimeError("private runtime detail"), "unexpected_error", "attention"),
+        (
+            OperationalError("private statement", {}, RuntimeError("private database detail")),
+            "database_unavailable",
+            "retry",
+        ),
+    ],
+)
+async def test_workflow_converts_raw_failures_to_safe_classified_errors(
+    news_database: async_sessionmaker[AsyncSession],
+    error: Exception,
+    expected_code: str,
+    expected_action: str,
+) -> None:
+    execution = NewsExecution(news_database, uuid.uuid4(), uuid.uuid4(), date(2026, 9, 11))
+
+    with news_execution(execution), pytest.raises(NewsOperationError) as captured:
+        async with workflow_scope(news_database, execution.edition_date, "global"):
+            raise error
+
+    assert captured.value.failure.code == expected_code
+    assert captured.value.failure.action == expected_action
+    assert "private" not in str(captured.value)
 
 
 @pytest.mark.integration
@@ -404,4 +434,46 @@ async def test_interruption_during_correction_does_not_allow_another_correction(
                 await model_step(
                     fingerprint("interrupted correction"), "summary", interrupted, lambda _: None
                 )
+    assert calls == 2
+
+
+@pytest.mark.integration
+async def test_transient_failure_during_correction_does_not_allow_third_call(
+    news_database: async_sessionmaker[AsyncSession],
+) -> None:
+    root = uuid.uuid4()
+    calls = 0
+
+    async def invalid_then_throttled() -> ModelCall:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ModelCallError(
+                "invalid translation",
+                error_code="translation_invalid_json",
+                input_digest="a" * 64,
+                latency_ms=1,
+            )
+        raise ModelCallError(
+            "private throttle response",
+            error_code="provider_http_429",
+            input_digest="a" * 64,
+            latency_ms=1,
+        )
+
+    for _ in range(2):
+        execution = NewsExecution(news_database, root, uuid.uuid4(), date(2026, 9, 11))
+        with news_execution(execution):
+            async with workflow_scope(news_database, execution.edition_date, "global"):
+                with pytest.raises(NewsOperationError) as captured:
+                    await model_step(
+                        fingerprint("transient correction"),
+                        "translation",
+                        invalid_then_throttled,
+                        lambda _: None,
+                        locale="en",
+                    )
+        assert captured.value.failure.code == "provider_http_429"
+        assert captured.value.failure.action == "attention"
+
     assert calls == 2

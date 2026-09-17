@@ -47,7 +47,9 @@ from daily_insights_api.modules.news.api import (
     NewsDependencyState,
     NewsExecution,
     NewsFailure,
+    NewsOperationError,
     automatic_window,
+    classify_failure,
     create_news_client,
     dependency_failure,
     edition_spec,
@@ -1455,6 +1457,7 @@ async def _execute_news(
         )
     execution = _news_execution(run, session_factory)
     outcomes: dict[str, str] = {}
+    operation_error: NewsOperationError | None = None
     try:
         allowed = effective_hostnames(
             settings.news_extra_hostnames, settings.news_blocked_hostnames
@@ -1476,7 +1479,7 @@ async def _execute_news(
                                 session_factory, failure, now=datetime.now(UTC)
                             )
                             await workflow.record(failure)
-                        outcomes[market] = "unavailable"
+                        raise NewsOperationError(failure)
                     else:
                         outcomes[market] = await run_news_edition(
                             session_factory,
@@ -1487,14 +1490,22 @@ async def _execute_news(
                             discovery_timeout_seconds=settings.news_discovery_timeout_seconds,
                             spec=edition_spec(market),
                         )
-                except Exception:
-                    # The workflow stores a sanitized, structured failure. A
-                    # failed database prevents subsequent model calls as well.
-                    outcomes[market] = "failed"
+                except NewsOperationError:
+                    raise
+                except Exception as error:
+                    raise NewsOperationError(classify_failure(error, stage="selection")) from error
+    except NewsOperationError as error:
+        operation_error = error
     finally:
         if client is not None:
             await client.aclose()
     details = await workflow_results(session_factory, run.id)
+    if operation_error is not None:
+        return (
+            "failed",
+            {"outcome": "interrupted", "outcomes": outcomes, "news": details},
+            sanitize_error_code(operation_error.error_code),
+        )
     succeeded = len(details) == len(markets) and all(
         value["state"] == "completed" for value in details.values()
     )
@@ -1617,6 +1628,8 @@ async def _execute_news_publish(
             )
         result["news"] = await workflow_results(session_factory, run.id)
         return outcome, result, error
+    except NewsOperationError as error:
+        return "failed", {}, sanitize_error_code(error.error_code)
     except Exception as error:
         return "failed", {}, sanitize_error(error)
     finally:
@@ -1843,7 +1856,12 @@ async def worker_loop(
                             tuple[str, dict[str, object], str | None], execution
                         )
                 except Exception as caught:
-                    outcome, result, error = "failed", {}, sanitize_error(caught)
+                    error = (
+                        sanitize_error_code(caught.error_code)
+                        if isinstance(caught, NewsOperationError)
+                        else sanitize_error(caught)
+                    )
+                    outcome, result = "failed", {}
                 finally:
                     stop.set()
                     await task

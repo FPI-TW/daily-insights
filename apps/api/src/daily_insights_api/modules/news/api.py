@@ -15,7 +15,11 @@ from daily_insights_api.modules.news.editions import (
     edition_spec,
 )
 from daily_insights_api.modules.news.extraction import FetchedCandidate
-from daily_insights_api.modules.news.failures import NewsFailure, classify_failure
+from daily_insights_api.modules.news.failures import (
+    NewsFailure,
+    NewsOperationError,
+    classify_failure,
+)
 from daily_insights_api.modules.news.feeds import (
     discover_feed_candidates,
     effective_hostnames,
@@ -54,6 +58,7 @@ from daily_insights_api.modules.news.service import (
     DERIVATION_VERSION,
     LOCALES,
     SUMMARY_PROMPT_VERSION,
+    TRANSLATION_PROMPT_VERSION,
     _cap_discovery,
     _digest,
     _edition_status,
@@ -91,6 +96,7 @@ __all__ = [
     "LOCALES",
     "PROVIDER_SCOPE",
     "SUMMARY_PROMPT_VERSION",
+    "TRANSLATION_PROMPT_VERSION",
     "DeepSeekClient",
     "EditionSpec",
     "FetchedCandidate",
@@ -107,6 +113,7 @@ __all__ = [
     "NewsFailure",
     "NewsGenerationAudit",
     "NewsItem",
+    "NewsOperationError",
     "NewsPresentation",
     "NewsProgress",
     "NewsStatus",
