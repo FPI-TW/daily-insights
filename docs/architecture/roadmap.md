@@ -367,23 +367,25 @@ Accept when:
 - every edition publishes `complete`, `partial`, or `unavailable`, with failed
   source-run evidence and nullable included cells/points when needed;
 - immutable revisions, same-input no-op, list-summary/latest-full separation,
-  scheduler idempotency/manual rerun/heartbeat, and the deployment restart plus
-  three-market terminal-state checks pass in the later feature/deploy PR.
+  RoutineRun/provider-job uniqueness, manual rerun/lease recovery, and the
+  deployment restart plus three-market terminal-state checks pass in the later
+  feature/deploy PR.
 
 Blocking decisions: the open items in
 [`phase-2-data-reports.md`](phase-2-data-reports.md).
 
 ## Daily news (delivered outside the phase plan)
 
-Implementation status: implemented locally with API, scheduler, migration
-`0007`, and customer UI coverage. Production deployment ships the
-`daily-news-scheduler` container disabled behind
-`DAILY_INSIGHTS_DAILY_NEWS_ENABLED`; it is enabled only after a local one-shot
-run is verified. Scope, pipeline, retry semantics, configuration, and acceptance
-criteria are recorded in [`daily-news.md`](daily-news.md). This feature does not
-change the Podcast pilot or the three-market morning-report acceptance rules,
-and it does not start Phase 5 chat even though it shares the DeepSeek model
-configuration.
+Implementation status: implemented locally with API, durable Function/Job/Routine
+orchestration, migrations, and customer UI coverage. The daily routine's
+`internal_services_daily_update` job runs the three market refresh functions and
+then `news_publish`; `DAILY_INSIGHTS_DAILY_NEWS_ENABLED` gates those functions,
+not a dedicated scheduler container. A local one-shot command remains available
+for development verification only. Scope, pipeline, retry semantics,
+configuration, and acceptance criteria are recorded in
+[`daily-news.md`](daily-news.md). This feature does not change the Podcast pilot
+or the three-market morning-report acceptance rules, and it does not start Phase
+5 chat even though it shares the DeepSeek model configuration.
 
 ## Confirmed post-initial-release security work
 

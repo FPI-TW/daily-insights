@@ -79,6 +79,8 @@ Always-required Variables：
 
 ```text
 PUBLIC_HOSTNAME
+DAILY_INSIGHTS_ORCHESTRATION_ENABLED
+DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE
 DAILY_INSIGHTS_MORNING_REPORTS_ENABLED
 DAILY_INSIGHTS_DAILY_NEWS_ENABLED
 DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED
@@ -99,6 +101,11 @@ Environment Secret 或 Variable。
 `DAILY_INSIGHTS_TWSE_ENABLED`、`DAILY_INSIGHTS_CHAT_ENABLED` 都必須明確設為 `true`
 或 `false`。**未設定時 deployment validation 會直接中止**，不會退回 Compose
 default。
+
+`DAILY_INSIGHTS_ORCHESTRATION_ENABLED` 在統一架構切換後必須固定為 `true`。
+`DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE` 第一次切換時設為部署日的下一個台北
+日期；之後部署保留原值且不得晚於當日。若 migration 已完成但第一個 RoutineRun 尚未
+建立，重試時可設為當日或下一個台北日期。
 
 Conditional-required Variables：
 
@@ -131,22 +138,17 @@ Daily news 除 always-required `DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 與啟用時�
 Compose 會使用列出的 defaults。若有設定 model API base URL，啟用 daily news 時必須是
 absolute HTTPS URL。
 
-`DAILY_INSIGHTS_YFINANCE_ENABLED` 控制 `index-daily-bars-scheduler` 與後台的國際
-指數抓取，範圍是 Yahoo 供應的那八檔；`DAILY_INSIGHTS_TWSE_ENABLED` 控制
-`institutional-flows-scheduler` 每天台北 08:00 排入、抓前一交易日的證交所回補，**^TWII 的日線
-也在其中** —— 該指數改由證交所供應，與三大法人共用同一個 TWSE client 與請求間隔，
-因此由同一筆 run 更新。`index-daily-bars-scheduler` 不需要、也不應該拿到
-`DAILY_INSIGHTS_TWSE_ENABLED`：那個容器不會連到證交所。
-`DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 控制
-`daily-news-scheduler` 每天台北 08:00 排入 initial `news_all`；scheduler 只寫入
-durable queue，`data-management-worker` 才會執行新聞 provider request 與逐市場重試。
-新聞 scheduler 在 08:00–12:00 重啟會補建當日缺漏 initial 作業；恢復依技術失敗分類，
-不以不足額判斷。額度／金鑰修復後須至後台按恢復，詳見 [新聞恢復操作](news-recovery.md)。
-`DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED` 則控制 analyst viewpoints scheduler 與
-API 功能。
+`DAILY_INSIGHTS_YFINANCE_ENABLED` 控制 Yahoo Finance functions；
+`DAILY_INSIGHTS_TWSE_ENABLED` 控制 TWSE 加權指數、個股法人與市場法人 functions。
+這三個 TWSE functions 在同一 Provider context 共用 client 與全域請求間隔。
+`DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 控制 Internal Services 的三個 news refresh
+functions 與後續 `news_publish`；`DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED` 控制
+`analyst_viewpoints_sync`。所有 automatic functions 由每日 08:00 的統一 routine 建立，
+不再使用個別 scheduler container。新聞額度／金鑰修復後可從後台建立新的 manual
+JobRun，詳見[新聞恢復操作](news-recovery.md)。
 
-晨報停用時 API 與 scheduler 不執行 provider request；啟用時不需要額外設定 manifest
-核准狀態或 hash。
+資料功能停用時 API、worker 與 dispatcher 仍可維持健康，但對應 function 不執行
+provider request。啟用晨報不需要額外設定 manifest 核准狀態或 hash。
 
 `infra/production/env/remote.*.env` 只作為本機設定清單，已被 Git 忽略；workflow
 不會讀取或上傳這些檔案。
@@ -223,28 +225,27 @@ Workflow 在 SSH process 中執行：
 7. 用 disposable nginx container 渲染 template 並執行 `nginx -t`；
 8. 在舊 API／Web 仍存活時，以 `--force-recreate --no-deps nginx` 單獨重建
    nginx，使 Docker DNS 動態解析先開始運作；
-9. 停止舊版 `daily-news-scheduler`、`index-daily-bars-scheduler`、
-   `institutional-flows-scheduler` 與 `data-management-worker`，並逐一確認四個
-   container 都已停止，避免舊版直接抓取
-   或完成語意跨越 migration boundary；其中 index scheduler 必須在 TWII provider
-   migration 前停止，才不會把剛刪除的 Yahoo 資料寫回；
-10. 使用 API image 執行 `alembic upgrade head`；
-11. 以 `--force-recreate --no-deps data-management-worker` 單獨啟動 replacement
-    worker，並等待其 health check 通過；
-12. replacement worker healthy 後，才 convergence API、Web、其餘 schedulers 與
-    `daily-news-scheduler`，且不再次重建 nginx；
-13. 等待所有 container health，並從 nginx container 內分別主動驗證 API
+9. 停止 API、`orchestration-dispatcher`、`orchestration-worker`，以及仍存在的所有
+   legacy scheduler／`data-management-worker`，並確認 quiescence，避免任何舊、新
+   runtime 跨越 migration boundary；
+10. 檢查 legacy management/report queues 沒有 pending 或 running work；若仍有工作，
+    保留原始歷史並由 operator 明確處理後再部署；
+11. 使用 API image 執行 `alembic upgrade head`；首次切換會把
+    `data_management_runs` 搬入 `legacy_data_management_runs`；
+12. 以 `--force-recreate --no-deps orchestration-worker` 單獨啟動統一 worker，並等待
+    health check 通過；
+13. worker healthy 後才 convergence API、Web 與 `orchestration-dispatcher`，且不再次
+    重建 nginx；
+14. 等待所有 container health，並從 nginx container 內分別主動驗證 API
     readiness 與 Web login route；
-14. 輸出失敗 container state/logs，並從 GHCR logout。
+15. 輸出失敗 container state/logs，並從 GHCR logout。
 
-若 migration、replacement worker 啟動或 health、final convergence、final health
-任一階段失敗，deployment 會再次停止 `daily-news-scheduler`、
-`index-daily-bars-scheduler`、`institutional-flows-scheduler` 與
-`data-management-worker`，並確認四者已停止；若 Docker 無法確認 quiescence，錯誤訊息
-會要求 operator 先手動停止並確認。Operator 應依 diagnostics 修正問題後重新執行
-`deploy.sh`。Deployment 不做自動 downgrade 或 rollback；TWII provider migration
-的 downgrade 是保留 TWSE 歷史的 no-op，因為刪除已回補資料或恢復錯誤的 Yahoo
-資料都不安全，實際 application rollback 仍需另行協調 provider 與資料版本。
+若 migration、worker 啟動或 health、final convergence、final health 任一階段失敗，
+deployment 會再次停止所有 schema-boundary services，並確認 legacy schedulers 與新
+orchestration 都未執行；若 Docker 無法確認 quiescence，錯誤訊息會要求 operator 先
+手動停止並確認。Operator 應依 diagnostics 修正問題後重新執行 `deploy.sh`。
+Deployment 不做自動 downgrade 或 rollback；實際 application rollback 仍需另行協調
+provider、orchestration 與資料版本。
 
 nginx 以 Docker embedded DNS 重新解析 `api`／`web` service alias，TTL 為兩秒。
 後端換址期間 deployment 會保持 pending；兩條 upstream probe 都成功前不得回報部署
@@ -277,13 +278,12 @@ docker logs --tail=200 daily-insights-nginx
 - customer/admin 登入、tenant isolation、會員/組織管理與三語系；
 - Podcast publish/unpublish、R2 CORS/range playback 與 signed URL expiry；
 - RDS backup/PITR 隔離還原結果；
-- EC2 reboot 後 10 個 production container 由 Docker 自動恢復且通過 health check 的
-  證據：`api`、`web`、`nginx`、`morning-report-scheduler`、
-  `daily-news-scheduler`、`analyst-viewpoints-scheduler`、
-  `index-daily-bars-scheduler`、`institutional-flows-scheduler`、
-  `macro-dashboard-scheduler` 與 `data-management-worker`；另須證明 news cutover 先
-  恢復並確認 replacement `data-management-worker` healthy，才啟動
-  `daily-news-scheduler`，且 worker 實際負責 queue 中的新聞 provider 執行與逐市場重試；
+- EC2 reboot 後 5 個 production container 由 Docker 自動恢復且通過 health check 的
+  證據：`api`、`web`、`nginx`、`orchestration-worker` 與
+  `orchestration-dispatcher`；另須證明 worker 先 healthy，dispatcher 才啟動；
+- 下一個台北 08:00 只有一個 RoutineRun，包含六個 Provider jobs、兩個 projection
+  jobs、functions／attempts、實際 provenance，以及 10:00 soft deadline 後的 terminal
+  狀態；
 - 告警實際送達與目標流量的 CPU、memory、disk、database、latency headroom。
 
 外部驗收完成前，狀態是「可部署，不可正式切流量」。

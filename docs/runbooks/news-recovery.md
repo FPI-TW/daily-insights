@@ -32,15 +32,22 @@
 
 ## 自動時段與人工恢復
 
-1. 台北每日 08:00–12:00，每分鐘確認當日 initial obligation；資料庫唯一鍵防重。
-2. 暫時故障按 5、15、30、30… 分鐘延後；供應商要求更久時延後至其期限。
-3. 12:00:00 起不開始新的自動外部步驟；進行中的單次請求可完成並保存。
-4. 額度、金鑰、權限或模型設定修復後，於作業歷史按「恢復／試做模型」。
-   API 為 `POST /api/admin/data-management/runs/{id}/resume`，需 admin 登入及 CSRF。
-   重複提交同一目標回傳同一後繼作業；存在其他新聞工作或供應商 probe 時不再建立。
+1. 統一 dispatcher 於台北每日 08:00 建立當日 RoutineRun，其中唯一的
+   `internal_services_daily_update` JobRun 包含三個 refresh functions；三者 terminal
+   後執行 `news_publish`。Refresh 與 publish 分離，publish 不再抓取外部資料。
+2. 暫時故障每 30 分鐘只重試缺失 scopes；供應商要求更久時延後至其期限。
+3. 10:00:00 起不開始新的 automatic 外部 attempt；進行中的單次請求可完成並保存。
+   `news_publish` 會在 dependencies terminal 後執行，避免 routine 永久等待。
+4. 額度、金鑰、權限或模型設定修復後，從新聞管理頁建立新的 current-edition manual
+   JobRun。完整重抓使用 `news_daily_update`；單一市場使用
+   `news_global_refresh_job`、`news_tw_equity_refresh_job` 或
+   `news_us_equity_refresh_job`。通用 API 為
+   `POST /api/admin/orchestration/job-runs`，需 admin 登入及 CSRF。每次提交建立新 run；
+   與 automatic work 或相同 Provider 衝突時排隊，不回傳 409。
 5. 供應商暫停時一次只允許一個 worker 試做一筆待處理模型請求。成功才解除暫停；
    失敗記錄新原因，JSON 失敗也不在 probe 內額外修正。
-6. 人工恢復僅限當日，含中午後；失敗保留進度，不建立無限自動鏈。跨日用新日作業。
+6. Manual jobs 僅限當日，含 10:00 後，且不受 automatic soft deadline 限制。失敗保留
+   進度；跨日由新日作業處理。
    「重新抓取」是新執行，不是 checkpoint 續跑；修正預算是各恢復鏈中每個輸入獨立。
 7. 心跳超過 90 秒顯示無回應，但不直接搶工作；仍需租約與鎖允許。取消撤銷發布權，
    未完成 probe 退回暫停，取消作業不得續建重試。
@@ -61,8 +68,9 @@
   配額；五星不設上限，四星最多十則，一至三星合計最多五則，不為湊足下限放寬品質。
 - 市場／日期 advisory lock 隔離版本；發布交易再次鎖定作業並確認租約所有權。隱藏的
   URL／事件對所有 revision 生效，回退與續跑不會重新出現。
-- Checkpoint 建立後 48 小時清理；啟用中的 scheduler 每分鐘維護，工作啟動亦清理過期
-  資料。不清理正式新聞、作業歷史或 audit。停用 scheduler 時須恢復它才能定期清理。
+- Checkpoint 建立後 48 小時清理；orchestration worker 執行新聞工作時會清理過期資料。
+  不清理正式新聞、JobRun／FunctionRun／Attempt 歷史或 audit。若長期停用新聞功能，
+  需以維運程序安排清理，而不是恢復舊 scheduler。
 - 外部請求成功、結果尚未落庫就中斷，仍可能重送；不是跨供應商的 exactly-once 保證。
 
 ## 本機代理驗收

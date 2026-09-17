@@ -40,6 +40,11 @@ make init
 make dev
 ```
 
+完整 Compose 開發環境會啟動 API、Web、nginx、PostgreSQL，以及統一的
+`orchestration-worker` 與 `orchestration-dispatcher`。本機預設啟用 orchestration；
+worker 使用最小權限的 `orchestration-worker` runtime role，dispatcher 每日台北時間
+08:00 建立 routine。
+
 常用指令：
 
 ```bash
@@ -58,6 +63,13 @@ make stop          # 停止 Compose 開發環境
 的 API 或 nginx origin；Vite 開發伺服器會將瀏覽器的 `/api` 請求代理至該
 位址。預設範例會連至 `http://localhost:8080`。單獨啟動 API 時則只會載入
 `apps/api/.env`，不會讀取 Web 或根目錄的應用程式設定。
+
+`DAILY_INSIGHTS_ORCHESTRATION_ENABLED` 與
+`DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE` 是 Compose 啟動設定，應放在根目錄
+`.env` 或啟動 shell，不放在 `apps/api/.env`。本機範例預設啟用並使用
+`1970-01-01` 作為 activation date，讓 dispatcher 在啟動後補建當日 routine；若在
+10:00 後才啟動，仍會建立當日 routine，但不會開始已超過 soft deadline 的自動外部
+attempt。後台建立的 manual jobs 不受這個截止時間限制。
 
 首次建立內部管理員時，先完成 migration，再執行：
 
@@ -111,6 +123,8 @@ make dev
 開發環境入口預設為 `http://localhost:8080`。只有 nginx 對外開放，PostgreSQL 保留在 Compose 內部網路。
 
 Compose 設定僅用於開發環境，不代表正式環境拓撲。正式部署方式請參考[新加坡部署操作手冊](docs/runbooks/production.md)。
+統一排程的本機啟動、截止時間與切換規範請參考
+[統一 orchestration 操作手冊](docs/runbooks/unified-orchestration.md)。
 
 ## 架構文件
 

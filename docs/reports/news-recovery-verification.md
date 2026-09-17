@@ -1,5 +1,10 @@
 # 新聞恢復機制驗收紀錄
 
+> 此文件是 migration `20260911_0025` 與舊 data-management 架構的歷史驗收紀錄，
+> 保留當時操作與證據，不代表目前 runtime 拓撲。現行操作請以
+> [統一 orchestration 操作手冊](../runbooks/unified-orchestration.md)與
+> [新聞失敗與恢復操作](../runbooks/news-recovery.md)為準。
+
 驗收日期：2026-09-11（Asia/Taipei）。作業工作樹為 PR #76 延續分支
 `feat/continue-pr-76`。操作方式見 [新聞失敗與恢復操作](../runbooks/news-recovery.md)。
 
