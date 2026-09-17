@@ -591,7 +591,7 @@ export function MacroDashboard({
         </div>
       </section>
       <section className="min-w-0">
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,560px),1fr))] items-start gap-6">
+        <div className="space-y-4">
           <DashboardPanel
             title={t("macroDollarIndex")}
             controls={<Range value={dxyDays} onChange={setDxyDays} />}
@@ -601,6 +601,19 @@ export function MacroDashboard({
               label={t("macroDollarIndex")}
               lines={[line("dxy", dxyDays)]}
               days={dxyDays}
+            />
+          </DashboardPanel>
+          <DashboardPanel
+            title={t("macroAsianFxNormalized")}
+            controls={
+              <Range value={normalizedFxDays} onChange={setNormalizedFxDays} />
+            }
+          >
+            <Chart
+              locale={locale}
+              label={t("macroAsianFxNormalized")}
+              lines={normalizedFxIds.map(normalizedLine)}
+              days={normalizedFxDays}
             />
           </DashboardPanel>
           <DashboardPanel
@@ -626,23 +639,6 @@ export function MacroDashboard({
               height={224}
             />
           </DashboardPanel>
-        </div>
-        <div className="mt-4">
-          <DashboardPanel
-            title={t("macroAsianFxNormalized")}
-            controls={
-              <Range value={normalizedFxDays} onChange={setNormalizedFxDays} />
-            }
-          >
-            <Chart
-              locale={locale}
-              label={t("macroAsianFxNormalized")}
-              lines={normalizedFxIds.map(normalizedLine)}
-              days={normalizedFxDays}
-            />
-          </DashboardPanel>
-        </div>
-        <div className="mt-4">
           <DashboardPanel
             title={t("fxTableTitle")}
             controls={

@@ -13,6 +13,8 @@
 - 外匯：EUR/USD、GBP/USD、AUD/USD、NZD/USD、USD/JPY、USD/CHF、USD/CAD、USD/TWD、USD/KRW、USD/HKD、USD/CNH、USD/SGD、EUR/JPY、AUD/JPY，可選擇 30／90／365 日與貨幣對，切換不重送請求。
 - 亞洲貨幣相對走勢：USD/TWD、USD/JPY、USD/KRW、USD/SGD、USD/CNH 各自以顯示期間內第一筆有效值設為 Base 100；每條線的基期日期由 API 的 `base_dates` 回傳並標示於圖例，期間改變時五條線各自重算。
 
+外匯圖表依「美元指數走勢」、「亞洲貨幣相對走勢」、「全球外匯市場價格走勢」的順序各自滿版顯示，下方的貨幣對收盤與變動表標題為「主要貨幣匯率」。
+
 原有不可變晨間報告保留在可展開區塊，其中的 Twelve Data 現貨與 ETF 代理資料，不與新儀表板的期貨、實際殖利率或 DXY 混用。
 
 ## 來源設定
