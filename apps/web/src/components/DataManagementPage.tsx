@@ -15,6 +15,10 @@ const catalogKey = ["orchestration", "catalog"] as const
 const runsKey = ["orchestration", "job-runs"] as const
 const routinesKey = ["orchestration", "routine-runs"] as const
 const ACTIVE = new Set(["pending", "running"])
+const jobLabel = (jobKey: string, translate: (key: string) => string) =>
+  jobKey === "dxy_settlement_confirm" || jobKey === "dxy_settlement_publish"
+    ? translate("dataManagementDxySettlement")
+    : jobKey
 const MARKET_JOBS = [
   {
     key: "global_macro_refresh",
@@ -224,7 +228,7 @@ function RoutineCard({
         {routine.jobs.map(job => (
           <li key={job.id} className="rounded border border-line p-3">
             <p className="m-0 font-bold">
-              {job.kind} · {job.job_key} · {job.status}
+              {job.kind} · {jobLabel(job.job_key, t)} · {job.status}
             </p>
             {job.depends_on.length ? (
               <p className="mt-1 mb-0 text-xs text-sea-ink-soft">
@@ -279,7 +283,7 @@ function RunCard({
   return (
     <details className="rounded-md border border-line p-3">
       <summary className="cursor-pointer font-bold">
-        {run.status} · {run.job_key} · {run.edition_date}
+        {run.status} · {jobLabel(run.job_key, t)} · {run.edition_date}
         {run.completed_at
           ? ` · ${new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(new Date(run.completed_at))}`
           : ""}

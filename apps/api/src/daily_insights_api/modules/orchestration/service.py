@@ -32,6 +32,9 @@ RETRY_INTERVAL = timedelta(minutes=30)
 MANUAL_RETRY_WINDOW = timedelta(hours=1)
 LEASE_DURATION = timedelta(minutes=10)
 ROUTINE_ENQUEUE_LOCK = 5_239_842_371_114_300
+DXY_SETTLEMENT_HOUR = 12
+DXY_SETTLEMENT_MINUTE = 5
+DXY_SETTLEMENT_DEADLINE_HOUR = 14
 RECONCILIATION_BATCH_SIZE = 100
 
 SUCCESS_FUNCTION_STATUSES = frozenset(("succeeded", "no_change"))
@@ -55,8 +58,10 @@ async def create_daily_routine(
     database: AsyncSession,
     *,
     edition_date: date | None = None,
+    now: datetime | None = None,
 ) -> RoutineRun:
     effective_date = edition_date or taipei_today()
+    effective_now = now or datetime.now(UTC)
     await database.execute(select(func.pg_advisory_xact_lock(ROUTINE_ENQUEUE_LOCK)))
     existing = await database.scalar(
         select(RoutineRun).where(
@@ -65,6 +70,7 @@ async def create_daily_routine(
         )
     )
     if existing is not None:
+        await _ensure_dxy_settlement_jobs(database, effective_date, effective_now)
         await database.commit()
         return existing
 
@@ -109,6 +115,7 @@ async def create_daily_routine(
                 policy=dependency.policy,
             )
         )
+    await _ensure_dxy_settlement_jobs(database, effective_date, effective_now)
     await database.commit()
     return routine
 
@@ -182,6 +189,7 @@ def _new_job_run(
     deadline_at: datetime | None,
     payload: dict[str, Any] | None,
     snapshot: dict[str, object],
+    next_attempt_at: datetime | None = None,
 ) -> JobRun:
     return JobRun(
         routine_run_id=routine_run_id,
@@ -196,7 +204,68 @@ def _new_job_run(
         status="pending",
         requested_by_user_id=requester_id,
         payload=payload,
-        next_attempt_at=None,
+        next_attempt_at=next_attempt_at,
+    )
+
+
+async def _ensure_dxy_settlement_jobs(
+    database: AsyncSession, edition_date: date, now: datetime
+) -> None:
+    scheduled_for = datetime.combine(
+        edition_date,
+        time(DXY_SETTLEMENT_HOUR, DXY_SETTLEMENT_MINUTE),
+        tzinfo=TAIPEI,
+    )
+    deadline_at = datetime.combine(
+        edition_date,
+        time(DXY_SETTLEMENT_DEADLINE_HOUR),
+        tzinfo=TAIPEI,
+    )
+    if now >= deadline_at:
+        return
+    existing = await database.scalar(
+        select(JobRun.id).where(
+            JobRun.automatic_key == "dxy_settlement_confirm",
+            JobRun.edition_date == edition_date,
+        )
+    )
+    if existing is not None:
+        return
+    snapshot = registry_snapshot()
+    definition = JOB_BY_KEY["dxy_settlement_confirm"]
+    confirmation = _new_job_run(
+        definition,
+        edition_date=edition_date,
+        trigger="automatic",
+        requester_id=None,
+        routine_run_id=None,
+        deadline_at=deadline_at,
+        payload={"purpose": "dxy_settlement", "require_settled_dxy": True},
+        snapshot=snapshot,
+        next_attempt_at=scheduled_for,
+    )
+    database.add(confirmation)
+    await database.flush()
+    await _materialize_functions(database, confirmation, definition)
+    projection = _new_job_run(
+        JOB_BY_KEY["dxy_settlement_publish"],
+        edition_date=edition_date,
+        trigger="automatic",
+        requester_id=None,
+        routine_run_id=None,
+        deadline_at=deadline_at,
+        payload={"purpose": "dxy_settlement", "source_job_run_id": str(confirmation.id)},
+        snapshot=snapshot,
+        next_attempt_at=scheduled_for,
+    )
+    database.add(projection)
+    await database.flush()
+    database.add(
+        JobDependency(
+            upstream_job_run_id=confirmation.id,
+            downstream_job_run_id=projection.id,
+            policy="terminal",
+        )
     )
 
 
@@ -215,6 +284,7 @@ async def _materialize_functions(
             scope=job.payload or {},
             status="pending",
             attempt_count=0,
+            next_attempt_at=job.next_attempt_at,
         )
         database.add(run)
         await database.flush()

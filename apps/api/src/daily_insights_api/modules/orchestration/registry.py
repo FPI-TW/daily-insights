@@ -241,6 +241,20 @@ JOBS = (
         deadline_policy="routine",
     ),
     JobDefinition(
+        "dxy_settlement_confirm",
+        "function",
+        ("automatic",),
+        _steps("dxy_daily_bars"),
+        automatic_key="dxy_settlement_confirm",
+    ),
+    JobDefinition(
+        "dxy_settlement_publish",
+        "projection",
+        ("automatic",),
+        projection_handler="macro_dashboard_publish",
+        automatic_key="dxy_settlement_publish",
+    ),
+    JobDefinition(
         "global_macro_refresh",
         "function",
         ("manual",),

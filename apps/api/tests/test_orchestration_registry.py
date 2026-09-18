@@ -195,6 +195,7 @@ def test_automatic_provider_jobs_are_unique_and_internal_services_are_combined()
         "us_treasury",
         "new_york_fed",
         "internal_services",
+        "dxy_settlement_confirm",
     ]
     internal = JOB_BY_KEY["internal_services_daily_update"]
     assert {step.function_key for step in internal.functions} == {

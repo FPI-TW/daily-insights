@@ -40,6 +40,7 @@ from daily_insights_api.modules.orchestration.facts import (
     fence_is_current,
     interest_rate_month_coverage,
     latest_market_date,
+    latest_provisional_market_date,
     store_interest_rates,
     store_market_bars,
 )
@@ -379,6 +380,16 @@ async def _run_yahoo(
         for item in YAHOO_MANIFESTS[claimed.function_key]
         if not retry_scopes or item[0] in retry_scopes
     )
+    require_settled_dxy = bool(claimed.scope.get("require_settled_dxy"))
+    expected_settlement_date: date | None = None
+    if require_settled_dxy:
+        async with session_factory() as database:
+            expected_settlement_date = await latest_provisional_market_date(
+                database,
+                provider_key=claimed.provider_key,
+                dataset_key=claimed.function_key,
+                symbol="DX-Y.NYB",
+            )
     for symbol, market, unit in manifest:
         try:
 
@@ -390,10 +401,21 @@ async def _run_yahoo(
                     market=current_market,
                     symbol=current_symbol,
                     period="2y",
-                    include_provisional_close=claimed.function_key == "dxy_daily_bars",
+                    include_provisional_close=(
+                        claimed.function_key == "dxy_daily_bars" and not require_settled_dxy
+                    ),
                 )
 
             result = await retry_macro_fetch(fetch)
+            if (
+                claimed.function_key == "dxy_daily_bars"
+                and require_settled_dxy
+                and expected_settlement_date is not None
+                and result.items[-1].trade_date < expected_settlement_date
+            ):
+                failures.append(symbol)
+                failure_reasons[symbol] = "stale_data"
+                continue
             async with session_factory.begin() as database:
                 inserted += await store_market_bars(
                     database,
@@ -447,6 +469,7 @@ async def _run_yahoo(
         if inserted
         else "no_change"
     )
+    settlement_pending = require_settled_dxy and failure_reasons.get("DX-Y.NYB") == "stale_data"
     return FunctionOutcome(
         status=status,
         source_as_of=as_of,
@@ -460,7 +483,7 @@ async def _run_yahoo(
             "failure_reasons": failure_reasons,
         },
         missing_scopes=tuple(failures),
-        error_code="partial_symbols" if failures else None,
+        error_code="stale_data" if settlement_pending else "partial_symbols" if failures else None,
         error_detail=_failure_detail(failure_reasons),
         retryable=bool(failures),
     )

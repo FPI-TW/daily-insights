@@ -139,6 +139,42 @@ async def latest_market_date(
     )
 
 
+async def latest_provisional_market_date(
+    database: AsyncSession, *, provider_key: str, dataset_key: str, symbol: str
+) -> date | None:
+    latest_versions = (
+        select(
+            MarketDailyObservation.series_id.label("series_id"),
+            MarketDailyObservation.observation_date.label("observation_date"),
+            func.max(MarketDailyObservation.version).label("version"),
+        )
+        .group_by(
+            MarketDailyObservation.series_id,
+            MarketDailyObservation.observation_date,
+        )
+        .subquery()
+    )
+    return cast(
+        date | None,
+        await database.scalar(
+            select(func.max(MarketDailyObservation.observation_date))
+            .join(MarketDailySeries, MarketDailySeries.id == MarketDailyObservation.series_id)
+            .join(
+                latest_versions,
+                (latest_versions.c.series_id == MarketDailyObservation.series_id)
+                & (latest_versions.c.observation_date == MarketDailyObservation.observation_date)
+                & (latest_versions.c.version == MarketDailyObservation.version),
+            )
+            .where(
+                MarketDailySeries.provider_key == provider_key,
+                MarketDailySeries.dataset_key == dataset_key,
+                MarketDailySeries.symbol == symbol,
+                MarketDailyObservation.is_provisional.is_(True),
+            )
+        ),
+    )
+
+
 async def interest_rate_month_coverage(
     database: AsyncSession,
     *,

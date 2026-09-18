@@ -25,7 +25,13 @@ import daily_insights_api.modules.orchestration.projections as orchestration_pro
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.analyst_viewpoints.api import AnalystViewpointSyncError
 from daily_insights_api.modules.analyst_viewpoints.models import AnalystViewpointSyncRun
-from daily_insights_api.modules.data_sources.api import TaiexDailyBar, TaiexDailyBars
+from daily_insights_api.modules.data_sources.api import (
+    DailyBar,
+    Provenance,
+    TaiexDailyBar,
+    TaiexDailyBars,
+    YfinanceDailyBars,
+)
 from daily_insights_api.modules.news.contracts import (
     Candidate,
     LocalizedSummary,
@@ -1770,6 +1776,131 @@ async def test_daily_routine_is_idempotent_and_worker_persists_attempts(
             )
             == 1
         )
+
+
+async def test_daily_routine_schedules_one_dxy_settlement_chain_until_1400(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, sessions = orchestration_database
+    edition = date(2026, 9, 17)
+    now = datetime(2026, 9, 17, 0, tzinfo=UTC)
+    async with sessions() as database:
+        first = await create_daily_routine(database, edition_date=edition, now=now)
+    async with sessions() as database:
+        second = await create_daily_routine(database, edition_date=edition, now=now)
+
+    assert first.id == second.id
+    async with sessions() as database:
+        jobs = list(
+            (
+                await database.scalars(
+                    select(JobRun).where(JobRun.job_key.like("dxy_settlement_%"))
+                )
+            ).all()
+        )
+        function = await database.scalar(
+            select(FunctionRun).join(JobRun).where(JobRun.job_key == "dxy_settlement_confirm")
+        )
+    assert {job.job_key for job in jobs} == {
+        "dxy_settlement_confirm",
+        "dxy_settlement_publish",
+    }
+    expected_start = datetime(2026, 9, 17, 4, 5, tzinfo=UTC)
+    expected_deadline = datetime(2026, 9, 17, 6, 0, tzinfo=UTC)
+    assert all(job.next_attempt_at == expected_start for job in jobs)
+    assert all(job.deadline_at == expected_deadline for job in jobs)
+    assert function is not None and function.next_attempt_at == expected_start
+    assert function.scope == {"purpose": "dxy_settlement", "require_settled_dxy": True}
+
+
+async def test_daily_routine_does_not_backfill_dxy_settlement_after_deadline(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, sessions = orchestration_database
+    edition = date(2026, 9, 17)
+    async with sessions() as database:
+        await create_daily_routine(
+            database,
+            edition_date=edition,
+            now=datetime(2026, 9, 17, 6, tzinfo=UTC),
+        )
+    async with sessions() as database:
+        count = await database.scalar(
+            select(func.count()).select_from(JobRun).where(JobRun.job_key.like("dxy_settlement_%"))
+        )
+    assert count == 0
+
+
+async def test_dxy_settlement_retries_when_yahoo_close_is_not_final(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, sessions = orchestration_database
+    edition = date(2026, 9, 17)
+
+    async def expected_date(*_: object, **__: object) -> date:
+        return edition
+
+    monkeypatch.setattr(
+        orchestration_functions,
+        "latest_provisional_market_date",
+        expected_date,
+    )
+
+    class Adapter:
+        async def get_daily_bars(self, **_: object) -> YfinanceDailyBars:
+            prior = edition - timedelta(days=1)
+            return YfinanceDailyBars(
+                symbol="DX-Y.NYB",
+                market="global_macro_bonds",
+                items=(
+                    DailyBar(
+                        instrument_source_id="DX-Y.NYB",
+                        market="global_macro_bonds",
+                        symbol="DX-Y.NYB",
+                        trade_date=prior,
+                        close=Decimal("99.65"),
+                        source="yfinance",
+                    ),
+                ),
+                dropped_unsettled_trade_date=edition,
+                provenance=Provenance(
+                    provider="yfinance",
+                    contract_version="test",
+                    contract_hash="a" * 64,
+                    endpoint="Ticker.history",
+                    query_fingerprint="b" * 64,
+                    fetched_at=datetime(2026, 9, 17, 4, 5, tzinfo=UTC),
+                    as_of=prior,
+                    response_digest="c" * 64,
+                    record_count=1,
+                ),
+            )
+
+    claimed = ClaimedFunction(
+        connection=cast(AsyncConnection, None),
+        function_run_id=uuid.uuid4(),
+        job_run_id=uuid.uuid4(),
+        attempt_id=uuid.uuid4(),
+        function_key="dxy_daily_bars",
+        provider_key="yahoo_finance",
+        edition_date=edition,
+        fence_token=uuid.uuid4(),
+        deadline_at=datetime(2026, 9, 17, 6, tzinfo=UTC),
+        scope={"purpose": "dxy_settlement", "require_settled_dxy": True},
+    )
+
+    outcome = await orchestration_functions._run_yahoo(
+        Settings(environment="test", yfinance_enabled=True),
+        sessions,
+        claimed,
+        cast(Any, Adapter()),
+    )
+
+    assert outcome.status == "unavailable"
+    assert outcome.error_code == "stale_data"
+    assert outcome.retryable is True
+    assert outcome.record_count == 0
 
 
 async def test_routine_response_uses_bounded_query_count(

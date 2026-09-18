@@ -571,7 +571,7 @@ async def _latest_eligible_observations(
 
 
 def _projection_datasets(job: JobRun) -> frozenset[str]:
-    if job.job_key == "macro_dashboard_publish":
+    if job.job_key in {"macro_dashboard_publish", "dxy_settlement_publish"}:
         return MACRO_DATASETS
     requested = (job.payload or {}).get("requested_market_job")
     if requested == "global_macro_refresh":
@@ -1048,9 +1048,9 @@ async def publish_macro_dashboard(
     relevant_outcomes = tuple(
         outcome for outcome in frozen_outcomes if outcome.get("function_key") in MACRO_DATASETS
     )
-    rows = _rows_for_current_outcomes(
-        tuple(row for row in frozen if row.dataset_key in MACRO_DATASETS), relevant_outcomes
-    )
+    settlement = job.job_key == "dxy_settlement_publish"
+    macro_rows = tuple(row for row in frozen if row.dataset_key in MACRO_DATASETS)
+    rows = macro_rows if settlement else _rows_for_current_outcomes(macro_rows, relevant_outcomes)
     if not rows:
         return {
             "action": "preserved",
@@ -1096,6 +1096,7 @@ async def publish_macro_dashboard(
         histories,
         relevant_outcomes,
         edition_date=edition_date,
+        required_outcomes=(frozenset(("dxy_daily_bars",)) if settlement else MACRO_DATASETS),
     )
     if validation_failures:
         return {
@@ -1211,6 +1212,7 @@ def _macro_publication_failures(
     outcomes: tuple[dict[str, Any], ...],
     *,
     edition_date: date,
+    required_outcomes: frozenset[str] = MACRO_DATASETS,
 ) -> list[dict[str, object]]:
     """Return stable diagnostics when a macro snapshot is unsafe to publish."""
     failures: list[dict[str, object]] = []
@@ -1219,7 +1221,7 @@ def _macro_publication_failures(
         for outcome in outcomes
         if outcome.get("function_key")
     }
-    for dataset in sorted(MACRO_DATASETS):
+    for dataset in sorted(required_outcomes):
         outcome = outcome_by_dataset.get(dataset)
         status = outcome.get("status") if outcome is not None else None
         if status not in MACRO_AVAILABLE_STATUSES:
