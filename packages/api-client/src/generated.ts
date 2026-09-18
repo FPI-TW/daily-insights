@@ -2336,6 +2336,11 @@ export interface components {
         | "translation"
         | "publication"
         | "complete"
+      /**
+       * Validation Issues
+       * @default []
+       */
+      validation_issues: string[]
     }
     /** NewsItemResponse */
     NewsItemResponse: {

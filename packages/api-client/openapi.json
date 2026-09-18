@@ -3721,6 +3721,14 @@
             ],
             "title": "Stage",
             "type": "string"
+          },
+          "validation_issues": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Validation Issues",
+            "type": "array"
           }
         },
         "required": ["code", "stage", "action"],

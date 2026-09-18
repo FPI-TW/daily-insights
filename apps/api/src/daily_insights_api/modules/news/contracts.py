@@ -36,15 +36,21 @@ class Selection(StrictModel):
     # One model call can inspect a full market batch. Publication applies the
     # stricter per-importance quotas after all batches have been merged.
     selections: tuple[SelectedCandidate, ...] = Field(max_length=100)
+    # One independently reported fallback per event may survive generation when
+    # the preferred report fails summary or translation validation.
+    reserves: tuple[SelectedCandidate, ...] = Field(default=(), max_length=100)
 
     @model_validator(mode="after")
     def unique_ids_and_event_keys(self) -> "Selection":
-        ids = [item.id for item in self.selections]
+        ids = [item.id for item in (*self.selections, *self.reserves)]
         if len(ids) != len(set(ids)):
-            raise ValueError("selected candidates must be unique")
+            raise ValueError("selected and reserve candidates must be unique")
         event_keys = [item.event_key for item in self.selections]
         if len(event_keys) != len(set(event_keys)):
             raise ValueError("selected candidates must have unique event keys")
+        reserve_event_keys = [item.event_key for item in self.reserves]
+        if len(reserve_event_keys) != len(set(reserve_event_keys)):
+            raise ValueError("reserve candidates must have unique event keys")
         return self
 
 
