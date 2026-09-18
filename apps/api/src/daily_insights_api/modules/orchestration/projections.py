@@ -91,6 +91,9 @@ MACRO_DATASETS = frozenset(
         "sofr_daily_rates",
     )
 )
+MACRO_MAX_HISTORY_AGE = timedelta(days=5)
+MACRO_MIN_HISTORY_SPAN = timedelta(days=365)
+MACRO_AVAILABLE_STATUSES = frozenset(("succeeded", "no_change"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -1034,6 +1037,10 @@ async def publish_macro_dashboard(
 ) -> dict[str, Any]:
     datasets = set(MACRO_DATASETS)
     async with session_factory() as database:
+        job = await database.get(JobRun, job_run_id)
+        if job is None:
+            raise ValueError("projection job does not exist")
+        edition_date = job.edition_date
         frozen_outcomes = await _frozen_function_outcomes(database, job_run_id)
     relevant_outcomes = tuple(
         outcome for outcome in frozen_outcomes if outcome.get("function_key") in MACRO_DATASETS
@@ -1078,6 +1085,21 @@ async def publish_macro_dashboard(
         ),
     )
     missing_histories = [history.id for history in histories if history.status != "ok"]
+    validation_failures = _macro_publication_failures(
+        histories,
+        relevant_outcomes,
+        edition_date=edition_date,
+    )
+    if validation_failures:
+        return {
+            "action": "preserved",
+            "partial": True,
+            "reason": "incomplete_sources",
+            "failures": validation_failures,
+            "missing_datasets": sorted(datasets - {row.dataset_key for row in rows}),
+            "missing_histories": missing_histories,
+            "function_outcomes": list(relevant_outcomes),
+        }
     async with session_factory.begin() as database:
         job = await database.scalar(
             select(JobRun)
@@ -1175,6 +1197,93 @@ async def publish_macro_dashboard(
         "missing_histories": missing_histories,
         "partial": bool(missing_histories),
     }
+
+
+def _macro_publication_failures(
+    histories: list[History],
+    outcomes: tuple[dict[str, Any], ...],
+    *,
+    edition_date: date,
+) -> list[dict[str, object]]:
+    """Return stable diagnostics when a macro snapshot is unsafe to publish."""
+    failures: list[dict[str, object]] = []
+    outcome_by_dataset = {
+        str(outcome.get("function_key")): outcome
+        for outcome in outcomes
+        if outcome.get("function_key")
+    }
+    for dataset in sorted(MACRO_DATASETS):
+        outcome = outcome_by_dataset.get(dataset)
+        status = outcome.get("status") if outcome is not None else None
+        if status not in MACRO_AVAILABLE_STATUSES:
+            failures.append(
+                {
+                    "type": "source_unavailable",
+                    "dataset": dataset,
+                    "affected_items": sorted(
+                        str(value)
+                        for value in (outcome or {}).get("missing_scopes", [])
+                        if isinstance(value, str)
+                    ),
+                }
+            )
+
+    for history in histories:
+        if history.status != "ok" or not history.points:
+            failures.append(
+                {
+                    "type": "source_unavailable",
+                    "dataset": _history_dataset(history),
+                    "affected_items": [history.symbol],
+                }
+            )
+            continue
+        newest = history.points[-1].date
+        if newest > edition_date or edition_date - newest > MACRO_MAX_HISTORY_AGE:
+            failures.append(
+                {
+                    "type": "stale_data",
+                    "dataset": _history_dataset(history),
+                    "affected_items": [history.symbol],
+                }
+            )
+        if history.points[0].date > newest - MACRO_MIN_HISTORY_SPAN:
+            failures.append(
+                {
+                    "type": "insufficient_history",
+                    "dataset": _history_dataset(history),
+                    "affected_items": [history.symbol],
+                }
+            )
+
+    treasury = [history for history in histories if history.source == "U.S. Treasury"]
+    if len(treasury) == len(TENORS) and all(history.points for history in treasury):
+        common_dates = {point.date for point in treasury[0].points}
+        for history in treasury[1:]:
+            common_dates.intersection_update(point.date for point in history.points)
+        if not common_dates or edition_date - max(common_dates) > MACRO_MAX_HISTORY_AGE:
+            failures.append(
+                {
+                    "type": "stale_data",
+                    "dataset": "treasury_yield_curve",
+                    "affected_items": sorted(history.symbol for history in treasury),
+                }
+            )
+    return failures
+
+
+def _history_dataset(history: History) -> str:
+    if history.source == "Twelve Data":
+        return (
+            "fx_daily_bars"
+            if history.symbol in {item[1] for item in FX_INSTRUMENTS}
+            else "commodity_daily_bars"
+        )
+    if history.source == "Yahoo Finance":
+        return "dxy_daily_bars"
+    if history.source == "U.S. Treasury":
+        return "treasury_yield_curve"
+    return "sofr_daily_rates"
 
 
 def _macro_payload_content(payload: dict[str, Any]) -> dict[str, Any]:

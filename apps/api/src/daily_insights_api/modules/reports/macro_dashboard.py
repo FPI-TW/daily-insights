@@ -6,8 +6,11 @@ remain explicit and never borrow a value from another instrument.
 """
 
 import asyncio
+import math
+from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from email.utils import parsedate_to_datetime
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -27,6 +30,7 @@ from daily_insights_api.modules.reports.macro_diagnostics import (
     EmptySourceResponse,
     SourceDiagnostic,
     SourceFailure,
+    classify,
     diagnostics,
     record_failure,
     summarize,
@@ -124,6 +128,55 @@ TREASURY_URL = (
     "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml"
 )
 SOFR_URL = "https://markets.newyorkfed.org/api/rates/secured/sofr/search.json"
+MACRO_HTTP_TIMEOUT = httpx.Timeout(connect=5, read=45, write=10, pool=5)
+MACRO_MAX_ATTEMPTS = 3
+MACRO_RETRY_DELAYS = (1.0, 2.0)
+MACRO_MAX_RETRY_AFTER_SECONDS = 30.0
+
+
+def _retry_after(error: BaseException) -> float | None:
+    if not isinstance(error, httpx.HTTPStatusError):
+        return None
+    value = error.response.headers.get("retry-after")
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+        if retry_at.tzinfo is None:
+            return None
+        seconds = (retry_at - datetime.now(UTC)).total_seconds()
+    if not math.isfinite(seconds) or seconds < 0:
+        return None
+    return min(seconds, MACRO_MAX_RETRY_AFTER_SECONDS)
+
+
+def retryable_macro_failure(error: BaseException) -> bool:
+    failure_type, status = classify(error)
+    return failure_type in {"timeout", "connection_error", "dns_error", "rate_limited"} or (
+        failure_type == "http_error" and status is not None and status >= 500
+    )
+
+
+async def retry_macro_fetch[T](
+    operation: Callable[[], Awaitable[T]],
+    *,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> T:
+    """Retry only transient provider failures with a small, bounded budget."""
+    for attempt in range(MACRO_MAX_ATTEMPTS):
+        try:
+            return await operation()
+        except Exception as error:
+            if attempt + 1 == MACRO_MAX_ATTEMPTS or not retryable_macro_failure(error):
+                raise
+            delay = _retry_after(error)
+            await sleep(delay if delay is not None else MACRO_RETRY_DELAYS[attempt])
+    raise AssertionError("bounded macro retry loop exited unexpectedly")
 
 
 def treasury_histories(payloads: list[bytes], today: date) -> list[History]:
@@ -180,15 +233,19 @@ async def load_treasury(
         period_parameter = (
             "field_tdr_date_value" if period_type == "year" else "field_tdr_date_value_month"
         )
-        response = await client.get(
-            TREASURY_URL,
-            params={
-                "data": "daily_treasury_yield_curve",
-                period_parameter: period,
-            },
-        )
-        response.raise_for_status()
-        return response.content
+
+        async def request() -> bytes:
+            response = await client.get(
+                TREASURY_URL,
+                params={
+                    "data": "daily_treasury_yield_curve",
+                    period_parameter: period,
+                },
+            )
+            response.raise_for_status()
+            return response.content
+
+        return await retry_macro_fetch(request)
 
     try:
         # A third year covers the previous observation when the one-year
@@ -240,14 +297,19 @@ async def load_treasury(
 
 async def load_sofr(client: httpx.AsyncClient, today: date) -> History:
     try:
-        response = await client.get(
-            SOFR_URL,
-            params={
-                "startDate": (today - timedelta(days=740)).isoformat(),
-                "endDate": today.isoformat(),
-            },
-        )
-        response.raise_for_status()
+
+        async def request() -> httpx.Response:
+            response = await client.get(
+                SOFR_URL,
+                params={
+                    "startDate": (today - timedelta(days=740)).isoformat(),
+                    "endDate": today.isoformat(),
+                },
+            )
+            response.raise_for_status()
+            return response
+
+        response = await retry_macro_fetch(request)
         parsed = SofrResponse.model_validate(response.json())
         values = {
             item.effectiveDate: item.percentRate
