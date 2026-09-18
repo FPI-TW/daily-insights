@@ -28,7 +28,7 @@ const data: MacroDashboardData = {
     status: "disabled",
     events: [],
   },
-  histories: ["eur_usd", "usd_jpy"].map((id, index) => ({
+  histories: ["dxy", "eur_usd", "usd_jpy"].map((id, index) => ({
     id,
     symbol: id,
     unit: "USD",
@@ -37,14 +37,25 @@ const data: MacroDashboardData = {
     base_dates: { "30": "2026-09-04", "90": "2026-09-04", "365": "2026-01-02" },
     points: [
       { date: "2026-01-02", value: "100" },
-      { date: "2026-09-04", value: index ? "145" : "1.17" },
+      {
+        date: "2026-09-04",
+        value: index === 0 ? "99.65" : index === 1 ? "1.17" : "145",
+      },
     ],
+    provisional_date: id === "dxy" ? "2026-09-04" : null,
   })),
 }
 function show(ui: React.ReactNode) {
   render(<I18nextProvider i18n={createI18n("en")}>{ui}</I18nextProvider>)
 }
 describe("integrated macro dashboard", () => {
+  it("labels the latest DXY observation when it is provisional", () => {
+    show(<MacroDashboard data={data} locale="en" />)
+    expect(screen.getByText("Provisional · 09/04")).toHaveAttribute(
+      "title",
+      expect.stringContaining("official close")
+    )
+  })
   it("has an explicit initial loading state", () => {
     show(<MacroDashboardLoading />)
     expect(screen.getByRole("status")).toHaveTextContent(
@@ -120,6 +131,7 @@ describe("integrated macro dashboard", () => {
           unit: "USD",
           source: "Twelve Data",
           status: "ok" as const,
+          provisional_date: null,
           base_dates: {
             "30": "2026-08-10",
             "90": "2026-08-10",

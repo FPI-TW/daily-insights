@@ -52,6 +52,7 @@ class History(BaseModel):
     status: Literal["ok", "unavailable", "disabled"]
     points: list[Point] = Field(default_factory=list)
     base_dates: dict[str, date] = Field(default_factory=dict)
+    provisional_date: date | None = None
 
 
 class EconomicEvent(BaseModel):

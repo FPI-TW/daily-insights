@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -298,6 +299,7 @@ class MarketDailyObservation(UUIDPrimaryKeyMixin, Base):
     low: Mapped[Decimal | None] = mapped_column(Numeric(24, 10))
     close: Mapped[Decimal] = mapped_column(Numeric(24, 10), nullable=False)
     volume: Mapped[int | None] = mapped_column(BigInteger)
+    is_provisional: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     source_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     value_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(

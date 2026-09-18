@@ -44,6 +44,7 @@ def _normalize(
     *,
     fetched_at: datetime = FETCHED_AT,
     regular_market_end: datetime | None = None,
+    include_provisional_close: bool = False,
 ) -> YfinanceDailyBars:
     return normalize_daily_bars(
         market="tw_equity",
@@ -52,6 +53,7 @@ def _normalize(
         frame=frame,
         fetched_at=fetched_at,
         regular_market_end=regular_market_end,
+        include_provisional_close=include_provisional_close,
     )
 
 
@@ -71,9 +73,40 @@ def test_settled_bars_are_mapped_with_provenance() -> None:
     assert result.items[0].symbol == "^TWII"
     assert result.items[0].market == "tw_equity"
     assert result.dropped_unsettled_trade_date is None
+    assert result.provisional_trade_date is None
     assert result.provenance.provider == "yfinance"
     assert result.provenance.as_of == date(2026, 9, 1)
     assert result.provenance.record_count == 2
+
+
+def test_same_day_bar_can_be_retained_as_an_explicit_provisional_close() -> None:
+    today = date(2026, 9, 3)
+    yesterday = today - timedelta(days=1)
+    result = _normalize(
+        _frame(
+            {
+                yesterday: (100.0, 101.0, 99.0, 100.0, 1_000.0),
+                today: (100.0, 100.5, 99.8, 100.2, 500.0),
+            }
+        ),
+        fetched_at=datetime(2026, 9, 3, 12, 0, tzinfo=TAIPEI),
+        regular_market_end=datetime(2026, 9, 3, 13, 30, tzinfo=TAIPEI),
+        include_provisional_close=True,
+    )
+
+    assert [bar.trade_date for bar in result.items] == [yesterday, today]
+    assert result.provisional_trade_date == today
+    assert result.dropped_unsettled_trade_date is None
+
+
+def test_future_bar_is_never_retained_as_provisional() -> None:
+    with pytest.raises(DataSourceContractError, match="no settled daily bars"):
+        _normalize(
+            _frame({date(2026, 9, 4): (100.0, 100.5, 99.8, 100.2, 500.0)}),
+            fetched_at=datetime(2026, 9, 3, 18, 0, tzinfo=TAIPEI),
+            regular_market_end=datetime(2026, 9, 3, 13, 30, tzinfo=TAIPEI),
+            include_provisional_close=True,
+        )
 
 
 def test_trailing_bar_without_a_close_is_dropped_and_the_settled_days_survive() -> None:

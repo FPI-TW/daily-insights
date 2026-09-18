@@ -143,6 +143,7 @@ type ChartLine = {
   points: { date: string; value: number | null }[]
   change?: number | null
   baseDate?: string
+  provisionalDate?: string | null
 }
 function Chart({
   lines,
@@ -234,6 +235,17 @@ function Chart({
               ) : null}
               {line.change !== undefined ? (
                 <Change value={line.change} locale={locale} />
+              ) : null}
+              {!curve &&
+              latest?.date === line.provisionalDate &&
+              line.provisionalDate ? (
+                <span
+                  className="inline-flex items-center rounded-full bg-harvest/15 px-2 py-0.5 font-sans text-[11px] font-bold text-sea-ink"
+                  title={t("macroProvisionalHint")}
+                >
+                  {t("macroProvisional")} ·{" "}
+                  {line.provisionalDate.slice(5).replace("-", "/")}
+                </span>
               ) : null}
             </div>
           )
@@ -460,6 +472,7 @@ export function MacroDashboard({
       value: Number(p.value),
     })),
     change: byId.has(id) ? periodChange(byId.get(id)!, "day") : null,
+    provisionalDate: byId.get(id)?.provisional_date ?? null,
   })
   const normalizedLine = (id: string): ChartLine => {
     const normalized = normalizedPoints(byId.get(id), normalizedFxDays)

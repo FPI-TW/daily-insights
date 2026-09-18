@@ -57,6 +57,7 @@ class YfinanceDailyBars:
     # here so callers can see that it was seen and dropped.
     dropped_unsettled_trade_date: date | None
     provenance: Provenance
+    provisional_trade_date: date | None = None
 
 
 class YfinanceAdapter:
@@ -80,6 +81,7 @@ class YfinanceAdapter:
         market: MarketCode,
         symbol: str,
         period: str = "2y",
+        include_provisional_close: bool = False,
     ) -> YfinanceDailyBars:
         # yfinance is synchronous and blocking.
         frame, regular_market_end = await asyncio.to_thread(self._history, symbol, period)
@@ -91,6 +93,7 @@ class YfinanceAdapter:
             frame=frame,
             fetched_at=fetched_at,
             regular_market_end=regular_market_end,
+            include_provisional_close=include_provisional_close,
         )
 
     def _history(self, symbol: str, period: str) -> tuple["DataFrame", datetime | None]:
@@ -132,6 +135,7 @@ def normalize_daily_bars(
     frame: "DataFrame",
     fetched_at: datetime,
     regular_market_end: datetime | None = None,
+    include_provisional_close: bool = False,
 ) -> YfinanceDailyBars:
     """Validate the frame at the trust boundary and map it to normalized DTOs."""
     from pandas import Timestamp
@@ -159,28 +163,34 @@ def normalize_daily_bars(
 
     items: list[DailyBar] = []
     dropped_unsettled_trade_date: date | None = None
+    provisional_trade_date: date | None = None
     for index, row in frame.iterrows():
         if not isinstance(index, Timestamp) or index.tzinfo is None:
             raise DataSourceContractError(
                 f"yfinance history for {symbol} returned a naive or non-datetime index"
             )
         trade_date = index.date()
+        if symbol == "DX-Y.NYB" and trade_date.weekday() >= 5:
+            continue
         # The index carries the exchange's own timezone. A same-day bar is
         # settled once Yahoo's regular session has ended; before then (or when
         # that metadata cannot be trusted) it is excluded conservatively.
-        if _is_unsettled_trade_date(
+        unsettled = _is_unsettled_trade_date(
             trade_date=trade_date,
             exchange_timezone=index.tzinfo,
             fetched_at=fetched_at,
             regular_market_end=regular_market_end,
-        ):
+        )
+        local_fetched_date = fetched_at.astimezone(index.tzinfo).date()
+        retain_provisional = (
+            include_provisional_close and unsettled and trade_date == local_fetched_date
+        )
+        if unsettled and not retain_provisional:
             dropped_unsettled_trade_date = trade_date
             continue
         # Yahoo's DXY feed includes an unfinished Sunday overnight row whose
         # close is NaN even on Monday. DXY daily closes use business dates;
         # this weekend session must not invalidate settled weekday history.
-        if symbol == "DX-Y.NYB" and trade_date.weekday() >= 5:
-            continue
         close = _decimal(row["Close"])
         if close is None:
             if last_settled_index is not None and index > last_settled_index:
@@ -226,6 +236,8 @@ def normalize_daily_bars(
                 source="yfinance",
             )
         )
+        if retain_provisional:
+            provisional_trade_date = trade_date
 
     if not items:
         raise DataSourceContractError(f"yfinance returned no settled daily bars for {symbol}")
@@ -235,6 +247,7 @@ def normalize_daily_bars(
         market=market,
         items=tuple(items),
         dropped_unsettled_trade_date=dropped_unsettled_trade_date,
+        provisional_trade_date=provisional_trade_date,
         provenance=_provenance(symbol=symbol, period=period, items=items, fetched_at=fetched_at),
     )
 

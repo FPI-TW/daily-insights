@@ -13,6 +13,7 @@ export const macroHistorySchema = z.object({
   status: z.enum(["ok", "unavailable", "disabled"]),
   points: z.array(z.object({ date: z.iso.date(), value: decimal })),
   base_dates: z.record(z.string(), z.iso.date()),
+  provisional_date: z.iso.date().nullable().default(null),
 })
 export const macroDashboardSchema = z.object({
   fetched_at: z.iso.datetime({ offset: true }),

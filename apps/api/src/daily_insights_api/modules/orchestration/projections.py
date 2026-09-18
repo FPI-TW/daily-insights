@@ -109,6 +109,7 @@ class FrozenObservation:
     value: Decimal
     open_value: Decimal | None
     value_digest: str
+    is_provisional: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -562,6 +563,7 @@ async def _latest_eligible_observations(
                     observation_date=observation.observation_date,
                     value=observation.close if kind == "market" else observation.value,
                     open_value=observation.open if kind == "market" else None,
+                    is_provisional=(observation.is_provisional if kind == "market" else False),
                     value_digest=observation.value_digest,
                 )
             )
@@ -636,6 +638,7 @@ async def _load_frozen(
                 observation_date=observation.observation_date,
                 value=value,
                 open_value=observation.open if kind == "market" else None,
+                is_provisional=(observation.is_provisional if kind == "market" else False),
                 value_digest=observation.value_digest,
             )
         )
@@ -1072,6 +1075,10 @@ async def publish_macro_dashboard(
                     Point(date=item.observation_date, value=item.value)
                     for item in sorted(values, key=lambda item: item.observation_date)
                 ],
+                provisional_date=max(
+                    (item.observation_date for item in values if item.is_provisional),
+                    default=None,
+                ),
             )
         )
     dashboard = MacroDashboard(

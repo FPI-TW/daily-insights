@@ -1305,6 +1305,18 @@
             "title": "Points",
             "type": "array"
           },
+          "provisional_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provisional Date"
+          },
           "source": {
             "title": "Source",
             "type": "string"

@@ -1442,6 +1442,8 @@ export interface components {
       id: string
       /** Points */
       points?: components["schemas"]["Point"][]
+      /** Provisional Date */
+      provisional_date?: string | null
       /** Source */
       source: string
       /**

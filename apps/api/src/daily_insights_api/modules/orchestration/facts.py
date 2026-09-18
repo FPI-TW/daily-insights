@@ -52,6 +52,7 @@ async def store_market_bars(
     unit: str,
     contract_version: str,
     bars: tuple[DailyBar, ...],
+    provisional_trade_date: date | None = None,
     source_timestamp: datetime | None = None,
 ) -> int:
     if not await fence_is_current(
@@ -86,6 +87,7 @@ async def store_market_bars(
             "low": bar.low,
             "close": bar.close,
             "volume": bar.volume,
+            "is_provisional": bar.trade_date == provisional_trade_date,
         }
         digest = fact_digest(values)
         latest = await database.scalar(
@@ -111,6 +113,7 @@ async def store_market_bars(
                 low=bar.low,
                 close=bar.close,
                 volume=bar.volume,
+                is_provisional=bar.trade_date == provisional_trade_date,
                 source_timestamp=source_timestamp,
                 value_digest=digest,
             )

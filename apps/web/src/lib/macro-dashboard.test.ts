@@ -17,6 +17,7 @@ function history(points: [string, string][]): MacroHistory {
     unit: "USD",
     status: "ok",
     base_dates: {},
+    provisional_date: null,
     points: points.map(([date, value]) => ({ date, value })),
   }
 }

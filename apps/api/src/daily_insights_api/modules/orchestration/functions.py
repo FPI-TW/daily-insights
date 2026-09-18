@@ -390,6 +390,7 @@ async def _run_yahoo(
                     market=current_market,
                     symbol=current_symbol,
                     period="2y",
+                    include_provisional_close=claimed.function_key == "dxy_daily_bars",
                 )
 
             result = await retry_macro_fetch(fetch)
@@ -406,15 +407,25 @@ async def _run_yahoo(
                     unit=unit,
                     contract_version=YFINANCE_CONTRACT_VERSION,
                     bars=result.items,
+                    provisional_trade_date=result.provisional_trade_date,
                 )
-                if symbol in TRACKED_INDICES and await fence_is_current(
-                    database,
-                    function_run_id=claimed.function_run_id,
-                    fence_token=claimed.fence_token,
+                settled_items = tuple(
+                    item
+                    for item in result.items
+                    if item.trade_date != result.provisional_trade_date
+                )
+                if (
+                    symbol in TRACKED_INDICES
+                    and settled_items
+                    and await fence_is_current(
+                        database,
+                        function_run_id=claimed.function_run_id,
+                        fence_token=claimed.fence_token,
+                    )
                 ):
                     await store_index_daily_bars(
                         database,
-                        bars=result.items,
+                        bars=settled_items,
                         provider="yfinance",
                         contract_version=YFINANCE_CONTRACT_VERSION,
                         source_fetched_at=result.provenance.fetched_at,
