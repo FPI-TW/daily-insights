@@ -53,14 +53,15 @@ from daily_insights_api.modules.orchestration.worker import (
 )
 from daily_insights_api.modules.reports.api import (
     FX_INSTRUMENTS,
+    MACRO_HTTP_TIMEOUT,
     TENORS,
     diagnostics,
     load_sofr,
     load_treasury,
+    retry_macro_fetch,
 )
 
 TwelveManifest = tuple[tuple[str, str, str, str | None, str | None], ...]
-TREASURY_REQUEST_TIMEOUT_SECONDS = 30.0
 
 
 def _treasury_fetch_periods(
@@ -380,11 +381,18 @@ async def _run_yahoo(
     )
     for symbol, market, unit in manifest:
         try:
-            result = await adapter.get_daily_bars(
-                market=market,  # type: ignore[arg-type]
-                symbol=symbol,
-                period="2y",
-            )
+
+            async def fetch(
+                current_market: Any = market,
+                current_symbol: str = symbol,
+            ) -> Any:
+                return await adapter.get_daily_bars(
+                    market=current_market,
+                    symbol=current_symbol,
+                    period="2y",
+                )
+
+            result = await retry_macro_fetch(fetch)
             async with session_factory.begin() as database:
                 inserted += await store_market_bars(
                     database,
@@ -657,7 +665,7 @@ async def _run_treasury(
     token = diagnostics.set(diagnostic_entries)
     try:
         async with httpx.AsyncClient(
-            timeout=TREASURY_REQUEST_TIMEOUT_SECONDS,
+            timeout=MACRO_HTTP_TIMEOUT,
             follow_redirects=False,
         ) as client:
             histories = await load_treasury(
@@ -737,7 +745,7 @@ async def _run_sofr(
 ) -> FunctionOutcome:
     del settings
     today = claimed.edition_date
-    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+    async with httpx.AsyncClient(timeout=MACRO_HTTP_TIMEOUT, follow_redirects=False) as client:
         history = await load_sofr(client, today)
     if not history.points:
         return FunctionOutcome(status="unavailable", error_code="empty_sofr", retryable=True)

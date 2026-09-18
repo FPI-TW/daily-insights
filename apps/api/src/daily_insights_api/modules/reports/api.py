@@ -25,6 +25,7 @@ from daily_insights_api.modules.reports.macro_dashboard import (
     COMMODITIES,
     FX_INSTRUMENTS,
     INSTRUMENTS,
+    MACRO_HTTP_TIMEOUT,
     TENORS,
     Calendar,
     History,
@@ -33,6 +34,7 @@ from daily_insights_api.modules.reports.macro_dashboard import (
     load_sofr,
     load_treasury,
     refresh_macro_dashboard,
+    retry_macro_fetch,
 )
 from daily_insights_api.modules.reports.macro_dashboard_models import MacroDashboardSnapshot
 from daily_insights_api.modules.reports.macro_diagnostics import diagnostics
@@ -60,6 +62,7 @@ __all__ = [
     "FX_INSTRUMENTS",
     "INSTRUMENTS",
     "LAUNCH_MARKET_ORDER",
+    "MACRO_HTTP_TIMEOUT",
     "MORNING_REPORT_DERIVATION_VERSION",
     "TENORS",
     "Calendar",
@@ -98,6 +101,7 @@ __all__ = [
     "load_sofr",
     "load_treasury",
     "refresh_macro_dashboard",
+    "retry_macro_fetch",
     "run_morning_report_edition",
     "visible_report_market_codes",
 ]

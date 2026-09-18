@@ -74,6 +74,77 @@ async def test_treasury_fetches_only_requested_periods() -> None:
     ]
 
 
+async def test_macro_retry_is_bounded_and_honors_retry_after() -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    async def operation() -> str:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            request = httpx.Request("GET", "https://example.test")
+            response = httpx.Response(429, headers={"Retry-After": "60"}, request=request)
+            raise httpx.HTTPStatusError("limited", request=request, response=response)
+        return "ok"
+
+    async def sleep(delay: float) -> None:
+        delays.append(delay)
+
+    assert await macro.retry_macro_fetch(operation, sleep=sleep) == "ok"
+    assert attempts == 3
+    assert delays == [30, 30]
+
+
+async def test_macro_retry_does_not_repeat_contract_or_general_4xx_errors() -> None:
+    attempts = 0
+
+    async def operation() -> None:
+        nonlocal attempts
+        attempts += 1
+        request = httpx.Request("GET", "https://example.test")
+        response = httpx.Response(400, request=request)
+        raise httpx.HTTPStatusError("bad request", request=request, response=response)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await macro.retry_macro_fetch(operation)
+    assert attempts == 1
+
+
+async def test_treasury_retries_only_the_failed_period(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, int] = {}
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        period_key = next(key for key in request.url.params if key != "data")
+        period = request.url.params[period_key]
+        calls[period] = calls.get(period, 0) + 1
+        if period == "2025" and calls[period] < 3:
+            raise httpx.ReadTimeout("slow", request=request)
+        fields = "".join(f"<{field}>4.0</{field}>" for _, field in macro.TENORS)
+        year = period[:4]
+        return httpx.Response(
+            200,
+            content=(
+                f"<feed><properties><NEW_DATE>{year}-09-04</NEW_DATE>{fields}</properties></feed>"
+            ).encode(),
+        )
+
+    monkeypatch.setattr(macro, "MACRO_RETRY_DELAYS", (0, 0))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        histories = await macro.load_treasury(
+            client,
+            date(2026, 9, 4),
+            years=(2024, 2025, 2026),
+        )
+    assert all(history.status == "ok" for history in histories)
+    assert calls == {"2024": 1, "2025": 3, "2026": 1}
+
+
+def test_public_macro_client_allows_a_45_second_read() -> None:
+    assert macro.MACRO_HTTP_TIMEOUT.read == 45
+
+
 async def test_sofr_validates_type_and_sorts_observations() -> None:
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(
