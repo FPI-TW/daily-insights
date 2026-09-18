@@ -16,14 +16,17 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionm
 import daily_insights_api.scripts.run_orchestration_worker as orchestration_worker_script
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.news.contracts import SelectedCandidate, Selection
+from daily_insights_api.modules.news.failures import NewsFailure, NewsOperationError
 from daily_insights_api.modules.news.llm import ModelCall
 from daily_insights_api.modules.news.models import NewsCandidateBatch, PreparedNewsItem
 from daily_insights_api.modules.orchestration import worker
 from daily_insights_api.modules.orchestration.models import JobRun
 from daily_insights_api.modules.orchestration.news_functions import (
     _publication_digest,
+    _refresh_error_code,
     _refresh_status,
     _restore_model_call,
+    _selection_failure_is_local,
     _serialize_model_call,
 )
 from daily_insights_api.modules.orchestration.projections import (
@@ -124,6 +127,29 @@ def test_news_generation_failures_and_editorial_shortfalls_are_terminal() -> Non
     assert _refresh_status(2, 0) == ("succeeded", "ready", False)
     assert _refresh_status(0, 1) == ("unavailable", "unavailable", False)
     assert _refresh_status(0, 0) == ("unavailable", "unavailable", False)
+
+
+def test_news_refresh_only_degrades_exhausted_selection_contract_failures() -> None:
+    schema_failure = NewsOperationError(
+        NewsFailure(
+            code="selection_schema_invalid_exhausted",
+            stage="selection",
+            action="attention",
+        )
+    )
+    provider_failure = NewsOperationError(
+        NewsFailure(
+            code="provider_http_503_repair_exhausted",
+            stage="selection",
+            action="attention",
+        )
+    )
+
+    assert _selection_failure_is_local(schema_failure) is True
+    assert _selection_failure_is_local(provider_failure) is False
+    assert _refresh_error_code(2, 1, 0) == "news_selection_partial"
+    assert _refresh_error_code(0, 1, 0) == "news_selection_unavailable"
+    assert _refresh_error_code(2, 1, 1) == "news_processing_partial"
 
 
 def test_selection_checkpoint_preserves_returned_and_rejected_candidates() -> None:

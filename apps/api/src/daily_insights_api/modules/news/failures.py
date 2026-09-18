@@ -37,6 +37,7 @@ class NewsFailure(BaseModel):
     candidate_id: str | None = None
     locale: str | None = None
     request_id: str | None = None
+    validation_issues: tuple[str, ...] = ()
 
 
 class NewsOperationError(Exception):
@@ -118,6 +119,7 @@ def classify_failure(
     status: int | None = None
     after: datetime | None = None
     request_id: str | None = None
+    validation_issues: tuple[str, ...] = ()
     code = "unexpected_error"
     action: FailureAction = "attention"
     is_model = stage in {"selection", "summary", "translation"}
@@ -135,6 +137,9 @@ def classify_failure(
                 pass
         after = getattr(error, "retry_after", None)
         request_id = getattr(error, "request_id", None)
+        raw_issues = getattr(error, "validation_issues", ())
+        if isinstance(raw_issues, tuple) and all(isinstance(item, str) for item in raw_issues):
+            validation_issues = raw_issues[:10]
     if status is not None:
         code = f"provider_http_{status}" if is_model else f"source_http_{status}"
         if status == 429 or status == 408 or 500 <= status <= 599:
@@ -160,12 +165,15 @@ def classify_failure(
     elif is_model and model_code in {
         "provider_invalid_json",
         "model_output_invalid",
+        "selection_schema_invalid",
         "selection_invalid_json",
         "selection_invalid_candidate",
+        "summary_schema_invalid",
         "summary_invalid_json",
         # Historical checkpoints may contain these pre-v5 validation codes.
         # New prompts no longer produce them, but recovery must classify them safely.
         "summary_ungrounded_number",
+        "translation_schema_invalid",
         "translation_invalid_json",
         "translation_ungrounded_number",
     }:
@@ -219,4 +227,5 @@ def classify_failure(
         candidate_id=candidate_id,
         locale=locale,
         request_id=request_id,
+        validation_issues=validation_issues,
     )

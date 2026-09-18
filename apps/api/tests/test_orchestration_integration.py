@@ -906,6 +906,151 @@ async def test_news_refresh_screens_full_pool_refills_and_classifies_failures(
     }
 
 
+async def test_news_refresh_keeps_successful_windows_when_selection_schema_repair_exhausts(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, sessions = orchestration_database
+    now = datetime.now(UTC)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_global_refresh_job",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            status="pending",
+        )
+        database.add(job)
+        await database.flush()
+        database.add(
+            FunctionRun(
+                job_run_id=job.id,
+                function_key="news_global_refresh",
+                provider_key="internal_services",
+                scope={},
+                status="pending",
+            )
+        )
+
+    candidates = [
+        Candidate(
+            id=f"{index:064x}",
+            url=f"https://source{index}.example/story",
+            hostname=f"source{index}.example",
+            source_name=f"Source {index}",
+            headline=f"Story {index}",
+        )
+        for index in range(40)
+    ]
+    extracted = [
+        FetchedCandidate(
+            candidate,
+            str(candidate.url),
+            f"Article body {index}",
+            f"{index + 100:064x}",
+        )
+        for index, candidate in enumerate(candidates)
+    ]
+
+    async def discover(*_: object, **__: object) -> list[Candidate]:
+        return candidates
+
+    async def extract(*_: object, **__: object) -> list[ExtractionOutcome]:
+        return [ExtractionOutcome(item.candidate, fetched=item) for item in extracted]
+
+    class Client:
+        model_name = "test-news-model"
+        selection_prompt_digest = "a" * 64
+        selection_prompt_version = "selection-test"
+
+        def __init__(self) -> None:
+            self.failed_window: tuple[str, ...] | None = None
+            self.selection_calls = 0
+
+        async def select(self, batch: list[FetchedCandidate], **_: object) -> ModelCall:
+            self.selection_calls += 1
+            ids = tuple(item.candidate.id for item in batch)
+            if self.failed_window is None:
+                self.failed_window = ids
+            if ids == self.failed_window:
+                raise ModelCallError(
+                    "selection schema validation failed",
+                    input_digest="b" * 64,
+                    latency_ms=1,
+                    error_code="selection_schema_invalid",
+                    validation_issues=("selections.0.event_key:string_pattern_mismatch",),
+                )
+            chosen = batch[0].candidate
+            selected = SelectedCandidate(
+                id=chosen.id,
+                topic="markets",
+                event_key=f"event-{int(chosen.id, 16)}",
+                market="global",
+                importance=5,
+            )
+            selection = Selection(selections=(selected,))
+            return ModelCall(selection, None, None, None, 1, "c" * 64)
+
+        async def summarize(
+            self,
+            candidate: Candidate,
+            article_text: str,
+            locale: str,
+            **_: object,
+        ) -> ModelCall:
+            del article_text
+            summary = LocalizedSummary(
+                headline=f"{locale} {candidate.headline}", summary=f"{locale} summary"
+            )
+            return ModelCall(summary, None, None, None, 1, candidate.id)
+
+        async def translate(
+            self,
+            candidate: Candidate,
+            article_text: str,
+            source_summary: LocalizedSummary,
+            locale: str,
+            **_: object,
+        ) -> ModelCall:
+            del article_text, source_summary
+            summary = LocalizedSummary(
+                headline=f"{locale} {candidate.headline}", summary=f"{locale} summary"
+            )
+            return ModelCall(summary, None, None, None, 1, candidate.id)
+
+        async def aclose(self) -> None:
+            return None
+
+    client = Client()
+    monkeypatch.setattr(orchestration_news_functions, "_client", lambda _: client)
+    monkeypatch.setattr(orchestration_news_functions, "discover_feed_candidates", discover)
+    monkeypatch.setattr(orchestration_news_functions, "_extract_candidate_outcomes", extract)
+    claimed = await claim_ready_function(engine, sessions, owner="selection-window-test", now=now)
+    assert claimed is not None
+
+    outcome = await orchestration_news_functions.refresh_news(
+        Settings(environment="test", daily_news_enabled=True), sessions, claimed
+    )
+
+    assert outcome.status == "partial"
+    assert outcome.error_code == "news_selection_partial"
+    assert outcome.retryable is False
+    assert outcome.result is not None
+    assert outcome.result["prepared"] == 1
+    assert outcome.result["selection_failed"] == 2
+    assert outcome.result["generation_failed"] == 0
+    assert client.selection_calls == 5
+    reasons = outcome.result["selection_failure_reasons"]
+    assert [reason["window"] for reason in reasons] == [1, 3]
+    assert all(reason["code"] == "selection_schema_invalid_exhausted" for reason in reasons)
+    assert all(
+        reason["validation_issues"] == ["selections.0.event_key:string_pattern_mismatch"]
+        for reason in reasons
+    )
+
+
 async def test_news_model_contract_failure_is_audited_then_repaired_once(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:

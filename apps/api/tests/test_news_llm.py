@@ -152,6 +152,45 @@ async def test_selection_retry_adds_fixed_safe_contract_guidance(
     assert "selection_invalid_json" not in guidance
 
 
+async def test_selection_schema_failure_records_only_safe_validation_issues(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = DeepSeekClient(
+        base_url="https://api.deepseek.com", api_key="secret", model="deepseek-chat"
+    )
+    monkeypatch.setattr(
+        client,
+        "_complete",
+        AsyncMock(
+            return_value=(
+                {
+                    "selections": [
+                        {
+                            "id": "a" * 64,
+                            "topic": "markets",
+                            "event_key": "?",
+                            "market": "global",
+                            "importance": 4,
+                        }
+                    ]
+                },
+                None,
+                10,
+                5,
+                1,
+                "a" * 64,
+            )
+        ),
+    )
+
+    with pytest.raises(ModelCallError) as captured:
+        await client.select([])
+
+    assert captured.value.error_code == "selection_schema_invalid"
+    assert captured.value.validation_issues == ("selections.0.event_key:string_pattern_mismatch",)
+    assert "?" not in str(captured.value.validation_issues)
+
+
 async def test_selection_rejects_unknown_id_and_summary_does_not_validate_numbers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -503,7 +542,10 @@ async def test_summary_retry_adds_safe_feedback_and_audits_invalid_json(
     assert result.value.headline == "Gain 10%"
     assert len(failures) == 1
     audit = _failed_audit(uuid.uuid4(), "summary", "en", "f" * 64, "test", failures[0])
-    assert audit.error_code == "summary_invalid_json"
+    assert audit.error_code == "summary_schema_invalid"
+    failure = failures[0]
+    assert isinstance(failure, ModelCallError)
+    assert failure.validation_issues == ("headline:string_too_short",)
     assert audit.input_digest == "d" * 64
     assert "RETRY_GUIDANCE" not in captured[0]
     assert "exact OUTPUT_CONTRACT" in captured[1]["RETRY_GUIDANCE"]

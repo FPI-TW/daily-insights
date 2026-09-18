@@ -42,6 +42,7 @@ class ModelCallError(ModelOutputError):
         input_tokens: int | None = None,
         output_tokens: int | None = None,
         retry_after: datetime | None = None,
+        validation_issues: tuple[str, ...] = (),
     ) -> None:
         super().__init__(message)
         self.error_code = error_code
@@ -51,6 +52,7 @@ class ModelCallError(ModelOutputError):
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
         self.retry_after = retry_after
+        self.validation_issues = validation_issues
 
 
 TOPIC_VALUES = ["markets", "economy", "companies", "policy", "technology", "commodities"]
@@ -352,7 +354,10 @@ class DeepSeekClient:
             value = Selection.model_validate(call[0])
         except ValidationError as error:
             raise _failure_from_call(
-                "invalid selection JSON", call, error_code="selection_invalid_json"
+                "selection output failed schema validation",
+                call,
+                error_code="selection_schema_invalid",
+                validation_issues=_validation_issues(error),
             ) from error
         returned = value.selections
         value, dropped = filter_selection_markets(value, policy)
@@ -410,7 +415,10 @@ class DeepSeekClient:
             value = LocalizedSummary.model_validate(call[0])
         except ValidationError as error:
             raise _failure_from_call(
-                "invalid summary JSON", call, error_code="summary_invalid_json"
+                "summary output failed schema validation",
+                call,
+                error_code="summary_schema_invalid",
+                validation_issues=_validation_issues(error),
             ) from error
         return ModelCall(value, *call[1:])
 
@@ -449,7 +457,10 @@ class DeepSeekClient:
             value = LocalizedSummary.model_validate(call[0])
         except ValidationError as error:
             raise _failure_from_call(
-                "invalid translation JSON", call, error_code="translation_invalid_json"
+                "translation output failed schema validation",
+                call,
+                error_code="translation_schema_invalid",
+                validation_issues=_validation_issues(error),
             ) from error
         return ModelCall(value, *call[1:])
 
@@ -687,6 +698,7 @@ def _failure_from_call(
     call: tuple[dict[str, Any], str | None, int | None, int | None, int, str],
     *,
     error_code: str,
+    validation_issues: tuple[str, ...] = (),
 ) -> ModelCallError:
     return ModelCallError(
         message,
@@ -696,7 +708,22 @@ def _failure_from_call(
         request_id=call[1],
         input_tokens=call[2],
         output_tokens=call[3],
+        validation_issues=validation_issues,
     )
+
+
+def _validation_issues(error: ValidationError) -> tuple[str, ...]:
+    """Return bounded schema locations and error types without model output."""
+    issues: list[str] = []
+    for item in error.errors(
+        include_url=False,
+        include_context=False,
+        include_input=False,
+    )[:10]:
+        location = ".".join(str(part) for part in item.get("loc", ())) or "$"
+        error_type = str(item.get("type") or "validation_error")
+        issues.append(f"{location}:{error_type}"[:200])
+    return tuple(issues)
 
 
 def _elapsed_ms(started: float) -> int:

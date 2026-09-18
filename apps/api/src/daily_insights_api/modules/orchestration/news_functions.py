@@ -12,6 +12,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api.core.config import Settings, is_placeholder_value
+from daily_insights_api.core.observability import emit_event
 from daily_insights_api.modules.news.api import (
     DERIVATION_VERSION,
     LOCALES,
@@ -145,7 +146,13 @@ async def _model_call_with_repair(
                     locale=locale,
                 )
             )
-        attempt, feedback, previous_action, cached_call = await _reserve_model_attempt(
+        (
+            attempt,
+            feedback,
+            previous_action,
+            previous_issues,
+            cached_call,
+        ) = await _reserve_model_attempt(
             session_factory, batch_id=batch_id, attempt_key=durable_key
         )
         if cached_call is not None:
@@ -169,6 +176,7 @@ async def _model_call_with_repair(
                     stage=stage,
                     candidate_id=candidate_id,
                     locale=locale,
+                    validation_issues=previous_issues,
                 )
             else:
                 failure = NewsFailure(
@@ -181,6 +189,7 @@ async def _model_call_with_repair(
                     stage=stage,
                     candidate_id=candidate_id,
                     locale=locale,
+                    validation_issues=previous_issues,
                 )
             raise NewsOperationError(failure)
         if guard is not None and not await guard():
@@ -220,6 +229,7 @@ async def _model_call_with_repair(
                     attempt_key=durable_key,
                     code=failure.code,
                     action=failure.action,
+                    validation_issues=failure.validation_issues,
                 )
             if attempt >= 2 or failure.action != "repair":
                 if attempt >= 2 and failure.action == "repair":
@@ -268,7 +278,13 @@ async def _reserve_model_attempt(
     *,
     batch_id: uuid.UUID,
     attempt_key: str,
-) -> tuple[int | None, str | None, str | None, dict[str, Any] | None]:
+) -> tuple[
+    int | None,
+    str | None,
+    str | None,
+    tuple[str, ...],
+    dict[str, Any] | None,
+]:
     """Durably reserve a model dispatch so restarts cannot renew repair budget."""
     async with session_factory.begin() as database:
         function_run = await _model_function_run(database, batch_id, for_update=True)
@@ -277,24 +293,31 @@ async def _reserve_model_attempt(
         state = dict(attempts.get(attempt_key) or {})
         cached_call = state.get("success")
         if isinstance(cached_call, dict):
-            return None, None, "success", cached_call
+            return None, None, "success", (), cached_call
         count = state.get("count", 0)
         count = count if isinstance(count, int) and not isinstance(count, bool) else 0
         previous_code = state.get("failure_code")
         previous_code = previous_code if isinstance(previous_code, str) else None
         previous_action = state.get("failure_action")
         previous_action = previous_action if isinstance(previous_action, str) else None
+        raw_issues = state.get("validation_issues")
+        previous_issues = (
+            tuple(item for item in raw_issues[:10] if isinstance(item, str))
+            if isinstance(raw_issues, list)
+            else ()
+        )
         if count >= 2:
             if previous_action == "retry":
                 previous_code = f"{previous_code or 'provider_retry'}_repair_exhausted"
                 previous_action = "attention"
-            return None, previous_code, previous_action, None
+            return None, previous_code, previous_action, previous_issues, None
         if previous_action == "retry":
             count = 0
             previous_code = None
             previous_action = None
+            previous_issues = ()
         elif previous_action in {"block", "attention"}:
-            return None, previous_code, previous_action, None
+            return None, previous_code, previous_action, previous_issues, None
         count += 1
         state["count"] = count
         attempts[attempt_key] = state
@@ -304,6 +327,7 @@ async def _reserve_model_attempt(
             count,
             previous_code if previous_action == "repair" else None,
             previous_action,
+            previous_issues,
             None,
         )
 
@@ -370,6 +394,7 @@ async def _record_model_attempt_success(
         state = dict(attempts.get(attempt_key) or {})
         state.pop("failure_code", None)
         state.pop("failure_action", None)
+        state.pop("validation_issues", None)
         state["success"] = _serialize_model_call(model_call)
         attempts[attempt_key] = state
         result[_MODEL_ATTEMPTS_KEY] = attempts
@@ -383,12 +408,17 @@ async def _record_model_attempt_failure(
     attempt_key: str,
     code: str,
     action: str,
+    validation_issues: tuple[str, ...] = (),
 ) -> None:
     function_run = await _model_function_run(database, batch_id, for_update=True)
     result = dict(function_run.result or {})
     attempts = dict(result.get(_MODEL_ATTEMPTS_KEY) or {})
     state = dict(attempts.get(attempt_key) or {})
     state.update(failure_code=sanitize_error_code(code), failure_action=action)
+    if validation_issues:
+        state["validation_issues"] = list(validation_issues[:10])
+    else:
+        state.pop("validation_issues", None)
     attempts[attempt_key] = state
     result[_MODEL_ATTEMPTS_KEY] = attempts
     function_run.result = result
@@ -436,14 +466,40 @@ def _translation_call(
     return call
 
 
-def _refresh_status(prepared: int, generation_failures: int) -> tuple[AttemptStatus, str, bool]:
-    if prepared and generation_failures:
+def _selection_failure_is_local(error: NewsOperationError) -> bool:
+    failure = error.failure
+    return (
+        failure.stage == "selection"
+        and failure.action == "attention"
+        and failure.code.startswith("selection_")
+        and failure.code.endswith("_exhausted")
+    )
+
+
+def _refresh_status(prepared: int, processing_failures: int) -> tuple[AttemptStatus, str, bool]:
+    if prepared and processing_failures:
         return "partial", "partial", False
     if prepared:
         return "succeeded", "ready", False
-    if generation_failures:
+    if processing_failures:
         return "unavailable", "unavailable", False
     return "unavailable", "unavailable", False
+
+
+def _refresh_error_code(
+    prepared: int, selection_failures: int, generation_failures: int
+) -> str | None:
+    if not selection_failures and not generation_failures:
+        return None
+    suffix = "partial" if prepared else "unavailable"
+    category = (
+        "processing"
+        if selection_failures and generation_failures
+        else "selection"
+        if selection_failures
+        else "generation"
+    )
+    return f"news_{category}_{suffix}"
 
 
 def build_news_handlers(
@@ -601,6 +657,7 @@ async def refresh_news(
             await database.flush()
         summary_failures = 0
         translation_failures = 0
+        selection_failures: list[dict[str, Any]] = []
         selection_calls = 0
         screened: set[str] = set()
         returned: set[str] = set()
@@ -706,6 +763,31 @@ async def refresh_news(
                     rejected_row.stage = "dropped"
                     rejected_row.drop_reason = reason
             return list(selection_call.value.selections)
+
+        async def select_batch_resilient(
+            batch_items: list[FetchedCandidate], previous_events: tuple[CoveredEvent, ...]
+        ) -> list[SelectedCandidate]:
+            try:
+                return await select_batch(batch_items, previous_events)
+            except NewsOperationError as error:
+                if not _selection_failure_is_local(error):
+                    raise
+                reason = {
+                    "window": selection_calls,
+                    "candidate_count": len(batch_items),
+                    "code": sanitize_error_code(error.failure.code),
+                    "validation_issues": list(error.failure.validation_issues),
+                }
+                selection_failures.append(reason)
+                emit_event(
+                    "news.selection.window_skipped",
+                    market=market,
+                    window=selection_calls,
+                    candidate_count=len(batch_items),
+                    error_code=reason["code"],
+                    validation_issues=reason["validation_issues"],
+                )
+                return []
 
         async def summarize_picks(picks: list[SelectedCandidate]) -> None:
             nonlocal summary_failures, translation_failures
@@ -860,7 +942,7 @@ async def refresh_news(
             if selection_calls >= 3:
                 break
             screening_picks.extend(
-                await select_batch(
+                await select_batch_resilient(
                     usable[start : start + spec.max_candidates],
                     covered_events(screening_picks),
                 )
@@ -893,7 +975,7 @@ async def refresh_news(
             refill_batch = remaining[: spec.max_candidates]
             if not refill_batch:
                 break
-            refill_picks = await select_batch(refill_batch, covered_events(successful))
+            refill_picks = await select_batch_resilient(refill_batch, covered_events(successful))
             await summarize_picks(sorted(refill_picks, key=lambda item: -item.importance))
             publication = publishable_selection(
                 sorted(successful, key=lambda item: -item.importance), usable, spec.selection
@@ -932,6 +1014,7 @@ async def refresh_news(
             )
         prepared = len(prepared_items)
         generation_failures = summary_failures + translation_failures
+        processing_failures = generation_failures + len(selection_failures)
         fetch_failures = sum(row.stage == "fetch_failed" for row in candidate_rows.values())
         async with session_factory.begin() as database:
             if not await fence_is_current(
@@ -943,7 +1026,7 @@ async def refresh_news(
                 return FunctionOutcome(status="cancelled", error_code="cancelled")
             stored = await database.get(NewsCandidateBatch, batch.id, with_for_update=True)
             assert stored is not None
-            outcome_status, batch_status, retryable = _refresh_status(prepared, generation_failures)
+            outcome_status, batch_status, retryable = _refresh_status(prepared, processing_failures)
             stored.status = batch_status
             stored.input_digest = digest
             stored.source_as_of = max(
@@ -955,6 +1038,8 @@ async def refresh_news(
                 "usable": len(usable),
                 "prepared": prepared,
                 "fetch_failed": fetch_failures,
+                "selection_failed": len(selection_failures),
+                "selection_failure_reasons": selection_failures,
                 "summary_failed": summary_failures,
                 "translation_failed": translation_failures,
                 "generation_failed": generation_failures,
@@ -979,24 +1064,29 @@ async def refresh_news(
                 "market_code": market,
                 "prepared": prepared,
                 "fetch_failed": fetch_failures,
+                "selection_failed": len(selection_failures),
+                "selection_failure_reasons": selection_failures,
                 "summary_failed": summary_failures,
                 "translation_failed": translation_failures,
                 "generation_failed": generation_failures,
                 "failure_reasons": failure_reasons,
             },
-            missing_scopes=(market,) if generation_failures else (),
-            error_code=(
-                "news_generation_partial"
-                if prepared and generation_failures
-                else "news_generation_unavailable"
-                if generation_failures
-                else None
-            ),
+            missing_scopes=(market,) if processing_failures else (),
+            error_code=_refresh_error_code(prepared, len(selection_failures), generation_failures),
             error_detail=(
                 "; ".join(
-                    f"{candidate_id}={reason['stage']}:{reason['locale']}:{reason['code']}"
-                    for candidate_id, reason in failure_reasons.items()
-                    if reason["stage"] in {"summary", "translation"}
+                    [
+                        (
+                            f"selection[{reason['window']}]={reason['code']}:"
+                            f"{','.join(reason['validation_issues']) or 'unspecified'}"
+                        )
+                        for reason in selection_failures
+                    ]
+                    + [
+                        f"{candidate_id}={reason['stage']}:{reason['locale']}:{reason['code']}"
+                        for candidate_id, reason in failure_reasons.items()
+                        if reason["stage"] in {"summary", "translation"}
+                    ]
                 )[:500]
                 or None
             ),

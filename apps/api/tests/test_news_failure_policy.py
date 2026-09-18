@@ -72,15 +72,18 @@ def test_translation_validation_is_repairable_and_operation_error_exposes_safe_c
     failure = classify_failure(
         ModelCallError(
             "private provider output",
-            error_code="translation_invalid_json",
+            error_code="translation_schema_invalid",
             input_digest="a" * 64,
             latency_ms=1,
+            validation_issues=("headline:string_too_short",),
         ),
         stage="translation",
         locale="en",
     )
 
     assert failure.action == "repair"
+    assert failure.code == "translation_schema_invalid"
+    assert failure.validation_issues == ("headline:string_too_short",)
     error = NewsOperationError(
         NewsFailure(code="translation_invalid_json_exhausted", action="skip", stage="translation")
     )

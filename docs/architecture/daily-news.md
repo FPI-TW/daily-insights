@@ -379,15 +379,20 @@ Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主�
 相同則數優先保留排名較前者。未知 ID、重複事件與結構錯誤仍拒絕。最多十個候選，
 搜尋不超過 1024 個子集，不增加模型呼叫。選題範例的 market 必須符合該版本允許值。
 
-摘要或翻譯的 JSON schema 驗證失敗時，既有一次重試加入固定的修正指引。流程不再以
+選稿、摘要或翻譯的 JSON schema 驗證失敗時，既有一次重試加入固定的修正指引。Provider
+回傳內容無法解析為 JSON object 時記為 `provider_invalid_json`；可解析但不符合嚴格 schema
+時則依階段記為 `selection_schema_invalid`、`summary_schema_invalid` 或
+`translation_schema_invalid`。Schema 錯誤只保存最多十個安全化的欄位路徑與錯誤類型，
+不保存模型原文、候選正文或欄位值。流程不再以
 程式逐一比對原文與輸出中的數字；`numeric_facts` 仍保存為呈現資料，但不作為通過門檻。
 翻譯不是單純接受模型文字：它沿用摘要的嚴格 JSON schema，並以已驗證繁中摘要作為
 翻譯基準；任一結構條件失敗都依實際的摘要或翻譯階段記錄安全錯誤代碼。
-Audit 與事件記錄區分 selection_invalid_json、selection_invalid_candidate、
-summary_invalid_json、translation_invalid_json、provider_http_<status>、
+Audit 與事件記錄區分 selection_schema_invalid、selection_invalid_candidate、
+summary_schema_invalid、translation_schema_invalid、provider_http_<status>、
 provider_invalid_json、provider_request_failed，不記錄 prompt、正文或原始例外內容。
-歷史 audit 或 checkpoint 可能仍含 `summary_ungrounded_number`／
-`translation_ungrounded_number`；新 prompt 版本不再產生這兩個代碼，但恢復流程仍能安全分類。
+歷史 audit 或 checkpoint 可能仍含 `selection_invalid_json`、`summary_invalid_json`、
+`translation_invalid_json`、`summary_ungrounded_number` 或
+`translation_ungrounded_number`；新流程不再產生這些舊 schema／數字代碼，但恢復流程仍能安全分類。
 選題修復事件 news.selection.repaired 僅記錄原始與保留則數。
 
 Orchestration refresh 若已有至少一則可發布內容，另有摘要或翻譯驗證耗盡，會以終態
@@ -400,6 +405,11 @@ provider timeout、429、5xx、認證或未知系統錯誤不會被降級為單�
 模型呼叫並沿用 worker 既有失敗恢復流程。`news_publish` 只處理具正常終態或已保存
 partial 批次的市場；純 `failed`／`cancelled` 市場記為 blocked／skipped，不建立空的
 `unavailable` edition，也不覆蓋既有可用版本。
+選稿會將候選池分成多個視窗。單一視窗的 schema 或候選契約修復耗盡時，不丟棄其他視窗
+已成功的選稿結果；該視窗記入 `selection_failure_reasons`，流程繼續後續視窗與不足額補選。
+只要至少一則內容備妥，refresh 以不可重試的 `partial` 完成並允許 `news_publish`；所有選稿
+視窗都耗盡且無內容時則以 `unavailable` 完成，同樣不把 sibling 市場標記為系統性失敗。
+Provider timeout、429、5xx、認證、資料庫或未知錯誤仍會立即停止，不會被誤降級為視窗失敗。
 因 retryable provider／系統錯誤或未執行 sibling 在 deadline 被通用終止器標為
 `unavailable` 時，必須同時具備最新 `unavailable` attempt 與正常完成的 unavailable batch
 才視為內容不足；failed batch、failed attempt 或無 batch 一律維持 blocked。
