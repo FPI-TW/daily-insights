@@ -101,6 +101,8 @@ async def test_selection_uses_original_mixed_language_content_and_separate_custo
     contract = captured["OUTPUT_CONTRACT"]
     assert isinstance(contract, dict)
     assert "ordered by importance from 5 down to 1" in contract["selections"]
+    assert "independently reported alternative" in contract["reserves"]
+    assert "same event_key" in contract["reserves"]
     assert "absolute scale" in contract["importance"]
     assert "systemic catalyst" in contract["importance"]
     assert "official forward guidance" in contract["importance"]
@@ -245,6 +247,74 @@ async def test_selection_rejects_unknown_id_and_summary_does_not_validate_number
     )
     summary = await client.summarize(_candidate(), "Source body gained 10%.", "en")
     assert summary.value == LocalizedSummary(headline="Gain 20%", summary="No basis.")
+
+
+async def test_selection_preserves_one_generation_reserve_for_the_same_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = DeepSeekClient(
+        base_url="https://api.deepseek.com", api_key="secret", model="deepseek-chat"
+    )
+    primary = _candidate()
+    reserve = Candidate(
+        id="b" * 64,
+        url="https://apnews.com/b",
+        hostname="apnews.com",
+        source_name="AP",
+        headline=primary.headline,
+    )
+    response = {
+        "selections": [
+            {
+                "id": primary.id,
+                "topic": "policy",
+                "event_key": "fed-rate-decision",
+                "market": "global",
+                "importance": 5,
+            }
+        ],
+        "reserves": [
+            {
+                "id": reserve.id,
+                "topic": "policy",
+                "event_key": "fed-rate-decision",
+                "market": "global",
+                "importance": 5,
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        client,
+        "_complete",
+        AsyncMock(return_value=(response, None, None, None, 1, "a" * 64)),
+    )
+
+    result = await client.select(
+        [
+            FetchedCandidate(primary, str(primary.url), "Primary report", "c" * 64),
+            FetchedCandidate(reserve, str(reserve.url), "Independent report", "d" * 64),
+        ]
+    )
+
+    assert isinstance(result.value, Selection)
+    assert [item.id for item in result.value.selections] == [primary.id]
+    assert [item.id for item in result.value.reserves] == [reserve.id]
+    assert [item.id for item in result.returned] == [primary.id, reserve.id]
+
+    invalid = {**response, "reserves": [{**response["reserves"][0], "event_key": "other-event"}]}
+    monkeypatch.setattr(
+        client,
+        "_complete",
+        AsyncMock(return_value=(invalid, None, None, None, 1, "a" * 64)),
+    )
+    with pytest.raises(ModelCallError, match="reserve") as captured:
+        await client.select(
+            [
+                FetchedCandidate(primary, str(primary.url), "Primary report", "c" * 64),
+                FetchedCandidate(reserve, str(reserve.url), "Independent report", "d" * 64),
+            ]
+        )
+    assert captured.value.error_code == "selection_invalid_candidate"
 
 
 async def test_translation_uses_validated_zh_hant_summary_and_original_source_grounding(
@@ -478,6 +548,16 @@ async def test_selection_salvages_valid_stories_when_model_exceeds_domain_cap(
         )
         for character in "abc"
     ]
+    candidates.append(
+        FetchedCandidate(
+            _candidate().model_copy(
+                update={"id": "d" * 64, "hostname": "apnews.com", "source_name": "AP"}
+            ),
+            "https://apnews.com/d",
+            "Independent fallback",
+            "d" * 64,
+        )
+    )
     complete = AsyncMock(
         return_value=(
             {
@@ -490,7 +570,16 @@ async def test_selection_salvages_valid_stories_when_model_exceeds_domain_cap(
                         "importance": 4,
                     }
                     for character in "abc"
-                ]
+                ],
+                "reserves": [
+                    {
+                        "id": "d" * 64,
+                        "topic": "markets",
+                        "event_key": "event-c",
+                        "market": "global",
+                        "importance": 5,
+                    }
+                ],
             },
             "request",
             10,
@@ -503,6 +592,11 @@ async def test_selection_salvages_valid_stories_when_model_exceeds_domain_cap(
     result = await client.select(candidates)
     assert not isinstance(result.value, LocalizedSummary)
     assert [item.id for item in result.value.selections] == ["a" * 64, "b" * 64]
+    assert result.value.reserves == ()
+    assert {item.id for item, reason in result.rejected if reason == "policy"} == {
+        "c" * 64,
+        "d" * 64,
+    }
     assert complete.await_count == 1
 
 
@@ -571,7 +665,9 @@ async def test_refill_prompt_provides_covered_events_without_relaxing_market_pol
             "topic": "policy",
         }
     ]
-    assert "different event_key" in prompt["REFILL_GUIDANCE"]
+    assert "distinct new events" in prompt["REFILL_GUIDANCE"]
+    assert "put at most one in reserves" in prompt["REFILL_GUIDANCE"]
+    assert "reuse that event's exact event_key" in prompt["REFILL_GUIDANCE"]
     assert "relevance" in prompt["REFILL_GUIDANCE"]
     assert "same absolute scale" in prompt["REFILL_GUIDANCE"]
     assert "publishes only selections tagged 'global'" in prompt["OUTPUT_CONTRACT"]["market_rule"]

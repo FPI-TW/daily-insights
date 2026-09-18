@@ -72,7 +72,7 @@ from daily_insights_api.modules.news.recovery import (
 )
 from daily_insights_api.modules.operations.api import sanitize_error_code
 
-DERIVATION_VERSION = "feeds-deepseek-news.v14"
+DERIVATION_VERSION = "feeds-deepseek-news.v15"
 SUMMARY_PROMPT_VERSION = "summary-v5"
 TRANSLATION_PROMPT_VERSION = "translation-v2"
 LOCALES = ("zh-hant", "zh-hans", "en")

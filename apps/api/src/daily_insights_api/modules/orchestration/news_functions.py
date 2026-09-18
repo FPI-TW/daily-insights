@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import uuid
 from collections import Counter
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, date, datetime
+from functools import partial
 from typing import Any, Literal, cast
 
 from sqlalchemy import func, or_, select
@@ -71,6 +73,44 @@ FUNCTION_MARKETS = {
 
 ModelStage = Literal["selection", "summary", "translation"]
 _MODEL_ATTEMPTS_KEY = "_news_model_attempts"
+NEWS_MODEL_PHASE_CONCURRENCY = 6
+
+
+class _ParallelPhaseControl:
+    def __init__(self) -> None:
+        self.aborted = asyncio.Event()
+        self.terminal_error: Exception | None = None
+
+    def abort(self, error: Exception) -> None:
+        if self.terminal_error is None:
+            self.terminal_error = error
+        self.aborted.set()
+
+
+async def _run_parallel_phase[T](
+    calls: Sequence[Callable[[_ParallelPhaseControl], Awaitable[T]]],
+    *,
+    concurrency: int = NEWS_MODEL_PHASE_CONCURRENCY,
+) -> list[T]:
+    """Run one model phase with bounded fan-out and stop dispatch after a hard failure."""
+    semaphore = asyncio.Semaphore(concurrency)
+    control = _ParallelPhaseControl()
+    skipped = object()
+
+    async def invoke(call: Callable[[_ParallelPhaseControl], Awaitable[T]]) -> T | object:
+        async with semaphore:
+            if control.aborted.is_set():
+                return skipped
+            try:
+                return await call(control)
+            except Exception as error:
+                control.abort(error)
+                return skipped
+
+    outcomes = await asyncio.gather(*(invoke(call) for call in calls))
+    if control.terminal_error is not None:
+        raise control.terminal_error
+    return [cast(T, outcome) for outcome in outcomes if outcome is not skipped]
 
 
 def _news_error_code(error: Exception) -> str:
@@ -125,6 +165,7 @@ async def _model_call_with_repair(
     candidate_id: str | None = None,
     attempt_key: str | None = None,
     guard: Callable[[], Awaitable[bool]] | None = None,
+    on_terminal_failure: Callable[[NewsOperationError], None] | None = None,
 ) -> ModelCall:
     durable_key = (
         attempt_key
@@ -211,6 +252,11 @@ async def _model_call_with_repair(
                 candidate_id=candidate_id,
                 locale=locale,
             )
+            terminal_error = (
+                NewsOperationError(failure) if failure.action not in {"repair", "skip"} else None
+            )
+            if terminal_error is not None and on_terminal_failure is not None:
+                on_terminal_failure(terminal_error)
             async with session_factory.begin() as database:
                 database.add(
                     _failed_audit(
@@ -241,7 +287,7 @@ async def _model_call_with_repair(
                             "code": f"{failure.code}_exhausted",
                         }
                     )
-                raise NewsOperationError(failure) from error
+                raise terminal_error or NewsOperationError(failure) from error
             continue
         await _record_model_attempt_success(
             session_factory,
@@ -661,20 +707,23 @@ async def refresh_news(
         selection_calls = 0
         screened: set[str] = set()
         returned: set[str] = set()
-        generation_attempted: set[str] = set()
-        successful: list[SelectedCandidate] = []
         localized: dict[str, dict[str, LocalizedSummary]] = {}
+        primary_by_event: dict[str, SelectedCandidate] = {}
+        reserve_by_event: dict[str, SelectedCandidate] = {}
 
         def covered_events(items: list[SelectedCandidate]) -> tuple[CoveredEvent, ...]:
-            return tuple(
-                CoveredEvent(
+            events: dict[str, CoveredEvent] = {}
+            for item in items:
+                events.setdefault(
                     item.event_key,
-                    fetched_by_id[item.id].candidate.headline,
-                    fetched_by_id[item.id].candidate.hostname,
-                    item.topic,
+                    CoveredEvent(
+                        item.event_key,
+                        fetched_by_id[item.id].candidate.headline,
+                        fetched_by_id[item.id].candidate.hostname,
+                        item.topic,
+                    ),
                 )
-                for item in items
-            )
+            return tuple(events.values())
 
         async def select_batch(
             batch_items: list[FetchedCandidate], previous_events: tuple[CoveredEvent, ...]
@@ -762,7 +811,12 @@ async def refresh_news(
                 if rejected_row is not None:
                     rejected_row.stage = "dropped"
                     rejected_row.drop_reason = reason
-            return list(selection_call.value.selections)
+            for selected in selection_call.value.selections:
+                primary_by_event.setdefault(selected.event_key, selected)
+            for reserve in selection_call.value.reserves:
+                if reserve.event_key in primary_by_event:
+                    reserve_by_event.setdefault(reserve.event_key, reserve)
+            return [*selection_call.value.selections, *selection_call.value.reserves]
 
         async def select_batch_resilient(
             batch_items: list[FetchedCandidate], previous_events: tuple[CoveredEvent, ...]
@@ -789,183 +843,25 @@ async def refresh_news(
                 )
                 return []
 
-        async def summarize_picks(picks: list[SelectedCandidate]) -> None:
-            nonlocal summary_failures, translation_failures
-            event_keys = {item.event_key for item in successful}
-            publication = publishable_selection(
-                sorted(successful, key=lambda item: -item.importance), usable, spec.selection
-            )
-            for selected in picks:
-                row = candidate_rows[selected.id]
-                if selected.id in generation_attempted:
-                    continue
-                if selected.event_key in event_keys:
-                    row.stage = "dropped"
-                    row.drop_reason = "duplicate_event"
-                    continue
-                four_star_count = sum(item.importance == 4 for item in publication.selections)
-                low_importance_count = sum(item.importance <= 3 for item in publication.selections)
-                if (
-                    selected.importance == 4
-                    and four_star_count >= spec.selection.max_four_star_items
-                ) or (
-                    selected.importance <= 3
-                    and low_importance_count >= spec.selection.max_low_importance_items
-                ):
-                    row.stage = "dropped"
-                    row.drop_reason = "reserve"
-                    continue
-                fetched = fetched_by_id[selected.id]
-                domain_count = sum(
-                    1
-                    for item in successful
-                    if item.importance < 5
-                    and fetched_by_id[item.id].candidate.hostname == fetched.candidate.hostname
-                )
-                if selected.importance < 5 and domain_count >= spec.selection.max_per_domain:
-                    row.stage = "dropped"
-                    row.drop_reason = "policy"
-                    continue
-                generation_attempted.add(selected.id)
-                summaries: dict[str, LocalizedSummary] = {}
-                locale = "zh-hant"
-                try:
-                    summary_call = await _model_call_with_repair(
-                        session_factory,
-                        batch_id=batch.id,
-                        stage="summary",
-                        locale=locale,
-                        fallback_digest=hashlib.sha256(fetched.content_digest.encode()).hexdigest(),
-                        model=client.model_name,
-                        prompt_version=SUMMARY_PROMPT_VERSION,
-                        call=_summary_call(client, fetched, locale),
-                        candidate_id=selected.id,
-                        attempt_key=_model_attempt_fingerprint(
-                            [
-                                "summary",
-                                fetched.candidate.model_dump(mode="json"),
-                                fetched.content_digest,
-                                locale,
-                                client.model_name,
-                                SUMMARY_PROMPT_VERSION,
-                            ]
-                        ),
-                        guard=guard,
-                    )
-                    assert isinstance(summary_call.value, LocalizedSummary)
-                    summaries[locale] = summary_call.value
-                    if not summary_call.reused:
-                        await _persist_successful_audit(
-                            session_factory,
-                            _audit(
-                                batch.id,
-                                "summary",
-                                locale,
-                                summary_call,
-                                client.model_name,
-                                SUMMARY_PROMPT_VERSION,
-                            ),
-                        )
-                    source_summary = summary_call.value
-                    for locale in LOCALES:
-                        if locale == "zh-hant":
-                            continue
-                        translation = await _model_call_with_repair(
-                            session_factory,
-                            batch_id=batch.id,
-                            stage="translation",
-                            locale=locale,
-                            fallback_digest=hashlib.sha256(
-                                fetched.content_digest.encode()
-                            ).hexdigest(),
-                            model=client.model_name,
-                            prompt_version=TRANSLATION_PROMPT_VERSION,
-                            call=_translation_call(client, fetched, source_summary, locale),
-                            candidate_id=selected.id,
-                            attempt_key=_model_attempt_fingerprint(
-                                [
-                                    "translation",
-                                    fetched.candidate.model_dump(mode="json"),
-                                    fetched.content_digest,
-                                    source_summary.model_dump(mode="json"),
-                                    locale,
-                                    client.model_name,
-                                    SUMMARY_PROMPT_VERSION,
-                                    TRANSLATION_PROMPT_VERSION,
-                                ]
-                            ),
-                            guard=guard,
-                        )
-                        assert isinstance(translation.value, LocalizedSummary)
-                        summaries[locale] = translation.value
-                        if not translation.reused:
-                            await _persist_successful_audit(
-                                session_factory,
-                                _audit(
-                                    batch.id,
-                                    "translation",
-                                    locale,
-                                    translation,
-                                    client.model_name,
-                                    TRANSLATION_PROMPT_VERSION,
-                                ),
-                            )
-                except NewsOperationError as error:
-                    if not (
-                        error.failure.action == "skip"
-                        and error.failure.stage in {"summary", "translation"}
-                    ):
-                        raise
-                    if error.failure.stage == "summary":
-                        summary_failures += 1
-                    else:
-                        translation_failures += 1
-                    failure_reasons[selected.id] = {
-                        "stage": error.failure.stage,
-                        "locale": error.failure.locale or locale,
-                        "code": sanitize_error_code(error.failure.code),
-                    }
-                    row.stage = "dropped"
-                    row.drop_reason = generation_drop_reason(error.failure.stage)
-                    continue
-                successful.append(selected)
-                localized[selected.id] = summaries
-                event_keys.add(selected.event_key)
-                publication = publishable_selection(
-                    sorted(successful, key=lambda item: -item.importance),
-                    usable,
-                    spec.selection,
-                )
-
-        screening_picks: list[SelectedCandidate] = []
+        selection_picks: list[SelectedCandidate] = []
         for start in range(0, len(usable), spec.max_candidates):
             if selection_calls >= 3:
                 break
-            screening_picks.extend(
+            selection_picks.extend(
                 await select_batch_resilient(
                     usable[start : start + spec.max_candidates],
-                    covered_events(screening_picks),
+                    covered_events(selection_picks),
                 )
             )
-        await summarize_picks(sorted(screening_picks, key=lambda item: -item.importance))
 
-        publication = publishable_selection(
-            sorted(successful, key=lambda item: -item.importance), usable, spec.selection
-        )
-        while selection_calls < 3 and (
-            len(publication.selections) < spec.target_items
-            or sum(item.importance == 4 for item in publication.selections)
-            < spec.selection.min_four_star_items
-        ):
+        # The third selection window is a pre-generation reserve round.  It must
+        # finish before any summary call so later generation failures can fall
+        # back to already-selected candidates without breaking the phase barrier.
+        while selection_calls < 3:
             covered_sources = Counter(
-                fetched_by_id[item.id].candidate.hostname for item in successful
+                fetched_by_id[item.id].candidate.hostname for item in selection_picks
             )
-            remaining = [
-                item
-                for item in usable
-                if item.candidate.id not in returned
-                and item.candidate.id not in generation_attempted
-            ]
+            remaining = [item for item in usable if item.candidate.id not in returned]
             remaining.sort(
                 key=lambda item: (
                     item.candidate.id in screened,
@@ -975,14 +871,200 @@ async def refresh_news(
             refill_batch = remaining[: spec.max_candidates]
             if not refill_batch:
                 break
-            refill_picks = await select_batch_resilient(refill_batch, covered_events(successful))
-            await summarize_picks(sorted(refill_picks, key=lambda item: -item.importance))
-            publication = publishable_selection(
-                sorted(successful, key=lambda item: -item.importance), usable, spec.selection
+            selection_picks.extend(
+                await select_batch_resilient(
+                    refill_batch,
+                    covered_events(selection_picks),
+                )
             )
 
-        final_ids = {item.id for item in publication.selections}
+        generation_picks = sorted(
+            [*primary_by_event.values(), *reserve_by_event.values()],
+            key=lambda item: -item.importance,
+        )
+
+        async def summarize_one(
+            selected: SelectedCandidate, phase: _ParallelPhaseControl
+        ) -> tuple[SelectedCandidate, ModelCall | None, NewsFailure | None]:
+            fetched = fetched_by_id[selected.id]
+
+            async def phase_guard() -> bool:
+                return not phase.aborted.is_set() and await guard()
+
+            try:
+                summary_call = await _model_call_with_repair(
+                    session_factory,
+                    batch_id=batch.id,
+                    stage="summary",
+                    locale="zh-hant",
+                    fallback_digest=hashlib.sha256(fetched.content_digest.encode()).hexdigest(),
+                    model=client.model_name,
+                    prompt_version=SUMMARY_PROMPT_VERSION,
+                    call=_summary_call(client, fetched, "zh-hant"),
+                    candidate_id=selected.id,
+                    attempt_key=_model_attempt_fingerprint(
+                        [
+                            "summary",
+                            fetched.candidate.model_dump(mode="json"),
+                            fetched.content_digest,
+                            "zh-hant",
+                            client.model_name,
+                            SUMMARY_PROMPT_VERSION,
+                        ]
+                    ),
+                    guard=phase_guard,
+                    on_terminal_failure=phase.abort,
+                )
+                assert isinstance(summary_call.value, LocalizedSummary)
+                if not summary_call.reused:
+                    await _persist_successful_audit(
+                        session_factory,
+                        _audit(
+                            batch.id,
+                            "summary",
+                            "zh-hant",
+                            summary_call,
+                            client.model_name,
+                            SUMMARY_PROMPT_VERSION,
+                        ),
+                    )
+                return selected, summary_call, None
+            except NewsOperationError as error:
+                if not (error.failure.action == "skip" and error.failure.stage == "summary"):
+                    raise
+                return selected, None, error.failure
+
+        summary_jobs = [partial(summarize_one, selected) for selected in generation_picks]
+        summary_results = await _run_parallel_phase(summary_jobs)
+        summary_successes: list[SelectedCandidate] = []
+        source_summaries: dict[str, LocalizedSummary] = {}
+        for selected, summary_call, failure in summary_results:
+            row = candidate_rows[selected.id]
+            if failure is not None:
+                summary_failures += 1
+                failure_reasons[selected.id] = {
+                    "stage": "summary",
+                    "locale": failure.locale or "zh-hant",
+                    "code": sanitize_error_code(failure.code),
+                }
+                row.stage = "dropped"
+                row.drop_reason = generation_drop_reason("summary")
+                continue
+            assert summary_call is not None
+            assert isinstance(summary_call.value, LocalizedSummary)
+            summary_successes.append(selected)
+            source_summaries[selected.id] = summary_call.value
+            localized[selected.id] = {"zh-hant": summary_call.value}
+
+        async def translate_one(
+            selected: SelectedCandidate, locale: str, phase: _ParallelPhaseControl
+        ) -> tuple[SelectedCandidate, str, ModelCall | None, NewsFailure | None]:
+            fetched = fetched_by_id[selected.id]
+            source_summary = source_summaries[selected.id]
+
+            async def phase_guard() -> bool:
+                return not phase.aborted.is_set() and await guard()
+
+            try:
+                translation = await _model_call_with_repair(
+                    session_factory,
+                    batch_id=batch.id,
+                    stage="translation",
+                    locale=locale,
+                    fallback_digest=hashlib.sha256(fetched.content_digest.encode()).hexdigest(),
+                    model=client.model_name,
+                    prompt_version=TRANSLATION_PROMPT_VERSION,
+                    call=_translation_call(client, fetched, source_summary, locale),
+                    candidate_id=selected.id,
+                    attempt_key=_model_attempt_fingerprint(
+                        [
+                            "translation",
+                            fetched.candidate.model_dump(mode="json"),
+                            fetched.content_digest,
+                            source_summary.model_dump(mode="json"),
+                            locale,
+                            client.model_name,
+                            SUMMARY_PROMPT_VERSION,
+                            TRANSLATION_PROMPT_VERSION,
+                        ]
+                    ),
+                    guard=phase_guard,
+                    on_terminal_failure=phase.abort,
+                )
+                assert isinstance(translation.value, LocalizedSummary)
+                if not translation.reused:
+                    await _persist_successful_audit(
+                        session_factory,
+                        _audit(
+                            batch.id,
+                            "translation",
+                            locale,
+                            translation,
+                            client.model_name,
+                            TRANSLATION_PROMPT_VERSION,
+                        ),
+                    )
+                return selected, locale, translation, None
+            except NewsOperationError as error:
+                if not (error.failure.action == "skip" and error.failure.stage == "translation"):
+                    raise
+                return selected, locale, None, error.failure
+
+        translation_jobs = [
+            partial(translate_one, selected, locale)
+            for selected in summary_successes
+            for locale in LOCALES
+            if locale != "zh-hant"
+        ]
+        translation_results = await _run_parallel_phase(translation_jobs)
+        translation_failed_ids: set[str] = set()
+        for selected, locale, translation, failure in translation_results:
+            if failure is not None:
+                if selected.id not in translation_failed_ids:
+                    translation_failures += 1
+                    failure_reasons[selected.id] = {
+                        "stage": "translation",
+                        "locale": failure.locale or locale,
+                        "code": sanitize_error_code(failure.code),
+                    }
+                translation_failed_ids.add(selected.id)
+                row = candidate_rows[selected.id]
+                row.stage = "dropped"
+                row.drop_reason = generation_drop_reason("translation")
+                continue
+            assert translation is not None
+            assert isinstance(translation.value, LocalizedSummary)
+            localized[selected.id][locale] = translation.value
+
+        successful = [
+            selected
+            for selected in summary_successes
+            if selected.id not in translation_failed_ids
+            and all(locale in localized[selected.id] for locale in LOCALES)
+        ]
+
+        # Preserve the model's primary/reserve role: a reserve can replace its
+        # primary only when that primary did not finish every locale.
+        successful_by_id = {selected.id: selected for selected in successful}
+        event_unique_successful: list[SelectedCandidate] = []
+        for event_key, primary in primary_by_event.items():
+            chosen = successful_by_id.get(primary.id)
+            if chosen is None and (reserve := reserve_by_event.get(event_key)) is not None:
+                chosen = successful_by_id.get(reserve.id)
+            if chosen is not None:
+                event_unique_successful.append(chosen)
+        event_unique_successful.sort(key=lambda item: -item.importance)
+        chosen_ids = {selected.id for selected in event_unique_successful}
         for selected in successful:
+            if selected.id not in chosen_ids:
+                row = candidate_rows[selected.id]
+                row.stage = "dropped"
+                row.drop_reason = "duplicate_event"
+
+        publication = publishable_selection(event_unique_successful, usable, spec.selection)
+
+        final_ids = {item.id for item in publication.selections}
+        for selected in event_unique_successful:
             if selected.id not in final_ids:
                 row = candidate_rows[selected.id]
                 row.stage = "dropped"

@@ -35,7 +35,7 @@ def test_packaged_selection_criteria_loads_with_version_and_digest() -> None:
     assert "純即時價格走勢稿" in criteria.text
     assert "企業交易、支付科技" in criteria.text
     assert "互相獨立的全球宏觀主線" in criteria.text
-    assert criteria.version == f"selection-v11:{criteria.digest[:12]}"
+    assert criteria.version == f"selection-v12:{criteria.digest[:12]}"
 
 
 @pytest.mark.parametrize("content", ["", "   \n\t"])

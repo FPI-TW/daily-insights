@@ -1,8 +1,10 @@
+import asyncio
 import os
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from functools import partial
 from typing import Any, cast
 
 import httpx
@@ -778,12 +780,18 @@ async def test_news_refresh_screens_full_pool_refills_and_classifies_failures(
             self.translation_failures = 0
             self.failed_candidate_id: str | None = None
             self.closed = False
+            self.events: list[str] = []
+            self.active_summaries = 0
+            self.max_active_summaries = 0
+            self.active_translations = 0
+            self.max_active_translations = 0
 
         async def select(
             self,
             batch: list[FetchedCandidate],
             **_: object,
         ) -> ModelCall:
+            self.events.append("selection")
             self.selection_batches.append([item.candidate.id for item in batch])
             chosen = batch[0].candidate
             if len(self.selection_batches) == 2:
@@ -814,10 +822,18 @@ async def test_news_refresh_screens_full_pool_refills_and_classifies_failures(
             **_: object,
         ) -> ModelCall:
             del article_text
-            summary = LocalizedSummary(
-                headline=f"{locale} {candidate.headline}", summary=f"{locale} summary"
-            )
-            return ModelCall(summary, None, None, None, 1, candidate.id)
+            self.active_summaries += 1
+            self.max_active_summaries = max(self.max_active_summaries, self.active_summaries)
+            self.events.append("summary:start")
+            try:
+                await asyncio.sleep(0.01)
+                summary = LocalizedSummary(
+                    headline=f"{locale} {candidate.headline}", summary=f"{locale} summary"
+                )
+                return ModelCall(summary, None, None, None, 1, candidate.id)
+            finally:
+                self.events.append("summary:end")
+                self.active_summaries -= 1
 
         async def translate(
             self,
@@ -828,18 +844,28 @@ async def test_news_refresh_screens_full_pool_refills_and_classifies_failures(
             **_: object,
         ) -> ModelCall:
             del article_text, source_summary
-            if candidate.id == self.failed_candidate_id and locale == "en":
-                self.translation_failures += 1
-                raise ModelCallError(
-                    "invalid translation JSON",
-                    input_digest=candidate.id,
-                    latency_ms=1,
-                    error_code="translation_invalid_json",
-                )
-            summary = LocalizedSummary(
-                headline=f"{locale} {candidate.headline}", summary=f"{locale} summary"
+            self.active_translations += 1
+            self.max_active_translations = max(
+                self.max_active_translations, self.active_translations
             )
-            return ModelCall(summary, None, None, None, 1, candidate.id)
+            self.events.append("translation:start")
+            try:
+                await asyncio.sleep(0.01)
+                if candidate.id == self.failed_candidate_id and locale == "en":
+                    self.translation_failures += 1
+                    raise ModelCallError(
+                        "invalid translation JSON",
+                        input_digest=candidate.id,
+                        latency_ms=1,
+                        error_code="translation_invalid_json",
+                    )
+                summary = LocalizedSummary(
+                    headline=f"{locale} {candidate.headline}", summary=f"{locale} summary"
+                )
+                return ModelCall(summary, None, None, None, 1, candidate.id)
+            finally:
+                self.events.append("translation:end")
+                self.active_translations -= 1
 
         async def aclose(self) -> None:
             self.closed = True
@@ -851,9 +877,12 @@ async def test_news_refresh_screens_full_pool_refills_and_classifies_failures(
     claimed = await claim_ready_function(engine, sessions, owner="news-refresh-test", now=now)
     assert claimed is not None
 
-    outcome = await orchestration_news_functions.refresh_news(
-        Settings(environment="test", daily_news_enabled=True), sessions, claimed
-    )
+    try:
+        outcome = await orchestration_news_functions.refresh_news(
+            Settings(environment="test", daily_news_enabled=True), sessions, claimed
+        )
+    finally:
+        await claimed.connection.close()
 
     assert outcome.status == "partial"
     assert outcome.error_code == "news_generation_partial"
@@ -866,6 +895,18 @@ async def test_news_refresh_screens_full_pool_refills_and_classifies_failures(
     assert len(client.selection_batches) == 3
     assert [len(batch) for batch in client.selection_batches] == [20, 2, 20]
     assert client.translation_failures == 2
+    assert 2 <= client.max_active_summaries <= 6
+    assert 2 <= client.max_active_translations <= 6
+    assert max(
+        index for index, event_name in enumerate(client.events) if event_name == "selection"
+    ) < min(
+        index for index, event_name in enumerate(client.events) if event_name == "summary:start"
+    )
+    assert max(
+        index for index, event_name in enumerate(client.events) if event_name == "summary:end"
+    ) < min(
+        index for index, event_name in enumerate(client.events) if event_name == "translation:start"
+    )
     assert client.closed is True
     assert client.failed_candidate_id is not None
     first_selected_id = client.selection_batches[0][0]
@@ -904,6 +945,288 @@ async def test_news_refresh_screens_full_pool_refills_and_classifies_failures(
         "locale": None,
         "code": "source_access_denied",
     }
+
+
+@pytest.mark.parametrize("failure_stage", ["none", "summary", "translation"])
+async def test_news_refresh_honors_same_event_primary_and_generation_fallback(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    engine, sessions = orchestration_database
+    now = datetime.now(UTC)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_global_refresh_job",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            status="pending",
+        )
+        database.add(job)
+        await database.flush()
+        database.add(
+            FunctionRun(
+                job_run_id=job.id,
+                function_key="news_global_refresh",
+                provider_key="internal_services",
+                scope={},
+                status="pending",
+            )
+        )
+
+    candidates = [
+        Candidate(
+            id=f"{index + 1:064x}",
+            url=f"https://fallback{index}.example/story",
+            hostname=f"fallback{index}.example",
+            source_name=f"Fallback {index}",
+            headline=f"Fallback story {index}",
+        )
+        for index in range(21)
+    ]
+    fetched = [
+        FetchedCandidate(
+            candidate,
+            str(candidate.url),
+            f"Article body {index}",
+            f"{index + 200:064x}",
+        )
+        for index, candidate in enumerate(candidates)
+    ]
+
+    async def discover(*_: object, **__: object) -> list[Candidate]:
+        return candidates
+
+    async def extract(*_: object, **__: object) -> list[ExtractionOutcome]:
+        return [ExtractionOutcome(item.candidate, fetched=item) for item in fetched]
+
+    class Client:
+        model_name = "test-news-model"
+        selection_prompt_digest = "a" * 64
+        selection_prompt_version = "selection-test"
+
+        def __init__(self) -> None:
+            self.selection_calls = 0
+            self.selected_ids: list[str] = []
+
+        async def select(self, batch: list[FetchedCandidate], **_: object) -> ModelCall:
+            self.selection_calls += 1
+            chosen = batch[0].candidate
+            self.selected_ids.append(chosen.id)
+            selection = SelectedCandidate(
+                id=chosen.id,
+                topic="markets",
+                event_key="shared-event",
+                market="global",
+                importance=4 if self.selection_calls == 1 else 5,
+            )
+            returned = tuple(
+                SelectedCandidate(
+                    id=item.candidate.id,
+                    topic="markets",
+                    event_key=(
+                        "shared-event"
+                        if item.candidate.id in {candidates[0].id, candidates[-1].id}
+                        else f"reserve-{index}"
+                    ),
+                    market="global",
+                    importance=selection.importance,
+                )
+                for index, item in enumerate(batch)
+            )
+            return ModelCall(
+                Selection(
+                    selections=(selection,) if self.selection_calls == 1 else (),
+                    reserves=() if self.selection_calls == 1 else (selection,),
+                ),
+                None,
+                None,
+                None,
+                1,
+                "d" * 64,
+                returned=returned,
+            )
+
+        async def summarize(
+            self,
+            candidate: Candidate,
+            article_text: str,
+            locale: str,
+            **_: object,
+        ) -> ModelCall:
+            del article_text
+            if candidate.id == self.selected_ids[0] and failure_stage == "summary":
+                raise ModelCallError(
+                    "invalid summary JSON",
+                    input_digest=candidate.id,
+                    latency_ms=1,
+                    error_code="summary_schema_invalid",
+                )
+            summary = LocalizedSummary(
+                headline=f"{locale} {candidate.headline}", summary=f"{locale} summary"
+            )
+            return ModelCall(summary, None, None, None, 1, candidate.id)
+
+        async def translate(
+            self,
+            candidate: Candidate,
+            article_text: str,
+            source_summary: LocalizedSummary,
+            locale: str,
+            **_: object,
+        ) -> ModelCall:
+            del article_text, source_summary
+            if (
+                candidate.id == self.selected_ids[0]
+                and failure_stage == "translation"
+                and locale == "en"
+            ):
+                raise ModelCallError(
+                    "invalid translation JSON",
+                    input_digest=candidate.id,
+                    latency_ms=1,
+                    error_code="translation_schema_invalid",
+                )
+            summary = LocalizedSummary(
+                headline=f"{locale} {candidate.headline}", summary=f"{locale} summary"
+            )
+            return ModelCall(summary, None, None, None, 1, candidate.id)
+
+        async def aclose(self) -> None:
+            return None
+
+    client = Client()
+    monkeypatch.setattr(orchestration_news_functions, "_client", lambda _: client)
+    monkeypatch.setattr(orchestration_news_functions, "discover_feed_candidates", discover)
+    monkeypatch.setattr(orchestration_news_functions, "_extract_candidate_outcomes", extract)
+    claimed = await claim_ready_function(engine, sessions, owner="same-event-test", now=now)
+    assert claimed is not None
+
+    try:
+        outcome = await orchestration_news_functions.refresh_news(
+            Settings(environment="test", daily_news_enabled=True), sessions, claimed
+        )
+    finally:
+        await claimed.connection.close()
+
+    assert outcome.result is not None
+    assert outcome.status == ("succeeded" if failure_stage == "none" else "partial")
+    if failure_stage != "none":
+        assert outcome.result[f"{failure_stage}_failed"] == 1
+    batch_id = uuid.UUID(cast(str, outcome.result["batch_id"]))
+    async with sessions() as database:
+        rows = {
+            row.candidate_id: row
+            for row in await database.scalars(
+                select(NewsCandidate).where(NewsCandidate.batch_id == batch_id)
+            )
+        }
+        prepared = list(
+            await database.scalars(
+                select(PreparedNewsItem).where(PreparedNewsItem.batch_id == batch_id)
+            )
+        )
+    assert len(client.selected_ids) == 2
+    expected_id = client.selected_ids[0] if failure_stage == "none" else client.selected_ids[1]
+    dropped_id = client.selected_ids[1] if failure_stage == "none" else client.selected_ids[0]
+    assert [item.candidate_id for item in prepared] == [rows[expected_id].id]
+    assert rows[expected_id].stage == "prepared"
+    assert rows[dropped_id].drop_reason == (
+        "duplicate_event" if failure_stage == "none" else f"{failure_stage}_failed"
+    )
+
+
+async def test_news_parallel_phase_stops_queued_work_after_hard_failure() -> None:
+    started: list[int] = []
+    release = asyncio.Event()
+
+    async def call(index: int, _: orchestration_news_functions._ParallelPhaseControl) -> int:
+        started.append(index)
+        if index == 0:
+            release.set()
+            raise RuntimeError("provider failed")
+        await release.wait()
+        return index
+
+    calls = [
+        partial(call, index)
+        for index in range(orchestration_news_functions.NEWS_MODEL_PHASE_CONCURRENCY + 4)
+    ]
+
+    with pytest.raises(RuntimeError, match="provider failed"):
+        await orchestration_news_functions._run_parallel_phase(calls)
+
+    assert 0 < len(started) <= orchestration_news_functions.NEWS_MODEL_PHASE_CONCURRENCY
+
+
+async def test_news_parallel_phase_preserves_originating_error_over_abort_cancellation() -> None:
+    origin_can_finish = asyncio.Event()
+    follower_started = asyncio.Event()
+    provider_error = NewsOperationError(
+        NewsFailure(code="provider_http_429", action="retry", stage="summary")
+    )
+
+    async def origin(
+        control: orchestration_news_functions._ParallelPhaseControl,
+    ) -> None:
+        await follower_started.wait()
+        control.abort(provider_error)
+        await origin_can_finish.wait()
+        raise provider_error
+
+    async def follower(
+        control: orchestration_news_functions._ParallelPhaseControl,
+    ) -> None:
+        follower_started.set()
+        await control.aborted.wait()
+        origin_can_finish.set()
+        raise NewsOperationError(NewsFailure(code="cancelled", action="cancelled", stage="summary"))
+
+    with pytest.raises(NewsOperationError) as captured:
+        await orchestration_news_functions._run_parallel_phase([origin, follower], concurrency=2)
+
+    assert captured.value is provider_error
+    assert captured.value.failure.action == "retry"
+
+
+@pytest.mark.parametrize(
+    "first_error",
+    [
+        RuntimeError("database failed"),
+        NewsOperationError(NewsFailure(code="cancelled", action="cancelled", stage="summary")),
+    ],
+)
+async def test_news_parallel_phase_does_not_replace_an_earlier_hard_failure(
+    first_error: Exception,
+) -> None:
+    follower_started = asyncio.Event()
+    provider_error = NewsOperationError(
+        NewsFailure(code="provider_http_429", action="retry", stage="summary")
+    )
+
+    async def first(
+        _: orchestration_news_functions._ParallelPhaseControl,
+    ) -> None:
+        await follower_started.wait()
+        raise first_error
+
+    async def later_provider(
+        control: orchestration_news_functions._ParallelPhaseControl,
+    ) -> None:
+        follower_started.set()
+        await control.aborted.wait()
+        control.abort(provider_error)
+        raise provider_error
+
+    with pytest.raises(Exception) as captured:
+        await orchestration_news_functions._run_parallel_phase(
+            [first, later_provider], concurrency=2
+        )
+
+    assert captured.value is first_error
 
 
 async def test_news_refresh_keeps_successful_windows_when_selection_schema_repair_exhausts(
@@ -1030,9 +1353,12 @@ async def test_news_refresh_keeps_successful_windows_when_selection_schema_repai
     claimed = await claim_ready_function(engine, sessions, owner="selection-window-test", now=now)
     assert claimed is not None
 
-    outcome = await orchestration_news_functions.refresh_news(
-        Settings(environment="test", daily_news_enabled=True), sessions, claimed
-    )
+    try:
+        outcome = await orchestration_news_functions.refresh_news(
+            Settings(environment="test", daily_news_enabled=True), sessions, claimed
+        )
+    finally:
+        await claimed.connection.close()
 
     assert outcome.status == "partial"
     assert outcome.error_code == "news_selection_partial"
@@ -1501,6 +1827,7 @@ async def test_news_translation_repair_budget_survives_function_retry(
 
 async def test_retryable_failure_during_translation_repair_does_not_reset_budget(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, sessions = orchestration_database
     edition = date(2026, 9, 17)
@@ -1559,6 +1886,37 @@ async def test_retryable_failure_during_translation_repair_does_not_reset_budget
         function_id = function.id
 
     calls = 0
+    terminal_failure = asyncio.Event()
+    terminal_error: NewsOperationError | None = None
+    original_record_failure = orchestration_news_functions._record_model_attempt_failure
+
+    def record_terminal(error: NewsOperationError) -> None:
+        nonlocal terminal_error
+        terminal_error = error
+        terminal_failure.set()
+
+    async def record_failure(
+        database: AsyncSession,
+        *,
+        batch_id: uuid.UUID,
+        attempt_key: str,
+        code: str,
+        action: str,
+        validation_issues: tuple[str, ...] = (),
+    ) -> None:
+        assert terminal_failure.is_set()
+        await original_record_failure(
+            database,
+            batch_id=batch_id,
+            attempt_key=attempt_key,
+            code=code,
+            action=action,
+            validation_issues=validation_issues,
+        )
+
+    monkeypatch.setattr(
+        orchestration_news_functions, "_record_model_attempt_failure", record_failure
+    )
 
     async def transient(feedback: str | None) -> ModelCall:
         nonlocal calls
@@ -1583,8 +1941,10 @@ async def test_retryable_failure_during_translation_repair_does_not_reset_budget
             call=transient,
             candidate_id="candidate-1",
             attempt_key=attempt_key,
+            on_terminal_failure=record_terminal,
         )
     assert first.value.failure.action == "retry"
+    assert terminal_error is first.value
     assert calls == 1
 
     async with sessions.begin() as database:

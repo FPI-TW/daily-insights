@@ -75,6 +75,44 @@ def test_selection_contract_is_structural_and_allows_market_editions_up_to_ten()
         Selection.model_validate({"selections": selection + selection[:3]})
 
 
+def test_selection_allows_one_distinct_reserve_for_the_same_event() -> None:
+    selection = Selection.model_validate(
+        {
+            "selections": [
+                {
+                    "id": "a" * 64,
+                    "topic": "policy",
+                    "event_key": "fed-rate-decision",
+                    "market": "global",
+                    "importance": 5,
+                }
+            ],
+            "reserves": [
+                {
+                    "id": "b" * 64,
+                    "topic": "policy",
+                    "event_key": "fed-rate-decision",
+                    "market": "global",
+                    "importance": 5,
+                }
+            ],
+        }
+    )
+
+    assert selection.reserves[0].event_key == selection.selections[0].event_key
+    with pytest.raises(ValueError, match="reserve candidates must have unique event keys"):
+        duplicate_reserve = selection.reserves[0].model_copy(update={"id": "c" * 64})
+        Selection.model_validate(
+            {
+                "selections": selection.model_dump(mode="json")["selections"],
+                "reserves": [
+                    *selection.model_dump(mode="json")["reserves"],
+                    duplicate_reserve.model_dump(mode="json"),
+                ],
+            }
+        )
+
+
 def test_contracts_do_not_have_article_body_fields() -> None:
     candidate = Candidate(
         id="a" * 64,
