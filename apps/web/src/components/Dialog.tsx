@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "motion/react"
 import { useEffect, useRef, type ReactNode, type RefObject } from "react"
 import { backdrop, dialogPanel } from "#/lib/motion"
+import { cn } from "#/lib/utils"
 
 const focusableSelector =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -14,6 +15,7 @@ export function Dialog({
   onClose,
   labelledBy,
   initialFocusRef,
+  panelClassName,
   role = "dialog",
   children,
 }: {
@@ -22,6 +24,7 @@ export function Dialog({
   labelledBy: string
   // Element to focus on open; defaults to the first focusable element.
   initialFocusRef?: RefObject<HTMLElement | null>
+  panelClassName?: string
   role?: "dialog" | "alertdialog"
   children: ReactNode
 }) {
@@ -75,7 +78,10 @@ export function Dialog({
           exit="hidden"
         >
           <motion.section
-            className="w-full max-w-sm rounded-[13px] border border-line bg-surface p-5 shadow-xl"
+            className={cn(
+              "w-full max-w-sm rounded-[13px] border border-line bg-surface p-5 shadow-xl",
+              panelClassName
+            )}
             role={role}
             aria-modal="true"
             aria-labelledby={labelledBy}
