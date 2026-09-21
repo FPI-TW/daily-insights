@@ -1,7 +1,7 @@
 import { formatDateStamp } from "#/lib/format"
 import type { Locale, User } from "@daily-insights/api-client"
 import { Link, useLocation, useRouter } from "@tanstack/react-router"
-import { Settings, X } from "lucide-react"
+import { ChevronRight, FileText, Settings, X } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
 import { Dialog } from "./Dialog"
 import type { ReactNode } from "react"
@@ -18,6 +18,7 @@ import { ActiveIndicator } from "./ActiveIndicator"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
 import { LocaleSwitcher } from "./LocaleSwitcher"
 import { ThemeModePicker } from "./ThemeToggle"
+import { LegalStatementDialog } from "./LegalStatementDialog"
 
 const customerNavLinkClass =
   "shrink-0 rounded-md px-3 py-2 text-sm font-bold text-sea-ink-soft no-underline transition-colors hover:text-sea-ink [&:not([aria-current=page])]:hover:bg-link-hover [&[aria-current=page]]:text-lagoon"
@@ -42,6 +43,7 @@ export function AppShell({
   const [pending, setPending] = useState(false)
   const [signOutError, setSignOutError] = useState("")
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [legalStatementOpen, setLegalStatementOpen] = useState(false)
   const settingsButtonRef = useRef<HTMLButtonElement>(null)
   const closeSettingsButtonRef = useRef<HTMLButtonElement>(null)
   const pathname = location.pathname
@@ -59,6 +61,11 @@ export function AppShell({
 
   const closeSettings = useCallback(() => {
     setSettingsOpen(false)
+    window.requestAnimationFrame(() => settingsButtonRef.current?.focus())
+  }, [])
+
+  const closeLegalStatement = useCallback(() => {
+    setLegalStatementOpen(false)
     window.requestAnimationFrame(() => settingsButtonRef.current?.focus())
   }, [])
 
@@ -306,6 +313,26 @@ export function AppShell({
             <ThemeModePicker />
           </div>
           <div className="grid gap-[9px] border-t border-line pt-[18px]">
+            <button
+              className="flex min-h-11 w-full items-center gap-3 rounded-lg border border-line bg-subtle/45 px-3.5 py-2.5 text-left text-sm font-extrabold text-sea-ink transition-colors hover:bg-link-hover"
+              type="button"
+              onClick={() => {
+                setSettingsOpen(false)
+                setLegalStatementOpen(true)
+              }}
+            >
+              <FileText
+                className="size-4 shrink-0 text-lagoon"
+                aria-hidden="true"
+              />
+              <span className="flex-1">{t("legalStatement")}</span>
+              <ChevronRight
+                className="size-4 shrink-0 text-sea-ink-soft"
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+          <div className="grid gap-[9px] border-t border-line pt-[18px]">
             <p className="m-0 truncate text-[11px] font-semibold text-sea-ink-soft">
               {t("signedInAs", { email: user.email })}
             </p>
@@ -320,6 +347,10 @@ export function AppShell({
           </div>
         </div>
       </Dialog>
+      <LegalStatementDialog
+        open={legalStatementOpen}
+        onClose={closeLegalStatement}
+      />
       <AnimatePresence>
         {signOutError ? (
           <motion.p

@@ -12,6 +12,40 @@ test.beforeEach(async ({ context, request }) => {
   await context.clearCookies()
 })
 
+test("legal statement opens from settings without overflowing the viewport", async ({
+  context,
+  page,
+}) => {
+  await authenticateAs(context, "org_member")
+  await openHydrated(page, "/zh-hant/reports", 'button[aria-label="設定"]')
+
+  await page.getByRole("button", { name: "設定" }).click()
+  await page.getByRole("button", { name: "法律聲明" }).click()
+
+  const dialog = page.getByRole("dialog", {
+    name: "法律聲明 (Legal Statement)",
+  })
+  await expect(dialog).toBeVisible()
+  await expect(
+    dialog.getByRole("heading", {
+      name: "1. 使用者服務條款 (Terms of Service)",
+    })
+  ).toBeVisible()
+  await expect(
+    dialog.getByRole("heading", {
+      name: "4. 綜合條款 (Miscellaneous)",
+    })
+  ).toBeAttached()
+
+  await page.setViewportSize({ width: 375, height: 720 })
+  await expect
+    .poll(async () => {
+      const box = await dialog.boundingBox()
+      return box !== null && box.x >= 0 && box.width <= 375 && box.height <= 720
+    })
+    .toBe(true)
+})
+
 test("customer login opens reports, then a market detail without mobile overflow", async ({
   page,
 }) => {

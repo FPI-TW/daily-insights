@@ -1,8 +1,14 @@
 import type { User } from "@daily-insights/api-client"
 import type { AnchorHTMLAttributes, ReactNode } from "react"
 import { I18nextProvider } from "react-i18next"
-import { render, screen, within } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createI18n } from "#/lib/i18n"
 import { AppShell } from "./AppShell"
 
@@ -57,7 +63,20 @@ const user: User = {
 
 beforeEach(() => {
   location.pathname = "/zh-hant/reports"
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn(() => ({
+      matches: false,
+      media: "(prefers-color-scheme: dark)",
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }))
+  )
 })
+
+afterEach(cleanup)
 
 describe("AppShell customer navigation", () => {
   it("renders the updated brand and navigation in the requested order", () => {
@@ -112,6 +131,47 @@ describe("AppShell customer navigation", () => {
       "href",
       "/zh-hant/reports"
     )
+  })
+
+  it("opens the complete legal statement from settings", () => {
+    const rendered = render(
+      <I18nextProvider i18n={createI18n("zh-hant")}>
+        <AppShell locale="zh-hant" user={user} surface="customer">
+          <main>Content</main>
+        </AppShell>
+      </I18nextProvider>
+    )
+
+    const view = within(rendered.container)
+    fireEvent.click(view.getByRole("button", { name: "設定" }))
+    fireEvent.click(view.getByRole("button", { name: "法律聲明" }))
+
+    const dialog = view.getByRole("dialog", {
+      name: "法律聲明 (Legal Statement)",
+    })
+    expect(
+      within(dialog).getByText(/歡迎您使用廷豐金融科技平台/)
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole("heading", {
+        name: "1. 使用者服務條款 (Terms of Service)",
+      })
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole("heading", {
+        name: "2. 隱私權政策 (Privacy Policy)",
+      })
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole("heading", {
+        name: "3. 智財權與侵權通報 (IP & Takedown)",
+      })
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole("heading", {
+        name: "4. 綜合條款 (Miscellaneous)",
+      })
+    ).toBeInTheDocument()
   })
 
   it("remeasures the admin tab highlight after leaving news management", () => {

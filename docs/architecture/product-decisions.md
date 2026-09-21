@@ -190,6 +190,10 @@ These are the implementation baseline unless a later ADR supersedes them:
   exception to the single nginx ingress rule.
 - Record every privileged conversation view and policy/configuration change in
   an append-only audit trail.
+- Expose the approved legal statement from the authenticated application's
+  shared settings panel. Present the full Traditional Chinese source text in
+  an accessible, scrollable modal on both customer and administration surfaces;
+  localized entry labels do not replace or translate the controlling text.
 
 ## Open product and compliance items
 
