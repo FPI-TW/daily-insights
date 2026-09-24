@@ -1017,4 +1017,110 @@ export type PodcastUploadInput = {
   expectedVersions: Partial<Record<Locale, number>>
 }
 
+export const podcastUploadBatchInitRequestSchema = z.object({
+  idempotency_key: z.string().min(16).max(128),
+  trading_date: z.iso.date(),
+  reason: z.enum(["initial_upload", "update_file", "other"]),
+  files: z
+    .array(
+      z.object({
+        locale: localeSchema,
+        filename: z.string().min(1).max(255),
+        size_bytes: z
+          .number()
+          .int()
+          .positive()
+          .max(256 * 1024 * 1024),
+        mime_type: z.string().min(1).max(255),
+        sha256: z.string().regex(/^[a-f0-9]{64}$/),
+        confirm_replacement: z.boolean().optional(),
+        expected_current_version: z.number().int().positive().optional(),
+      })
+    )
+    .min(1)
+    .max(3),
+})
+export type PodcastUploadBatchInitRequest = z.infer<
+  typeof podcastUploadBatchInitRequestSchema
+>
+
+export const podcastUploadBatchInitResponseSchema = z.object({
+  batch_id: z.string().uuid(),
+  trading_date: z.iso.date(),
+  reason: z.enum(["initial_upload", "update_file", "other"]),
+  base_episode_version: z.number().int().nullable(),
+  status: z.enum([
+    "pending",
+    "partial",
+    "completed",
+    "failed",
+    "conflict",
+    "expired",
+  ]),
+  expires_at: z.iso.datetime(),
+  files: z.array(
+    z.object({
+      session_id: z.string().uuid(),
+      asset_id: z.string().uuid(),
+      locale: localeSchema,
+      object_key: z.string(),
+      upload_url: z.url(),
+      required_headers: z.object({
+        "Content-Type": z.string(),
+        "If-None-Match": z.literal("*"),
+        "x-amz-meta-sha256": z.string().regex(/^[a-f0-9]{64}$/),
+      }),
+      expires_at: z.iso.datetime(),
+      status: z.enum([
+        "pending_upload",
+        "queued",
+        "processing",
+        "completed",
+        "failed",
+        "conflict",
+        "expired",
+      ]),
+      request_id: z.string().nullable(),
+    })
+  ),
+})
+export type PodcastUploadBatchInitResponse = z.infer<
+  typeof podcastUploadBatchInitResponseSchema
+>
+
+export const podcastUploadBatchStatusSchema = z.object({
+  batch_id: z.string().uuid(),
+  status: z.enum([
+    "pending",
+    "partial",
+    "completed",
+    "failed",
+    "conflict",
+    "expired",
+  ]),
+  applied_count: z.number().int().nonnegative(),
+  files: z.array(
+    z.object({
+      session_id: z.string().uuid(),
+      asset_id: z.string().uuid(),
+      locale: localeSchema,
+      status: z.enum([
+        "pending_upload",
+        "queued",
+        "processing",
+        "completed",
+        "failed",
+        "conflict",
+        "expired",
+      ]),
+      error_code: z.string().nullable(),
+      sha256: z.string().nullable(),
+      duration_seconds: z.number().nonnegative().nullable(),
+    })
+  ),
+})
+export type PodcastUploadBatchStatus = z.infer<
+  typeof podcastUploadBatchStatusSchema
+>
+
 export type PodcastUploadReason = "initial_upload" | "update_file" | "other"

@@ -7,6 +7,12 @@ import {
   type PodcastAudioImportInput,
   type PodcastChaptersUpdateInput,
   type PodcastUploadInput,
+  type PodcastUploadBatchInitRequest,
+  type PodcastUploadBatchInitResponse,
+  type PodcastUploadBatchStatus,
+  podcastUploadBatchInitRequestSchema,
+  podcastUploadBatchInitResponseSchema,
+  podcastUploadBatchStatusSchema,
   podcastEpisodeAdminListSchema,
   podcastEpisodeAdminSchema,
   type PodcastEpisodeCreateInput,
@@ -664,6 +670,63 @@ export function createPodcastAdminClient(transport: ApiTransport) {
           body,
         }),
         podcastEpisodeAdminSchema
+      )
+    },
+    async initializeUploadBatch(
+      input: PodcastUploadBatchInitRequest,
+      csrfToken: string
+    ): Promise<PodcastUploadBatchInitResponse> {
+      const payload = podcastUploadBatchInitRequestSchema.parse(input)
+      return parseResponse(
+        await transport("/api/admin/podcasts/upload-batches", {
+          method: "POST",
+          headers: {
+            ...mutationHeaders(csrfToken),
+            "Idempotency-Key": payload.idempotency_key,
+          },
+          body: JSON.stringify(payload),
+        }),
+        podcastUploadBatchInitResponseSchema
+      )
+    },
+    async finalizeUploadBatchFile(
+      batchId: string,
+      locale: Locale,
+      csrfToken: string
+    ) {
+      return parseResponse(
+        await transport(
+          `/api/admin/podcasts/upload-batches/${encodeURIComponent(batchId)}/files/${locale}/finalize`,
+          {
+            method: "POST",
+            headers: mutationHeaders(csrfToken),
+          }
+        ),
+        z.object({
+          batch_id: z.string().uuid(),
+          session_id: z.string().uuid(),
+          locale: z.enum(["zh-hant", "zh-hans", "en"]),
+          status: z.enum([
+            "pending_upload",
+            "queued",
+            "processing",
+            "completed",
+            "failed",
+            "conflict",
+            "expired",
+          ]),
+          error_code: z.string().nullable(),
+        })
+      )
+    },
+    async uploadBatchStatus(
+      batchId: string
+    ): Promise<PodcastUploadBatchStatus> {
+      return parseResponse(
+        await transport(
+          `/api/admin/podcasts/upload-batches/${encodeURIComponent(batchId)}`
+        ),
+        podcastUploadBatchStatusSchema
       )
     },
   }

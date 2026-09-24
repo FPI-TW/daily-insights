@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     )
 
     environment: Environment = "development"
-    runtime_role: Literal["api", "orchestration-worker"] = "api"
+    runtime_role: Literal["api", "orchestration-worker", "media-worker"] = "api"
     database_url: str | None = None
     app_name: str = "Daily Insights API"
     session_secret: SecretStr | None = None
@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     orchestration_activation_date: date | None = None
     orchestration_worker_concurrency: int = Field(default=6, ge=1, le=20)
     orchestration_poll_seconds: float = Field(default=2.0, ge=0.1, le=60)
+    podcast_upload_presign_ttl_seconds: int = Field(default=900, ge=60, le=3600)
+    podcast_upload_cleanup_grace_seconds: int = Field(
+        default=24 * 60 * 60, ge=3600, le=7 * 24 * 60 * 60
+    )
+    podcast_media_poll_seconds: float = Field(default=2.0, ge=0.1, le=60)
+    podcast_media_spool_dir: str = "/var/spool/podcast-media"
     morning_reports_enabled: bool = False
     analyst_viewpoints_enabled: bool = False
     analyst_viewpoints_base_url: str = "https://analyst-viewpoints.invalid"
@@ -121,6 +127,9 @@ class Settings(BaseSettings):
             self.r2_bucket_name = None
             self.r2_access_key_id = None
             self.r2_secret_access_key = None
+        elif self.runtime_role == "media-worker":
+            self.session_secret = None
+            self.password_pepper = None
         if self.session_secret is None and self.runtime_role == "api":
             if self.environment not in {"development", "test"}:
                 raise ValueError("session_secret is required outside development and test")
@@ -215,7 +224,7 @@ class Settings(BaseSettings):
                 or is_placeholder_value(self.chat_model_api_key.get_secret_value())
             ):
                 raise ValueError("chat_model_api_key is required and cannot be a placeholder")
-        if self.runtime_role != "api":
+        if self.runtime_role not in {"api", "media-worker"}:
             return
         required_r2_values = {
             "r2_endpoint_url": self.r2_endpoint_url,

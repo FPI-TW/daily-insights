@@ -328,3 +328,28 @@ class R2ObjectStore:
             Params={"Bucket": ref.bucket, "Key": ref.key},
             ExpiresIn=expires_in_seconds,
         )
+
+    async def presign_put(
+        self,
+        ref: ObjectRef,
+        *,
+        mime_type: str,
+        sha256: str,
+        expires_in: timedelta,
+    ) -> str:
+        """Sign a create-only browser PUT for one immutable podcast object."""
+        expires_in_seconds = int(expires_in.total_seconds())
+        if expires_in_seconds <= 0:
+            raise ValueError("signed URL lifetime must be positive")
+        return await asyncio.to_thread(
+            self._client.generate_presigned_url,
+            "put_object",
+            Params={
+                "Bucket": ref.bucket,
+                "Key": ref.key,
+                "ContentType": mime_type,
+                "Metadata": {"sha256": sha256},
+                "IfNoneMatch": "*",
+            },
+            ExpiresIn=expires_in_seconds,
+        )

@@ -909,6 +909,66 @@
         "title": "EconomicEvent",
         "type": "object"
       },
+      "FileInitResponse": {
+        "properties": {
+          "asset_id": {
+            "format": "uuid",
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "locale": {
+            "enum": ["zh-hant", "zh-hans", "en"],
+            "title": "Locale",
+            "type": "string"
+          },
+          "object_key": {
+            "title": "Object Key",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "required_headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Required Headers",
+            "type": "object"
+          },
+          "session_id": {
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "upload_url": {
+            "title": "Upload Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "asset_id",
+          "locale",
+          "object_key",
+          "upload_url",
+          "required_headers",
+          "expires_at",
+          "status",
+          "request_id"
+        ],
+        "title": "FileInitResponse",
+        "type": "object"
+      },
       "FunctionAttemptResponse": {
         "properties": {
           "attempt_number": {
@@ -5554,6 +5614,287 @@
         "title": "TableColumn",
         "type": "object"
       },
+      "UploadBatchInitResponse": {
+        "properties": {
+          "base_episode_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Episode Version"
+          },
+          "batch_id": {
+            "format": "uuid",
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/FileInitResponse"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "reason": {
+            "enum": ["initial_upload", "update_file", "other"],
+            "title": "Reason",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "trading_date": {
+            "format": "date",
+            "title": "Trading Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "batch_id",
+          "trading_date",
+          "reason",
+          "base_episode_version",
+          "status",
+          "expires_at",
+          "files"
+        ],
+        "title": "UploadBatchInitResponse",
+        "type": "object"
+      },
+      "UploadBatchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/UploadRequest"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Files",
+            "type": "array"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 16,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "reason": {
+            "enum": ["initial_upload", "update_file", "other"],
+            "title": "Reason",
+            "type": "string"
+          },
+          "trading_date": {
+            "format": "date",
+            "title": "Trading Date",
+            "type": "string"
+          }
+        },
+        "required": ["idempotency_key", "trading_date", "reason", "files"],
+        "title": "UploadBatchRequest",
+        "type": "object"
+      },
+      "UploadBatchStatusResponse": {
+        "properties": {
+          "applied_count": {
+            "title": "Applied Count",
+            "type": "integer"
+          },
+          "batch_id": {
+            "format": "uuid",
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/UploadFileStatus"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": ["batch_id", "status", "applied_count", "files"],
+        "title": "UploadBatchStatusResponse",
+        "type": "object"
+      },
+      "UploadFileStatus": {
+        "properties": {
+          "asset_id": {
+            "format": "uuid",
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "locale": {
+            "enum": ["zh-hant", "zh-hans", "en"],
+            "title": "Locale",
+            "type": "string"
+          },
+          "session_id": {
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "asset_id",
+          "locale",
+          "status",
+          "error_code",
+          "sha256",
+          "duration_seconds"
+        ],
+        "title": "UploadFileStatus",
+        "type": "object"
+      },
+      "UploadFinalizeResponse": {
+        "properties": {
+          "batch_id": {
+            "format": "uuid",
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "locale": {
+            "enum": ["zh-hant", "zh-hans", "en"],
+            "title": "Locale",
+            "type": "string"
+          },
+          "session_id": {
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "batch_id",
+          "session_id",
+          "locale",
+          "status",
+          "error_code"
+        ],
+        "title": "UploadFinalizeResponse",
+        "type": "object"
+      },
+      "UploadRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm_replacement": {
+            "default": false,
+            "title": "Confirm Replacement",
+            "type": "boolean"
+          },
+          "expected_current_version": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Current Version"
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "locale": {
+            "enum": ["zh-hant", "zh-hans", "en"],
+            "title": "Locale",
+            "type": "string"
+          },
+          "mime_type": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 268435456.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": ["locale", "filename", "size_bytes", "mime_type", "sha256"],
+        "title": "UploadRequest",
+        "type": "object"
+      },
       "UserResponse": {
         "properties": {
           "display_name": {
@@ -7344,6 +7685,171 @@
         },
         "summary": "Admin Create",
         "tags": ["podcasts"]
+      }
+    },
+    "/api/admin/podcasts/upload-batches": {
+      "post": {
+        "operationId": "admin_podcast_upload_batch_init",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadBatchInitResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Init Upload Batch",
+        "tags": ["podcast uploads"]
+      }
+    },
+    "/api/admin/podcasts/upload-batches/{batch_id}": {
+      "get": {
+        "operationId": "admin_podcast_upload_batch_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Batch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadBatchStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Batch Status",
+        "tags": ["podcast uploads"]
+      }
+    },
+    "/api/admin/podcasts/upload-batches/{batch_id}/files/{locale}/finalize": {
+      "post": {
+        "operationId": "admin_podcast_upload_finalize",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "locale",
+            "required": true,
+            "schema": {
+              "enum": ["zh-hant", "zh-hans", "en"],
+              "title": "Locale",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadFinalizeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Finalize Upload",
+        "tags": ["podcast uploads"]
       }
     },
     "/api/admin/podcasts/uploads": {

@@ -131,6 +131,17 @@ class FakeObjectStore:
         del ref, expires_in
         raise AssertionError("migration integration does not sign")
 
+    async def presign_put(
+        self,
+        ref: ObjectRef,
+        *,
+        mime_type: str,
+        sha256: str,
+        expires_in: timedelta,
+    ) -> str:
+        del ref, mime_type, sha256, expires_in
+        raise AssertionError("migration integration does not sign")
+
 
 def _entry(source_key: str) -> AssetMigrationInput:
     return AssetMigrationInput(

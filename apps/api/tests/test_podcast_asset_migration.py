@@ -117,6 +117,17 @@ class FakeObjectStore:
         del ref, expires_in
         raise AssertionError("migration must not sign")
 
+    async def presign_put(
+        self,
+        ref: ObjectRef,
+        *,
+        mime_type: str,
+        sha256: str,
+        expires_in: timedelta,
+    ) -> str:
+        del ref, mime_type, sha256, expires_in
+        raise AssertionError("migration must not sign")
+
 
 def _entry(source_key: str = "legacy/podcast.mp3") -> AssetMigrationInput:
     return AssetMigrationInput(

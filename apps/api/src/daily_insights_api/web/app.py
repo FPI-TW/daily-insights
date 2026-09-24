@@ -33,6 +33,7 @@ from daily_insights_api.modules.news.admin import router as news_admin_router
 from daily_insights_api.modules.news.router import router as news_router
 from daily_insights_api.modules.operations.health import ReadinessReport, evaluate_readiness
 from daily_insights_api.modules.orchestration.router import router as orchestration_router
+from daily_insights_api.modules.podcasts.direct_upload import router as podcast_uploads_router
 from daily_insights_api.modules.podcasts.router import router as podcasts_router
 from daily_insights_api.modules.reports.router import router as reports_router
 
@@ -178,6 +179,7 @@ def create_app(
     app.include_router(news_admin_router)
     app.include_router(chat_router)
     app.include_router(podcasts_router)
+    app.include_router(podcast_uploads_router)
 
     @app.get("/health/live", response_model=HealthResponse, include_in_schema=False)
     @app.get("/api/health/live", response_model=HealthResponse)

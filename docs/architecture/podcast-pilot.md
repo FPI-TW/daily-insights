@@ -22,6 +22,10 @@ Phase 4 上線驗收仍待執行。八大市場正式內容與報告前端在此
 - 獨立的客戶與管理端登入入口、route guard、導覽與登出導向；
 - `/admin/audio` 音檔管理頁、三個可點擊／拖放的語系 slot、R2 upload 及發布
   控制；
+- browser audio upload now uses idempotent batch init, immutable UUID object keys,
+  direct signed R2 PUTs, locale-level finalize/status, and a durable media worker
+  that checks size/MIME, computes SHA-256, extracts media metadata, and performs
+  fenced database cutover;
 - PostgreSQL + fake R2 端到端測試，覆蓋建立、發布拒絕、音檔登記、角色限制、
   locale fallback、同路徑覆寫及下架；
 - Playwright + deterministic mock API browser E2E 共 15 個 specs，覆蓋兩個
@@ -65,8 +69,10 @@ Podcast 先行版用來驗證一條可上線的完整路徑：
 - `admin` 組合 episode 與 asset 的 privileged workflow，並寫入 audit。
 - 客戶 web 只取得可發布的 episode metadata；播放前再向 API 要求短效、
   object-scoped URL。
-- 播放 audio bytes 由瀏覽器直接向 R2 取得；後台 upload 則經 nginx/API 的受控
-  multipart endpoint 寫入 private R2。
+- 播放 audio bytes 由瀏覽器直接向 R2 取得；browser upload 也由瀏覽器直接 PUT
+  到 private R2。API 驗證身份、確認替換版本並簽發短效 create-only URL，worker
+  驗證完整物件後才啟用資料庫 asset/variant。既有 multipart upload 與 import API
+  保留給內部工具。
 - Podcast catalog 由所有具有效 membership 的 org 共用，不套用八市場
   visibility，也沒有 customer-specific episode policy。`admin` 與
   `asset_manager` 以前台虛擬 `admin` 組織存取同一份 catalog；此 scope
@@ -103,11 +109,36 @@ podcast_episode_audio_variants
   拖放。一次請求至少一檔、最多三檔，不要求固定必備語系。
 - 上傳原因使用固定選單：`initial_upload`（初次上傳）、`update_file`
   （更新檔案）、`other`（其他）。
-- browser upload 的 object 使用
-  `podcasts/{trading-date}/audio/{locale}/podcast.{ext}`，其中 `{ext}` 僅支援
-  `mp3` 與 `mp4`。三個語系使用相同 basename 並透過 locale 路徑區分；同交易日
-  同語系經明確確認後，格式相同時覆寫同一 stable key；格式改變時先寫入新格式
-  的 stable-extension key，再刪除被取代的舊格式 object。
+- browser direct upload 的 object 使用
+  `podcasts/{trading-date}/audio/{locale}/{asset-uuid}.{ext}`，其中 `{ext}` 僅支援
+  `mp3` 與 `mp4`。每一 locale 都寫入新的不可變 key；替換成功後以 PostgreSQL
+  variant mapping 原子切換，不覆寫舊 bytes。每個 init file 必須提供 64 位小寫
+  SHA-256；API 將其與 locale、大小、MIME、replacement expected version 綁定到
+  upload session。R2 PUT 簽名包含 `Content-Type`、`If-None-Match: *` 與
+  `x-amz-meta-sha256`，讓 R2 在 HEAD metadata 中保留該 checksum。
+- finalize 與 worker 都會確認 R2 HEAD 的 `sha256` metadata 等於 session 預期值；
+  worker 仍會把 object 串流到 bounded spool，獨立計算 bytes 的 SHA-256，並要求
+  同時符合 session 預期值與前後 HEAD metadata，才會啟用 Asset。播放簽 URL 可透過
+  R2 HEAD metadata 比對 Asset checksum，不必為新上傳檔案重新下載整段音訊。
+- R2 暫時性網路或服務錯誤會將該 locale 保留為 `processing`，以資料庫 lease
+  延後重試；重試等待從 15 秒起逐次增加，最多執行五次，耗盡後標記 `failed`。
+  延後中的 locale 不阻塞同批其他 queued locale；未預期的程式錯誤仍會向上拋出。
+- batch 有一至三個獨立 locale session。任一 locale 驗證與 cutover 成功就會立即
+  啟用；同批其他 locale 可繼續處理。狀態以 locale 回報，失敗不回滾已完成語系。
+  批次從 draft 或不存在 episode 開始時，首個成功 locale 會發布 episode。之後若
+  有管理者下架或修改 episode，episode version fence 會讓剩餘 session 進入 conflict，
+  worker 不會重新發布 episode。
+- init 以 PostgreSQL transaction advisory lock 序列化相同交易日；同日已有
+  `pending_upload`、`queued` 或 `processing` session 時，另一批次回傳
+  `409 upload_in_progress`，包括不同語系，以維持 episode version fence。相同批次仍可
+  一次初始化多個語系。同一 idempotency key 會在取得日期鎖後重新讀取並回傳原 batch。
+  過期的 `pending_upload` 會先轉成 `expired`，不再阻擋新批次；`queued` 與 `processing`
+  即使 presign 時間已過仍會阻擋，直到處理完成或進入 terminal 狀態。
+- unfinalized object 只在簽名 PUT 到期並超過設定 grace period 後開始清理。過期
+  session/key 會保留清理墓碑並再次檢查，處理 URL 到期前已開始、之後才完成的 PUT；
+  版本 fence 產生的 conflict session 也會在 grace period 後清理 orphan object。
+  R2 清理錯誤會透過 cleanup lease 延後五分鐘重試；object key 不會重用，也不會
+  刪除已有 Asset row 的 key。
 - object key 與檔名只由後端產生，來源檔名不進入 R2 key。上傳時不輸入標題或
   摘要；後台 `admin` 可輸入三語標題與摘要（`metadata_source = manual`）；尚未
   輸入時顯示由固定檔名 `podcast` 與 trading date 推導的
@@ -154,11 +185,13 @@ publication、show/series/season、episode number、收聽分析、留言、訂�
   警告。
 - 同一 `trading_date + locale` 已有 active audio 時，登記或上傳新檔第一次
   必須回傳 replacement-required 警告，不得直接改變 active mapping。
-- 管理者明確確認後，格式相同時才以同一 stable R2 key 原地改寫 bytes；若在
-  MP3 與 MP4 間切換，則先寫入新 stable-extension key，再刪除被取代的舊格式
-  key。兩條路徑都會更新 asset metadata、checksum 與 size，並遞增 variant 的
-  邏輯版本；請求需帶 expected current version，避免兩位管理者同時操作造成
-  lost update，且 mutation 必須寫入 audit。
+- 管理者明確確認後，direct upload 會使用新的 UUID R2 key，不覆寫原 object；
+  worker 取得 episode 與 variant 鎖後確認 batch base episode version、已套用 locale
+  數與 expected current locale version，再以單一 DB transaction 建立 active Asset、
+  切換 variant、遞增 episode version、套用首個 locale 的自動發布並寫 audit。互不相關
+  的 episode 編輯、下架或另一批次先完成 cutover 都會 fence 剩餘 locales。
+- 舊的 multipart endpoint 仍保留原有 stable-key 行為；新 browser workflow 使用
+  immutable key，舊 bytes 由既有資產保留政策管理。
 
 ## 既有 R2 搬移流程
 
