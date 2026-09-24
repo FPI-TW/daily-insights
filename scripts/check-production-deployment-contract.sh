@@ -466,7 +466,7 @@ if PATH="$temporary_dir/stubs:$PATH" \
   echo "deployment must fail when migration fails after quiescing automatic news" >&2
   exit 1
 fi
-grep -q 'Legacy schedulers are confirmed quiescent' "$temporary_dir/migration-failure.err"
+grep -q 'Schema-boundary services are confirmed quiescent' "$temporary_dir/migration-failure.err"
 if grep -q 'up -d --no-build --force-recreate --no-deps orchestration-worker' "$temporary_dir/deployment.log" ||
   grep -q 'up -d --no-build --force-recreate --no-deps podcast-media-worker' "$temporary_dir/deployment.log" ||
   grep -q 'up -d --no-build --remove-orphans .*orchestration-dispatcher' "$temporary_dir/deployment.log"; then
@@ -482,7 +482,7 @@ if PATH="$temporary_dir/stubs:$PATH" \
   echo "deployment must fail when the replacement worker cannot start" >&2
   exit 1
 fi
-grep -q 'Legacy schedulers are confirmed quiescent' "$temporary_dir/worker-failure.err"
+grep -q 'Schema-boundary services are confirmed quiescent' "$temporary_dir/worker-failure.err"
 if grep -q 'up -d --no-build --remove-orphans .*orchestration-dispatcher' "$temporary_dir/deployment.log"; then
   echo "worker startup failure must not start the orchestration dispatcher" >&2
   exit 1
@@ -514,13 +514,14 @@ assert_requiesced_after_scheduler_attempt() {
   index_scheduler_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-index-daily-bars-scheduler' "$post_attempt_log" | head -n 1 | cut -d: -f1)
   institutional_scheduler_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-institutional-flows-scheduler' "$post_attempt_log" | head -n 1 | cut -d: -f1)
   worker_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-data-management-worker' "$post_attempt_log" | head -n 1 | cut -d: -f1)
+  media_worker_stop_line=$(grep -n 'stop daily-insights-podcast-media-worker' "$post_attempt_log" | head -n 1 | cut -d: -f1)
   media_worker_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-podcast-media-worker' "$post_attempt_log" | head -n 1 | cut -d: -f1)
   if [ "$dispatcher_stop_line" -ge "$dispatcher_confirmed_line" ] ||
     [ "$stop_line" -ge "$scheduler_confirmed_line" ] ||
     [ "$stop_line" -ge "$index_scheduler_confirmed_line" ] ||
     [ "$stop_line" -ge "$institutional_scheduler_confirmed_line" ] ||
     [ "$stop_line" -ge "$worker_confirmed_line" ] ||
-    [ "$stop_line" -ge "$media_worker_confirmed_line" ]; then
+    [ "$media_worker_stop_line" -ge "$media_worker_confirmed_line" ]; then
     echo "failed deployment must confirm every schema-boundary service after stopping them" >&2
     exit 1
   fi
@@ -534,7 +535,7 @@ if PATH="$temporary_dir/stubs:$PATH" \
   echo "deployment must fail when final service convergence fails" >&2
   exit 1
 fi
-grep -q 'Legacy schedulers are confirmed quiescent' "$temporary_dir/convergence-failure.err"
+grep -q 'Schema-boundary services are confirmed quiescent' "$temporary_dir/convergence-failure.err"
 assert_requiesced_after_scheduler_attempt "$temporary_dir/deployment.log"
 
 : >"$temporary_dir/deployment.log"
@@ -546,7 +547,7 @@ if PATH="$temporary_dir/stubs:$PATH" \
   echo "deployment must fail when the final health check fails" >&2
   exit 1
 fi
-grep -q 'Legacy schedulers are confirmed quiescent' "$temporary_dir/deployment-health-failure.err"
+grep -q 'Schema-boundary services are confirmed quiescent' "$temporary_dir/deployment-health-failure.err"
 assert_requiesced_after_scheduler_attempt "$temporary_dir/deployment.log"
 
 if PATH="$temporary_dir/stubs:$PATH" \
