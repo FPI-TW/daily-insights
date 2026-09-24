@@ -2112,6 +2112,125 @@ async def test_treasury_failed_year_is_partial_and_retryable(
     assert outcome.result["failure_reasons"] == {str(current_year): "timeout"}
 
 
+def _complete_macro_histories(edition: date) -> list[History]:
+    return [
+        History(
+            id=identifier,
+            symbol=symbol,
+            unit=unit,
+            source=source,
+            status="ok",
+            points=[
+                Point(date=edition - timedelta(days=370), value=Decimal("4")),
+                Point(date=edition, value=Decimal("4.1")),
+            ],
+        )
+        for _dataset, identifier, symbol, unit, source in (
+            orchestration_projections._macro_history_specs()
+        )
+    ]
+
+
+def _complete_macro_outcomes() -> tuple[dict[str, Any], ...]:
+    return tuple(
+        {"function_key": dataset, "status": "succeeded", "missing_scopes": []}
+        for dataset in sorted(orchestration_projections.MACRO_DATASETS)
+    )
+
+
+def _complete_macro_frozen_observations(
+    edition: date,
+    *,
+    value: Decimal,
+    digest_character: str,
+) -> tuple[FrozenObservation, ...]:
+    providers = {
+        "commodity_daily_bars": "twelve_data",
+        "fx_daily_bars": "twelve_data",
+        "dxy_daily_bars": "yahoo_finance",
+        "treasury_yield_curve": "us_treasury",
+        "sofr_daily_rates": "new_york_fed",
+    }
+    return tuple(
+        FrozenObservation(
+            kind="rate" if dataset in {"treasury_yield_curve", "sofr_daily_rates"} else "market",
+            id=uuid.uuid4(),
+            function_attempt_id=uuid.uuid4(),
+            provider_key=providers[dataset],
+            dataset_key=dataset,
+            symbol=symbol,
+            unit=unit,
+            observation_date=observation_date,
+            value=value,
+            open_value=value
+            if dataset not in {"treasury_yield_curve", "sofr_daily_rates"}
+            else None,
+            value_digest=digest_character * 64,
+        )
+        for dataset, _identifier, symbol, unit, _source in (
+            orchestration_projections._macro_history_specs()
+        )
+        for observation_date in (edition - timedelta(days=370), edition)
+    )
+
+
+def test_macro_publication_validation_accepts_complete_fresh_histories() -> None:
+    edition = date(2026, 9, 17)
+    assert (
+        orchestration_projections._macro_publication_failures(
+            _complete_macro_histories(edition),
+            _complete_macro_outcomes(),
+            edition_date=edition,
+        )
+        == []
+    )
+
+
+def test_macro_publication_validation_rejects_stale_and_partial_sources() -> None:
+    edition = date(2026, 9, 17)
+    histories = _complete_macro_histories(edition)
+    dxy = next(history for history in histories if history.id == "dxy")
+    dxy.points[-1] = Point(date=edition - timedelta(days=6), value=Decimal("4.1"))
+    outcomes = list(_complete_macro_outcomes())
+    treasury = next(
+        outcome for outcome in outcomes if outcome["function_key"] == "treasury_yield_curve"
+    )
+    treasury["status"] = "partial"
+    treasury["missing_scopes"] = ["2024"]
+
+    failures = orchestration_projections._macro_publication_failures(
+        histories,
+        tuple(outcomes),
+        edition_date=edition,
+    )
+
+    assert any(failure["type"] == "stale_data" for failure in failures)
+    assert {
+        "type": "source_unavailable",
+        "dataset": "treasury_yield_curve",
+        "affected_items": ["2024"],
+    } in failures
+
+
+def test_macro_publication_validation_requires_shared_treasury_date() -> None:
+    edition = date(2026, 9, 17)
+    histories = _complete_macro_histories(edition)
+    treasury = [history for history in histories if history.source == "U.S. Treasury"]
+    treasury[-1].points[-1] = Point(date=edition - timedelta(days=1), value=Decimal("4.1"))
+
+    failures = orchestration_projections._macro_publication_failures(
+        histories,
+        _complete_macro_outcomes(),
+        edition_date=edition,
+    )
+
+    assert {
+        "type": "stale_data",
+        "dataset": "treasury_yield_curve",
+        "affected_items": sorted(history.symbol for history in treasury),
+    } in failures
+
+
 async def test_daily_routine_is_idempotent_and_worker_persists_attempts(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
@@ -2427,7 +2546,10 @@ async def test_older_macro_projection_cannot_overwrite_newer_freeze(
                     registry_version="test",
                     cutoff_at=cutoff,
                     input_digest=("1" if suffix == "older" else "2") * 64,
-                    inputs={"observations": [], "function_outcomes": []},
+                    inputs={
+                        "observations": [],
+                        "function_outcomes": list(_complete_macro_outcomes()),
+                    },
                 )
             )
             jobs.append((job.id, owner, token))
@@ -2436,20 +2558,10 @@ async def test_older_macro_projection_cannot_overwrite_newer_freeze(
     newer_job, newer_owner, newer_token = jobs[1]
 
     def observation(value: str, digest: str) -> tuple[FrozenObservation, ...]:
-        return (
-            FrozenObservation(
-                kind="market",
-                id=uuid.uuid4(),
-                function_attempt_id=uuid.uuid4(),
-                provider_key="twelve_data",
-                dataset_key="commodity_daily_bars",
-                symbol="WTI/USD",
-                unit="usd",
-                observation_date=edition,
-                value=Decimal(value),
-                open_value=Decimal(value),
-                value_digest=digest * 64,
-            ),
+        return _complete_macro_frozen_observations(
+            edition,
+            value=Decimal(value),
+            digest_character=digest,
         )
 
     newer_result = await publish_macro_dashboard(
