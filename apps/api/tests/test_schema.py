@@ -52,6 +52,8 @@ EXPECTED_TABLES = {
     "podcast_episode_audio_variants",
     "podcast_episode_translations",
     "podcast_episodes",
+    "podcast_upload_batches",
+    "podcast_upload_sessions",
     "prepared_news_items",
     "projection_input_freezes",
     "projection_input_observations",

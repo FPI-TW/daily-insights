@@ -60,6 +60,41 @@ services:
       - app
       - data
 
+  podcast-media-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: apps/api/.env
+        required: false
+    environment:
+      DAILY_INSIGHTS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-daily_insights}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-daily_insights}
+      DAILY_INSIGHTS_RUNTIME_ROLE: media-worker
+    command:
+      ["python", "-m", "daily_insights_api.scripts.run_podcast_media_worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import time; from pathlib import Path; p = Path('/tmp/podcast-media-worker-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 90",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - podcast-media-spool:/var/spool/podcast-media
+    networks:
+      - app
+      - data
+
   orchestration-worker:
     build:
       context: .
@@ -188,6 +223,7 @@ services:
 
 volumes:
   postgres-data:
+  podcast-media-spool:
 
 networks:
   # No web/API container port is published. This network still permits API

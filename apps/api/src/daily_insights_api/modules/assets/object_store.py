@@ -69,3 +69,12 @@ class ObjectStore(Protocol):
     def read(self, ref: ObjectRef) -> AsyncIterator[bytes]: ...
 
     async def presign_get(self, ref: ObjectRef, expires_in: timedelta) -> str: ...
+
+    async def presign_put(
+        self,
+        ref: ObjectRef,
+        *,
+        mime_type: str,
+        sha256: str,
+        expires_in: timedelta,
+    ) -> str: ...

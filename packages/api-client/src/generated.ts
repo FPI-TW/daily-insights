@@ -443,6 +443,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/admin/podcasts/upload-batches": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Init Upload Batch */
+    post: operations["admin_podcast_upload_batch_init"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/podcasts/upload-batches/{batch_id}": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Upload Batch Status */
+    get: operations["admin_podcast_upload_batch_status"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/podcasts/upload-batches/{batch_id}/files/{locale}/finalize": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Finalize Upload */
+    post: operations["admin_podcast_upload_finalize"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/admin/podcasts/uploads": {
     parameters: {
       query?: never
@@ -1314,6 +1365,41 @@ export interface components {
       previous?: string | null
       /** Unit */
       unit?: string | null
+    }
+    /** FileInitResponse */
+    FileInitResponse: {
+      /**
+       * Asset Id
+       * Format: uuid
+       */
+      asset_id: string
+      /**
+       * Expires At
+       * Format: date-time
+       */
+      expires_at: string
+      /**
+       * Locale
+       * @enum {string}
+       */
+      locale: "zh-hant" | "zh-hans" | "en"
+      /** Object Key */
+      object_key: string
+      /** Request Id */
+      request_id: string
+      /** Required Headers */
+      required_headers: {
+        [key: string]: string
+      }
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string
+      /** Status */
+      status: string
+      /** Upload Url */
+      upload_url: string
     }
     /** FunctionAttemptResponse */
     FunctionAttemptResponse: {
@@ -3109,6 +3195,137 @@ export interface components {
       /** Unit Code */
       unit_code?: string | null
     }
+    /** UploadBatchInitResponse */
+    UploadBatchInitResponse: {
+      /** Base Episode Version */
+      base_episode_version: number | null
+      /**
+       * Batch Id
+       * Format: uuid
+       */
+      batch_id: string
+      /**
+       * Expires At
+       * Format: date-time
+       */
+      expires_at: string
+      /** Files */
+      files: components["schemas"]["FileInitResponse"][]
+      /**
+       * Reason
+       * @enum {string}
+       */
+      reason: "initial_upload" | "update_file" | "other"
+      /** Status */
+      status: string
+      /**
+       * Trading Date
+       * Format: date
+       */
+      trading_date: string
+    }
+    /** UploadBatchRequest */
+    UploadBatchRequest: {
+      /** Files */
+      files: components["schemas"]["UploadRequest"][]
+      /** Idempotency Key */
+      idempotency_key: string
+      /**
+       * Reason
+       * @enum {string}
+       */
+      reason: "initial_upload" | "update_file" | "other"
+      /**
+       * Trading Date
+       * Format: date
+       */
+      trading_date: string
+    }
+    /** UploadBatchStatusResponse */
+    UploadBatchStatusResponse: {
+      /** Applied Count */
+      applied_count: number
+      /**
+       * Batch Id
+       * Format: uuid
+       */
+      batch_id: string
+      /** Files */
+      files: components["schemas"]["UploadFileStatus"][]
+      /** Status */
+      status: string
+    }
+    /** UploadFileStatus */
+    UploadFileStatus: {
+      /**
+       * Asset Id
+       * Format: uuid
+       */
+      asset_id: string
+      /** Duration Seconds */
+      duration_seconds: number | null
+      /** Error Code */
+      error_code: string | null
+      /**
+       * Locale
+       * @enum {string}
+       */
+      locale: "zh-hant" | "zh-hans" | "en"
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string
+      /** Sha256 */
+      sha256: string | null
+      /** Status */
+      status: string
+    }
+    /** UploadFinalizeResponse */
+    UploadFinalizeResponse: {
+      /**
+       * Batch Id
+       * Format: uuid
+       */
+      batch_id: string
+      /** Error Code */
+      error_code: string | null
+      /**
+       * Locale
+       * @enum {string}
+       */
+      locale: "zh-hant" | "zh-hans" | "en"
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string
+      /** Status */
+      status: string
+    }
+    /** UploadRequest */
+    UploadRequest: {
+      /**
+       * Confirm Replacement
+       * @default false
+       */
+      confirm_replacement: boolean
+      /** Expected Current Version */
+      expected_current_version?: number | null
+      /** Filename */
+      filename: string
+      /**
+       * Locale
+       * @enum {string}
+       */
+      locale: "zh-hant" | "zh-hans" | "en"
+      /** Mime Type */
+      mime_type: string
+      /** Sha256 */
+      sha256: string
+      /** Size Bytes */
+      size_bytes: number
+    }
     /** UserResponse */
     UserResponse: {
       /** Display Name */
@@ -4183,6 +4400,106 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["PodcastEpisodeAdminResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  admin_podcast_upload_batch_init: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UploadBatchRequest"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["UploadBatchInitResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  admin_podcast_upload_batch_status: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        batch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["UploadBatchStatusResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  admin_podcast_upload_finalize: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        batch_id: string
+        locale: "zh-hant" | "zh-hans" | "en"
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["UploadFinalizeResponse"]
         }
       }
       /** @description Validation Error */

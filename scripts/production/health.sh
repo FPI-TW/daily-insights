@@ -14,7 +14,7 @@ if [ "$timeout_seconds" -lt 1 ] || [ "$timeout_seconds" -gt 900 ]; then
 fi
 
 deadline=$(( $(date +%s) + timeout_seconds ))
-containers="daily-insights-api daily-insights-web daily-insights-nginx daily-insights-orchestration-worker daily-insights-orchestration-dispatcher"
+containers="daily-insights-api daily-insights-web daily-insights-nginx daily-insights-orchestration-worker daily-insights-podcast-media-worker daily-insights-orchestration-dispatcher"
 
 while [ "$(date +%s)" -le "$deadline" ]; do
   all_healthy=true

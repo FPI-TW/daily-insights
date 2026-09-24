@@ -13,6 +13,7 @@ SERVICES = (
     "web",
     "nginx",
     "orchestration-worker",
+    "podcast-media-worker",
     "orchestration-dispatcher",
 )
 API_ENVIRONMENT_KEYS = {
@@ -142,7 +143,41 @@ def main() -> None:
         },
         "orchestration-dispatcher must only receive queueing and activation settings",
     )
-    for name in ("orchestration-worker", "orchestration-dispatcher"):
+    media_environment = services["podcast-media-worker"].get("environment", {})
+    require(
+        {
+            "DAILY_INSIGHTS_ENVIRONMENT",
+            "DAILY_INSIGHTS_RUNTIME_ROLE",
+            "DAILY_INSIGHTS_DATABASE_URL",
+            "DAILY_INSIGHTS_R2_ENDPOINT_URL",
+            "DAILY_INSIGHTS_R2_BUCKET_NAME",
+            "DAILY_INSIGHTS_R2_ACCESS_KEY_ID",
+            "DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY",
+            "DAILY_INSIGHTS_PODCAST_MEDIA_POLL_SECONDS",
+            "DAILY_INSIGHTS_PODCAST_UPLOAD_CLEANUP_GRACE_SECONDS",
+            "DAILY_INSIGHTS_PODCAST_MEDIA_SPOOL_DIR",
+        }.issubset(media_environment),
+        "podcast-media-worker must receive its database, scoped R2, and worker settings",
+    )
+    require(
+        media_environment.get("DAILY_INSIGHTS_RUNTIME_ROLE") == "media-worker",
+        "podcast-media-worker must use its least-privilege runtime role",
+    )
+    require(
+        not {
+            "DAILY_INSIGHTS_SESSION_SECRET",
+            "DAILY_INSIGHTS_PASSWORD_PEPPER",
+        }.intersection(media_environment),
+        "podcast-media-worker must not receive API authentication secrets",
+    )
+    require(
+        media_environment.get("DAILY_INSIGHTS_R2_ACCESS_KEY_ID")
+        != api_environment.get("DAILY_INSIGHTS_R2_ACCESS_KEY_ID")
+        and media_environment.get("DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY")
+        != api_environment.get("DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY"),
+        "podcast-media-worker must use separate R2 credentials from the API signer",
+    )
+    for name in ("orchestration-worker", "podcast-media-worker", "orchestration-dispatcher"):
         require(
             services[name].get("environment", {}).get("DAILY_INSIGHTS_ENVIRONMENT")
             == "production",

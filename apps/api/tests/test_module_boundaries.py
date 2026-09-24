@@ -57,6 +57,8 @@ TABLE_OWNERS = {
     "podcast_episode_audio_variants": "podcasts",
     "podcast_episode_translations": "podcasts",
     "podcast_episodes": "podcasts",
+    "podcast_upload_batches": "podcasts",
+    "podcast_upload_sessions": "podcasts",
     "publication_source_runs": "reports",
     "report_pipeline_runs": "operations",
     "report_publications": "reports",

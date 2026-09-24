@@ -930,4 +930,111 @@ describe("API client trust boundary", () => {
     expect(headers.has("content-type")).toBe(false)
     expect((captured?.body as FormData).get("en")).toBeInstanceOf(File)
   })
+
+  it("initializes a direct Podcast upload batch with CSRF and idempotency headers", async () => {
+    let capturedPath = ""
+    let captured: RequestInit | undefined
+    const client = createPodcastAdminClient(async (path, init) => {
+      capturedPath = path
+      captured = init
+      return Response.json({
+        batch_id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
+        trading_date: "2026-07-25",
+        reason: "initial_upload",
+        base_episode_version: null,
+        status: "pending",
+        expires_at: "2026-07-25T10:00:00Z",
+        files: [
+          {
+            session_id: "0f9b6a6e-3d7f-4f4f-9a3f-2b7d3f1c9e11",
+            asset_id: "2a5e0d3e-5b2c-4d51-8f2e-6f0d3a9c1b22",
+            locale: "en",
+            object_key: "podcasts/en.mp3",
+            upload_url: "https://storage.example/upload?signature=opaque",
+            required_headers: {
+              "Content-Type": "audio/mpeg",
+              "If-None-Match": "*",
+              "x-amz-meta-sha256": "a".repeat(64),
+            },
+            expires_at: "2026-07-25T10:00:00Z",
+            status: "pending_upload",
+            request_id: "request-id",
+          },
+        ],
+      })
+    })
+
+    const result = await client.initializeUploadBatch(
+      {
+        idempotency_key: "c744cb20-bf7c-4f4a-8e7b-1e0c69a91adf",
+        trading_date: "2026-07-25",
+        reason: "initial_upload",
+        files: [
+          {
+            locale: "en",
+            filename: "episode.mp3",
+            size_bytes: 7,
+            mime_type: "audio/mpeg",
+            sha256: "a".repeat(64),
+          },
+        ],
+      },
+      "csrf-token"
+    )
+
+    expect(capturedPath).toBe("/api/admin/podcasts/upload-batches")
+    expect(captured?.method).toBe("POST")
+    expect(new Headers(captured?.headers).get("x-csrf-token")).toBe(
+      "csrf-token"
+    )
+    expect(new Headers(captured?.headers).get("idempotency-key")).toBe(
+      "c744cb20-bf7c-4f4a-8e7b-1e0c69a91adf"
+    )
+    expect(JSON.parse(String(captured?.body))).toMatchObject({
+      idempotency_key: "c744cb20-bf7c-4f4a-8e7b-1e0c69a91adf",
+      files: [{ locale: "en", filename: "episode.mp3" }],
+    })
+    expect(result.files[0]?.required_headers["If-None-Match"]).toBe("*")
+    expect(result.files[0]?.required_headers["x-amz-meta-sha256"]).toBe(
+      "a".repeat(64)
+    )
+  })
+
+  it("parses a batch status when every upload session failed", async () => {
+    const client = createPodcastAdminClient(async () =>
+      Response.json({
+        batch_id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
+        status: "failed",
+        applied_count: 0,
+        files: [
+          {
+            session_id: "0f9b6a6e-3d7f-4f4f-9a3f-2b7d3f1c9e11",
+            asset_id: "2a5e0d3e-5b2c-4d51-8f2e-6f0d3a9c1b22",
+            locale: "en",
+            status: "failed",
+            error_code: "audio_validation_failed",
+            sha256: null,
+            duration_seconds: null,
+          },
+          {
+            session_id: "3b6f1e4f-6c3d-4e62-9a3f-7a1e4b0d2c33",
+            asset_id: "c744cb20-bf7c-4f4a-8e7b-1e0c69a91adf",
+            locale: "zh-hant",
+            status: "failed",
+            error_code: "audio_validation_failed",
+            sha256: null,
+            duration_seconds: null,
+          },
+        ],
+      })
+    )
+
+    const result = await client.uploadBatchStatus(
+      "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09"
+    )
+
+    expect(result.status).toBe("failed")
+    expect(result.files).toHaveLength(2)
+    expect(result.files.every(file => file.status === "failed")).toBe(true)
+  })
 })

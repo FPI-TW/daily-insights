@@ -4,6 +4,7 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import date, timedelta
 from typing import IO, Any, BinaryIO, Protocol, cast
+from urllib.parse import parse_qs, urlparse
 
 import boto3
 import pytest
@@ -89,6 +90,17 @@ class SigningStore:
     async def presign_get(self, ref: ObjectRef, expires_in: timedelta) -> str:
         self.signed += 1
         return f"https://private.invalid/{ref.key}?ttl={int(expires_in.total_seconds())}"
+
+    async def presign_put(
+        self,
+        ref: ObjectRef,
+        *,
+        mime_type: str,
+        sha256: str,
+        expires_in: timedelta,
+    ) -> str:
+        del ref, mime_type, sha256, expires_in
+        raise AssertionError("signing must not create a browser upload URL")
 
 
 class StubStreamingBody:
@@ -337,6 +349,25 @@ async def test_r2_adapter_maps_s3_calls_without_treating_etag_as_checksum() -> N
     assert await store.copy_if_absent(source, target, sha256=digest)
     signed = await store.presign_get(target, timedelta(seconds=90))
     assert signed == "https://signed.invalid/private"
+    put_url = await store.presign_put(
+        ObjectRef(bucket="private", key="podcasts/asset.mp3"),
+        mime_type="audio/mpeg",
+        sha256=hashlib.sha256(b"podcast").hexdigest(),
+        expires_in=timedelta(minutes=10),
+    )
+    assert put_url == "https://signed.invalid/private"
+    put_signature = client.calls[-1][1]
+    assert put_signature == {
+        "method": "put_object",
+        "params": {
+            "Bucket": "private",
+            "Key": "podcasts/asset.mp3",
+            "ContentType": "audio/mpeg",
+            "Metadata": {"sha256": hashlib.sha256(b"podcast").hexdigest()},
+            "IfNoneMatch": "*",
+        },
+        "expires": 600,
+    }
     put_call = next(arguments for name, arguments in client.calls if name == "put")
     assert put_call["Bucket"] == "private"
     assert put_call["Key"] == "target.mp3"
@@ -344,6 +375,31 @@ async def test_r2_adapter_maps_s3_calls_without_treating_etag_as_checksum() -> N
     assert put_call["ContentLength"] == 7
     assert put_call["Metadata"] == {"legacy": "true", "sha256": digest}
     assert client.put_body is not None and client.put_body.closed
+
+
+@pytest.mark.asyncio
+async def test_real_botocore_presign_binds_metadata_checksum_header() -> None:
+    client = boto3.client(
+        "s3",
+        endpoint_url="https://account.r2.cloudflarestorage.com",
+        aws_access_key_id="offline-access",
+        aws_secret_access_key="offline-secret",
+        region_name="auto",
+    )
+    digest = hashlib.sha256(b"podcast").hexdigest()
+    url = await R2ObjectStore(cast(S3Client, client)).presign_put(
+        ObjectRef(bucket="private", key="podcasts/asset.mp3"),
+        mime_type="audio/mpeg",
+        sha256=digest,
+        expires_in=timedelta(minutes=10),
+    )
+
+    query = parse_qs(urlparse(url).query)
+    signed_headers = query["X-Amz-SignedHeaders"][0].lower().split(";")
+    assert "content-type" in signed_headers
+    assert "if-none-match" in signed_headers
+    assert "x-amz-meta-sha256" in signed_headers
+    assert query["X-Amz-Expires"] == ["600"]
 
 
 @pytest.mark.asyncio

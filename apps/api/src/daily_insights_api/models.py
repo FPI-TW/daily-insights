@@ -52,6 +52,10 @@ from daily_insights_api.modules.podcasts.models import (
     PodcastEpisodeAudioVariant,
     PodcastEpisodeTranslation,
 )
+from daily_insights_api.modules.podcasts.upload_models import (
+    PodcastUploadBatch,
+    PodcastUploadSession,
+)
 from daily_insights_api.modules.reports.macro_dashboard_models import MacroDashboardSnapshot
 from daily_insights_api.modules.reports.models import PublicationSourceRun, ReportPublication
 from daily_insights_api.modules.tenancy.models import Membership, Organization
@@ -95,6 +99,8 @@ __all__ = [
     "PodcastEpisode",
     "PodcastEpisodeAudioVariant",
     "PodcastEpisodeTranslation",
+    "PodcastUploadBatch",
+    "PodcastUploadSession",
     "PreparedNewsItem",
     "ProjectionInputFreeze",
     "ProjectionInputObservation",

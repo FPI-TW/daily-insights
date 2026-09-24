@@ -17,7 +17,7 @@ diagnose_cutover_failure() {
   message=$1
   echo "$message" >&2
   if quiesce_schema_boundary_services; then
-    echo "Legacy schedulers are confirmed quiescent. Inspect the diagnostics, correct the failure, then rerun deploy.sh; do not start orchestration-dispatcher before orchestration-worker is healthy." >&2
+    echo "Schema-boundary services are confirmed quiescent. Inspect the diagnostics, correct the failure, then rerun deploy.sh; do not start orchestration-dispatcher before both workers are healthy." >&2
   else
     echo "Legacy schedulers could not be confirmed quiescent. Keep the deployment halted, stop every legacy scheduler and data-management-worker manually, inspect the diagnostics, then rerun deploy.sh." >&2
   fi
@@ -43,6 +43,7 @@ quiesce_schema_boundary_services() {
     daily-insights-api \
     daily-insights-orchestration-dispatcher \
     daily-insights-orchestration-worker \
+    daily-insights-podcast-media-worker \
     daily-insights-morning-report-scheduler \
     daily-insights-daily-news-scheduler \
     daily-insights-analyst-viewpoints-scheduler \
@@ -111,6 +112,8 @@ DAILY_INSIGHTS_R2_BUCKET_NAME
 DAILY_INSIGHTS_R2_ACCESS_KEY_ID
 DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY
 DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS
+DAILY_INSIGHTS_R2_MEDIA_WORKER_ACCESS_KEY_ID
+DAILY_INSIGHTS_R2_MEDIA_WORKER_SECRET_ACCESS_KEY
 "
 for name in $required_environment; do
   if [ -z "$(printenv "$name" 2>/dev/null || true)" ]; then
@@ -272,8 +275,14 @@ fi
 if ! wait_for_healthy_container daily-insights-orchestration-worker; then
   diagnose_cutover_failure "orchestration-worker did not become healthy"
 fi
+if ! compose up -d --no-build --force-recreate --no-deps podcast-media-worker; then
+  diagnose_cutover_failure "podcast-media-worker failed to start"
+fi
+if ! wait_for_healthy_container daily-insights-podcast-media-worker; then
+  diagnose_cutover_failure "podcast-media-worker did not become healthy"
+fi
 
-if ! compose up -d --no-build --remove-orphans api web orchestration-dispatcher; then
+if ! compose up -d --no-build --remove-orphans api web orchestration-dispatcher podcast-media-worker; then
   diagnose_cutover_failure "final service convergence failed after the replacement worker started"
 fi
 

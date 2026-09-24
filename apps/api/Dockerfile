@@ -12,6 +12,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY apps/api ./
 RUN uv sync --frozen --no-dev
+RUN mkdir -p /var/spool/podcast-media && chown nobody:nogroup /var/spool/podcast-media
 
 ENV PATH="/app/.venv/bin:${PATH}"
 

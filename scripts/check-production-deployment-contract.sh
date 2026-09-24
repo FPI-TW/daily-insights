@@ -39,7 +39,7 @@ if grep -q 'postgres:' "$compose_file"; then
   exit 1
 fi
 
-production_services="api web nginx orchestration-worker orchestration-dispatcher"
+production_services="api web nginx orchestration-worker podcast-media-worker orchestration-dispatcher"
 for service in $production_services; do
   grep -q "^  ${service}:" "$compose_file"
   grep -q "container_name: daily-insights-${service}" "$compose_file"
@@ -79,6 +79,10 @@ fi
 grep -Fq 'daily_insights_api.scripts.run_orchestration_worker' "$compose_file"
 grep -Fq 'daily_insights_api.scripts.run_orchestration_dispatcher' "$compose_file"
 grep -Fq '/tmp/orchestration-worker-heartbeat' "$compose_file"
+grep -Fq '/tmp/podcast-media-worker-heartbeat' "$compose_file"
+grep -Fq 'daily_insights_api.scripts.run_podcast_media_worker' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_R2_ACCESS_KEY_ID: ${DAILY_INSIGHTS_R2_MEDIA_WORKER_ACCESS_KEY_ID:?' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY: ${DAILY_INSIGHTS_R2_MEDIA_WORKER_SECRET_ACCESS_KEY:?' "$compose_file"
 grep -Fq '/tmp/orchestration-dispatcher-heartbeat' "$compose_file"
 if grep -Eq '^  (morning-report-scheduler|daily-news-scheduler|analyst-viewpoints-scheduler|index-daily-bars-scheduler|institutional-flows-scheduler|macro-dashboard-scheduler|data-management-worker):' "$compose_file"; then
   echo "legacy scheduler services must be removed from production Compose" >&2
@@ -185,6 +189,10 @@ grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_KEY: ${{ secrets.DAILY_INSIGHTS_CHAT_MOD
 grep -Fq 'DAILY_INSIGHTS_NEWS_MODEL_API_KEY: ${{ secrets.DAILY_INSIGHTS_NEWS_MODEL_API_KEY }}' "$workflow_file"
 grep -Fq ',DAILY_INSIGHTS_NEWS_MODEL_API_KEY' "$workflow_file"
 grep -Fq ',DAILY_INSIGHTS_CHAT_MODEL_API_KEY' "$workflow_file"
+for name in DAILY_INSIGHTS_R2_MEDIA_WORKER_ACCESS_KEY_ID DAILY_INSIGHTS_R2_MEDIA_WORKER_SECRET_ACCESS_KEY; do
+  grep -Fq "${name}: \${{ secrets.${name} }}" "$workflow_file"
+  grep -Fq ",${name}" "$workflow_file"
+done
 grep -Fq '/opt/daily-insights/scripts/production/deploy.sh' "$workflow_file"
 
 for obsolete in \
@@ -279,6 +287,8 @@ export DAILY_INSIGHTS_R2_ENDPOINT_URL=https://tenant.r2.cloudflarestorage.com
 export DAILY_INSIGHTS_R2_BUCKET_NAME=production-podcast-assets
 export DAILY_INSIGHTS_R2_ACCESS_KEY_ID=contract-r2-access
 export DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY=contract-r2-secret
+export DAILY_INSIGHTS_R2_MEDIA_WORKER_ACCESS_KEY_ID=contract-media-worker-access
+export DAILY_INSIGHTS_R2_MEDIA_WORKER_SECRET_ACCESS_KEY=contract-media-worker-secret
 export DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS=900
 
 docker compose \
@@ -339,6 +349,7 @@ grep -q 'compose .* run --rm --no-deps api python -m daily_insights_api.scripts.
 grep -q 'compose .* run --rm --no-deps api python -m daily_insights_api.scripts.check_legacy_queues_quiescent' "$temporary_dir/deployment.log"
 grep -q 'stop daily-insights-api' "$temporary_dir/deployment.log"
 grep -q 'stop daily-insights-orchestration-worker' "$temporary_dir/deployment.log"
+grep -q 'stop daily-insights-podcast-media-worker' "$temporary_dir/deployment.log"
 grep -q 'stop daily-insights-daily-news-scheduler' "$temporary_dir/deployment.log"
 grep -q 'inspect --format {{.State.Status}} daily-insights-daily-news-scheduler' "$temporary_dir/deployment.log"
 grep -q 'inspect --format {{.State.Status}} daily-insights-index-daily-bars-scheduler' "$temporary_dir/deployment.log"
@@ -347,7 +358,9 @@ grep -q 'inspect --format {{.State.Status}} daily-insights-data-management-worke
 grep -q 'compose .* run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log"
 grep -q 'compose .* up -d --no-build --force-recreate --no-deps orchestration-worker' "$temporary_dir/deployment.log"
 grep -q 'inspect --format {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} daily-insights-orchestration-worker' "$temporary_dir/deployment.log"
-grep -q 'compose .* up -d --no-build --remove-orphans api web orchestration-dispatcher' "$temporary_dir/deployment.log"
+grep -q 'compose .* up -d --no-build --force-recreate --no-deps podcast-media-worker' "$temporary_dir/deployment.log"
+grep -q 'inspect --format {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} daily-insights-podcast-media-worker' "$temporary_dir/deployment.log"
+grep -q 'compose .* up -d --no-build --remove-orphans api web orchestration-dispatcher podcast-media-worker' "$temporary_dir/deployment.log"
 grep -q 'exec daily-insights-nginx wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/api' "$temporary_dir/deployment.log"
 grep -q 'exec daily-insights-nginx wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/web' "$temporary_dir/deployment.log"
 
@@ -355,6 +368,7 @@ nginx_validate_line=$(grep -n 'run --rm --no-deps nginx nginx -t' "$temporary_di
 nginx_recreate_line=$(grep -n 'up -d --no-build --force-recreate --no-deps nginx' "$temporary_dir/deployment.log" | cut -d: -f1)
 api_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-api' "$temporary_dir/deployment.log" | head -n 1 | cut -d: -f1)
 orchestration_worker_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-orchestration-worker' "$temporary_dir/deployment.log" | head -n 1 | cut -d: -f1)
+media_worker_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-podcast-media-worker' "$temporary_dir/deployment.log" | head -n 1 | cut -d: -f1)
 news_stop_line=$(grep -n 'stop daily-insights-daily-news-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
 scheduler_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-daily-news-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
 index_scheduler_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-index-daily-bars-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
@@ -364,7 +378,9 @@ migration_line=$(grep -n 'run --rm --no-deps api alembic upgrade head' "$tempora
 legacy_queue_check_line=$(grep -n 'run --rm --no-deps api python -m daily_insights_api.scripts.check_legacy_queues_quiescent' "$temporary_dir/deployment.log" | cut -d: -f1)
 worker_start_line=$(grep -n 'up -d --no-build --force-recreate --no-deps orchestration-worker' "$temporary_dir/deployment.log" | cut -d: -f1)
 worker_healthy_line=$(grep -n 'inspect --format {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} daily-insights-orchestration-worker' "$temporary_dir/deployment.log" | head -n 1 | cut -d: -f1)
-backend_converge_line=$(grep -n 'up -d --no-build --remove-orphans api web orchestration-dispatcher' "$temporary_dir/deployment.log" | cut -d: -f1)
+media_worker_start_line=$(grep -n 'up -d --no-build --force-recreate --no-deps podcast-media-worker' "$temporary_dir/deployment.log" | cut -d: -f1)
+media_worker_healthy_line=$(grep -n 'inspect --format {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} daily-insights-podcast-media-worker' "$temporary_dir/deployment.log" | head -n 1 | cut -d: -f1)
+backend_converge_line=$(grep -n 'up -d --no-build --remove-orphans api web orchestration-dispatcher podcast-media-worker' "$temporary_dir/deployment.log" | cut -d: -f1)
 if [ "$nginx_validate_line" -ge "$nginx_recreate_line" ] ||
   [ "$nginx_recreate_line" -ge "$news_stop_line" ] ||
   [ "$news_stop_line" -ge "$scheduler_stopped_line" ] ||
@@ -377,11 +393,14 @@ if [ "$nginx_validate_line" -ge "$nginx_recreate_line" ] ||
   [ "$worker_stopped_line" -ge "$migration_line" ] ||
   [ "$api_stopped_line" -ge "$migration_line" ] ||
   [ "$orchestration_worker_stopped_line" -ge "$migration_line" ] ||
+  [ "$media_worker_stopped_line" -ge "$migration_line" ] ||
   [ "$orchestration_worker_stopped_line" -ge "$legacy_queue_check_line" ] ||
   [ "$legacy_queue_check_line" -ge "$migration_line" ] ||
   [ "$migration_line" -ge "$worker_start_line" ] ||
   [ "$worker_start_line" -ge "$worker_healthy_line" ] ||
-  [ "$worker_healthy_line" -ge "$backend_converge_line" ]; then
+  [ "$worker_healthy_line" -ge "$media_worker_start_line" ] ||
+  [ "$media_worker_start_line" -ge "$media_worker_healthy_line" ] ||
+  [ "$media_worker_healthy_line" -ge "$backend_converge_line" ]; then
   echo "deployment must quiesce schema-boundary services before migration and verify the new worker before restarting schedulers" >&2
   exit 1
 fi
@@ -410,6 +429,7 @@ PATH="$temporary_dir/stubs:$PATH" \
   scripts/production/deploy.sh >/dev/null
 grep -q 'stop daily-insights-api' "$temporary_dir/deployment.log"
 grep -q 'stop daily-insights-orchestration-worker' "$temporary_dir/deployment.log"
+grep -q 'stop daily-insights-podcast-media-worker' "$temporary_dir/deployment.log"
 grep -q 'compose .* run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log"
 if grep -Eq -- '--env-file|systemctl|daily-insights[.]service' "$temporary_dir/deployment.log"; then
   echo "deployment unexpectedly used a host env file or app systemd unit" >&2
@@ -448,6 +468,7 @@ if PATH="$temporary_dir/stubs:$PATH" \
 fi
 grep -q 'Legacy schedulers are confirmed quiescent' "$temporary_dir/migration-failure.err"
 if grep -q 'up -d --no-build --force-recreate --no-deps orchestration-worker' "$temporary_dir/deployment.log" ||
+  grep -q 'up -d --no-build --force-recreate --no-deps podcast-media-worker' "$temporary_dir/deployment.log" ||
   grep -q 'up -d --no-build --remove-orphans .*orchestration-dispatcher' "$temporary_dir/deployment.log"; then
   echo "migration failure must not restart the worker or scheduler" >&2
   exit 1
@@ -467,6 +488,20 @@ if grep -q 'up -d --no-build --remove-orphans .*orchestration-dispatcher' "$temp
   exit 1
 fi
 
+: >"$temporary_dir/deployment.log"
+if PATH="$temporary_dir/stubs:$PATH" \
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  DOCKER_FAIL_MATCH='up -d --no-build --force-recreate --no-deps podcast-media-worker' \
+  scripts/production/deploy.sh >"$temporary_dir/media-worker-failure.out" 2>"$temporary_dir/media-worker-failure.err"; then
+  echo "deployment must fail when the Podcast media worker cannot start" >&2
+  exit 1
+fi
+grep -q 'podcast-media-worker failed to start' "$temporary_dir/media-worker-failure.err"
+if grep -q 'up -d --no-build --remove-orphans .*orchestration-dispatcher' "$temporary_dir/deployment.log"; then
+  echo "Podcast media worker startup failure must not start the orchestration dispatcher" >&2
+  exit 1
+fi
+
 assert_requiesced_after_scheduler_attempt() {
   deployment_log=$1
   scheduler_attempt_line=$(grep -n 'up -d --no-build --remove-orphans .*orchestration-dispatcher' "$deployment_log" | tail -n 1 | cut -d: -f1)
@@ -479,11 +514,13 @@ assert_requiesced_after_scheduler_attempt() {
   index_scheduler_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-index-daily-bars-scheduler' "$post_attempt_log" | head -n 1 | cut -d: -f1)
   institutional_scheduler_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-institutional-flows-scheduler' "$post_attempt_log" | head -n 1 | cut -d: -f1)
   worker_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-data-management-worker' "$post_attempt_log" | head -n 1 | cut -d: -f1)
+  media_worker_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-podcast-media-worker' "$post_attempt_log" | head -n 1 | cut -d: -f1)
   if [ "$dispatcher_stop_line" -ge "$dispatcher_confirmed_line" ] ||
     [ "$stop_line" -ge "$scheduler_confirmed_line" ] ||
     [ "$stop_line" -ge "$index_scheduler_confirmed_line" ] ||
     [ "$stop_line" -ge "$institutional_scheduler_confirmed_line" ] ||
-    [ "$stop_line" -ge "$worker_confirmed_line" ]; then
+    [ "$stop_line" -ge "$worker_confirmed_line" ] ||
+    [ "$stop_line" -ge "$media_worker_confirmed_line" ]; then
     echo "failed deployment must confirm every schema-boundary service after stopping them" >&2
     exit 1
   fi
@@ -492,7 +529,7 @@ assert_requiesced_after_scheduler_attempt() {
 : >"$temporary_dir/deployment.log"
 if PATH="$temporary_dir/stubs:$PATH" \
   DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
-  DOCKER_FAIL_MATCH='up -d --no-build --remove-orphans api web orchestration-dispatcher' \
+  DOCKER_FAIL_MATCH='up -d --no-build --remove-orphans api web orchestration-dispatcher podcast-media-worker' \
   scripts/production/deploy.sh >"$temporary_dir/convergence-failure.out" 2>"$temporary_dir/convergence-failure.err"; then
   echo "deployment must fail when final service convergence fails" >&2
   exit 1
