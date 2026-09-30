@@ -127,6 +127,26 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/admin/news/collection": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Collection Status
+     * @description Current overnight polling state of every feed the collector has polled.
+     */
+    get: operations["collection_status_api_admin_news_collection_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/admin/news/editions": {
     parameters: {
       query?: never
@@ -2193,6 +2213,8 @@ export interface components {
       ai_rank: number | null
       /** Ai Topic */
       ai_topic: string | null
+      /** Discovered Via */
+      discovered_via: ("live" | "collected" | "both") | null
       /** Drop Reason */
       drop_reason:
         | (
@@ -2221,6 +2243,10 @@ export interface components {
       publish_requested_at: string | null
       /** Publish Run Id */
       publish_run_id: string | null
+      /** Screen Rank */
+      screen_rank: number | null
+      /** Screen Score */
+      screen_score: number | null
       /** Seen At */
       seen_at: string | null
       /** Source Name */
@@ -2239,6 +2265,7 @@ export interface components {
         | "prepared"
         | "dropped"
         | "published"
+        | "screened_out"
       /** Url */
       url: string
     }
@@ -2261,6 +2288,8 @@ export interface components {
       published: number
       /** Reviewed */
       reviewed: number
+      /** Screened Out */
+      screened_out: number
       /** Unused */
       unused: number
     }
@@ -2298,6 +2327,7 @@ export interface components {
       items: components["schemas"]["NewsAdminItem"][]
       /** Market Code */
       market_code: string
+      pool: components["schemas"]["NewsAdminPoolCounts"]
     }
     /** NewsAdminEditionsResponse */
     NewsAdminEditionsResponse: {
@@ -2350,6 +2380,20 @@ export interface components {
       /** Topic */
       topic: string
     }
+    /**
+     * NewsAdminPoolCounts
+     * @description Where an edition's candidates came from and how many passed screening.
+     */
+    NewsAdminPoolCounts: {
+      /** Both */
+      both: number
+      /** Collected */
+      collected: number
+      /** Live */
+      live: number
+      /** Screen Selected */
+      screen_selected: number
+    }
     /** NewsCandidatePublishRequest */
     NewsCandidatePublishRequest: {
       /** Candidate Ids */
@@ -2360,6 +2404,16 @@ export interface components {
       edition_id?: string | null
       /** Market Code */
       market_code?: ("global" | "tw_equity" | "us_equity") | null
+    }
+    /** NewsCollectionStatusResponse */
+    NewsCollectionStatusResponse: {
+      /**
+       * As Of
+       * Format: date-time
+       */
+      as_of: string
+      /** Sources */
+      sources: components["schemas"]["NewsFeedPollSource"][]
     }
     /** NewsDependencyResponse */
     NewsDependencyResponse: {
@@ -2427,6 +2481,46 @@ export interface components {
        * @default []
        */
       validation_issues: string[]
+    }
+    /**
+     * NewsFeedPollSource
+     * @description Current overnight polling state of one feed; not a nightly history.
+     */
+    NewsFeedPollSource: {
+      /** Consecutive Failures */
+      consecutive_failures: number
+      /** Cooldown Until */
+      cooldown_until: string | null
+      /** Feed Url */
+      feed_url: string
+      /** Gap Count */
+      gap_count: number
+      /** Gap Count Since */
+      gap_count_since: string | null
+      /** Hostname */
+      hostname: string
+      /** Last Attempt At */
+      last_attempt_at: string | null
+      /** Last Count */
+      last_count: number | null
+      /** Last Error Code */
+      last_error_code: string | null
+      /** Last Gap Minutes */
+      last_gap_minutes: number | null
+      /** Last Status */
+      last_status: number | null
+      /** Last Success At */
+      last_success_at: string | null
+      /** Markets */
+      markets: ("global" | "tw_equity" | "us_equity")[]
+      /** Poll Group */
+      poll_group: string | null
+      /** Registered */
+      registered: boolean
+      /** Source Key */
+      source_key: string
+      /** Source Name */
+      source_name: string
     }
     /** NewsItemResponse */
     NewsItemResponse: {
@@ -3627,6 +3721,26 @@ export interface operations {
           [name: string]: unknown
         }
         content?: never
+      }
+    }
+  }
+  collection_status_api_admin_news_collection_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["NewsCollectionStatusResponse"]
+        }
       }
     }
   }

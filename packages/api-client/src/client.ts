@@ -45,6 +45,7 @@ import {
   dataManagementCatalogSchema,
   newsAdminEditionsSchema,
   newsAdminItemSchema,
+  newsCollectionStatusSchema,
   newsRecoverySchema,
   jobRunListSchema,
   jobRunSchema,
@@ -419,6 +420,12 @@ export function createAdministrationClient(transport: ApiTransport) {
       return parseResponse(
         await transport("/api/admin/news/recovery"),
         newsRecoverySchema
+      )
+    },
+    async newsCollectionStatus() {
+      return parseResponse(
+        await transport("/api/admin/news/collection"),
+        newsCollectionStatusSchema
       )
     },
     async hideNewsItem(itemId: string, csrfToken: string) {
