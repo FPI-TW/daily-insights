@@ -976,8 +976,8 @@ function PodcastFileSlot({
     <div
       className={
         dragging
-          ? "grid min-h-32 place-items-center gap-2 rounded-lg border-2 border-dashed border-lagoon bg-lagoon/10 p-4 text-center"
-          : "grid min-h-32 place-items-center gap-2 rounded-lg border-2 border-dashed border-line bg-link-hover p-4 text-center transition-colors hover:border-lagoon"
+          ? "relative min-h-32 rounded-lg border-2 border-dashed border-lagoon bg-lagoon/10 text-center"
+          : "relative min-h-32 rounded-lg border-2 border-dashed border-line bg-link-hover text-center transition-colors hover:border-lagoon"
       }
       onDragEnter={event => {
         event.preventDefault()
@@ -987,9 +987,6 @@ function PodcastFileSlot({
       onDragLeave={() => setDragging(false)}
       onDrop={receiveDrop}
     >
-      <strong className="text-xs tracking-[0.08em] text-kicker uppercase">
-        {locale}
-      </strong>
       <input
         className="sr-only"
         id={inputId}
@@ -1001,16 +998,21 @@ function PodcastFileSlot({
       <label
         className={
           disabled
-            ? "max-w-full overflow-hidden text-ellipsis text-sm font-bold text-sea-ink"
-            : "max-w-full cursor-pointer overflow-hidden text-ellipsis text-sm font-bold text-sea-ink"
+            ? "absolute inset-0 grid place-items-center gap-2 p-4 text-sm font-bold text-sea-ink"
+            : "absolute inset-0 grid cursor-pointer place-items-center gap-2 p-4 text-sm font-bold text-sea-ink"
         }
         htmlFor={inputId}
       >
-        {file ? file.name : t("podcastUploadSlotPrompt")}
+        <strong className="text-xs tracking-[0.08em] text-kicker uppercase">
+          {locale}
+        </strong>
+        <span className="max-w-full overflow-hidden text-ellipsis">
+          {file ? file.name : t("podcastUploadSlotPrompt")}
+        </span>
       </label>
       {file && (
         <button
-          className="px-2 py-1 text-xs"
+          className="absolute right-2 bottom-2 z-10 px-2 py-1 text-xs"
           type="button"
           disabled={disabled}
           onClick={() => onChange(null)}
