@@ -18,11 +18,15 @@ from daily_insights_api.core.observability import emit_event
 from daily_insights_api.modules.news.api import (
     DERIVATION_VERSION,
     LOCALES,
+    SCREEN_MAX_POOL,
     SUMMARY_PROMPT_VERSION,
     TRANSLATION_PROMPT_VERSION,
+    Candidate,
     CoveredEvent,
     DeepSeekClient,
+    EditionSpec,
     FetchedCandidate,
+    HeadlineScreen,
     LocalizedSummary,
     ModelCall,
     ModelCallError,
@@ -37,6 +41,7 @@ from daily_insights_api.modules.news.api import (
     NewsOperationError,
     NewsPresentation,
     PreparedNewsItem,
+    ScreenOutcome,
     SelectedCandidate,
     Selection,
     _cap_discovery,
@@ -51,10 +56,18 @@ from daily_insights_api.modules.news.api import (
     effective_hostnames,
     feed_client,
     generation_drop_reason,
+    limit_screened_candidates,
+    load_screen_criteria,
     load_selection_criteria,
+    merge_screen_batches,
     news_execution,
+    order_pool,
     publish_candidates,
     publishable_selection,
+    screen_batches,
+    screen_failure_is_local,
+    screen_input_digest,
+    shortlist_limit,
 )
 from daily_insights_api.modules.operations.api import sanitize_error_code
 from daily_insights_api.modules.orchestration.facts import fence_is_current
@@ -71,7 +84,8 @@ FUNCTION_MARKETS = {
     "news_us_equity_refresh": "us_equity",
 }
 
-ModelStage = Literal["selection", "summary", "translation"]
+ModelStage = Literal["screen", "selection", "summary", "translation"]
+FailureStage = Literal["selection", "summary", "translation"]
 _MODEL_ATTEMPTS_KEY = "_news_model_attempts"
 NEWS_MODEL_PHASE_CONCURRENCY = 6
 
@@ -122,6 +136,12 @@ def _model_attempt_fingerprint(value: object) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
     ).hexdigest()
+
+
+def _failure_stage(stage: ModelStage) -> FailureStage:
+    # Headline screening is a pre-selection model call: its failures use the
+    # selection stage's policy, while audits and checkpoints keep "screen".
+    return "selection" if stage == "screen" else stage
 
 
 def _failed_audit(
@@ -176,13 +196,14 @@ async def _model_call_with_repair(
             ).encode()
         ).hexdigest()
     )
+    failure_stage = _failure_stage(stage)
     for _ in range(2):
         if guard is not None and not await guard():
             raise NewsOperationError(
                 NewsFailure(
                     code="cancelled",
                     action="cancelled",
-                    stage=stage,
+                    stage=failure_stage,
                     candidate_id=candidate_id,
                     locale=locale,
                 )
@@ -204,7 +225,7 @@ async def _model_call_with_repair(
                     NewsFailure(
                         code="model_checkpoint_invalid",
                         action="attention",
-                        stage=stage,
+                        stage=failure_stage,
                         candidate_id=candidate_id,
                         locale=locale,
                     )
@@ -214,7 +235,7 @@ async def _model_call_with_repair(
                 failure = NewsFailure(
                     code=f"{feedback or f'{stage}_validation'}_exhausted",
                     action="skip" if stage in {"summary", "translation"} else "attention",
-                    stage=stage,
+                    stage=failure_stage,
                     candidate_id=candidate_id,
                     locale=locale,
                     validation_issues=previous_issues,
@@ -227,7 +248,7 @@ async def _model_call_with_repair(
                         if previous_action in {"retry", "block", "attention"}
                         else "attention"
                     ),
-                    stage=stage,
+                    stage=failure_stage,
                     candidate_id=candidate_id,
                     locale=locale,
                     validation_issues=previous_issues,
@@ -238,7 +259,7 @@ async def _model_call_with_repair(
                 NewsFailure(
                     code="cancelled",
                     action="cancelled",
-                    stage=stage,
+                    stage=failure_stage,
                     candidate_id=candidate_id,
                     locale=locale,
                 )
@@ -248,7 +269,7 @@ async def _model_call_with_repair(
         except Exception as error:
             failure = classify_failure(
                 error,
-                stage=stage,
+                stage=failure_stage,
                 candidate_id=candidate_id,
                 locale=locale,
             )
@@ -379,7 +400,13 @@ async def _reserve_model_attempt(
 
 
 def _serialize_model_call(model_call: ModelCall) -> dict[str, Any]:
-    value_type = "selection" if isinstance(model_call.value, Selection) else "localized_summary"
+    value_type = (
+        "selection"
+        if isinstance(model_call.value, Selection)
+        else "headline_screen"
+        if isinstance(model_call.value, HeadlineScreen)
+        else "localized_summary"
+    )
     return {
         "value_type": value_type,
         "value": model_call.value.model_dump(mode="json"),
@@ -399,9 +426,11 @@ def _serialize_model_call(model_call: ModelCall) -> dict[str, Any]:
 def _restore_model_call(payload: dict[str, Any], *, stage: ModelStage) -> ModelCall:
     value_type = payload["value_type"]
     value_payload = payload["value"]
-    value: Selection | LocalizedSummary
+    value: Selection | LocalizedSummary | HeadlineScreen
     if value_type == "selection" and stage == "selection":
         value = Selection.model_validate(value_payload)
+    elif value_type == "headline_screen" and stage == "screen":
+        value = HeadlineScreen.model_validate(value_payload)
     elif value_type == "localized_summary" and stage in {"summary", "translation"}:
         value = LocalizedSummary.model_validate(value_payload)
     else:
@@ -512,6 +541,152 @@ def _translation_call(
     return call
 
 
+def _screen_call(
+    client: DeepSeekClient,
+    headlines: list[tuple[int, Candidate]],
+    spec: EditionSpec,
+    limit: int,
+    shortlisted: tuple[str, ...],
+) -> Callable[[str | None], Awaitable[ModelCall]]:
+    async def call(feedback: str | None) -> ModelCall:
+        return await client.screen(
+            headlines,
+            policy=spec.selection,
+            limit=limit,
+            shortlisted=shortlisted,
+            retry_feedback=feedback,
+        )
+
+    return call
+
+
+async def _screen_headlines(
+    session_factory: async_sessionmaker[AsyncSession],
+    client: DeepSeekClient,
+    *,
+    batch_id: uuid.UUID,
+    market: str,
+    spec: EditionSpec,
+    pool: list[Candidate],
+    guard: Callable[[], Awaitable[bool]],
+) -> ScreenOutcome:
+    """Shortlist the pool by headline, or report a fallback to the regex ranking.
+
+    Provider, database and unknown failures propagate under the systemic news
+    policy; only an exhausted validation repair falls back, and a resumed run
+    reuses both successful answers and spent repair budget from the checkpoint.
+    """
+    if not pool:
+        return ScreenOutcome(status="empty", pool=0)
+    ordered = order_pool(pool, spec.headline_impact_patterns)
+    truncated = max(0, len(ordered) - SCREEN_MAX_POOL)
+    if truncated:
+        emit_event("news.screen.truncated", market=market, pool=len(ordered), truncated=truncated)
+        ordered = ordered[:SCREEN_MAX_POOL]
+    limit = shortlist_limit(spec)
+    screened_ids = frozenset(candidate.id for candidate in ordered)
+    answers: list[tuple[list[tuple[int, Candidate]], HeadlineScreen]] = []
+    shortlisted: tuple[str, ...] = ()
+    for call_number, headlines in enumerate(screen_batches(ordered), start=1):
+        attempt_key = _model_attempt_fingerprint(
+            [
+                "screen",
+                market,
+                call_number,
+                [
+                    [
+                        number,
+                        candidate.id,
+                        candidate.headline,
+                        candidate.source_name,
+                        candidate.seen_at.isoformat() if candidate.seen_at else None,
+                    ]
+                    for number, candidate in headlines
+                ],
+                list(shortlisted),
+                limit,
+                spec.selection.market_focus,
+                spec.selection.importance_guidance,
+                client.model_name,
+                client.screen_prompt_version,
+            ]
+        )
+        try:
+            screen_call = await _model_call_with_repair(
+                session_factory,
+                batch_id=batch_id,
+                stage="screen",
+                locale=None,
+                fallback_digest=attempt_key,
+                model=client.model_name,
+                prompt_version=client.screen_prompt_version,
+                call=_screen_call(client, headlines, spec, limit, shortlisted),
+                attempt_key=attempt_key,
+                guard=guard,
+            )
+        except NewsOperationError as error:
+            if not screen_failure_is_local(error):
+                raise
+            code = sanitize_error_code(error.failure.code)
+            emit_event(
+                "news.screen.fallback",
+                market=market,
+                call=call_number,
+                error_code=code,
+                validation_issues=list(error.failure.validation_issues),
+            )
+            return ScreenOutcome(
+                status="fallback",
+                pool=len(pool),
+                truncated=truncated,
+                calls=call_number,
+                fallback_code=code,
+            )
+        assert isinstance(screen_call.value, HeadlineScreen)
+        if not screen_call.reused:
+            await _persist_successful_audit(
+                session_factory,
+                _audit(
+                    batch_id,
+                    "screen",
+                    None,
+                    screen_call,
+                    client.model_name,
+                    client.screen_prompt_version,
+                ),
+            )
+        answers.append((headlines, screen_call.value))
+        shortlisted = tuple(
+            pick.candidate.headline for pick in merge_screen_batches(answers, limit)
+        )
+    picks = merge_screen_batches(answers, limit)
+    if not picks:
+        # A valid but empty answer would silently empty the edition; the
+        # regex ranking is the safer default.
+        emit_event(
+            "news.screen.fallback",
+            market=market,
+            call=len(answers),
+            error_code="screen_empty_shortlist",
+            validation_issues=[],
+        )
+        return ScreenOutcome(
+            status="fallback",
+            pool=len(pool),
+            truncated=truncated,
+            calls=len(answers),
+            fallback_code="screen_empty_shortlist",
+        )
+    return ScreenOutcome(
+        status="shortlisted",
+        pool=len(pool),
+        truncated=truncated,
+        calls=len(answers),
+        screened_ids=screened_ids,
+        picks=tuple(picks),
+    )
+
+
 def _selection_failure_is_local(error: NewsOperationError) -> bool:
     failure = error.failure
     return (
@@ -573,6 +748,7 @@ def _client(settings: Settings) -> DeepSeekClient | None:
         model=settings.model_name,
         timeout_seconds=settings.model_timeout_seconds,
         selection_criteria=load_selection_criteria(),
+        screen_criteria=load_screen_criteria(),
     )
 
 
@@ -633,13 +809,32 @@ async def refresh_news(
             discovered = await discover_feed_candidates(
                 feeds_http, allowed, market=market, bodies=bodies
             )
-        capped = _cap_discovery(
-            discovered,
-            per_source=spec.max_discovery_per_source,
-            total=spec.max_discovery_total,
-            full_text_ids=frozenset(bodies),
-            interleave=spec.interleave_sources,
-            impact_patterns=spec.headline_impact_patterns,
+        # Headline screening (flag on) replaces the regex discovery cap with a
+        # model shortlist and ranks extracted articles by that shortlist.
+        screen = (
+            await _screen_headlines(
+                session_factory,
+                client,
+                batch_id=batch.id,
+                market=market,
+                spec=spec,
+                pool=discovered,
+                guard=guard,
+            )
+            if settings.news_headline_screen_enabled
+            else None
+        )
+        capped = (
+            screen.shortlist
+            if screen is not None and screen.applied
+            else _cap_discovery(
+                discovered,
+                per_source=spec.max_discovery_per_source,
+                total=spec.max_discovery_total,
+                full_text_ids=frozenset(bodies),
+                interleave=spec.interleave_sources,
+                impact_patterns=spec.headline_impact_patterns,
+            )
         )
         extraction_outcomes = await _extract_candidate_outcomes(
             capped, allowed, settings.news_fetch_timeout_seconds, bodies
@@ -647,12 +842,21 @@ async def refresh_news(
         extracted = [
             outcome.fetched for outcome in extraction_outcomes if outcome.fetched is not None
         ]
-        usable = _limit_candidates(
-            extracted,
-            total=spec.max_candidates * 2,
-            per_source=spec.max_per_source,
-            interleave=spec.interleave_sources,
-            impact_patterns=spec.headline_impact_patterns,
+        usable = (
+            limit_screened_candidates(
+                extracted,
+                screen.ranks,
+                total=spec.max_candidates * 2,
+                per_source=spec.max_per_source,
+            )
+            if screen is not None and screen.applied
+            else _limit_candidates(
+                extracted,
+                total=spec.max_candidates * 2,
+                per_source=spec.max_per_source,
+                interleave=spec.interleave_sources,
+                impact_patterns=spec.headline_impact_patterns,
+            )
         )
         digest = _digest(
             usable,
@@ -661,6 +865,10 @@ async def refresh_news(
             market,
             spec.selection,
         )
+        if settings.news_headline_screen_enabled:
+            digest = screen_input_digest(
+                digest, client.screen_prompt_digest, client.screen_prompt_version
+            )
         candidate_rows = {
             candidate.id: NewsCandidate(
                 edition_id=None,
@@ -676,6 +884,16 @@ async def refresh_news(
             )
             for candidate in discovered
         }
+        if screen is not None and screen.applied:
+            screen_ranks = screen.ranks
+            for candidate_id in screen.screened_ids:
+                row = candidate_rows[candidate_id]
+                pick = screen_ranks.get(candidate_id)
+                if pick is None:
+                    row.stage = "screened_out"
+                else:
+                    row.screen_rank = pick.rank
+                    row.screen_score = pick.score
         failure_reasons: dict[str, dict[str, str | None]] = {}
         for outcome in extraction_outcomes:
             row = candidate_rows[outcome.candidate.id]
@@ -1128,9 +1346,15 @@ async def refresh_news(
                 "failure_reasons": failure_reasons,
                 "model_name": client.model_name,
                 "prompt_version": (
-                    f"{client.selection_prompt_version}+{SUMMARY_PROMPT_VERSION}"
+                    (
+                        f"{client.screen_prompt_version}+"
+                        if settings.news_headline_screen_enabled
+                        else ""
+                    )
+                    + f"{client.selection_prompt_version}+{SUMMARY_PROMPT_VERSION}"
                     f"+{TRANSLATION_PROMPT_VERSION}"
                 ),
+                **({"screen": screen.summary()} if screen is not None else {}),
             }
             stored.finalized_at = datetime.now(UTC)
             database.add_all(candidate_rows.values())

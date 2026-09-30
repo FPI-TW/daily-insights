@@ -590,7 +590,7 @@ async def test_selection_salvages_valid_stories_when_model_exceeds_domain_cap(
     )
     monkeypatch.setattr(client, "_complete", complete)
     result = await client.select(candidates)
-    assert not isinstance(result.value, LocalizedSummary)
+    assert isinstance(result.value, Selection)
     assert [item.id for item in result.value.selections] == ["a" * 64, "b" * 64]
     assert result.value.reserves == ()
     assert {item.id for item, reason in result.rejected if reason == "policy"} == {

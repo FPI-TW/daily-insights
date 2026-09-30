@@ -2,6 +2,7 @@
 
 from daily_insights_api.modules.news.access import visible_news_market_codes
 from daily_insights_api.modules.news.contracts import (
+    Candidate,
     Locale,
     LocalizedSummary,
     NewsProgress,
@@ -30,6 +31,7 @@ from daily_insights_api.modules.news.feeds import (
 from daily_insights_api.modules.news.llm import (
     CoveredEvent,
     DeepSeekClient,
+    HeadlineScreen,
     ModelCall,
     ModelCallError,
     publishable_selection,
@@ -46,7 +48,7 @@ from daily_insights_api.modules.news.models import (
     NewsWorkflow,
     PreparedNewsItem,
 )
-from daily_insights_api.modules.news.prompts import load_selection_criteria
+from daily_insights_api.modules.news.prompts import load_screen_criteria, load_selection_criteria
 from daily_insights_api.modules.news.recovery import (
     PROVIDER_SCOPE,
     NewsExecution,
@@ -56,6 +58,17 @@ from daily_insights_api.modules.news.recovery import (
     news_execution,
     workflow_results,
     workflow_scope,
+)
+from daily_insights_api.modules.news.screening import (
+    SCREEN_MAX_POOL,
+    ScreenOutcome,
+    limit_screened_candidates,
+    merge_screen_batches,
+    order_pool,
+    screen_batches,
+    screen_failure_is_local,
+    screen_input_digest,
+    shortlist_limit,
 )
 from daily_insights_api.modules.news.service import (
     DERIVATION_VERSION,
@@ -91,6 +104,7 @@ def create_news_client(
         model=model,
         timeout_seconds=timeout_seconds,
         selection_criteria=load_selection_criteria(),
+        screen_criteria=load_screen_criteria(),
     )
 
 
@@ -100,13 +114,16 @@ __all__ = [
     "GLOBAL_MARKET",
     "LOCALES",
     "PROVIDER_SCOPE",
+    "SCREEN_MAX_POOL",
     "SUMMARY_PROMPT_VERSION",
     "TRANSLATION_PROMPT_VERSION",
+    "Candidate",
     "CoveredEvent",
     "DeepSeekClient",
     "EditionSpec",
     "ExtractionOutcome",
     "FetchedCandidate",
+    "HeadlineScreen",
     "Locale",
     "LocalizedSummary",
     "ModelCall",
@@ -126,6 +143,7 @@ __all__ = [
     "NewsStatus",
     "NewsWorkflow",
     "PreparedNewsItem",
+    "ScreenOutcome",
     "SelectedCandidate",
     "Selection",
     "_cap_discovery",
@@ -145,13 +163,21 @@ __all__ = [
     "effective_hostnames",
     "feed_client",
     "generation_drop_reason",
+    "limit_screened_candidates",
+    "load_screen_criteria",
     "load_selection_criteria",
+    "merge_screen_batches",
     "news_execution",
+    "order_pool",
     "publish_candidates",
     "publishable_selection",
     "run_all_editions",
     "run_all_editions_with_outcomes",
     "run_news_edition",
+    "screen_batches",
+    "screen_failure_is_local",
+    "screen_input_digest",
+    "shortlist_limit",
     "visible_news_market_codes",
     "workflow_results",
     "workflow_scope",
