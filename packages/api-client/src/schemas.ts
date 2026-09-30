@@ -706,6 +706,8 @@ export const newsCandidateStageSchema = z.enum([
   "prepared",
   "dropped",
   "published",
+  // The headline screen did not shortlist it; never fetched or reviewed.
+  "screened_out",
 ])
 export type NewsCandidateStage = z.infer<typeof newsCandidateStageSchema>
 export const newsCandidateDropReasonSchema = z.enum([
@@ -718,6 +720,16 @@ export const newsCandidateDropReasonSchema = z.enum([
 ])
 export type NewsCandidateDropReason = z.infer<
   typeof newsCandidateDropReasonSchema
+>
+// Whether a candidate came from the 08:00 live feed read, the overnight
+// collection pool, or both.
+export const newsCandidateDiscoverySchema = z.enum([
+  "live",
+  "collected",
+  "both",
+])
+export type NewsCandidateDiscovery = z.infer<
+  typeof newsCandidateDiscoverySchema
 >
 export const newsItemOriginSchema = z.enum(["model", "manual"])
 export type NewsItemOrigin = z.infer<typeof newsItemOriginSchema>
@@ -757,6 +769,11 @@ export const newsAdminCandidateSchema = z.object({
   ai_market: z.string().nullable(),
   ai_importance: z.number().int().nullable(),
   ai_event_key: z.string().nullable(),
+  // Null on candidates recorded before overnight collection existed.
+  discovered_via: newsCandidateDiscoverySchema.nullable(),
+  // Headline screen shortlist position and 1-5 score; null when unscreened.
+  screen_rank: z.number().int().positive().nullable(),
+  screen_score: z.number().int().min(1).max(5).nullable(),
   item_id: z.uuid().nullable(),
   publish_run_id: z.uuid().nullable(),
   publish_requested_at: z.iso.datetime({ offset: true }).nullable(),
@@ -771,11 +788,19 @@ export const newsAdminEditionCountsSchema = z.object({
   prepared: z.number().int().nonnegative(),
   dropped: z.number().int().nonnegative(),
   published: z.number().int().nonnegative(),
+  screened_out: z.number().int().nonnegative(),
   hidden: z.number().int().nonnegative(),
 })
 export type NewsAdminEditionCounts = z.infer<
   typeof newsAdminEditionCountsSchema
 >
+export const newsAdminPoolCountsSchema = z.object({
+  live: z.number().int().nonnegative(),
+  collected: z.number().int().nonnegative(),
+  both: z.number().int().nonnegative(),
+  screen_selected: z.number().int().nonnegative(),
+})
+export type NewsAdminPoolCounts = z.infer<typeof newsAdminPoolCountsSchema>
 export const newsAdminEditionSchema = z.object({
   market_code: dataManagementNewsMarketCodeSchema,
   // Null when no edition exists for the date; the lists are then empty.
@@ -792,12 +817,43 @@ export const newsAdminEditionSchema = z.object({
     .nullable(),
   items: z.array(newsAdminItemSchema),
   candidates: z.array(newsAdminCandidateSchema),
+  pool: newsAdminPoolCountsSchema,
 })
 export type NewsAdminEdition = z.infer<typeof newsAdminEditionSchema>
 export const newsAdminEditionsSchema = z.object({
   edition_date: z.iso.date(),
   editions: z.array(newsAdminEditionSchema),
 })
+
+// Current overnight polling state per feed; not a nightly history.
+export const newsFeedPollSourceSchema = z.object({
+  source_key: z.string().length(64),
+  source_name: z.string(),
+  hostname: z.string(),
+  // Credentials and cache busters are stripped by the API.
+  feed_url: z.string(),
+  registered: z.boolean(),
+  poll_group: z.string().nullable(),
+  markets: z.array(dataManagementNewsMarketCodeSchema),
+  last_attempt_at: z.iso.datetime({ offset: true }).nullable(),
+  last_success_at: z.iso.datetime({ offset: true }).nullable(),
+  last_status: z.number().int().nullable(),
+  last_count: z.number().int().nonnegative().nullable(),
+  last_error_code: z.string().nullable(),
+  cooldown_until: z.iso.datetime({ offset: true }).nullable(),
+  consecutive_failures: z.number().int().nonnegative(),
+  last_gap_minutes: z.number().int().nullable(),
+  // Gaps counted during the collection night that feeds the edition dated
+  // gap_count_since (the collector's morning collection date).
+  gap_count: z.number().int().nonnegative(),
+  gap_count_since: z.iso.date().nullable(),
+})
+export type NewsFeedPollSource = z.infer<typeof newsFeedPollSourceSchema>
+export const newsCollectionStatusSchema = z.object({
+  as_of: z.iso.datetime({ offset: true }),
+  sources: z.array(newsFeedPollSourceSchema),
+})
+export type NewsCollectionStatus = z.infer<typeof newsCollectionStatusSchema>
 export type NewsAdminEditions = z.infer<typeof newsAdminEditionsSchema>
 export const newsCandidatePublishInputSchema = z
   .object({

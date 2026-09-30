@@ -17,6 +17,7 @@ import {
   institutionalStocksSchema,
   newsAdminEditionsSchema,
   newsCandidatePublishInputSchema,
+  newsCollectionStatusSchema,
 } from "../src/schemas"
 
 const newsAdminItem = {
@@ -53,11 +54,16 @@ const newsAdminCandidate = {
   ai_market: "taiwan",
   ai_importance: 4,
   ai_event_key: "tsmc-earnings",
+  discovered_via: "both",
+  screen_rank: 3,
+  screen_score: 5,
   item_id: "0f9b6a6e-3d7f-4f4f-9a3f-2b7d3f1c9e11",
   publish_run_id: null,
   publish_requested_at: null,
   publish_error: null,
 }
+
+const emptyPool = { live: 0, collected: 0, both: 0, screen_selected: 0 }
 
 const newsAdminEditions = {
   edition_date: "2026-09-08",
@@ -79,14 +85,53 @@ const newsAdminEditions = {
           prepared: 0,
           dropped: 1,
           published: 1,
+          screened_out: 4,
           hidden: 0,
         },
       },
       items: [newsAdminItem],
       candidates: [newsAdminCandidate],
+      pool: { live: 3, collected: 2, both: 1, screen_selected: 2 },
     },
-    { market_code: "tw_equity", edition: null, items: [], candidates: [] },
-    { market_code: "us_equity", edition: null, items: [], candidates: [] },
+    {
+      market_code: "tw_equity",
+      edition: null,
+      items: [],
+      candidates: [],
+      pool: emptyPool,
+    },
+    {
+      market_code: "us_equity",
+      edition: null,
+      items: [],
+      candidates: [],
+      pool: emptyPool,
+    },
+  ],
+}
+
+const newsCollectionStatus = {
+  as_of: "2026-09-30T00:00:00+00:00",
+  sources: [
+    {
+      source_key: "a".repeat(64),
+      source_name: "The Guardian",
+      hostname: "www.theguardian.com",
+      feed_url: "https://content.guardianapis.com/search?section=business",
+      registered: true,
+      poll_group: "normal",
+      markets: ["global"],
+      last_attempt_at: "2026-09-29T22:00:00+00:00",
+      last_success_at: "2026-09-29T22:00:00+00:00",
+      last_status: 304,
+      last_count: 0,
+      last_error_code: null,
+      cooldown_until: null,
+      consecutive_failures: 0,
+      last_gap_minutes: null,
+      gap_count: 0,
+      gap_count_since: "2026-09-29",
+    },
   ],
 }
 
@@ -235,6 +280,26 @@ describe("API client trust boundary", () => {
     )
   })
 
+  it("reads the overnight collection status", async () => {
+    const transport = vi.fn(async () => Response.json(newsCollectionStatus))
+    const status = await createAdministrationClient(
+      transport
+    ).newsCollectionStatus()
+
+    expect(transport).toHaveBeenCalledWith("/api/admin/news/collection")
+    expect(status.sources[0]).toMatchObject({
+      hostname: "www.theguardian.com",
+      last_status: 304,
+      markets: ["global"],
+    })
+    expect(
+      newsCollectionStatusSchema.safeParse({
+        ...newsCollectionStatus,
+        sources: [{ ...newsCollectionStatus.sources[0], markets: ["crypto"] }],
+      }).success
+    ).toBe(false)
+  })
+
   it("rejects a candidate stage or drop reason outside the contract", () => {
     const withCandidate = (candidate: Record<string, unknown>) => ({
       ...newsAdminEditions,
@@ -245,6 +310,28 @@ describe("API client trust boundary", () => {
         withCandidate({ ...newsAdminCandidate, stage: "queued" })
       ).success
     ).toBe(false)
+    expect(
+      newsAdminEditionsSchema.safeParse(
+        withCandidate({ ...newsAdminCandidate, discovered_via: "archive" })
+      ).success
+    ).toBe(false)
+    expect(
+      newsAdminEditionsSchema.safeParse(
+        withCandidate({ ...newsAdminCandidate, screen_score: 6 })
+      ).success
+    ).toBe(false)
+    expect(
+      newsAdminEditionsSchema.safeParse(
+        withCandidate({
+          ...newsAdminCandidate,
+          stage: "screened_out",
+          discovered_via: null,
+          screen_rank: null,
+          screen_score: null,
+          item_id: null,
+        })
+      ).success
+    ).toBe(true)
     expect(
       newsAdminEditionsSchema.safeParse(
         withCandidate({

@@ -40,8 +40,16 @@ class LatestNewsResponse(BaseModel):
 
 
 CandidateStage = Literal[
-    "discovered", "fetch_failed", "unused", "reviewed", "prepared", "dropped", "published"
+    "discovered",
+    "fetch_failed",
+    "unused",
+    "reviewed",
+    "prepared",
+    "dropped",
+    "published",
+    "screened_out",
 ]
+CandidateDiscoverySource = Literal["live", "collected", "both"]
 CandidateDropReason = Literal[
     "off_market",
     "policy",
@@ -63,7 +71,18 @@ class NewsAdminCounts(BaseModel):
     prepared: int
     dropped: int
     published: int
+    screened_out: int
     hidden: int
+
+
+class NewsAdminPoolCounts(BaseModel):
+    """Where an edition's candidates came from and how many passed screening."""
+
+    live: int
+    collected: int
+    both: int
+    # Candidates the headline screen shortlisted (they carry a screen rank).
+    screen_selected: int
 
 
 class NewsAdminEdition(BaseModel):
@@ -111,6 +130,11 @@ class NewsAdminCandidate(BaseModel):
     ai_market: str | None
     ai_importance: int | None
     ai_event_key: str | None
+    # Null on candidates recorded before overnight collection existed.
+    discovered_via: CandidateDiscoverySource | None
+    # Headline screen shortlist position and 1-5 score; null when unscreened.
+    screen_rank: int | None
+    screen_score: int | None
     item_id: uuid.UUID | None
     publish_run_id: uuid.UUID | None
     publish_requested_at: datetime | None
@@ -123,6 +147,7 @@ class NewsAdminEditionEntry(BaseModel):
     edition: NewsAdminEdition | None
     items: list[NewsAdminItem]
     candidates: list[NewsAdminCandidate]
+    pool: NewsAdminPoolCounts
 
 
 class NewsAdminEditionsResponse(BaseModel):
@@ -164,3 +189,34 @@ class NewsDependencyResponse(BaseModel):
 
 class NewsRecoveryResponse(BaseModel):
     dependencies: list[NewsDependencyResponse]
+
+
+class NewsFeedPollSource(BaseModel):
+    """Current overnight polling state of one feed; not a nightly history."""
+
+    source_key: str
+    # Registry display name, or the hostname for a feed no longer registered.
+    source_name: str
+    hostname: str
+    # Credentials and cache busters are never included.
+    feed_url: str
+    registered: bool
+    poll_group: str | None
+    markets: list[Literal["global", "tw_equity", "us_equity"]]
+    last_attempt_at: datetime | None
+    last_success_at: datetime | None
+    last_status: int | None
+    last_count: int | None
+    last_error_code: str | None
+    cooldown_until: datetime | None
+    consecutive_failures: int
+    last_gap_minutes: int | None
+    # Gaps counted during the collection night that feeds the edition dated
+    # ``gap_count_since`` (the collector's morning collection date).
+    gap_count: int
+    gap_count_since: date | None
+
+
+class NewsCollectionStatusResponse(BaseModel):
+    as_of: datetime
+    sources: list[NewsFeedPollSource]

@@ -20,6 +20,9 @@
 - 後台「新聞管理」頁提供人工覆核：可看到每個版本探索到的全部候選與 AI 的處置結果，
   可隱藏 AI 選入但不相關的新聞，也可把 AI 未選的候選人工上架（見
   [後台候選監控與人工上架](#後台候選監控與人工上架)）。客戶端仍不提供篩選。
+- 選用的隔夜蒐集與標題初篩（兩個獨立旗標，預設關閉）：18:00 至隔日 08:00 持續輪詢
+  feed 保存標題中繼資料，08:00 由模型先看過整池標題再挑短名單擷取正文（見
+  [隔夜蒐集與標題初篩](#隔夜蒐集與標題初篩)）。
 
 ## 流程
 
@@ -73,7 +76,8 @@ flowchart LR
    只保留符合各來源 `link_pattern` 的連結，並以 URL 與標題去重；任一 feed 失敗只
    影響該來源，事件為 `news.feed.failed`。需要金鑰或聯絡信箱的來源在設定缺漏時發
    `news.feed.skipped` 並略過。標記 `language_filter` 的新聞稿 feed 以 `langdetect`
-   丟棄中、英、日、韓以外的稿件。
+   丟棄中、英、日、韓以外的稿件。隔夜蒐集啟用時，即時探索結果再與蒐集池合併去重
+   （見[隔夜蒐集與標題初篩](#隔夜蒐集與標題初篩)）。
 4. 每個版本在正文擷取前，先以該市場 `EditionSpec.headline_impact_patterns` 定義的多組
    標題訊號調整送審優先序。全球版關注央行、總經、主權債、能源、地緣政治與主要指數；
    台股版關注加權指數、上市櫃權值股、半導體供應鏈、財報／訂單、法人籌碼與台灣監管；
@@ -83,7 +87,8 @@ flowchart LR
    feed 已帶全文者（不需擷取）與發佈時間。每個來源最多 `max_discovery_per_source` 筆（全球
    5、台股與美股 10），總數上限全球 80 筆、台股與美股 100 筆。正文擷取後，各版候選
    也以自己的相同訊號排序再套用每來源與總數上限，避免重大但稍早發布的事件在任一層被
-   截斷。
+   截斷。標題初篩啟用時，這一步的正則排序與總數上限改由初篩短名單取代，擷取後也改依
+   初篩名次排序；每來源上限不變。
 5. 每筆候選以 SSRF 安全的 client 擷取正文：只允許白名單主機的 443 連接埠、DNS
    解析結果必須全部為公網 IP 且連線固定在該 IP、redirect 逐跳重新驗證、遵守
    `robots.txt`、限制位元組數與內容型別，不帶 cookie 也不讀環境代理設定。feed 已
@@ -121,6 +126,49 @@ flowchart LR
    `target_items`）、`partial`（非零但未達目標）或 `unavailable`（0）；星等配額
    另行限制，這些狀態不決定重試。同一交易內，該版本看過的每個 feed 候選
    都寫成一列 `news_candidates`，記錄它走到哪個階段（見下方候選階段）。
+
+## 隔夜蒐集與標題初篩
+
+設計決策與分階段交付見
+[隔夜新聞蒐集與標題初篩規劃](../specs/overnight-news-collection-plan.md)。兩個旗標
+獨立，關閉任一個即回到原本的 08:00 單次探索或正則排序；
+`DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 為 `false` 時兩者都不發出外部請求。
+
+**隔夜蒐集**（`DAILY_INSIGHTS_NEWS_COLLECTION_ENABLED`）：
+
+- collector 是 `orchestration-worker` 程序內的 asyncio task，不是 JobRun，也不新增
+  Compose 服務；以 PostgreSQL advisory lock 保證多個 worker 時只有一個在輪詢，例外只
+  記錄事件並退避重啟，不中斷 worker 主迴圈。
+- 台北時間 18:00 首輪全部來源、07:40 最後一輪，07:55 後不再開始新輪詢；依 feed 的
+  `poll_group`（`flash`／`fast` 每小時、`normal` 每兩小時，`poll_interval_minutes`
+  可逐來源覆寫）排程，並以 feed URL 雜湊取得固定 0–10 分鐘偏移。重啟後只補最近一期。
+- 沿用 robots、同主機請求間隔、SSRF 安全 client、白名單、`link_pattern` 與語言過濾；
+  支援 `ETag`／`Last-Modified` 條件式請求（304 視為成功），429／5xx 依
+  `Retry-After` 與 5／15／30 分鐘退避冷卻。
+- 只保存中繼資料到 `news_collected_candidates`（不存正文），同一 URL 再出現只更新
+  `last_collected_at` 與市場標記、不覆寫首次 `seen_at`；列保留 7 天，旗標關閉時清理仍
+  執行。每個 feed 的最近一次輪詢寫入 `news_feed_poll_states`。
+- 缺口偵測：本次回應最舊一則晚於上次成功輪詢時，代表中間可能有稿件被擠出，發
+  `news.collection.gap` 並累加該晚的 `gap_count`。這是調整輪詢間隔的依據，不自動調整。
+- 08:00 refresh 在 `discover_feed_candidates` 之後讀取標記給本市場、`seen_at`（無日期
+  時用 `first_collected_at`）落在 refresh 前 24 小時內的蒐集列，以 candidate ID 與即時
+  探索合併去重，feed 已帶正文者優先；合併結果納入 `input_digest`。候選寫入
+  `discovered_via`：`live`（僅 08:00 即時探索）、`collected`（僅蒐集池，被擠出 feed
+  而救回的稿件）或 `both`。
+
+**標題初篩**（`DAILY_INSIGHTS_NEWS_HEADLINE_SCREEN_ENABLED`）：
+
+- 模型階段順序變為 `標題初篩 → 擷取 → 選稿 → 繁中摘要 → 翻譯`，仍嚴格串行。初篩只
+  看標題、來源名稱與發布時間，每次最多 200 則、每市場最多兩次呼叫；候選池超過 400 則
+  時先以現行正則分數與發布時間截斷並發 `news.screen.truncated`。
+- 輸出依重要性排序的短名單與 1–5 粗略分數，短名單上限全球 60、台股與美股 90。入選者
+  寫入 `screen_rank`（1 起算）與 `screen_score`，未入選者階段為 `screened_out`。
+- JSON／schema 驗證失敗時同一輸入修正一次，仍失敗或短名單為空則退回正則排序並發
+  `news.screen.fallback`，不阻擋版本；未知序號丟棄並發 `news.screen.discarded`。
+  provider 逾時、429、5xx 與認證錯誤沿用既有系統性錯誤政策。
+- prompt 為 `modules/news/prompts/screen_criteria.txt`，`prompt_version` 以
+  `screen-v1:` 開頭並納入 `input_digest`；呼叫結果保存在
+  `FunctionRun.result._news_model_attempts`，續跑直接重用。
 
 ## 版本規格
 
@@ -219,16 +267,18 @@ JSON 清單（dot-notation 欄位、`unix_s`／`unix_ms`／`iso`／`datetime_str
 
 ## 資料表
 
-| 資料表                   | 內容                                                                                                                                                                                                                                                                              |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `news_editions`          | 每日版本、`market_code`、revision、`input_digest`、模型與 prompt 版本、狀態、警語                                                                                                                                                                                                 |
-| `news_items`             | 入選新聞的來源中繼資料、主題、重要性、內容摘要、數值事實，以及選稿階段的 `market` 與 `event_key`（migration 0012 之前的版本為 null）                                                                                                                                              |
-| `news_presentations`     | 每則新聞的三語標題與摘要                                                                                                                                                                                                                                                          |
-| `news_generation_audits` | 每次模型呼叫的 stage、locale、token、延遲、request id 與失敗代碼（人工上架的摘要呼叫也記在這裡）                                                                                                                                                                                  |
-| `news_candidates`        | 版本看過的每個 feed 候選：來源、URL、標題、`seen_at`、擷取後的 `content_digest` 與發佈時間、`stage`、`drop_reason`、模型回傳的 `ai_*` 欄位、對應的 `item_id`，以及人工上架的請求資訊（`publish_run_id`、`publish_requested_at`、`publish_requested_by_user_id`、`publish_error`） |
-| `job_runs`               | Automatic／manual 新聞 jobs、trigger、edition、狀態與結果摘要；候選人工上架使用 `news_publish_job`                                                                                                                                                                                |
-| `function_runs`          | 四個新聞 functions 的 scope、provider、狀態、`next_attempt_at` 與最終結果                                                                                                                                                                                                         |
-| `function_attempts`      | 每次實際執行的 immutable metadata、record count、digest 與清理後錯誤                                                                                                                                                                                                              |
+| 資料表                      | 內容                                                                                                                                                                                                                                                                                                                               |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `news_editions`             | 每日版本、`market_code`、revision、`input_digest`、模型與 prompt 版本、狀態、警語                                                                                                                                                                                                                                                  |
+| `news_items`                | 入選新聞的來源中繼資料、主題、重要性、內容摘要、數值事實，以及選稿階段的 `market` 與 `event_key`（migration 0012 之前的版本為 null）                                                                                                                                                                                               |
+| `news_presentations`        | 每則新聞的三語標題與摘要                                                                                                                                                                                                                                                                                                           |
+| `news_generation_audits`    | 每次模型呼叫的 stage、locale、token、延遲、request id 與失敗代碼（人工上架的摘要呼叫也記在這裡）                                                                                                                                                                                                                                   |
+| `news_candidates`           | 版本看過的每個 feed 候選：來源、URL、標題、`seen_at`、擷取後的 `content_digest` 與發佈時間、`stage`、`drop_reason`、模型回傳的 `ai_*` 欄位、`discovered_via`、`screen_rank`、`screen_score`、對應的 `item_id`，以及人工上架的請求資訊（`publish_run_id`、`publish_requested_at`、`publish_requested_by_user_id`、`publish_error`） |
+| `news_collected_candidates` | 隔夜蒐集池：URL SHA-256 `candidate_id`、URL、主機、來源名稱、標題、`seen_at`、`markets`、feed 的 `source_key`、首次與最後蒐集時間；不含正文，保留 7 天                                                                                                                                                                             |
+| `news_feed_poll_states`     | 每個 feed 的目前輪詢狀態（`source_key` 為 feed URL 的 SHA-256）：最後嘗試／成功、HTTP 狀態、則數、錯誤碼、條件式請求 validators、冷卻、連續失敗、最近缺口分鐘與當晚缺口次數；只保留最新一筆，不是歷史                                                                                                                              |
+| `job_runs`                  | Automatic／manual 新聞 jobs、trigger、edition、狀態與結果摘要；候選人工上架使用 `news_publish_job`                                                                                                                                                                                                                                 |
+| `function_runs`             | 四個新聞 functions 的 scope、provider、狀態、`next_attempt_at` 與最終結果                                                                                                                                                                                                                                                          |
+| `function_attempts`         | 每次實際執行的 immutable metadata、record count、digest 與清理後錯誤                                                                                                                                                                                                                                                               |
 
 `news_items` 另有 `origin`（`model`／`manual`）、`hidden_at`、`hidden_by_user_id` 與
 `published_by_user_id`。`news_publish_job` 的 JobRun payload 保存人工上架的版本與候選
@@ -243,7 +293,15 @@ id；FunctionRun／Attempt 保存續跑、租約與 attempt provenance。
 
 `GET /api/admin/news/editions?date=YYYY-MM-DD`（預設台北今天）回傳三個市場的最新
 revision、已上架新聞（含 zh-hant 標題、`origin`、`hidden`）與全部候選；候選排序為
-已上架（依 rank）、內容已備妥、模型回傳但剔除（依 `ai_rank`）、送審未選、其餘。
+已上架（依 rank）、內容已備妥、模型回傳但剔除（依 `ai_rank`）、送審未選、其餘，最後是
+初篩未入選（`screened_out`）。送審未選與其餘兩組內依 `screen_rank` 排序，沒有初篩名次的
+候選排在該組後面並依 `seen_at` 由新到舊。初篩未入選排在最後，因為模型已判定它們不如
+任何入選候選；它們仍可勾選人工上架。
+
+每個市場另回傳 `pool` 摘要：`live`、`collected`、`both` 三種來源的候選數，以及
+`screen_selected`（帶 `screen_rank` 的初篩入選數）；階段計數 `counts` 也包含
+`screened_out`。migration 0031 之前的候選 `discovered_via`、`screen_rank`、
+`screen_score` 皆為 null，不計入 `pool` 的來源數。
 
 候選 `stage` 以走到的最遠階段為準：
 
@@ -256,10 +314,24 @@ revision、已上架新聞（含 zh-hant 標題、`origin`、`hidden`）與全�
 | `prepared`     | 繁中摘要與支援語系翻譯皆完成，已建立不可變 `PreparedNewsItem`，等待發布                                                                                                                                                                                                                       |
 | `dropped`      | 模型有回傳但未發布，`drop_reason` 為 `off_market`（標成他市場）、`policy`（來源／多樣性規則剔除或最終組合未納入）、`duplicate_event`（同一事件已有另一則報導摘要成功並採用）、`summary_failed`（繁中摘要失敗）、`translation_failed`（後續翻譯失敗）、`reserve`（超出目標則數的備選，未用到） |
 | `published`    | 進入最終發布，`item_id` 指向 `news_items`                                                                                                                                                                                                                                                     |
+| `screened_out` | 標題初篩未列入短名單，未擷取正文也未送選稿；只在初篩啟用時出現                                                                                                                                                                                                                                |
 
 模型回傳過的候選（任一輪）都會填 `ai_rank`（在模型原始清單中的位置，取第一次回傳的那輪）、
 `ai_topic`、`ai_market`、`ai_importance`、`ai_event_key`；來源是過濾與修復前的原始清單，
 所以被 `off_market`／`policy` 剔除的稿件也看得到模型的判斷。
+
+`GET /api/admin/news/collection` 回傳隔夜蒐集的來源輪詢狀態（admin 限定，與其他後台
+GET 相同身分與權限；不需 CSRF）。每列以 `source_key` 對應 `FEED_SOURCES`，提供來源
+名稱、主機、`poll_group`、市場、最後嘗試／成功時間、HTTP 狀態、最近則數、錯誤碼、
+冷卻期限、連續失敗、最近缺口分鐘，以及 `gap_count`／`gap_count_since`（該晚缺口次數與
+它所供應的版本日期）。回傳的 `feed_url` 一律移除憑證：註冊表內的 feed 只保留註冊表
+URL 的非機密查詢參數（去除 `api-key` 等金鑰參數與 cache buster），已不在註冊表的舊列
+只回主機與路徑。清單只列 collector 輪詢過的 feed，依註冊表順序，已移除的來源排在最後；
+尚未輪詢任何 feed 時為空清單。這是「目前狀態」，每次輪詢覆寫，不是每日歷史統計。
+
+新聞管理頁在市場版本摘要下方顯示 `pool` 計數，候選列表顯示來源標記（隔夜蒐集／08:00
+即時／即時與隔夜）與「初篩名次／分數」欄，並新增「初篩未入選」篩選；另有「隔夜蒐集
+來源」區塊標示為目前狀態，列出上述輪詢欄位，窄畫面改為逐列的標籤式紀錄。
 
 人工操作：
 
@@ -285,21 +357,21 @@ revision、已上架新聞（含 zh-hant 標題、`origin`、`hidden`）與全�
 
 ## 設定
 
-| 變數                                            | 用途                                                                                     | 正式環境來源             |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------ |
-| `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`             | `true`／`false`，關閉時新聞 functions 不呼叫外部服務                                     | GitHub Variables         |
-| `DAILY_INSIGHTS_NEWS_COLLECTION_ENABLED`        | `true`／`false`，預設 `false`；隔夜蒐集開關，只傳給 worker（尚未啟用行為，後續 PR 實作） | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_NEWS_HEADLINE_SCREEN_ENABLED`   | `true`／`false`，預設 `false`；標題初篩開關，只傳給 worker（尚未啟用行為，後續 PR 實作） | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES`           | 逗號分隔的精確主機名稱，加入註冊表推導的白名單                                           | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES`         | 逗號分隔的精確主機名稱，從白名單排除（停用該來源的 feed）                                | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_GUARDIAN_API_KEY`               | Guardian Content API 金鑰；未設定時 Guardian 三個 feed 略過                              | GitHub Secrets，可省略   |
-| `DAILY_INSIGHTS_SEC_CONTACT_EMAIL`              | SEC EDGAR 要求的聯絡信箱，寫入 User-Agent；未設定時 8-K feed 略過                        | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_MODEL_NAME`                     | DeepSeek 模型名稱，預設 `deepseek-chat`                                                  | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_MODEL_API_BASE_URL`             | 必須是 HTTPS 絕對 URL，預設 `https://api.deepseek.com`                                   | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`             | 啟用時必填，不得為 placeholder                                                           | GitHub Secrets           |
-| `DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS`          | 單次模型呼叫逾時，預設 120 秒；選題 prompt 約 28k token，實測需 30 到 45 秒              | 開發環境                 |
-| `DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS`     | 正文擷取逾時，預設 25 秒                                                                 | 開發環境                 |
-| `DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS` | 讀取單一 feed 的逾時，預設 30 秒                                                         | 開發環境                 |
+| 變數                                            | 用途                                                                                                   | 正式環境來源             |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------ |
+| `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`             | `true`／`false`，關閉時新聞 functions 不呼叫外部服務                                                   | GitHub Variables         |
+| `DAILY_INSIGHTS_NEWS_COLLECTION_ENABLED`        | `true`／`false`，預設 `false`；啟用 18:00–08:00 隔夜蒐集，並讓 08:00 refresh 合併蒐集池；只傳給 worker | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_NEWS_HEADLINE_SCREEN_ENABLED`   | `true`／`false`，預設 `false`；啟用 08:00 標題初篩，關閉時沿用正則排序與現行擷取上限；只傳給 worker    | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES`           | 逗號分隔的精確主機名稱，加入註冊表推導的白名單                                                         | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES`         | 逗號分隔的精確主機名稱，從白名單排除（停用該來源的 feed）                                              | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_GUARDIAN_API_KEY`               | Guardian Content API 金鑰；未設定時 Guardian 三個 feed 略過                                            | GitHub Secrets，可省略   |
+| `DAILY_INSIGHTS_SEC_CONTACT_EMAIL`              | SEC EDGAR 要求的聯絡信箱，寫入 User-Agent；未設定時 8-K feed 略過                                      | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_MODEL_NAME`                     | DeepSeek 模型名稱，預設 `deepseek-chat`                                                                | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_MODEL_API_BASE_URL`             | 必須是 HTTPS 絕對 URL，預設 `https://api.deepseek.com`                                                 | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`             | 啟用時必填，不得為 placeholder                                                                         | GitHub Secrets           |
+| `DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS`          | 單次模型呼叫逾時，預設 120 秒；選題 prompt 約 28k token，實測需 30 到 45 秒                            | 開發環境                 |
+| `DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS`     | 正文擷取逾時，預設 25 秒                                                                               | 開發環境                 |
+| `DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS` | 讀取單一 feed 的逾時，預設 30 秒                                                                       | 開發環境                 |
 
 `core/config.py` 在啟用時會驗證 provider 為 `deepseek`、URL 為 HTTPS、API key 與
 Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主機；不符合時服務啟動即失敗。
@@ -364,8 +436,10 @@ Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主�
 - 多個 dispatcher 實例可同時嘗試建立 routine，但 automatic provider
   job／edition 唯一鍵會收斂為一筆工作；provider lock、worker lease 與新聞 edition
   lock 處理執行期 recovery。
-- 探索一律讀全部 feed，`poll_group` 只是給未來常駐 poller 的建議頻率；Benzinga 這類
-  一次只回兩則的來源目前沒有納入。
+- 08:00 即時探索一律讀全部 feed；`poll_group` 只決定隔夜蒐集的輪詢頻率，蒐集關閉時
+  沒有作用。Benzinga 這類一次只回兩則的來源目前沒有納入。
+- 後台來源輪詢狀態只有每個 feed 的最新一筆與當晚缺口次數，沒有逐次輪詢歷史；需要
+  回顧時查 worker 的 `news.collection.*` 事件。
 - Twelve Data 的 `/press_releases` 已評估不採用：必須帶 symbol 查詢、沒有原文
   URL、內容為付費通稿且近乎沒有當日稿件（2026-09-02 實測 NVDA 近 3 天 0 筆）。
 - Reuters 對非瀏覽器請求回應 `401`，CNBC、BBC 與 AP 封鎖爬蟲，均不在註冊表內。

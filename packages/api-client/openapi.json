@@ -3148,6 +3148,18 @@
             ],
             "title": "Ai Topic"
           },
+          "discovered_via": {
+            "anyOf": [
+              {
+                "enum": ["live", "collected", "both"],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discovered Via"
+          },
           "drop_reason": {
             "anyOf": [
               {
@@ -3227,6 +3239,28 @@
             ],
             "title": "Publish Run Id"
           },
+          "screen_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Screen Rank"
+          },
+          "screen_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Screen Score"
+          },
           "seen_at": {
             "anyOf": [
               {
@@ -3263,7 +3297,8 @@
               "reviewed",
               "prepared",
               "dropped",
-              "published"
+              "published",
+              "screened_out"
             ],
             "title": "Stage",
             "type": "string"
@@ -3288,6 +3323,9 @@
           "ai_market",
           "ai_importance",
           "ai_event_key",
+          "discovered_via",
+          "screen_rank",
+          "screen_score",
           "item_id",
           "publish_run_id",
           "publish_requested_at",
@@ -3327,6 +3365,10 @@
             "title": "Reviewed",
             "type": "integer"
           },
+          "screened_out": {
+            "title": "Screened Out",
+            "type": "integer"
+          },
           "unused": {
             "title": "Unused",
             "type": "integer"
@@ -3340,6 +3382,7 @@
           "prepared",
           "dropped",
           "published",
+          "screened_out",
           "hidden"
         ],
         "title": "NewsAdminCounts",
@@ -3419,9 +3462,12 @@
           "market_code": {
             "title": "Market Code",
             "type": "string"
+          },
+          "pool": {
+            "$ref": "#/components/schemas/NewsAdminPoolCounts"
           }
         },
-        "required": ["market_code", "edition", "items", "candidates"],
+        "required": ["market_code", "edition", "items", "candidates", "pool"],
         "title": "NewsAdminEditionEntry",
         "type": "object"
       },
@@ -3572,6 +3618,30 @@
         "title": "NewsAdminItem",
         "type": "object"
       },
+      "NewsAdminPoolCounts": {
+        "description": "Where an edition's candidates came from and how many passed screening.",
+        "properties": {
+          "both": {
+            "title": "Both",
+            "type": "integer"
+          },
+          "collected": {
+            "title": "Collected",
+            "type": "integer"
+          },
+          "live": {
+            "title": "Live",
+            "type": "integer"
+          },
+          "screen_selected": {
+            "title": "Screen Selected",
+            "type": "integer"
+          }
+        },
+        "required": ["live", "collected", "both", "screen_selected"],
+        "title": "NewsAdminPoolCounts",
+        "type": "object"
+      },
       "NewsCandidatePublishRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3624,6 +3694,25 @@
         },
         "required": ["candidate_ids"],
         "title": "NewsCandidatePublishRequest",
+        "type": "object"
+      },
+      "NewsCollectionStatusResponse": {
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/NewsFeedPollSource"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": ["as_of", "sources"],
+        "title": "NewsCollectionStatusResponse",
         "type": "object"
       },
       "NewsDependencyResponse": {
@@ -3793,6 +3882,171 @@
         },
         "required": ["code", "stage", "action"],
         "title": "NewsFailure",
+        "type": "object"
+      },
+      "NewsFeedPollSource": {
+        "description": "Current overnight polling state of one feed; not a nightly history.",
+        "properties": {
+          "consecutive_failures": {
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "cooldown_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cooldown Until"
+          },
+          "feed_url": {
+            "title": "Feed Url",
+            "type": "string"
+          },
+          "gap_count": {
+            "title": "Gap Count",
+            "type": "integer"
+          },
+          "gap_count_since": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gap Count Since"
+          },
+          "hostname": {
+            "title": "Hostname",
+            "type": "string"
+          },
+          "last_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Attempt At"
+          },
+          "last_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Count"
+          },
+          "last_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Code"
+          },
+          "last_gap_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Gap Minutes"
+          },
+          "last_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Status"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "markets": {
+            "items": {
+              "enum": ["global", "tw_equity", "us_equity"],
+              "type": "string"
+            },
+            "title": "Markets",
+            "type": "array"
+          },
+          "poll_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Poll Group"
+          },
+          "registered": {
+            "title": "Registered",
+            "type": "boolean"
+          },
+          "source_key": {
+            "title": "Source Key",
+            "type": "string"
+          },
+          "source_name": {
+            "title": "Source Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_key",
+          "source_name",
+          "hostname",
+          "feed_url",
+          "registered",
+          "poll_group",
+          "markets",
+          "last_attempt_at",
+          "last_success_at",
+          "last_status",
+          "last_count",
+          "last_error_code",
+          "cooldown_until",
+          "consecutive_failures",
+          "last_gap_minutes",
+          "gap_count",
+          "gap_count_since"
+        ],
+        "title": "NewsFeedPollSource",
         "type": "object"
       },
       "NewsItemResponse": {
@@ -6423,6 +6677,26 @@
           }
         },
         "summary": "Publish Candidates",
+        "tags": ["news management"]
+      }
+    },
+    "/api/admin/news/collection": {
+      "get": {
+        "description": "Current overnight polling state of every feed the collector has polled.",
+        "operationId": "collection_status_api_admin_news_collection_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsCollectionStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Collection Status",
         "tags": ["news management"]
       }
     },
