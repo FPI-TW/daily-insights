@@ -102,8 +102,10 @@ class FeedSource:
     max_age_hours: int = 24
     # The feed carries the article body, so extraction can skip fetch_article.
     provides_full_text: bool = False
-    # Suggested polling cadence for a future resident poller: flash | fast | normal.
+    # Overnight collector cadence: flash | fast | normal (see news.collection).
     poll_group: str = "normal"
+    # Overrides the poll_group interval, e.g. for a short feed that shows gaps.
+    poll_interval_minutes: int | None = None
     mapping: JsonListMapping | None = None
     # Credentialed feeds: the Settings attribute holding the key and the query
     # parameter to place it in. Keys never appear in FEED_SOURCES.
