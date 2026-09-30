@@ -42,3 +42,55 @@ describe("request-local i18n", () => {
     expect(traditionalChinese.language).toBe("zh-hant")
   })
 })
+
+describe("news management translations", () => {
+  const locales = ["zh-hant", "zh-hans", "en"] as const
+  const newsAdminKeys = (locale: (typeof locales)[number]) =>
+    Object.keys(
+      createI18n(locale).getResourceBundle(locale, "translation") as Record<
+        string,
+        string
+      >
+    )
+      .filter(key =>
+        /^news(Collection|Candidate|Curation|Management)/.test(key)
+      )
+      .sort()
+
+  it("defines every news management key in all three locales", () => {
+    const traditional = newsAdminKeys("zh-hant")
+    expect(newsAdminKeys("zh-hans")).toEqual(traditional)
+    expect(newsAdminKeys("en")).toEqual(traditional)
+  })
+
+  it("covers the overnight collection and headline screen labels", () => {
+    const keys = [
+      "newsCandidateStage_screened_out",
+      "newsCurationFilter_screened_out",
+      "newsCurationColScreen",
+      "newsCurationScreenLabel",
+      "newsCurationScreenSelected",
+      "newsCurationPool",
+      ...["live", "collected", "both"].map(key => `newsCandidateVia_${key}`),
+      "newsCollectionTitle",
+      "newsCollectionCurrent",
+      "newsCollectionLoading",
+      "newsCollectionEmpty",
+      ...["never", "cooling", "failing", "ok"].map(
+        key => `newsCollectionHealth_${key}`
+      ),
+      ...["flash", "fast", "normal"].map(
+        key => `newsCollectionPollGroup_${key}`
+      ),
+    ]
+    for (const locale of locales) {
+      const translation = createI18n(locale).getResourceBundle(
+        locale,
+        "translation"
+      ) as Record<string, string>
+      for (const key of keys) {
+        expect(translation[key], `${locale}:${key}`).toBeTruthy()
+      }
+    }
+  })
+})

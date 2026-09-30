@@ -5,14 +5,17 @@ import {
   type NewsCandidateStage,
 } from "@daily-insights/api-client"
 
-// The admin table groups the seven pipeline stages into the three questions an
-// editor asks: what did the model reject, what did it never pick, and what
-// never reached it. "all" keeps the raw list.
-export type CandidateFilter = "all" | "dropped" | "reviewed" | "other"
+// The admin table groups the pipeline stages into the questions an editor
+// asks: what did the model reject, what did it never pick, what did the
+// headline screen leave out, and what never reached the model for other
+// reasons. "all" keeps the raw list.
+export type CandidateFilter =
+  "all" | "dropped" | "reviewed" | "screened_out" | "other"
 export const candidateFilters: readonly CandidateFilter[] = [
   "all",
   "dropped",
   "reviewed",
+  "screened_out",
   "other",
 ]
 
@@ -21,6 +24,7 @@ export function candidateFilterOf(
 ): Exclude<CandidateFilter, "all"> {
   if (stage === "dropped") return "dropped"
   if (stage === "reviewed") return "reviewed"
+  if (stage === "screened_out") return "screened_out"
   return "other"
 }
 

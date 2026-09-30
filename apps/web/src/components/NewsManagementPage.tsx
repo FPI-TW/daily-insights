@@ -4,6 +4,7 @@ import {
   type NewsAdminCandidate,
   type NewsAdminEdition,
   type NewsAdminItem,
+  type NewsAdminPoolCounts,
   type NewsCandidatePublishInput,
 } from "@daily-insights/api-client"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -11,6 +12,8 @@ import { LoaderCircle } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Dialog } from "#/components/Dialog"
+import { NewsBadge } from "#/components/NewsBadge"
+import { NewsCollectionStatus } from "#/components/NewsCollectionStatus"
 import {
   NewsAdminLoadError,
   NewsDependencies,
@@ -267,6 +270,7 @@ export function NewsManagementPage({ locale }: { locale: Locale }) {
         active={activeNewsRuns.length > 0}
         redirectExpired={redirectExpired}
       />
+      <NewsCollectionStatus redirectExpired={redirectExpired} />
       <NewsCuration
         taipeiDate={catalog.data.taipei_date}
         dailyNewsEnabled={catalog.data.daily_news_enabled}
@@ -611,6 +615,9 @@ function NewsCuration({
       ) : (
         <>
           {edition.edition ? <EditionSummary edition={edition} /> : null}
+          {edition.candidates.length > 0 ? (
+            <PoolSummary pool={edition.pool} />
+          ) : null}
           {edition.edition ? (
             <PublishedItems
               items={edition.items}
@@ -695,28 +702,6 @@ function ToggleButton({
   )
 }
 
-function Badge({
-  children,
-  tone = "neutral",
-}: {
-  children: string
-  tone?: "neutral" | "caution" | "muted"
-}) {
-  const toneClass =
-    tone === "caution"
-      ? "border-market-caution/50 bg-market-caution/10 text-market-caution"
-      : tone === "muted"
-        ? "border-line bg-link-hover text-sea-ink-soft"
-        : "border-chip-line bg-chip text-sea-ink"
-  return (
-    <span
-      className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-bold whitespace-nowrap ${toneClass}`}
-    >
-      {children}
-    </span>
-  )
-}
-
 const countKeys = [
   "discovered",
   "fetch_failed",
@@ -725,6 +710,7 @@ const countKeys = [
   "prepared",
   "dropped",
   "published",
+  "screened_out",
   "hidden",
 ] as const
 
@@ -748,13 +734,37 @@ function EditionSummary({ edition }: { edition: NewsAdminEdition }) {
       >
         {countKeys.map(key => (
           <li key={key}>
-            <Badge tone="muted">
+            <NewsBadge tone="muted">
               {`${t(`newsCandidateStage_${key}`)} ${detail.counts[key]}`}
-            </Badge>
+            </NewsBadge>
           </li>
         ))}
       </ul>
     </div>
+  )
+}
+
+const discoveryKeys = ["collected", "live", "both"] as const
+
+/** Where the candidates came from and how many the headline screen kept. */
+function PoolSummary({ pool }: { pool: NewsAdminPoolCounts }) {
+  const { t } = useTranslation()
+  return (
+    <ul
+      aria-label={t("newsCurationPool")}
+      className="m-0 mt-2 flex list-none flex-wrap gap-1.5 p-0"
+    >
+      {discoveryKeys.map(key => (
+        <li key={key}>
+          <NewsBadge>{`${t(`newsCandidateVia_${key}`)} ${pool[key]}`}</NewsBadge>
+        </li>
+      ))}
+      <li>
+        <NewsBadge>
+          {`${t("newsCurationScreenSelected")} ${pool.screen_selected}`}
+        </NewsBadge>
+      </li>
+    </ul>
   )
 }
 
@@ -817,11 +827,13 @@ function PublishedItems({
                   <span>{item.source_name}</span>
                   <MarketTag market={item.market} />
                   <ImportanceStars importance={item.importance} />
-                  <Badge>{t(`newsCurationOrigin_${item.origin}`)}</Badge>
+                  <NewsBadge>
+                    {t(`newsCurationOrigin_${item.origin}`)}
+                  </NewsBadge>
                   {item.hidden ? (
-                    <Badge tone="caution">
+                    <NewsBadge tone="caution">
                       {t("newsCandidateStage_hidden")}
-                    </Badge>
+                    </NewsBadge>
                   ) : null}
                 </p>
               </div>
@@ -869,12 +881,13 @@ function CandidateTable({
     "newsCurationColSource",
     "newsCurationColSeen",
     "newsCurationColStage",
+    "newsCurationColScreen",
     "newsCurationColAi",
     "newsCurationColPublish",
   ]
   return (
     <div className="mt-3 overflow-x-auto rounded-md border border-line">
-      <table className="w-full min-w-200 text-sm">
+      <table className="w-full min-w-220 text-sm">
         <thead className="bg-link-hover text-left text-xs text-sea-ink-soft">
           <tr>
             {headers.map(key => (
@@ -913,26 +926,56 @@ function CandidateTable({
                   </a>
                 </td>
                 <td className="px-3 py-2.5 text-sea-ink-soft">
-                  {candidate.source_name}
+                  <span className="block">{candidate.source_name}</span>
+                  {candidate.discovered_via ? (
+                    <span className="mt-1 block">
+                      <NewsBadge
+                        tone={
+                          candidate.discovered_via === "live"
+                            ? "muted"
+                            : "neutral"
+                        }
+                      >
+                        {t(`newsCandidateVia_${candidate.discovered_via}`)}
+                      </NewsBadge>
+                    </span>
+                  ) : null}
                 </td>
-                <td className="px-3 py-2.5 font-mono text-xs tabular-nums text-sea-ink-soft">
+                <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap tabular-nums text-sea-ink-soft">
                   {candidate.seen_at ? formatTimestamp(candidate.seen_at) : "—"}
                 </td>
                 <td className="px-3 py-2.5">
                   <span className="flex flex-wrap gap-1">
-                    <Badge
+                    <NewsBadge
                       tone={
                         candidate.stage === "dropped" ? "caution" : "neutral"
                       }
                     >
                       {t(`newsCandidateStage_${candidate.stage}`)}
-                    </Badge>
+                    </NewsBadge>
                     {candidate.drop_reason ? (
-                      <Badge tone="muted">
+                      <NewsBadge tone="muted">
                         {t(`newsCandidateDrop_${candidate.drop_reason}`)}
-                      </Badge>
+                      </NewsBadge>
                     ) : null}
                   </span>
+                </td>
+                <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap tabular-nums">
+                  {candidate.screen_rank === null ? (
+                    "—"
+                  ) : (
+                    <span
+                      aria-label={t("newsCurationScreenLabel", {
+                        rank: candidate.screen_rank,
+                        score: candidate.screen_score ?? "—",
+                      })}
+                    >
+                      #{candidate.screen_rank}
+                      {candidate.screen_score !== null
+                        ? ` · ${candidate.screen_score}/5`
+                        : ""}
+                    </span>
+                  )}
                 </td>
                 <td className="px-3 py-2.5">
                   {candidate.ai_rank === null ? (
@@ -956,9 +999,9 @@ function CandidateTable({
                     </span>
                   ) : candidate.publish_run_id &&
                     queuedRunIds.has(candidate.publish_run_id) ? (
-                    <Badge tone="caution">
+                    <NewsBadge tone="caution">
                       {t("newsCurationPublishQueued")}
-                    </Badge>
+                    </NewsBadge>
                   ) : null}
                 </td>
               </tr>
