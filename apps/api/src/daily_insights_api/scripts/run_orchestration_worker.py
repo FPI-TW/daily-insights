@@ -12,6 +12,7 @@ from daily_insights_api import models as registered_models  # noqa: F401
 from daily_insights_api.core.config import get_settings
 from daily_insights_api.core.database import create_engine, create_session_factory
 from daily_insights_api.core.logging import configure_logging
+from daily_insights_api.modules.news.collection import start_collector
 from daily_insights_api.modules.orchestration.functions import build_function_handlers
 from daily_insights_api.modules.orchestration.projections import (
     claim_ready_projection,
@@ -43,6 +44,9 @@ async def worker_loop(*, once: bool = False) -> None:
     tasks: set[asyncio.Task[None]] = set()
     claimed_count = 0
     prefer_projection = True
+    # The overnight collector is a resident task beside the claim loop; a
+    # one-shot run never starts it.
+    collector = None if once else start_collector(settings, sessions)
     try:
         while True:
             await HEARTBEAT_PATH.touch()
@@ -111,6 +115,9 @@ async def worker_loop(*, once: bool = False) -> None:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        if collector is not None:
+            collector.cancel()
+            await asyncio.gather(collector, return_exceptions=True)
         await handlers.close()
         await engine.dispose()
 
