@@ -285,19 +285,21 @@ revision、已上架新聞（含 zh-hant 標題、`origin`、`hidden`）與全�
 
 ## 設定
 
-| 變數                                            | 用途                                                                        | 正式環境來源             |
-| ----------------------------------------------- | --------------------------------------------------------------------------- | ------------------------ |
-| `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`             | `true`／`false`，關閉時新聞 functions 不呼叫外部服務                        | GitHub Variables         |
-| `DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES`           | 逗號分隔的精確主機名稱，加入註冊表推導的白名單                              | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES`         | 逗號分隔的精確主機名稱，從白名單排除（停用該來源的 feed）                   | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_GUARDIAN_API_KEY`               | Guardian Content API 金鑰；未設定時 Guardian 三個 feed 略過                 | GitHub Secrets，可省略   |
-| `DAILY_INSIGHTS_SEC_CONTACT_EMAIL`              | SEC EDGAR 要求的聯絡信箱，寫入 User-Agent；未設定時 8-K feed 略過           | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_MODEL_NAME`                     | DeepSeek 模型名稱，預設 `deepseek-chat`                                     | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_MODEL_API_BASE_URL`             | 必須是 HTTPS 絕對 URL，預設 `https://api.deepseek.com`                      | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`             | 啟用時必填，不得為 placeholder                                              | GitHub Secrets           |
-| `DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS`          | 單次模型呼叫逾時，預設 120 秒；選題 prompt 約 28k token，實測需 30 到 45 秒 | 開發環境                 |
-| `DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS`     | 正文擷取逾時，預設 25 秒                                                    | 開發環境                 |
-| `DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS` | 讀取單一 feed 的逾時，預設 30 秒                                            | 開發環境                 |
+| 變數                                            | 用途                                                                                     | 正式環境來源             |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------ |
+| `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`             | `true`／`false`，關閉時新聞 functions 不呼叫外部服務                                     | GitHub Variables         |
+| `DAILY_INSIGHTS_NEWS_COLLECTION_ENABLED`        | `true`／`false`，預設 `false`；隔夜蒐集開關，只傳給 worker（尚未啟用行為，後續 PR 實作） | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_NEWS_HEADLINE_SCREEN_ENABLED`   | `true`／`false`，預設 `false`；標題初篩開關，只傳給 worker（尚未啟用行為，後續 PR 實作） | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES`           | 逗號分隔的精確主機名稱，加入註冊表推導的白名單                                           | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES`         | 逗號分隔的精確主機名稱，從白名單排除（停用該來源的 feed）                                | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_GUARDIAN_API_KEY`               | Guardian Content API 金鑰；未設定時 Guardian 三個 feed 略過                              | GitHub Secrets，可省略   |
+| `DAILY_INSIGHTS_SEC_CONTACT_EMAIL`              | SEC EDGAR 要求的聯絡信箱，寫入 User-Agent；未設定時 8-K feed 略過                        | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_MODEL_NAME`                     | DeepSeek 模型名稱，預設 `deepseek-chat`                                                  | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_MODEL_API_BASE_URL`             | 必須是 HTTPS 絕對 URL，預設 `https://api.deepseek.com`                                   | GitHub Variables，可省略 |
+| `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`             | 啟用時必填，不得為 placeholder                                                           | GitHub Secrets           |
+| `DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS`          | 單次模型呼叫逾時，預設 120 秒；選題 prompt 約 28k token，實測需 30 到 45 秒              | 開發環境                 |
+| `DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS`     | 正文擷取逾時，預設 25 秒                                                                 | 開發環境                 |
+| `DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS` | 讀取單一 feed 的逾時，預設 30 秒                                                         | 開發環境                 |
 
 `core/config.py` 在啟用時會驗證 provider 為 `deepseek`、URL 為 HTTPS、API key 與
 Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主機；不符合時服務啟動即失敗。
@@ -314,6 +316,10 @@ Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主�
   不再啟動任何新聞專用 scheduler。
 - `release.yml` 從 production 環境傳遞上述變數；`DAILY_INSIGHTS_DAILY_NEWS_ENABLED`
   是必填變數，缺少時部署驗證失敗。
+- `DAILY_INSIGHTS_NEWS_COLLECTION_ENABLED` 與 `DAILY_INSIGHTS_NEWS_HEADLINE_SCREEN_ENABLED`
+  為選填變數：未設定時以 Compose 預設 `false` 部署，有設定時 `release.yml` 與
+  `deploy.sh` 都只接受 `true`／`false`。設計見
+  [隔夜新聞蒐集與標題初篩規劃](../specs/overnight-news-collection-plan.md)。
 
 啟用步驟：
 

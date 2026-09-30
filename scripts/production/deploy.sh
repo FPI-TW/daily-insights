@@ -167,6 +167,19 @@ if [ "$DAILY_INSIGHTS_DAILY_NEWS_ENABLED" = true ] &&
   exit 1
 fi
 
+# Optional overnight collection and headline screening flags; unset deploys as
+# false through the Compose default.
+for name in DAILY_INSIGHTS_NEWS_COLLECTION_ENABLED DAILY_INSIGHTS_NEWS_HEADLINE_SCREEN_ENABLED; do
+  value=$(printenv "$name" 2>/dev/null || true)
+  case "$value" in
+    "" | true | false) ;;
+    *)
+      echo "$name must be true or false when set" >&2
+      exit 1
+      ;;
+  esac
+done
+
 case "$DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED" in
   true | false) ;;
   *)

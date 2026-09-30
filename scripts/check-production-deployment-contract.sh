@@ -66,6 +66,13 @@ done
 grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_BASE_URL: ${DAILY_INSIGHTS_TWELVE_DATA_BASE_URL:-https://api.twelvedata.com}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_API_KEY: ${DAILY_INSIGHTS_TWELVE_DATA_API_KEY:-}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_DAILY_NEWS_ENABLED: ${DAILY_INSIGHTS_DAILY_NEWS_ENABLED:-false}' "$compose_file"
+for name in DAILY_INSIGHTS_NEWS_COLLECTION_ENABLED DAILY_INSIGHTS_NEWS_HEADLINE_SCREEN_ENABLED; do
+  flag_services=$(grep -Fc "${name}: \${${name}:-false}" "$compose_file")
+  if [ "$flag_services" -ne 1 ]; then
+    echo "expected ${name} only on orchestration-worker; found $flag_services" >&2
+    exit 1
+  fi
+done
 grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED:-false}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL:-https://analyst-viewpoints.invalid}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY:-}' "$compose_file"
@@ -175,6 +182,8 @@ for name in \
   DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL \
   DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS \
   DAILY_INSIGHTS_YFINANCE_ENABLED \
+  DAILY_INSIGHTS_NEWS_COLLECTION_ENABLED \
+  DAILY_INSIGHTS_NEWS_HEADLINE_SCREEN_ENABLED \
   DAILY_INSIGHTS_CHAT_ENABLED \
   DAILY_INSIGHTS_CHAT_MODEL_PROVIDER \
   DAILY_INSIGHTS_CHAT_MODEL_NAME \
@@ -576,6 +585,16 @@ if PATH="$temporary_dir/stubs:$PATH" \
   echo "enabled daily news must require a model API key" >&2
   exit 1
 fi
+
+for name in DAILY_INSIGHTS_NEWS_COLLECTION_ENABLED DAILY_INSIGHTS_NEWS_HEADLINE_SCREEN_ENABLED; do
+  if env "$name=yes" PATH="$temporary_dir/stubs:$PATH" \
+    DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+    scripts/production/deploy.sh >/dev/null 2>"$temporary_dir/news-flag.err"; then
+    echo "$name must only accept true or false" >&2
+    exit 1
+  fi
+  grep -Fq "$name must be true or false when set" "$temporary_dir/news-flag.err"
+done
 
 if PATH="$temporary_dir/stubs:$PATH" \
   DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
