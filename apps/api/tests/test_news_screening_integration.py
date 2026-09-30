@@ -1,3 +1,4 @@
+import hashlib
 import os
 import uuid
 from collections import Counter
@@ -31,6 +32,7 @@ from daily_insights_api.modules.news.llm import (
 from daily_insights_api.modules.news.models import (
     NewsCandidate,
     NewsCandidateBatch,
+    NewsCollectedCandidate,
     NewsGenerationAudit,
 )
 from daily_insights_api.modules.news.screening import screen_input_digest
@@ -229,12 +231,15 @@ class Harness:
             scope={},
         )
 
-    async def refresh(self, *, screen_enabled: bool = True) -> uuid.UUID:
+    async def refresh(
+        self, *, screen_enabled: bool = True, collection_enabled: bool = False
+    ) -> uuid.UUID:
         claimed = await self.claim()
         outcome = await orchestration_news_functions.refresh_news(
             Settings(
                 environment="test",
                 daily_news_enabled=True,
+                news_collection_enabled=collection_enabled,
                 news_headline_screen_enabled=screen_enabled,
             ),
             self.sessions,
@@ -577,3 +582,73 @@ async def test_disabled_screen_keeps_the_current_pipeline(
     rows = await harness.rows(batch_id)
     assert all(row.screen_rank is None and row.stage != "screened_out" for row in rows.values())
     assert await harness.screen_audits() == []
+
+
+async def test_screen_ranks_collected_pool_candidates_beside_live_discovery(
+    sessions: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With both flags on, stories only the overnight pool kept reach the screen."""
+    live = _pool(3)
+    collected_at = datetime.now(UTC) - timedelta(hours=10)
+    rows_to_collect = [
+        # A story live discovery also returned: the live candidate is kept.
+        (live[0].id, str(live[0].url), live[0].headline),
+        # A story that scrolled off its feed before the refresh.
+        (
+            hashlib.sha256(b"https://www.cnbc.com/2026/09/29/overnight-story.html").hexdigest(),
+            "https://www.cnbc.com/2026/09/29/overnight-story.html",
+            "Overnight central bank decision",
+        ),
+    ]
+    async with sessions.begin() as database:
+        database.add_all(
+            NewsCollectedCandidate(
+                candidate_id=candidate_id,
+                url=url,
+                hostname="www.cnbc.com",
+                source_name="CNBC",
+                headline=headline,
+                seen_at=collected_at,
+                markets=["global"],
+                source_key="f" * 64,
+                first_collected_at=collected_at,
+                last_collected_at=collected_at,
+            )
+            for candidate_id, url, headline in rows_to_collect
+        )
+
+    def answer(
+        headlines: Sequence[tuple[int, Candidate]], call: int, feedback: str | None
+    ) -> HeadlineScreen:
+        del call, feedback
+        return HeadlineScreen(
+            shortlist=tuple(ScreenedHeadline(n=number, score=3) for number, _ in headlines)
+        )
+
+    harness = Harness(sessions, monkeypatch, live, Client(answer))
+
+    batch_id = await harness.refresh(collection_enabled=True)
+
+    overnight_id = rows_to_collect[1][0]
+    assert [len(call["numbers"]) for call in harness.client.screen_calls] == [4]
+    assert overnight_id in {candidate.id for candidate in harness.extracted[0]}
+    rows = await harness.rows(batch_id)
+    assert {candidate_id: row.discovered_via for candidate_id, row in rows.items()} == {
+        live[0].id: "both",
+        live[1].id: "live",
+        live[2].id: "live",
+        overnight_id: "collected",
+    }
+    assert all(row.screen_rank is not None for row in rows.values())
+    assert rows[live[0].id].hostname == live[0].hostname
+    merged = [fields for name, fields in harness.events if name == "news.collection.merged"]
+    assert merged == [
+        {
+            "market": "global",
+            "live": 2,
+            "collected": 1,
+            "both": 1,
+            "duplicate_titles": 0,
+            "invalid": 0,
+        }
+    ]
