@@ -238,6 +238,43 @@ const pollSource = {
   gap_count_since: "2026-09-06",
 }
 
+function healthySource(key: string, name: string) {
+  return {
+    ...pollSource,
+    source_key: key.repeat(64),
+    source_name: name,
+    last_success_at: pollSource.last_attempt_at,
+    last_status: 200,
+    last_error_code: null,
+    cooldown_until: null,
+    consecutive_failures: 0,
+    last_gap_minutes: null,
+    gap_count: 0,
+  }
+}
+
+const collectionTitle = "Overnight collection sources"
+
+async function collectionPanel() {
+  const summary = await screen.findByText(collectionTitle, {
+    selector: "summary",
+    exact: false,
+  })
+  const panel = summary.closest("details")
+  expect(panel).not.toBeNull()
+  return panel!
+}
+
+function openPanel(panel: HTMLElement) {
+  fireEvent.click(
+    within(panel).getByText(collectionTitle, {
+      selector: "summary",
+      exact: false,
+    })
+  )
+  expect(panel).toHaveAttribute("open")
+}
+
 const editions = {
   edition_date: "2026-09-07",
   editions: [globalEdition, emptyMarket("tw_equity"), emptyMarket("us_equity")],
@@ -499,6 +536,14 @@ describe("NewsManagementPage", () => {
 
     await screen.findByRole("link", { name: "Fed holds rates" })
     const pool = screen.getByRole("list", { name: "Candidate sources" })
+    // Same summary box and labelled chip row as the stage counts.
+    const summaryBox = pool.parentElement?.parentElement
+    expect(summaryBox).toContainElement(
+      screen.getByRole("list", { name: "Candidate counts" })
+    )
+    expect(
+      within(summaryBox!).getByText("Candidate sources", { selector: "span" })
+    ).toBeVisible()
     expect(pool).toHaveTextContent("Overnight 7")
     expect(pool).toHaveTextContent("08:00 live 5")
     expect(pool).toHaveTextContent("Live and overnight 2")
@@ -529,41 +574,42 @@ describe("NewsManagementPage", () => {
     ).toBeEnabled()
   })
 
-  it("shows a loading skeleton for the collection status before its first response", async () => {
+  it("keeps the collection status collapsed with a loading summary before its first response", async () => {
     catalog.mockResolvedValue(enabledCatalog)
     listNewsRuns.mockResolvedValue({ items: [] })
     listEditions.mockResolvedValue(editions)
     collectionStatus.mockReturnValue(new Promise(() => {}))
     renderPage()
 
-    const region = await screen.findByRole("region", {
-      name: /Overnight collection sources/,
+    const panel = await collectionPanel()
+    expect(panel).not.toHaveAttribute("open")
+    const summary = within(panel).getByText(collectionTitle, {
+      selector: "summary",
+      exact: false,
     })
-    expect(within(region).getByRole("status")).toHaveTextContent(
+    expect(within(summary).getByRole("status")).toHaveTextContent(
       "Loading feed polling status."
     )
-    expect(within(region).queryByRole("alert")).toBeNull()
+    expect(within(panel).queryByRole("alert")).toBeNull()
     expect(
-      within(region).queryByText("No polls recorded yet", { exact: false })
+      within(panel).queryByText("No polls recorded yet", { exact: false })
     ).toBeNull()
   })
 
-  it("shows an empty collection status as current state", async () => {
+  it("summarises an empty collection status as current state", async () => {
     catalog.mockResolvedValue(enabledCatalog)
     listNewsRuns.mockResolvedValue({ items: [] })
     listEditions.mockResolvedValue(editions)
     renderPage()
 
-    const region = await screen.findByRole("region", {
-      name: /Overnight collection sources/,
-    })
-    expect(within(region).getByText("Current status")).toBeInTheDocument()
+    const panel = await collectionPanel()
+    expect(within(panel).getByText("Current status")).toBeInTheDocument()
+    expect(await within(panel).findByText("No polls yet")).toBeInTheDocument()
+    openPanel(panel)
     expect(
-      await within(region).findByText("No polls recorded yet", {
-        exact: false,
-      })
+      within(panel).getByText("No polls recorded yet", { exact: false })
     ).toBeInTheDocument()
-    expect(within(region).queryByRole("table")).toBeNull()
+    expect(within(panel).queryByRole("table")).toBeNull()
   })
 
   it("offers a reload when the collection status fails", async () => {
@@ -575,101 +621,144 @@ describe("NewsManagementPage", () => {
     )
     renderPage()
 
-    const region = await screen.findByRole("region", {
-      name: /Overnight collection sources/,
-    })
-    expect(await within(region).findByRole("alert")).toHaveTextContent(
+    const panel = await collectionPanel()
+    expect(await within(panel).findByText("Unable to load")).toBeInTheDocument()
+    openPanel(panel)
+    expect(within(panel).getByRole("alert")).toHaveTextContent(
       "Request ID: collection-request"
     )
-    fireEvent.click(within(region).getByRole("button", { name: "Reload" }))
-    expect(
-      await within(region).findByText("No polls recorded yet", {
-        exact: false,
-      })
-    ).toBeInTheDocument()
+    fireEvent.click(within(panel).getByRole("button", { name: "Reload" }))
+    expect(await within(panel).findByText("No polls yet")).toBeInTheDocument()
     await waitFor(() =>
       expect(redirectExpired).toHaveBeenCalledWith(expect.any(ApiError))
     )
   })
 
-  it("lists each feed's current polling state", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] })
-    vi.setSystemTime(new Date("2026-09-07T00:00:00Z"))
-    try {
-      catalog.mockResolvedValue(enabledCatalog)
-      listNewsRuns.mockResolvedValue({ items: [] })
-      listEditions.mockResolvedValue(editions)
-      collectionStatus.mockResolvedValue({
-        ...emptyCollection,
-        sources: [
-          pollSource,
-          {
-            ...pollSource,
-            source_key: "b".repeat(64),
-            source_name: "retired.example",
-            hostname: "retired.example",
-            feed_url: "https://retired.example/rss.xml",
-            registered: false,
-            poll_group: null,
-            markets: [],
-            last_attempt_at: null,
-            last_success_at: null,
-            last_status: null,
-            last_count: null,
-            last_error_code: null,
-            cooldown_until: null,
-            consecutive_failures: 0,
-            last_gap_minutes: null,
-            gap_count: 0,
-            gap_count_since: null,
-          },
-        ],
-      })
-      renderPage()
+  it("summarises feed health and lists feeds needing attention first", async () => {
+    catalog.mockResolvedValue(enabledCatalog)
+    listNewsRuns.mockResolvedValue({ items: [] })
+    listEditions.mockResolvedValue(editions)
+    collectionStatus.mockResolvedValue({
+      ...emptyCollection,
+      sources: [
+        healthySource("b", "Bloomberg"),
+        healthySource("c", "Anue"),
+        // Cooling down at as_of.
+        pollSource,
+        {
+          ...healthySource("d", "Zeta Wire"),
+          last_success_at: "2026-09-06T20:00:00+00:00",
+          last_status: 503,
+          last_error_code: "feed_http_503",
+          consecutive_failures: 1,
+        },
+        { ...healthySource("e", "Gap Daily"), gap_count: 2 },
+        {
+          ...healthySource("f", "retired.example"),
+          registered: false,
+          poll_group: null,
+          markets: [],
+          last_attempt_at: null,
+          last_success_at: null,
+          last_status: null,
+          last_count: null,
+        },
+      ],
+    })
+    renderPage()
 
-      const region = await screen.findByRole("region", {
-        name: /Overnight collection sources/,
-      })
-      const guardian = (
-        await within(region).findByRole("rowheader", {
-          name: /The Guardian/,
-        })
-      ).closest("tr")
-      expect(guardian).not.toBeNull()
-      const row = within(guardian!)
-      expect(
-        row.getByText(
-          "https://content.guardianapis.com/search?section=business"
-        )
-      ).toBeInTheDocument()
-      expect(row.getByText("Normal")).toBeInTheDocument()
-      expect(row.getByText("Global digest")).toBeInTheDocument()
-      expect(row.getByText("Cooling down")).toBeInTheDocument()
-      expect(row.getByText("HTTP 429")).toBeInTheDocument()
-      // Taipei stamps in the same format as the candidate table.
-      // Timestamps sit in their own no-wrap span inside the sentence.
-      expect(row.getByText("2026-09-07 06:00").parentElement).toHaveTextContent(
-        "Last attempt: 2026-09-07 06:00"
-      )
-      expect(row.getByText("2026-09-07 04:00")).toBeInTheDocument()
-      expect(row.getByText("rate_limited")).toBeInTheDocument()
-      expect(row.getByText("Consecutive failures: 2")).toBeInTheDocument()
-      expect(row.getByText("12")).toBeInTheDocument()
-      expect(row.getByText("3")).toBeInTheDocument()
-      expect(row.getByText("2026-09-06").parentElement).toHaveTextContent(
-        "For the 2026-09-06 edition"
-      )
-      expect(row.getByText("Latest gap 45 min")).toBeInTheDocument()
-      const retired = within(
-        within(region)
-          .getByRole("rowheader", { name: /retired\.example/ })
-          .closest("tr")!
-      )
-      expect(retired.getByText("No longer registered")).toBeInTheDocument()
-      expect(retired.getByText("Not polled yet")).toBeInTheDocument()
-    } finally {
-      vi.useRealTimers()
-    }
+    const panel = await collectionPanel()
+    const summary = within(panel).getByText(collectionTitle, {
+      selector: "summary",
+      exact: false,
+    })
+    await within(summary).findByText("Sources 6")
+    expect(summary).toHaveTextContent("OK 3")
+    expect(summary).toHaveTextContent("Cooling / failing 2")
+    expect(summary).toHaveTextContent("Not polled yet 1")
+    expect(summary).toHaveTextContent("Gaps tonight 5")
+    expect(within(summary).getByText("Cooling / failing 2")).toHaveClass(
+      "text-market-caution"
+    )
+    expect(within(summary).getByText("OK 3")).not.toHaveClass(
+      "text-market-caution"
+    )
+
+    openPanel(panel)
+    expect(
+      within(panel)
+        .getAllByRole("rowheader")
+        .map(header => header.querySelector("span")?.textContent)
+    ).toEqual([
+      "Zeta Wire",
+      "The Guardian",
+      "Gap Daily",
+      "retired.example",
+      "Anue",
+      "Bloomberg",
+    ])
+  })
+
+  it("lists each feed's current polling state", async () => {
+    catalog.mockResolvedValue(enabledCatalog)
+    listNewsRuns.mockResolvedValue({ items: [] })
+    listEditions.mockResolvedValue(editions)
+    collectionStatus.mockResolvedValue({
+      ...emptyCollection,
+      sources: [
+        pollSource,
+        {
+          ...healthySource("f", "retired.example"),
+          registered: false,
+          poll_group: null,
+          markets: [],
+          last_attempt_at: null,
+          last_success_at: null,
+          last_status: null,
+          last_count: null,
+          gap_count_since: null,
+        },
+      ],
+    })
+    renderPage()
+
+    const panel = await collectionPanel()
+    openPanel(panel)
+    const guardian = (
+      await within(panel).findByRole("rowheader", { name: /The Guardian/ })
+    ).closest("tr")
+    expect(guardian).not.toBeNull()
+    const row = within(guardian!)
+    const url = row.getByText(
+      "https://content.guardianapis.com/search?section=business"
+    )
+    // One truncated line; the full masked URL stays available on hover.
+    expect(url).toHaveClass("truncate")
+    expect(url).toHaveAttribute("title", url.textContent)
+    expect(row.getByText("Normal")).toBeInTheDocument()
+    expect(row.getByText("Global digest")).toBeInTheDocument()
+    expect(row.getByText("Cooling down")).toBeInTheDocument()
+    expect(row.getByText("HTTP 429")).toBeInTheDocument()
+    // Timestamps sit in their own no-wrap span inside the sentence.
+    expect(row.getByText("2026-09-07 06:00").parentElement).toHaveTextContent(
+      "Last attempt: 2026-09-07 06:00"
+    )
+    expect(row.getByText("2026-09-07 04:00")).toBeInTheDocument()
+    expect(row.getByText("rate_limited")).toBeInTheDocument()
+    expect(row.getByText("Consecutive failures: 2")).toBeInTheDocument()
+    expect(row.getByText("12")).toHaveClass("@lg:text-right")
+    expect(row.getByText("3")).toBeInTheDocument()
+    expect(row.getByText("2026-09-06").parentElement).toHaveTextContent(
+      "For the 2026-09-06 edition"
+    )
+    expect(row.getByText("Latest gap 45 min")).toBeInTheDocument()
+    const retired = within(
+      within(panel)
+        .getByRole("rowheader", { name: /retired\.example/ })
+        .closest("tr")!
+    )
+    expect(retired.getByText("No longer registered")).toBeInTheDocument()
+    expect(retired.getByText("Not polled yet")).toBeInTheDocument()
   })
 
   it("hides a published item with the CSRF token and refreshes the edition", async () => {

@@ -486,6 +486,10 @@ const resources: Resource = {
       newsCurationColScreen: "初篩名次 / 分數",
       newsCollectionTitle: "隔夜蒐集來源",
       newsCollectionCurrent: "目前狀態",
+      newsCollectionSummarySources: "來源",
+      newsCollectionSummaryIssues: "冷卻／失敗",
+      newsCollectionSummaryEmpty: "尚無輪詢紀錄",
+      newsCollectionSummaryFailed: "無法載入",
       newsCollectionDescription:
         "每個 feed 最近一次輪詢的結果，下一次輪詢會直接覆寫；這不是每日歷史統計。",
       newsCollectionLoading: "正在載入來源輪詢狀態。",
@@ -1445,6 +1449,10 @@ const resources: Resource = {
       newsCurationColScreen: "初筛名次 / 分数",
       newsCollectionTitle: "隔夜搜集来源",
       newsCollectionCurrent: "当前状态",
+      newsCollectionSummarySources: "来源",
+      newsCollectionSummaryIssues: "冷却／失败",
+      newsCollectionSummaryEmpty: "暂无轮询记录",
+      newsCollectionSummaryFailed: "无法加载",
       newsCollectionDescription:
         "每个 feed 最近一次轮询的结果，下一次轮询会直接覆盖；这不是每日历史统计。",
       newsCollectionLoading: "正在加载来源轮询状态。",
@@ -2419,6 +2427,10 @@ const resources: Resource = {
       newsCurationColScreen: "Screen rank / score",
       newsCollectionTitle: "Overnight collection sources",
       newsCollectionCurrent: "Current status",
+      newsCollectionSummarySources: "Sources",
+      newsCollectionSummaryIssues: "Cooling / failing",
+      newsCollectionSummaryEmpty: "No polls yet",
+      newsCollectionSummaryFailed: "Unable to load",
       newsCollectionDescription:
         "The latest poll of each feed; the next poll overwrites it. This is not a daily history.",
       newsCollectionLoading: "Loading feed polling status.",
