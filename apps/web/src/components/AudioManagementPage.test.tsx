@@ -182,7 +182,7 @@ describe("AudioManagementPage direct uploads", () => {
       })
       fireEvent.change(
         screen.getAllByLabelText(
-          "Click to choose or drop an audio file here"
+          /Click to choose or drop an audio file here/
         )[2]!,
         {
           target: {
@@ -293,7 +293,7 @@ describe("AudioManagementPage direct uploads", () => {
       target: { value: "2026-07-25" },
     })
     const slots = screen.getAllByLabelText(
-      "Click to choose or drop an audio file here"
+      /Click to choose or drop an audio file here/
     )
     for (const [index, name] of ["zh-hant.mp3", "episode.mp3"].entries()) {
       const audioFile = new File([`audio ${index}`], name, {
@@ -373,7 +373,7 @@ describe("AudioManagementPage direct uploads", () => {
     fireEvent.change(date, { target: { value: "2026-07-25" } })
     selectFile(
       screen.getAllByLabelText(
-        "Click to choose or drop an audio file here"
+        /Click to choose or drop an audio file here/
       )[2]!,
       new File(["audio"], "episode.mp3", { type: "audio/mpeg" })
     )
@@ -442,7 +442,7 @@ describe("AudioManagementPage direct uploads", () => {
       target: { value: "2026-07-25" },
     })
     const emptySlots = screen.getAllByLabelText(
-      "Click to choose or drop an audio file here"
+      /Click to choose or drop an audio file here/
     )
     selectFile(
       emptySlots[2]!,
@@ -453,12 +453,12 @@ describe("AudioManagementPage direct uploads", () => {
     await screen.findByRole("button", { name: "Confirm overwrite" })
 
     selectFile(
-      screen.getByLabelText("old.mp3"),
+      screen.getByLabelText(/old\.mp3/),
       new File(["new"], "new.mp3", { type: "audio/mpeg" })
     )
     selectFile(
       screen.getAllByLabelText(
-        "Click to choose or drop an audio file here"
+        /Click to choose or drop an audio file here/
       )[0]!,
       new File(["localized"], "hant.mp3", { type: "audio/mpeg" })
     )
@@ -587,7 +587,7 @@ describe("AudioManagementPage direct uploads", () => {
         target: { value: "2026-07-25" },
       })
       const slots = screen.getAllByLabelText(
-        "Click to choose or drop an audio file here"
+        /Click to choose or drop an audio file here/
       )
       selectFile(
         slots[0]!,
@@ -739,7 +739,7 @@ describe("AudioManagementPage direct uploads", () => {
         target: { value: "2026-07-25" },
       })
       const slots = screen.getAllByLabelText(
-        "Click to choose or drop an audio file here"
+        /Click to choose or drop an audio file here/
       )
       selectFile(
         slots[0]!,
@@ -900,7 +900,7 @@ describe("AudioManagementPage direct uploads", () => {
       const date = screen.getByLabelText("Trading date")
       const reason = screen.getByLabelText("Reason for change")
       const slots = screen.getAllByLabelText(
-        "Click to choose or drop an audio file here"
+        /Click to choose or drop an audio file here/
       )
       selectFile(
         slots[0]!,
@@ -992,7 +992,7 @@ describe("AudioManagementPage direct uploads", () => {
     })
     fireEvent.change(
       screen.getAllByLabelText(
-        "Click to choose or drop an audio file here"
+        /Click to choose or drop an audio file here/
       )[2]!,
       {
         target: {
