@@ -2,6 +2,7 @@ import asyncio
 import sys
 from pathlib import Path
 
+from daily_insights_api import models as registered_models  # noqa: F401
 from daily_insights_api.core.config import get_settings
 from daily_insights_api.core.database import create_engine, create_session_factory
 from daily_insights_api.modules.assets.r2.store import R2ObjectStore
