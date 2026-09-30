@@ -1,6 +1,10 @@
 """Public contracts and execution helpers for the daily-news module."""
 
 from daily_insights_api.modules.news.access import visible_news_market_codes
+from daily_insights_api.modules.news.collected_pool import (
+    load_collected_candidates,
+    merge_collected_candidates,
+)
 from daily_insights_api.modules.news.contracts import (
     Locale,
     LocalizedSummary,
@@ -145,7 +149,9 @@ __all__ = [
     "effective_hostnames",
     "feed_client",
     "generation_drop_reason",
+    "load_collected_candidates",
     "load_selection_criteria",
+    "merge_collected_candidates",
     "news_execution",
     "publish_candidates",
     "publishable_selection",
