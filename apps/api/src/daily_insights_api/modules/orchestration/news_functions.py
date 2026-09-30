@@ -51,7 +51,9 @@ from daily_insights_api.modules.news.api import (
     effective_hostnames,
     feed_client,
     generation_drop_reason,
+    load_collected_candidates,
     load_selection_criteria,
+    merge_collected_candidates,
     news_execution,
     publish_candidates,
     publishable_selection,
@@ -629,9 +631,30 @@ async def refresh_news(
                 return FunctionOutcome(status="cancelled", error_code="cancelled")
             database.add(batch)
         bodies: dict[str, str] = {}
+        discovered_at = datetime.now(UTC)
         async with feed_client(settings.news_discovery_timeout_seconds) as feeds_http:
             discovered = await discover_feed_candidates(
-                feeds_http, allowed, market=market, bodies=bodies
+                feeds_http, allowed, discovered_at, market=market, bodies=bodies
+            )
+        # The overnight pool shares live discovery's window end. Collection
+        # stops before 08:00, so retries of this function read the same pool.
+        discovered_via: dict[str, str] = {}
+        if settings.news_collection_enabled:
+            async with session_factory() as database:
+                pool = await load_collected_candidates(
+                    database, market=market, allowed=allowed, now=discovered_at
+                )
+            merged = merge_collected_candidates(discovered, pool.candidates)
+            discovered = merged.candidates
+            discovered_via = dict(merged.discovered_via)
+            emit_event(
+                "news.collection.merged",
+                market=market,
+                live=merged.live,
+                collected=merged.collected,
+                both=merged.both,
+                duplicate_titles=merged.duplicate_titles,
+                invalid=pool.invalid,
             )
         capped = _cap_discovery(
             discovered,
@@ -673,6 +696,7 @@ async def refresh_news(
                 seen_at=candidate.seen_at,
                 source_published_at=None,
                 stage="discovered",
+                discovered_via=discovered_via.get(candidate.id, "live"),
             )
             for candidate in discovered
         }
