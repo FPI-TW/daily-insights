@@ -34,26 +34,6 @@ function candidate(index: number, overrides: Record<string, unknown>) {
   }
 }
 
-const pollSource = {
-  source_key: "a".repeat(64),
-  source_name: "The Guardian",
-  hostname: "www.theguardian.com",
-  feed_url: "https://content.guardianapis.com/search?section=business",
-  registered: true,
-  poll_group: "normal",
-  markets: ["global", "us_equity"],
-  last_attempt_at: evening,
-  last_success_at: `${today}T08:00:00+00:00`,
-  last_status: 429,
-  last_count: 12,
-  last_error_code: "rate_limited",
-  cooldown_until: `${today}T10:15:00+00:00`,
-  consecutive_failures: 2,
-  last_gap_minutes: 45,
-  gap_count: 3,
-  gap_count_since: today,
-}
-
 type CollectionState = "full" | "empty" | "error" | "loading"
 
 async function routeNewsAdmin(page: Page, collection: CollectionState) {
@@ -148,108 +128,324 @@ async function routeNewsAdmin(page: Page, collection: CollectionState) {
     await route.fulfill({
       json: {
         as_of: evening,
-        sources: collection === "empty" ? [] : manySources,
+        sources: collection === "empty" ? [] : productionSources,
       },
     })
   })
 }
 
-// Enough feeds to scroll, with long names, URLs and error codes.
-const manySources = [
-  pollSource,
-  {
-    ...pollSource,
-    source_key: "b".repeat(64),
-    source_name: "經濟日報",
-    hostname: "money.udn.com",
-    feed_url: "https://money.udn.com/rssfeed/news/1001/5591",
-    poll_group: "fast",
-    markets: ["tw_equity"],
-    last_success_at: evening,
-    last_status: 200,
-    last_count: 20,
-    last_error_code: null,
-    cooldown_until: null,
-    consecutive_failures: 0,
-    last_gap_minutes: null,
-    gap_count: 0,
-  },
-  {
-    ...pollSource,
-    source_key: "c".repeat(64),
-    source_name:
-      "PR Newswire Financial Services and Investing Press Releases (United States)",
-    hostname: "www.prnewswire.com",
-    feed_url:
-      "https://www.prnewswire.com/rss/financial-services-latest-news/financial-services-latest-news-list.rss",
-    poll_group: "flash",
-    markets: ["global", "us_equity"],
-    last_success_at: `${today}T06:00:00+00:00`,
+// The production registry: display name, hostname, feed URL (credentials
+// already stripped by the API), poll group and markets.
+const registry: ReadonlyArray<
+  readonly [string, string, string, string, readonly string[]]
+> = [
+  [
+    "鉅亨",
+    "news.cnyes.com",
+    "https://news.cnyes.com/rss/v1/news/category/tw_stock",
+    "fast",
+    ["tw_equity"],
+  ],
+  [
+    "鉅亨",
+    "news.cnyes.com",
+    "https://news.cnyes.com/rss/v1/news/category/headline",
+    "fast",
+    ["tw_equity"],
+  ],
+  [
+    "鉅亨",
+    "news.cnyes.com",
+    "https://news.cnyes.com/rss/v1/news/category/wd_stock",
+    "fast",
+    ["us_equity"],
+  ],
+  [
+    "經濟日報",
+    "money.udn.com",
+    "https://money.udn.com/rssfeed/news/1001/5590?ch=money",
+    "fast",
+    ["tw_equity"],
+  ],
+  [
+    "經濟日報",
+    "money.udn.com",
+    "https://money.udn.com/rssfeed/news/1001/5591?ch=money",
+    "fast",
+    ["tw_equity"],
+  ],
+  [
+    "中央社",
+    "www.cna.com.tw",
+    "https://feeds.feedburner.com/rsscna/finance",
+    "fast",
+    ["tw_equity"],
+  ],
+  [
+    "ETtoday 財經",
+    "finance.ettoday.net",
+    "https://feeds.feedburner.com/ettoday/finance",
+    "fast",
+    ["tw_equity"],
+  ],
+  [
+    "財經新報",
+    "finance.technews.tw",
+    "https://cdn.technews.tw/feed/",
+    "fast",
+    ["tw_equity"],
+  ],
+  [
+    "自由財經",
+    "ec.ltn.com.tw",
+    "https://news.ltn.com.tw/rss/all.xml",
+    "fast",
+    ["tw_equity"],
+  ],
+  [
+    "INSIDE",
+    "www.inside.com.tw",
+    "https://www.inside.com.tw/feed/rss",
+    "fast",
+    ["tw_equity"],
+  ],
+  [
+    "遠見",
+    "www.gvm.com.tw",
+    "https://www.gvm.com.tw/rss",
+    "fast",
+    ["tw_equity"],
+  ],
+  [
+    "今周刊",
+    "www.businesstoday.com.tw",
+    "https://www.businesstoday.com.tw/news-sitemap.xml",
+    "fast",
+    ["tw_equity"],
+  ],
+  [
+    "風傳媒",
+    "www.storm.mg",
+    "https://www.storm.mg/feed/sitemap/news",
+    "fast",
+    ["tw_equity"],
+  ],
+  [
+    "The Guardian",
+    "www.theguardian.com",
+    "https://www.theguardian.com/uk/business/rss",
+    "normal",
+    ["global", "us_equity"],
+  ],
+  [
+    "The Guardian",
+    "www.theguardian.com",
+    "https://www.theguardian.com/world/rss",
+    "normal",
+    ["global"],
+  ],
+  [
+    "CNBC",
+    "www.cnbc.com",
+    "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+    "normal",
+    ["global", "us_equity"],
+  ],
+  [
+    "CNBC",
+    "www.cnbc.com",
+    "https://www.cnbc.com/id/100727362/device/rss/rss.html",
+    "normal",
+    ["global"],
+  ],
+  [
+    "CNBC",
+    "www.cnbc.com",
+    "https://www.cnbc.com/id/20910258/device/rss/rss.html",
+    "normal",
+    ["global", "us_equity"],
+  ],
+  [
+    "CNBC",
+    "www.cnbc.com",
+    "https://www.cnbc.com/id/10000664/device/rss/rss.html",
+    "normal",
+    ["global", "us_equity"],
+  ],
+  [
+    "FXStreet",
+    "www.fxstreet.com",
+    "https://www.fxstreet.com/rss/news",
+    "normal",
+    ["global"],
+  ],
+  [
+    "Al Jazeera",
+    "www.aljazeera.com",
+    "https://www.aljazeera.com/xml/rss/all.xml",
+    "normal",
+    ["global"],
+  ],
+  [
+    "Federal Reserve",
+    "www.federalreserve.gov",
+    "https://www.federalreserve.gov/feeds/press_all.xml",
+    "normal",
+    ["global", "us_equity"],
+  ],
+  [
+    "European Central Bank",
+    "www.ecb.europa.eu",
+    "https://www.ecb.europa.eu/rss/press.html",
+    "normal",
+    ["global"],
+  ],
+  [
+    "TheStreet",
+    "www.thestreet.com",
+    "https://www.thestreet.com/.rss/feed/a4a58455-5a41-4dfa-899c-86c49b653ed8.xml",
+    "normal",
+    ["global", "us_equity"],
+  ],
+  [
+    "City A.M.",
+    "www.cityam.com",
+    "https://www.cityam.com/feed/",
+    "normal",
+    ["global"],
+  ],
+  [
+    "GlobeNewswire",
+    "www.globenewswire.com",
+    "https://www.globenewswire.com/RssFeed/subjectcode/13-Earnings%20Releases%20and%20Operating%20Results/feedTitle/GlobeNewswire%20-%20Earnings%20Releases%20and%20Operating%20Results",
+    "flash",
+    ["global", "us_equity"],
+  ],
+  [
+    "GlobeNewswire",
+    "www.globenewswire.com",
+    "https://www.globenewswire.com/RssFeed/subjectcode/27-Mergers%20and%20Acquisitions/feedTitle/GlobeNewswire%20-%20Mergers%20and%20Acquisitions",
+    "normal",
+    ["global", "us_equity"],
+  ],
+  [
+    "PR Newswire",
+    "www.prnewswire.com",
+    "https://www.prnewswire.com/rss/financial-services-latest-news/financial-services-latest-news-list.rss",
+    "normal",
+    ["global", "us_equity"],
+  ],
+  [
+    "The Guardian",
+    "www.theguardian.com",
+    "https://content.guardianapis.com/search?section=business&order-by=newest&page-size=50&show-fields=bodyText",
+    "normal",
+    ["global", "us_equity"],
+  ],
+  [
+    "The Guardian",
+    "www.theguardian.com",
+    "https://content.guardianapis.com/search?section=world&order-by=newest&page-size=50&show-fields=bodyText",
+    "normal",
+    ["global"],
+  ],
+  [
+    "The Guardian",
+    "www.theguardian.com",
+    "https://content.guardianapis.com/search?section=politics&order-by=newest&page-size=50&show-fields=bodyText",
+    "normal",
+    ["global"],
+  ],
+  [
+    "SEC EDGAR",
+    "www.sec.gov",
+    "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&output=atom",
+    "flash",
+    ["us_equity"],
+  ],
+]
+
+// Mostly healthy, as on a normal night; a few feeds cool down, fail, show
+// gaps or have not been polled yet.
+const trouble: Record<number, Record<string, unknown>> = {
+  11: {
+    last_success_at: `${today}T08:00:00+00:00`,
     last_status: 503,
-    last_count: 10,
-    last_error_code: "feed_http_503_service_unavailable_upstream_timeout",
-    cooldown_until: null,
-    consecutive_failures: 4,
-    last_gap_minutes: 180,
-    gap_count: 12,
+    last_error_code: "feed_http_503",
+    consecutive_failures: 1,
   },
-  {
-    ...pollSource,
-    source_key: "d".repeat(64),
-    source_name: "retired.example",
-    hostname: "retired.example",
-    feed_url: "https://retired.example/rss.xml",
-    registered: false,
-    poll_group: null,
-    markets: [],
+  20: {
     last_attempt_at: null,
     last_success_at: null,
     last_status: null,
     last_count: null,
+  },
+  23: { last_count: 10, last_gap_minutes: 95, gap_count: 2 },
+  27: { last_count: 10, last_gap_minutes: 180, gap_count: 3 },
+  28: {
+    last_success_at: `${today}T08:00:00+00:00`,
+    last_status: 429,
+    last_error_code: "rate_limited",
+    cooldown_until: `${today}T10:15:00+00:00`,
+    consecutive_failures: 2,
+  },
+  31: {
+    last_success_at: `${today}T06:00:00+00:00`,
+    last_status: 403,
+    last_error_code: "feed_http_403_forbidden_missing_contact_email",
+    consecutive_failures: 4,
+    last_gap_minutes: 60,
+    gap_count: 1,
+  },
+}
+
+const productionSources = registry.map(
+  ([source_name, hostname, feed_url, poll_group, markets], index) => ({
+    source_key: index.toString(16).padStart(64, "0"),
+    source_name,
+    hostname,
+    feed_url,
+    registered: true,
+    poll_group,
+    markets,
+    last_attempt_at: evening,
+    last_success_at: evening,
+    last_status: index % 4 === 0 ? 304 : 200,
+    last_count: index % 4 === 0 ? 0 : 20 - (index % 7),
     last_error_code: null,
     cooldown_until: null,
     consecutive_failures: 0,
     last_gap_minutes: null,
     gap_count: 0,
-    gap_count_since: null,
-  },
-  ...Array.from({ length: 8 }, (_, index) => ({
-    ...pollSource,
-    source_key: String(index).repeat(64),
-    source_name: `鉅亨網 ${index + 1}`,
-    hostname: "news.cnyes.com",
-    feed_url: `https://news.cnyes.com/rss/v1/news/category/tw_stock_${index}`,
-    poll_group: "fast",
-    markets: ["tw_equity"],
-    last_success_at: evening,
-    last_status: index % 3 === 0 ? 304 : 200,
-    last_count: 20 - index,
-    last_error_code: null,
-    cooldown_until: null,
-    consecutive_failures: 0,
-    last_gap_minutes: index === 2 ? 30 : null,
-    gap_count: index === 2 ? 1 : 0,
-  })),
-]
+    gap_count_since: today,
+    ...trouble[index],
+  })
+)
 
 const text = {
   "zh-hant": {
-    region: /隔夜蒐集來源/,
-    current: "目前狀態",
-    cooling: "冷卻中",
+    summary: "隔夜蒐集來源",
+    health: ["來源 32", "正常 28", "冷卻／失敗 3", "尚未輪詢 1", "當晚缺口 6"],
     pool: "候選來源",
     shortlisted: "初篩入選 3",
     loading: "正在載入來源輪詢狀態。",
-    empty: "尚無輪詢紀錄",
+    empty: "尚無輪詢紀錄。",
+    firstRow: "SEC EDGAR",
   },
   en: {
-    region: /Overnight collection sources/,
-    current: "Current status",
-    cooling: "Cooling down",
+    summary: "Overnight collection sources",
+    health: [
+      "Sources 32",
+      "OK 28",
+      "Cooling / failing 3",
+      "Not polled yet 1",
+      "Gaps tonight 6",
+    ],
     pool: "Candidate sources",
     shortlisted: "Shortlisted 3",
     loading: "Loading feed polling status.",
-    empty: "No polls recorded yet",
+    empty: "No polls recorded yet.",
+    firstRow: "SEC EDGAR",
   },
 } as const
 
@@ -266,9 +462,9 @@ async function openNewsManagement(
   await routeNewsAdmin(page, collection)
   await page.goto(`/${locale}/admin/news-management`)
   await expect(page.locator("html")).toHaveAttribute("data-theme", scheme)
-  const region = page.getByRole("region", { name: text[locale].region })
-  await expect(region).toBeVisible({ timeout: 15_000 })
-  return region
+  const summary = page.locator("summary", { hasText: text[locale].summary })
+  await expect(summary).toBeVisible({ timeout: 15_000 })
+  return { summary, panel: page.locator("details", { has: summary }) }
 }
 
 async function expectNoPageOverflow(page: Page) {
@@ -281,9 +477,27 @@ async function expectNoPageOverflow(page: Page) {
     .toBe(true)
 }
 
+// No candidate table header may wrap onto a third line.
+async function expectCompactCandidateHeaders(page: Page) {
+  const lines = await page
+    .locator("table thead th")
+    .filter({ visible: true })
+    .evaluateAll(headers =>
+      headers.map(header => {
+        const style = getComputedStyle(header)
+        const padding =
+          parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+        return Math.round(
+          (header.clientHeight - padding) / parseFloat(style.lineHeight)
+        )
+      })
+    )
+  expect(Math.max(...lines)).toBeLessThanOrEqual(2)
+}
+
 for (const locale of ["zh-hant", "en"] as const) {
   for (const scheme of ["light", "dark"] as const) {
-    test(`${locale} ${scheme}: collection status and screen results fit desktop and phone`, async ({
+    test(`${locale} ${scheme}: collapsed collection summary keeps curation near the top`, async ({
       page,
       context,
       request,
@@ -291,16 +505,21 @@ for (const locale of ["zh-hant", "en"] as const) {
       await resetMockApi(request)
       await authenticateAs(context, "admin")
       await page.setViewportSize({ width: 1440, height: 900 })
-      const region = await openNewsManagement(page, locale, scheme, "full")
       const labels = text[locale]
-      await expect(region.getByText(labels.current)).toBeVisible()
-      await expect(
-        region.getByRole("rowheader", { name: /The Guardian/ })
-      ).toBeVisible()
-      await expect(region.getByText(labels.cooling)).toBeVisible()
+      const { summary, panel } = await openNewsManagement(
+        page,
+        locale,
+        scheme,
+        "full"
+      )
+      await expect(panel).not.toHaveAttribute("open", "")
+      for (const count of labels.health) {
+        await expect(summary.getByText(count, { exact: true })).toBeVisible()
+      }
       await expect(page.getByRole("list", { name: labels.pool })).toContainText(
         labels.shortlisted
       )
+      await expectCompactCandidateHeaders(page)
       await expectNoPageOverflow(page)
       await page.screenshot({
         path: testInfo.outputPath(
@@ -321,8 +540,11 @@ for (const locale of ["zh-hant", "en"] as const) {
   }
 }
 
-for (const state of ["loading", "empty", "error"] as const) {
-  test(`collection status ${state} state`, async ({
+for (const [locale, scheme] of [
+  ["zh-hant", "light"],
+  ["en", "dark"],
+] as const) {
+  test(`${locale} ${scheme}: expanded collection lists troubled feeds first`, async ({
     page,
     context,
     request,
@@ -330,21 +552,79 @@ for (const state of ["loading", "empty", "error"] as const) {
     await resetMockApi(request)
     await authenticateAs(context, "admin")
     await page.setViewportSize({ width: 1440, height: 900 })
-    const region = await openNewsManagement(page, "zh-hant", "light", state)
+    const { summary, panel } = await openNewsManagement(
+      page,
+      locale,
+      scheme,
+      "full"
+    )
+    await summary.click()
+    await expect(panel).toHaveAttribute("open", "")
+    const rows = panel.getByRole("rowheader")
+    await expect(rows).toHaveCount(32)
+    await expect(rows.first()).toContainText(text[locale].firstRow)
+    // Feed URLs stay on one truncated line with the full URL on hover.
+    const url = rows.filter({ hasText: "PR Newswire" }).locator("span[title]")
+    await expect(url).toHaveCSS("text-overflow", "ellipsis")
+    expect(await url.evaluate(node => node.getClientRects().length)).toBe(1)
+    await expectNoPageOverflow(page)
+    // Full page: an element shot would scroll the sticky header over the panel.
+    await page.screenshot({
+      path: testInfo.outputPath(
+        `news-collection-${locale}-${scheme}-expanded-1440.png`
+      ),
+      fullPage: true,
+    })
+
+    await page.setViewportSize({ width: 390, height: 900 })
+    await expectNoPageOverflow(page)
+    expect(await url.evaluate(node => node.getClientRects().length)).toBe(1)
+    // Full page: an element shot would scroll the sticky header over the panel.
+    await page.screenshot({
+      path: testInfo.outputPath(
+        `news-collection-${locale}-${scheme}-expanded-390.png`
+      ),
+      fullPage: true,
+    })
+  })
+}
+
+for (const state of ["loading", "empty", "error"] as const) {
+  test(`collection status ${state} state, expanded`, async ({
+    page,
+    context,
+    request,
+  }, testInfo) => {
+    await resetMockApi(request)
+    await authenticateAs(context, "admin")
+    await page.setViewportSize({ width: 1440, height: 900 })
     const labels = text["zh-hant"]
+    const { summary, panel } = await openNewsManagement(
+      page,
+      "zh-hant",
+      "light",
+      state
+    )
     if (state === "loading") {
-      await expect(region.getByRole("status")).toHaveText(labels.loading)
-      await expect(region.getByRole("alert")).toHaveCount(0)
+      await expect(summary.getByRole("status")).toHaveText(labels.loading)
     } else if (state === "empty") {
       await expect(
-        region.getByText(labels.empty, { exact: false })
+        summary.getByText("尚無輪詢紀錄", { exact: true })
       ).toBeVisible()
     } else {
-      await expect(region.getByRole("alert")).toContainText(
+      await expect(summary.getByText("無法載入", { exact: true })).toBeVisible()
+    }
+    await summary.click()
+    if (state === "loading") {
+      await expect(panel.getByRole("alert")).toHaveCount(0)
+    } else if (state === "empty") {
+      await expect(panel.getByText(labels.empty)).toBeVisible()
+    } else {
+      await expect(panel.getByRole("alert")).toContainText(
         "collection-e2e-request"
       )
     }
-    await region.screenshot({
+    await panel.screenshot({
       path: testInfo.outputPath(`news-collection-${state}.png`),
     })
   })

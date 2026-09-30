@@ -7,7 +7,11 @@ import { NewsAdminLoadError } from "#/components/NewsRecoveryStatus"
 import { ResponsiveTable } from "#/components/ResponsiveTable"
 import { browserAdministrationClient } from "#/lib/admin-members"
 import { formatTimestamp } from "#/lib/format"
-import { feedPollHealth } from "#/lib/news-collection"
+import {
+  feedPollHealth,
+  sortFeedPollSources,
+  summarizeFeedPolls,
+} from "#/lib/news-collection"
 import { newsAdminRetryDelay, retryNewsAdminGet } from "#/lib/news-recovery"
 
 /** Current overnight polling state per feed; each poll overwrites its row. */
@@ -30,18 +34,53 @@ export function NewsCollectionStatus({
   // Same Taipei "YYYY-MM-DD HH:mm" stamps as the candidate table below.
   const time = (value: string | null) => (value ? formatTimestamp(value) : "—")
 
+  const now = query.data ? Date.parse(query.data.as_of) : 0
+  const sources = query.data ? sortFeedPollSources(query.data.sources, now) : []
+  const summary = summarizeFeedPolls(sources, now)
+
+  // Collapsed by default like the source and model health panel above it, so
+  // the curation workspace stays near the top of the page.
   return (
-    <section
-      className="surface-panel mt-6 max-w-6xl p-5"
-      aria-labelledby="news-collection-title"
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 id="news-collection-title" className="m-0 text-lg font-extrabold">
-          {t("newsCollectionTitle")}
-        </h2>
-        <NewsBadge tone="muted">{t("newsCollectionCurrent")}</NewsBadge>
-      </div>
-      <p className="mt-2 text-sm leading-6 text-sea-ink-soft">
+    <details className="mt-6 max-w-6xl rounded-xl border border-line p-5">
+      <summary className="cursor-pointer font-bold">
+        {t("newsCollectionTitle")}
+        <span className="ml-2 inline-flex flex-wrap items-center gap-1.5 align-middle font-normal">
+          <NewsBadge tone="muted">{t("newsCollectionCurrent")}</NewsBadge>
+          {query.isPending ? (
+            <span role="status" aria-live="polite">
+              <span className="sr-only">{t("newsCollectionLoading")}</span>
+              <span className="inline-block h-5 w-56 animate-pulse rounded-full bg-link-hover align-middle" />
+            </span>
+          ) : !query.data ? (
+            <NewsBadge tone="caution">
+              {t("newsCollectionSummaryFailed")}
+            </NewsBadge>
+          ) : summary.total === 0 ? (
+            <NewsBadge tone="muted">
+              {t("newsCollectionSummaryEmpty")}
+            </NewsBadge>
+          ) : (
+            <>
+              <NewsBadge>
+                {`${t("newsCollectionSummarySources")} ${summary.total}`}
+              </NewsBadge>
+              <NewsBadge tone="muted">
+                {`${t("newsCollectionHealth_ok")} ${summary.ok}`}
+              </NewsBadge>
+              <NewsBadge tone={summary.issues > 0 ? "caution" : "muted"}>
+                {`${t("newsCollectionSummaryIssues")} ${summary.issues}`}
+              </NewsBadge>
+              <NewsBadge tone={summary.never > 0 ? "caution" : "muted"}>
+                {`${t("newsCollectionHealth_never")} ${summary.never}`}
+              </NewsBadge>
+              <NewsBadge tone={summary.gaps > 0 ? "caution" : "muted"}>
+                {`${t("newsCollectionColGaps")} ${summary.gaps}`}
+              </NewsBadge>
+            </>
+          )}
+        </span>
+      </summary>
+      <p className="mt-4 mb-0 text-sm leading-6 text-sea-ink-soft">
         {t("newsCollectionDescription")}
       </p>
       {query.data && query.error ? (
@@ -52,23 +91,18 @@ export function NewsCollectionStatus({
         />
       ) : null}
       {query.isPending ? (
-        <div role="status" aria-live="polite" className="mt-2">
-          <span className="sr-only">{t("newsCollectionLoading")}</span>
-          <div className="h-4 w-44 animate-pulse rounded bg-link-hover" />
-          <div className="mt-3 grid gap-px overflow-hidden rounded-md border border-line">
-            <div className="h-9 animate-pulse bg-link-hover" />
-            <div className="h-24 animate-pulse bg-link-hover/60" />
-            <div className="h-24 animate-pulse bg-link-hover/60" />
-          </div>
-        </div>
+        <div
+          className="mt-4 h-20 animate-pulse rounded bg-link-hover"
+          aria-hidden="true"
+        />
       ) : !query.data ? (
         <NewsAdminLoadError
           error={query.error}
           reload={() => void query.refetch()}
           pending={query.isFetching}
         />
-      ) : query.data.sources.length === 0 ? (
-        <p className="mt-4 text-sm text-sea-ink-soft">
+      ) : sources.length === 0 ? (
+        <p className="mt-4 mb-0 text-sm text-sea-ink-soft">
           {t("newsCollectionEmpty")}
         </p>
       ) : (
@@ -83,24 +117,32 @@ export function NewsCollectionStatus({
             <ResponsiveTable>
               <thead className="bg-link-hover text-left text-xs text-sea-ink-soft">
                 <tr>
-                  <th scope="col">{t("newsCollectionColSource")}</th>
-                  <th scope="col">{t("newsCollectionColStatus")}</th>
-                  <th scope="col">{t("newsCollectionColLastSuccess")}</th>
-                  <th scope="col" className="text-right">
+                  <th scope="col" className="@lg:w-[32%]!">
+                    {t("newsCollectionColSource")}
+                  </th>
+                  <th scope="col" className="@lg:w-[22%]">
+                    {t("newsCollectionColStatus")}
+                  </th>
+                  <th scope="col" className="@lg:w-[13%]">
+                    {t("newsCollectionColLastSuccess")}
+                  </th>
+                  <th scope="col" className="@lg:w-[8%] @lg:text-right">
                     {t("newsCollectionColCount")}
                   </th>
-                  <th scope="col">{t("newsCollectionColCooldown")}</th>
-                  <th scope="col" className="text-right">
+                  <th scope="col" className="@lg:w-[13%]">
+                    {t("newsCollectionColCooldown")}
+                  </th>
+                  <th scope="col" className="@lg:w-[12%] @lg:text-right">
                     {t("newsCollectionColGaps")}
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {query.data.sources.map(source => (
+                {sources.map(source => (
                   <FeedPollRow
                     key={source.source_key}
                     source={source}
-                    now={Date.parse(query.data.as_of)}
+                    now={now}
                     time={time}
                   />
                 ))}
@@ -109,7 +151,7 @@ export function NewsCollectionStatus({
           </div>
         </>
       )}
-    </section>
+    </details>
   )
 }
 
@@ -127,8 +169,11 @@ function FeedPollRow({
   return (
     <tr className="border-t border-line align-top first:border-t-0">
       <th scope="row" className="text-left font-semibold text-sea-ink">
-        <span className="block">{source.source_name}</span>
-        <span className="block font-mono text-xs font-normal break-all text-sea-ink-soft">
+        <span className="block wrap-break-word">{source.source_name}</span>
+        <span
+          className="block truncate font-mono text-xs font-normal text-sea-ink-soft"
+          title={source.feed_url}
+        >
           {source.feed_url}
         </span>
         <span className="mt-1 flex flex-wrap gap-1">
@@ -196,7 +241,7 @@ function FeedPollRow({
       </td>
       <td
         data-label={t("newsCollectionColCount")}
-        className="text-right font-mono tabular-nums"
+        className="font-mono tabular-nums @lg:text-right"
       >
         {source.last_count ?? "—"}
       </td>
@@ -208,7 +253,7 @@ function FeedPollRow({
           ? time(source.cooldown_until)
           : "—"}
       </td>
-      <td data-label={t("newsCollectionColGaps")} className="text-right">
+      <td data-label={t("newsCollectionColGaps")} className="@lg:text-right">
         <span className="font-mono tabular-nums">{source.gap_count}</span>
         {source.gap_count_since ? (
           <span className="block text-xs wrap-normal text-sea-ink-soft">

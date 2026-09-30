@@ -4,12 +4,11 @@ import {
   type NewsAdminCandidate,
   type NewsAdminEdition,
   type NewsAdminItem,
-  type NewsAdminPoolCounts,
   type NewsCandidatePublishInput,
 } from "@daily-insights/api-client"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { LoaderCircle } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Dialog } from "#/components/Dialog"
 import { NewsBadge } from "#/components/NewsBadge"
@@ -614,10 +613,7 @@ function NewsCuration({
         </p>
       ) : (
         <>
-          {edition.edition ? <EditionSummary edition={edition} /> : null}
-          {edition.candidates.length > 0 ? (
-            <PoolSummary pool={edition.pool} />
-          ) : null}
+          <EditionSummary edition={edition} />
           {edition.edition ? (
             <PublishedItems
               items={edition.items}
@@ -714,57 +710,79 @@ const countKeys = [
   "hidden",
 ] as const
 
+/** Revision details, stage totals and where the candidates came from. */
 function EditionSummary({ edition }: { edition: NewsAdminEdition }) {
   const { t } = useTranslation()
   const detail = edition.edition
-  if (!detail) return null
   return (
-    <div className="mt-4 rounded-md border border-line p-3">
-      <p className="m-0 text-sm text-sea-ink-soft">
-        {t("newsCurationRevision", { revision: detail.revision })} ·{" "}
-        {t(`newsCurationStatus_${detail.status}`)} ·{" "}
-        {t("newsCurationGeneratedAt", {
-          time: formatTimestamp(detail.generated_at),
-        })}{" "}
-        · {t("newsCurationPromptVersion", { version: detail.prompt_version })}
-      </p>
-      <ul
-        aria-label={t("newsCurationCounts")}
-        className="m-0 mt-2 flex list-none flex-wrap gap-1.5 p-0"
-      >
-        {countKeys.map(key => (
-          <li key={key}>
-            <NewsBadge tone="muted">
-              {`${t(`newsCandidateStage_${key}`)} ${detail.counts[key]}`}
-            </NewsBadge>
-          </li>
-        ))}
-      </ul>
+    <div className="mt-4 grid gap-2 rounded-md border border-line p-3">
+      {detail ? (
+        <>
+          <p className="m-0 text-sm text-sea-ink-soft">
+            {t("newsCurationRevision", { revision: detail.revision })} ·{" "}
+            {t(`newsCurationStatus_${detail.status}`)} ·{" "}
+            {t("newsCurationGeneratedAt", {
+              time: formatTimestamp(detail.generated_at),
+            })}{" "}
+            ·{" "}
+            {t("newsCurationPromptVersion", { version: detail.prompt_version })}
+          </p>
+          <CountRow
+            label={t("newsCurationCounts")}
+            counts={countKeys.map(key => ({
+              key,
+              label: t(`newsCandidateStage_${key}`),
+              value: detail.counts[key],
+            }))}
+          />
+        </>
+      ) : null}
+      <CountRow
+        label={t("newsCurationPool")}
+        counts={[
+          ...discoveryKeys.map(key => ({
+            key,
+            label: t(`newsCandidateVia_${key}`),
+            value: edition.pool[key],
+          })),
+          {
+            key: "screen_selected",
+            label: t("newsCurationScreenSelected"),
+            value: edition.pool.screen_selected,
+          },
+        ]}
+      />
     </div>
   )
 }
 
 const discoveryKeys = ["collected", "live", "both"] as const
 
-/** Where the candidates came from and how many the headline screen kept. */
-function PoolSummary({ pool }: { pool: NewsAdminPoolCounts }) {
-  const { t } = useTranslation()
+/** One labelled row of count chips inside the edition summary. */
+function CountRow({
+  label,
+  counts,
+}: {
+  label: string
+  counts: readonly { key: string; label: string; value: number }[]
+}) {
+  const labelId = useId()
   return (
-    <ul
-      aria-label={t("newsCurationPool")}
-      className="m-0 mt-2 flex list-none flex-wrap gap-1.5 p-0"
-    >
-      {discoveryKeys.map(key => (
-        <li key={key}>
-          <NewsBadge>{`${t(`newsCandidateVia_${key}`)} ${pool[key]}`}</NewsBadge>
-        </li>
-      ))}
-      <li>
-        <NewsBadge>
-          {`${t("newsCurationScreenSelected")} ${pool.screen_selected}`}
-        </NewsBadge>
-      </li>
-    </ul>
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+      <span id={labelId} className="text-xs font-bold text-sea-ink-soft">
+        {label}
+      </span>
+      <ul
+        aria-labelledby={labelId}
+        className="m-0 flex list-none flex-wrap gap-1.5 p-0"
+      >
+        {counts.map(count => (
+          <li key={count.key}>
+            <NewsBadge tone="muted">{`${count.label} ${count.value}`}</NewsBadge>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 
@@ -891,7 +909,13 @@ function CandidateTable({
         <thead className="bg-link-hover text-left text-xs text-sea-ink-soft">
           <tr>
             {headers.map(key => (
-              <th key={key} scope="col" className="px-3 py-2.5">
+              <th
+                key={key}
+                scope="col"
+                // Floors keep long labels to two lines without squeezing the
+                // headline column.
+                className={`px-3 py-2.5 break-keep ${key === "newsCurationColHeadline" ? "min-w-56" : key === "newsCurationColAi" ? "min-w-32" : key === "newsCurationColScreen" ? "min-w-24" : ""}`}
+              >
                 {t(key)}
               </th>
             ))}
