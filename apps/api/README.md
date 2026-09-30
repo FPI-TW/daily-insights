@@ -49,6 +49,17 @@ API 僅讀取 `apps/api/.env` 與程序環境中的 `DAILY_INSIGHTS_*` 變數，
 `DAILY_INSIGHTS_DATABASE_URL`；直接執行 API 時，該 URL 必須指向本機可連線
 的 PostgreSQL。
 
+本機測試 Podcast 直傳時，使用獨立的開發 R2 bucket 和僅限該 bucket 的物件
+讀寫金鑰。在 `apps/api/.env` 設定 `DAILY_INSIGHTS_R2_ENDPOINT_URL`、
+`DAILY_INSIGHTS_R2_BUCKET_NAME`、`DAILY_INSIGHTS_R2_ACCESS_KEY_ID` 與
+`DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY`；本地 Compose 的 API 與
+`podcast-media-worker` 會讀取同一份設定。開發 bucket 的 CORS 須允許
+`http://localhost:${APP_PORT}`（`APP_PORT` 預設為 `8080`），並依
+[正式環境 runbook 的直傳 CORS 範例](../../docs/runbooks/production.md#r2-browser-upload-cors)
+允許直傳方法與標頭。切勿將金鑰提交到 Git，或用正式 bucket 進行本地上傳測試。
+直傳完成後，音檔需由 `podcast-media-worker` 驗證並寫入資料庫，才會出現在
+後台清單；新節目完成處理後會發布，並出現在前台 `/podcasts`。
+
 `DAILY_INSIGHTS_DATABASE_URL` 只會在 `development` 或 `test` 使用本機
 預設值；staging 與 production 必須明確提供資料庫、獨立 session/password
 secret、FinDB API key，以及完整 R2 endpoint、bucket 與 access credentials。
