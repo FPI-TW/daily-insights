@@ -12,7 +12,7 @@ import re
 import uuid
 from collections import defaultdict
 from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Any, Literal
 
@@ -36,6 +36,7 @@ from daily_insights_api.modules.newsroom import (
     events_service,
     publishing,
     sources_service,
+    translation,
 )
 from daily_insights_api.modules.newsroom.contracts import MarketCode, RelatedSymbol
 from daily_insights_api.modules.newsroom.models import (
@@ -521,12 +522,16 @@ def _event_service_error(error: Exception) -> HTTPException | None:
 
 
 @contextmanager
-def _service_errors() -> Iterator[None]:
+def _service_errors(
+    *, value_error_status: int = status.HTTP_422_UNPROCESSABLE_CONTENT
+) -> Iterator[None]:
     """Map the owning workstream's exceptions onto HTTP statuses.
 
     ``EventServiceError`` by its code (``EVENT_ERROR_STATUS``), then
-    ``LookupError`` → 404, ``ValueError`` → 422, and a service that is still a
-    stub (``NotImplementedError``) → 501 so the console degrades visibly.
+    ``LookupError`` → 404 and ``ValueError`` → ``value_error_status`` (422 for
+    rejected input; ``publishing`` raises it for a state that does not allow
+    the action, which is a 409). A service that is still a stub
+    (``NotImplementedError``) → 501 so the console degrades visibly.
     """
     try:
         yield
@@ -541,10 +546,23 @@ def _service_errors() -> Iterator[None]:
         if isinstance(error, LookupError):
             raise HTTPException(status.HTTP_404_NOT_FOUND, str(error) or "not found") from error
         if isinstance(error, ValueError):
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_CONTENT, str(error) or "invalid request"
-            ) from error
+            raise HTTPException(value_error_status, str(error) or "invalid request") from error
         raise
+
+
+def _publishing_errors() -> AbstractContextManager[None]:
+    return _service_errors(value_error_status=status.HTTP_409_CONFLICT)
+
+
+async def _mark_english_stale(database: AsyncSession, event_id: uuid.UUID) -> None:
+    """Have workstream ③ re-translate now that the visible items changed.
+
+    Looked up at call time: ``translation.mark_english_stale`` ships with the
+    editions branch (its per-minute sweep is the fallback until then).
+    """
+    mark = getattr(translation, "mark_english_stale", None)
+    if mark is not None:
+        await mark(database, event_id)
 
 
 def _now() -> datetime:
@@ -1093,7 +1111,7 @@ async def publish_edition(edition_id: uuid.UUID, actor: AdminWrite, database: Da
     edition = await _locked_edition(database, edition_id)
     if edition.status != "draft":
         raise HTTPException(status.HTTP_409_CONFLICT, "edition is already published")
-    with _service_errors():
+    with _publishing_errors():
         await publishing.publish_edition(database, edition.id, user_id=actor.user.id)
     await database.commit()
 
@@ -1114,7 +1132,7 @@ async def publish_day(
             .with_for_update()
         )
     ).all()
-    with _service_errors():
+    with _publishing_errors():
         for edition in editions:
             await publishing.publish_edition(database, edition.id, user_id=actor.user.id)
     await database.commit()
@@ -1151,7 +1169,7 @@ async def add_item(
     )
     if existing is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "event is already in this edition")
-    with _service_errors():
+    with _publishing_errors():
         item_id = await publishing.add_event_to_edition(
             database, edition.id, event.id, user_id=actor.user.id
         )
@@ -1263,6 +1281,7 @@ async def _set_item_timestamp(
         before={noun: current},
         after={noun: value, "edition_id": str(edition.id), "event_id": str(item.event_id)},
     )
+    await _mark_english_stale(database, item.event_id)
     await database.commit()
 
 
@@ -1329,7 +1348,7 @@ async def edit_why(
     item, _ = await _item_and_edition(database, item_id)
     if item.why_status != "ready":
         raise HTTPException(status.HTTP_409_CONFLICT, "why is not ready yet")
-    with _service_errors():
+    with _publishing_errors():
         await publishing.apply_why_edit(database, item.id, payload.why, user_id=actor.user.id)
     await database.commit()
 
@@ -1435,7 +1454,7 @@ async def edit_event(
     event = await _open_event(database, event_id)
     if event.analysis_status != "ready":
         raise HTTPException(status.HTTP_409_CONFLICT, "analysis is not ready yet")
-    with _service_errors():
+    with _publishing_errors():
         await publishing.apply_event_edit(
             database,
             event.id,
@@ -1460,7 +1479,7 @@ async def edit_event(
 async def reanalyze_event(event_id: uuid.UUID, actor: AdminWrite, database: Database) -> None:
     """Queue the event's analysis and every placement's "why" again (spec §6.4)."""
     event = await _open_event(database, event_id)
-    with _service_errors():
+    with _publishing_errors():
         await publishing.reanalyze_event(database, event.id, user_id=actor.user.id)
     await database.commit()
 

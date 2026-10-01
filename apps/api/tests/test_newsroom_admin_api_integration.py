@@ -33,6 +33,7 @@ from daily_insights_api.modules.newsroom import (
     events_service,
     publishing,
     sources_service,
+    translation,
 )
 from daily_insights_api.modules.newsroom.models import (
     NewsroomArticle,
@@ -980,3 +981,59 @@ async def test_event_service_errors_map_by_code(
 
     assert (merged.status_code, merged.json()["detail"]) == (expected, code)
     assert (split.status_code, split.json()["detail"]) == (expected, code)
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [(LookupError("newsroom event not found"), 404), (ValueError("edition is closed"), 409)],
+)
+async def test_publishing_errors_map_to_404_and_409(
+    database: async_sessionmaker[AsyncSession],
+    client: AsyncClient,
+    calls: Calls,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    expected: int,
+) -> None:
+    del calls
+
+    async def rejected(*args: Any, **kwargs: Any) -> None:
+        raise error
+
+    monkeypatch.setattr(publishing, "reanalyze_event", rejected)
+    event = await _event(database, "Story")
+
+    response = await client.post(f"{BASE}/events/{event.id}/reanalyze")
+
+    assert response.status_code == expected
+    assert response.json()["detail"] == str(error)
+
+
+async def test_visibility_changes_mark_english_stale(
+    database: async_sessionmaker[AsyncSession],
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stale: list[uuid.UUID] = []
+
+    async def mark_english_stale(session: AsyncSession, event_id: uuid.UUID) -> None:
+        assert isinstance(session, AsyncSession)
+        stale.append(event_id)
+
+    monkeypatch.setattr(translation, "mark_english_stale", mark_english_stale, raising=False)
+    draft_event = await _event(database, "Draft story")
+    published_event = await _event(database, "Published story")
+    draft = await _item(database, await _edition(database, "global"), draft_event, 1)
+    shown = await _item(database, await _published(database, "us_equity"), published_event, 1)
+
+    for path in (
+        f"{BASE}/items/{draft.id}/remove",
+        f"{BASE}/items/{draft.id}/remove",
+        f"{BASE}/items/{draft.id}/restore",
+        f"{BASE}/items/{shown.id}/hide",
+        f"{BASE}/items/{shown.id}/unhide",
+    ):
+        assert (await client.post(path)).status_code == 204
+
+    # The repeated remove changed nothing, so it queues nothing.
+    assert stale == [draft_event.id, draft_event.id, published_event.id, published_event.id]
