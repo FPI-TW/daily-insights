@@ -16,7 +16,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 attempt=0
-until docker exec "$container_id" pg_isready -U daily_insights -d daily_insights_test >/dev/null
+until docker exec "$container_id" pg_isready -h 127.0.0.1 -U daily_insights -d daily_insights_test >/dev/null
 do
   attempt=$((attempt + 1))
   if [ "$attempt" -ge 30 ]; then

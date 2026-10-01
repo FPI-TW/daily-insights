@@ -129,7 +129,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U daily_insights_ci -d daily_insights_ci"
+          --health-cmd "pg_isready -h 127.0.0.1 -U daily_insights_ci -d daily_insights_ci"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
