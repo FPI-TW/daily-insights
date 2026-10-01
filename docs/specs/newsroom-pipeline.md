@@ -150,6 +150,22 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
   - **不可重試**（401／402／403、設定缺失）：直接 `failed`，並觸發 Slack 通知（同一錯誤碼每小時最多通知一次）。
 - 共用實作在 `newsroom/queue.py`，各 stage 不得自行發明重試邏輯。
 
+### 5.1 階段交接（跨工作樹契約）
+
+各階段之間只靠資料列欄位交接，不互相呼叫。每個欄位只由一個擁有者寫成 `pending`：
+
+| 交接                     | 寫入者                    | 規則                                                                                                                                   |
+| ------------------------ | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 新文章 → 全文、embedding | ① 收稿（插入文章時）      | 同時設 `fetch_status = pending` 與 `embed_status = pending`；feed 自帶全文者直接寫 `body`、`body_status = ok`、`fetch_status = done`。 |
+| embedding → 初篩         | ② embed handler（成功時） | 設 `triage_status = pending`。                                                                                                         |
+| 全文 → 初篩              | ② triage binding          | 以 `extra_filter` 只領取 `fetch_status IN ('done','failed')` 的文章，確保初篩時全文已有定論；全文失敗者以標題與摘要初篩。              |
+| 初篩 → 事件              | ② triage handler          | 寫 `relevant`、`topic`、`market_scores`、`event_id`、`triaged_at`。                                                                    |
+| 組稿 → 分析              | ③ assembly                | 入選事件 `analysis_status = pending`（若已 `ready` 且未被修改則不重排）；項目 `why_status = pending`。                                 |
+| 分析 → 項目「為何重要」  | ③ analysis handler        | 事件分析成功時一併寫入該事件所有項目的 `why_zh_hant`（及簡中）並把項目 `why_status` 設為 `ready`。                                     |
+| 發布／修改 → 英文        | ③ publishing              | 設事件 `en_status = pending`；translate handler 同時寫事件英文與各項目 `why_en`、`why_en_status`。                                     |
+| 手動貼全文 → 分析        | ① `set_manual_body`       | 所屬事件若為 `needs_body`，改回 `analysis_status = pending`。                                                                          |
+| 合併／拆分 → 分析        | ② `events_service`        | 受影響且在版次中的事件 `analysis_status = pending`。                                                                                   |
+
 ## 6. 各階段規格
 
 ### 6.1 收稿（工作樹 ①）
@@ -166,7 +182,7 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 
 ### 6.2 初篩與分群（工作樹 ②）
 
-- embedding：標題 + feed 摘要（+ 正文前 1,500 字元，若有）。
+- embedding：標題 + feed 摘要（不等全文，見 §5.1）。
 - 初篩呼叫（DeepSeek，JSON mode，temperature 0）輸入：文章標題、來源、摘要／正文前段、**同 `edition_date` 窗內** kNN 最相近的
   5 個事件（以文章 embedding 對窗內已歸屬事件的文章做 cosine 搜尋，取不重複事件，附事件 `working_title` 與 2 則代表標題）。
 - 輸出（`newsroom/contracts.py::TriageResult`）：`relevant`、`topic`、`market_scores`、
