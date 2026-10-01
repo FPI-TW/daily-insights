@@ -56,25 +56,32 @@ function ReportsAndNewsLoading() {
     </>
   )
 }
+// Chat grounds home-page answers in the listed reports and the newsroom
+// edition shown above them; without any report there is no page context.
+export function reportsIndexChatContext({
+  reports,
+  news,
+}: {
+  reports: ReadonlyArray<{ publicationId?: string }>
+  news: Pick<NewsroomEdition, "edition_id"> | null
+}) {
+  const publicationIds = reports.flatMap(report =>
+    report.publicationId ? [report.publicationId] : []
+  )
+  if (!publicationIds.length) return null
+  return {
+    kind: "reports_index" as const,
+    publication_ids: publicationIds,
+    news_edition_id: news?.edition_id ?? null,
+  }
+}
+
 function ReportsPage() {
   const { reports, news, viewpoints } = Route.useLoaderData()
   const markets = useLoaderData({
     from: "/{-$locale}/_customer/reports",
   })
-  const publicationIds = reports.flatMap(report =>
-    report.publicationId ? [report.publicationId] : []
-  )
-  useChatPageContext(
-    publicationIds.length
-      ? {
-          kind: "reports_index",
-          publication_ids: publicationIds,
-          // The chat context still reads legacy news editions; a newsroom
-          // edition id would be rejected there until chat reads newsroom.
-          news_edition_id: null,
-        }
-      : null
-  )
+  useChatPageContext(reportsIndexChatContext({ reports, news }))
   return (
     <>
       <DailyNews edition={news} />

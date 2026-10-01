@@ -8,7 +8,7 @@ vi.mock("#/lib/reports", () => ({ getReportList }))
 vi.mock("#/lib/newsroom", () => ({ getNewsroomEdition }))
 vi.mock("#/lib/analyst-viewpoints", () => ({ getTodayAnalystViewpoints }))
 
-const { loadReportsAndNews } = await import("./index")
+const { loadReportsAndNews, reportsIndexChatContext } = await import("./index")
 
 const reports = [{ marketCode: "crypto" }, { marketCode: "us_equity" }]
 const news = {
@@ -60,5 +60,34 @@ describe("reports index loader", () => {
     await expect(
       loadReportsAndNews({ context: { locale: "en" } })
     ).rejects.toBe(failure)
+  })
+})
+
+describe("reports index chat context", () => {
+  const listed = [
+    { publicationId: "report-1" },
+    {},
+    { publicationId: "report-2" },
+  ]
+
+  it("passes the loaded newsroom edition id with the listed reports", () => {
+    expect(reportsIndexChatContext({ reports: listed, news })).toEqual({
+      kind: "reports_index",
+      publication_ids: ["report-1", "report-2"],
+      news_edition_id: "00000000-0000-4000-8000-000000000001",
+    })
+  })
+
+  it("sends no edition id when no newsroom edition loaded", () => {
+    expect(
+      reportsIndexChatContext({ reports: listed, news: null })
+    ).toMatchObject({ news_edition_id: null })
+    expect(
+      reportsIndexChatContext({ reports: listed, news: { edition_id: null } })
+    ).toMatchObject({ news_edition_id: null })
+  })
+
+  it("falls back to the global chat context without published reports", () => {
+    expect(reportsIndexChatContext({ reports: [{}], news })).toBeNull()
   })
 })
