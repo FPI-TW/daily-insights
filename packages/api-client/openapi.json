@@ -4033,8 +4033,15 @@
             "type": "string"
           },
           "why": {
-            "title": "Why",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Why"
           }
         },
         "required": [

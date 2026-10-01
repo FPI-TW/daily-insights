@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
-from sqlalchemy import ColumnElement, and_, select
+from sqlalchemy import ColumnElement, and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.enums import SystemRole
@@ -77,7 +77,8 @@ class NewsroomItemResponse(BaseModel):
     stars: int | None
     headline: str
     summary: str
-    why: str
+    # Null only for items migrated from the legacy pipeline, which had none.
+    why: str | None
     related_symbols: list[NewsroomRelatedSymbol]
     sources: list[NewsroomSourceLink]
 
@@ -110,6 +111,7 @@ def _visible_items_filter(locale: Locale) -> ColumnElement[bool]:
 
     Expects ``NewsroomEditionItem`` joined to its edition and event. The
     localized text must also be present: an item cannot be shown without it.
+    Items migrated from the legacy pipeline never had a "why" and show none.
     """
     headline, summary, why = _localized_columns(locale)
     conditions = [
@@ -117,7 +119,7 @@ def _visible_items_filter(locale: Locale) -> ColumnElement[bool]:
         NewsroomEvent.analysis_status == "ready",
         headline.is_not(None),
         summary.is_not(None),
-        why.is_not(None),
+        or_(why.is_not(None), NewsroomEditionItem.origin == "legacy"),
     ]
     if locale == "en":
         conditions += [
@@ -318,7 +320,7 @@ async def _edition_response(
 
 def _localized_text(
     item: NewsroomEditionItem, event: NewsroomEvent, locale: Locale
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str | None]:
     if locale == "zh-hans":
         texts = (event.headline_zh_hans, event.summary_zh_hans, item.why_zh_hans)
     elif locale == "en":
@@ -326,8 +328,9 @@ def _localized_text(
     else:
         texts = (event.headline_zh_hant, event.summary_zh_hant, item.why_zh_hant)
     headline, summary, why = texts
-    # The visibility filter already required every localized field.
-    assert headline is not None and summary is not None and why is not None
+    # The visibility filter already required the localized text (a "why" only
+    # outside legacy items).
+    assert headline is not None and summary is not None
     return headline, summary, why
 
 

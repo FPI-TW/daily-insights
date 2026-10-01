@@ -2533,7 +2533,7 @@ export interface components {
       /** Summary */
       summary: string
       /** Why */
-      why: string
+      why: string | null
     }
     /** NewsroomRelatedSymbol */
     NewsroomRelatedSymbol: {

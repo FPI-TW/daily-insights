@@ -297,12 +297,15 @@ function NewsCard({ item, locale }: { item: NewsroomItem; locale: Locale }) {
         {item.headline}
       </h3>
       <p className="m-0 text-sm leading-6 text-sea-ink-soft">{item.summary}</p>
-      <div className="mt-4 rounded-[10px] border border-line-soft bg-lagoon-tint px-4 py-3">
-        <h4 className="m-0 text-xs font-extrabold tracking-[0.08em] text-lagoon-deep uppercase">
-          {t("newsroomWhyItMatters")}
-        </h4>
-        <p className="mt-1 mb-0 text-sm leading-6 text-sea-ink">{item.why}</p>
-      </div>
+      {item.why ? (
+        // Stories migrated from the legacy pipeline have no "why".
+        <div className="mt-4 rounded-[10px] border border-line-soft bg-lagoon-tint px-4 py-3">
+          <h4 className="m-0 text-xs font-extrabold tracking-[0.08em] text-lagoon-deep uppercase">
+            {t("newsroomWhyItMatters")}
+          </h4>
+          <p className="mt-1 mb-0 text-sm leading-6 text-sea-ink">{item.why}</p>
+        </div>
+      ) : null}
       {item.related_symbols.length > 0 ? (
         <RelatedSymbols symbols={item.related_symbols} locale={locale} />
       ) : null}

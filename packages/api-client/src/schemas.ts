@@ -1154,7 +1154,8 @@ export const newsroomItemSchema = z.object({
   stars: z.number().int().min(1).max(5).nullable(),
   headline: z.string(),
   summary: z.string(),
-  why: z.string(),
+  // Null only for stories migrated from the legacy pipeline.
+  why: z.string().nullable(),
   related_symbols: z.array(newsroomRelatedSymbolSchema),
   sources: z.array(newsroomSourceLinkSchema),
 })

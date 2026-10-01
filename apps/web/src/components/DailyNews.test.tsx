@@ -184,6 +184,14 @@ describe("DailyNews", () => {
     }
   )
 
+  it("shows a legacy story without the why-it-matters section", () => {
+    const { panel } = renderNews(edition([story(1, { why: null })]))
+    expect(panel.getByRole("heading", { name: "Story 1" })).toBeInTheDocument()
+    expect(
+      panel.queryByRole("heading", { name: "Why it matters" })
+    ).not.toBeInTheDocument()
+  })
+
   it("keeps the sources collapsed until the reader expands them", () => {
     const { panel } = renderNews(
       edition([

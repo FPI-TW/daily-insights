@@ -466,6 +466,49 @@ async def test_english_falls_back_past_editions_whose_translation_is_stale(
     assert [item.headline for item in response.items] == ["Day9 en"]
 
 
+async def test_legacy_items_show_without_why(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    async with newsroom_database() as database:
+        newsroom = _Newsroom(database)
+        legacy = await newsroom.event(TODAY, "Legacy", created_by="legacy")
+        await newsroom.item(
+            TODAY,
+            legacy,
+            origin="legacy",
+            stars=None,
+            why_zh_hant=None,
+            why_zh_hans=None,
+            why_en=None,
+        )
+        manual = await newsroom.source("manual", kind="manual")
+        article = await newsroom.article(legacy, manual, "https://www.reuters.com/markets/a")
+        article.body_status = "purged"
+        await newsroom.sign_english(legacy)
+        # A pipeline item still needs its "why" to be shown.
+        unexplained = await newsroom.event(TODAY, "Unexplained")
+        await newsroom.item(
+            TODAY, unexplained, rank=2, why_zh_hant=None, why_zh_hans=None, why_en=None
+        )
+        await newsroom.sign_english(unexplained)
+        await database.commit()
+
+        locales: tuple[public_api.Locale, ...] = ("zh-hant", "zh-hans", "en")
+        responses = {locale: await _latest(database, locale=locale) for locale in locales}
+
+    assert {
+        locale: [(item.headline, item.why) for item in response.items]
+        for locale, response in responses.items()
+    } == {
+        "zh-hant": [("Legacy 繁", None)],
+        "zh-hans": [("Legacy 简", None)],
+        "en": [("Legacy en", None)],
+    }
+    assert [(source.name, source.url) for source in responses["en"].items[0].sources] == [
+        ("www.reuters.com", "https://www.reuters.com/markets/a")
+    ]
+
+
 def _member(role: str, organization_id: uuid.UUID | None) -> AuthContext:
     return cast(
         AuthContext,
