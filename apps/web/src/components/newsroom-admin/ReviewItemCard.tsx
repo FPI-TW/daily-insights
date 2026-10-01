@@ -9,12 +9,13 @@ import {
   type NewsroomItem,
   type NewsroomMarket,
 } from "#/lib/newsroom-admin"
+import { ConfirmDialog } from "./ConfirmDialog"
 import { EventEditDialog, TextEditDialog, WHY_MAX } from "./EditDialogs"
 import { EventArticlesPanel, type MergeOption } from "./EventArticlesPanel"
 import { StatusBadge } from "./StatusBadge"
 import { useNewsroomAction } from "./useNewsroomAction"
 
-type Editing = "event" | "why" | null
+type Editing = "event" | "why" | "reanalyze" | null
 
 /** One placed event: what readers will see, its review state, and D19 actions. */
 export function ReviewItemCard({
@@ -82,12 +83,13 @@ export function ReviewItemCard({
       newsroomAdminKeys.editionsOfDate(date),
       newsroomAdminKeys.event(event.id),
     ],
+    onSuccess: () => setEditing(null),
   })
   const removed = item.removed_at !== null
   const hidden = item.hidden_at !== null
   const published = edition.status === "published"
   const alerts = itemAlerts(item)
-  const actionError = itemAction.error || reanalyze.error
+  const actionError = itemAction.error
   const headline = event.headline_zh_hant ?? event.working_title
   const panelId = `newsroom-item-${item.id}-articles`
 
@@ -249,7 +251,10 @@ export function ReviewItemCard({
         <button
           type="button"
           disabled={reanalyze.isPending || event.analysis_status === "pending"}
-          onClick={() => void reanalyze.run()}
+          onClick={() => {
+            reanalyze.reset()
+            setEditing("reanalyze")
+          }}
         >
           {t("newsroomAdminReanalyze")}
         </button>
@@ -310,6 +315,17 @@ export function ReviewItemCard({
           error={editEvent.error}
           onClose={() => setEditing(null)}
           onSubmit={changes => void editEvent.run(changes)}
+        />
+      ) : null}
+      {editing === "reanalyze" ? (
+        <ConfirmDialog
+          title={t("newsroomAdminReanalyzeTitle")}
+          message={t("newsroomAdminOverwriteWarning")}
+          confirmLabel={t("newsroomAdminReanalyze")}
+          pending={reanalyze.isPending}
+          error={reanalyze.error}
+          onClose={() => setEditing(null)}
+          onConfirm={() => void reanalyze.run()}
         />
       ) : null}
       {editing === "why" ? (

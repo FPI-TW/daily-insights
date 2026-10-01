@@ -154,6 +154,10 @@ describe("EventArticlesPanel", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Split selected articles (1)" })
     )
+    const confirm = screen.getByRole("alertdialog")
+    expect(confirm).toHaveTextContent(/replace any text an editor has changed/)
+    expect(client.splitEvent).not.toHaveBeenCalled()
+    fireEvent.click(within(confirm).getByRole("button", { name: "Split" }))
     await waitFor(() =>
       expect(client.splitEvent).toHaveBeenCalledWith(
         subject.id,
@@ -190,6 +194,9 @@ describe("EventArticlesPanel", () => {
       })
     )
     const dialog = screen.getByRole("dialog")
+    expect(within(dialog).getByRole("note")).toHaveTextContent(
+      /replace any text an editor has changed/
+    )
     fireEvent.click(within(dialog).getByLabelText("另一則"))
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Merge 1 event" })

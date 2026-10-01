@@ -358,8 +358,16 @@ describe("NewsroomReviewPage", () => {
     )
     const card = screen.getByRole("article", { name: "聯準會維持利率不變" })
     fireEvent.click(within(card).getByRole("button", { name: "Re-analyse" }))
+    // Re-analysis replaces edited text, so it asks first.
+    const confirm = screen.getByRole("alertdialog")
+    expect(confirm).toHaveTextContent(/replace any text an editor has changed/)
+    expect(client.reanalyze).not.toHaveBeenCalled()
+    fireEvent.click(within(confirm).getByRole("button", { name: "Re-analyse" }))
     await waitFor(() =>
       expect(client.reanalyze).toHaveBeenCalledWith(first.event.id, "csrf")
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
     )
   })
 

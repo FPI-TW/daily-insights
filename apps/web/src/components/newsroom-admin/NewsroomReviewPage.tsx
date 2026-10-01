@@ -156,7 +156,7 @@ export function NewsroomReviewPage({
             }}
           />
         </label>
-        <div className="grid gap-1 text-sm">
+        <div className="grid justify-items-start gap-1 text-sm">
           {summary.is_today ? (
             <StatusBadge tone="positive">{t("newsroomAdminToday")}</StatusBadge>
           ) : (

@@ -928,6 +928,11 @@ const resources: Resource = {
       dailyNewsSourceLink: "閱讀原文",
       // Newsroom review console (/admin/newsroom); owned by the admin workstream.
       newsroomAdminNav: "重點新聞審核",
+      newsroomAdminReanalyzeTitle: "重新分析這個事件？",
+      newsroomAdminSplitTitle: "將選取的 {{count}} 篇文章拆成新事件？",
+      newsroomAdminSplitConfirm: "拆分",
+      newsroomAdminOverwriteWarning:
+        "此動作會重新執行 AI 分析，產生新的標題、摘要與各市場「為何重要」，取代管理員已改過的文字。",
       newsroomAdminTitle: "重點新聞審核",
       newsroomAdminDescription:
         "審核 AI 草稿：改字、移除或加入項目、調整排序後核准；09:00 未核准的版次會自動發布。",
@@ -2029,6 +2034,11 @@ const resources: Resource = {
       dailyNewsSourceLink: "阅读原文",
       // Newsroom review console (/admin/newsroom); owned by the admin workstream.
       newsroomAdminNav: "重点新闻审核",
+      newsroomAdminReanalyzeTitle: "重新分析这个事件？",
+      newsroomAdminSplitTitle: "将选取的 {{count}} 篇文章拆成新事件？",
+      newsroomAdminSplitConfirm: "拆分",
+      newsroomAdminOverwriteWarning:
+        "此操作会重新执行 AI 分析，生成新的标题、摘要与各市场“为何重要”，取代管理员已改过的文字。",
       newsroomAdminTitle: "重点新闻审核",
       newsroomAdminDescription:
         "审核 AI 草稿：改字、移除或加入项目、调整排序后核准；09:00 未核准的版次会自动发布。",
@@ -3176,6 +3186,12 @@ const resources: Resource = {
       dailyNewsSourceLink: "Read source",
       // Newsroom review console (/admin/newsroom); owned by the admin workstream.
       newsroomAdminNav: "Key news review",
+      newsroomAdminReanalyzeTitle: "Re-analyse this event?",
+      newsroomAdminSplitTitle:
+        "Split the {{count}} selected articles into a new event?",
+      newsroomAdminSplitConfirm: "Split",
+      newsroomAdminOverwriteWarning:
+        "This runs the AI analysis again: a new headline, summary and per-market “why it matters” will replace any text an editor has changed.",
       newsroomAdminTitle: "Key news review",
       newsroomAdminDescription:
         "Review the AI drafts: edit, remove or add items and reorder them, then approve. Drafts not approved by 09:00 publish automatically.",

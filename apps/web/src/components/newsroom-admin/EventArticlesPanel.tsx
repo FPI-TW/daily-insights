@@ -11,6 +11,7 @@ import {
   type NewsroomEvent,
   type NewsroomMarket,
 } from "#/lib/newsroom-admin"
+import { ConfirmDialog } from "./ConfirmDialog"
 import { BODY_MAX, TextEditDialog } from "./EditDialogs"
 import { StatusBadge } from "./StatusBadge"
 import { useNewsroomAction } from "./useNewsroomAction"
@@ -42,6 +43,7 @@ export function EventArticlesPanel({
   const [selected, setSelected] = useState<string[]>([])
   const [pasteFor, setPasteFor] = useState<NewsroomArticle | null>(null)
   const [mergeOpen, setMergeOpen] = useState(false)
+  const [splitOpen, setSplitOpen] = useState(false)
   const detail = useQuery({
     queryKey: newsroomAdminKeys.event(event.id),
     queryFn: () => browserNewsroomAdminClient().eventDetail(event.id),
@@ -56,7 +58,10 @@ export function EventArticlesPanel({
     run: (client, articleIds: string[], csrf) =>
       client.splitEvent(event.id, articleIds, csrf),
     invalidates: (_, result) => affected([event.id, result.event_id]),
-    onSuccess: () => setSelected([]),
+    onSuccess: () => {
+      setSelected([])
+      setSplitOpen(false)
+    },
   })
   const paste = useNewsroomAction({
     locale,
@@ -72,7 +77,7 @@ export function EventArticlesPanel({
     invalidates: sourceIds => affected([event.id, ...sourceIds]),
     onSuccess: () => setMergeOpen(false),
   })
-  const error = split.error || merge.error
+  const error = merge.error
 
   if (detail.isPending) {
     return (
@@ -207,7 +212,10 @@ export function EventArticlesPanel({
         <button
           type="button"
           disabled={!canSplit || split.isPending}
-          onClick={() => void split.run(selected)}
+          onClick={() => {
+            split.reset()
+            setSplitOpen(true)
+          }}
         >
           {t("newsroomAdminSplit", { count: selected.length })}
         </button>
@@ -239,6 +247,17 @@ export function EventArticlesPanel({
           error={paste.error}
           onClose={() => setPasteFor(null)}
           onSubmit={body => void paste.run({ articleId: pasteFor.id, body })}
+        />
+      ) : null}
+      {splitOpen ? (
+        <ConfirmDialog
+          title={t("newsroomAdminSplitTitle", { count: selected.length })}
+          message={t("newsroomAdminOverwriteWarning")}
+          confirmLabel={t("newsroomAdminSplitConfirm")}
+          pending={split.isPending}
+          error={split.error}
+          onClose={() => setSplitOpen(false)}
+          onConfirm={() => void split.run(selected)}
         />
       ) : null}
       {mergeOpen ? (
@@ -302,6 +321,12 @@ function MergeDialog({
         </h2>
         <p className="m-0 text-sm text-sea-ink-soft">
           {t("newsroomAdminMergeDescription")}
+        </p>
+        <p
+          role="note"
+          className="m-0 rounded-lg border border-market-caution/50 bg-market-caution/10 p-3 text-sm font-bold text-market-caution"
+        >
+          {t("newsroomAdminOverwriteWarning")}
         </p>
         <fieldset className="m-0 grid max-h-80 gap-2 overflow-y-auto border-0 p-0">
           <legend className="sr-only">{t("newsroomAdminMergeTitle")}</legend>
