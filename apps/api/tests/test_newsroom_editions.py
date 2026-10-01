@@ -232,7 +232,7 @@ def _claimed(edition_date: date) -> ClaimedFunction:
         job_run_id=uuid.uuid4(),
         attempt_id=uuid.uuid4(),
         function_key="newsroom_assemble",
-        provider_key="internal_services",
+        provider_key="newsroom",
         edition_date=edition_date,
         fence_token=uuid.uuid4(),
         deadline_at=None,
