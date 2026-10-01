@@ -19,7 +19,9 @@ from daily_insights_api.modules.newsroom.assembly import (
     validate_ratings,
 )
 from daily_insights_api.modules.newsroom.contracts import EditorRating, EditorResult
+from daily_insights_api.modules.newsroom.models import NewsroomEditionItem, NewsroomEvent
 from daily_insights_api.modules.newsroom.translation import (
+    _english_is_current,
     load_prompt,
     to_zh_hans,
     zh_hant_digest,
@@ -206,6 +208,15 @@ def test_related_symbols_drop_anything_without_a_dashboard() -> None:
 
 def test_zh_hans_uses_opencc_taiwan_phrases() -> None:
     assert to_zh_hans("聯準會升息 滑鼠與軟體類股走強") == "联准会升息 鼠标与软件类股走强"
+
+
+def test_english_needs_no_why_for_an_item_without_a_zh_hant_why() -> None:
+    # Items migrated from the legacy pipeline have no "why" in any language.
+    legacy = NewsroomEditionItem(why_zh_hant=None, why_en=None, why_en_status="ready")
+    event = NewsroomEvent(headline_en="Headline", summary_en="Summary", en_source_digest="d")
+    assert _english_is_current(event, [legacy], "d")
+    untranslated = NewsroomEditionItem(why_zh_hant="為何", why_en=None, why_en_status="ready")
+    assert not _english_is_current(event, [legacy, untranslated], "d")
 
 
 def test_zh_hant_digest_is_stable_and_content_sensitive() -> None:
