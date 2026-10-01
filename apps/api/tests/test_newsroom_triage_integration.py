@@ -746,11 +746,52 @@ async def test_merge_moves_articles_and_items_and_requeues_the_target(
     assert sorted(merge_after["moved_article_ids"]) == sorted(str(a) for a in moved)
     assert merge_after["repointed_item_ids"] == [str(repointed), str(us_first)]
     assert merge_after["removed_item_ids"] == [str(dropped), str(us_second)]
+    assert merge_after["restored_item_ids"] == []
     assert merge_after["analysis_requeued_event_ids"] == [str(target)]
     for source in (first, second):
         [source_log] = await _edits(newsroom_database, source)
         assert source_log.action == "merged_into"
         assert source_log.after == {"status": "merged", "merged_into_id": str(target)}
+
+
+async def test_merge_restores_a_removed_target_item_in_the_live_source_slot(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user_id = await _user(newsroom_database)
+    target = await _event(newsroom_database, "Target")
+    first = await _event(newsroom_database, "First")
+    second = await _event(newsroom_database, "Second")
+    removed_at = datetime(2026, 9, 30, 23, tzinfo=UTC)
+    global_ = await _edition(newsroom_database, "global")
+    tw = await _edition(newsroom_database, "tw_equity")
+    # global: removed target, live source → the target comes back at rank 2.
+    revived = await _item(newsroom_database, global_, target, 4, removed_at=removed_at)
+    replaced = await _item(newsroom_database, global_, first, 2)
+    # tw: removed target, removed source → nothing changes.
+    still_removed = await _item(newsroom_database, tw, target, 3, removed_at=removed_at)
+    untouched = await _item(newsroom_database, tw, second, 1, removed_at=removed_at)
+
+    async with newsroom_database() as database:
+        await events_service.merge_events(
+            database, target_id=target, source_ids=[first, second], user_id=user_id
+        )
+        await database.commit()
+
+    revived_row = await _get(newsroom_database, NewsroomEditionItem, revived)
+    assert (revived_row.event_id, revived_row.rank, revived_row.removed_at) == (target, 2, None)
+    replaced_row = await _get(newsroom_database, NewsroomEditionItem, replaced)
+    assert (replaced_row.event_id, replaced_row.removed_at is not None) == (first, True)
+    still_removed_row = await _get(newsroom_database, NewsroomEditionItem, still_removed)
+    assert (still_removed_row.rank, still_removed_row.removed_at) == (3, removed_at)
+    untouched_row = await _get(newsroom_database, NewsroomEditionItem, untouched)
+    assert (untouched_row.event_id, untouched_row.removed_at) == (second, removed_at)
+    assert (await _get(newsroom_database, NewsroomEvent, target)).analysis_status == "pending"
+
+    [merge_log] = await _edits(newsroom_database, target)
+    merge_after = _logged(merge_log.after)
+    assert merge_after["restored_item_ids"] == [str(revived)]
+    assert merge_after["removed_item_ids"] == [str(replaced)]
+    assert merge_after["repointed_item_ids"] == []
 
 
 async def test_merge_leaves_an_unplaced_target_unqueued(

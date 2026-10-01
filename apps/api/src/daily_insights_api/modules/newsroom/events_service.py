@@ -108,7 +108,8 @@ async def merge_events(
     """Move every article of ``source_ids`` into ``target_id``; sources become ``merged``.
 
     Edition items pointing at a source event move to the target (or are dropped
-    when the target is already in that edition).
+    when the target is already in that edition; a removed target item is then
+    restored at the live source item's rank).
     """
     sources = list(dict.fromkeys(source_ids))
     if not sources or target_id in sources:
@@ -134,15 +135,16 @@ async def merge_events(
         .values(event_id=target_id)
     )
 
-    target_editions = set(
-        (
+    target_items = {
+        item.edition_id: item
+        for item in (
             await database.scalars(
-                select(NewsroomEditionItem.edition_id).where(
-                    NewsroomEditionItem.event_id == target_id
-                )
+                select(NewsroomEditionItem)
+                .where(NewsroomEditionItem.event_id == target_id)
+                .with_for_update()
             )
         ).all()
-    )
+    }
     items = (
         await database.scalars(
             select(NewsroomEditionItem)
@@ -154,17 +156,24 @@ async def merge_events(
     now = datetime.now(UTC)
     repointed: list[uuid.UUID] = []
     removed: list[uuid.UUID] = []
+    restored: list[uuid.UUID] = []
     for item in items:
-        if item.edition_id in target_editions:
-            # (edition, event) is unique, so the target's own item stays the
-            # edition's entry and the source's item leaves the draft.
-            if item.removed_at is None:
-                item.removed_at = now
-                removed.append(item.id)
-        else:
+        target_item = target_items.get(item.edition_id)
+        if target_item is None:
             item.event_id = target_id
-            target_editions.add(item.edition_id)
+            target_items[item.edition_id] = item
             repointed.append(item.id)
+            continue
+        # (edition, event) is unique, so the target's own item stays the
+        # edition's entry and the source's item leaves the draft. A live source
+        # item revives a removed target item in its place.
+        if item.removed_at is None:
+            if target_item.removed_at is not None:
+                target_item.removed_at = None
+                target_item.rank = item.rank
+                restored.append(target_item.id)
+            item.removed_at = now
+            removed.append(item.id)
     await database.flush()
 
     # Keep merge chains one hop deep: events merged into a source now point at the target.
@@ -190,6 +199,7 @@ async def merge_events(
             "moved_article_ids": _ids(moved_articles),
             "repointed_item_ids": _ids(repointed),
             "removed_item_ids": _ids(removed),
+            "restored_item_ids": _ids(restored),
             "analysis_requeued_event_ids": requeued,
         },
     )
