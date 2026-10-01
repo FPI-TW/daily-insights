@@ -100,18 +100,16 @@ export function AppShell({
           : "customer-podcasts"
       : location.pathname.endsWith("/admin/members")
         ? "admin-members"
-        : location.pathname.endsWith("/admin/news-management")
-          ? "admin-news-management"
-          : location.pathname.endsWith("/admin/newsroom/sources")
-            ? "admin-newsroom-sources"
-            : /\/admin\/newsroom\/?$/.test(location.pathname)
-              ? "admin-newsroom"
-              : location.pathname.endsWith("/admin/data-management") ||
-                  location.pathname.endsWith("/admin/index-data")
-                ? "admin-data-management"
-                : location.pathname.endsWith("/admin/analyst-viewpoints")
-                  ? "admin-analyst-viewpoints"
-                  : "admin-audio"
+        : location.pathname.endsWith("/admin/newsroom/sources")
+          ? "admin-newsroom-sources"
+          : /\/admin\/newsroom\/?$/.test(location.pathname)
+            ? "admin-newsroom"
+            : location.pathname.endsWith("/admin/data-management") ||
+                location.pathname.endsWith("/admin/index-data")
+              ? "admin-data-management"
+              : location.pathname.endsWith("/admin/analyst-viewpoints")
+                ? "admin-analyst-viewpoints"
+                : "admin-audio"
 
   return (
     <>
@@ -246,13 +244,6 @@ export function AppShell({
                     className={adminNavLinkClass}
                   >
                     {t("dataManagementNav")}
-                  </Link>
-                  <Link
-                    to="/{-$locale}/admin/news-management"
-                    params={{ locale }}
-                    className={adminNavLinkClass}
-                  >
-                    {t("newsManagementNav")}
                   </Link>
                   <Link
                     to="/{-$locale}/admin/newsroom"
