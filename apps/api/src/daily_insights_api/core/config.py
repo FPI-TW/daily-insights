@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     analyst_viewpoints_api_key: SecretStr | None = None
     analyst_viewpoints_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     daily_news_enabled: bool = False
+    # Overnight (18:00-08:00 Taipei) feed collection merged into the 08:00
+    # refresh, and the headline screening stage before article extraction.
+    # Both are independent kill switches and stay inert while
+    # daily_news_enabled is false.
+    news_collection_enabled: bool = False
+    news_headline_screen_enabled: bool = False
     # The article allowlist is derived from the feed registry; these only add
     # hosts (for a temporary feed) or block registry hosts (kill switch).
     news_extra_hostnames: str = ""
@@ -286,6 +292,8 @@ class DailyNewsSchedulerSettings(BaseSettings):
     environment: Environment = "development"
     database_url: str | None = None
     daily_news_enabled: bool = False
+    news_collection_enabled: bool = False
+    news_headline_screen_enabled: bool = False
 
     @model_validator(mode="after")
     def require_database_url(self) -> Self:

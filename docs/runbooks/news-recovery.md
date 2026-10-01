@@ -73,6 +73,50 @@
 401 走既有登入失效流程，403 顯示權限不足，其餘錯誤附請求編號。POST 不自動重送。
 初次資料保留 skeleton，刷新失敗保留原資料並顯示局部錯誤。
 
+## 隔夜蒐集與標題初篩
+
+設計見 [隔夜新聞蒐集與標題初篩規劃](../specs/overnight-news-collection-plan.md)，行為
+摘要見 [每日重大新聞](../architecture/daily-news.md#隔夜蒐集與標題初篩)。兩者都不建立
+JobRun；collector 狀態看新聞管理頁的「隔夜蒐集來源」區塊（目前狀態）與 worker 事件，
+初篩結果看候選列表的「初篩名次／分數」欄、`screened_out` 篩選與各市場的 `pool` 計數。
+
+事件都由 `orchestration-worker` 輸出，以 `docker logs daily-insights-orchestration-worker`
+查詢：
+
+| 事件                      | 主要欄位                                                                       | 意義與處理                                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `news.collection.standby` | —                                                                              | 此 worker 未取得 collector advisory lock（另一個 worker 在輪詢），正常                                  |
+| `news.collection.started` | `polling`                                                                      | 取得 lock 並啟動；`polling=false` 代表旗標關閉，只執行過期列清理                                        |
+| `news.collection.poll`    | `hostname`、`feed`、`status`、`count`、`new_count`                             | 單一 feed 輪詢成功（含 304）；`new_count` 為首次蒐集的則數                                              |
+| `news.collection.failed`  | `hostname`、`feed`、`status`、`error_code`；或 `scope=collector`、`error_type` | feed 失敗只影響該來源，依 `Retry-After` 與 5／15／30 分鐘冷卻；`scope=collector` 為 task 例外，退避重啟 |
+| `news.collection.gap`     | `hostname`、`feed`、`gap_minutes`                                              | 兩次成功輪詢之間可能有稿件被擠出；同一來源每晚反覆出現時縮短其 `poll_interval_minutes`                  |
+| `news.collection.cleanup` | `deleted`                                                                      | 清除超過 7 天的蒐集列                                                                                   |
+| `news.collection.merged`  | `market`、`live`、`collected`、`both`                                          | 08:00 refresh 合併蒐集池的結果；`collected` 為靠隔夜蒐集救回的候選數                                    |
+| `news.screen.truncated`   | `market`、`pool`、`truncated`                                                  | 候選池超過 400 則，依正則分數與發布時間截斷後才送初篩                                                   |
+| `news.screen.discarded`   | `unknown`、`duplicates`                                                        | 模型回傳未知或重複序號，已丟棄；有效序號照常使用                                                        |
+| `news.screen.fallback`    | `market`、`call`、`error_code`、`validation_issues`                            | 修正一次後仍驗證失敗或短名單為空，該市場退回正則排序，版本照常產生                                      |
+
+操作方式：
+
+1. **確認 collector 在跑**：晚間 18:10 後新聞管理頁的「隔夜蒐集來源」應列出已輪詢的
+   feed；空清單代表尚未輪詢。worker log 應有一筆 `news.collection.started` 且
+   `polling=true`，其他 worker 只會有 `standby`。
+2. **單一來源失敗或冷卻**：狀態欄顯示「冷卻中」或「失敗」與錯誤碼、連續失敗次數；
+   collector 會自行退避，不需人工重試。長期失敗的來源依 feed 註冊表流程處理（例如以
+   `DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES` 暫停），與 08:00 即時探索相同。
+3. **缺口**：「當晚缺口」欄與 `news.collection.gap` 是調整輪詢間隔的依據；連續 2–3 晚
+   同一來源都有缺口時，在 `feeds.py` 為該來源設定較短的 `poll_interval_minutes`，
+   不自動調整。欄位下方的日期是該晚所供應的版本日期（例如 09-30 18:00 至 10-01 08:00
+   計入 10-01 版），每晚第一次輪詢時歸零。
+4. **初篩退回**：`news.screen.fallback` 不阻擋版本，只代表該市場當天改用正則排序；
+   連續發生時檢查 `error_code` 與 `validation_issues`，必要時調整
+   `modules/news/prompts/screen_criteria.txt`。provider 逾時、429、5xx 與認證錯誤
+   依本手冊上方的系統性錯誤政策處理。
+5. **回退**：關閉 `DAILY_INSIGHTS_NEWS_COLLECTION_ENABLED` 即停止輪詢並回到 08:00
+   單次探索，已蒐集的列在 7 天後由清理移除；關閉
+   `DAILY_INSIGHTS_NEWS_HEADLINE_SCREEN_ENABLED` 即回到正則排序與現行擷取上限。兩者
+   獨立，都不需要 migration 回滾，改完變數後依部署流程重新部署 worker。
+
 ## 保存、安全與併發
 
 - `news_checkpoints` 保存候選中繼資料、內容 SHA-256、成功選題、繁中摘要及驗證完成的翻譯；
@@ -107,6 +151,8 @@
   不清理正式新聞、JobRun／FunctionRun／Attempt 歷史或 audit。若長期停用新聞功能，
   需以維運程序安排清理，而不是恢復舊 scheduler。
 - 外部請求成功、結果尚未落庫就中斷，仍可能重送；不是跨供應商的 exactly-once 保證。
+- 隔夜蒐集只保存 feed 中繼資料，不保存正文；後台輪詢狀態 API 回傳的 feed URL 已移除
+  金鑰等憑證參數，不得改為回傳實際請求 URL。
 
 ## 本機代理驗收
 

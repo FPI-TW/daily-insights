@@ -5,10 +5,12 @@ reached, hide a published story the model should not have picked, and queue
 a manual publish of candidates it did not pick.
 """
 
+import hashlib
 import uuid
 from collections import Counter
 from datetime import UTC, date, datetime
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import false, func, or_, select, update
@@ -19,11 +21,13 @@ from daily_insights_api.modules.audit.api import record_audit_event
 from daily_insights_api.modules.data_management.api import taipei_today
 from daily_insights_api.modules.identity.api import AuthContext, require_csrf_roles, require_roles
 from daily_insights_api.modules.news.editions import EDITION_ORDER, edition_spec
+from daily_insights_api.modules.news.feeds import FEED_SOURCES, FeedSource
 from daily_insights_api.modules.news.models import (
     NewsCandidate,
     NewsCandidateBatch,
     NewsDependencyState,
     NewsEdition,
+    NewsFeedPollState,
     NewsItem,
     NewsPresentation,
 )
@@ -34,8 +38,11 @@ from daily_insights_api.modules.news.schemas import (
     NewsAdminEditionEntry,
     NewsAdminEditionsResponse,
     NewsAdminItem,
+    NewsAdminPoolCounts,
     NewsCandidatePublishRequest,
+    NewsCollectionStatusResponse,
     NewsDependencyResponse,
+    NewsFeedPollSource,
     NewsRecoveryResponse,
 )
 from daily_insights_api.modules.news.service import _lock_key
@@ -53,8 +60,19 @@ Database = Annotated[AsyncSession, Depends(get_database_session)]
 ADMIN_LOCALE = "zh-hant"
 # Published stories lead, followed by the final prepared selection, what the
 # edition dropped, what the model reviewed and passed over, then everything it
-# never saw.
-STAGE_ORDER = {"published": 0, "prepared": 1, "dropped": 2, "reviewed": 3}
+# never saw. Headlines the screen rejected come last: the model already judged
+# them weaker than every shortlisted candidate.
+STAGE_ORDER = {"published": 0, "prepared": 1, "dropped": 2, "reviewed": 3, "screened_out": 5}
+OTHER_STAGE_GROUP = 4
+MarketCode = Literal["global", "tw_equity", "us_equity"]
+# Poll states are keyed by the SHA-256 of the registry feed URL.
+FEED_SOURCE_BY_KEY = {
+    hashlib.sha256(source.url.encode()).hexdigest(): source for source in FEED_SOURCES
+}
+FEED_SOURCE_ORDER = {key: index for index, key in enumerate(FEED_SOURCE_BY_KEY)}
+CREDENTIAL_PARAMS = frozenset(
+    {"api-key", "api_key", "apikey", "key", "token", "access_token", "secret", "signature"}
+)
 
 
 @router.get("/recovery", response_model=NewsRecoveryResponse)
@@ -158,6 +176,9 @@ def _candidate_response(candidate: NewsCandidate) -> NewsAdminCandidate:
         ai_market=candidate.ai_market,
         ai_importance=candidate.ai_importance,
         ai_event_key=candidate.ai_event_key,
+        discovered_via=candidate.discovered_via,
+        screen_rank=candidate.screen_rank,
+        screen_score=candidate.screen_score,
         item_id=candidate.item_id,
         publish_run_id=candidate.publish_run_id,
         publish_requested_at=candidate.publish_requested_at,
@@ -168,8 +189,8 @@ def _candidate_response(candidate: NewsCandidate) -> NewsAdminCandidate:
 def _ordered_candidates(
     candidates: list[NewsCandidate], item_ranks: dict[uuid.UUID, int]
 ) -> list[NewsCandidate]:
-    def sort_key(candidate: NewsCandidate) -> tuple[int, int, float, str]:
-        group = STAGE_ORDER.get(candidate.stage, 4)
+    def sort_key(candidate: NewsCandidate) -> tuple[int, int, bool, int, float, str]:
+        group = STAGE_ORDER.get(candidate.stage, OTHER_STAGE_GROUP)
         within = (
             item_ranks.get(candidate.item_id or uuid.UUID(int=0), 0)
             if group == 0
@@ -177,10 +198,30 @@ def _ordered_candidates(
             if group in {1, 2}
             else 0
         )
+        # Candidates the model never selected follow the headline screen's
+        # order; unscreened ones keep the newest-first order after them.
+        unscreened = candidate.screen_rank is None
         seen = candidate.seen_at.timestamp() if candidate.seen_at is not None else 0.0
-        return (group, within, -seen, candidate.headline)
+        return (
+            group,
+            within,
+            unscreened,
+            candidate.screen_rank or 0,
+            -seen,
+            candidate.headline,
+        )
 
     return sorted(candidates, key=sort_key)
+
+
+def _pool_counts(candidates: list[NewsCandidate]) -> NewsAdminPoolCounts:
+    sources = Counter(candidate.discovered_via for candidate in candidates)
+    return NewsAdminPoolCounts(
+        live=sources["live"],
+        collected=sources["collected"],
+        both=sources["both"],
+        screen_selected=sum(1 for candidate in candidates if candidate.screen_rank is not None),
+    )
 
 
 async def _edition_entry(
@@ -210,6 +251,7 @@ async def _edition_entry(
             candidates=[
                 _candidate_response(candidate) for candidate in _ordered_candidates(candidates, {})
             ],
+            pool=_pool_counts(candidates),
         )
     rows = (
         await database.execute(
@@ -248,6 +290,7 @@ async def _edition_entry(
         prepared=stages["prepared"],
         dropped=stages["dropped"],
         published=stages["published"],
+        screened_out=stages["screened_out"],
         hidden=sum(1 for item in items if item.hidden),
     )
     item_ranks = {item.id: item.rank for item, _ in rows}
@@ -267,6 +310,7 @@ async def _edition_entry(
             _candidate_response(candidate)
             for candidate in _ordered_candidates(candidates, item_ranks)
         ],
+        pool=_pool_counts(candidates),
     )
 
 
@@ -283,6 +327,77 @@ async def list_editions(
         editions=[
             await _edition_entry(database, resolved, market_code) for market_code in EDITION_ORDER
         ],
+    )
+
+
+def _public_feed_url(url: str, source: FeedSource | None) -> str:
+    """The feed URL without credentials, cache busters or user info.
+
+    Registry URLs keep their non-secret query (Guardian sections differ only
+    there); a stored URL with no registry entry is reduced to host and path.
+    """
+    parsed = urlsplit(url)
+    query = ""
+    if source is not None:
+        hidden = set(CREDENTIAL_PARAMS)
+        hidden.add(source.api_key_param.lower())
+        if source.cache_buster_param:
+            hidden.add(source.cache_buster_param.lower())
+        query = urlencode(
+            [
+                (name, value)
+                for name, value in parse_qsl(parsed.query, keep_blank_values=True)
+                if name.lower() not in hidden
+            ]
+        )
+    host = parsed.netloc.rpartition("@")[2]
+    return urlunsplit((parsed.scheme, host, parsed.path, query, ""))
+
+
+def _market_codes(source: FeedSource | None) -> list[MarketCode]:
+    if source is None:
+        return []
+    return [cast(MarketCode, market) for market in EDITION_ORDER if market in source.markets]
+
+
+def _poll_source(state: NewsFeedPollState) -> NewsFeedPollSource:
+    source = FEED_SOURCE_BY_KEY.get(state.source_key)
+    hostname = source.hostname if source is not None else urlsplit(state.feed_url).hostname or ""
+    return NewsFeedPollSource(
+        source_key=state.source_key,
+        source_name=(source.display_name or source.hostname) if source is not None else hostname,
+        hostname=hostname,
+        feed_url=_public_feed_url(source.url if source is not None else state.feed_url, source),
+        registered=source is not None,
+        poll_group=source.poll_group if source is not None else None,
+        markets=_market_codes(source),
+        last_attempt_at=state.last_attempt_at,
+        last_success_at=state.last_success_at,
+        last_status=state.last_status,
+        last_count=state.last_count,
+        last_error_code=state.last_error_code,
+        cooldown_until=state.cooldown_until,
+        consecutive_failures=state.consecutive_failures,
+        last_gap_minutes=state.last_gap_minutes,
+        gap_count=state.gap_count,
+        gap_count_since=state.gap_count_since,
+    )
+
+
+@router.get("/collection", response_model=NewsCollectionStatusResponse)
+async def collection_status(_: AdminRead, database: Database) -> NewsCollectionStatusResponse:
+    """Current overnight polling state of every feed the collector has polled."""
+    states = list(await database.scalars(select(NewsFeedPollState)))
+    # Registry order groups feeds by region; feeds removed from the registry
+    # follow by URL.
+    states.sort(
+        key=lambda state: (
+            FEED_SOURCE_ORDER.get(state.source_key, len(FEED_SOURCE_ORDER)),
+            state.feed_url,
+        )
+    )
+    return NewsCollectionStatusResponse(
+        as_of=datetime.now(UTC), sources=[_poll_source(state) for state in states]
     )
 
 

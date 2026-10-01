@@ -1,3 +1,4 @@
+import hashlib
 import os
 import uuid
 from collections.abc import AsyncIterator
@@ -25,10 +26,12 @@ from daily_insights_api.modules.identity.api import (
 from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.identity.session_models import Session
 from daily_insights_api.modules.news.editions import GLOBAL_SPEC
+from daily_insights_api.modules.news.feeds import FEED_SOURCES
 from daily_insights_api.modules.news.models import (
     NewsCandidate,
     NewsCandidateBatch,
     NewsEdition,
+    NewsFeedPollState,
     NewsItem,
     NewsPresentation,
 )
@@ -138,7 +141,10 @@ async def _admin(factory: async_sessionmaker[AsyncSession]) -> User:
 
 
 def _client(
-    factory: async_sessionmaker[AsyncSession], user: User, *, enabled: bool = True
+    factory: async_sessionmaker[AsyncSession],
+    user: User | None,
+    *,
+    enabled: bool = True,
 ) -> AsyncClient:
     app = create_app(
         Settings(
@@ -151,10 +157,13 @@ def _client(
     )
 
     async def authenticated() -> AuthContext:
+        assert user is not None
         return AuthContext(user=user, session=Session(), organization_id=None)
 
-    app.dependency_overrides[require_password_changed] = authenticated
-    app.dependency_overrides[require_csrf] = authenticated
+    # Without a user the real session dependencies answer 401.
+    if user is not None:
+        app.dependency_overrides[require_password_changed] = authenticated
+        app.dependency_overrides[require_csrf] = authenticated
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
@@ -284,6 +293,7 @@ async def test_admin_editions_list_every_market_with_counts_and_ordered_candidat
         "prepared": 1,
         "dropped": 2,
         "published": 2,
+        "screened_out": 0,
         "hidden": 0,
     }
     assert [item["id"] for item in entry["items"]] == [str(item_id) for item_id in item_ids]
@@ -302,9 +312,177 @@ async def test_admin_editions_list_every_market_with_counts_and_ordered_candidat
             "edition": None,
             "items": [],
             "candidates": [],
+            "pool": {"live": 0, "collected": 0, "both": 0, "screen_selected": 0},
         }
     assert empty.json()["editions"][0]["edition"] is None
     assert invalid.status_code == 422
+
+
+async def test_admin_editions_expose_discovery_source_and_headline_screen(
+    news_admin_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(news_admin_database)
+    today = datetime.now(TAIPEI).date()
+    async with news_admin_database.begin() as database:
+        edition = NewsEdition(
+            edition_date=today,
+            market_code="tw_equity",
+            revision=1,
+            input_digest="e" * 64,
+            derivation_version="test",
+            prompt_version="screen-v1:test+selection-v7:test",
+            status="partial",
+        )
+        database.add(edition)
+        await database.flush()
+        candidates = [
+            _candidate(
+                edition.id,
+                1,
+                stage="reviewed",
+                discovered_via="both",
+                screen_rank=2,
+                screen_score=4,
+            ),
+            _candidate(edition.id, 2, stage="screened_out", discovered_via="collected"),
+            _candidate(
+                edition.id,
+                3,
+                stage="unused",
+                discovered_via="collected",
+                screen_rank=5,
+                screen_score=3,
+            ),
+            _candidate(
+                edition.id,
+                4,
+                stage="reviewed",
+                discovered_via="live",
+                screen_rank=1,
+                screen_score=5,
+            ),
+            # Written before migration 0031: no discovery source, never screened.
+            _candidate(edition.id, 5, stage="unused"),
+            _candidate(edition.id, 6, stage="unused", discovered_via="live", screen_rank=3),
+        ]
+        database.add_all(candidates)
+        await database.flush()
+        ids = [str(candidate.id) for candidate in candidates]
+    async with _client(news_admin_database, user) as client:
+        response = await client.get(f"/api/admin/news/editions?date={today.isoformat()}")
+
+    assert response.status_code == 200
+    entry = next(
+        entry for entry in response.json()["editions"] if entry["market_code"] == "tw_equity"
+    )
+    assert entry["edition"]["counts"]["screened_out"] == 1
+    assert entry["edition"]["counts"]["unused"] == 3
+    assert entry["pool"] == {"live": 2, "collected": 2, "both": 1, "screen_selected": 4}
+    # Reviewed and other unselected stages follow the screen rank, unscreened
+    # candidates trail their group, and screened-out headlines come last.
+    assert [candidate["id"] for candidate in entry["candidates"]] == [
+        ids[index] for index in (3, 0, 5, 2, 4, 1)
+    ]
+    first = entry["candidates"][0]
+    assert (first["discovered_via"], first["screen_rank"], first["screen_score"]) == (
+        "live",
+        1,
+        5,
+    )
+    legacy = entry["candidates"][4]
+    assert (legacy["discovered_via"], legacy["screen_rank"], legacy["screen_score"]) == (
+        None,
+        None,
+        None,
+    )
+    assert entry["candidates"][5]["stage"] == "screened_out"
+
+
+async def test_collection_status_lists_poll_states_without_credentials(
+    news_admin_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user = await _admin(news_admin_database)
+    member = User(
+        email="member@example.com",
+        display_name="Member",
+        password_hash="unused",
+        must_change_password=False,
+        system_role=SystemRole.ORG_MEMBER,
+        status=UserStatus.ACTIVE,
+    )
+    async with _client(news_admin_database, user) as client:
+        empty = await client.get("/api/admin/news/collection")
+    async with _client(news_admin_database, member) as client:
+        forbidden = await client.get("/api/admin/news/collection")
+    async with _client(news_admin_database, None) as client:
+        anonymous = await client.get("/api/admin/news/collection")
+    assert empty.status_code == 200 and empty.json()["sources"] == []
+    assert forbidden.status_code == 403
+    assert anonymous.status_code == 401
+
+    guardian = next(source for source in FEED_SOURCES if source.api_key_setting)
+    taiwan = next(source for source in FEED_SOURCES if "tw_equity" in source.markets)
+    night = datetime.now(TAIPEI).date()
+    attempt = datetime(2026, 9, 30, 12, 5, tzinfo=UTC)
+    async with news_admin_database.begin() as database:
+        database.add_all(
+            [
+                # A collector that stored the keyed request URL must not leak it.
+                NewsFeedPollState(
+                    source_key=hashlib.sha256(guardian.url.encode()).hexdigest(),
+                    feed_url=f"{guardian.url}&{guardian.api_key_param}=guardian-secret",
+                    last_attempt_at=attempt,
+                    last_status=429,
+                    last_error_code="rate_limited",
+                    cooldown_until=attempt + timedelta(minutes=15),
+                    consecutive_failures=2,
+                ),
+                NewsFeedPollState(
+                    source_key=hashlib.sha256(taiwan.url.encode()).hexdigest(),
+                    feed_url=taiwan.url,
+                    last_attempt_at=attempt,
+                    last_success_at=attempt,
+                    last_status=200,
+                    last_count=20,
+                    last_gap_minutes=45,
+                    gap_count_since=night,
+                    gap_count=3,
+                ),
+                NewsFeedPollState(
+                    source_key="f" * 64,
+                    feed_url="https://user:hunter2@retired.example/rss.xml?token=retired-secret",
+                    last_attempt_at=attempt,
+                    last_status=None,
+                    last_error_code="removed",
+                ),
+            ]
+        )
+    async with _client(news_admin_database, user) as client:
+        response = await client.get("/api/admin/news/collection")
+
+    assert response.status_code == 200
+    assert "secret" not in response.text and "hunter2" not in response.text
+    body = response.json()
+    assert body["as_of"] is not None
+    sources = {source["hostname"]: source for source in body["sources"]}
+    assert list(sources)[-1] == "retired.example"
+    keyed = sources[guardian.hostname]
+    assert keyed["source_name"] == (guardian.display_name or guardian.hostname)
+    assert keyed["registered"] is True and keyed["poll_group"] == guardian.poll_group
+    assert keyed["feed_url"] == guardian.url
+    assert keyed["last_status"] == 429 and keyed["last_error_code"] == "rate_limited"
+    assert keyed["cooldown_until"] is not None and keyed["consecutive_failures"] == 2
+    assert keyed["last_success_at"] is None and keyed["gap_count"] == 0
+    polled = sources[taiwan.hostname]
+    assert polled["markets"] == [
+        market for market in ("global", "tw_equity", "us_equity") if market in taiwan.markets
+    ]
+    assert polled["last_count"] == 20 and polled["last_gap_minutes"] == 45
+    assert polled["gap_count"] == 3 and polled["gap_count_since"] == night.isoformat()
+    retired = sources["retired.example"]
+    assert retired["registered"] is False and retired["poll_group"] is None
+    assert retired["markets"] == [] and retired["source_name"] == "retired.example"
+    assert retired["feed_url"] == "https://retired.example/rss.xml"
 
 
 async def test_hide_and_unhide_are_idempotent_audited_and_hide_from_readers(

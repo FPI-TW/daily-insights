@@ -25,6 +25,7 @@ const {
   publishCandidates,
   redirectExpired,
   recoveryStatus,
+  collectionStatus,
 } = vi.hoisted(() => ({
   catalog: vi.fn(),
   listNewsRuns: vi.fn(),
@@ -36,6 +37,10 @@ const {
   publishCandidates: vi.fn(),
   redirectExpired: vi.fn().mockResolvedValue(false),
   recoveryStatus: vi.fn().mockResolvedValue({ dependencies: [] }),
+  collectionStatus: vi.fn().mockResolvedValue({
+    as_of: "2026-09-07T00:00:00+00:00",
+    sources: [],
+  }),
 }))
 
 vi.mock("#/lib/admin-members", () => ({
@@ -49,6 +54,7 @@ vi.mock("#/lib/admin-members", () => ({
     unhideNewsItem: unhideItem,
     publishNewsCandidates: publishCandidates,
     newsRecoveryStatus: recoveryStatus,
+    newsCollectionStatus: collectionStatus,
   }),
 }))
 
@@ -103,6 +109,9 @@ function candidate(overrides: Record<string, unknown>) {
     ai_market: "us",
     ai_importance: 4,
     ai_event_key: "fed",
+    discovered_via: "collected",
+    screen_rank: 4,
+    screen_score: 3,
     item_id: null,
     publish_run_id: null,
     publish_requested_at: null,
@@ -128,6 +137,7 @@ const globalEdition = {
       prepared: 0,
       dropped: 1,
       published: 1,
+      screened_out: 6,
       hidden: 0,
     },
   },
@@ -164,6 +174,9 @@ const globalEdition = {
       ai_market: null,
       ai_importance: null,
       ai_event_key: null,
+      discovered_via: "live",
+      screen_rank: 2,
+      screen_score: 4,
     }),
     candidate({
       id: "4c7a2f5a-7d4e-4f73-8b4a-8b2f5c1e3d44",
@@ -173,8 +186,27 @@ const globalEdition = {
       url: "https://www.reuters.com/tsmc",
       ai_rank: 1,
       item_id: itemId,
+      discovered_via: "live",
+      screen_rank: 1,
+      screen_score: 5,
+    }),
+    candidate({
+      id: "5d8b3a6b-8e5f-4a84-9c5b-9c3a6d2f4e55",
+      stage: "screened_out",
+      drop_reason: null,
+      headline: "Celebrity buys yacht",
+      url: "https://www.reuters.com/yacht",
+      ai_rank: null,
+      ai_topic: null,
+      ai_market: null,
+      ai_importance: null,
+      ai_event_key: null,
+      discovered_via: "both",
+      screen_rank: null,
+      screen_score: null,
     }),
   ],
+  pool: { live: 5, collected: 7, both: 2, screen_selected: 9 },
 }
 
 const emptyMarket = (market_code: string) => ({
@@ -182,7 +214,66 @@ const emptyMarket = (market_code: string) => ({
   edition: null,
   items: [],
   candidates: [],
+  pool: { live: 0, collected: 0, both: 0, screen_selected: 0 },
 })
+
+const emptyCollection = { as_of: "2026-09-07T00:00:00+00:00", sources: [] }
+const pollSource = {
+  source_key: "a".repeat(64),
+  source_name: "The Guardian",
+  hostname: "www.theguardian.com",
+  feed_url: "https://content.guardianapis.com/search?section=business",
+  registered: true,
+  poll_group: "normal",
+  markets: ["global", "us_equity"],
+  last_attempt_at: "2026-09-06T22:00:00+00:00",
+  last_success_at: "2026-09-06T20:00:00+00:00",
+  last_status: 429,
+  last_count: 12,
+  last_error_code: "rate_limited",
+  cooldown_until: "2026-09-07T00:15:00+00:00",
+  consecutive_failures: 2,
+  last_gap_minutes: 45,
+  gap_count: 3,
+  gap_count_since: "2026-09-06",
+}
+
+function healthySource(key: string, name: string) {
+  return {
+    ...pollSource,
+    source_key: key.repeat(64),
+    source_name: name,
+    last_success_at: pollSource.last_attempt_at,
+    last_status: 200,
+    last_error_code: null,
+    cooldown_until: null,
+    consecutive_failures: 0,
+    last_gap_minutes: null,
+    gap_count: 0,
+  }
+}
+
+const collectionTitle = "Overnight collection sources"
+
+async function collectionPanel() {
+  const summary = await screen.findByText(collectionTitle, {
+    selector: "summary",
+    exact: false,
+  })
+  const panel = summary.closest("details")
+  expect(panel).not.toBeNull()
+  return panel!
+}
+
+function openPanel(panel: HTMLElement) {
+  fireEvent.click(
+    within(panel).getByText(collectionTitle, {
+      selector: "summary",
+      exact: false,
+    })
+  )
+  expect(panel).toHaveAttribute("open")
+}
 
 const editions = {
   edition_date: "2026-09-07",
@@ -225,6 +316,8 @@ afterEach(() => {
   publishCandidates.mockReset()
   recoveryStatus.mockReset()
   recoveryStatus.mockResolvedValue({ dependencies: [] })
+  collectionStatus.mockReset()
+  collectionStatus.mockResolvedValue(emptyCollection)
   redirectExpired.mockReset()
   redirectExpired.mockResolvedValue(false)
 })
@@ -435,6 +528,239 @@ describe("NewsManagementPage", () => {
     ).toBeDisabled()
   })
 
+  it("marks discovery sources, screen ranks and filters screened-out candidates", async () => {
+    catalog.mockResolvedValue(enabledCatalog)
+    listNewsRuns.mockResolvedValue({ items: [] })
+    listEditions.mockResolvedValue(editions)
+    renderPage()
+
+    await screen.findByRole("link", { name: "Fed holds rates" })
+    const pool = screen.getByRole("list", { name: "Candidate sources" })
+    // Same summary box and labelled chip row as the stage counts.
+    const summaryBox = pool.parentElement?.parentElement
+    expect(summaryBox).toContainElement(
+      screen.getByRole("list", { name: "Candidate counts" })
+    )
+    expect(
+      within(summaryBox!).getByText("Candidate sources", { selector: "span" })
+    ).toBeVisible()
+    expect(pool).toHaveTextContent("Overnight 7")
+    expect(pool).toHaveTextContent("08:00 live 5")
+    expect(pool).toHaveTextContent("Live and overnight 2")
+    expect(pool).toHaveTextContent("Shortlisted 9")
+    expect(
+      screen.getByRole("list", { name: "Candidate counts" })
+    ).toHaveTextContent("Screened out 6")
+    const table = screen.getByRole("table")
+    expect(
+      within(table).getByRole("columnheader", { name: "Screen rank / score" })
+    ).toBeInTheDocument()
+    expect(
+      within(table).getByLabelText("Headline screen rank 4, score 3")
+    ).toHaveTextContent("#4 · 3/5")
+    const fedRow = within(table)
+      .getByRole("link", { name: "Fed holds rates" })
+      .closest("tr")
+    expect(fedRow).not.toBeNull()
+    expect(within(fedRow!).getByText("Overnight")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Screened out" }))
+    expect(
+      screen.getByRole("link", { name: "Celebrity buys yacht" })
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Fed holds rates" })).toBeNull()
+    expect(
+      screen.getByRole("checkbox", { name: "Celebrity buys yacht" })
+    ).toBeEnabled()
+  })
+
+  it("keeps the collection status collapsed with a loading summary before its first response", async () => {
+    catalog.mockResolvedValue(enabledCatalog)
+    listNewsRuns.mockResolvedValue({ items: [] })
+    listEditions.mockResolvedValue(editions)
+    collectionStatus.mockReturnValue(new Promise(() => {}))
+    renderPage()
+
+    const panel = await collectionPanel()
+    expect(panel).not.toHaveAttribute("open")
+    const summary = within(panel).getByText(collectionTitle, {
+      selector: "summary",
+      exact: false,
+    })
+    expect(within(summary).getByRole("status")).toHaveTextContent(
+      "Loading feed polling status."
+    )
+    expect(within(panel).queryByRole("alert")).toBeNull()
+    expect(
+      within(panel).queryByText("No polls recorded yet", { exact: false })
+    ).toBeNull()
+  })
+
+  it("summarises an empty collection status as current state", async () => {
+    catalog.mockResolvedValue(enabledCatalog)
+    listNewsRuns.mockResolvedValue({ items: [] })
+    listEditions.mockResolvedValue(editions)
+    renderPage()
+
+    const panel = await collectionPanel()
+    expect(within(panel).getByText("Current status")).toBeInTheDocument()
+    expect(await within(panel).findByText("No polls yet")).toBeInTheDocument()
+    openPanel(panel)
+    expect(
+      within(panel).getByText("No polls recorded yet", { exact: false })
+    ).toBeInTheDocument()
+    expect(within(panel).queryByRole("table")).toBeNull()
+  })
+
+  it("offers a reload when the collection status fails", async () => {
+    catalog.mockResolvedValue(enabledCatalog)
+    listNewsRuns.mockResolvedValue({ items: [] })
+    listEditions.mockResolvedValue(editions)
+    collectionStatus.mockRejectedValueOnce(
+      new ApiError(500, "collection-request", "failed")
+    )
+    renderPage()
+
+    const panel = await collectionPanel()
+    expect(await within(panel).findByText("Unable to load")).toBeInTheDocument()
+    openPanel(panel)
+    expect(within(panel).getByRole("alert")).toHaveTextContent(
+      "Request ID: collection-request"
+    )
+    fireEvent.click(within(panel).getByRole("button", { name: "Reload" }))
+    expect(await within(panel).findByText("No polls yet")).toBeInTheDocument()
+    await waitFor(() =>
+      expect(redirectExpired).toHaveBeenCalledWith(expect.any(ApiError))
+    )
+  })
+
+  it("summarises feed health and lists feeds needing attention first", async () => {
+    catalog.mockResolvedValue(enabledCatalog)
+    listNewsRuns.mockResolvedValue({ items: [] })
+    listEditions.mockResolvedValue(editions)
+    collectionStatus.mockResolvedValue({
+      ...emptyCollection,
+      sources: [
+        healthySource("b", "Bloomberg"),
+        healthySource("c", "Anue"),
+        // Cooling down at as_of.
+        pollSource,
+        {
+          ...healthySource("d", "Zeta Wire"),
+          last_success_at: "2026-09-06T20:00:00+00:00",
+          last_status: 503,
+          last_error_code: "feed_http_503",
+          consecutive_failures: 1,
+        },
+        { ...healthySource("e", "Gap Daily"), gap_count: 2 },
+        {
+          ...healthySource("f", "retired.example"),
+          registered: false,
+          poll_group: null,
+          markets: [],
+          last_attempt_at: null,
+          last_success_at: null,
+          last_status: null,
+          last_count: null,
+        },
+      ],
+    })
+    renderPage()
+
+    const panel = await collectionPanel()
+    const summary = within(panel).getByText(collectionTitle, {
+      selector: "summary",
+      exact: false,
+    })
+    await within(summary).findByText("Sources 6")
+    expect(summary).toHaveTextContent("OK 3")
+    expect(summary).toHaveTextContent("Cooling / failing 2")
+    expect(summary).toHaveTextContent("Not polled yet 1")
+    expect(summary).toHaveTextContent("Gaps tonight 5")
+    expect(within(summary).getByText("Cooling / failing 2")).toHaveClass(
+      "text-market-caution"
+    )
+    expect(within(summary).getByText("OK 3")).not.toHaveClass(
+      "text-market-caution"
+    )
+
+    openPanel(panel)
+    expect(
+      within(panel)
+        .getAllByRole("rowheader")
+        .map(header => header.querySelector("span")?.textContent)
+    ).toEqual([
+      "Zeta Wire",
+      "The Guardian",
+      "Gap Daily",
+      "retired.example",
+      "Anue",
+      "Bloomberg",
+    ])
+  })
+
+  it("lists each feed's current polling state", async () => {
+    catalog.mockResolvedValue(enabledCatalog)
+    listNewsRuns.mockResolvedValue({ items: [] })
+    listEditions.mockResolvedValue(editions)
+    collectionStatus.mockResolvedValue({
+      ...emptyCollection,
+      sources: [
+        pollSource,
+        {
+          ...healthySource("f", "retired.example"),
+          registered: false,
+          poll_group: null,
+          markets: [],
+          last_attempt_at: null,
+          last_success_at: null,
+          last_status: null,
+          last_count: null,
+          gap_count_since: null,
+        },
+      ],
+    })
+    renderPage()
+
+    const panel = await collectionPanel()
+    openPanel(panel)
+    const guardian = (
+      await within(panel).findByRole("rowheader", { name: /The Guardian/ })
+    ).closest("tr")
+    expect(guardian).not.toBeNull()
+    const row = within(guardian!)
+    const url = row.getByText(
+      "https://content.guardianapis.com/search?section=business"
+    )
+    // One truncated line; the full masked URL stays available on hover.
+    expect(url).toHaveClass("truncate")
+    expect(url).toHaveAttribute("title", url.textContent)
+    expect(row.getByText("Normal")).toBeInTheDocument()
+    expect(row.getByText("Global digest")).toBeInTheDocument()
+    expect(row.getByText("Cooling down")).toBeInTheDocument()
+    expect(row.getByText("HTTP 429")).toBeInTheDocument()
+    // Timestamps sit in their own no-wrap span inside the sentence.
+    expect(row.getByText("2026-09-07 06:00").parentElement).toHaveTextContent(
+      "Last attempt: 2026-09-07 06:00"
+    )
+    expect(row.getByText("2026-09-07 04:00")).toBeInTheDocument()
+    expect(row.getByText("rate_limited")).toBeInTheDocument()
+    expect(row.getByText("Consecutive failures: 2")).toBeInTheDocument()
+    expect(row.getByText("12")).toHaveClass("@lg:text-right")
+    expect(row.getByText("3")).toBeInTheDocument()
+    expect(row.getByText("2026-09-06").parentElement).toHaveTextContent(
+      "For the 2026-09-06 edition"
+    )
+    expect(row.getByText("Latest gap 45 min")).toBeInTheDocument()
+    const retired = within(
+      within(panel)
+        .getByRole("rowheader", { name: /retired\.example/ })
+        .closest("tr")!
+    )
+    expect(retired.getByText("No longer registered")).toBeInTheDocument()
+    expect(retired.getByText("Not polled yet")).toBeInTheDocument()
+  })
+
   it("hides a published item with the CSRF token and refreshes the edition", async () => {
     catalog.mockResolvedValue(enabledCatalog)
     listNewsRuns.mockResolvedValue({ items: [] })
@@ -488,6 +814,7 @@ describe("NewsManagementPage", () => {
           edition: null,
           items: [],
           candidates: [candidate({ stage: "reviewed", drop_reason: null })],
+          pool: { live: 0, collected: 1, both: 0, screen_selected: 1 },
         },
         emptyMarket("tw_equity"),
         emptyMarket("us_equity"),

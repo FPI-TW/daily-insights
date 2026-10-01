@@ -165,6 +165,8 @@ def classify_failure(
     elif is_model and model_code in {
         "provider_invalid_json",
         "model_output_invalid",
+        # Headline screening shares the selection stage's model failure policy.
+        "screen_schema_invalid",
         "selection_schema_invalid",
         "selection_invalid_json",
         "selection_invalid_candidate",

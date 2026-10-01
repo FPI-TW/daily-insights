@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -127,7 +128,9 @@ CANDIDATE_STAGES = (
     "prepared",
     "dropped",
     "published",
+    "screened_out",
 )
+CANDIDATE_DISCOVERY_SOURCES = ("live", "collected", "both")
 CANDIDATE_DROP_REASONS = (
     "off_market",
     "policy",
@@ -150,8 +153,16 @@ class NewsCandidate(UUIDPrimaryKeyMixin, Base):
     __table_args__ = (
         CheckConstraint(
             "stage IN "
-            "('discovered','fetch_failed','unused','reviewed','prepared','dropped','published')",
+            "('discovered','fetch_failed','unused','reviewed','prepared','dropped','published',"
+            "'screened_out')",
             name="stage_valid",
+        ),
+        CheckConstraint(
+            "discovered_via IS NULL OR discovered_via IN ('live','collected','both')",
+            name="discovered_via_valid",
+        ),
+        CheckConstraint(
+            "screen_score IS NULL OR screen_score BETWEEN 1 AND 5", name="screen_score_range"
         ),
         CheckConstraint(
             "drop_reason IS NULL OR drop_reason IN "
@@ -195,6 +206,13 @@ class NewsCandidate(UUIDPrimaryKeyMixin, Base):
     ai_market: Mapped[str | None] = mapped_column(String(20))
     ai_importance: Mapped[int | None] = mapped_column(Integer)
     ai_event_key: Mapped[str | None] = mapped_column(String(80))
+    # Whether the candidate came from the 08:00 live discovery, the overnight
+    # collection pool, or both; null on rows written before migration 0031.
+    discovered_via: Mapped[str | None] = mapped_column(String(16))
+    # Headline screening output: 1-based rank in the shortlist and the model's
+    # coarse 1-5 score; both stay null when screening did not run.
+    screen_rank: Mapped[int | None] = mapped_column(Integer)
+    screen_score: Mapped[int | None] = mapped_column(SmallInteger)
     item_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("news_items.id", ondelete="SET NULL")
     )
@@ -400,3 +418,70 @@ class NewsDependencyState(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
+
+
+class NewsCollectedCandidate(Base):
+    """Overnight feed metadata awaiting the 08:00 refresh; never article bodies.
+
+    ``candidate_id`` is the same URL SHA-256 as ``NewsCandidate.candidate_id``.
+    A repeat sighting only advances ``last_collected_at`` and merges
+    ``markets``; the first ``seen_at`` is kept so an old story cannot regain
+    eligibility with a newer timestamp.
+    """
+
+    __tablename__ = "news_collected_candidates"
+    __table_args__ = (
+        CheckConstraint("char_length(candidate_id) = 64", name="candidate_id_sha256"),
+        CheckConstraint("char_length(source_key) = 64", name="source_key_sha256"),
+        CheckConstraint("jsonb_typeof(markets) = 'array'", name="markets_array"),
+    )
+
+    candidate_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    hostname: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    headline: Mapped[str] = mapped_column(Text, nullable=False)
+    seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Edition market codes (``global``, ``tw_equity``, ``us_equity``) the
+    # feed was registered for.
+    markets: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    # SHA-256 hex of the feed URL; joins to ``NewsFeedPollState.source_key``.
+    source_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    first_collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    last_collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+
+
+class NewsFeedPollState(Base):
+    """Current overnight polling state per feed; not a history of polls."""
+
+    __tablename__ = "news_feed_poll_states"
+    __table_args__ = (
+        CheckConstraint("char_length(source_key) = 64", name="source_key_sha256"),
+        CheckConstraint("consecutive_failures >= 0", name="consecutive_failures_nonnegative"),
+        CheckConstraint("gap_count >= 0", name="gap_count_nonnegative"),
+    )
+
+    # SHA-256 hex of ``feed_url``.
+    source_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    feed_url: Mapped[str] = mapped_column(Text, nullable=False)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # HTTP status of the last response (304 counts as a successful poll).
+    last_status: Mapped[int | None] = mapped_column(Integer)
+    last_count: Mapped[int | None] = mapped_column(Integer)
+    last_error_code: Mapped[str | None] = mapped_column(String(100))
+    etag: Mapped[str | None] = mapped_column(Text)
+    last_modified: Mapped[str | None] = mapped_column(Text)
+    cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    last_gap_minutes: Mapped[int | None] = mapped_column(Integer)
+    # Nightly gap counter: ``gap_count`` counts gaps for the collection date
+    # in ``gap_count_since`` and restarts when a new collection night begins.
+    gap_count_since: Mapped[date | None] = mapped_column(Date)
+    gap_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")

@@ -83,6 +83,28 @@ def test_daily_news_scheduler_requires_only_database_and_feature_flag() -> None:
         DailyNewsSchedulerSettings(environment="production", database_url=None)
 
 
+def test_overnight_news_flags_default_off_and_read_prefixed_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DAILY_INSIGHTS_NEWS_COLLECTION_ENABLED", raising=False)
+    monkeypatch.delenv("DAILY_INSIGHTS_NEWS_HEADLINE_SCREEN_ENABLED", raising=False)
+    for settings_class in (Settings, DailyNewsSchedulerSettings):
+        defaults = settings_class(environment="test", _env_file=None)
+        assert defaults.news_collection_enabled is False
+        assert defaults.news_headline_screen_enabled is False
+
+    monkeypatch.setenv("DAILY_INSIGHTS_NEWS_COLLECTION_ENABLED", "true")
+    monkeypatch.setenv("DAILY_INSIGHTS_NEWS_HEADLINE_SCREEN_ENABLED", "false")
+    for settings_class in (Settings, DailyNewsSchedulerSettings):
+        configured = settings_class(environment="test", _env_file=None)
+        assert configured.news_collection_enabled is True
+        assert configured.news_headline_screen_enabled is False
+
+    monkeypatch.setenv("DAILY_INSIGHTS_NEWS_HEADLINE_SCREEN_ENABLED", "maybe")
+    with pytest.raises(ValidationError, match="news_headline_screen_enabled"):
+        Settings(environment="test", _env_file=None)
+
+
 def test_daily_news_uses_news_specific_model_key() -> None:
     settings = Settings.model_validate(
         production_settings(

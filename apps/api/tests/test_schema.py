@@ -41,6 +41,8 @@ EXPECTED_TABLES = {
     "news_candidate_batches",
     "news_candidate_publications",
     "news_checkpoints",
+    "news_collected_candidates",
+    "news_feed_poll_states",
     "news_workflows",
     "news_dependency_states",
     "news_editions",
