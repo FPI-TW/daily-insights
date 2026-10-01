@@ -20,7 +20,6 @@ type LocaleDestination =
   | "admin-audio"
   | "admin-members"
   | "admin-data-management"
-  | "admin-news-management"
   | "admin-newsroom"
   | "admin-newsroom-sources"
   | "admin-analyst-viewpoints"
@@ -36,7 +35,6 @@ const destinations = {
   "admin-audio": "/{-$locale}/admin/audio",
   "admin-members": "/{-$locale}/admin/members",
   "admin-data-management": "/{-$locale}/admin/data-management",
-  "admin-news-management": "/{-$locale}/admin/news-management",
   "admin-newsroom": "/{-$locale}/admin/newsroom",
   "admin-newsroom-sources": "/{-$locale}/admin/newsroom/sources",
   "admin-analyst-viewpoints": "/{-$locale}/admin/analyst-viewpoints",

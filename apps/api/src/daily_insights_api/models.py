@@ -21,16 +21,6 @@ from daily_insights_api.modules.model_runtime.models import (
     GenerationRecord,
     ModelConfiguration,
 )
-from daily_insights_api.modules.news.models import (
-    NewsCandidate,
-    NewsCandidateBatch,
-    NewsCandidatePublication,
-    NewsEdition,
-    NewsGenerationAudit,
-    NewsItem,
-    NewsPresentation,
-    PreparedNewsItem,
-)
 from daily_insights_api.modules.newsroom.models import (
     NewsroomArticle,
     NewsroomEdition,
@@ -96,13 +86,6 @@ __all__ = [
     "Membership",
     "Message",
     "ModelConfiguration",
-    "NewsCandidate",
-    "NewsCandidateBatch",
-    "NewsCandidatePublication",
-    "NewsEdition",
-    "NewsGenerationAudit",
-    "NewsItem",
-    "NewsPresentation",
     "NewsroomArticle",
     "NewsroomEditLog",
     "NewsroomEdition",
@@ -117,7 +100,6 @@ __all__ = [
     "PodcastEpisodeTranslation",
     "PodcastUploadBatch",
     "PodcastUploadSession",
-    "PreparedNewsItem",
     "ProjectionInputFreeze",
     "ProjectionInputObservation",
     "PublicationFunctionAttempt",

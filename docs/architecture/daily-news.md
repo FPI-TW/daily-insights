@@ -1,443 +1,381 @@
-# 每日重大新聞（Daily news）
+# 重點新聞（Newsroom）
 
-狀態：API、Provider Function／Job／Routine、資料表與客戶端 UI 已實作並有測試；
-正式環境以 `DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 旗標 gating，第一次部署時保持
-關閉，經本地 `--once` 驗證後再啟用。實作與部署接線的細節見
-[專案審查基準](../reviews/2026-09-02-project-review.md) 的 D-02、B-05 至 B-09。
+狀態：收稿、初篩與事件分群、08:00 組稿、深度分析、發布、翻譯、讀者 API 與後台審核
+主控台均已實作並有測試。整條管線由 `DAILY_INSIGHTS_NEWSROOM_ENABLED` 旗標控制，
+預設關閉；關閉時 `newsroom-worker` 只維持心跳，08:00 組稿 function 以 `no_change`
+略過。決策來源與跨模組契約見
+[重點新聞 Newsroom 管線重構規格](../specs/newsroom-pipeline.md)；本文件描述系統
+目前的實際行為。
 
-本功能在路線圖既有階段之外交付，不影響 Podcast 試點與三市場晨報的驗收條件。
-它使用 DeepSeek 作為選題與摘要模型，但不是 Phase 5 對話功能的一部分；模型設定
-沿用相同的 `DAILY_INSIGHTS_MODEL_*` 變數。
+舊的每日新聞管線（`modules/news`、`news_*` 資料表、`news_*` orchestration functions
+與「新聞管理」後台頁）已在切換時移除，歷史版次已搬移到 `newsroom_*` 資料表，見
+[舊版次資料搬移](#舊版次資料搬移)。
 
-## 範圍
+## 產品範圍
 
-- 每日為全球、台股與美股各產生一版重點新聞，附三語系標題與摘要；五星新聞不設發布上限、四星發布 5～10 則、一至三星合計至多 5 則。
-- 只從白名單新聞來源擷取正文；候選一律來自各來源自己的 RSS、Atom、news sitemap
-  或 JSON 清單（feed 註冊表是唯一的探索路徑，白名單也由註冊表推導）。文章正文不
-  落地，只保存來源中繼資料、摘要與 SHA-256 內容摘要。
-- 顯示在客戶報告首頁的清單下方；所有已驗證組織共用同一版，不受市場可見性政策
-  影響。
-- 後台「新聞管理」頁提供人工覆核：可看到每個版本探索到的全部候選與 AI 的處置結果，
-  可隱藏 AI 選入但不相關的新聞，也可把 AI 未選的候選人工上架（見
-  [後台候選監控與人工上架](#後台候選監控與人工上架)）。客戶端仍不提供篩選。
+- 每天（含週末、假日）為 `global`、`tw_equity`、`us_equity` 三個市場各產生一版精選
+  新聞。選題單位是「事件」：同一事件的多家報導合併成一則，報導家數是重要性訊號。
+- 每則上架內容：標題、2–3 句只寫事實的摘要（綜合多來源）、各市場 1–2 句「為何重要」、
+  相關標的（連到站內儀表板）與來源列表。不做多空或情緒判斷，讀者端不提供篩選。
+- 同一事件可同時出現在多個市場版：標題、摘要、來源與相關標的共用，「為何重要」依
+  市場各寫一段。
+- AI 在 08:00 產生草稿；管理員可在 09:00 前改字、換稿、排序與核准。09:00 仍未核准的
+  草稿自動發布，發布後仍可編修或隱藏。
+- 全文只存在 Postgres 供分析使用，30 天後清除，永不提供給讀者。
+- 繁體中文是唯一可編輯的語言；簡體中文以 OpenCC `tw2sp` 同步轉換，英文於發布後由
+  LLM 非同步翻譯，未完成時英文頁不顯示該則。
 
-## 流程
+## 元件與資料流
 
 ```mermaid
-flowchart LR
-    S["orchestration-dispatcher<br/>08:00 Asia/Taipei"] --> R["daily_market_update_v1<br/>RoutineRun"]
-    R --> J["internal_services_daily_update<br/>JobRun"]
-    J --> G["news_global_refresh"]
-    J --> T["news_tw_equity_refresh"]
-    J --> U["news_us_equity_refresh"]
-    G --> P["news_publish"]
-    T --> P
-    U --> P
-    M["後台新聞管理頁<br/>重新抓取 / 候選人工上架"] --> MJ["manual news JobRun"]
-    MJ --> W["orchestration-worker"]
-    J --> W
-    W --> F["feed 註冊表 + 安全正文擷取<br/>DeepSeek 選題、繁中摘要與翻譯"]
-    W --> DB[("PostgreSQL<br/>news_* + orchestration tables")]
-    LR["/reports loader<br/>Promise.allSettled"] --> A["GET /api/news/latest"]
-    A --> DB
-    LR --> UI["本日重大新聞 UI"]
+flowchart TB
+    SRC[("newsroom_sources<br/>後台管理")] --> POLL["newsroom-worker<br/>每分鐘輪詢到期來源"]
+    POLL --> ART[("newsroom_articles")]
+    ART --> FETCH["fetch：全文抓取＋品質檢查"]
+    ART --> EMB["embed：標題＋摘要 embedding"]
+    EMB --> TRI["triage：DeepSeek 初篩<br/>市場粗分、主題、事件歸屬"]
+    FETCH -. 全文有定論後才初篩 .-> TRI
+    TRI --> EVT[("newsroom_events<br/>單一版次窗")]
+    DISP["orchestration-dispatcher<br/>08:00 RoutineRun"] --> JOB["newsroom_daily_assemble<br/>orchestration-worker"]
+    JOB --> ASM["newsroom_assemble：等待初篩、粗分、<br/>精選星等、套配額"]
+    EVT --> ASM
+    ASM --> ED[("newsroom_editions（draft）<br/>newsroom_edition_items")]
+    ED --> ANA["analysis／why：深度分析<br/>事實摘要＋各市場為何重要"]
+    ANA --> ED
+    ADMIN["/admin/newsroom<br/>審核主控台"] --> ED
+    ED --> PUB["09:00 自動發布<br/>12:00 停止補上"]
+    PUB --> EN["translate：英文翻譯"]
+    PUB --> API["GET /api/newsroom/editions/latest"]
+    API --> UI["/reports 與市場報告頁"]
 ```
 
-執行順序：
+| 程序                   | 角色（`DAILY_INSIGHTS_RUNTIME_ROLE`） | 在新聞管線中的工作                                                          |
+| ---------------------- | ------------------------------------- | --------------------------------------------------------------------------- |
+| `newsroom-worker`      | `newsroom-worker`                     | 來源輪詢、全文、embedding、初篩、分析、為何重要、翻譯、發布與清除的常駐迴圈 |
+| `orchestration-worker` | `orchestration-worker`                | 執行 08:00 routine 中的 `newsroom_assemble` function（組稿）                |
+| `api`                  | `api`                                 | 讀者 API 與後台 API；只改資料列狀態，不呼叫 LLM                             |
 
-1. 統一 dispatcher 於台北時間每日 08:00（含週末、假日）建立唯一的
-   `daily_market_update_v1` RoutineRun。`internal_services_daily_update` 先執行全球、
-   台股與美股三個 refresh functions；三者都取得 terminal 結果後才執行
-   `news_publish`。Refresh 只準備候選與 workflow 成果，不負責發布。
-2. Worker 依結構化失敗分類決定恢復，與新聞篇數、edition `partial` 狀態分離。
-   暫時故障每 30 分鐘重試缺失 scopes，並遵守更長的 `Retry-After`。
-   任一市場 refresh 因系統性錯誤進入 `retry_wait` 時，同一 JobRun 的其他市場暫停
-   claim，直到原市場恢復成功；若錯誤為不可重試的 block／attention，尚未執行的市場
-   會以相同安全錯誤代碼終止。單篇摘要／翻譯驗證耗盡形成的 `partial` 或
-   `unavailable` 不啟動此跨市場閘門。
-   completion、ownership 驗證與下一筆 retry 寫入在同一交易完成。`next_attempt_at`
-   未到不得 claim；10:00:00 起不再開始新的自動外部 attempt，已送出的單次請求可完成
-   保存。Terminal-dependent function `news_publish` 不呼叫外部 provider，會在
-   dependencies terminal
-   後執行，即使跨過 soft deadline 也不讓 DAG 永久等待。市場／日期鎖、租約與
-   checkpoint 支援重啟續跑：只重抓失敗 feed，重新
-   取得必要原文，重用符合指紋的選題、繁中摘要與已驗證翻譯，不再以 edition 是否存在
-   判斷可跳過。模型設定、功能停用或金鑰缺失／placeholder 屬共享 block，安全錯誤碼為
-   `news_model_configuration_missing`；作業以 `failed`／`outcome=interrupted` 結束，停止尚未
-   執行的市場，不合成三市場 `unavailable` 結果。相容的 DataManagementRun 回傳
-   `outcomes={}`，並只在 `news` 保存已進入的首個市場失敗紀錄。`news_recovery_required`
-   僅代表沒有系統性例外、但正常 workflow 結算後仍有未完成項目，不得用來取代上述設定
-   錯誤碼。
-   詳細分類、操作與限制見 [新聞恢復操作手冊](../runbooks/news-recovery.md)。
-3. `discover_feed_candidates` 依序讀取標記給該市場、且文章主機在白名單內的 feed，
-   只保留符合各來源 `link_pattern` 的連結，並以 URL 與標題去重；任一 feed 失敗只
-   影響該來源，事件為 `news.feed.failed`。需要金鑰或聯絡信箱的來源在設定缺漏時發
-   `news.feed.skipped` 並略過。標記 `language_filter` 的新聞稿 feed 以 `langdetect`
-   丟棄中、英、日、韓以外的稿件。
-4. 每個版本在正文擷取前，先以該市場 `EditionSpec.headline_impact_patterns` 定義的多組
-   標題訊號調整送審優先序。全球版關注央行、總經、主權債、能源、地緣政治與主要指數；
-   台股版關注加權指數、上市櫃權值股、半導體供應鏈、財報／訂單、法人籌碼與台灣監管；
-   美股版關注主要指數、聯準會與美國數據、美債、美元、權值股、財報與監管。這層讓同一
-   來源裡較早但更具本市場影響力的候選優先，只決定有限擷取與提示預算涵蓋哪些文章，不
-   直接評星或發布。新增市場時必須在版本規格提供自己的訊號，不需修改管線。其後再排
-   feed 已帶全文者（不需擷取）與發佈時間。每個來源最多 `max_discovery_per_source` 筆（全球
-   5、台股與美股 10），總數上限全球 80 筆、台股與美股 100 筆。正文擷取後，各版候選
-   也以自己的相同訊號排序再套用每來源與總數上限，避免重大但稍早發布的事件在任一層被
-   截斷。
-5. 每筆候選以 SSRF 安全的 client 擷取正文：只允許白名單主機的 443 連接埠、DNS
-   解析結果必須全部為公網 IP 且連線固定在該 IP、redirect 逐跳重新驗證、遵守
-   `robots.txt`、限制位元組數與內容型別，不帶 cookie 也不讀環境代理設定。feed 已
-   帶全文（`provides_full_text`）的候選直接以 feed 內文組成擷取結果，不再請求文章頁。
-6. 統一編排的模型流程有三個嚴格階段：`選稿 → 繁中摘要 → 翻譯`。不同階段必須串行，
-   同一階段才可並行。選稿先做「整池篩選」：可用候選池依每輪上限（全球 20、台股與美股
-   30）切成最多兩批，依序送 DeepSeek 以 JSON mode 評分並排序，第二批會附上第一批已選的
-   事件；即使第一批已足以填滿版本，第二批仍會被審閱，因為五星新聞可能就在其中。若仍有
-   未回傳候選且尚有第三次額度，第三次會在任何摘要開始前作為備選選稿。所有選稿完成後，
-   才以最多六個並行呼叫產生各篇 `zh-hant` 摘要；全部繁中摘要完成後，才以相同上限並行
-   執行所有文章與 `zh-hans`、`en` 語系的翻譯。三語全部驗證通過才可發布。
+`newsroom-worker` 由 `python -m daily_insights_api.scripts.run_newsroom_worker` 啟動，
+本機與正式環境的 Compose 都會預設啟動它。旗標關閉時它不連資料庫，只每隔
+`DAILY_INSIGHTS_NEWSROOM_WORKER_POLL_SECONDS` 更新 `/tmp/newsroom-worker-heartbeat`；
+開啟時才建立 provider client 與各階段迴圈。runtime role 不是 `newsroom-worker` 時
+直接拒絕啟動。
 
-   合併各輪選稿時只依候選 ID 去重，不預先套用事件、網域或星等發布上限；同一事件的第二
-   則報導會保留到內容生成完成。所有語系成功後才依重要性排序、以 `event_key` 去重並套用
-   最終來源與多樣性政策，因此首選報導摘要或翻譯失敗時，已完成的替代報導仍可遞補。整池
-   篩選讓候選池跨兩個提示視窗的版本多一次選題呼叫，第三輪備選則以額外生成成本換取嚴格
-   階段屏障下的失敗遞補能力。重要性採絕對尺度，且由各版
-   `SelectionPolicy.importance_guidance` 定義（5 為對本版市場有立即且廣泛影響的事件、
-   4 為主要產業或多數投資人重要、3 為單一公司或窄產業的重要事件、2 為次要、1 為瑣碎），
-   prompt 明確要求不得為了填滿名額抬高評分。全球版會先辨識
-   當日各條獨立宏觀主線，把央行、數據、主權債操作、能源／軍事／貿易衝擊等原始催化劑
-   排在市場反應之前；沒有新宏觀發展的純價格走勢稿，以及不改變全球成長、通膨、利率、
-   匯率、主權債、能源供給或貿易條件的企業交易、產品、支付科技與產業題材，直接不通過
-   全球版相關性門檻。投行、分析師或企業主管的市場觀點若沒有新的官方行動或數據，至多
-   三星；主要央行的官方前瞻指引或可信度高且顯示近期政策路徑改變的調查可評四星。摘要與
-   翻譯仍要求不得增刪事實，但程式不再逐一比對數字；JSON／欄位驗證失敗時，同一輸入最多
-   修正一次，次數在送出修正前持久化，續跑不重置。既有 workflow
-   使用 checkpoint；統一編排則在 `FunctionRun.result._news_model_attempts` 保存同一輸入的
-   呼叫預約及已驗證的結構化結果，程序中斷或新 attempt 會直接重用成功結果，也不會重新
-   取得一次修正額度。網路、額度、安全與未知
-   程式錯誤不走這個立即修正迴圈；若唯一的修正呼叫已送出後才遇到暫時供應商錯誤，該修正
-   額度仍視為已使用並轉人工處理，不再送出第二次修正。
+## 時間與版次窗
 
-7. 結果以版本化的 `news_editions` revision 寫入，相容狀態為 `complete`（達到該版
-   `target_items`）、`partial`（非零但未達目標）或 `unavailable`（0）；星等配額
-   另行限制，這些狀態不決定重試。同一交易內，該版本看過的每個 feed 候選
-   都寫成一列 `news_candidates`，記錄它走到哪個階段（見下方候選階段）。
+時區一律 `Asia/Taipei`（`modules/newsroom/clock.py`）。
 
-## 版本規格
+| 時間                              | 行為                                                                                                   |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `[D-1 08:00, D 08:00)`            | 版次 `D` 的收稿窗，以文章 `first_seen_at` 判定並寫入 `edition_date`；08:00 之後看到的文章屬於 `D+1`    |
+| `D 08:00`                         | 統一 routine 觸發 `newsroom_assemble`；最多等到 08:10 讓窗內 embedding／初篩完成，逾時者忽略並記錄數量 |
+| `D 09:00`（`auto_publish_at`）    | 仍為 `draft` 的版次自動發布（`published_by_user_id = NULL`）                                           |
+| `D 12:00`（`late_fill_deadline`） | 仍未完成的項目設 `abandoned_at` 並通知                                                                 |
+| 每日 03:00                        | 清除 `first_seen_at` 早於 30 天的文章正文                                                              |
 
-同一條管線每天產生三個版本，由 `modules/news/editions.py` 的 `EditionSpec` 定義：
-
-| 版本         | `market_code` | 目標則數 | 探索路徑                                               | 選題限制                                                                  |
-| ------------ | ------------- | -------- | ------------------------------------------------------ | ------------------------------------------------------------------------- |
-| 本日重大新聞 | `global`      | 5        | 英文財經媒體、央行新聞稿、企業新聞稿                   | 五星不限量；四星 5～10 則；一至三星合計至多 5 則；低於五星每網域至多 2 則 |
-| 台股重點新聞 | `tw_equity`   | 5        | 台灣媒體 12 支 feed（鉅亨台股、經濟日報、中央社等）    | 五星不限量；四星 5～10 則；一至三星合計至多 5 則                          |
-| 美股重點新聞 | `us_equity`   | 5        | 英文綜合與新聞稿、Guardian 商業、鉅亨國際股市、SEC 8-K | 五星不限量；四星 5～10 則；一至三星合計至多 5 則；低於五星每網域至多 3 則 |
-
-選題 prompt 由三層組成：固定的 `task`（去重、交叉比對、來源分散、填滿名額與輸出格式等不可被覆寫的規則）、`OUTPUT_CONTRACT`（依各版本 `SelectionPolicy` 產生的封閉詞彙、數量限制與該市場自己的重要度尺度），以及部署時可調整的 `CUSTOM_SELECTION_CRITERIA`（`modules/news/prompts/selection_criteria.txt`，中文撰寫的共通排序準則與來源可信度判斷標準）。準則檔只影響共通排序與取捨，各市場的五星定義、分級配額、每網域上限與多樣性門檻都寫在 `OUTPUT_CONTRACT`；每個核心事件在 `selections` 只能有一則首選稿，但模型可在 `reserves` 保留至多一則獨立報導的替代稿並沿用相同 `event_key`。固定指令或準則檔任一變動都會改變 `prompt_version`（`selection-v12:<準則摘要>`）；完整的 `SelectionPolicy` 也會納入 edition 輸入摘要，市場專屬規則修改後即使候選池相同也會重新產生版本。
-
-各版本只讀取標記給該市場的 feed，選題 prompt 附帶該版本的 `MARKET_FOCUS` 提示，內容是該版的硬性相關性門檻：每則候選先過門檻再排序，全球版只收影響跨區域投資人的總經事件（央行、利率、匯率、商品、跨市場風險），台股版只收主體為上市櫃公司、加權指數與期貨、三大法人、台灣政策、半導體供應鏈或報導本身點明台股影響的海外事件；美股版則以「是否改變美股指數、重要產業或具足夠權重的上市公司定價」為準，候選足夠時讓低於五星的入選稿約 30～40% 為整體市場驅動、60～70% 為個股或產業催化劑。美股版另將正式政策或公司揭露排在分析師、投行與 CEO 預測之前，對批次中明顯較舊且沒有實質更新的公司稿施加時效折扣；例行發債、再融資、增發與 tender offer 原則上至多二星，除非規模相對公司異常、涉及財務壓力或重大稀釋、形成信用事件、用於重大收購，或報導證明股價有重大反應。門檻明列不得入選的類型（他國市場、無台股／美股影響的總經新聞、政治、天氣、娛樂、生活等），且寧可留空也不得以弱關聯新聞填滿名額。`OUTPUT_CONTRACT` 對每個版本都提供完整的 `market` 詞彙，並以 `market_rule` 說明本版只發布 `global`／`taiwan`／`us` 其中一個標記，模型必須依報導主要談論的市場誠實標記、不得改標遷就本版；標成其他市場的稿件會在限制檢查前被剔除並記錄 `news.selection.dropped_market`，因此模型自己判定為他國市場的新聞不會進入該版。市場頁的新聞不依市場分組，只有首頁的全球版分組顯示。worker 依序執行三個版本；個別 feed／文章來源錯誤依既有來源隔離政策記錄後繼續其他來源，模型供應商網路、認證、額度、資料庫、未知程式錯誤或 selection 耗盡則轉為安全分類錯誤並立即停止後續市場，避免再發出付費模型呼叫。最差結果決定
-執行紀錄的狀態依新聞 workflow 是否正常完成決定（正常 0、1、4 則也可為 `succeeded`），
-只有可恢復的技術失敗會建立同日自動重試。
-`make generate-daily-news MARKET=tw_equity` 可單獨產生一個版本。
-
-市場版本顯示在各市場報告頁下方，並受組織的市場可見性政策限制：
-`GET /api/news/{market_code}/latest` 對不可見或未定義的市場回 404，內部角色可
-預覽所有市場。台股沒有正式報告，其報告頁顯示「報告尚未推出」加台股新聞；原本
-以直接網址提供的台股示範數字已移除。
-
-## 來源註冊表
-
-`modules/news/feeds.py` 的 `FEED_SOURCES` 是唯一的探索路徑；每筆 `FeedSource` 記錄
-文章主機（`hostname`）、feed URL、`kind`、`link_pattern`、市場標記、`poll_group`、
-`max_age_hours`、`provides_full_text` 與 adapter 需要的映射。文章白名單由所有
-`hostname` 推導，`DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES` 只能加入主機、
-`DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES` 只能排除主機（排除註冊表主機等於停用該來源）。
-
-| 分組（`poll_group`） | 來源                                                                                                                                                                     | `kind`                         | 市場標記                     |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------ | ---------------------------- |
-| 英文（`normal`）     | Guardian 商業與國際 RSS、CNBC 頭條／國際／經濟／財經、FXStreet、Al Jazeera 經濟、聯準會與 ECB 新聞稿、TheStreet（全文）、City A.M.（全文）、Guardian API（全文，需金鑰） | `rss`、`rss_full`、`json_list` | `global`，多數加 `us_equity` |
-| 新聞稿               | GlobeNewswire 財報（`flash`）、併購；PR Newswire 金融服務；SEC EDGAR 8-K Atom（需聯絡信箱，僅 `us_equity`）                                                              | `rss`                          | `global` 加 `us_equity`      |
-| 台灣（`fast`）       | 鉅亨台股與頭條、經濟日報要聞與產業、中央社財經、ETtoday 財經、財經新報、自由財經、INSIDE（全文）、遠見、今周刊、風傳媒；鉅亨國際股市掛 `us_equity`                       | `rss`、`rss_full`、sitemap     | `tw_equity`                  |
-
-2026-09-14 起，執行清單只保留現有三個新聞市場使用的 32 個 feed。未上線市場的
-19 個 feed 與移除的 GlobeNewswire 公司公告，其端點與重新啟用條件保留在
-[非執行中的新聞來源](inactive-news-sources.md)。
-
-adapter 種類：`rss` 同時處理 RSS 2.0、RSS 1.0／RDF（`dc:date`）與 Atom（`link href`、
-`updated`）；`rss_full` 另讀 `content:encoded`（或第三方 feed 的 `description`），內文
-少於 200 字元視為摘要而非全文；`news_sitemap` 讀 Google news sitemap 的
-`loc`／`news:title`／`news:publication_date`；`json_list` 依 `JsonListMapping` 讀任意
-JSON 清單（dot-notation 欄位、`unix_s`／`unix_ms`／`iso`／`datetime_str` 時間、
-金十的 JS 前綴剝除、東方財富的每次請求隨機 `r` 參數）。
-
-2026-09-03 實測後未納入的來源與原因：
-
-- BBC、AP：RSS 或文章頁回 403，或 robots.txt 封鎖爬蟲，候選無法擷取。CNBC 在 9 月 3 日的財經分類 feed 回 403，9 月 4 日以頭條、國際、經濟、財經四個分類 feed 實測 feed 與文章頁都可取得，已重新納入。
-- WSJ、MarketWatch、Investing.com、Forbes、Bloomberg：feed 可讀但文章頁 401／403、robots 禁止或只回付費牆導言，已移除。
-- 鉅亨 RSS 的 `content:encoded` 只有約 300 字元的導言，因此鉅亨維持 `rss` 並走擷取。
-- Mining.com 回 403、Benzinga feed 回 404、PR Newswire 全站清單回 404、Nasdaq feed
-  逾時無回應。
-- TheStreet 的 `/.rss/full/` 以 308 轉址到固定 feed id，註冊表直接使用轉址後的 URL。
-- 規格 4.6 的 Webz.io 與 Marketaux 為後續選項，未實作。
-
-## 來源監控
-
-- 每個 feed 讀取後先看最新一則的發佈時間，超過該來源的 `max_age_hours`（預設 24
-  小時）就發 `news.feed.stale`（含 `age_hours`），候選仍會進入後續流程，由選題決定
-  取捨；正常時發 `news.feed.ok`（含 `count`、`newest_age_minutes`、`full_text` 與
-  `dropped_language`）。回 HTTP 200 但內容停在數月前的殭屍 feed 只有這個檢查能看出來。
-- 缺金鑰或聯絡信箱的來源發 `news.feed.skipped`（`reason` 為 `missing_credential` 或
-  `missing_contact_email`）。
-- 去重後候選數低於 `target_items * 2` 時發 `news.candidates.below_floor`，版本狀態
-  沿用既有的 `partial`／`unavailable` 判定。feed 註冊表是唯一的探索路徑，這是整批
-  來源失效時最早的警訊。
-- 所有事件經 `core/logging.py` 的 stderr handler 輸出，`docker logs` 可直接查看；告警
-  送達仍待另案接上。
-
-## 版本與重試語意
-
-- 每天恰好一個 automatic `internal_services_daily_update` JobRun；RoutineRun 與
-  provider job 以 edition 唯一。技術失敗只重試缺失 scope，正常選題不足不建立重試；
-  來源全面故障則不會被視為正常零則。
-- 每個 `edition_date` 可有多個 `revision`，不覆寫舊版正文／摘要或刪除正式版本；
-  管理員隱藏／取消隱藏仍可更新各版的可見性。
-- Legacy 產生流程在選題、摘要與翻譯完成前不建立可見 revision；只有正常
-  `complete`／`partial`／`unavailable` 終態才以單一交易寫入 edition、候選、項目與模型
-  audit。模型或租約失敗因此不需刪除暫存版次，也不會讓人工上架誤用尚未完成的 revision。
-- `input_digest` 由候選集合、模型名稱與選題準則摘要計算。若最新版本為
-  `complete` 且 `input_digest` 相同，重跑為 no-op；`partial` 與 `unavailable`
-  允許以相同輸入建立新版本。checkpoint 續跑不使用上述 no-op 捷徑，因足額版本仍可能
-  有待恢復的技術故障；改以成功階段的指紋重用，並於發布交易檢查去重、配額及隱藏。
-- 讀取 API 回傳最新可發布且有可見新聞的版本，可跨日回退；新失敗／零則版本不取代
-  可閱讀新聞。歷史隱藏的來源 URL／事件在回退與續跑中仍維持隱藏。
-- 手動重新抓取只從後台新聞管理頁發起；底層以
-  `POST /api/admin/orchestration/job-runs` 建立 `news_daily_update` 或單一市場的
-  `news_global_refresh_job`、`news_tw_equity_refresh_job`、
-  `news_us_equity_refresh_job`。每次操作建立新的 current-edition JobRun；與自動工作
-  衝突時排隊，不回傳 409，也不取消 automatic routine。
-  開發環境另可用 `make generate-daily-news`（`--once`）直接產生一次，可傳
-  `EDITION_DATE=YYYY-MM-DD`，但服務只允許產生台北時間的當日版本。
+`auto_publish_at` 與 `late_fill_deadline` 存在每個版次的欄位上，便於測試與個案調整。
+事件只存在於單一版次窗內：跨日的同一事件一律視為新事件，隱藏也只對當版有效。
 
 ## 資料表
 
-| 資料表                   | 內容                                                                                                                                                                                                                                                                              |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `news_editions`          | 每日版本、`market_code`、revision、`input_digest`、模型與 prompt 版本、狀態、警語                                                                                                                                                                                                 |
-| `news_items`             | 入選新聞的來源中繼資料、主題、重要性、內容摘要、數值事實，以及選稿階段的 `market` 與 `event_key`（migration 0012 之前的版本為 null）                                                                                                                                              |
-| `news_presentations`     | 每則新聞的三語標題與摘要                                                                                                                                                                                                                                                          |
-| `news_generation_audits` | 每次模型呼叫的 stage、locale、token、延遲、request id 與失敗代碼（人工上架的摘要呼叫也記在這裡）                                                                                                                                                                                  |
-| `news_candidates`        | 版本看過的每個 feed 候選：來源、URL、標題、`seen_at`、擷取後的 `content_digest` 與發佈時間、`stage`、`drop_reason`、模型回傳的 `ai_*` 欄位、對應的 `item_id`，以及人工上架的請求資訊（`publish_run_id`、`publish_requested_at`、`publish_requested_by_user_id`、`publish_error`） |
-| `job_runs`               | Automatic／manual 新聞 jobs、trigger、edition、狀態與結果摘要；候選人工上架使用 `news_publish_job`                                                                                                                                                                                |
-| `function_runs`          | 四個新聞 functions 的 scope、provider、狀態、`next_attempt_at` 與最終結果                                                                                                                                                                                                         |
-| `function_attempts`      | 每次實際執行的 immutable metadata、record count、digest 與清理後錯誤                                                                                                                                                                                                              |
+完整欄位以 `apps/api/src/daily_insights_api/modules/newsroom/models.py` 為準。
 
-`news_items` 另有 `origin`（`model`／`manual`）、`hidden_at`、`hidden_by_user_id` 與
-`published_by_user_id`。`news_publish_job` 的 JobRun payload 保存人工上架的版本與候選
-id；FunctionRun／Attempt 保存續跑、租約與 attempt provenance。
+| 資料表                   | 內容                                                                                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `newsroom_sources`       | 來源設定（格式、網址、網域、涵蓋市場、信任等級 1–3、權重 0.5–2.0、輪詢間隔 5–1440 分鐘、啟用）與健康狀態欄位              |
+| `newsroom_articles`      | 每個發布者 URL 一列（`url_hash` 唯一）；全文、`fetch`／`embed`／`triage` 三組佇列欄位、`embedding vector(1536)`、初篩結果 |
+| `newsroom_events`        | 單一版次窗內的事件；共用的三語標題與摘要、相關標的；`analysis` 與 `en` 兩組佇列欄位、`en_source_digest`                   |
+| `newsroom_editions`      | 每個 `(edition_date, market_code)` 唯一的一版；`draft`／`published`、`selection_mode`、發布時間與發布者                   |
+| `newsroom_edition_items` | 某事件在某市場版的項目；排序、星等、粗分快照、`origin`、三語「為何重要」與 `why` 佇列欄位、移除／隱藏／放棄時間           |
+| `newsroom_edit_log`      | 每個管理員動作的 append-only 紀錄（`before`／`after` JSONB）                                                              |
+| `newsroom_llm_calls`     | 每次 LLM／embedding 呼叫的稽核：stage、model、prompt 版本、token、延遲、request id、錯誤碼；不存 prompt 與正文            |
 
-新增 `news_workflows` 保存每市場執行階段、成功進度與結構化失敗；`news_checkpoints`
-保存指紋、候選中繼資料、驗證結果與修正預算；`news_dependency_states` 保存來源／模型
-共用冷卻、暫停及 probe 所有權。中間 checkpoint 48 小時後清理，正式新聞與稽核保留。
-文章正文與完整 prompt 不寫入資料表；續跑或人工上架會重新擷取必要原文。
+`selection_mode` 為 `pending`、`editor`（精選成功）、`fallback`（精選失敗改用粗分）或
+`legacy`（舊管線搬移）。項目 `origin` 為 `model`、`manual`（管理員加入）或 `legacy`。
 
-## 後台候選監控與人工上架
+## 佇列與重試
 
-`GET /api/admin/news/editions?date=YYYY-MM-DD`（預設台北今天）回傳三個市場的最新
-revision、已上架新聞（含 zh-hant 標題、`origin`、`hidden`）與全部候選；候選排序為
-已上架（依 rank）、內容已備妥、模型回傳但剔除（依 `ai_rank`）、送審未選、其餘。
+所有可失敗的工作都以「資料列即佇列」表示，不使用 checkpoint 表。每個 stage 在自己的
+資料列上有 `<stage>_status`、`<stage>_attempts`、`<stage>_next_attempt_at`、
+`<stage>_error_code` 四個欄位，共用實作在 `modules/newsroom/queue.py`。
 
-候選 `stage` 以走到的最遠階段為準：
+| Stage       | 資料表                   | 欄位前綴   | 完成狀態 | `max_attempts` | 並行數                                           |
+| ----------- | ------------------------ | ---------- | -------- | -------------- | ------------------------------------------------ |
+| `fetch`     | `newsroom_articles`      | `fetch`    | `done`   | 4              | `DAILY_INSIGHTS_NEWSROOM_FETCH_CONCURRENCY`（4） |
+| `embed`     | `newsroom_articles`      | `embed`    | `done`   | 6              | 2                                                |
+| `triage`    | `newsroom_articles`      | `triage`   | `done`   | 6              | 4                                                |
+| `analysis`  | `newsroom_events`        | `analysis` | `ready`  | 5              | 1                                                |
+| `why`       | `newsroom_edition_items` | `why`      | `ready`  | 5              | 1                                                |
+| `translate` | `newsroom_events`        | `en`       | `ready`  | 6              | 1                                                |
 
-| `stage`        | 意義                                                                                                                                                                                                                                                                                          |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `discovered`   | feed 有列出，但被探索上限（`_cap_discovery`）截掉，未擷取                                                                                                                                                                                                                                     |
-| `fetch_failed` | 已送擷取，沒有可用正文                                                                                                                                                                                                                                                                        |
-| `unused`       | 擷取成功，但未進入任何一輪選題（被 `_limit_candidates` 截掉或輪次已結束）                                                                                                                                                                                                                     |
-| `reviewed`     | 曾送進模型，模型未回傳                                                                                                                                                                                                                                                                        |
-| `prepared`     | 繁中摘要與支援語系翻譯皆完成，已建立不可變 `PreparedNewsItem`，等待發布                                                                                                                                                                                                                       |
-| `dropped`      | 模型有回傳但未發布，`drop_reason` 為 `off_market`（標成他市場）、`policy`（來源／多樣性規則剔除或最終組合未納入）、`duplicate_event`（同一事件已有另一則報導摘要成功並採用）、`summary_failed`（繁中摘要失敗）、`translation_failed`（後續翻譯失敗）、`reserve`（超出目標則數的備選，未用到） |
-| `published`    | 進入最終發布，`item_id` 指向 `news_items`                                                                                                                                                                                                                                                     |
+- **領取**：`<stage>_status = 'pending'` 且 `<stage>_next_attempt_at` 為 NULL 或已到期
+  即可領取。worker 以 `SELECT … FOR UPDATE SKIP LOCKED` 取列，同一交易內
+  `attempts += 1` 並把 `next_attempt_at` 推遲 10 分鐘作為租約。worker 崩潰時租約到期
+  即自然重試。
+- **完成**：寫回結果並清除 `next_attempt_at` 與 `error_code`。寫回以 `attempts` 做
+  fence：租約過期後被重新領取的舊 attempt 無法覆寫較新的結果。
+- **可重試失敗**（逾時、連線錯誤、429、5xx、JSON 或 schema 不合法、未預期例外）：
+  記錄錯誤碼，依 1、2、4、8… 分鐘指數退避，上限 60 分鐘；`Retry-After` 較長時遵守
+  （最多 6 小時）。`attempts` 達 `max_attempts` 後轉為 `failed`。
+- **不可重試失敗**（provider 回 400／401／402／403／404、金鑰未設定）：直接 `failed`，
+  並發出 `stage_fatal` Slack 通知，同一 stage 與錯誤碼每小時最多一次。
+- `failed` 不會自動恢復；需要人工重新排入，操作見
+  [重點新聞維運手冊](../runbooks/news-recovery.md)。
 
-模型回傳過的候選（任一輪）都會填 `ai_rank`（在模型原始清單中的位置，取第一次回傳的那輪）、
-`ai_topic`、`ai_market`、`ai_importance`、`ai_event_key`；來源是過濾與修復前的原始清單，
-所以被 `off_market`／`policy` 剔除的稿件也看得到模型的判斷。
+各 stage 之間只透過資料列欄位交接，每個欄位只有一個寫入者會把它設成 `pending`：
 
-人工操作：
+| 交接                     | 寫入者                          | 規則                                                                                                             |
+| ------------------------ | ------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 新文章 → 全文、embedding | 收稿（插入文章時）              | `fetch_status = pending`、`embed_status = pending`；feed 自帶且通過品質檢查的全文直接寫入，`fetch_status = done` |
+| embedding → 初篩         | embed handler（成功時）         | `triage_status = pending`                                                                                        |
+| 全文 → 初篩              | triage 的領取條件               | 只領取 `fetch_status IN ('done','failed')` 的文章；全文失敗者以標題與摘要初篩                                    |
+| 組稿 → 分析              | `newsroom_assemble`             | 入選事件若為 `idle`／`failed`／`needs_body` 則 `analysis_status = pending`；項目 `why_status = pending`          |
+| 分析 → 為何重要          | analysis handler                | 同時寫入事件所有未移除項目的「為何重要」並設 `why_status = ready`                                                |
+| 發布／修改 → 英文        | publishing 與每分鐘 stale sweep | 可見內容的繁中 digest 改變時 `en_status = pending`                                                               |
+| 貼上全文 → 分析          | `set_manual_body`               | 所屬事件若為 `needs_body`，改回 `analysis_status = pending`                                                      |
+| 合併／拆分 → 分析        | `events_service`                | 受影響且在版次中的事件 `analysis_status = pending`                                                               |
+| 重新分析                 | 後台「重新分析」                | 事件 `analysis_status = pending`，其所有未移除、未隱藏、未放棄項目 `why_status = pending`                        |
 
-- `POST /api/admin/news/items/{item_id}/hide`、`/unhide`：隱藏或恢復一則新聞。隱藏的
-  新聞留在不可變的版本內，但 `GET /api/news/latest` 與市場版讀取 API 不再回傳；操作可
-  重複、記錄 `news.item_hidden`／`news.item_unhidden` audit。
-- `POST /api/admin/news/candidates/publish`，body `{"edition_id", "candidate_ids": [1 到 10 個]}`：
-  建立一個 `news_publish_job`（202，回傳 JobRun）。每次提交都建立新的 manual run；
-  多筆候選上架與其他 Internal Services 新聞工作共用 Provider lock，衝突時依序執行，
-  不因已有 pending／running 工作回傳 409。版本不是該日該市場的最新 revision 時回 409、
-  候選不屬於該版本或已上架回 422、旗標關閉回 503。請求成功時候選寫入 `publish_run_id`
-  等欄位並記錄 `news.candidate_publish_requested` audit。
-- worker 執行 `news_publish`（`publish_candidates`）：逐一重新擷取文章、產生繁中摘要及兩個翻譯、
-  以「目前最大 rank + 1」建立 `origin='manual'` 的 `news_items` 與三語
-  `news_presentations`，候選改為 `published` 並連結 `item_id`，記錄
-  `news.candidate_published` audit；每則各自 commit，失敗的候選只寫入 `publish_error`
-  （`edition_superseded`、`already_published`、`url_already_published`、`fetch_failed`、
-  `summary_failed`、`translation_failed`）且階段不變。執行結果為
-  `succeeded`／`partial`／`failed`，`result`
-  含各候選的結果代碼。模型未分類的候選以 `topic=markets`、`importance=3`、
-  該版本自己的市場標記（`global`／`taiwan`／`us`）上架，`event_key` 保留模型的判斷
-  （可能為空）。
+## 各階段
+
+### 來源與收稿
+
+- 來源存放於 `newsroom_sources`，初始資料由 seed migration 從舊 feed 註冊表匯入；
+  之後在後台「新聞來源管理」新增、修改、停用。支援格式：`rss`、`rdf`、`atom`、
+  `rss_full`、`news_sitemap`、`json_list`、`guardian_api`，以及承接管理員池外 URL 的
+  固定 `manual` 來源。非執行中的歷史來源見
+  [非執行中的新聞來源](inactive-news-sources.md)。
+- worker 每分鐘領取 `enabled ∧ next_poll_at <= now()` 的來源（每批最多 32 個、同時
+  4 個），以租約推遲 `next_poll_at` 10 分鐘避免重複輪詢；每個來源獨立成敗。
+- Feed 請求經 SSRF-safe client：只連公開 HTTPS 位址、遵守 robots.txt、不跟隨 feed
+  轉址、限制回應大小。Guardian 等主機有最小請求間隔。
+- 需要憑證的來源（Guardian API key、SEC 聯絡信箱）在設定缺漏時略過，`last_error_code`
+  記為 `guardian_api_key_missing`／`sec_contact_email_missing`，不計入連續失敗。
+- 去重：`url_hash`（SHA-256）唯一；同一版次窗內標題完全相同者略過；發布時間早於
+  24 小時的 feed 項目不收；設定 `language_filter` 的來源丟棄其他語言。
+- 健康：成功時重置 `consecutive_failures`；失敗時累計並記錄 `last_error_code`。
+  連續失敗且距離最後成功（或建立時間）超過 6 小時的來源發出一次 `source_unhealthy`
+  通知，恢復成功後重置。
+
+### 全文抓取與品質檢查
+
+- `fetch` stage 讀取原文頁面：只允許來源網域白名單（啟用來源的 `hostname` 加上
+  `DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES`，扣除 `DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES`），
+  最多 3 次轉址且每次重新驗證、頁面上限 1.5 MB、只接受 HTML、遵守 robots.txt。
+  管理員送出的池外 URL 允許其本身網域，但仍受 blocked hosts 限制。
+- 品質檢查依序：少於 200 字（`too_short`）、導覽字詞比例超過 10%
+  （`navigation_heavy`）、與標題相關性過低（`unrelated_to_title`）。不合格為
+  `rejected`；付費牆、存取被拒、404／410、非 HTML、過大或 robots 禁止為
+  `unavailable`。這些都是最終答案（`fetch_status = done`），只有逾時、連線錯誤、
+  429、5xx 會重試。
+- 正文上限 40,000 字元，只用於初篩摘錄與分析，不回傳給讀者。
+
+### Embedding、初篩與事件分群
+
+- `embed`：以標題＋feed 摘要（不等全文）呼叫 OpenAI-compatible embedding API，
+  預設 `text-embedding-3-small`、1536 維，存入 `pgvector`。成功即排入初篩。
+- `triage`：DeepSeek JSON mode、temperature 0。輸入標題、來源、摘要或全文前段，以及
+  同一版次窗內 kNN 最相近的 5 個事件（附 `working_title` 與 2 則代表標題）。輸出
+  `relevant`、`topic`、三市場 0–100 粗分，以及歸屬既有事件或開新事件。不相關文章
+  不歸屬事件。
+- 事件寫入以每個版次日期的 advisory lock 序列化；決定開新事件時在鎖內再做一次 kNN，
+  與模型呼叫期間新開事件相似度 ≥ 0.88 者改歸屬該事件，避免同一事件被重複開啟。
+- 事件可在後台合併（被合併者 `status = merged`、指向目標）或拆分（被拆出的文章
+  形成 `created_by = split` 的新事件），受影響且在版次中的事件會重新分析。
+
+### 08:00 組稿
+
+統一 routine `daily_market_update_v1` 每天 08:00 建立 `newsroom_daily_assemble` job，
+由 `orchestration-worker` 在獨立的 `newsroom` provider 下執行 `newsroom_assemble`
+function，不與其他 provider 共用鎖。流程冪等：
+
+1. 等待窗內 `embed`／`triage` 仍為 `pending` 的文章，最多到 08:10；剩餘數量寫入
+   `ignored_pending_triage`。
+2. 每市場計算事件粗分：`max(文章市場分數 × 來源權重)`，每多一個不同來源 +5，
+   最多 +20。
+3. 只有含至少一篇 `body_status = ok` 文章、且該市場分數大於 0 的事件可入選；取粗分
+   前 30 名。
+4. 精選（每市場一次 LLM 呼叫，`DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL`）：輸入事件、
+   最多 5 則報導標題與來源、報導家數，輸出每個事件 1–5 星。失敗會在組稿內重試至多
+   3 次；仍失敗或遇到不可重試錯誤時改用 `fallback`：依粗分取前 5 名、星等留空，並
+   發出 `selection_fallback` 通知。
+5. 由程式套配額：5 星全收；4 星最多 5 則；5＋4 星不足 5 則時才以 1–3 星補到 5 則。
+6. 建立或重建 `draft` 版次與項目，並把入選事件排入分析。重建時保留管理員加入的
+   項目與已移除的項目；已發布的版次不重建。
+7. 有任何市場完成組稿時發出一次 `draft_ready` 通知（各市場則數、5 星事件標題、
+   未初篩數量、後台連結）。
+
+旗標關閉時 function 回傳 `no_change`；在 08:00 前手動觸發時回傳可重試的
+`newsroom_window_open`。其他失敗由統一 orchestration 依一般 function 規則每 30 分鐘
+重試至 10:00 soft deadline。需要對特定日期重新組稿時，使用
+`make assemble-newsroom [EDITION_DATE=YYYY-MM-DD]`，它在 newsroom-worker 容器中執行
+`python -m daily_insights_api.scripts.run_newsroom_assemble`（同樣要求旗標開啟且收稿窗已關閉）。
+
+### 深度分析與「為何重要」
+
+- `analysis`（每事件一次，`DAILY_INSIGHTS_NEWSROOM_ANALYSIS_MODEL`）：輸入事件內
+  最多 5 篇有全文的文章（依信任等級、權重排序，每篇截 8,000 字元）、事件所在的市場
+  清單與站內儀表板標的清單。輸出標題、事實摘要、相關標的與每個市場的「為何重要」；
+  成功時同時寫入事件與各項目，繁中寫入時同步產生簡中。
+- 事件沒有任何可用全文時不算失敗，`analysis_status = needs_body`；後台顯示「缺全文」，
+  管理員貼上全文後自動重新排入。
+- 相關標的必須對應站內既有儀表板（指數、商品、外匯、個股等清單），對不上的丟棄；
+  管理員手動編輯時對不上者直接拒絕。
+- `why`：事件已分析完成後才被加入其他市場版的項目，只對該項目單獨呼叫一次
+  （最多 3 篇文章、每篇 3,000 字元）。
+
+### 發布、晚到補上與放棄
+
+- 管理員可核准單一市場或當日全部草稿，立即發布並寫入編輯紀錄。
+- `newsroom-worker` 每分鐘把 `draft ∧ now() >= auto_publish_at` 的版次自動發布。
+- 發布後，項目完成分析與「為何重要」即對讀者可見；`now() >= late_fill_deadline` 時
+  仍未完成的項目設 `abandoned_at`，並以 `late_fill_abandoned` 通知列出標題。每個版次
+  的放棄處理只執行一次（`late_fill_closed_at`）。
+- 讀者可見條件：版次 `published` ∧ 未移除 ∧ 未隱藏 ∧ 未放棄 ∧ 事件
+  `analysis_status = ready` ∧ 項目 `why_status = ready`，且該語系的標題與摘要存在。
+  英文另需事件 `en_status = ready`、`en_source_digest` 等於目前繁中內容的 digest，以及
+  項目英文「為何重要」已備妥。
+
+### 多語系
+
+- 繁中由 LLM 產出且是唯一可編輯的語言；所有繁中寫入點（分析、為何重要、後台編輯）
+  都同步以 OpenCC `tw2sp` 產生簡中。
+- 版次發布時，把可見項目的事件排入 `translate`（`DAILY_INSIGHTS_NEWSROOM_TRANSLATE_MODEL`）。
+  翻譯一次寫入事件英文標題、摘要與各可見項目的英文「為何重要」，並記錄當時繁中內容
+  的 digest。
+- 之後繁中被修改、項目晚到完成或被隱藏，使 digest 改變時重新排入翻譯；每分鐘的
+  stale sweep 檢查近 2 天發布的版次，補上發布函式看不到的變化。`failed` 的翻譯不會被
+  sweep 自動重試，要等下一次編修或人工重新排入。
+
+### 正文清除
+
+每 10 分鐘檢查一次，清除 `first_seen_at` 早於「最近一次 03:00 減 30 天」的文章正文，
+設 `body_status = purged`，只保留中繼資料。實際上每天 03:00 後推進一次。
+
+## 讀者端
+
+- `GET /api/newsroom/editions/latest?market=<global|tw_equity|us_equity>&locale=<zh-hant|zh-hans|en>`
+  回傳該市場最近一個 `published` 且在該語系有可見項目、`edition_date` 不晚於台北今日
+  的版次，附 `edition_date` 與 `is_today`。回應 `Cache-Control: no-store`。
+- 需登入且已更換初始密碼。`global` 版所有會員皆可讀；`tw_equity`、`us_equity` 依組織
+  的市場可見性政策開放，內部角色可預覽全部市場。相關標的只在讀者可開啟該儀表板時
+  提供連結。
+- 每則顯示標題、事實摘要、「為何重要」、相關標的與來源列表。`/reports` 首頁顯示全球版，
+  各市場報告頁顯示對應市場版；載入沿用 `Promise.allSettled` 容錯，不影響報告本身。
+  非今日版次明確標示日期。
+- 舊管線搬移的項目沒有「為何重要」，讀者端照常顯示其標題、摘要與來源。
+
+## 後台審核主控台
+
+`/admin/newsroom`（側邊選單「重點新聞審核」）與 `/admin/newsroom/sources`
+（「新聞來源管理」）只限 admin，寫入動作需要 CSRF。後台 API 位於
+`/api/admin/newsroom`，只呼叫 newsroom 的 service 函式與佇列狀態變更，不直接呼叫 LLM；
+每個動作都寫入 `newsroom_edit_log`。
+
+| 功能     | 說明                                                                                                   |
+| -------- | ------------------------------------------------------------------------------------------------------ |
+| 版次總覽 | 依日期檢視三個市場版的狀態、自動發布倒數、未初篩與初篩失敗數、`fallback` 警示                          |
+| 核准     | 「核准此市場」或「核准全部草稿」，立即發布                                                             |
+| 項目編修 | 改標題／摘要、改「為何重要」、移除／還原（草稿）、隱藏／取消隱藏（已發布）、上下排序                   |
+| 候選事件 | 依粗分列出尚未入選的事件，可「加入此版」；新加入的項目自動排入分析或單一市場「為何重要」               |
+| 事件     | 原文對照（含全文狀態與初篩狀態）、合併其他事件、拆分選取的文章、重新分析                               |
+| 全文     | 對「缺全文」或抓不到全文的文章「貼上全文」                                                             |
+| 池外文章 | 「手動加入池外文章」：輸入公開 HTTPS 網址，歸入正在審核的版次日期，走完整的抓取 → embedding → 初篩     |
+| 來源管理 | 新增、編輯、啟用／停用來源，調整信任等級、權重、輪詢間隔；檢視最後輪詢、最後成功、連續失敗與最後錯誤碼 |
+
+狀態標示：「分析中」、「分析失敗」、「缺全文」、「撰寫『為何重要』中」、「『為何重要』失敗」、
+「12:00 未完成已放棄」。
+
+## 通知
+
+`Notifier` 介面目前實作為 Slack incoming webhook（`DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL`）；
+未設定時只寫 worker log。通知為 best effort，送出失敗只記 log，不影響管線。訊息內的
+後台連結以 `DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL` 組成。
+
+| 種類                  | 發出者              | 時機                                              |
+| --------------------- | ------------------- | ------------------------------------------------- |
+| `draft_ready`         | `newsroom_assemble` | 08:00 組稿完成（至少一個市場）                    |
+| `selection_fallback`  | `newsroom_assemble` | 某市場精選失敗改用粗分排序                        |
+| `late_fill_abandoned` | `newsroom-worker`   | 12:00 仍有未完成項目被放棄                        |
+| `source_unhealthy`    | `newsroom-worker`   | 來源連續失敗且超過 6 小時沒有成功（每次故障一次） |
+| `stage_fatal`         | `newsroom-worker`   | 任一 stage 遇到不可重試錯誤（同錯誤碼每小時一次） |
+
+訊息內容與對應處置見[重點新聞維運手冊](../runbooks/news-recovery.md#slack-通知與處置)。
 
 ## 設定
 
-| 變數                                            | 用途                                                                        | 正式環境來源             |
-| ----------------------------------------------- | --------------------------------------------------------------------------- | ------------------------ |
-| `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`             | `true`／`false`，關閉時新聞 functions 不呼叫外部服務                        | GitHub Variables         |
-| `DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES`           | 逗號分隔的精確主機名稱，加入註冊表推導的白名單                              | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES`         | 逗號分隔的精確主機名稱，從白名單排除（停用該來源的 feed）                   | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_GUARDIAN_API_KEY`               | Guardian Content API 金鑰；未設定時 Guardian 三個 feed 略過                 | GitHub Secrets，可省略   |
-| `DAILY_INSIGHTS_SEC_CONTACT_EMAIL`              | SEC EDGAR 要求的聯絡信箱，寫入 User-Agent；未設定時 8-K feed 略過           | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_MODEL_NAME`                     | DeepSeek 模型名稱，預設 `deepseek-chat`                                     | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_MODEL_API_BASE_URL`             | 必須是 HTTPS 絕對 URL，預設 `https://api.deepseek.com`                      | GitHub Variables，可省略 |
-| `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`             | 啟用時必填，不得為 placeholder                                              | GitHub Secrets           |
-| `DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS`          | 單次模型呼叫逾時，預設 120 秒；選題 prompt 約 28k token，實測需 30 到 45 秒 | 開發環境                 |
-| `DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS`     | 正文擷取逾時，預設 25 秒                                                    | 開發環境                 |
-| `DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS` | 讀取單一 feed 的逾時，預設 30 秒                                            | 開發環境                 |
+所有設定以 `DAILY_INSIGHTS_` 為前綴，定義於 `core/config.py`。
 
-`core/config.py` 在啟用時會驗證 provider 為 `deepseek`、URL 為 HTTPS、API key 與
-Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主機；不符合時服務啟動即失敗。
+| 變數                                                                           | 預設                           | 使用者                                     | 用途                                                       |
+| ------------------------------------------------------------------------------ | ------------------------------ | ------------------------------------------ | ---------------------------------------------------------- |
+| `NEWSROOM_ENABLED`                                                             | `false`                        | newsroom-worker、orchestration-worker、api | 啟用常駐管線與 08:00 組稿；api 用於 orchestration 目錄狀態 |
+| `NEWSROOM_LLM_BASE_URL`、`NEWSROOM_LLM_API_KEY`                                | `https://api.deepseek.com`     | newsroom-worker、orchestration-worker      | DeepSeek（OpenAI-compatible）                              |
+| `NEWSROOM_TRIAGE_MODEL`、`NEWSROOM_ANALYSIS_MODEL`、`NEWSROOM_TRANSLATE_MODEL` | `deepseek-chat`                | newsroom-worker                            | 初篩、分析與為何重要、英文翻譯的 model                     |
+| `NEWSROOM_EDITOR_MODEL`                                                        | `deepseek-chat`                | orchestration-worker                       | 08:00 精選的 model                                         |
+| `NEWSROOM_LLM_TIMEOUT_SECONDS`                                                 | `90`                           | 同 LLM                                     | 單次 LLM 呼叫 timeout                                      |
+| `NEWSROOM_EMBEDDING_BASE_URL`、`NEWSROOM_EMBEDDING_API_KEY`                    | `https://api.openai.com/v1`    | newsroom-worker                            | OpenAI-compatible embedding                                |
+| `NEWSROOM_EMBEDDING_MODEL`、`NEWSROOM_EMBEDDING_TIMEOUT_SECONDS`               | `text-embedding-3-small`、`30` | newsroom-worker                            | embedding model 與 timeout（向量固定 1536 維）             |
+| `NEWSROOM_SLACK_WEBHOOK_URL`                                                   | 未設定                         | newsroom-worker、orchestration-worker      | Slack 通知；必須是 `https://hooks.slack.com/` 網址         |
+| `NEWSROOM_ADMIN_BASE_URL`                                                      | `http://localhost:3000`        | newsroom-worker、orchestration-worker      | 通知中的後台連結 origin                                    |
+| `NEWSROOM_WORKER_POLL_SECONDS`、`NEWSROOM_FETCH_CONCURRENCY`                   | `2`、`4`                       | newsroom-worker                            | 空佇列輪詢間隔（也是停用時的心跳間隔）與全文抓取並行數     |
+| `NEWS_EXTRA_HOSTNAMES`、`NEWS_BLOCKED_HOSTNAMES`                               | 空                             | newsroom-worker（blocked 也用於 api）      | 全文白名單增補與封鎖；封鎖也停止輪詢並拒絕池外 URL         |
+| `NEWS_FETCH_TIMEOUT_SECONDS`、`NEWS_DISCOVERY_TIMEOUT_SECONDS`                 | `25`、`30`                     | newsroom-worker                            | 全文頁面與 feed 讀取 timeout                               |
+| `GUARDIAN_API_KEY`、`SEC_CONTACT_EMAIL`                                        | 未設定                         | newsroom-worker                            | 需要憑證的來源；未設定時略過該來源                         |
+
+`newsroom-worker` 在 `NEWSROOM_ENABLED=true` 時於啟動驗證設定：LLM 與 embedding 的
+base URL 必須是 absolute HTTPS，API key 不得空白或為 placeholder，Slack webhook 若有
+設定必須是 `hooks.slack.com`。驗證失敗即拒絕啟動。
 
 ## 部署
 
-- `compose.production.yaml` 只部署單一 `orchestration-dispatcher` 與
-  `orchestration-worker`。Dispatcher 只需資料庫與 orchestration 設定。API 與 worker
-  目前都取得新聞設定及 credential；只有 worker 執行新聞 provider／model calls，API
-  使用相同設定做啟動驗證與管理端功能。進行權限盤點或事故評估時，兩個容器都必須列入
-  credential exposure 範圍。
-- `scripts/production/deploy.sh` 驗證旗標必須是 `true` 或 `false`，為 `true` 時要求
-  `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`；收斂時啟動 `api`、`web`、dispatcher 與 worker，
-  不再啟動任何新聞專用 scheduler。
-- `release.yml` 從 production 環境傳遞上述變數；`DAILY_INSIGHTS_DAILY_NEWS_ENABLED`
-  是必填變數，缺少時部署驗證失敗。
+- 本機：`compose.yaml` 預設啟動 `newsroom-worker`；旗標與金鑰放在 `apps/api/.env`，
+  api、orchestration-worker 與 newsroom-worker 讀到同一組值。
+- 正式環境：`compose.production.yaml` 的 `newsroom-worker` 與其他 worker 相同強化
+  （唯讀根目錄、`/tmp` tmpfs、`cap_drop: ALL`、`no-new-privileges`、心跳 healthcheck），
+  只拿到資料庫、newsroom 與收稿設定，不拿 session secret 或 R2 憑證。
+  `orchestration-worker` 只拿組稿需要的旗標、LLM key、精選 model、Slack 與後台
+  origin，不拿 embedding key。GitHub Secrets／Variables 與驗證規則見
+  [EC2 首次部署](../runbooks/ec2-first-deploy.md#2-github-production-environment)。
+- `deploy.sh` 在 migration 前停止並確認 `newsroom-worker` 已停，migration 後依序啟動並
+  確認 `orchestration-worker`、`podcast-media-worker`、`newsroom-worker` 健康，最後才啟動
+  dispatcher。
 
-啟用步驟：
+## 舊版次資料搬移
 
-1. 在開發環境的 `apps/api/.env` 設定 DeepSeek key，執行
-   `make generate-daily-news`，確認候選、擷取、繁中摘要與兩個翻譯都正常。
-2. 在 GitHub production 環境新增 `DAILY_INSIGHTS_NEWS_MODEL_API_KEY` secret。
-3. 把 `DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 改為 `true`，以 `workflow_dispatch`
-   重新部署。
-4. 隔日 08:00 後檢查 `docker logs daily-insights-orchestration-dispatcher`、
-   `docker logs daily-insights-orchestration-worker`、後台 RoutineRun／JobRun 的 functions
-   與 attempts，以及 `/api/news/latest`。
+切換 migration 把舊管線每個版次日期與市場最新、狀態為 complete 或 partial 且有可見
+項目的版次搬入 `newsroom_*`：
 
-## 畫面
+- 版次為 `selection_mode = legacy`、已發布；事件 `created_by = legacy`，三語標題與
+  摘要直接帶入；項目 `origin = legacy`，沒有「為何重要」。
+- 原新聞的來源連結成為 `manual` 來源下的文章，供讀者端來源列表使用。
+- 搬移完成後刪除舊的 `news_*` 資料表。同一個 migration 會把仍為 pending 或 running
+  的舊新聞 orchestration job／function runs 取消。
 
-2026-09-02 本機以 `make generate-daily-news` 產生的 `complete` 版本：
+搬移後的歷史版次和新版次走同一個讀者 API，也可在後台依日期檢視與隱藏。
 
-| 繁中桌面版                                           | 英文桌面版                                      | 繁中手機版                                          |
-| ---------------------------------------------------- | ----------------------------------------------- | --------------------------------------------------- |
-| ![繁中桌面版](../images/reports-zh-hant-desktop.png) | ![英文桌面版](../images/reports-en-desktop.png) | ![繁中手機版](../images/reports-zh-hant-mobile.png) |
+執行紀錄不搬移也不刪除：
 
-市場版本（2026-09-02 本機，台股 7/8、美股 7/8）：
+- `legacy_data_management_runs` 是唯讀封存（自 migration `20260916_0028` 起以 trigger
+  保護），其中 `news_all`、`news_market`、`news_publish` 等歷史紀錄完整保留，仍可由
+  `GET /api/admin/orchestration/legacy-runs` 查閱。切換只移除 `data_management` 中
+  執行這些新聞操作的程式路徑。
+- 使用已移除 key（`news_global_refresh`、`news_tw_equity_refresh`、
+  `news_us_equity_refresh`、`news_publish`、`news_daily_update`、`news_*_refresh_job`、
+  `news_publish_job`）的 orchestration job／function runs 留在歷史中，後台照常列出，
+  但無法再執行或重跑。
 
-| 台股報告頁（報告尚未推出加台股新聞）                | 美股報告頁（報告區塊下方加美股新聞）                |
-| --------------------------------------------------- | --------------------------------------------------- |
-| ![台股報告頁](../images/reports-tw-equity-news.png) | ![美股報告頁](../images/reports-us-equity-news.png) |
+## 安全與限制
 
-## 驗收條件
+- 所有對外 HTTP 都經 SSRF-safe client：只連公開位址、逐跳驗證轉址、遵守 robots.txt、
+  限制大小與 timeout；不得為了收錄來源放寬這些限制。
+- LLM 與 embedding 呼叫的稽核不保存 prompt 與正文；正文 30 天後清除。
+- 精選、分析、翻譯都依賴同一個 DeepSeek 帳號；帳號額度或權限問題會以 `stage_fatal`
+  或 `selection_fallback` 通知呈現，修復後需要人工重新排入 `failed` 的資料列。
+- 第一版後台不提供「附指示重跑」與手動星等；英文內容不可編輯。
 
-- 契約腳本、Compose 模型驗證與部署腳本都只接受統一 dispatcher／worker 拓撲。
-- 旗標為 `false` 時統一容器維持健康且新聞 functions 不呼叫任何外部服務。
-- 相同輸入下 `complete` 版本不會重複產生；`unavailable` 版本可以重新生成。
-- 09:00 啟動會補建當日 routine；10:00 起不開始新的自動外部 attempt，已開始的工作
-  可完成，`news_publish` function 在 dependencies terminal 後收斂。
-- 後台可看到版本的全部候選與階段，隱藏的新聞不出現在讀取 API，人工上架的新聞與
-  模型選入的新聞在客戶端無差別。
-- 報告頁新聞刷新失敗時保留已載入的卡片與分頁；不新增更新中、延遲或技術提示。
-- 非白名單主機、非 443 連接埠、私有 IP 與 redirect 到未核准目標都被拒絕。
-- 摘要與翻譯的結構不符 schema 時，依實際階段分類並由後續候選遞補。
+## 相關文件
 
-## 已知限制
-
-- 多個 dispatcher 實例可同時嘗試建立 routine，但 automatic provider
-  job／edition 唯一鍵會收斂為一筆工作；provider lock、worker lease 與新聞 edition
-  lock 處理執行期 recovery。
-- 探索一律讀全部 feed，`poll_group` 只是給未來常駐 poller 的建議頻率；Benzinga 這類
-  一次只回兩則的來源目前沒有納入。
-- Twelve Data 的 `/press_releases` 已評估不採用：必須帶 symbol 查詢、沒有原文
-  URL、內容為付費通稿且近乎沒有當日稿件（2026-09-02 實測 NVDA 近 3 天 0 筆）。
-- Reuters 對非瀏覽器請求回應 `401`，CNBC、BBC 與 AP 封鎖爬蟲，均不在註冊表內。
-- 日經的文章頁有付費牆，候選會在擷取階段以 `news.source.failed` 記錄；WSJ、MarketWatch、Investing.com、Forbes 已因同樣原因移出註冊表。SEC 8-K 的連結是申報索引頁，摘要品質取決於索引頁文字。
-- `langdetect` 對短標題的判斷不穩定，因此只在新聞稿 feed 啟用語言過濾。
-- 人工覆核只到隱藏與上架：無法編輯標題或摘要；若模型選題或摘要品質整體不佳，仍需
-  調整 `modules/news/prompts` 中的選題準則後手動重跑。
-- Automatic 與 manual 工作共用 Provider lock 與 execution lease 保護；當日 automatic
-  provider job 由唯一鍵防止重複，manual 操作則每次建立新 JobRun 並在衝突時排隊。
-  後台可取消待執行或執行中的工作，撤銷租約後不可建立後繼重試。
-
-## 新聞可用性與失敗處理
-
-新聞 API 依市場與語系，回傳今天或更早「實際有該語系新聞」的最新 complete／partial
-版本。新的 unavailable 或空版本不會取代已發布內容；跨日、週末或持續產生失敗時，
-沿用最近可用版本，不另行提示版本日期；客戶端也不顯示完整或不完整的狀態標記。從未產生過內容的市場仍回 unavailable，不編造新聞。
-此保留策略需要 API 與資料庫可正常存取，不代表基礎設施故障時仍能提供新頁面。
-
-選題若違反來源上限或多樣性規則，從模型原有排名中選出符合全部規則的最大子集；
-相同則數優先保留排名較前者。未知 ID、重複事件與結構錯誤仍拒絕。最多十個候選，
-搜尋不超過 1024 個子集，不增加模型呼叫。選題範例的 market 必須符合該版本允許值。
-
-選稿、摘要或翻譯的 JSON schema 驗證失敗時，既有一次重試加入固定的修正指引。Provider
-回傳內容無法解析為 JSON object 時記為 `provider_invalid_json`；可解析但不符合嚴格 schema
-時則依階段記為 `selection_schema_invalid`、`summary_schema_invalid` 或
-`translation_schema_invalid`。Schema 錯誤只保存最多十個安全化的欄位路徑與錯誤類型，
-不保存模型原文、候選正文或欄位值。流程不再以
-程式逐一比對原文與輸出中的數字；`numeric_facts` 仍保存為呈現資料，但不作為通過門檻。
-翻譯不是單純接受模型文字：它沿用摘要的嚴格 JSON schema，並以已驗證繁中摘要作為
-翻譯基準；任一結構條件失敗都依實際的摘要或翻譯階段記錄安全錯誤代碼。
-Audit 與事件記錄區分 selection_schema_invalid、selection_invalid_candidate、
-summary_schema_invalid、translation_schema_invalid、provider_http_<status>、
-provider_invalid_json、provider_request_failed，不記錄 prompt、正文或原始例外內容。
-歷史 audit 或 checkpoint 可能仍含 `selection_invalid_json`、`summary_invalid_json`、
-`translation_invalid_json`、`summary_ungrounded_number` 或
-`translation_ungrounded_number`；新流程不再產生這些舊 schema／數字代碼，但恢復流程仍能安全分類。
-選題修復事件 news.selection.repaired 僅記錄原始與保留則數。
-
-Orchestration refresh 若已有至少一則可發布內容，另有摘要或翻譯驗證耗盡，會以終態
-`partial` 保存候選對應的 `stage`、`locale` 與安全錯誤代碼，並允許 `news_publish` 繼續；
-摘要與翻譯失敗分別計入 `summary_failed`／`translation_failed`，另以
-`generation_failed` 提供合計，文章擷取失敗則以 `stage=article` 保存安全原因。
-若所有入選文章都因摘要或翻譯驗證耗盡而失敗，則為不可重試的終態 `unavailable`，仍允許
-terminal dependency 繼續檢查其他可發布批次；
-provider timeout、429、5xx、認證或未知系統錯誤不會被降級為單篇 `partial`，而是停止後續
-模型呼叫並沿用 worker 既有失敗恢復流程。摘要與翻譯各自使用最多六個工作的有界並行；
-第一個系統性或 ownership 錯誤會停止尚未開始的工作，已在途工作完成後回拋原始錯誤，且
-其他工作的 schema 修正呼叫會在送出前由共享中止狀態擋下。`news_publish` 只處理具正常終態或已保存
-partial 批次的市場；純 `failed`／`cancelled` 市場記為 blocked／skipped，不建立空的
-`unavailable` edition，也不覆蓋既有可用版本。
-選稿會將候選池分成多個視窗。單一視窗的 schema 或候選契約修復耗盡時，不丟棄其他視窗
-已成功的選稿結果；該視窗記入 `selection_failure_reasons`，流程繼續後續視窗與不足額補選。
-只要至少一則內容備妥，refresh 以不可重試的 `partial` 完成並允許 `news_publish`；所有選稿
-視窗都耗盡且無內容時則以 `unavailable` 完成，同樣不把 sibling 市場標記為系統性失敗。
-Provider timeout、429、5xx、認證、資料庫或未知錯誤仍會立即停止，不會被誤降級為視窗失敗。
-因 retryable provider／系統錯誤或未執行 sibling 在 deadline 被通用終止器標為
-`unavailable` 時，必須同時具備最新 `unavailable` attempt 與正常完成的 unavailable batch
-才視為內容不足；failed batch、failed attempt 或無 batch 一律維持 blocked。
-人工上架中單篇文章的擷取永久失敗或摘要／翻譯驗證耗盡同樣是該次請求的終態結果；有其他
-文章成功時為 `partial`，全部失敗時為 `failed`，兩者皆不建立技術性 retry。只有已記錄為
-`waiting_recovery` 的共享暫時故障候選會進入後續恢復。
-
-## 不足額補選
-
-每次執行最多三次選題呼叫，整池篩選與備選選稿合計。正文仍只擷取一次且最多 80 筆（台股／美股
-100 筆）；擷取後的可用候選池擴為原本兩倍（全球最多 40 筆、台股／美股最多 60 筆），每次
-送入模型的候選上限仍為 20／30，因此整池篩選最多用掉兩次呼叫，剩下至少一次留給補選。
-統一編排會在兩個候選窗都篩選後、任何摘要開始前進行第三輪備選選稿；只要仍有模型未回傳
-的可用候選就會使用該輪，不等候生成結果判斷是否不足。備選輪排除模型已回傳的文章，並提
-供目前已選事件的標題、event key、來源及主題，鼓勵不同事件與來源。每則繁中摘要與各翻譯
-皆最多兩次嘗試，三語系全部驗證通過才可進入最終事件去重與發布政策。
-
-全份新聞的事件、來源上限、主題與來源多樣性在翻譯完成後驗證；五星候選全部發布，四星
-最多發布 10 則，一至三星合計最多發布 5 則。三輪用盡或候選耗盡時，發布已完成的合格部分；
-備選選稿的 selection 驗證耗盡或系統性錯誤沿用整批失敗政策，不降級為單篇 `partial`。
-既有最近可用新聞回退策略不變。Legacy 產生流程仍保留既有的 `news.refill.round` 事件；
-生產用統一編排不在生成後再送出選稿呼叫。
-
-本節補選是既有單次選題政策的一部分，不等於失敗重試。正常少量／零則結果不重跑；
-足額但來源有技術故障仍保留失敗證據並按分類恢復。10:00 後不再開始新的 automatic
-外部 attempt；manual current-edition JobRun 仍可明確重抓，不以不相關文章或重複事件硬湊則數。
+- [重點新聞維運手冊](../runbooks/news-recovery.md)
+- [重點新聞 Newsroom 管線重構規格](../specs/newsroom-pipeline.md)
+- [統一 orchestration 操作手冊](../runbooks/unified-orchestration.md)
+- [非執行中的新聞來源](inactive-news-sources.md)

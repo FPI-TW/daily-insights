@@ -37,16 +37,6 @@ EXPECTED_TABLES = {
     "memberships",
     "messages",
     "model_configurations",
-    "news_candidates",
-    "news_candidate_batches",
-    "news_candidate_publications",
-    "news_checkpoints",
-    "news_workflows",
-    "news_dependency_states",
-    "news_editions",
-    "news_generation_audits",
-    "news_items",
-    "news_presentations",
     "newsroom_articles",
     "newsroom_edit_log",
     "newsroom_edition_items",
@@ -61,7 +51,6 @@ EXPECTED_TABLES = {
     "podcast_episodes",
     "podcast_upload_batches",
     "podcast_upload_sessions",
-    "prepared_news_items",
     "projection_input_freezes",
     "projection_input_observations",
     "publication_function_attempts",
@@ -81,15 +70,6 @@ EXPECTED_TABLES = {
 
 def test_schema_registers_all_foundation_tables() -> None:
     assert set(Base.metadata.tables) == EXPECTED_TABLES
-
-
-def test_news_candidate_publication_identity_is_the_composite_primary_key() -> None:
-    table = Base.metadata.tables["news_candidate_publications"]
-
-    assert tuple(table.primary_key.columns.keys()) == ("publish_job_run_id", "candidate_id")
-    assert not any(
-        constraint.name == "uq_news_candidate_publish_job" for constraint in table.constraints
-    )
 
 
 def test_fixed_market_catalog_has_eight_unique_codes() -> None:

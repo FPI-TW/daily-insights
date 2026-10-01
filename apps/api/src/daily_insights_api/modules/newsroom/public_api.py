@@ -334,6 +334,20 @@ def _localized_text(
     return headline, summary, why
 
 
+async def visible_item_texts(
+    database: AsyncSession, edition_id: uuid.UUID, locale: Locale
+) -> list[tuple[str, str, str | None]]:
+    """Headline, summary and "why" of an edition's reader-visible items, by rank.
+
+    The same visibility a reader gets (spec §4.5), including the English
+    digest check; an unpublished edition has no visible items.
+    """
+    return [
+        _localized_text(item, event, locale)
+        for item, event in await _visible_rows(database, edition_id, locale)
+    ]
+
+
 async def readable_market_codes(database: AsyncSession, context: AuthContext) -> frozenset[str]:
     """Markets whose editions and dashboards the viewer may open.
 

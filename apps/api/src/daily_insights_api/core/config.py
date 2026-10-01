@@ -75,18 +75,11 @@ class Settings(BaseSettings):
     analyst_viewpoints_base_url: str = "https://analyst-viewpoints.invalid"
     analyst_viewpoints_api_key: SecretStr | None = None
     analyst_viewpoints_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
-    daily_news_enabled: bool = False
-    # The article allowlist is derived from the feed registry; these only add
-    # hosts (for a temporary feed) or block registry hosts (kill switch).
+    # Newsroom ingestion: the article allowlist is derived from the source
+    # registry; these only add hosts (for a temporary source) or block
+    # registry hosts (kill switch).
     news_extra_hostnames: str = ""
     news_blocked_hostnames: str = ""
-    model_provider: str = "deepseek"
-    model_name: str = "deepseek-chat"
-    model_api_base_url: str = "https://api.deepseek.com"
-    news_model_api_key: SecretStr | None = None
-    # A selection prompt carries up to ~100k characters of source text; the
-    # provider regularly needs 30-45 seconds to answer it.
-    model_timeout_seconds: float = Field(default=120, gt=0, le=300)
     chat_user_max_pending: int = Field(default=2, gt=0)
     chat_org_max_pending: int = Field(default=8, gt=0)
     chat_user_daily_turns: int = Field(default=100, gt=0)
@@ -124,7 +117,6 @@ class Settings(BaseSettings):
     newsroom_slack_webhook_url: SecretStr | None = None
     newsroom_admin_base_url: str = "http://localhost:3000"
     newsroom_worker_poll_seconds: float = Field(default=2.0, ge=0.1, le=60)
-    newsroom_worker_concurrency: int = Field(default=6, ge=1, le=20)
     newsroom_fetch_concurrency: int = Field(default=4, ge=1, le=20)
     report_freshness_max_age_days: int = Field(default=3, ge=1, le=30)
     r2_endpoint_url: str | None = None
@@ -182,6 +174,19 @@ class Settings(BaseSettings):
         return self
 
     def _validate_newsroom(self) -> None:
+        for setting, override in (
+            ("news_extra_hostnames", self.news_extra_hostnames),
+            ("news_blocked_hostnames", self.news_blocked_hostnames),
+        ):
+            hostnames = [item.strip().lower().rstrip(".") for item in override.split(",")]
+            if override.strip() and any(
+                not item or "/" in item or ":" in item or "." not in item for item in hostnames
+            ):
+                raise ValueError(f"{setting} must contain exact hostnames")
+        if self.guardian_api_key is not None and is_placeholder_value(
+            self.guardian_api_key.get_secret_value()
+        ):
+            raise ValueError("guardian_api_key cannot be a placeholder")
         if self.newsroom_enabled:
             for setting, url, key in (
                 ("newsroom_llm", self.newsroom_llm_base_url, self.newsroom_llm_api_key),
@@ -235,33 +240,6 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "analyst_viewpoints_api_key is required and cannot be a placeholder"
                 )
-        if self.daily_news_enabled:
-            model_url = urlparse(self.model_api_base_url)
-            if (
-                self.model_provider != "deepseek"
-                or model_url.scheme != "https"
-                or not model_url.netloc
-            ):
-                raise ValueError("daily news requires a DeepSeek absolute HTTPS model API URL")
-            if (
-                self.news_model_api_key is None
-                or not self.news_model_api_key.get_secret_value().strip()
-                or is_placeholder_value(self.news_model_api_key.get_secret_value())
-            ):
-                raise ValueError("news_model_api_key is required and cannot be a placeholder")
-            for setting, override in (
-                ("news_extra_hostnames", self.news_extra_hostnames),
-                ("news_blocked_hostnames", self.news_blocked_hostnames),
-            ):
-                hostnames = [item.strip().lower().rstrip(".") for item in override.split(",")]
-                if override.strip() and any(
-                    not item or "/" in item or ":" in item or "." not in item for item in hostnames
-                ):
-                    raise ValueError(f"{setting} must contain exact hostnames")
-            if self.guardian_api_key is not None and is_placeholder_value(
-                self.guardian_api_key.get_secret_value()
-            ):
-                raise ValueError("guardian_api_key cannot be a placeholder")
         if self.chat_enabled:
             chat_url = urlparse(self.chat_model_api_base_url)
             if self.chat_model_provider not in {"deepseek", "openai-compatible"}:
@@ -324,28 +302,6 @@ class MacroDashboardSchedulerSettings(BaseSettings):
         return self
 
 
-class DailyNewsSchedulerSettings(BaseSettings):
-    """Minimal runtime configuration for the database-only news scheduler."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="DAILY_INSIGHTS_",
-        env_file=API_ENV_FILE,
-        extra="ignore",
-    )
-
-    environment: Environment = "development"
-    database_url: str | None = None
-    daily_news_enabled: bool = False
-
-    @model_validator(mode="after")
-    def require_database_url(self) -> Self:
-        if self.database_url is None:
-            if self.environment not in {"development", "test"}:
-                raise ValueError("database_url is required outside development and test")
-            self.database_url = LOCAL_DATABASE_URL
-        return self
-
-
 def is_placeholder_value(value: str) -> bool:
     lowered = value.lower()
     return any(marker in lowered for marker in PLACEHOLDER_MARKERS)
@@ -359,8 +315,3 @@ def get_settings() -> Settings:
 @lru_cache
 def get_macro_dashboard_scheduler_settings() -> MacroDashboardSchedulerSettings:
     return MacroDashboardSchedulerSettings()
-
-
-@lru_cache
-def get_daily_news_scheduler_settings() -> DailyNewsSchedulerSettings:
-    return DailyNewsSchedulerSettings()

@@ -60,7 +60,8 @@ Conditional-required Secrets：
 
 - `DAILY_INSIGHTS_MORNING_REPORTS_ENABLED=true`：
   `DAILY_INSIGHTS_TWELVE_DATA_API_KEY`；
-- `DAILY_INSIGHTS_DAILY_NEWS_ENABLED=true`：`DAILY_INSIGHTS_NEWS_MODEL_API_KEY`；
+- `DAILY_INSIGHTS_NEWSROOM_ENABLED=true`：`DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY` 與
+  `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`；
 - `DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED=true`：
   `DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY`；
 - `DAILY_INSIGHTS_CHAT_ENABLED=true`：`DAILY_INSIGHTS_CHAT_MODEL_API_KEY`。
@@ -82,7 +83,7 @@ PUBLIC_HOSTNAME
 DAILY_INSIGHTS_ORCHESTRATION_ENABLED
 DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE
 DAILY_INSIGHTS_MORNING_REPORTS_ENABLED
-DAILY_INSIGHTS_DAILY_NEWS_ENABLED
+DAILY_INSIGHTS_NEWSROOM_ENABLED
 DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED
 DAILY_INSIGHTS_YFINANCE_ENABLED
 DAILY_INSIGHTS_TWSE_ENABLED
@@ -96,7 +97,7 @@ Workflow 也會把 build job 產生的 `API_IMAGE` 與 `WEB_IMAGE` 視為 always
 deployment values，並驗證 immutable SHA-256 digest；兩者不是人工設定的 GitHub
 Environment Secret 或 Variable。
 
-`DAILY_INSIGHTS_MORNING_REPORTS_ENABLED`、`DAILY_INSIGHTS_DAILY_NEWS_ENABLED`、
+`DAILY_INSIGHTS_MORNING_REPORTS_ENABLED`、`DAILY_INSIGHTS_NEWSROOM_ENABLED`、
 `DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED`、`DAILY_INSIGHTS_YFINANCE_ENABLED` 與
 `DAILY_INSIGHTS_TWSE_ENABLED`、`DAILY_INSIGHTS_CHAT_ENABLED` 都必須明確設為 `true`
 或 `false`。**未設定時 deployment validation 會直接中止**，不會退回 Compose
@@ -118,34 +119,38 @@ Conditional-required Variables：
   `DAILY_INSIGHTS_CHAT_MODEL_NAME`、`DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL` 與
   `DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS`。
 
-Daily news 除 always-required `DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 與啟用時必填的
-`DAILY_INSIGHTS_NEWS_MODEL_API_KEY` 外，下列都是 optional/defaulted configuration：
+重點新聞（newsroom）除 always-required `DAILY_INSIGHTS_NEWSROOM_ENABLED` 與啟用時必填的
+`DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY`、`DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY` 外，
+下列都是 optional/defaulted configuration，空值時使用括號內的 Compose default：
 
-- `DAILY_INSIGHTS_MODEL_PROVIDER=deepseek`：news model provider；啟用 daily news 時目前
-  只接受 `deepseek`；
-- `DAILY_INSIGHTS_MODEL_NAME=deepseek-chat` 與
-  `DAILY_INSIGHTS_MODEL_API_BASE_URL=https://api.deepseek.com`：model 與 endpoint；
-- `DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS=120`：單次 model response timeout，API 接受
-  `0 < value <= 300`；
-- `DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS=25`：抓取單篇候選新聞內容的 timeout，API
-  接受 `0 < value <= 120`；
-- `DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS=30`：讀取各 publisher feed／listing 的
-  timeout，API 接受 `0 < value <= 180`；
-- `DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES`、`DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES`、
-  `DAILY_INSIGHTS_GUARDIAN_API_KEY` 與 `DAILY_INSIGHTS_SEC_CONTACT_EMAIL` 可留空。
+- Variables `DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL`（`https://api.deepseek.com`）與
+  `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_BASE_URL`（`https://api.openai.com/v1`）：有設定時
+  必須是 absolute HTTPS URL；
+- Variables `DAILY_INSIGHTS_NEWSROOM_TRIAGE_MODEL`、`DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL`、
+  `DAILY_INSIGHTS_NEWSROOM_ANALYSIS_MODEL`、`DAILY_INSIGHTS_NEWSROOM_TRANSLATE_MODEL`
+  （皆為 `deepseek-chat`）與 `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_MODEL`
+  （`text-embedding-3-small`，向量必須是 1536 維）；
+- Secret `DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL`：Slack incoming webhook，有設定時
+  必須以 `https://hooks.slack.com/` 開頭；未設定時通知只寫入 worker log；
+- Variables `DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES`、`DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES`
+  與 `DAILY_INSIGHTS_SEC_CONTACT_EMAIL`，以及 Secret `DAILY_INSIGHTS_GUARDIAN_API_KEY`：
+  可留空；需要憑證的來源在未設定時略過。
 
-目前 release workflow 沒有傳入上述 provider 與三個 timeout override，因此 production
-Compose 會使用列出的 defaults。若有設定 model API base URL，啟用 daily news 時必須是
-absolute HTTPS URL。
+`DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL` 不需要設定：workflow 以
+`https://` 加上 `PUBLIC_HOSTNAME` 組成，供 Slack 通知中的後台連結使用。
+`DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS`（25）與
+`DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS`（30）目前不由 workflow 傳入，固定使用
+Compose default。
 
 `DAILY_INSIGHTS_YFINANCE_ENABLED` 控制 Yahoo Finance functions；
 `DAILY_INSIGHTS_TWSE_ENABLED` 控制 TWSE 加權指數、個股法人與市場法人 functions。
 這三個 TWSE functions 在同一 Provider context 共用 client 與全域請求間隔。
-`DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 控制 Internal Services 的三個 news refresh
-functions 與後續 `news_publish`；`DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED` 控制
+`DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED` 控制 Internal Services 的
 `analyst_viewpoints_sync`。所有 automatic functions 由每日 08:00 的統一 routine 建立，
-不再使用個別 scheduler container。新聞額度／金鑰修復後可從後台建立新的 manual
-JobRun，詳見[新聞恢復操作](news-recovery.md)。
+不再使用個別 scheduler container。`DAILY_INSIGHTS_NEWSROOM_ENABLED` 同時控制常駐的
+`newsroom-worker` 與 routine 中的 `newsroom_assemble`；旗標關閉時 worker 仍啟動並維持
+健康，只是不處理任何新聞。金鑰或額度修復後的重新排入步驟見
+[重點新聞維運手冊](news-recovery.md)。
 
 資料功能停用時 API、worker 與 dispatcher 仍可維持健康，但對應 function 不執行
 provider request。啟用晨報不需要額外設定 manifest 核准狀態或 hash。
@@ -225,17 +230,18 @@ Workflow 在 SSH process 中執行：
 7. 用 disposable nginx container 渲染 template 並執行 `nginx -t`；
 8. 在舊 API／Web 仍存活時，以 `--force-recreate --no-deps nginx` 單獨重建
    nginx，使 Docker DNS 動態解析先開始運作；
-9. 停止 API、`orchestration-dispatcher`、`orchestration-worker`，以及仍存在的所有
-   legacy scheduler／`data-management-worker`，並確認 quiescence，避免任何舊、新
-   runtime 跨越 migration boundary；
+9. 停止 API、`orchestration-dispatcher`、`orchestration-worker`、
+   `podcast-media-worker`、`newsroom-worker`，以及仍存在的所有 legacy
+   scheduler／`data-management-worker`，並確認 quiescence，避免任何舊、新 runtime
+   跨越 migration boundary；
 10. 檢查 legacy management/report queues 沒有 pending 或 running work；若仍有工作，
     保留原始歷史並由 operator 明確處理後再部署；
 11. 使用 API image 執行 `alembic upgrade head`；首次切換會把
     `data_management_runs` 搬入 `legacy_data_management_runs`；
-12. 以 `--force-recreate --no-deps orchestration-worker` 單獨啟動統一 worker，並等待
-    health check 通過；
-13. worker healthy 後才 convergence API、Web 與 `orchestration-dispatcher`，且不再次
-    重建 nginx；
+12. 依序以 `--force-recreate --no-deps` 單獨啟動 `orchestration-worker`、
+    `podcast-media-worker` 與 `newsroom-worker`，每個都等待 health check 通過；
+13. 所有 worker healthy 後才 convergence API、Web 與 `orchestration-dispatcher`，且不
+    再次重建 nginx；
 14. 等待所有 container health，並從 nginx container 內分別主動驗證 API
     readiness 與 Web login route；
 15. 輸出失敗 container state/logs，並從 GHCR logout。
@@ -278,12 +284,15 @@ docker logs --tail=200 daily-insights-nginx
 - customer/admin 登入、tenant isolation、會員/組織管理與三語系；
 - Podcast publish/unpublish、R2 CORS/range playback 與 signed URL expiry；
 - RDS backup/PITR 隔離還原結果；
-- EC2 reboot 後 5 個 production container 由 Docker 自動恢復且通過 health check 的
-  證據：`api`、`web`、`nginx`、`orchestration-worker` 與
-  `orchestration-dispatcher`；另須證明 worker 先 healthy，dispatcher 才啟動；
-- 下一個台北 08:00 只有一個 RoutineRun，包含六個 Provider jobs、兩個 projection
-  jobs、functions／attempts、實際 provenance，以及 10:00 soft deadline 後的 terminal
-  狀態；
+- EC2 reboot 後 7 個 production container 由 Docker 自動恢復且通過 health check 的
+  證據：`api`、`web`、`nginx`、`orchestration-worker`、`podcast-media-worker`、
+  `newsroom-worker` 與 `orchestration-dispatcher`；另須證明 worker 先 healthy，
+  dispatcher 才啟動；
+- 下一個台北 08:00 只有一個 RoutineRun，包含七個 Provider function jobs（含
+  `newsroom_daily_assemble`）、兩個 projection jobs、functions／attempts、實際
+  provenance，以及 10:00 soft deadline 後的 terminal 狀態；
+- 啟用重點新聞時，三個市場版在 08:00 後產生草稿、09:00 自動發布，Slack 收到
+  「草稿完成」通知；
 - 告警實際送達與目標流量的 CPU、memory、disk、database、latency headroom。
 
 外部驗收完成前，狀態是「可部署，不可正式切流量」。

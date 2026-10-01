@@ -4,7 +4,7 @@ export pnpm_config_verify_deps_before_run := false
 
 .PHONY: help init dev dev-detached dev-web dev-api stop restart logs ps \
 	migrate bootstrap-admin format format-check lint type-check test test-db \
-	generate-morning-reports generate-daily-news backfill-index-daily-bars \
+	generate-morning-reports assemble-newsroom backfill-index-daily-bars \
 	check-index-catalog check-nginx check-production-deployment \
 	check build
 
@@ -67,9 +67,9 @@ generate-morning-reports: ## 本地使用 Twelve Data 單次產生三市場晨�
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
 	docker compose run --rm --build api python -m daily_insights_api.scripts.run_morning_reports --once $(if $(EDITION_DATE),--edition-date $(EDITION_DATE),)
 
-generate-daily-news: ## 本地使用 DeepSeek 單次產生本日新聞（可傳 EDITION_DATE、MARKET=global|tw_equity|us_equity）
+assemble-newsroom: ## 本地單次組出三市場重點新聞草稿（需啟用 newsroom，可傳 EDITION_DATE）
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
-	docker compose run --rm --build api python -m daily_insights_api.scripts.run_daily_news --once $(if $(EDITION_DATE),--edition-date $(EDITION_DATE),) $(if $(MARKET),--market $(MARKET),)
+	docker compose run --rm --build newsroom-worker python -m daily_insights_api.scripts.run_newsroom_assemble $(if $(EDITION_DATE),--edition-date $(EDITION_DATE),)
 
 backfill-index-daily-bars: ## 一次性把指數日 K 灌進資料庫（可傳 PERIOD，預設 2y）
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }

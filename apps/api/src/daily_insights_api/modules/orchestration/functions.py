@@ -46,7 +46,6 @@ from daily_insights_api.modules.orchestration.facts import (
     store_market_bars,
 )
 from daily_insights_api.modules.orchestration.models import JobRun
-from daily_insights_api.modules.orchestration.news_functions import build_news_handlers
 from daily_insights_api.modules.orchestration.worker import (
     AttemptStatus,
     ClaimedFunction,
@@ -200,7 +199,6 @@ def build_function_handlers(
             "newsroom_assemble": _bind(_run_newsroom_assemble, settings, session_factory),
         }
     )
-    handlers.update(build_news_handlers(settings, session_factory))
     return FunctionHandlers(handlers, twelve_transport=twelve_transport, twse_adapter=twse_adapter)
 
 

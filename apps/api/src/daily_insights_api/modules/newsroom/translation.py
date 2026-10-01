@@ -152,7 +152,11 @@ def _english_is_current(
         event.en_source_digest == digest
         and event.headline_en is not None
         and event.summary_en is not None
-        and all(item.why_en_status == "ready" and item.why_en for item in items)
+        # An item without a zh-hant "why" (migrated legacy items) needs no English one.
+        and all(
+            item.why_en_status == "ready" and (item.why_en or not item.why_zh_hant)
+            for item in items
+        )
     )
 
 
@@ -245,7 +249,10 @@ async def translate_event(
         await database.execute(
             update(NewsroomEditionItem)
             .where(NewsroomEditionItem.id == item.id)
-            .values(why_en=translated, why_en_status="ready" if translated else "idle")
+            .values(
+                why_en=translated,
+                why_en_status="ready" if translated or not item.why_zh_hant else "idle",
+            )
         )
     return {
         "headline_en": result.headline,

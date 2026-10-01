@@ -374,18 +374,21 @@ Accept when:
 Blocking decisions: the open items in
 [`phase-2-data-reports.md`](phase-2-data-reports.md).
 
-## Daily news (delivered outside the phase plan)
+## Key news (delivered outside the phase plan)
 
-Implementation status: implemented locally with API, durable Function/Job/Routine
-orchestration, migrations, and customer UI coverage. The daily routine's
-`internal_services_daily_update` job runs the three market refresh functions and
-then `news_publish`; `DAILY_INSIGHTS_DAILY_NEWS_ENABLED` gates those functions,
-not a dedicated scheduler container. A local one-shot command remains available
-for development verification only. Scope, pipeline, retry semantics,
-configuration, and acceptance criteria are recorded in
-[`daily-news.md`](daily-news.md). This feature does not change the Podcast pilot
-or the three-market morning-report acceptance rules, and it does not start Phase
-5 chat even though it shares the DeepSeek model configuration.
+Implementation status: the newsroom pipeline is implemented with tests and
+replaced the earlier daily-news pipeline in a one-shot cutover; legacy editions
+were migrated into the newsroom tables. A dedicated `newsroom-worker` polls
+sources and runs ingestion, triage, analysis, publishing, and translation; the
+daily routine's `newsroom_daily_assemble` job builds the 08:00 drafts, which
+admins review in `/admin/newsroom` before the 09:00 automatic publish.
+`DAILY_INSIGHTS_NEWSROOM_ENABLED` gates the pipeline. Architecture, settings,
+and the review model are recorded in [`daily-news.md`](daily-news.md); the
+product decisions are fixed in
+[`newsroom-pipeline.md`](../specs/newsroom-pipeline.md). This feature does not
+change the Podcast pilot or the three-market morning-report acceptance rules,
+and it does not start Phase 5 chat; its DeepSeek and embedding settings are
+separate from the chat model configuration.
 
 ## Confirmed post-initial-release security work
 

@@ -11,6 +11,7 @@ from daily_insights_api.modules.reports.api import Locale
 class ReportsIndexContext(BaseModel):
     kind: Literal["reports_index"]
     publication_ids: list[uuid.UUID] = Field(min_length=1, max_length=20)
+    # The newsroom edition shown on the page (``/api/newsroom/editions/latest``).
     news_edition_id: uuid.UUID | None = None
 
 
