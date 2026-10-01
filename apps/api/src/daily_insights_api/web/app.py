@@ -31,6 +31,8 @@ from daily_insights_api.modules.markets.router import router as markets_router
 from daily_insights_api.modules.model_runtime.service import sync_chat_model_configuration
 from daily_insights_api.modules.news.admin import router as news_admin_router
 from daily_insights_api.modules.news.router import router as news_router
+from daily_insights_api.modules.newsroom.admin_api import router as newsroom_admin_router
+from daily_insights_api.modules.newsroom.public_api import router as newsroom_router
 from daily_insights_api.modules.operations.health import ReadinessReport, evaluate_readiness
 from daily_insights_api.modules.orchestration.router import router as orchestration_router
 from daily_insights_api.modules.podcasts.direct_upload import router as podcast_uploads_router
@@ -177,6 +179,8 @@ def create_app(
     app.include_router(reports_router)
     app.include_router(news_router)
     app.include_router(news_admin_router)
+    app.include_router(newsroom_router)
+    app.include_router(newsroom_admin_router)
     app.include_router(chat_router)
     app.include_router(podcasts_router)
     app.include_router(podcast_uploads_router)

@@ -31,6 +31,15 @@ from daily_insights_api.modules.news.models import (
     NewsPresentation,
     PreparedNewsItem,
 )
+from daily_insights_api.modules.newsroom.models import (
+    NewsroomArticle,
+    NewsroomEdition,
+    NewsroomEditionItem,
+    NewsroomEditLog,
+    NewsroomEvent,
+    NewsroomLlmCall,
+    NewsroomSource,
+)
 from daily_insights_api.modules.operations.models import ReportPipelineRun, SourceRun
 from daily_insights_api.modules.orchestration.models import (
     FunctionAttempt,
@@ -94,6 +103,13 @@ __all__ = [
     "NewsGenerationAudit",
     "NewsItem",
     "NewsPresentation",
+    "NewsroomArticle",
+    "NewsroomEditLog",
+    "NewsroomEdition",
+    "NewsroomEditionItem",
+    "NewsroomEvent",
+    "NewsroomLlmCall",
+    "NewsroomSource",
     "Organization",
     "OrganizationMarketPolicy",
     "PodcastEpisode",

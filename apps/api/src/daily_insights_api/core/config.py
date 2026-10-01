@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     )
 
     environment: Environment = "development"
-    runtime_role: Literal["api", "orchestration-worker", "media-worker"] = "api"
+    runtime_role: Literal["api", "orchestration-worker", "media-worker", "newsroom-worker"] = "api"
     database_url: str | None = None
     app_name: str = "Daily Insights API"
     session_secret: SecretStr | None = None
@@ -107,6 +107,24 @@ class Settings(BaseSettings):
     # SEC EDGAR requires a contact email in the User-Agent; without it the
     # 8-K feed is skipped rather than requested anonymously.
     sec_contact_email: str | None = None
+    # Newsroom pipeline (docs/specs/newsroom-pipeline.md). Every LLM stage has its
+    # own model setting so a stage can be swapped without touching the others.
+    newsroom_enabled: bool = False
+    newsroom_llm_base_url: str = "https://api.deepseek.com"
+    newsroom_llm_api_key: SecretStr | None = None
+    newsroom_triage_model: str = "deepseek-chat"
+    newsroom_editor_model: str = "deepseek-chat"
+    newsroom_analysis_model: str = "deepseek-chat"
+    newsroom_translate_model: str = "deepseek-chat"
+    newsroom_llm_timeout_seconds: float = Field(default=90, gt=0, le=300)
+    newsroom_embedding_base_url: str = "https://api.openai.com/v1"
+    newsroom_embedding_api_key: SecretStr | None = None
+    newsroom_embedding_model: str = "text-embedding-3-small"
+    newsroom_embedding_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    newsroom_slack_webhook_url: SecretStr | None = None
+    newsroom_admin_base_url: str = "http://localhost:3000"
+    newsroom_worker_poll_seconds: float = Field(default=2.0, ge=0.1, le=60)
+    newsroom_worker_concurrency: int = Field(default=6, ge=1, le=20)
     report_freshness_max_age_days: int = Field(default=3, ge=1, le=30)
     r2_endpoint_url: str | None = None
     r2_bucket_name: str | None = None
@@ -120,7 +138,7 @@ class Settings(BaseSettings):
             if self.environment not in {"development", "test"}:
                 raise ValueError("database_url is required outside development and test")
             self.database_url = LOCAL_DATABASE_URL
-        if self.runtime_role == "orchestration-worker":
+        if self.runtime_role in {"orchestration-worker", "newsroom-worker"}:
             self.session_secret = None
             self.password_pepper = None
             self.r2_endpoint_url = None
@@ -156,7 +174,38 @@ class Settings(BaseSettings):
             ):
                 raise ValueError("deployment secrets must not use placeholders")
             self._validate_production_external_services()
+        # The worker is the only process that calls the providers, so it refuses
+        # to start with missing or placeholder keys in every environment.
+        if self.runtime_role == "newsroom-worker":
+            self._validate_newsroom()
         return self
+
+    def _validate_newsroom(self) -> None:
+        if self.newsroom_enabled:
+            for setting, url, key in (
+                ("newsroom_llm", self.newsroom_llm_base_url, self.newsroom_llm_api_key),
+                (
+                    "newsroom_embedding",
+                    self.newsroom_embedding_base_url,
+                    self.newsroom_embedding_api_key,
+                ),
+            ):
+                parsed = urlparse(url)
+                if parsed.scheme != "https" or not parsed.netloc:
+                    raise ValueError(f"{setting}_base_url must be an absolute HTTPS URL")
+                if (
+                    key is None
+                    or not key.get_secret_value().strip()
+                    or is_placeholder_value(key.get_secret_value())
+                ):
+                    raise ValueError(f"{setting}_api_key is required and cannot be a placeholder")
+            if (
+                self.newsroom_slack_webhook_url is not None
+                and self.newsroom_slack_webhook_url.get_secret_value().strip()
+            ):
+                webhook = urlparse(self.newsroom_slack_webhook_url.get_secret_value())
+                if webhook.scheme != "https" or webhook.netloc != "hooks.slack.com":
+                    raise ValueError("newsroom_slack_webhook_url must be a hooks.slack.com URL")
 
     def _validate_production_external_services(self) -> None:
         if self.morning_reports_enabled:
