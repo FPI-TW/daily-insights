@@ -15,9 +15,9 @@ The repository now includes an offline-verifiable deployment foundation and an
 Cloudflare, RDS, or R2 resources:
 
 - [`compose.production.yaml`](../../compose.production.yaml) runs only externally
-  built images pinned by digest across six containers: API, Web, nginx, the
-  unified orchestration worker, the Podcast media worker, and the 08:00
-  Asia/Taipei dispatcher;
+  built images pinned by digest across seven containers: API, Web, nginx, the
+  unified orchestration worker, the Podcast media worker, the newsroom (key
+  news) worker, and the 08:00 Asia/Taipei dispatcher;
   PostgreSQL is deliberately absent because production uses RDS;
 - [`deploy.sh`](../../scripts/production/deploy.sh),
   [`preflight.sh`](../../scripts/production/preflight.sh),
@@ -41,8 +41,11 @@ files.
 
 - One x86_64 EC2 application instance in a private or tightly restricted subnet
   runs `api`, `web`, `nginx`, `orchestration-worker`, `podcast-media-worker`,
-  and `orchestration-dispatcher`. The dispatcher persists one daily RoutineRun;
-  workers claim provider functions and Podcast verification sessions. Size from
+  `newsroom-worker`, and `orchestration-dispatcher`. The dispatcher persists one
+  daily RoutineRun; workers claim provider functions and Podcast verification
+  sessions, and the newsroom worker continuously polls news sources and runs
+  the key-news LLM stages (it idles while `DAILY_INSIGHTS_NEWSROOM_ENABLED` is
+  false). Size from
   measured upload spool, SSE memory, and CPU, not user count alone.
 - RDS PostgreSQL in private subnets is the durable store. A Single-AZ instance
   is compatible with accepted downtime and lower cost; Multi-AZ is the
@@ -93,12 +96,16 @@ CloudWatch, security-group control, and future scaling are clearer with EC2.
 ## Secrets
 
 - Store production database credentials, session/password secrets, FinDB key,
-  API signing R2 credentials, media-worker-only R2 credentials, and the
-  deployment SSH key in the protected GitHub `production` environment. Set
+  API signing R2 credentials, media-worker-only R2 credentials, the newsroom
+  LLM, embedding, and Slack webhook secrets, and the deployment SSH key in the
+  protected GitHub `production` environment. Set
   `DAILY_INSIGHTS_R2_MEDIA_WORKER_ACCESS_KEY_ID` and
   `DAILY_INSIGHTS_R2_MEDIA_WORKER_SECRET_ACCESS_KEY` to a separate R2 key scoped
   to the application bucket and the media worker's `GetObject` and
   `DeleteObject` needs. The API signer keeps its own R2 credentials.
+- Only `newsroom-worker` receives the embedding key and ingestion settings; the
+  orchestration worker receives the newsroom LLM key only for the 08:00 editor
+  pass. Neither worker receives session secrets or R2 credentials.
 - The GitHub SSH action passes Secrets only to the deployment process. Compose
   writes API values into Docker's container configuration when creating the
   API container; no application env file is written or mounted on EC2.
@@ -144,6 +151,9 @@ Minimum alarms:
 - daily ingestion/publication job missing its deadline, source freshness older
   than the daily SLO, FinDB contract failure, and provider error-rate spike;
 - model-provider failure/latency spike and generations stuck in `pending`;
+- `newsroom-worker` unhealthy, newsroom Slack `stage_fatal` or
+  `late_fill_abandoned` notices, and no published key-news edition by 09:05
+  Asia/Taipei (see the [key news operations runbook](news-recovery.md));
 - unusual admin conversation views, repeated authentication failures, and R2
   signing/management failures.
 
@@ -209,13 +219,13 @@ Compose while retaining immutable deployment inputs.
    pulls pinned images, renders and tests the nginx template in a disposable
    container, then recreates only nginx with Docker DNS re-resolution enabled
    while the previous API/Web containers are still available. It then stops
-   the API, orchestration dispatcher/worker, every legacy scheduler, and
-   `podcast-media-worker`, `data-management-worker`, confirms they are stopped, verifies that the
-   legacy management and report queues have no pending/running rows, and runs
-   `alembic upgrade head`. After migration it starts and
-   health-checks `orchestration-worker` and `podcast-media-worker`, then
-   converges API, Web, and `orchestration-dispatcher` without recreating nginx
-   again.
+   the API, orchestration dispatcher/worker, every legacy scheduler,
+   `podcast-media-worker`, `newsroom-worker`, and `data-management-worker`,
+   confirms they are stopped, verifies that the legacy management and report
+   queues have no pending/running rows, and runs `alembic upgrade head`. After
+   migration it starts and health-checks `orchestration-worker`,
+   `podcast-media-worker`, and `newsroom-worker`, then converges API, Web, and
+   `orchestration-dispatcher` without recreating nginx again.
    A migrated installation with no RoutineRun is activation-pending, so a
    failed first deployment can be retried before 10:00 with activation set to
    today or the next Taipei date. Once a RoutineRun exists, normal deployments
