@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>Acme Corporation reports record quarterly revenue and raises full-year guidance</title>
+      <link>https://www.example-news.com/news-releases/acme-record-quarter.html</link>
+      <pubDate>Wed, 02 Sep 2026 02:30:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Spoločnosť Acme oznámila rekordné štvrťročné tržby a zvýšila celoročný výhľad</title>
+      <link>https://www.example-news.com/news-releases/acme-rekordny-stvrtrok.html</link>
+      <pubDate>Wed, 02 Sep 2026 02:20:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>台積電第二季營收創新高，全年展望上修</title>
+      <link>https://www.example-news.com/news-releases/tsmc-q2.html</link>
+      <pubDate>Wed, 02 Sep 2026 02:10:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>2026-09-02 09:30 +4.2% -1.1%</title>
+      <link>https://www.example-news.com/news-releases/tickers.html</link>
+      <pubDate>Wed, 02 Sep 2026 02:00:00 +0000</pubDate>
+    </item>
+  </channel>
+</rss>
