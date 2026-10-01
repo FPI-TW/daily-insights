@@ -448,32 +448,38 @@ def test_enabled_chat_requires_a_non_placeholder_key_in_production() -> None:
 
 
 @pytest.mark.parametrize(
-    "market,allowed",
-    [("global", True), ("us_equity", True), ("tw_equity", False), ("unknown", False)],
+    "market,status,allowed",
+    [
+        ("global", "published", True),
+        ("us_equity", "published", True),
+        ("us_equity", "draft", False),
+        ("tw_equity", "published", False),
+        ("unknown", "published", False),
+    ],
 )
 async def test_news_snapshot_enforces_market_policy_before_reading_content(
     monkeypatch: pytest.MonkeyPatch,
     market: str,
+    status: str,
     allowed: bool,
 ) -> None:
     from fastapi import HTTPException
     from sqlalchemy.ext.asyncio import AsyncSession
 
     publication = _publication("us_equity")
-    edition = SimpleNamespace(id=uuid.uuid4(), market_code=market)
+    edition = SimpleNamespace(id=uuid.uuid4(), market_code=market, status=status)
     database = AsyncMock(spec=AsyncSession)
     database.scalars.return_value = _ScalarRows([publication])
     database.get.return_value = edition
-    database.execute.return_value = [
-        (object(), SimpleNamespace(headline="Headline", summary="Summary"))
-    ]
+    item_texts = AsyncMock(return_value=[("Headline", "Summary", "Why")])
     monkeypatch.setattr(
         chat_api, "visible_report_market_codes", AsyncMock(return_value=frozenset({"us_equity"}))
     )
     monkeypatch.setattr(chat_api, "_latest_cross_page_reports", AsyncMock(return_value=[]))
     monkeypatch.setattr(
-        chat_api, "visible_news_market_codes", AsyncMock(return_value=frozenset({"us_equity"}))
+        chat_api, "readable_market_codes", AsyncMock(return_value=frozenset({"us_equity"}))
     )
+    monkeypatch.setattr(chat_api, "visible_item_texts", item_texts)
     payload = ChatStreamRequest.model_validate(
         {
             "client_request_id": str(uuid.uuid4()),
@@ -489,9 +495,9 @@ async def test_news_snapshot_enforces_market_policy_before_reading_content(
     if allowed:
         snapshot, _ = await _page_snapshot(database, context=_customer_context(), payload=payload)
         assert "Headline" in json.dumps(snapshot)
-        database.execute.assert_awaited_once()
+        item_texts.assert_awaited_once_with(database, edition.id, "en")
     else:
         with pytest.raises(HTTPException) as error:
             await _page_snapshot(database, context=_customer_context(), payload=payload)
         assert error.value.status_code == 404
-        database.execute.assert_not_awaited()
+        item_texts.assert_not_awaited()

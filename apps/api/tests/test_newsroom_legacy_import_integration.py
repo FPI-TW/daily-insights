@@ -27,7 +27,7 @@ from daily_insights_api.modules.newsroom.models import (
     NewsroomEditionItem,
     NewsroomEvent,
 )
-from daily_insights_api.modules.newsroom.public_api import latest_edition
+from daily_insights_api.modules.newsroom.public_api import latest_edition, visible_item_texts
 from daily_insights_api.modules.newsroom.translation import current_zh_hant_digest, to_zh_hans
 
 pytestmark = pytest.mark.integration
@@ -278,6 +278,11 @@ async def test_legacy_editions_become_readable_newsroom_editions(database_url: s
             english = await latest_edition(database, "global", "en", today=date(2026, 9, 29))
             assert [(item.headline, item.summary) for item in english.items] == [
                 ("A English headline", "A English summary.")
+            ]
+            # The chat page context reads the same visible items.
+            assert english.edition_id is not None
+            assert await visible_item_texts(database, english.edition_id, "en") == [
+                ("A English headline", "A English summary.", None)
             ]
 
             events = (
