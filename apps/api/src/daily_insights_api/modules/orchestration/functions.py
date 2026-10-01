@@ -36,6 +36,8 @@ from daily_insights_api.modules.markets.api import (
     store_institutional_market_flows,
     store_institutional_stock_flows,
 )
+from daily_insights_api.modules.newsroom.api import Runtime as NewsroomRuntime
+from daily_insights_api.modules.newsroom.api import assemble_editions, edition_window
 from daily_insights_api.modules.orchestration.facts import (
     fence_is_current,
     interest_rate_month_coverage,
@@ -195,6 +197,7 @@ def build_function_handlers(
             "treasury_yield_curve": _bind(_run_treasury, settings, session_factory),
             "sofr_daily_rates": _bind(_run_sofr, settings, session_factory),
             "analyst_viewpoints_sync": _bind(_run_analyst, settings, session_factory),
+            "newsroom_assemble": _bind(_run_newsroom_assemble, settings, session_factory),
         }
     )
     handlers.update(build_news_handlers(settings, session_factory))
@@ -829,6 +832,35 @@ async def _run_analyst(
         missing_scopes=missing,
         result=result.model_dump(mode="json"),
         retryable=bool(missing),
+    )
+
+
+async def _run_newsroom_assemble(
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+    claimed: ClaimedFunction,
+) -> FunctionOutcome:
+    """08:00 newsroom drafts (docs/specs/newsroom-pipeline.md §6.3); idempotent."""
+    if not settings.newsroom_enabled:
+        # Disabled is the default until cutover; it must not degrade the job.
+        return FunctionOutcome(status="no_change", result={"skipped": "newsroom_disabled"})
+    if datetime.now(UTC) < edition_window(claimed.edition_date)[1]:
+        # Started before 08:00 (manual run): retry once the collection window closes.
+        return FunctionOutcome(
+            status="unavailable", error_code="newsroom_window_open", retryable=True
+        )
+    runtime = NewsroomRuntime.build(settings, session_factory)
+    try:
+        report = await assemble_editions(runtime, claimed.edition_date)
+    finally:
+        await runtime.aclose()
+    assembled = report.assembled
+    return FunctionOutcome(
+        status="succeeded" if assembled else "no_change",
+        source_as_of=claimed.edition_date,
+        fetched_at=datetime.now(UTC),
+        record_count=sum(market.item_count for market in assembled),
+        result=report.as_dict(),
     )
 
 

@@ -212,6 +212,8 @@ class NewsroomArticle(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_newsroom_articles_embed_due", "embed_status", "embed_next_attempt_at"),
         Index("ix_newsroom_articles_triage_due", "triage_status", "triage_next_attempt_at"),
         Index("ix_newsroom_articles_event", "event_id"),
+        # The 30-day body purge scans by status and age.
+        Index("ix_newsroom_articles_purge", "body_status", "first_seen_at"),
     )
     source_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("newsroom_sources.id", ondelete="RESTRICT"), nullable=False

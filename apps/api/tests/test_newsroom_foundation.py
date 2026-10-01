@@ -72,3 +72,10 @@ def test_newsroom_settings_reject_placeholder_keys() -> None:
             newsroom_embedding_api_key="sk-real",
             newsroom_slack_webhook_url="https://example.com/hook",
         )
+
+
+def test_newsroom_provider_is_ready_only_when_enabled() -> None:
+    from daily_insights_api.modules.orchestration.router import _provider_ready
+
+    assert _provider_ready("newsroom", Settings(newsroom_enabled=False)) is False
+    assert _provider_ready("newsroom", Settings(newsroom_enabled=True)) is True

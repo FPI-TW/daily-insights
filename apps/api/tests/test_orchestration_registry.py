@@ -73,6 +73,7 @@ def test_registry_has_expected_provider_function_job_relationships() -> None:
         "us_treasury",
         "new_york_fed",
         "internal_services",
+        "newsroom",
     }
     assert len(registry_digest()) == 64
 
@@ -221,6 +222,7 @@ def test_automatic_provider_jobs_are_unique_and_internal_services_are_combined()
         "us_treasury",
         "new_york_fed",
         "internal_services",
+        "newsroom",
     ]
     internal = JOB_BY_KEY["internal_services_daily_update"]
     assert {step.function_key for step in internal.functions} == {
@@ -230,6 +232,34 @@ def test_automatic_provider_jobs_are_unique_and_internal_services_are_combined()
         "news_publish",
         "analyst_viewpoints_sync",
     }
+
+
+def test_newsroom_assembly_runs_daily_independent_of_legacy_news() -> None:
+    definition = FUNCTION_BY_KEY["newsroom_assemble"]
+    assert definition.provider_key == "newsroom"
+    assert PROVIDER_BY_KEY["newsroom"].display_name == "Newsroom"
+    assert definition.freshness_days == 1
+    assert definition.resources == ("third_party_llm",)
+    # Alone on its provider, so no other function holds its provider lock.
+    assert [key for key, item in FUNCTION_BY_KEY.items() if item.provider_key == "newsroom"] == [
+        "newsroom_assemble"
+    ]
+
+    job = JOB_BY_KEY["newsroom_daily_assemble"]
+    assert job.triggers == ("automatic",)
+    assert job.automatic_key == "newsroom"
+    assert job.deadline_policy == "routine"
+    assert [step.function_key for step in job.functions] == ["newsroom_assemble"]
+    assert job.key in DAILY_ROUTINE.job_keys
+    assert not any(
+        job.key in (dependency.upstream_job_key, dependency.downstream_job_key)
+        for dependency in DAILY_ROUTINE.dependencies
+    )
+    assert all(
+        "newsroom_assemble" not in {step.function_key for step in other.functions}
+        for other in JOB_BY_KEY.values()
+        if other.key != job.key
+    )
 
 
 def test_manual_news_market_jobs_publish_after_their_refresh() -> None:

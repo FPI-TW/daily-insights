@@ -2138,7 +2138,7 @@ async def test_daily_routine_is_idempotent_and_worker_persists_attempts(
     assert first.id == second.id
     async with sessions() as database:
         assert await database.scalar(select(func.count()).select_from(RoutineRun)) == 1
-        assert await database.scalar(select(func.count()).select_from(JobRun)) == 8
+        assert await database.scalar(select(func.count()).select_from(JobRun)) == 9
         assert await database.scalar(select(func.count()).select_from(JobDependency)) == 8
 
     claimed = await claim_ready_function(engine, sessions, owner="integration-worker")
@@ -2191,7 +2191,7 @@ async def test_routine_response_uses_bounded_query_count(
         event.remove(engine.sync_engine, "before_cursor_execute", count_statement)
 
     assert len(responses) == 1
-    assert len(responses[0].jobs) == 8
+    assert len(responses[0].jobs) == 9
     assert statement_count <= 5
 
 
@@ -2244,7 +2244,7 @@ async def test_registry_version_change_does_not_duplicate_daily_routine(
     assert second.id == first.id
     async with sessions() as database:
         assert await database.scalar(select(func.count()).select_from(RoutineRun)) == 1
-        assert await database.scalar(select(func.count()).select_from(JobRun)) == 8
+        assert await database.scalar(select(func.count()).select_from(JobRun)) == 9
 
 
 async def test_projection_fence_token_rejects_stale_worker_with_same_owner(

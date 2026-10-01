@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns="http://purl.org/rss/1.0/"
+         xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel rdf:about="https://www.example-news.com/rss">
+    <title>RSS 1.0 feed</title>
+  </channel>
+  <item rdf:about="https://www.example-news.com/news/id/20">
+    <title>RDF item with dc:date</title>
+    <link>https://www.example-news.com/news/id/20</link>
+    <dc:date>2026-09-02T11:30:00+09:00</dc:date>
+  </item>
+  <item rdf:about="https://www.example-news.com/news/id/21">
+    <title>RDF item with a bad date</title>
+    <link>https://www.example-news.com/news/id/21</link>
+    <dc:date>soon</dc:date>
+  </item>
+</rdf:RDF>
