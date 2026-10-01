@@ -3911,6 +3911,203 @@
         "title": "NewsRecoveryResponse",
         "type": "object"
       },
+      "NewsroomEditionResponse": {
+        "properties": {
+          "edition_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edition Date"
+          },
+          "edition_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edition Id"
+          },
+          "is_today": {
+            "title": "Is Today",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NewsroomItemResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "locale": {
+            "enum": ["zh-hant", "zh-hans", "en"],
+            "title": "Locale",
+            "type": "string"
+          },
+          "market_code": {
+            "enum": ["global", "tw_equity", "us_equity"],
+            "title": "Market Code",
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          }
+        },
+        "required": [
+          "market_code",
+          "locale",
+          "edition_id",
+          "edition_date",
+          "is_today",
+          "published_at",
+          "items"
+        ],
+        "title": "NewsroomEditionResponse",
+        "type": "object"
+      },
+      "NewsroomItemResponse": {
+        "properties": {
+          "event_id": {
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "headline": {
+            "title": "Headline",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "related_symbols": {
+            "items": {
+              "$ref": "#/components/schemas/NewsroomRelatedSymbol"
+            },
+            "title": "Related Symbols",
+            "type": "array"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/NewsroomSourceLink"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "stars": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stars"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "event_id",
+          "rank",
+          "stars",
+          "headline",
+          "summary",
+          "why",
+          "related_symbols",
+          "sources"
+        ],
+        "title": "NewsroomItemResponse",
+        "type": "object"
+      },
+      "NewsroomRelatedSymbol": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "market_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Code"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": ["symbol", "kind", "label", "market_code"],
+        "title": "NewsroomRelatedSymbol",
+        "type": "object"
+      },
+      "NewsroomSourceLink": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": ["name", "url", "published_at"],
+        "title": "NewsroomSourceLink",
+        "type": "object"
+      },
       "OrchestrationCatalog": {
         "properties": {
           "features": {
@@ -8914,6 +9111,58 @@
         },
         "summary": "Latest Market News",
         "tags": ["news"]
+      }
+    },
+    "/api/newsroom/editions/latest": {
+      "get": {
+        "operationId": "latest_newsroom_edition_api_newsroom_editions_latest_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "market",
+            "required": true,
+            "schema": {
+              "enum": ["global", "tw_equity", "us_equity"],
+              "title": "Market",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "locale",
+            "required": false,
+            "schema": {
+              "default": "zh-hant",
+              "enum": ["zh-hant", "zh-hans", "en"],
+              "title": "Locale",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsroomEditionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Latest Newsroom Edition",
+        "tags": ["newsroom"]
       }
     },
     "/api/podcasts": {

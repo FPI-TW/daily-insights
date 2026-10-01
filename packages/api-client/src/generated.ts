@@ -892,6 +892,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/newsroom/editions/latest": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Latest Newsroom Edition */
+    get: operations["latest_newsroom_edition_api_newsroom_editions_latest_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/podcasts": {
     parameters: {
       query?: never
@@ -2467,6 +2484,76 @@ export interface components {
     NewsRecoveryResponse: {
       /** Dependencies */
       dependencies: components["schemas"]["NewsDependencyResponse"][]
+    }
+    /** NewsroomEditionResponse */
+    NewsroomEditionResponse: {
+      /** Edition Date */
+      edition_date: string | null
+      /** Edition Id */
+      edition_id: string | null
+      /** Is Today */
+      is_today: boolean
+      /** Items */
+      items: components["schemas"]["NewsroomItemResponse"][]
+      /**
+       * Locale
+       * @enum {string}
+       */
+      locale: "zh-hant" | "zh-hans" | "en"
+      /**
+       * Market Code
+       * @enum {string}
+       */
+      market_code: "global" | "tw_equity" | "us_equity"
+      /** Published At */
+      published_at: string | null
+    }
+    /** NewsroomItemResponse */
+    NewsroomItemResponse: {
+      /**
+       * Event Id
+       * Format: uuid
+       */
+      event_id: string
+      /** Headline */
+      headline: string
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Rank */
+      rank: number
+      /** Related Symbols */
+      related_symbols: components["schemas"]["NewsroomRelatedSymbol"][]
+      /** Sources */
+      sources: components["schemas"]["NewsroomSourceLink"][]
+      /** Stars */
+      stars: number | null
+      /** Summary */
+      summary: string
+      /** Why */
+      why: string
+    }
+    /** NewsroomRelatedSymbol */
+    NewsroomRelatedSymbol: {
+      /** Kind */
+      kind: string
+      /** Label */
+      label: string
+      /** Market Code */
+      market_code: string | null
+      /** Symbol */
+      symbol: string
+    }
+    /** NewsroomSourceLink */
+    NewsroomSourceLink: {
+      /** Name */
+      name: string
+      /** Published At */
+      published_at: string | null
+      /** Url */
+      url: string
     }
     /** OrchestrationCatalog */
     OrchestrationCatalog: {
@@ -5163,6 +5250,38 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["LatestNewsResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  latest_newsroom_edition_api_newsroom_editions_latest_get: {
+    parameters: {
+      query: {
+        market: "global" | "tw_equity" | "us_equity"
+        locale?: "zh-hant" | "zh-hans" | "en"
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["NewsroomEditionResponse"]
         }
       }
       /** @description Validation Error */
