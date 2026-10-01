@@ -6,418 +6,268 @@ import {
   waitFor,
   within,
 } from "@testing-library/react"
+import type { AnchorHTMLAttributes, ReactNode } from "react"
 import { I18nextProvider } from "react-i18next"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { createI18n } from "#/lib/i18n"
 import { DailyNews, DailyNewsLoading } from "./DailyNews"
-import type { LatestNews } from "@daily-insights/api-client"
+import type {
+  Locale,
+  NewsroomEdition,
+  NewsroomItem,
+} from "@daily-insights/api-client"
+
+type MockLinkProps = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & {
+  children: ReactNode
+  params?: { locale?: string; marketCode?: string }
+  to: string
+}
+
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({ children, params, to, ...props }: MockLinkProps) => (
+    <a
+      href={to
+        .replace("{-$locale}", params?.locale ?? "")
+        .replace("$marketCode", params?.marketCode ?? "")}
+      {...props}
+    >
+      {children}
+    </a>
+  ),
+}))
 
 afterEach(cleanup)
 
+function story(index: number, overrides: Partial<NewsroomItem> = {}) {
+  return {
+    id: `00000000-0000-4000-8000-0000000001${index.toString().padStart(2, "0")}`,
+    event_id: `00000000-0000-4000-8000-0000000002${index.toString().padStart(2, "0")}`,
+    rank: index,
+    stars: 4,
+    headline: `Story ${index}`,
+    summary: `Summary ${index}.`,
+    why: `Why ${index} matters.`,
+    related_symbols: [],
+    sources: [],
+    ...overrides,
+  } satisfies NewsroomItem
+}
+
+function edition(
+  items: NewsroomItem[],
+  overrides: Partial<NewsroomEdition> = {}
+): NewsroomEdition {
+  return {
+    market_code: "global",
+    locale: "en",
+    edition_id: "00000000-0000-4000-8000-000000000004",
+    edition_date: "2026-10-01",
+    is_today: true,
+    published_at: "2026-10-01T01:00:00Z",
+    items,
+    ...overrides,
+  }
+}
+
+function renderNews(
+  latest: NewsroomEdition | null,
+  { locale = "en", titleKey }: { locale?: Locale; titleKey?: string } = {}
+) {
+  const i18n = createI18n(locale)
+  const view = (next: NewsroomEdition | null, key = titleKey) => (
+    <I18nextProvider i18n={i18n}>
+      <DailyNews edition={next} {...(key ? { titleKey: key } : {})} />
+    </I18nextProvider>
+  )
+  const result = render(view(latest))
+  return {
+    ...result,
+    panel: within(result.container),
+    rerenderNews: (next: NewsroomEdition | null, key?: string) =>
+      result.rerender(view(next, key ?? titleKey)),
+  }
+}
+
 describe("DailyNews", () => {
-  it("keeps the current cards and page on refresh failure without a warning", async () => {
-    const i18n = createI18n("en")
-    const news: LatestNews = {
-      market_code: "us_equity",
-      target_items: 5,
-      edition_id: "00000000-0000-4000-8000-000000000004",
-      edition_date: "2026-09-11",
-      revision: 1,
-      status: "complete",
-      locale: "en",
-      generated_at: "2026-09-11T00:00:00Z",
-      caveat: null,
-      items: Array.from({ length: 7 }, (_, index) => ({
-        id: `00000000-0000-4000-8000-00000000000${index}`,
-        rank: index + 1,
-        importance: 4,
-        topic: "markets",
-        headline: `Retained story ${index + 1}`,
-        summary: "Validated summary",
-        source_name: "Source",
-        source_hostname: "source.example",
-        source_url: `https://source.example/${index}`,
-        source_published_at: null,
-        numeric_facts: [],
-        market: "us",
-        event_key: `story-${index}`,
-      })),
-    }
-    const view = (
-      latest: LatestNews | null,
-      titleKey = "marketNewsTitle_us_equity"
-    ) => (
-      <I18nextProvider i18n={i18n}>
-        <DailyNews news={latest} titleKey={titleKey} groupByMarket={false} />
+  it("shows an accessible initial skeleton", () => {
+    render(
+      <I18nextProvider i18n={createI18n("en")}>
+        <DailyNewsLoading />
       </I18nextProvider>
     )
-    const { container, rerender } = render(view(news))
-    const panel = within(container)
+    const skeleton = screen.getByRole("status", { name: "Loading key news" })
+    expect(skeleton).toHaveAttribute("aria-live", "polite")
+    expect(skeleton).toHaveClass("mb-6")
+  })
+
+  it("shows the headline, facts, why it matters and the importance", () => {
+    const { panel } = renderNews(edition([story(1), story(2, { stars: null })]))
+    const [first, second] = panel.getAllByRole("article")
+    const card = within(first!)
+    expect(card.getByRole("heading", { name: "Story 1" })).toBeInTheDocument()
+    expect(card.getByText("Summary 1.")).toBeInTheDocument()
+    expect(
+      card.getByRole("heading", { name: "Why it matters" })
+    ).toBeInTheDocument()
+    expect(card.getByText("Why 1 matters.")).toBeInTheDocument()
+    expect(card.getByLabelText("Importance 4 stars")).toHaveTextContent("★★★★")
+    expect(
+      within(second!).queryByLabelText(/Importance/)
+    ).not.toBeInTheDocument()
+    // Today's edition carries no date notice.
+    expect(panel.queryByText(/being prepared/)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ["en", "Today’s news is being prepared. Showing September 30."],
+    ["zh-hant", "今日新聞準備中，以下為 9月30日 內容"],
+    ["zh-hans", "今日新闻准备中，以下为 9月30日 内容"],
+  ] as const)(
+    "labels an earlier edition with its date in %s",
+    (locale, notice) => {
+      const { panel } = renderNews(
+        edition([story(1)], {
+          locale,
+          edition_date: "2026-09-30",
+          is_today: false,
+        }),
+        { locale }
+      )
+      const heading = panel.getByRole("heading", { level: 2 })
+      expect(panel.getByText(notice).parentElement).toBe(heading.parentElement)
+    }
+  )
+
+  it("links related symbols to the dashboard they appear on", () => {
+    const { panel } = renderNews(
+      edition([
+        story(1, {
+          related_symbols: [
+            {
+              symbol: "^TWII",
+              kind: "index",
+              label: "TAIEX",
+              market_code: "tw_equity",
+            },
+            {
+              symbol: "2330.TW",
+              kind: "equity",
+              label: "TSMC",
+              market_code: null,
+            },
+          ],
+        }),
+      ])
+    )
+    const symbols = panel.getByRole("list", { name: "Related markets" })
+    expect(
+      within(symbols).getByRole("link", { name: "TAIEX" })
+    ).toHaveAttribute("href", "/en/reports/tw_equity")
+    expect(
+      within(symbols).queryByRole("link", { name: "TSMC" })
+    ).not.toBeInTheDocument()
+    expect(within(symbols).getByText("TSMC")).toBeInTheDocument()
+  })
+
+  it("keeps the sources collapsed until the reader expands them", () => {
+    const { panel } = renderNews(
+      edition([
+        story(1, {
+          sources: [
+            {
+              name: "Reuters",
+              url: "https://www.reuters.com/a",
+              published_at: "2026-09-30T23:30:00Z",
+            },
+            {
+              name: "Nikkei",
+              url: "https://asia.nikkei.com/b",
+              published_at: null,
+            },
+          ],
+        }),
+        story(2),
+      ])
+    )
+    const toggle = panel.getByText("2 sources")
+    const details = toggle.closest("details")!
+    expect(details).not.toHaveAttribute("open")
+    fireEvent.click(toggle)
+    expect(details).toHaveAttribute("open")
+    const link = within(details).getByRole("link", { name: "Reuters" })
+    expect(link).toHaveAttribute("href", "https://www.reuters.com/a")
+    expect(link).toHaveAttribute("target", "_blank")
+    expect(link).toHaveAttribute("rel", "noopener noreferrer")
+    expect(within(details).getByText("2026-10-01 07:30")).toBeInTheDocument()
+    expect(within(details).getAllByRole("listitem")).toHaveLength(2)
+    // A story without sources has no empty toggle.
+    expect(panel.getAllByRole("group")).toHaveLength(1)
+  })
+
+  it("keeps the current cards and page on refresh failure", async () => {
+    const latest = edition(
+      Array.from({ length: 7 }, (_, index) => story(index + 1)),
+      { market_code: "us_equity" }
+    )
+    const { container, panel, rerenderNews } = renderNews(latest, {
+      titleKey: "newsroomTitle_us_equity",
+    })
     fireEvent.click(panel.getByRole("button", { name: "Next news page" }))
     await waitFor(() =>
       expect(container.querySelectorAll("article")).toHaveLength(1)
     )
-    rerender(view(null))
-    expect(panel.getByText("Retained story 7")).toBeInTheDocument()
-    expect(panel.queryByRole("alert")).not.toBeInTheDocument()
+    rerenderNews(null)
+    expect(panel.getByText("Story 7")).toBeInTheDocument()
     expect(panel.queryByRole("status")).not.toBeInTheDocument()
     // An authoritative empty response (for example all items hidden) wins.
-    rerender(view({ ...news, status: "unavailable", items: [] }))
-    expect(panel.queryByText("Retained story 7")).not.toBeInTheDocument()
-    rerender(view(news))
-    rerender(view(null, "marketNewsTitle_tw_equity"))
-    expect(panel.queryByText("Retained story 1")).not.toBeInTheDocument()
-  })
-  it("shows an accessible initial skeleton", async () => {
-    const i18n = createI18n("en")
-    await i18n.changeLanguage("en")
-    render(
-      <I18nextProvider i18n={i18n}>
-        <DailyNewsLoading />
-      </I18nextProvider>
-    )
-    expect(screen.getByRole("status")).toHaveClass("mb-6")
-  })
-
-  it("shows source metadata, importance, and a hardened external link", async () => {
-    const i18n = createI18n("en")
-    await i18n.changeLanguage("en")
-    render(
-      <I18nextProvider i18n={i18n}>
-        <DailyNews
-          news={{
-            market_code: "global",
-            target_items: 5,
-            edition_id: "00000000-0000-4000-8000-000000000002",
-            edition_date: "2026-09-01",
-            revision: 1,
-            status: "complete",
-            locale: "en",
-            generated_at: "2026-09-01T00:00:00+00:00",
-            caveat: "Showing the latest available news from 2026-09-01.",
-            items: [
-              {
-                id: "00000000-0000-4000-8000-000000000001",
-                rank: 1,
-                importance: 4,
-                topic: "markets",
-                headline: "Markets move",
-                summary: "A grounded summary.",
-                source_name: "Reuters",
-                source_hostname: "www.reuters.com",
-                source_url: "https://www.reuters.com/example",
-                source_published_at: "2026-09-01T00:00:00+00:00",
-                numeric_facts: [],
-                market: null,
-                event_key: null,
-              },
-            ],
-          }}
-        />
-      </I18nextProvider>
-    )
-    // The pipeline's fallback notice and the edition status are never shown.
-    expect(
-      screen.queryByText("Showing the latest available news from 2026-09-01.")
-    ).not.toBeInTheDocument()
-    expect(screen.queryByText("Complete")).not.toBeInTheDocument()
-    const link = screen.getByRole("link", { name: "Read source" })
-    expect(link).toHaveAttribute("rel", "noopener noreferrer")
-    expect(screen.getByLabelText("Importance 4 stars")).toHaveTextContent(
-      "★★★★"
-    )
-  })
-
-  it("shows a partial edition as a plain list and hides missing publish times", async () => {
-    const i18n = createI18n("en")
-    await i18n.changeLanguage("en")
-    const { container } = render(
-      <I18nextProvider i18n={i18n}>
-        <DailyNews
-          news={{
-            market_code: "global",
-            target_items: 5,
-            edition_id: "00000000-0000-4000-8000-000000000002",
-            edition_date: "2026-09-01",
-            revision: 1,
-            status: "partial",
-            locale: "en",
-            generated_at: "2026-09-01T00:00:00+00:00",
-            caveat: null,
-            items: [
-              {
-                id: "00000000-0000-4000-8000-000000000001",
-                rank: 1,
-                importance: 3,
-                topic: "markets",
-                headline: "Undated story",
-                summary: "A grounded summary.",
-                source_name: "AP",
-                source_hostname: "apnews.com",
-                source_url: "https://apnews.com/example",
-                source_published_at: null,
-                numeric_facts: [],
-                market: null,
-                event_key: null,
-              },
-            ],
-          }}
-        />
-      </I18nextProvider>
-    )
-    const panel = within(container)
-    expect(panel.queryByText("Partial")).not.toBeInTheDocument()
-    expect(panel.queryByText(/of 5 stories/)).not.toBeInTheDocument()
-    expect(panel.queryByText(/Time unavailable/)).not.toBeInTheDocument()
-    expect(container.querySelector("time")).toBeNull()
-  })
-
-  it("groups stories by market and keeps numeric facts out of the card", async () => {
-    const i18n = createI18n("zh-hant")
-    await i18n.changeLanguage("zh-hant")
-    const item = (index: number, market: "us" | "taiwan", facts: string[]) => ({
-      id: `00000000-0000-4000-8000-00000000001${index}`,
-      rank: index,
-      importance: 3,
-      topic: "markets" as const,
-      headline: `Story ${index}`,
-      summary: "Summary.",
-      source_name: "Source",
-      source_hostname: "source.example",
-      source_url: `https://source.example/${index}`,
-      source_published_at: null,
-      numeric_facts: facts,
-      market,
-      event_key: `event-${index}`,
-    })
-    const { container } = render(
-      <I18nextProvider i18n={i18n}>
-        <DailyNews
-          news={{
-            market_code: "global",
-            target_items: 5,
-            edition_id: "00000000-0000-4000-8000-000000000002",
-            edition_date: "2026-09-03",
-            revision: 1,
-            status: "complete",
-            locale: "zh-hant",
-            generated_at: "2026-09-03T00:00:00+00:00",
-            caveat: null,
-            items: [
-              item(1, "us", ["+3.2%", "1 碼"]),
-              item(2, "taiwan", []),
-              item(3, "us", ["-0.5%"]),
-            ],
-          }}
-        />
-      </I18nextProvider>
-    )
-    const panel = within(container)
-    const groups = panel.getAllByRole("heading", { level: 3 })
-    expect(groups.map(heading => heading.textContent)).toEqual([
-      "美國",
-      "Story 1",
-      "Story 3",
-      "台灣",
-      "Story 2",
-    ])
-    // numeric_facts is the summary's grounding record, not reader content:
-    // stripped of their sentences the figures are ambiguous, so cards omit them.
-    expect(panel.queryByText("+3.2%")).not.toBeInTheDocument()
-    expect(panel.queryByText("1 碼")).not.toBeInTheDocument()
-  })
-
-  it("renders a market page's stories without market headings", async () => {
-    const i18n = createI18n("zh-hant")
-    await i18n.changeLanguage("zh-hant")
-    const item = (index: number, market: "taiwan" | "global") => ({
-      id: `00000000-0000-4000-8000-00000000002${index}`,
-      rank: index,
-      importance: 3,
-      topic: "markets" as const,
-      headline: `Story ${index}`,
-      summary: "Summary.",
-      source_name: "Source",
-      source_hostname: "source.example",
-      source_url: `https://source.example/${index}`,
-      source_published_at: null,
-      numeric_facts: [],
-      market,
-      event_key: `event-${index}`,
-    })
-    const { container } = render(
-      <I18nextProvider i18n={i18n}>
-        <DailyNews
-          news={{
-            market_code: "tw_equity",
-            target_items: 5,
-            edition_id: "00000000-0000-4000-8000-000000000003",
-            edition_date: "2026-09-04",
-            revision: 1,
-            status: "partial",
-            locale: "zh-hant",
-            generated_at: "2026-09-04T00:00:00+00:00",
-            caveat: null,
-            items: [item(1, "taiwan"), item(2, "global")],
-          }}
-          eyebrowKey="marketNewsEyebrow"
-          titleKey="marketNewsTitle_tw_equity"
-          groupByMarket={false}
-        />
-      </I18nextProvider>
-    )
-    const panel = within(container)
-    expect(
-      panel.getAllByRole("heading", { level: 3 }).map(h => h.textContent)
-    ).toEqual(["Story 1", "Story 2"])
-    expect(panel.queryByText("全球")).not.toBeInTheDocument()
-  })
-
-  it("paginates news into at most six cards with looping arrow navigation", async () => {
-    const i18n = createI18n("en")
-    await i18n.changeLanguage("en")
-    const item = (index: number) => ({
-      id: `00000000-0000-4000-8000-0000000001${index.toString().padStart(2, "0")}`,
-      rank: index,
-      importance: 4,
-      topic: "markets" as const,
-      headline: `Story ${index}`,
-      summary: "Summary.",
-      source_name: "Source",
-      source_hostname: "source.example",
-      source_url: `https://source.example/${index}`,
-      source_published_at: null,
-      numeric_facts: [],
-      market: "taiwan" as const,
-      event_key: `event-${index}`,
-    })
-    const { container } = render(
-      <I18nextProvider i18n={i18n}>
-        <DailyNews
-          news={{
-            market_code: "tw_equity",
-            target_items: 5,
-            edition_id: "00000000-0000-4000-8000-000000000004",
-            edition_date: "2026-09-05",
-            revision: 1,
-            status: "complete",
-            locale: "en",
-            generated_at: "2026-09-05T00:00:00+00:00",
-            caveat: null,
-            items: Array.from({ length: 13 }, (_, index) => item(index + 1)),
-          }}
-          groupByMarket={false}
-        />
-      </I18nextProvider>
-    )
-
-    const panel = within(container)
-    expect(container.querySelectorAll("article")).toHaveLength(6)
-    expect(panel.getByText("Story 1")).toBeInTheDocument()
+    rerenderNews(edition([], { edition_id: null, edition_date: null }))
     expect(panel.queryByText("Story 7")).not.toBeInTheDocument()
-    expect(panel.queryByText("Page 1 of 3")).not.toBeInTheDocument()
+    expect(panel.getByRole("status")).toHaveTextContent(
+      "No key news is available yet."
+    )
+    rerenderNews(latest)
+    rerenderNews(null, "newsroomTitle_tw_equity")
+    expect(panel.queryByText("Story 1")).not.toBeInTheDocument()
+  })
 
-    const previous = panel.getByRole("button", {
-      name: "Previous news page",
-    })
+  it("paginates six cards at a time with looping arrows", async () => {
+    const { container, panel } = renderNews(
+      edition(Array.from({ length: 13 }, (_, index) => story(index + 1)))
+    )
+    expect(container.querySelectorAll("article")).toHaveLength(6)
+    const previous = panel.getByRole("button", { name: "Previous news page" })
     const next = panel.getByRole("button", { name: "Next news page" })
-    const pagination = panel.getByRole("navigation", {
-      name: "News pagination",
-    })
-    expect(pagination).toHaveClass("flex", "shrink-0", "gap-2")
-    expect(pagination).not.toHaveClass("absolute")
-    expect(pagination.parentElement).toHaveClass(
-      "flex",
-      "items-end",
-      "justify-between"
-    )
-    expect(previous).toHaveClass(
-      "flex",
-      "size-11",
-      "border-lagoon-deep",
-      "bg-lagoon-deep",
-      "text-white",
-      "focus-visible:outline-lagoon-deep"
-    )
-    expect(next).toHaveClass(
-      "flex",
-      "size-11",
-      "border-lagoon-deep",
-      "bg-lagoon-deep",
-      "text-white",
-      "focus-visible:outline-lagoon-deep"
-    )
-    expect(previous).toBeEnabled()
-    expect(next).toBeEnabled()
+    expect(
+      panel.getByRole("navigation", { name: "News pagination" })
+    ).toBeInTheDocument()
 
     fireEvent.click(previous)
     await waitFor(() =>
       expect(container.querySelectorAll("article")).toHaveLength(1)
     )
     expect(panel.getByText("Story 13")).toBeInTheDocument()
-    expect(panel.getByRole("button", { name: "Previous news page" })).toBe(
-      previous
-    )
-    expect(panel.getByRole("button", { name: "Next news page" })).toBe(next)
-
     fireEvent.click(next)
     await waitFor(() => expect(panel.getByText("Story 1")).toBeInTheDocument())
-
     fireEvent.click(next)
     await waitFor(() => expect(panel.getByText("Story 7")).toBeInTheDocument())
     expect(panel.queryByText("Story 1")).not.toBeInTheDocument()
-
-    fireEvent.click(next)
-    await waitFor(() =>
-      expect(container.querySelectorAll("article")).toHaveLength(1)
-    )
-    expect(panel.getByText("Story 13")).toBeInTheDocument()
-
-    fireEvent.click(next)
-    await waitFor(() => expect(panel.getByText("Story 1")).toBeInTheDocument())
   })
 
-  it("hides pagination controls when all news fits on one page", async () => {
-    const i18n = createI18n("en")
-    await i18n.changeLanguage("en")
-    const { container } = render(
-      <I18nextProvider i18n={i18n}>
-        <DailyNews
-          news={{
-            market_code: "global",
-            target_items: 5,
-            edition_id: "00000000-0000-4000-8000-000000000005",
-            edition_date: "2026-09-05",
-            revision: 1,
-            status: "complete",
-            locale: "en",
-            generated_at: "2026-09-05T00:00:00+00:00",
-            caveat: null,
-            items: [],
-          }}
-        />
-      </I18nextProvider>
-    )
-
+  it("hides pagination when every story fits on one page", () => {
+    const { panel } = renderNews(edition([story(1)]))
     expect(
-      within(container).queryByRole("navigation", { name: "News pagination" })
+      panel.queryByRole("navigation", { name: "News pagination" })
     ).not.toBeInTheDocument()
   })
 
-  it("degrades to an unavailable panel when the news request failed", async () => {
-    const i18n = createI18n("en")
-    await i18n.changeLanguage("en")
-    const { container } = render(
-      <I18nextProvider i18n={i18n}>
-        <DailyNews news={null} />
-      </I18nextProvider>
+  it("explains a failed first request without any legacy status text", () => {
+    const { container, panel } = renderNews(null)
+    expect(panel.getByRole("status")).toHaveTextContent(
+      "Key news is temporarily unavailable. Reports are not affected."
     )
-    const panel = within(container)
     expect(
-      panel.getByText(/Today’s major news has not been generated yet/)
-    ).toHaveAttribute("role", "status")
-    expect(panel.queryByText("Unavailable")).not.toBeInTheDocument()
+      panel.getByRole("heading", { name: "Today’s major news" })
+    ).toBeInTheDocument()
     expect(container.querySelector("section")).toHaveClass("mt-7", "mb-6")
-    expect(panel.queryByRole("link")).not.toBeInTheDocument()
   })
 })
