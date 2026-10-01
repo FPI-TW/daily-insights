@@ -497,10 +497,34 @@ class NewsroomAdminManualUrl(_Request):
 # --- Helpers ----------------------------------------------------------------
 
 
+# ``events_service.EventServiceError.code`` → status: a missing row is 404,
+# a state that changed under the editor is 409, a malformed request is 422.
+EVENT_ERROR_STATUS = {
+    "event_not_found": status.HTTP_404_NOT_FOUND,
+    "event_not_open": status.HTTP_409_CONFLICT,
+    "edition_date_mismatch": status.HTTP_409_CONFLICT,
+    "invalid_merge_sources": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "empty_split": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "article_not_in_event": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "split_takes_every_article": status.HTTP_422_UNPROCESSABLE_CONTENT,
+}
+
+
+def _event_service_error(error: Exception) -> HTTPException | None:
+    # Looked up at call time: the class ships with workstream ②'s
+    # events_service and is absent from the stub this branch starts from.
+    error_type = getattr(events_service, "EventServiceError", None)
+    if not isinstance(error_type, type) or not isinstance(error, error_type):
+        return None
+    code = str(getattr(error, "code", "") or "invalid_request")
+    return HTTPException(EVENT_ERROR_STATUS.get(code, status.HTTP_422_UNPROCESSABLE_CONTENT), code)
+
+
 @contextmanager
 def _service_errors() -> Iterator[None]:
     """Map the owning workstream's exceptions onto HTTP statuses.
 
+    ``EventServiceError`` by its code (``EVENT_ERROR_STATUS``), then
     ``LookupError`` → 404, ``ValueError`` → 422, and a service that is still a
     stub (``NotImplementedError``) → 501 so the console degrades visibly.
     """
@@ -510,12 +534,17 @@ def _service_errors() -> Iterator[None]:
         raise HTTPException(
             status.HTTP_501_NOT_IMPLEMENTED, "newsroom service is not available yet"
         ) from error
-    except LookupError as error:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error) or "not found") from error
-    except ValueError as error:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, str(error) or "invalid request"
-        ) from error
+    except Exception as error:
+        mapped = _event_service_error(error)
+        if mapped is not None:
+            raise mapped from error
+        if isinstance(error, LookupError):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(error) or "not found") from error
+        if isinstance(error, ValueError):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, str(error) or "invalid request"
+            ) from error
+        raise
 
 
 def _now() -> datetime:

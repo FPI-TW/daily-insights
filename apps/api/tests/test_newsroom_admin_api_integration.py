@@ -925,3 +925,58 @@ async def test_submit_manual_url(client: AsyncClient, calls: Calls, admin: User)
     assert calls.of("submit_manual_url") == [
         {"args": ("https://news.example/story",), "edition_date": DAY, "user_id": admin.id}
     ]
+
+
+class FakeEventServiceError(Exception):
+    """Stand-in for workstream ②'s ``events_service.EventServiceError``."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        ("event_not_found", 404),
+        ("event_not_open", 409),
+        ("edition_date_mismatch", 409),
+        ("invalid_merge_sources", 422),
+        ("empty_split", 422),
+        ("article_not_in_event", 422),
+        ("split_takes_every_article", 422),
+        ("something_new", 422),
+    ],
+)
+async def test_event_service_errors_map_by_code(
+    database: async_sessionmaker[AsyncSession],
+    client: AsyncClient,
+    calls: Calls,
+    monkeypatch: pytest.MonkeyPatch,
+    code: str,
+    expected: int,
+) -> None:
+    del calls
+    monkeypatch.setattr(events_service, "EventServiceError", FakeEventServiceError, raising=False)
+
+    async def rejected(*args: Any, **kwargs: Any) -> None:
+        raise FakeEventServiceError(code)
+
+    monkeypatch.setattr(events_service, "merge_events", rejected)
+    monkeypatch.setattr(events_service, "split_event", rejected)
+    wire = await _source(database, "wire")
+    target = await _event(database, "Target")
+    source = await _event(database, "Source")
+    keep = await _article(database, wire, target)
+    await _article(database, wire, target)
+
+    merged = await client.post(
+        f"{BASE}/events/merge",
+        json={"target_id": str(target.id), "source_ids": [str(source.id)]},
+    )
+    split = await client.post(
+        f"{BASE}/events/{target.id}/split", json={"article_ids": [str(keep.id)]}
+    )
+
+    assert (merged.status_code, merged.json()["detail"]) == (expected, code)
+    assert (split.status_code, split.json()["detail"]) == (expected, code)
