@@ -511,16 +511,6 @@ EVENT_ERROR_STATUS = {
 }
 
 
-def _event_service_error(error: Exception) -> HTTPException | None:
-    # Looked up at call time: the class ships with workstream ②'s
-    # events_service and is absent from the stub this branch starts from.
-    error_type = getattr(events_service, "EventServiceError", None)
-    if not isinstance(error_type, type) or not isinstance(error, error_type):
-        return None
-    code = str(getattr(error, "code", "") or "invalid_request")
-    return HTTPException(EVENT_ERROR_STATUS.get(code, status.HTTP_422_UNPROCESSABLE_CONTENT), code)
-
-
 @contextmanager
 def _service_errors(
     *, value_error_status: int = status.HTTP_422_UNPROCESSABLE_CONTENT
@@ -530,39 +520,22 @@ def _service_errors(
     ``EventServiceError`` by its code (``EVENT_ERROR_STATUS``), then
     ``LookupError`` → 404 and ``ValueError`` → ``value_error_status`` (422 for
     rejected input; ``publishing`` raises it for a state that does not allow
-    the action, which is a 409). A service that is still a stub
-    (``NotImplementedError``) → 501 so the console degrades visibly.
+    the action, which is a 409).
     """
     try:
         yield
-    except NotImplementedError as error:
+    except events_service.EventServiceError as error:
         raise HTTPException(
-            status.HTTP_501_NOT_IMPLEMENTED, "newsroom service is not available yet"
+            EVENT_ERROR_STATUS.get(error.code, status.HTTP_422_UNPROCESSABLE_CONTENT), error.code
         ) from error
-    except Exception as error:
-        mapped = _event_service_error(error)
-        if mapped is not None:
-            raise mapped from error
-        if isinstance(error, LookupError):
-            raise HTTPException(status.HTTP_404_NOT_FOUND, str(error) or "not found") from error
-        if isinstance(error, ValueError):
-            raise HTTPException(value_error_status, str(error) or "invalid request") from error
-        raise
+    except LookupError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error) or "not found") from error
+    except ValueError as error:
+        raise HTTPException(value_error_status, str(error) or "invalid request") from error
 
 
 def _publishing_errors() -> AbstractContextManager[None]:
     return _service_errors(value_error_status=status.HTTP_409_CONFLICT)
-
-
-async def _mark_english_stale(database: AsyncSession, event_id: uuid.UUID) -> None:
-    """Have workstream ③ re-translate now that the visible items changed.
-
-    Looked up at call time: ``translation.mark_english_stale`` ships with the
-    editions branch (its per-minute sweep is the fallback until then).
-    """
-    mark = getattr(translation, "mark_english_stale", None)
-    if mark is not None:
-        await mark(database, event_id)
 
 
 def _now() -> datetime:
@@ -1281,7 +1254,9 @@ async def _set_item_timestamp(
         before={noun: current},
         after={noun: value, "edition_id": str(edition.id), "event_id": str(item.event_id)},
     )
-    await _mark_english_stale(database, item.event_id)
+    # Visibility changed what readers see: re-translate now rather than at
+    # the next per-minute sweep.
+    await translation.mark_english_stale(database, item.event_id)
     await database.commit()
 
 

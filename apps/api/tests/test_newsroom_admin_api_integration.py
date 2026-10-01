@@ -387,13 +387,6 @@ async def test_source_service_errors_map_to_http_statuses(
     assert response.status_code == 422
     assert response.json()["detail"] == "feed URL is not reachable"
 
-    async def stub(*args: Any, **kwargs: Any) -> uuid.UUID:
-        raise NotImplementedError
-
-    monkeypatch.setattr(sources_service, "create_source", stub)
-    response = await client.post(f"{BASE}/sources", json=payload)
-    assert response.status_code == 501
-
 
 async def test_update_source_passes_only_the_changed_fields(
     database: async_sessionmaker[AsyncSession], client: AsyncClient, calls: Calls
@@ -928,14 +921,6 @@ async def test_submit_manual_url(client: AsyncClient, calls: Calls, admin: User)
     ]
 
 
-class FakeEventServiceError(Exception):
-    """Stand-in for workstream ②'s ``events_service.EventServiceError``."""
-
-    def __init__(self, code: str) -> None:
-        super().__init__(code)
-        self.code = code
-
-
 @pytest.mark.parametrize(
     ("code", "expected"),
     [
@@ -958,10 +943,9 @@ async def test_event_service_errors_map_by_code(
     expected: int,
 ) -> None:
     del calls
-    monkeypatch.setattr(events_service, "EventServiceError", FakeEventServiceError, raising=False)
 
     async def rejected(*args: Any, **kwargs: Any) -> None:
-        raise FakeEventServiceError(code)
+        raise events_service.EventServiceError(code)
 
     monkeypatch.setattr(events_service, "merge_events", rejected)
     monkeypatch.setattr(events_service, "split_event", rejected)
@@ -1016,11 +1000,12 @@ async def test_visibility_changes_mark_english_stale(
 ) -> None:
     stale: list[uuid.UUID] = []
 
-    async def mark_english_stale(session: AsyncSession, event_id: uuid.UUID) -> None:
+    async def mark_english_stale(session: AsyncSession, event_id: uuid.UUID) -> bool:
         assert isinstance(session, AsyncSession)
         stale.append(event_id)
+        return True
 
-    monkeypatch.setattr(translation, "mark_english_stale", mark_english_stale, raising=False)
+    monkeypatch.setattr(translation, "mark_english_stale", mark_english_stale)
     draft_event = await _event(database, "Draft story")
     published_event = await _event(database, "Published story")
     draft = await _item(database, await _edition(database, "global"), draft_event, 1)

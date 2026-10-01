@@ -1053,7 +1053,6 @@ const resources: Resource = {
         "狀態已變更（例如版次已發布或事件已合併），請重新整理後再試。",
       newsroomAdminErrorInvalid: "內容不符合要求，請檢查後再試。",
       newsroomAdminErrorNotFound: "找不到這筆資料，可能已被變更。",
-      newsroomAdminErrorUnavailable: "此功能尚未啟用。",
       newsroomAdminErrorFailed: "操作失敗，請稍後再試。",
       newsroomAdminSourcesLink: "來源管理",
       newsroomAdminReviewLink: "回到審核",
@@ -2159,7 +2158,6 @@ const resources: Resource = {
         "状态已变更（例如版次已发布或事件已合并），请刷新后再试。",
       newsroomAdminErrorInvalid: "内容不符合要求，请检查后再试。",
       newsroomAdminErrorNotFound: "找不到这笔数据，可能已被变更。",
-      newsroomAdminErrorUnavailable: "此功能尚未启用。",
       newsroomAdminErrorFailed: "操作失败，请稍后再试。",
       newsroomAdminSourcesLink: "来源管理",
       newsroomAdminReviewLink: "返回审核",
@@ -3322,7 +3320,6 @@ const resources: Resource = {
       newsroomAdminErrorInvalid:
         "The request was not valid. Check it and try again.",
       newsroomAdminErrorNotFound: "That record no longer exists.",
-      newsroomAdminErrorUnavailable: "This action is not available yet.",
       newsroomAdminErrorFailed: "The action failed. Try again later.",
       newsroomAdminSourcesLink: "Manage sources",
       newsroomAdminReviewLink: "Back to review",

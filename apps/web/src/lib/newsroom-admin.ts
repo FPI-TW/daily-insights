@@ -531,7 +531,6 @@ export function newsroomAdminErrorKey(error: unknown) {
     if (error.status === 409) return "newsroomAdminErrorConflict"
     if (error.status === 422) return "newsroomAdminErrorInvalid"
     if (error.status === 404) return "newsroomAdminErrorNotFound"
-    if (error.status === 501) return "newsroomAdminErrorUnavailable"
   }
   return "newsroomAdminErrorFailed"
 }

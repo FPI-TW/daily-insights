@@ -85,8 +85,8 @@ describe("newsroom admin helpers", () => {
     expect(newsroomAdminErrorKey(new ApiError(409, null, "x"))).toBe(
       "newsroomAdminErrorConflict"
     )
-    expect(newsroomAdminErrorKey(new ApiError(501, null, "x"))).toBe(
-      "newsroomAdminErrorUnavailable"
+    expect(newsroomAdminErrorKey(new ApiError(422, null, "x"))).toBe(
+      "newsroomAdminErrorInvalid"
     )
     expect(newsroomAdminErrorKey(new Error("x"))).toBe(
       "newsroomAdminErrorFailed"
