@@ -32,6 +32,69 @@ const indexSymbols = new Set([
 const reportViewerRoles = ["admin", "asset_manager", "org_member"]
 const port = Number(process.argv[process.argv.indexOf("--port") + 1] || 3311)
 
+const newsroomText = {
+  "zh-hant": {
+    headline: "市場消化最新經濟數據",
+    summary: "投資人在開盤前評估新公布的數據。",
+    why: "利率預期變化牽動股市評價。",
+  },
+  "zh-hans": {
+    headline: "市场消化最新经济数据",
+    summary: "投资人在开盘前评估新公布的数据。",
+    why: "利率预期变化牵动股市评价。",
+  },
+  en: {
+    headline: "Markets respond to the latest economic signals",
+    summary: "Investors assessed new data before the opening bell.",
+    why: "Shifting rate expectations move equity valuations.",
+  },
+}
+
+// The Taiwan edition is a day old so the earlier-edition notice is exercised.
+function newsroomEdition(market, locale) {
+  const text = newsroomText[locale] ?? newsroomText["zh-hant"]
+  const symbol = market === "tw_equity" ? "^TWII" : "^GSPC"
+  const editionDate = market === "tw_equity" ? "2026-08-29" : "2026-08-30"
+  return {
+    market_code: market,
+    locale,
+    edition_id: `2${["global", "tw_equity", "us_equity"].indexOf(market)}000000-0000-4000-8000-000000000001`,
+    edition_date: editionDate,
+    is_today: market !== "tw_equity",
+    published_at: `${editionDate}T01:00:00Z`,
+    items: [
+      {
+        id: "30000000-0000-4000-8000-000000000001",
+        event_id: "31000000-0000-4000-8000-000000000001",
+        rank: 1,
+        stars: 4,
+        headline: text.headline,
+        summary: text.summary,
+        why: text.why,
+        related_symbols: [
+          {
+            symbol,
+            kind: "index",
+            market_code: market === "tw_equity" ? "tw_equity" : "us_equity",
+          },
+        ],
+        sources: [
+          {
+            name: "Example Wire",
+            url: "https://example.com/markets",
+            published_at: `${editionDate}T00:30:00Z`,
+          },
+          {
+            name: "Example Daily",
+            url: "https://daily.example.com/markets",
+            published_at: null,
+          },
+        ],
+      },
+    ],
+  }
+}
+
 let state
 
 function reset(overrides = {}) {
@@ -520,42 +583,20 @@ const server = createServer(async (request, response) => {
     return
   }
 
-  const marketNewsMatch = /^\/api\/news\/(tw_equity|us_equity)\/latest$/.exec(
-    url.pathname
-  )
-  if (marketNewsMatch && request.method === "GET") {
+  if (
+    url.pathname === "/api/newsroom/editions/latest" &&
+    request.method === "GET"
+  ) {
     const role = requireRole(request, response, reportViewerRoles)
     if (!role) return
-    const marketCode = marketNewsMatch[1]
+    const market = url.searchParams.get("market")
     const locale = url.searchParams.get("locale") || "zh-hant"
-    sendJson(response, 200, {
-      market_code: marketCode,
-      target_items: 5,
-      edition_id: "20000000-0000-4000-8000-000000000001",
-      edition_date: "2026-08-30",
-      revision: 1,
-      generated_at: "2026-08-30T07:30:00+08:00",
-      status: "complete",
-      locale,
-      caveat: null,
-      items: [
-        {
-          id: "30000000-0000-4000-8000-000000000001",
-          rank: 1,
-          importance: 4,
-          topic: "markets",
-          headline: "Markets respond to the latest economic signals",
-          summary: "Investors assessed new data before the opening bell.",
-          source_name: "Example Wire",
-          source_hostname: "example.com",
-          source_url: "https://example.com/markets",
-          source_published_at: "2026-08-30T06:30:00+08:00",
-          numeric_facts: [],
-          market: marketCode === "tw_equity" ? "taiwan" : "us",
-          event_key: "market-open",
-        },
-      ],
-    })
+    if (!["global", "tw_equity", "us_equity"].includes(market ?? "")) {
+      sendJson(response, 422, { detail: "unknown market" })
+      return
+    }
+    recordRequest(request, url, role)
+    sendJson(response, 200, newsroomEdition(market, locale))
     return
   }
 

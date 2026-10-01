@@ -33,6 +33,8 @@ import {
   reportDetailSchema,
   reportListSchema,
   latestNewsSchema,
+  newsroomEditionSchema,
+  type NewsroomMarketCode,
   analystViewpointListSchema,
   analystViewpointSyncStatusSchema,
   type LaunchMarketCode,
@@ -188,6 +190,18 @@ export function createNewsClient(transport: ApiTransport) {
           `/api/news/${encodeURIComponent(marketCode)}/latest?${query}`
         ),
         latestNewsSchema
+      )
+    },
+  }
+}
+
+export function createNewsroomClient(transport: ApiTransport) {
+  return {
+    async latestEdition(market: NewsroomMarketCode, locale: Locale) {
+      const query = new URLSearchParams({ market, locale })
+      return parseResponse(
+        await transport(`/api/newsroom/editions/latest?${query}`),
+        newsroomEditionSchema
       )
     },
   }

@@ -1,8 +1,8 @@
 import {
-  createNewsClient,
+  createNewsroomClient,
   localeSchema,
-  newsMarketCodeSchema,
-  type LatestNews,
+  newsroomMarketCodeSchema,
+  type NewsroomEdition,
 } from "@daily-insights/api-client"
 import { createServerTransport } from "@daily-insights/api-client/server"
 import { createServerFn } from "@tanstack/react-start"
@@ -12,17 +12,17 @@ import {
 } from "@tanstack/react-start/server"
 import { z } from "zod"
 
-const marketNewsInputSchema = z.object({
+const newsroomEditionInputSchema = z.object({
   locale: localeSchema,
-  marketCode: newsMarketCodeSchema,
+  marketCode: newsroomMarketCodeSchema,
 })
 
-function serverNewsClient() {
+function serverNewsroomClient() {
   const apiUrl = process.env.API_INTERNAL_URL
   if (!apiUrl) throw new Error("API_INTERNAL_URL is required by the web server")
   const cookie = getRequestHeader("cookie")
   const requestId = getRequestHeader("x-request-id")
-  return createNewsClient(
+  return createNewsroomClient(
     createServerTransport(apiUrl, {
       ...(cookie ? { cookie } : {}),
       ...(requestId ? { requestId } : {}),
@@ -30,16 +30,9 @@ function serverNewsClient() {
   )
 }
 
-export const getLatestNews = createServerFn({ method: "GET" })
-  .validator(localeSchema)
-  .handler(async ({ data: locale }): Promise<LatestNews> => {
+export const getNewsroomEdition = createServerFn({ method: "GET" })
+  .validator(newsroomEditionInputSchema)
+  .handler(async ({ data }): Promise<NewsroomEdition> => {
     setResponseHeader("Cache-Control", "no-store")
-    return serverNewsClient().latest(locale)
-  })
-
-export const getMarketNews = createServerFn({ method: "GET" })
-  .validator(marketNewsInputSchema)
-  .handler(async ({ data }): Promise<LatestNews> => {
-    setResponseHeader("Cache-Control", "no-store")
-    return serverNewsClient().latestForMarket(data.locale, data.marketCode)
+    return serverNewsroomClient().latestEdition(data.marketCode, data.locale)
   })
