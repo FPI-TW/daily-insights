@@ -183,3 +183,18 @@ async def test_enqueue_resets_a_failed_row(
             .where(NewsroomArticle.embed_status == "pending", NewsroomArticle.embed_attempts == 0)
         )
     assert pending == 1
+
+
+async def test_handler_can_settle_an_alternative_terminal_status(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    article_id = await _article(newsroom_database)
+    async with newsroom_database() as database:
+        claims = await claim(database, queue.EMBED)
+
+    async def handler(database: AsyncSession, claim_: Claim) -> dict[str, Any]:
+        return {"embed_status": "failed", "embed_error_code": "embed_input_empty"}
+
+    assert await run_claimed(newsroom_database, claims[0], handler) == "done"
+    row = await _row(newsroom_database, article_id)
+    assert (row.embed_status, row.embed_error_code) == ("failed", "embed_input_empty")

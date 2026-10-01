@@ -139,17 +139,24 @@ def _fenced(claim_: Claim) -> Any:
 async def settle_success(
     database: AsyncSession, claim_: Claim, values: dict[str, Any] | None = None
 ) -> bool:
-    """Mark the stage done and write the stage's result columns in one statement."""
+    """Mark the stage done and write the stage's result columns in one statement.
+
+    ``values`` may override ``<stage>_status`` with another terminal state (for
+    example ``needs_body``); it must never set it back to ``pending``.
+    """
     stage = claim_.stage
+    status_key = f"{stage.column}_status"
+    if (values or {}).get(status_key) == "pending":
+        raise ValueError("a stage handler cannot re-queue its own row")
     result = await database.execute(
         update(stage.model)
         .where(_fenced(claim_))
         .values(
             {
-                **(values or {}),
-                f"{stage.column}_status": stage.done_status,
+                status_key: stage.done_status,
                 f"{stage.column}_next_attempt_at": None,
                 f"{stage.column}_error_code": None,
+                **(values or {}),
             }
         )
     )
