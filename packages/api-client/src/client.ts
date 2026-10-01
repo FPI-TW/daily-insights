@@ -13,6 +13,9 @@ import {
   podcastUploadBatchInitRequestSchema,
   podcastUploadBatchInitResponseSchema,
   podcastUploadBatchStatusSchema,
+  podcastDirectUploadRequestSchema,
+  podcastDirectUploadTargetSchema,
+  podcastCompletedUploadSchema,
   podcastEpisodeAdminListSchema,
   podcastEpisodeAdminSchema,
   type PodcastEpisodeCreateInput,
@@ -670,6 +673,32 @@ export function createPodcastAdminClient(transport: ApiTransport) {
           body,
         }),
         podcastEpisodeAdminSchema
+      )
+    },
+    async signDirectUploads(
+      input: z.input<typeof podcastDirectUploadRequestSchema>,
+      csrfToken: string
+    ) {
+      const payload = podcastDirectUploadRequestSchema.parse(input)
+      return parseResponse(
+        await transport("/api/admin/podcasts/direct-uploads", {
+          method: "POST",
+          headers: mutationHeaders(csrfToken),
+          body: JSON.stringify(payload),
+        }),
+        z.object({
+          files: z.array(podcastDirectUploadTargetSchema).min(1).max(3),
+        })
+      )
+    },
+    async completeDirectUpload(uploadToken: string, csrfToken: string) {
+      return parseResponse(
+        await transport("/api/admin/podcasts/direct-uploads/complete", {
+          method: "POST",
+          headers: mutationHeaders(csrfToken),
+          body: JSON.stringify({ upload_token: uploadToken }),
+        }),
+        podcastCompletedUploadSchema
       )
     },
     async initializeUploadBatch(

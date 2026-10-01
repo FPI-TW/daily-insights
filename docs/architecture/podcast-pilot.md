@@ -12,8 +12,8 @@ Phase 4 上線驗收仍待執行。八大市場正式內容與報告前端在此
 - `admin` 與 `asset_manager` 可從後台一次上傳 1–3 個語系音檔，成功上傳後
   episode 預設發布，兩種身份皆可發布及下架；
 - 同交易日唯一性、任一語系 active audio 發布驗證，以及缺漏語系提示；
-- 同 locale 替換警告、明確確認、expected current version、stable canonical
-  key 的同格式原地覆寫／跨格式 key 切換，以及邏輯版本遞增；
+- 同 locale 替換警告、明確確認、expected current version，以及不可變
+  object key 的 variant mapping 切換與版本遞增；
 - 客戶共用 catalog、detail、requested locale 優先且其後依
   `zh-hant` → `zh-hans` → `en` fallback，以及短效 signed URL；
 - TanStack Start 三語客戶頁、responsive Podcast 清單內的原生 audio element、
@@ -22,13 +22,11 @@ Phase 4 上線驗收仍待執行。八大市場正式內容與報告前端在此
 - 獨立的客戶與管理端登入入口、route guard、導覽與登出導向；
 - `/admin/audio` 音檔管理頁、三個可點擊／拖放的語系 slot、R2 upload 及發布
   控制；
-- browser audio upload now uses idempotent batch init, immutable UUID object keys,
-  direct signed R2 PUTs, locale-level finalize/status, and a durable media worker
-  that checks size/MIME, computes SHA-256, extracts media metadata, and performs
-  fenced database cutover;
+- browser 上傳使用無狀態簽署、不可變 UUID object key、直接 R2 PUT，以及
+  API 同步驗證與資料庫登記；不再依賴音檔處理 worker 或批次輪詢；
 - PostgreSQL + fake R2 端到端測試，覆蓋建立、發布拒絕、音檔登記、角色限制、
   locale fallback、同路徑覆寫及下架；
-- Playwright + deterministic mock API browser E2E 共 15 個 specs，覆蓋兩個
+- Playwright + deterministic mock API browser E2E 共 23 個 specs，覆蓋兩個
   login 入口、錯角色 session 清除、跨 surface guard、各自 logout、後台 upload
   slot、replacement／unpublish confirmation、客戶清單內播放器、locale
   fallback、lazy signed URL、單集音檔重試、mounted session 過期導向、
@@ -44,6 +42,59 @@ Phase 4 上線驗收仍待執行。八大市場正式內容與報告前端在此
 - signed URL 到期後的拒絕行為，以及 R2／network failure 的 browser UX；
 - live API endpoint 的登入、CSRF、multipart upload、發布及播放授權完整流程；
 - 正式容量、併發、失敗注入及網路條件驗收。
+
+## 2026-10-01 同步直傳流程
+
+本分支已實作，尚未部署正式環境。日常音檔小於 20 MB，但保留既有每檔
+256 MiB、MP3／MP4，以及每次 1–3 個語系檔案的硬性限制。
+
+1. Frontend → Server：`POST /api/admin/podcasts/direct-uploads` 取得 signed
+   PUT URL 與 HMAC 簽章憑證。驗證身份、角色、CSRF、檔案資訊與替換版本；
+   憑證綁定使用者、asset ID、交易日、語系、大小、MIME、SHA、版本與期限。
+   此步驟只讀 DB，不建立 batch／session，也不占用交易日。
+2. Frontend → R2 → Frontend：以簽署要求的 headers 直接 PUT 音檔。
+3. Frontend → Server → R2 → DB：
+   `POST /api/admin/podcasts/direct-uploads/complete` 提交憑證，Server 同步
+   檢查 HEAD、完整 SHA-256、時長與章節，以 transaction 寫入 Asset、variant
+   與 audit，成功才回傳完成。日期鎖只用於資料切換，同一 asset ID 的提交
+   與清理使用共同的 PostgreSQL advisory lock。
+
+各語系獨立提交；部分失敗不回滾已完成語系。後端確認完成後，Frontend
+清除該語系的選檔，保留完成進度與 checksum；正常完成及重試憑證取得成功結果
+都使用相同行為。之後新增另一語系時，只提交仍選取的檔案，避免重送已完成檔案
+或再次要求替換確認。失敗／取消語系的選檔保留供重試。
+
+Frontend 顯示 PUT 進度及驗證等待，失敗後可重試或重新上傳。重試優先提交原憑證，避免回應遺失後重傳；
+憑證已成功登記時，即使過期仍回傳原結果。重新整理後需重新選檔，但可立即
+開始新上傳，不會建立原先的 `upload_in_progress` 占用。
+
+確定驗證失敗、版本衝突或 DB 回滾且物件未被引用時，執行補償刪除。
+提交結果不明時，在新交易重新查證；DB 不可用或 R2 暫時失敗時保留物件，
+允許重試。API lifespan 每五分鐘掃描新 prefix，僅在憑證到期與最後修改時間
+均超過 cleanup grace（預設 24 小時）後，刪除未被任何 Asset 引用的物件。
+archived 版本同樣受保護；刪除失敗及晚到物件會在後續掃描重試。
+
+正式 API 使用專用磁碟 volume `/var/spool/podcast-media`，不受 `/tmp` 的
+64 MiB tmpfs 限制。同步內容驗證最長九分鐘，nginx complete endpoint 最長
+等待十分鐘；其他一般 API 保留原本設定。實際 R2 網路耗時仍須正式驗收。
+
+程式碼：`synchronous_upload.py`、`upload_cleanup.py` 與
+`AudioManagementPage.tsx`。正式 Compose、部署腳本與 release workflow 已
+移除 media worker 與專屬 credentials；舊 worker 的一次性清退、舊 session
+盤點及 DB 處理依 [人工切換流程](../runbooks/podcast-upload-cutover.md)，不放入
+CI/CD。舊 batch init／finalize 在 production 回傳 `410 legacy_upload_retired`；
+歷史狀態讀取及本機 `legacy-podcast` profile 留供舊流程驗證。
+
+### 同步直傳本機驗證（2026-10-01）
+
+- `pnpm check` 通過：945 項 API（含隔離 PostgreSQL 整合）、235 項 Web、
+  31 項 API client，以及格式、lint、型別、OpenAPI 產物一致性與建置。
+- Podcast Playwright 23 項通過，涵蓋簽署、直接 PUT、同步登記與替換確認。
+- 部署合約、nginx syntax 與 Docker DNS upstream 替換測試通過。
+- 失敗注入涵蓋 checksum、完整交易回滾、提交回應遺失、DB 結果不明、
+  R2 讀取／刪除失敗，以及 orphan sweep 與 complete 競態。
+- 此次使用 fake R2／mock browser；未部署正式環境，live R2 權限、網路耗時
+  與 Cloudflare 代理期限需依正式 runbook 驗收。
 
 ## 目標
 
@@ -70,8 +121,8 @@ Podcast 先行版用來驗證一條可上線的完整路徑：
 - 客戶 web 只取得可發布的 episode metadata；播放前再向 API 要求短效、
   object-scoped URL。
 - 播放 audio bytes 由瀏覽器直接向 R2 取得；browser upload 也由瀏覽器直接 PUT
-  到 private R2。API 驗證身份、確認替換版本並簽發短效 create-only URL，worker
-  驗證完整物件後才啟用資料庫 asset/variant。既有 multipart upload 與 import API
+  到 private R2。API 驗證身份、確認替換版本並簽發短效 create-only URL，再於 complete
+  同步驗證完整物件後啟用資料庫 asset/variant。既有 multipart upload 與 import API
   保留給內部工具。
 - Podcast catalog 由所有具有效 membership 的 org 共用，不套用八市場
   visibility，也沒有 customer-specific episode policy。`admin` 與
@@ -94,7 +145,7 @@ podcast_episode_audio_variants
   episode_id
   locale       zh-hant | zh-hans | en
   asset_id
-  UNIQUE (episode_id, locale)
+  UNIQUE (episode_id, locale) WHERE is_active
 ```
 
 - 已發布 episode 只需至少一個有效語系音檔。
@@ -109,36 +160,17 @@ podcast_episode_audio_variants
   拖放。一次請求至少一檔、最多三檔，不要求固定必備語系。
 - 上傳原因使用固定選單：`initial_upload`（初次上傳）、`update_file`
   （更新檔案）、`other`（其他）。
-- browser direct upload 的 object 使用
-  `podcasts/{trading-date}/audio/{locale}/{asset-uuid}.{ext}`，其中 `{ext}` 僅支援
-  `mp3` 與 `mp4`。每一 locale 都寫入新的不可變 key；替換成功後以 PostgreSQL
-  variant mapping 原子切換，不覆寫舊 bytes。每個 init file 必須提供 64 位小寫
-  SHA-256；API 將其與 locale、大小、MIME、replacement expected version 綁定到
-  upload session。R2 PUT 簽名包含 `Content-Type`、`If-None-Match: *` 與
-  `x-amz-meta-sha256`，讓 R2 在 HEAD metadata 中保留該 checksum。
-- finalize 與 worker 都會確認 R2 HEAD 的 `sha256` metadata 等於 session 預期值；
-  worker 仍會把 object 串流到 bounded spool，獨立計算 bytes 的 SHA-256，並要求
-  同時符合 session 預期值與前後 HEAD metadata，才會啟用 Asset。播放簽 URL 可透過
-  R2 HEAD metadata 比對 Asset checksum，不必為新上傳檔案重新下載整段音訊。
-- R2 暫時性網路或服務錯誤會將該 locale 保留為 `processing`，以資料庫 lease
-  延後重試；重試等待從 15 秒起逐次增加，最多執行五次，耗盡後標記 `failed`。
-  延後中的 locale 不阻塞同批其他 queued locale；未預期的程式錯誤仍會向上拋出。
-- batch 有一至三個獨立 locale session。任一 locale 驗證與 cutover 成功就會立即
-  啟用；同批其他 locale 可繼續處理。狀態以 locale 回報，失敗不回滾已完成語系。
-  批次從 draft 或不存在 episode 開始時，首個成功 locale 會發布 episode。之後若
-  有管理者下架或修改 episode，episode version fence 會讓剩餘 session 進入 conflict，
-  worker 不會重新發布 episode。
-- init 以 PostgreSQL transaction advisory lock 序列化相同交易日；同日已有
-  `pending_upload`、`queued` 或 `processing` session 時，另一批次回傳
-  `409 upload_in_progress`，包括不同語系，以維持 episode version fence。相同批次仍可
-  一次初始化多個語系。同一 idempotency key 會在取得日期鎖後重新讀取並回傳原 batch。
-  過期的 `pending_upload` 會先轉成 `expired`，不再阻擋新批次；`queued` 與 `processing`
-  即使 presign 時間已過仍會阻擋，直到處理完成或進入 terminal 狀態。
-- unfinalized object 只在簽名 PUT 到期並超過設定 grace period 後開始清理。過期
-  session/key 會保留清理墓碑並再次檢查，處理 URL 到期前已開始、之後才完成的 PUT；
-  版本 fence 產生的 conflict session 也會在 grace period 後清理 orphan object。
-  R2 清理錯誤會透過 cleanup lease 延後五分鐘重試；object key 不會重用，也不會
-  刪除已有 Asset row 的 key。
+- browser direct upload 使用
+  `podcasts/direct/{expires}/{trading-date}/{locale}/{asset-uuid}.{ext}`，僅支援
+  `mp3`／`mp4`；來源檔名不進入 key。每次簽署建立新 key，不覆寫舊音檔。
+- 每檔提供 64 位小寫 SHA-256，與檔案資訊綁定簽章憑證。R2 PUT 簽署
+  `Content-Type`、`If-None-Match: *`、`x-amz-meta-sha256`；API 比對 HEAD
+  與串流 bytes 的 checksum，前後 HEAD 必須一致，才啟用 Asset。
+- R2 暫時失敗回傳可重試錯誤，不建立 queue 或 processing lease。多語系各自
+  完成，資料切換時以 locale 的 expected current version 防止競態覆蓋。
+- 初次成功音檔沿用自動發布；若管理員在簽署後下架或編輯 episode，
+  後續登記不會重新自動發布。不同語系可獨立完成。
+- 清理遵守上節的期限與引用檢查，不刪除已登記的 active／archived 版本。
 - object key 與檔名只由後端產生，來源檔名不進入 R2 key。上傳時不輸入標題或
   摘要；後台 `admin` 可輸入三語標題與摘要（`metadata_source = manual`）；尚未
   輸入時顯示由固定檔名 `podcast` 與 trading date 推導的
@@ -186,10 +218,10 @@ publication、show/series/season、episode number、收聽分析、留言、訂�
 - 同一 `trading_date + locale` 已有 active audio 時，登記或上傳新檔第一次
   必須回傳 replacement-required 警告，不得直接改變 active mapping。
 - 管理者明確確認後，direct upload 會使用新的 UUID R2 key，不覆寫原 object；
-  worker 取得 episode 與 variant 鎖後確認 batch base episode version、已套用 locale
-  數與 expected current locale version，再以單一 DB transaction 建立 active Asset、
-  切換 variant、遞增 episode version、套用首個 locale 的自動發布並寫 audit。互不相關
-  的 episode 編輯、下架或另一批次先完成 cutover 都會 fence 剩餘 locales。
+  complete 取得 episode 與 variant 鎖後確認 expected current locale version，
+  以單一 DB transaction 切換版本、遞增 episode version 並寫 audit。
+  同語系競態的後完成者回傳衝突；不同語系可各自完成。介入的下架／編輯
+  會阻止自動發布，不影響其他語系檔案的獨立登記。
 - 舊的 multipart endpoint 仍保留原有 stable-key 行為；新 browser workflow 使用
   immutable key，舊 bytes 由既有資產保留政策管理。
 
@@ -250,9 +282,9 @@ key 使用 resolved audio locale：例如英文頁面 fallback 至 `zh-hant` 時
   Podcast 結果。
 - 同一交易日不得建立第二個 logical episode；同 locale replacement 未經明確
   確認不得改變 active audio。
-- replacement 必須明確確認並帶 expected current version；格式相同時覆寫同一
-  stable canonical key，格式改變時先寫入新 stable-extension key，再刪除被
-  取代的舊格式 key。
+- browser replacement 必須明確確認並帶 expected current version，以新 UUID
+  key 及原子 variant mapping 切換；已登記舊版本保留，不由孤兒清理刪除。
+  內部 multipart 工具保留原有 stable-key 覆寫與跨格式 key 切換行為。
 - requested locale variant 存在時必須播放相符檔案；不存在時依
   `zh-hant` → `zh-hans` → `en` 穩定回退。
 - 既有 legacy 音檔的 locale 必須逐一人工審核，不得由 source key 推斷；

@@ -1124,3 +1124,29 @@ export type PodcastUploadBatchStatus = z.infer<
 >
 
 export type PodcastUploadReason = "initial_upload" | "update_file" | "other"
+
+export const podcastDirectUploadRequestSchema =
+  podcastUploadBatchInitRequestSchema.omit({ idempotency_key: true })
+export const podcastDirectUploadTargetSchema = z.object({
+  asset_id: z.string().uuid(),
+  locale: localeSchema,
+  upload_url: z.url(),
+  upload_token: z.string(),
+  required_headers: z.object({
+    "Content-Type": z.string(),
+    "If-None-Match": z.literal("*"),
+    "x-amz-meta-sha256": z.string().regex(/^[a-f0-9]{64}$/),
+  }),
+  expires_at: z.iso.datetime(),
+})
+export type PodcastDirectUploadTarget = z.infer<
+  typeof podcastDirectUploadTargetSchema
+>
+export const podcastCompletedUploadSchema = z.object({
+  asset_id: z.string().uuid(),
+  episode_id: z.string().uuid(),
+  locale: localeSchema,
+  status: z.literal("completed"),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  duration_seconds: z.number().int().positive().nullable(),
+})

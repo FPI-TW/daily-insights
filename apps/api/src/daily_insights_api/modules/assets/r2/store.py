@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import base64
 import binascii
@@ -10,8 +12,10 @@ from typing import Any, BinaryIO, Protocol, cast
 import boto3
 from botocore.client import BaseClient
 from botocore.exceptions import ClientError
+from botocore.paginate import Paginator
 
 from daily_insights_api.modules.assets.object_store import (
+    ListedObject,
     ObjectMetadata,
     ObjectRef,
 )
@@ -24,6 +28,7 @@ class _StreamingBody(Protocol):
 
 
 class S3Client(Protocol):
+    def get_paginator(self, operation_name: str) -> Paginator[dict[str, Any]]: ...
     def head_object(self, **kwargs: object) -> dict[str, Any]: ...
 
     def get_object(self, **kwargs: object) -> dict[str, Any]: ...
@@ -111,7 +116,7 @@ class R2ObjectStore:
         secret_access_key: str,
         region_name: str = "auto",
         client_factory: ClientFactory = boto3.client,
-    ) -> "R2ObjectStore":
+    ) -> R2ObjectStore:
         client = client_factory(
             "s3",
             endpoint_url=endpoint_url,
@@ -140,6 +145,20 @@ class R2ObjectStore:
             sha256=_content_sha256(response),
             etag=str(response["ETag"]) if response.get("ETag") is not None else None,
         )
+
+    async def list_objects(self, bucket: str, prefix: str) -> AsyncIterator[ListedObject]:
+        pages = iter(
+            self._client.get_paginator("list_objects_v2").paginate(
+                Bucket=bucket,
+                Prefix=prefix,
+            )
+        )
+        while (page := await asyncio.to_thread(next, pages, None)) is not None:
+            for item in page.get("Contents", []):
+                yield ListedObject(
+                    ref=ObjectRef(bucket=bucket, key=item["Key"]),
+                    last_modified=item["LastModified"],
+                )
 
     def _copy_if_absent(self, source: ObjectRef, target: ObjectRef, sha256: str) -> bool:
         response = self._client.get_object(

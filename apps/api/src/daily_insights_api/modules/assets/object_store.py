@@ -1,7 +1,7 @@
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import timedelta
-from typing import BinaryIO, Protocol
+from datetime import datetime, timedelta
+from typing import BinaryIO, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -17,6 +17,17 @@ class ObjectMetadata:
     mime_type: str
     sha256: str | None = None
     etag: str | None = None
+
+
+@dataclass(frozen=True)
+class ListedObject:
+    ref: ObjectRef
+    last_modified: datetime
+
+
+@runtime_checkable
+class ListableObjectStore(Protocol):
+    def list_objects(self, bucket: str, prefix: str) -> AsyncIterator[ListedObject]: ...
 
 
 class ObjectStore(Protocol):
