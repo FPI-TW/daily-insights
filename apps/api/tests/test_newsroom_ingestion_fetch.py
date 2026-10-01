@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.newsroom import queue
-from daily_insights_api.modules.newsroom.ingestion import DEFAULT_FETCH_CONCURRENCY, register
+from daily_insights_api.modules.newsroom.ingestion import register
 from daily_insights_api.modules.newsroom.ingestion.extract import extract_page
 from daily_insights_api.modules.newsroom.ingestion.fetching import (
     ArticleUnavailableError,
@@ -408,7 +408,7 @@ def test_register_binds_fetch_and_the_periodic_tasks() -> None:
 
     [binding] = registration.stages
     assert binding.stage is queue.FETCH
-    assert binding.concurrency == DEFAULT_FETCH_CONCURRENCY == 4
+    assert binding.concurrency == 4
     assert {task.name: task.interval for task in registration.periodic} == {
         "newsroom_poll_sources": timedelta(minutes=1),
         "newsroom_purge_bodies": timedelta(minutes=10),

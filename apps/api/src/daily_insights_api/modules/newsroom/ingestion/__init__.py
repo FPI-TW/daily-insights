@@ -17,17 +17,12 @@ from daily_insights_api.modules.newsroom.worker import (
     StageBinding,
 )
 
-DEFAULT_FETCH_CONCURRENCY = 4
 POLL_EVERY = timedelta(minutes=1)
 PURGE_EVERY = timedelta(minutes=10)
 
 
 def fetch_concurrency(runtime: Runtime) -> int:
-    """``newsroom_fetch_concurrency`` when the setting exists, else 4."""
-    value = getattr(runtime.settings, "newsroom_fetch_concurrency", DEFAULT_FETCH_CONCURRENCY)
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        return DEFAULT_FETCH_CONCURRENCY
-    return value
+    return runtime.settings.newsroom_fetch_concurrency
 
 
 def register(runtime: Runtime, deps: IngestionDeps | None = None) -> Registration:

@@ -125,6 +125,7 @@ class Settings(BaseSettings):
     newsroom_admin_base_url: str = "http://localhost:3000"
     newsroom_worker_poll_seconds: float = Field(default=2.0, ge=0.1, le=60)
     newsroom_worker_concurrency: int = Field(default=6, ge=1, le=20)
+    newsroom_fetch_concurrency: int = Field(default=4, ge=1, le=20)
     report_freshness_max_age_days: int = Field(default=3, ge=1, le=30)
     r2_endpoint_url: str | None = None
     r2_bucket_name: str | None = None
