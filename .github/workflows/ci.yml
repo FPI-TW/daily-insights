@@ -121,7 +121,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17-alpine
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_DB: daily_insights_ci
           POSTGRES_USER: daily_insights_ci
