@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">
+  <url>
+    <loc>https://www.example-news.com/markets/no-news-block</loc>
+    <lastmod>2026-09-02</lastmod>
+  </url>
+  <url>
+    <loc>https://www.example-news.com/markets/no-title</loc>
+    <news:news><news:publication_date>2026-09-02T02:30:00Z</news:publication_date></news:news>
+  </url>
+  <url>
+    <news:news>
+      <news:publication_date>2026-09-02T02:30:00Z</news:publication_date>
+      <news:title>No loc</news:title>
+    </news:news>
+  </url>
+  <url>
+    <loc>https://www.example-news.com/markets/complete</loc>
+    <news:news>
+      <news:publication_date>2026-09-02T02:30:00Z</news:publication_date>
+      <news:title>Complete entry</news:title>
+    </news:news>
+  </url>
+</urlset>
