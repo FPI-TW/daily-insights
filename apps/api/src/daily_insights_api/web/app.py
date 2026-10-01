@@ -29,8 +29,6 @@ from daily_insights_api.modules.identity.password_work import PasswordWork
 from daily_insights_api.modules.identity.router import router as identity_router
 from daily_insights_api.modules.markets.router import router as markets_router
 from daily_insights_api.modules.model_runtime.service import sync_chat_model_configuration
-from daily_insights_api.modules.news.admin import router as news_admin_router
-from daily_insights_api.modules.news.router import router as news_router
 from daily_insights_api.modules.newsroom.admin_api import router as newsroom_admin_router
 from daily_insights_api.modules.newsroom.public_api import router as newsroom_router
 from daily_insights_api.modules.operations.health import ReadinessReport, evaluate_readiness
@@ -87,12 +85,6 @@ def create_app(
         return (
             not resolved_settings.morning_reports_enabled
             or resolved_settings.twelve_data_api_key is not None
-        )
-
-    async def news_runtime_is_ready() -> bool:
-        return (
-            not resolved_settings.daily_news_enabled
-            or resolved_settings.news_model_api_key is not None
         )
 
     async def analyst_viewpoints_runtime_is_ready() -> bool:
@@ -177,8 +169,6 @@ def create_app(
     app.include_router(analyst_viewpoints_router)
     app.include_router(markets_router)
     app.include_router(reports_router)
-    app.include_router(news_router)
-    app.include_router(news_admin_router)
     app.include_router(newsroom_router)
     app.include_router(newsroom_admin_router)
     app.include_router(chat_router)
@@ -208,7 +198,6 @@ def create_app(
             {
                 "database": readiness_checker,
                 "twelve_data_configuration": provider_runtime_is_ready,
-                "daily_news_configuration": news_runtime_is_ready,
                 "analyst_viewpoints_configuration": analyst_viewpoints_runtime_is_ready,
                 "chat_configuration": chat_runtime_is_ready,
                 "r2_runtime": r2_runtime_is_ready,

@@ -18,7 +18,12 @@ from daily_insights_api.core.models import Base, UUIDPrimaryKeyMixin
 
 
 class DataManagementRun(UUIDPrimaryKeyMixin, Base):
-    """A restart-safe requested provider operation."""
+    """A restart-safe requested provider operation.
+
+    The table is the read-only archive kept since the unified orchestration
+    cutover; its constraints still admit the retired ``news_*`` operations so
+    historical rows stay valid.
+    """
 
     __tablename__ = "legacy_data_management_runs"
     __table_args__ = (

@@ -1,6 +1,7 @@
 """Public newsroom interface for other modules (orchestration, chat)."""
 
 from daily_insights_api.modules.newsroom.assembly import AssemblyReport, assemble_editions
+from daily_insights_api.modules.newsroom.clock import taipei_today
 from daily_insights_api.modules.newsroom.clock import window as edition_window
 from daily_insights_api.modules.newsroom.models import NewsroomEdition
 from daily_insights_api.modules.newsroom.public_api import (
@@ -18,5 +19,6 @@ __all__ = [
     "assemble_editions",
     "edition_window",
     "readable_market_codes",
+    "taipei_today",
     "visible_item_texts",
 ]

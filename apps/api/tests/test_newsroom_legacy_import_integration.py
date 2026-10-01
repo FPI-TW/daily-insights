@@ -34,6 +34,8 @@ pytestmark = pytest.mark.integration
 
 BEFORE_IMPORT = "20261001_0033"
 IMPORT = "20261001_0034"
+DROP_LEGACY = "20261001_0035"
+LEGACY_TABLES = ("news_editions", "news_items", "news_presentations", "news_candidates")
 GENERATED_AT = datetime(2026, 9, 29, 0, 5, tzinfo=UTC)
 
 
@@ -230,6 +232,65 @@ def _seed_legacy(url: str) -> dict[str, Any]:
         engine.dispose()
 
 
+def _seed_legacy_runs(url: str) -> dict[str, uuid.UUID]:
+    """A legacy news job still waiting to run and one that already finished."""
+    engine = create_engine(url)
+    ids: dict[str, uuid.UUID] = {}
+    try:
+        with engine.begin() as connection:
+            for name, status in (("pending", "running"), ("finished", "succeeded")):
+                job_id, function_id = uuid.uuid4(), uuid.uuid4()
+                connection.execute(
+                    text(
+                        "INSERT INTO job_runs (id, job_key, kind, trigger, registry_version, "
+                        "registry_snapshot, edition_date, status) VALUES (:id, "
+                        "'news_daily_update', 'function', 'manual', 'test', '{}', "
+                        "'2026-09-29', :status)"
+                    ),
+                    {"id": job_id, "status": status},
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO function_runs (id, job_run_id, function_key, provider_key, "
+                        "scope, status) VALUES (:id, :job, 'news_publish', "
+                        "'internal_services', '{}', :status)"
+                    ),
+                    {
+                        "id": function_id,
+                        "job": job_id,
+                        "status": "retry_wait" if name == "pending" else "succeeded",
+                    },
+                )
+                ids[f"{name}_job"], ids[f"{name}_function"] = job_id, function_id
+    finally:
+        engine.dispose()
+    return ids
+
+
+def _run_table(key: str) -> str:
+    return "job_runs" if key.endswith("job") else "function_runs"
+
+
+def _legacy_state(url: str, ids: dict[str, uuid.UUID]) -> dict[str, Any]:
+    engine = create_engine(url)
+    try:
+        with engine.connect() as connection:
+            tables = set(
+                connection.scalars(
+                    text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+                )
+            )
+            statuses = {
+                key: connection.scalar(
+                    text(f"SELECT status FROM {_run_table(key)} WHERE id = :id"), {"id": value}
+                )
+                for key, value in ids.items()
+            }
+            return {"tables": tables, "statuses": statuses}
+    finally:
+        engine.dispose()
+
+
 async def _sessions(url: str) -> tuple[Any, async_sessionmaker[AsyncSession]]:
     engine = create_async_engine(url)
     return engine, async_sessionmaker(engine, expire_on_commit=False)
@@ -370,3 +431,32 @@ async def test_legacy_editions_become_readable_newsroom_editions(database_url: s
             )
     finally:
         await engine.dispose()
+
+
+async def test_legacy_tables_are_dropped_once_their_history_moved(database_url: str) -> None:
+    _seed_legacy(database_url)
+    runs = _seed_legacy_runs(database_url)
+    _alembic(database_url, "upgrade", DROP_LEGACY)
+
+    state = _legacy_state(database_url, runs)
+    assert not set(LEGACY_TABLES) & state["tables"]
+    assert state["statuses"] == {
+        "pending_job": "cancelled",
+        "pending_function": "cancelled",
+        "finished_job": "succeeded",
+        "finished_function": "succeeded",
+    }
+    engine, sessions = await _sessions(database_url)
+    try:
+        async with sessions() as database:
+            edition = await latest_edition(database, "global", "zh-hant", today=date(2026, 9, 29))
+            assert [item.headline for item in edition.items] == ["A 臺灣標題", "B 臺灣發佈頭條"]
+    finally:
+        await engine.dispose()
+
+    _alembic(database_url, "downgrade", IMPORT)
+    restored = _legacy_state(database_url, runs)
+    assert set(LEGACY_TABLES) <= restored["tables"]
+    assert restored["statuses"]["pending_function"] == "cancelled"
+    _alembic(database_url, "downgrade", BEFORE_IMPORT)
+    _alembic(database_url, "upgrade", DROP_LEGACY)
