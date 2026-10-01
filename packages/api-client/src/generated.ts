@@ -198,6 +198,379 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/admin/newsroom/articles/manual": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Submit Manual Url
+     * @description Queue an off-pool URL for fetch → embedding → triage into ``edition_date``.
+     */
+    post: operations["submit_manual_url_api_admin_newsroom_articles_manual_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/newsroom/articles/{article_id}/body": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /**
+     * Set Manual Body
+     * @description Paste the full text for an article the fetcher could not read (D18).
+     */
+    put: operations["set_manual_body_api_admin_newsroom_articles__article_id__body_put"]
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/newsroom/editions": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Edition Day
+     * @description The three market editions of one date (default: today in Taipei).
+     */
+    get: operations["edition_day_api_admin_newsroom_editions_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/newsroom/editions/publish": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Publish Day
+     * @description Approve every market still in draft for one date; published ones are skipped.
+     */
+    post: operations["publish_day_api_admin_newsroom_editions_publish_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/newsroom/editions/{edition_date}/{market_code}": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Edition Detail
+     * @description One market's items in rank order plus the events that could be added.
+     */
+    get: operations["edition_detail_api_admin_newsroom_editions__edition_date___market_code__get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/newsroom/editions/{edition_id}/items": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Add Item
+     * @description Place a candidate event in this market's edition (D19).
+     */
+    post: operations["add_item_api_admin_newsroom_editions__edition_id__items_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/newsroom/editions/{edition_id}/order": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /**
+     * Reorder Items
+     * @description Renumber ranks 1..n in the given order; the list must name every item once.
+     */
+    put: operations["reorder_items_api_admin_newsroom_editions__edition_id__order_put"]
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/newsroom/editions/{edition_id}/publish": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Publish Edition
+     * @description Approve one market's draft now instead of waiting for 09:00 (D1).
+     */
+    post: operations["publish_edition_api_admin_newsroom_editions__edition_id__publish_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/newsroom/events/merge": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Merge Events
+     * @description Fold ``source_ids`` into ``target_id`` (D10).
+     */
+    post: operations["merge_events_api_admin_newsroom_events_merge_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/newsroom/events/{event_id}": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Event Detail
+     * @description Every article of an event, with a body preview for checking the original.
+     */
+    get: operations["event_detail_api_admin_newsroom_events__event_id__get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    /**
+     * Edit Event
+     * @description Rewrite the shared zh-hant headline, summary or related symbols (D7).
+     */
+    patch: operations["edit_event_api_admin_newsroom_events__event_id__patch"]
+    trace?: never
+  }
+  "/api/admin/newsroom/events/{event_id}/reanalyze": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Reanalyze Event
+     * @description Queue the event's analysis and every placement's "why" again (spec §6.4).
+     */
+    post: operations["reanalyze_event_api_admin_newsroom_events__event_id__reanalyze_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/newsroom/events/{event_id}/split": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Split Event
+     * @description Move the chosen articles into a new event (D10).
+     */
+    post: operations["split_event_api_admin_newsroom_events__event_id__split_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/newsroom/items/{item_id}/hide": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Hide Item */
+    post: operations["hide_item_api_admin_newsroom_items__item_id__hide_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/newsroom/items/{item_id}/remove": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Remove Item */
+    post: operations["remove_item_api_admin_newsroom_items__item_id__remove_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/newsroom/items/{item_id}/restore": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Restore Item */
+    post: operations["restore_item_api_admin_newsroom_items__item_id__restore_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/newsroom/items/{item_id}/unhide": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Unhide Item */
+    post: operations["unhide_item_api_admin_newsroom_items__item_id__unhide_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/newsroom/items/{item_id}/why": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /**
+     * Edit Why
+     * @description Rewrite this market's zh-hant "why it matters" (D7: the only editable language).
+     */
+    put: operations["edit_why_api_admin_newsroom_items__item_id__why_put"]
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/newsroom/sources": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * List Sources
+     * @description Every source with its polling health and 7-day article count (D3).
+     */
+    get: operations["list_sources_api_admin_newsroom_sources_get"]
+    put?: never
+    /** Create Source */
+    post: operations["create_source_api_admin_newsroom_sources_post"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/newsroom/sources/{source_id}": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    /**
+     * Update Source
+     * @description Edit settings or enable/disable a source (D3); omitted fields are unchanged.
+     */
+    patch: operations["update_source_api_admin_newsroom_sources__source_id__patch"]
+    trace?: never
+  }
   "/api/admin/orchestration/catalog": {
     parameters: {
       query?: never
@@ -2468,6 +2841,627 @@ export interface components {
       /** Dependencies */
       dependencies: components["schemas"]["NewsDependencyResponse"][]
     }
+    /** NewsroomAdminAddItem */
+    NewsroomAdminAddItem: {
+      /**
+       * Event Id
+       * Format: uuid
+       */
+      event_id: string
+    }
+    /** NewsroomAdminArticle */
+    NewsroomAdminArticle: {
+      /** Body Fetched At */
+      body_fetched_at: string | null
+      /** Body Length */
+      body_length: number
+      /** Body Preview */
+      body_preview: string | null
+      /** Body Quality Reason */
+      body_quality_reason: string | null
+      /** Body Source */
+      body_source: ("feed" | "fetch" | "manual") | null
+      /**
+       * Body Status
+       * @enum {string}
+       */
+      body_status: "pending" | "ok" | "unavailable" | "rejected" | "purged"
+      /**
+       * Embed Status
+       * @enum {string}
+       */
+      embed_status: "idle" | "pending" | "done" | "failed"
+      /** Feed Summary */
+      feed_summary: string | null
+      /** Fetch Error Code */
+      fetch_error_code: string | null
+      /**
+       * Fetch Status
+       * @enum {string}
+       */
+      fetch_status: "idle" | "pending" | "done" | "failed"
+      /**
+       * First Seen At
+       * Format: date-time
+       */
+      first_seen_at: string
+      /** Hostname */
+      hostname: string
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Language */
+      language: string | null
+      /** Market Scores */
+      market_scores: {
+        [key: string]: number
+      }
+      /** Published At */
+      published_at: string | null
+      /** Relevant */
+      relevant: boolean | null
+      /**
+       * Source Id
+       * Format: uuid
+       */
+      source_id: string
+      /** Source Key */
+      source_key: string
+      /** Source Name */
+      source_name: string
+      /** Title */
+      title: string
+      /** Topic */
+      topic: string | null
+      /** Triage Error Code */
+      triage_error_code: string | null
+      /**
+       * Triage Status
+       * @enum {string}
+       */
+      triage_status: "idle" | "pending" | "done" | "failed"
+      /** Url */
+      url: string
+    }
+    /** NewsroomAdminArticleLink */
+    NewsroomAdminArticleLink: {
+      /**
+       * Body Status
+       * @enum {string}
+       */
+      body_status: "pending" | "ok" | "unavailable" | "rejected" | "purged"
+      /** Hostname */
+      hostname: string
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Published At */
+      published_at: string | null
+      /** Source Name */
+      source_name: string
+      /** Title */
+      title: string
+      /** Url */
+      url: string
+    }
+    /** NewsroomAdminCandidate */
+    NewsroomAdminCandidate: {
+      event: components["schemas"]["NewsroomAdminEvent"]
+      /** Score */
+      score: number
+    }
+    /** NewsroomAdminCreatedArticle */
+    NewsroomAdminCreatedArticle: {
+      /**
+       * Article Id
+       * Format: uuid
+       */
+      article_id: string
+    }
+    /** NewsroomAdminCreatedEvent */
+    NewsroomAdminCreatedEvent: {
+      /**
+       * Event Id
+       * Format: uuid
+       */
+      event_id: string
+    }
+    /** NewsroomAdminCreatedItem */
+    NewsroomAdminCreatedItem: {
+      /**
+       * Item Id
+       * Format: uuid
+       */
+      item_id: string
+    }
+    /** NewsroomAdminEdition */
+    NewsroomAdminEdition: {
+      /** Assembled At */
+      assembled_at: string | null
+      /**
+       * Auto Publish At
+       * Format: date-time
+       */
+      auto_publish_at: string
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Ignored Pending Triage */
+      ignored_pending_triage: number
+      /** Late Fill Closed At */
+      late_fill_closed_at: string | null
+      /**
+       * Late Fill Deadline
+       * Format: date-time
+       */
+      late_fill_deadline: string
+      /**
+       * Market Code
+       * @enum {string}
+       */
+      market_code: "global" | "tw_equity" | "us_equity"
+      /** Published At */
+      published_at: string | null
+      /** Published By User Id */
+      published_by_user_id: string | null
+      /**
+       * Selection Mode
+       * @enum {string}
+       */
+      selection_mode: "pending" | "editor" | "fallback" | "legacy"
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "draft" | "published"
+    }
+    /** NewsroomAdminEditionDay */
+    NewsroomAdminEditionDay: {
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /** Is Today */
+      is_today: boolean
+      /** Markets */
+      markets: components["schemas"]["NewsroomAdminMarketSummary"][]
+      /** Triage Failed Articles */
+      triage_failed_articles: number
+      /** Untriaged Articles */
+      untriaged_articles: number
+    }
+    /** NewsroomAdminEditionDetail */
+    NewsroomAdminEditionDetail: {
+      /** Candidates */
+      candidates: components["schemas"]["NewsroomAdminCandidate"][]
+      edition: components["schemas"]["NewsroomAdminEdition"] | null
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /** Items */
+      items: components["schemas"]["NewsroomAdminItem"][]
+      /**
+       * Market Code
+       * @enum {string}
+       */
+      market_code: "global" | "tw_equity" | "us_equity"
+    }
+    /**
+     * NewsroomAdminEvent
+     * @description An event with its shared analysis and the facts an editor triages by.
+     */
+    NewsroomAdminEvent: {
+      /** Analysis Error Code */
+      analysis_error_code: string | null
+      /**
+       * Analysis Status
+       * @enum {string}
+       */
+      analysis_status: "idle" | "pending" | "ready" | "failed" | "needs_body"
+      /** Analyzed At */
+      analyzed_at: string | null
+      /** Article Count */
+      article_count: number
+      /** Articles */
+      articles: components["schemas"]["NewsroomAdminArticleLink"][]
+      /** Body Ok Count */
+      body_ok_count: number
+      /**
+       * Created By
+       * @enum {string}
+       */
+      created_by: "triage" | "split" | "manual" | "legacy"
+      /** Edited At */
+      edited_at: string | null
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /** En Error Code */
+      en_error_code: string | null
+      /**
+       * En Status
+       * @enum {string}
+       */
+      en_status: "idle" | "pending" | "ready" | "failed"
+      /** Headline En */
+      headline_en: string | null
+      /** Headline Zh Hans */
+      headline_zh_hans: string | null
+      /** Headline Zh Hant */
+      headline_zh_hant: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Merged Into Id */
+      merged_into_id: string | null
+      /** Related Symbols */
+      related_symbols: components["schemas"]["RelatedSymbol"][]
+      /** Source Count */
+      source_count: number
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "open" | "merged"
+      /** Summary En */
+      summary_en: string | null
+      /** Summary Zh Hans */
+      summary_zh_hans: string | null
+      /** Summary Zh Hant */
+      summary_zh_hant: string | null
+      /** Working Title */
+      working_title: string
+    }
+    /** NewsroomAdminEventDetail */
+    NewsroomAdminEventDetail: {
+      /** Articles */
+      articles: components["schemas"]["NewsroomAdminArticle"][]
+      event: components["schemas"]["NewsroomAdminEvent"]
+      /** Placements */
+      placements: components["schemas"]["NewsroomAdminPlacement"][]
+    }
+    /** NewsroomAdminEventEdit */
+    NewsroomAdminEventEdit: {
+      /** Headline */
+      headline?: string | null
+      /** Related Symbols */
+      related_symbols?: components["schemas"]["RelatedSymbol"][] | null
+      /** Summary */
+      summary?: string | null
+    }
+    /** NewsroomAdminItem */
+    NewsroomAdminItem: {
+      /** Abandoned At */
+      abandoned_at: string | null
+      /**
+       * Edition Id
+       * Format: uuid
+       */
+      edition_id: string
+      /** Editor Score */
+      editor_score: number | null
+      event: components["schemas"]["NewsroomAdminEvent"]
+      /** Hidden At */
+      hidden_at: string | null
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /**
+       * Origin
+       * @enum {string}
+       */
+      origin: "model" | "manual" | "legacy"
+      /** Rank */
+      rank: number
+      /** Removed At */
+      removed_at: string | null
+      /** Stars */
+      stars: number | null
+      /** Why En */
+      why_en: string | null
+      /**
+       * Why En Status
+       * @enum {string}
+       */
+      why_en_status: "idle" | "pending" | "ready" | "failed"
+      /** Why Error Code */
+      why_error_code: string | null
+      /**
+       * Why Status
+       * @enum {string}
+       */
+      why_status: "pending" | "ready" | "failed"
+      /** Why Zh Hans */
+      why_zh_hans: string | null
+      /** Why Zh Hant */
+      why_zh_hant: string | null
+    }
+    /** NewsroomAdminItemCounts */
+    NewsroomAdminItemCounts: {
+      /** Abandoned */
+      abandoned: number
+      /** Active */
+      active: number
+      /** Analysis Failed */
+      analysis_failed: number
+      /** Hidden */
+      hidden: number
+      /** Needs Body */
+      needs_body: number
+      /** Ready */
+      ready: number
+      /** Removed */
+      removed: number
+    }
+    /** NewsroomAdminManualBody */
+    NewsroomAdminManualBody: {
+      /** Body */
+      body: string
+    }
+    /** NewsroomAdminManualUrl */
+    NewsroomAdminManualUrl: {
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /** Url */
+      url: string
+    }
+    /** NewsroomAdminMarketSummary */
+    NewsroomAdminMarketSummary: {
+      counts: components["schemas"]["NewsroomAdminItemCounts"]
+      edition: components["schemas"]["NewsroomAdminEdition"] | null
+      /**
+       * Market Code
+       * @enum {string}
+       */
+      market_code: "global" | "tw_equity" | "us_equity"
+    }
+    /** NewsroomAdminMerge */
+    NewsroomAdminMerge: {
+      /** Source Ids */
+      source_ids: string[]
+      /**
+       * Target Id
+       * Format: uuid
+       */
+      target_id: string
+    }
+    /** NewsroomAdminOrder */
+    NewsroomAdminOrder: {
+      /** Item Ids */
+      item_ids: string[]
+    }
+    /** NewsroomAdminPlacement */
+    NewsroomAdminPlacement: {
+      /**
+       * Edition Id
+       * Format: uuid
+       */
+      edition_id: string
+      /**
+       * Edition Status
+       * @enum {string}
+       */
+      edition_status: "draft" | "published"
+      /** Hidden */
+      hidden: boolean
+      /**
+       * Item Id
+       * Format: uuid
+       */
+      item_id: string
+      /**
+       * Market Code
+       * @enum {string}
+       */
+      market_code: "global" | "tw_equity" | "us_equity"
+      /** Removed */
+      removed: boolean
+    }
+    /** NewsroomAdminPublishDay */
+    NewsroomAdminPublishDay: {
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+    }
+    /** NewsroomAdminSource */
+    NewsroomAdminSource: {
+      /** Articles 7D */
+      articles_7d: number
+      /** Consecutive Failures */
+      consecutive_failures: number
+      /** Enabled */
+      enabled: boolean
+      /** Full Text In Feed */
+      full_text_in_feed: boolean
+      /**
+       * Health
+       * @enum {string}
+       */
+      health: "disabled" | "pending" | "healthy" | "degraded" | "unhealthy"
+      /** Hostname */
+      hostname: string
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string
+      /** Key */
+      key: string
+      /** Kind */
+      kind:
+        | (
+            | "rss"
+            | "rdf"
+            | "atom"
+            | "rss_full"
+            | "news_sitemap"
+            | "json_list"
+            | "guardian_api"
+          )
+        | "manual"
+      /** Language Filter */
+      language_filter: string[] | null
+      /** Last Error At */
+      last_error_at: string | null
+      /** Last Error Code */
+      last_error_code: string | null
+      /** Last Polled At */
+      last_polled_at: string | null
+      /** Last Success At */
+      last_success_at: string | null
+      /** Link Pattern */
+      link_pattern: string | null
+      /** Markets */
+      markets: ("global" | "tw_equity" | "us_equity")[]
+      /** Name */
+      name: string
+      /** Next Poll At */
+      next_poll_at: string | null
+      /** Poll Interval Minutes */
+      poll_interval_minutes: number
+      /** Trust Tier */
+      trust_tier: number
+      /** Url */
+      url: string | null
+      /** Weight */
+      weight: number
+    }
+    /** NewsroomAdminSourceCreate */
+    NewsroomAdminSourceCreate: {
+      /**
+       * Enabled
+       * @default true
+       */
+      enabled: boolean
+      /**
+       * Full Text In Feed
+       * @default false
+       */
+      full_text_in_feed: boolean
+      /** Hostname */
+      hostname: string
+      /** Key */
+      key: string
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind:
+        | "rss"
+        | "rdf"
+        | "atom"
+        | "rss_full"
+        | "news_sitemap"
+        | "json_list"
+        | "guardian_api"
+      /** Language Filter */
+      language_filter?: string[] | null
+      /** Link Pattern */
+      link_pattern?: string | null
+      /** Markets */
+      markets?: ("global" | "tw_equity" | "us_equity")[]
+      /** Name */
+      name: string
+      /**
+       * Poll Interval Minutes
+       * @default 30
+       */
+      poll_interval_minutes: number
+      /**
+       * Trust Tier
+       * @default 2
+       */
+      trust_tier: number
+      /** Url */
+      url?: string | null
+      /**
+       * Weight
+       * @default 1
+       */
+      weight: number
+    }
+    /** NewsroomAdminSourceList */
+    NewsroomAdminSourceList: {
+      /** Sources */
+      sources: components["schemas"]["NewsroomAdminSource"][]
+    }
+    /**
+     * NewsroomAdminSourceUpdate
+     * @description Partial update; omitted fields stay unchanged, ``null`` clears an optional one.
+     */
+    NewsroomAdminSourceUpdate: {
+      /** Enabled */
+      enabled?: boolean | null
+      /** Full Text In Feed */
+      full_text_in_feed?: boolean | null
+      /** Hostname */
+      hostname?: string | null
+      /** Key */
+      key?: string | null
+      /** Kind */
+      kind?:
+        | (
+            | "rss"
+            | "rdf"
+            | "atom"
+            | "rss_full"
+            | "news_sitemap"
+            | "json_list"
+            | "guardian_api"
+          )
+        | null
+      /** Language Filter */
+      language_filter?: string[] | null
+      /** Link Pattern */
+      link_pattern?: string | null
+      /** Markets */
+      markets?: ("global" | "tw_equity" | "us_equity")[] | null
+      /** Name */
+      name?: string | null
+      /** Poll Interval Minutes */
+      poll_interval_minutes?: number | null
+      /** Trust Tier */
+      trust_tier?: number | null
+      /** Url */
+      url?: string | null
+      /** Weight */
+      weight?: number | null
+    }
+    /** NewsroomAdminSplit */
+    NewsroomAdminSplit: {
+      /** Article Ids */
+      article_ids: string[]
+    }
+    /** NewsroomAdminWhyEdit */
+    NewsroomAdminWhyEdit: {
+      /** Why */
+      why: string
+    }
     /** OrchestrationCatalog */
     OrchestrationCatalog: {
       /** Features */
@@ -2941,6 +3935,18 @@ export interface components {
        * @enum {string}
        */
       status: "ok" | "unhealthy"
+    }
+    /** RelatedSymbol */
+    RelatedSymbol: {
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "index" | "equity" | "fx" | "commodity" | "rate" | "crypto"
+      /** Label */
+      label: string
+      /** Symbol */
+      symbol: string
     }
     /** ReportDetailContext */
     ReportDetailContext: {
@@ -3743,6 +4749,878 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["NewsRecoveryResponse"]
+        }
+      }
+    }
+  }
+  submit_manual_url_api_admin_newsroom_articles_manual_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NewsroomAdminManualUrl"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["NewsroomAdminCreatedArticle"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  set_manual_body_api_admin_newsroom_articles__article_id__body_put: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        article_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NewsroomAdminManualBody"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Article not found. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  edition_day_api_admin_newsroom_editions_get: {
+    parameters: {
+      query?: {
+        date?: string | null
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["NewsroomAdminEditionDay"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  publish_day_api_admin_newsroom_editions_publish_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NewsroomAdminPublishDay"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  edition_detail_api_admin_newsroom_editions__edition_date___market_code__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        edition_date: string
+        market_code: "global" | "tw_equity" | "us_equity"
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["NewsroomAdminEditionDetail"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  add_item_api_admin_newsroom_editions__edition_id__items_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        edition_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NewsroomAdminAddItem"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["NewsroomAdminCreatedItem"]
+        }
+      }
+      /** @description Edition or event not found. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Event is merged, from another date, or already in the edition. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  reorder_items_api_admin_newsroom_editions__edition_id__order_put: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        edition_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NewsroomAdminOrder"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Edition not found. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description item_ids is not exactly the edition's items. */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+    }
+  }
+  publish_edition_api_admin_newsroom_editions__edition_id__publish_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        edition_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Edition not found. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Edition is already published. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  merge_events_api_admin_newsroom_events_merge_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NewsroomAdminMerge"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description An event was not found. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description An event is merged already or from another edition date. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  event_detail_api_admin_newsroom_events__event_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        event_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["NewsroomAdminEventDetail"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  edit_event_api_admin_newsroom_events__event_id__patch: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        event_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NewsroomAdminEventEdit"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Event not found. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Event is merged or its analysis is not ready. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  reanalyze_event_api_admin_newsroom_events__event_id__reanalyze_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        event_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Event not found. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Event is merged. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  split_event_api_admin_newsroom_events__event_id__split_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        event_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NewsroomAdminSplit"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["NewsroomAdminCreatedEvent"]
+        }
+      }
+      /** @description Event not found. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Event is merged. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Articles are not all in the event, or none would remain. */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+    }
+  }
+  hide_item_api_admin_newsroom_items__item_id__hide_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        item_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Item not found. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Edition is still a draft. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  remove_item_api_admin_newsroom_items__item_id__remove_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        item_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Item not found. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Edition is already published. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  restore_item_api_admin_newsroom_items__item_id__restore_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        item_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Item not found. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Edition is already published. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  unhide_item_api_admin_newsroom_items__item_id__unhide_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        item_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Item not found. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Edition is still a draft. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  edit_why_api_admin_newsroom_items__item_id__why_put: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        item_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NewsroomAdminWhyEdit"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Item not found. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description The item's "why" is not ready yet. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  list_sources_api_admin_newsroom_sources_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["NewsroomAdminSourceList"]
+        }
+      }
+    }
+  }
+  create_source_api_admin_newsroom_sources_post: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NewsroomAdminSourceCreate"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["NewsroomAdminSource"]
+        }
+      }
+      /** @description Source key already exists. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  update_source_api_admin_newsroom_sources__source_id__patch: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        source_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NewsroomAdminSourceUpdate"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["NewsroomAdminSource"]
+        }
+      }
+      /** @description Source not found. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Source key already exists, or the manual source's kind changed. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
         }
       }
     }
