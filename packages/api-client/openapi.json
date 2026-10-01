@@ -3911,6 +3911,1738 @@
         "title": "NewsRecoveryResponse",
         "type": "object"
       },
+      "NewsroomAdminAddItem": {
+        "additionalProperties": false,
+        "properties": {
+          "event_id": {
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          }
+        },
+        "required": ["event_id"],
+        "title": "NewsroomAdminAddItem",
+        "type": "object"
+      },
+      "NewsroomAdminArticle": {
+        "properties": {
+          "body_fetched_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Fetched At"
+          },
+          "body_length": {
+            "title": "Body Length",
+            "type": "integer"
+          },
+          "body_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Preview"
+          },
+          "body_quality_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Quality Reason"
+          },
+          "body_source": {
+            "anyOf": [
+              {
+                "enum": ["feed", "fetch", "manual"],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Source"
+          },
+          "body_status": {
+            "enum": ["pending", "ok", "unavailable", "rejected", "purged"],
+            "title": "Body Status",
+            "type": "string"
+          },
+          "embed_status": {
+            "enum": ["idle", "pending", "done", "failed"],
+            "title": "Embed Status",
+            "type": "string"
+          },
+          "feed_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feed Summary"
+          },
+          "fetch_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetch Error Code"
+          },
+          "fetch_status": {
+            "enum": ["idle", "pending", "done", "failed"],
+            "title": "Fetch Status",
+            "type": "string"
+          },
+          "first_seen_at": {
+            "format": "date-time",
+            "title": "First Seen At",
+            "type": "string"
+          },
+          "hostname": {
+            "title": "Hostname",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "market_scores": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Market Scores",
+            "type": "object"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "relevant": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relevant"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_key": {
+            "title": "Source Key",
+            "type": "string"
+          },
+          "source_name": {
+            "title": "Source Name",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          },
+          "triage_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Triage Error Code"
+          },
+          "triage_status": {
+            "enum": ["idle", "pending", "done", "failed"],
+            "title": "Triage Status",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source_id",
+          "source_key",
+          "source_name",
+          "hostname",
+          "title",
+          "url",
+          "feed_summary",
+          "published_at",
+          "first_seen_at",
+          "language",
+          "body_status",
+          "body_source",
+          "body_quality_reason",
+          "body_fetched_at",
+          "body_length",
+          "body_preview",
+          "fetch_status",
+          "fetch_error_code",
+          "embed_status",
+          "triage_status",
+          "triage_error_code",
+          "relevant",
+          "topic",
+          "market_scores"
+        ],
+        "title": "NewsroomAdminArticle",
+        "type": "object"
+      },
+      "NewsroomAdminArticleLink": {
+        "properties": {
+          "body_status": {
+            "enum": ["pending", "ok", "unavailable", "rejected", "purged"],
+            "title": "Body Status",
+            "type": "string"
+          },
+          "hostname": {
+            "title": "Hostname",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "source_name": {
+            "title": "Source Name",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source_name",
+          "hostname",
+          "title",
+          "url",
+          "published_at",
+          "body_status"
+        ],
+        "title": "NewsroomAdminArticleLink",
+        "type": "object"
+      },
+      "NewsroomAdminCandidate": {
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/NewsroomAdminEvent"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          }
+        },
+        "required": ["score", "event"],
+        "title": "NewsroomAdminCandidate",
+        "type": "object"
+      },
+      "NewsroomAdminCreatedArticle": {
+        "properties": {
+          "article_id": {
+            "format": "uuid",
+            "title": "Article Id",
+            "type": "string"
+          }
+        },
+        "required": ["article_id"],
+        "title": "NewsroomAdminCreatedArticle",
+        "type": "object"
+      },
+      "NewsroomAdminCreatedEvent": {
+        "properties": {
+          "event_id": {
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          }
+        },
+        "required": ["event_id"],
+        "title": "NewsroomAdminCreatedEvent",
+        "type": "object"
+      },
+      "NewsroomAdminCreatedItem": {
+        "properties": {
+          "item_id": {
+            "format": "uuid",
+            "title": "Item Id",
+            "type": "string"
+          }
+        },
+        "required": ["item_id"],
+        "title": "NewsroomAdminCreatedItem",
+        "type": "object"
+      },
+      "NewsroomAdminEdition": {
+        "properties": {
+          "assembled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assembled At"
+          },
+          "auto_publish_at": {
+            "format": "date-time",
+            "title": "Auto Publish At",
+            "type": "string"
+          },
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "ignored_pending_triage": {
+            "title": "Ignored Pending Triage",
+            "type": "integer"
+          },
+          "late_fill_closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Late Fill Closed At"
+          },
+          "late_fill_deadline": {
+            "format": "date-time",
+            "title": "Late Fill Deadline",
+            "type": "string"
+          },
+          "market_code": {
+            "enum": ["global", "tw_equity", "us_equity"],
+            "title": "Market Code",
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "published_by_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published By User Id"
+          },
+          "selection_mode": {
+            "enum": ["pending", "editor", "fallback", "legacy"],
+            "title": "Selection Mode",
+            "type": "string"
+          },
+          "status": {
+            "enum": ["draft", "published"],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "edition_date",
+          "market_code",
+          "status",
+          "selection_mode",
+          "auto_publish_at",
+          "late_fill_deadline",
+          "assembled_at",
+          "published_at",
+          "published_by_user_id",
+          "ignored_pending_triage",
+          "late_fill_closed_at"
+        ],
+        "title": "NewsroomAdminEdition",
+        "type": "object"
+      },
+      "NewsroomAdminEditionDay": {
+        "properties": {
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          },
+          "is_today": {
+            "title": "Is Today",
+            "type": "boolean"
+          },
+          "markets": {
+            "items": {
+              "$ref": "#/components/schemas/NewsroomAdminMarketSummary"
+            },
+            "title": "Markets",
+            "type": "array"
+          },
+          "triage_failed_articles": {
+            "title": "Triage Failed Articles",
+            "type": "integer"
+          },
+          "untriaged_articles": {
+            "title": "Untriaged Articles",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "edition_date",
+          "is_today",
+          "untriaged_articles",
+          "triage_failed_articles",
+          "markets"
+        ],
+        "title": "NewsroomAdminEditionDay",
+        "type": "object"
+      },
+      "NewsroomAdminEditionDetail": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/NewsroomAdminCandidate"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "edition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NewsroomAdminEdition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NewsroomAdminItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "market_code": {
+            "enum": ["global", "tw_equity", "us_equity"],
+            "title": "Market Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "edition_date",
+          "market_code",
+          "edition",
+          "items",
+          "candidates"
+        ],
+        "title": "NewsroomAdminEditionDetail",
+        "type": "object"
+      },
+      "NewsroomAdminEvent": {
+        "description": "An event with its shared analysis and the facts an editor triages by.",
+        "properties": {
+          "analysis_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Error Code"
+          },
+          "analysis_status": {
+            "enum": ["idle", "pending", "ready", "failed", "needs_body"],
+            "title": "Analysis Status",
+            "type": "string"
+          },
+          "analyzed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analyzed At"
+          },
+          "article_count": {
+            "title": "Article Count",
+            "type": "integer"
+          },
+          "articles": {
+            "items": {
+              "$ref": "#/components/schemas/NewsroomAdminArticleLink"
+            },
+            "title": "Articles",
+            "type": "array"
+          },
+          "body_ok_count": {
+            "title": "Body Ok Count",
+            "type": "integer"
+          },
+          "created_by": {
+            "enum": ["triage", "split", "manual", "legacy"],
+            "title": "Created By",
+            "type": "string"
+          },
+          "edited_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edited At"
+          },
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          },
+          "en_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "En Error Code"
+          },
+          "en_status": {
+            "enum": ["idle", "pending", "ready", "failed"],
+            "title": "En Status",
+            "type": "string"
+          },
+          "headline_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline En"
+          },
+          "headline_zh_hans": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline Zh Hans"
+          },
+          "headline_zh_hant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline Zh Hant"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "merged_into_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merged Into Id"
+          },
+          "related_symbols": {
+            "items": {
+              "$ref": "#/components/schemas/RelatedSymbol"
+            },
+            "title": "Related Symbols",
+            "type": "array"
+          },
+          "source_count": {
+            "title": "Source Count",
+            "type": "integer"
+          },
+          "status": {
+            "enum": ["open", "merged"],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary En"
+          },
+          "summary_zh_hans": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Zh Hans"
+          },
+          "summary_zh_hant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Zh Hant"
+          },
+          "working_title": {
+            "title": "Working Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "edition_date",
+          "working_title",
+          "status",
+          "merged_into_id",
+          "created_by",
+          "headline_zh_hant",
+          "summary_zh_hant",
+          "headline_zh_hans",
+          "summary_zh_hans",
+          "headline_en",
+          "summary_en",
+          "related_symbols",
+          "analysis_status",
+          "analysis_error_code",
+          "analyzed_at",
+          "en_status",
+          "en_error_code",
+          "edited_at",
+          "article_count",
+          "source_count",
+          "body_ok_count",
+          "articles"
+        ],
+        "title": "NewsroomAdminEvent",
+        "type": "object"
+      },
+      "NewsroomAdminEventDetail": {
+        "properties": {
+          "articles": {
+            "items": {
+              "$ref": "#/components/schemas/NewsroomAdminArticle"
+            },
+            "title": "Articles",
+            "type": "array"
+          },
+          "event": {
+            "$ref": "#/components/schemas/NewsroomAdminEvent"
+          },
+          "placements": {
+            "items": {
+              "$ref": "#/components/schemas/NewsroomAdminPlacement"
+            },
+            "title": "Placements",
+            "type": "array"
+          }
+        },
+        "required": ["event", "articles", "placements"],
+        "title": "NewsroomAdminEventDetail",
+        "type": "object"
+      },
+      "NewsroomAdminEventEdit": {
+        "additionalProperties": false,
+        "properties": {
+          "headline": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline"
+          },
+          "related_symbols": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RelatedSymbol"
+                },
+                "maxItems": 8,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Related Symbols"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          }
+        },
+        "title": "NewsroomAdminEventEdit",
+        "type": "object"
+      },
+      "NewsroomAdminItem": {
+        "properties": {
+          "abandoned_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abandoned At"
+          },
+          "edition_id": {
+            "format": "uuid",
+            "title": "Edition Id",
+            "type": "string"
+          },
+          "editor_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Editor Score"
+          },
+          "event": {
+            "$ref": "#/components/schemas/NewsroomAdminEvent"
+          },
+          "hidden_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hidden At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "origin": {
+            "enum": ["model", "manual", "legacy"],
+            "title": "Origin",
+            "type": "string"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "removed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Removed At"
+          },
+          "stars": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stars"
+          },
+          "why_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Why En"
+          },
+          "why_en_status": {
+            "enum": ["idle", "pending", "ready", "failed"],
+            "title": "Why En Status",
+            "type": "string"
+          },
+          "why_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Why Error Code"
+          },
+          "why_status": {
+            "enum": ["pending", "ready", "failed"],
+            "title": "Why Status",
+            "type": "string"
+          },
+          "why_zh_hans": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Why Zh Hans"
+          },
+          "why_zh_hant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Why Zh Hant"
+          }
+        },
+        "required": [
+          "id",
+          "edition_id",
+          "rank",
+          "stars",
+          "editor_score",
+          "origin",
+          "why_zh_hant",
+          "why_zh_hans",
+          "why_en",
+          "why_status",
+          "why_error_code",
+          "why_en_status",
+          "removed_at",
+          "hidden_at",
+          "abandoned_at",
+          "event"
+        ],
+        "title": "NewsroomAdminItem",
+        "type": "object"
+      },
+      "NewsroomAdminItemCounts": {
+        "properties": {
+          "abandoned": {
+            "title": "Abandoned",
+            "type": "integer"
+          },
+          "active": {
+            "title": "Active",
+            "type": "integer"
+          },
+          "analysis_failed": {
+            "title": "Analysis Failed",
+            "type": "integer"
+          },
+          "hidden": {
+            "title": "Hidden",
+            "type": "integer"
+          },
+          "needs_body": {
+            "title": "Needs Body",
+            "type": "integer"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "integer"
+          },
+          "removed": {
+            "title": "Removed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "active",
+          "removed",
+          "hidden",
+          "abandoned",
+          "ready",
+          "analysis_failed",
+          "needs_body"
+        ],
+        "title": "NewsroomAdminItemCounts",
+        "type": "object"
+      },
+      "NewsroomAdminManualBody": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "maxLength": 40000,
+            "minLength": 1,
+            "title": "Body",
+            "type": "string"
+          }
+        },
+        "required": ["body"],
+        "title": "NewsroomAdminManualBody",
+        "type": "object"
+      },
+      "NewsroomAdminManualUrl": {
+        "additionalProperties": false,
+        "properties": {
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": ["url", "edition_date"],
+        "title": "NewsroomAdminManualUrl",
+        "type": "object"
+      },
+      "NewsroomAdminMarketSummary": {
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/NewsroomAdminItemCounts"
+          },
+          "edition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NewsroomAdminEdition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "market_code": {
+            "enum": ["global", "tw_equity", "us_equity"],
+            "title": "Market Code",
+            "type": "string"
+          }
+        },
+        "required": ["market_code", "edition", "counts"],
+        "title": "NewsroomAdminMarketSummary",
+        "type": "object"
+      },
+      "NewsroomAdminMerge": {
+        "additionalProperties": false,
+        "properties": {
+          "source_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Source Ids",
+            "type": "array"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": ["target_id", "source_ids"],
+        "title": "NewsroomAdminMerge",
+        "type": "object"
+      },
+      "NewsroomAdminOrder": {
+        "additionalProperties": false,
+        "properties": {
+          "item_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Item Ids",
+            "type": "array"
+          }
+        },
+        "required": ["item_ids"],
+        "title": "NewsroomAdminOrder",
+        "type": "object"
+      },
+      "NewsroomAdminPlacement": {
+        "properties": {
+          "edition_id": {
+            "format": "uuid",
+            "title": "Edition Id",
+            "type": "string"
+          },
+          "edition_status": {
+            "enum": ["draft", "published"],
+            "title": "Edition Status",
+            "type": "string"
+          },
+          "hidden": {
+            "title": "Hidden",
+            "type": "boolean"
+          },
+          "item_id": {
+            "format": "uuid",
+            "title": "Item Id",
+            "type": "string"
+          },
+          "market_code": {
+            "enum": ["global", "tw_equity", "us_equity"],
+            "title": "Market Code",
+            "type": "string"
+          },
+          "removed": {
+            "title": "Removed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "item_id",
+          "edition_id",
+          "market_code",
+          "edition_status",
+          "removed",
+          "hidden"
+        ],
+        "title": "NewsroomAdminPlacement",
+        "type": "object"
+      },
+      "NewsroomAdminPublishDay": {
+        "additionalProperties": false,
+        "properties": {
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          }
+        },
+        "required": ["edition_date"],
+        "title": "NewsroomAdminPublishDay",
+        "type": "object"
+      },
+      "NewsroomAdminSource": {
+        "properties": {
+          "articles_7d": {
+            "title": "Articles 7D",
+            "type": "integer"
+          },
+          "consecutive_failures": {
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "full_text_in_feed": {
+            "title": "Full Text In Feed",
+            "type": "boolean"
+          },
+          "health": {
+            "enum": ["disabled", "pending", "healthy", "degraded", "unhealthy"],
+            "title": "Health",
+            "type": "string"
+          },
+          "hostname": {
+            "title": "Hostname",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "rss",
+                  "rdf",
+                  "atom",
+                  "rss_full",
+                  "news_sitemap",
+                  "json_list",
+                  "guardian_api"
+                ],
+                "type": "string"
+              },
+              {
+                "const": "manual",
+                "type": "string"
+              }
+            ],
+            "title": "Kind"
+          },
+          "language_filter": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language Filter"
+          },
+          "last_error_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error At"
+          },
+          "last_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Code"
+          },
+          "last_polled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Polled At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "link_pattern": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Pattern"
+          },
+          "markets": {
+            "items": {
+              "enum": ["global", "tw_equity", "us_equity"],
+              "type": "string"
+            },
+            "title": "Markets",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "next_poll_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Poll At"
+          },
+          "poll_interval_minutes": {
+            "title": "Poll Interval Minutes",
+            "type": "integer"
+          },
+          "trust_tier": {
+            "title": "Trust Tier",
+            "type": "integer"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "name",
+          "kind",
+          "url",
+          "hostname",
+          "link_pattern",
+          "markets",
+          "language_filter",
+          "full_text_in_feed",
+          "trust_tier",
+          "weight",
+          "poll_interval_minutes",
+          "enabled",
+          "last_polled_at",
+          "last_success_at",
+          "next_poll_at",
+          "consecutive_failures",
+          "last_error_code",
+          "last_error_at",
+          "articles_7d",
+          "health"
+        ],
+        "title": "NewsroomAdminSource",
+        "type": "object"
+      },
+      "NewsroomAdminSourceCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "full_text_in_feed": {
+            "default": false,
+            "title": "Full Text In Feed",
+            "type": "boolean"
+          },
+          "hostname": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Hostname",
+            "type": "string"
+          },
+          "key": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "rss",
+              "rdf",
+              "atom",
+              "rss_full",
+              "news_sitemap",
+              "json_list",
+              "guardian_api"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "language_filter": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 10,
+                  "minLength": 2,
+                  "type": "string"
+                },
+                "maxItems": 10,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language Filter"
+          },
+          "link_pattern": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Pattern"
+          },
+          "markets": {
+            "items": {
+              "enum": ["global", "tw_equity", "us_equity"],
+              "type": "string"
+            },
+            "maxItems": 3,
+            "title": "Markets",
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "poll_interval_minutes": {
+            "default": 30,
+            "maximum": 1440.0,
+            "minimum": 5.0,
+            "title": "Poll Interval Minutes",
+            "type": "integer"
+          },
+          "trust_tier": {
+            "default": 2,
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Trust Tier",
+            "type": "integer"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "weight": {
+            "default": 1.0,
+            "maximum": 2.0,
+            "minimum": 0.5,
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": ["key", "name", "kind", "hostname"],
+        "title": "NewsroomAdminSourceCreate",
+        "type": "object"
+      },
+      "NewsroomAdminSourceList": {
+        "properties": {
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/NewsroomAdminSource"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": ["sources"],
+        "title": "NewsroomAdminSourceList",
+        "type": "object"
+      },
+      "NewsroomAdminSourceUpdate": {
+        "additionalProperties": false,
+        "description": "Partial update; omitted fields stay unchanged, ``null`` clears an optional one.",
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "full_text_in_feed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Text In Feed"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "rss",
+                  "rdf",
+                  "atom",
+                  "rss_full",
+                  "news_sitemap",
+                  "json_list",
+                  "guardian_api"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "language_filter": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 10,
+                  "minLength": 2,
+                  "type": "string"
+                },
+                "maxItems": 10,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language Filter"
+          },
+          "link_pattern": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Pattern"
+          },
+          "markets": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": ["global", "tw_equity", "us_equity"],
+                  "type": "string"
+                },
+                "maxItems": 3,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Markets"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "poll_interval_minutes": {
+            "anyOf": [
+              {
+                "maximum": 1440.0,
+                "minimum": 5.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Poll Interval Minutes"
+          },
+          "trust_tier": {
+            "anyOf": [
+              {
+                "maximum": 3.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trust Tier"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "maximum": 2.0,
+                "minimum": 0.5,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          }
+        },
+        "title": "NewsroomAdminSourceUpdate",
+        "type": "object"
+      },
+      "NewsroomAdminSplit": {
+        "additionalProperties": false,
+        "properties": {
+          "article_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Article Ids",
+            "type": "array"
+          }
+        },
+        "required": ["article_ids"],
+        "title": "NewsroomAdminSplit",
+        "type": "object"
+      },
+      "NewsroomAdminWhyEdit": {
+        "additionalProperties": false,
+        "properties": {
+          "why": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": ["why"],
+        "title": "NewsroomAdminWhyEdit",
+        "type": "object"
+      },
       "NewsroomEditionResponse": {
         "properties": {
           "edition_date": {
@@ -5200,6 +6932,31 @@
         },
         "required": ["status", "components"],
         "title": "ReadinessReport",
+        "type": "object"
+      },
+      "RelatedSymbol": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": ["index", "equity", "fx", "commodity", "rate", "crypto"],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "symbol": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": ["symbol", "kind", "label"],
+        "title": "RelatedSymbol",
         "type": "object"
       },
       "ReportDetailContext": {
@@ -6804,6 +8561,1199 @@
         },
         "summary": "Recovery Status",
         "tags": ["news management"]
+      }
+    },
+    "/api/admin/newsroom/articles/manual": {
+      "post": {
+        "description": "Queue an off-pool URL for fetch → embedding → triage into ``edition_date``.",
+        "operationId": "submit_manual_url_api_admin_newsroom_articles_manual_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewsroomAdminManualUrl"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsroomAdminCreatedArticle"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Manual Url",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/articles/{article_id}/body": {
+      "put": {
+        "description": "Paste the full text for an article the fetcher could not read (D18).",
+        "operationId": "set_manual_body_api_admin_newsroom_articles__article_id__body_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "article_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Article Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewsroomAdminManualBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Article not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Manual Body",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/editions": {
+      "get": {
+        "description": "The three market editions of one date (default: today in Taipei).",
+        "operationId": "edition_day_api_admin_newsroom_editions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsroomAdminEditionDay"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edition Day",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/editions/publish": {
+      "post": {
+        "description": "Approve every market still in draft for one date; published ones are skipped.",
+        "operationId": "publish_day_api_admin_newsroom_editions_publish_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewsroomAdminPublishDay"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Publish Day",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/editions/{edition_date}/{market_code}": {
+      "get": {
+        "description": "One market's items in rank order plus the events that could be added.",
+        "operationId": "edition_detail_api_admin_newsroom_editions__edition_date___market_code__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "edition_date",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Edition Date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "market_code",
+            "required": true,
+            "schema": {
+              "enum": ["global", "tw_equity", "us_equity"],
+              "title": "Market Code",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsroomAdminEditionDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edition Detail",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/editions/{edition_id}/items": {
+      "post": {
+        "description": "Place a candidate event in this market's edition (D19).",
+        "operationId": "add_item_api_admin_newsroom_editions__edition_id__items_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "edition_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Edition Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewsroomAdminAddItem"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsroomAdminCreatedItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Edition or event not found."
+          },
+          "409": {
+            "description": "Event is merged, from another date, or already in the edition."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Item",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/editions/{edition_id}/order": {
+      "put": {
+        "description": "Renumber ranks 1..n in the given order; the list must name every item once.",
+        "operationId": "reorder_items_api_admin_newsroom_editions__edition_id__order_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "edition_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Edition Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewsroomAdminOrder"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Edition not found."
+          },
+          "422": {
+            "description": "item_ids is not exactly the edition's items."
+          }
+        },
+        "summary": "Reorder Items",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/editions/{edition_id}/publish": {
+      "post": {
+        "description": "Approve one market's draft now instead of waiting for 09:00 (D1).",
+        "operationId": "publish_edition_api_admin_newsroom_editions__edition_id__publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "edition_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Edition Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Edition not found."
+          },
+          "409": {
+            "description": "Edition is already published."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Publish Edition",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/events/merge": {
+      "post": {
+        "description": "Fold ``source_ids`` into ``target_id`` (D10).",
+        "operationId": "merge_events_api_admin_newsroom_events_merge_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewsroomAdminMerge"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "An event was not found."
+          },
+          "409": {
+            "description": "An event is merged already or from another edition date."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Merge Events",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/events/{event_id}": {
+      "get": {
+        "description": "Every article of an event, with a body preview for checking the original.",
+        "operationId": "event_detail_api_admin_newsroom_events__event_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsroomAdminEventDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Event Detail",
+        "tags": ["newsroom management"]
+      },
+      "patch": {
+        "description": "Rewrite the shared zh-hant headline, summary or related symbols (D7).",
+        "operationId": "edit_event_api_admin_newsroom_events__event_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewsroomAdminEventEdit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Event not found."
+          },
+          "409": {
+            "description": "Event is merged or its analysis is not ready."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edit Event",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/events/{event_id}/reanalyze": {
+      "post": {
+        "description": "Queue the event's analysis and every placement's \"why\" again (spec §6.4).",
+        "operationId": "reanalyze_event_api_admin_newsroom_events__event_id__reanalyze_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Event not found."
+          },
+          "409": {
+            "description": "Event is merged."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reanalyze Event",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/events/{event_id}/split": {
+      "post": {
+        "description": "Move the chosen articles into a new event (D10).",
+        "operationId": "split_event_api_admin_newsroom_events__event_id__split_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewsroomAdminSplit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsroomAdminCreatedEvent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Event not found."
+          },
+          "409": {
+            "description": "Event is merged."
+          },
+          "422": {
+            "description": "Articles are not all in the event, or none would remain."
+          }
+        },
+        "summary": "Split Event",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/items/{item_id}/hide": {
+      "post": {
+        "operationId": "hide_item_api_admin_newsroom_items__item_id__hide_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Item not found."
+          },
+          "409": {
+            "description": "Edition is still a draft."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hide Item",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/items/{item_id}/remove": {
+      "post": {
+        "operationId": "remove_item_api_admin_newsroom_items__item_id__remove_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Item not found."
+          },
+          "409": {
+            "description": "Edition is already published."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Item",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/items/{item_id}/restore": {
+      "post": {
+        "operationId": "restore_item_api_admin_newsroom_items__item_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Item not found."
+          },
+          "409": {
+            "description": "Edition is already published."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Item",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/items/{item_id}/unhide": {
+      "post": {
+        "operationId": "unhide_item_api_admin_newsroom_items__item_id__unhide_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Item not found."
+          },
+          "409": {
+            "description": "Edition is still a draft."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unhide Item",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/items/{item_id}/why": {
+      "put": {
+        "description": "Rewrite this market's zh-hant \"why it matters\" (D7: the only editable language).",
+        "operationId": "edit_why_api_admin_newsroom_items__item_id__why_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewsroomAdminWhyEdit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Item not found."
+          },
+          "409": {
+            "description": "The item's \"why\" is not ready yet."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edit Why",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/sources": {
+      "get": {
+        "description": "Every source with its polling health and 7-day article count (D3).",
+        "operationId": "list_sources_api_admin_newsroom_sources_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsroomAdminSourceList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Sources",
+        "tags": ["newsroom management"]
+      },
+      "post": {
+        "operationId": "create_source_api_admin_newsroom_sources_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewsroomAdminSourceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsroomAdminSource"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "Source key already exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Source",
+        "tags": ["newsroom management"]
+      }
+    },
+    "/api/admin/newsroom/sources/{source_id}": {
+      "patch": {
+        "description": "Edit settings or enable/disable a source (D3); omitted fields are unchanged.",
+        "operationId": "update_source_api_admin_newsroom_sources__source_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewsroomAdminSourceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsroomAdminSource"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Source not found."
+          },
+          "409": {
+            "description": "Source key already exists, or the manual source's kind changed."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Source",
+        "tags": ["newsroom management"]
       }
     },
     "/api/admin/orchestration/catalog": {
