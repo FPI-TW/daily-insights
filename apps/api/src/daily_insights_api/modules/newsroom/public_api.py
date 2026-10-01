@@ -21,9 +21,9 @@ from sqlalchemy import ColumnElement, and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.enums import SystemRole
-from daily_insights_api.modules.data_sources.api import TRACKED_INDICES
 from daily_insights_api.modules.identity.api import AuthContext, require_password_changed
 from daily_insights_api.modules.markets.api import visible_market_codes
+from daily_insights_api.modules.newsroom.analysis import resolve_symbol, symbol_catalog
 from daily_insights_api.modules.newsroom.clock import taipei_today
 from daily_insights_api.modules.newsroom.contracts import MarketCode
 from daily_insights_api.modules.newsroom.models import (
@@ -45,9 +45,10 @@ GLOBAL_MARKET = "global"
 # is visible to every member (carried over from the legacy news access rules).
 POLICY_GATED_MARKETS: tuple[str, ...] = ("tw_equity", "us_equity")
 _INTERNAL_PREVIEW_ROLES = frozenset({SystemRole.ADMIN, SystemRole.ASSET_MANAGER})
-# Related symbols link to the market page that charts them; the tracked indices
-# are the only symbols with a dashboard of their own.
-_SYMBOL_DASHBOARDS: dict[str, str] = {symbol: market for symbol, market in TRACKED_INDICES.items()}
+# The forex catalog entries are charted on the global macro dashboard, which
+# the forex page itself redirects to when the viewer may open it.
+_MACRO_DASHBOARD = "global_macro_bonds"
+_FOREX_MARKET = "forex"
 # Editions are checked newest first in pages; a page past the first is only read
 # when English translations of the newer editions are stale.
 _EDITION_PAGE_SIZE = 7
@@ -60,9 +61,10 @@ class NewsroomSourceLink(BaseModel):
 
 
 class NewsroomRelatedSymbol(BaseModel):
+    # Canonical dashboard symbol; the page names it from its own catalog of
+    # localized names, never from the model's label.
     symbol: str
     kind: str
-    label: str
     # The site's dashboard for this symbol when the viewer may open it; the
     # symbol is shown as plain text otherwise.
     market_code: str | None
@@ -198,29 +200,32 @@ async def _sources(
     return sources
 
 
+def _dashboard_market(market_code: str, linkable_markets: frozenset[str]) -> str | None:
+    if market_code == _FOREX_MARKET and _MACRO_DASHBOARD in linkable_markets:
+        return _MACRO_DASHBOARD
+    return market_code if market_code in linkable_markets else None
+
+
 def _related_symbols(
-    raw: Sequence[Any], locale: Locale, linkable_markets: frozenset[str]
+    raw: Sequence[Any], linkable_markets: frozenset[str]
 ) -> list[NewsroomRelatedSymbol]:
     symbols: list[NewsroomRelatedSymbol] = []
+    seen: set[str] = set()
     for entry in raw:
-        if not isinstance(entry, dict):
+        if not isinstance(entry, dict) or not isinstance(entry.get("symbol"), str):
             continue
-        symbol, kind, label = entry.get("symbol"), entry.get("kind"), entry.get("label")
-        if not (isinstance(symbol, str) and isinstance(kind, str) and isinstance(label, str)):
+        dashboard = resolve_symbol(entry["symbol"])
+        if dashboard is None:
+            # Analysis keeps only catalog symbols; anything else is plain text.
+            symbol, kind, market = entry["symbol"], entry.get("kind"), None
+            kind = kind if isinstance(kind, str) else "other"
+        else:
+            symbol, kind = dashboard.symbol, dashboard.kind
+            market = _dashboard_market(dashboard.market_code, linkable_markets)
+        if symbol in seen:
             continue
-        # Labels come from the zh-hant analysis and are not translated; an
-        # English page shows the ticker rather than Chinese text.
-        if locale == "en" and not label.isascii():
-            label = symbol
-        market = _SYMBOL_DASHBOARDS.get(symbol)
-        symbols.append(
-            NewsroomRelatedSymbol(
-                symbol=symbol,
-                kind=kind,
-                label=label,
-                market_code=market if market in linkable_markets else None,
-            )
-        )
+        seen.add(symbol)
+        symbols.append(NewsroomRelatedSymbol(symbol=symbol, kind=kind, market_code=market))
     return symbols
 
 
@@ -296,7 +301,7 @@ async def _edition_response(
                 headline=headline,
                 summary=summary,
                 why=why,
-                related_symbols=_related_symbols(event.related_symbols, locale, linkable_markets),
+                related_symbols=_related_symbols(event.related_symbols, linkable_markets),
                 sources=sources[event.id],
             )
         )
@@ -333,7 +338,11 @@ async def readable_market_codes(database: AsyncSession, context: AuthContext) ->
     market policy decides the rest; the global edition is never gated.
     """
     if context.user.system_role in _INTERNAL_PREVIEW_ROLES:
-        return frozenset(POLICY_GATED_MARKETS) | frozenset(_SYMBOL_DASHBOARDS.values())
+        return (
+            frozenset(POLICY_GATED_MARKETS)
+            | frozenset(entry.market_code for entry in symbol_catalog().values())
+            | {_MACRO_DASHBOARD}
+        )
     if context.organization_id is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "organization membership required")
     return frozenset(await visible_market_codes(database, context.organization_id))

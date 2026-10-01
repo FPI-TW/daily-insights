@@ -138,36 +138,51 @@ describe("DailyNews", () => {
     }
   )
 
-  it("links related symbols to the dashboard they appear on", () => {
-    const { panel } = renderNews(
-      edition([
-        story(1, {
-          related_symbols: [
-            {
-              symbol: "^TWII",
-              kind: "index",
-              label: "TAIEX",
-              market_code: "tw_equity",
-            },
-            {
-              symbol: "2330.TW",
-              kind: "equity",
-              label: "TSMC",
-              market_code: null,
-            },
+  it.each([
+    ["en", "TWSE Capitalization Weighted Stock Index", "US Dollar Index DXY"],
+    ["zh-hant", "臺灣加權股價指數", "美元指數 DXY"],
+  ] as const)(
+    "names related symbols from the dashboards and links them in %s",
+    (locale, taiex, dollar) => {
+      const { panel } = renderNews(
+        edition(
+          [
+            story(1, {
+              related_symbols: [
+                { symbol: "^TWII", kind: "index", market_code: "tw_equity" },
+                {
+                  symbol: "DX-Y.NYB",
+                  kind: "index",
+                  market_code: "global_macro_bonds",
+                },
+                { symbol: "GBP/USD", kind: "fx", market_code: null },
+                { symbol: "2330.TW", kind: "equity", market_code: null },
+              ],
+            }),
           ],
-        }),
-      ])
-    )
-    const symbols = panel.getByRole("list", { name: "Related markets" })
-    expect(
-      within(symbols).getByRole("link", { name: "TAIEX" })
-    ).toHaveAttribute("href", "/en/reports/tw_equity")
-    expect(
-      within(symbols).queryByRole("link", { name: "TSMC" })
-    ).not.toBeInTheDocument()
-    expect(within(symbols).getByText("TSMC")).toBeInTheDocument()
-  })
+          { locale }
+        ),
+        { locale }
+      )
+      const symbols = within(
+        panel.getByRole("list", {
+          name: locale === "en" ? "Related markets" : "相關標的",
+        })
+      )
+      expect(symbols.getByRole("link", { name: taiex })).toHaveAttribute(
+        "href",
+        `/${locale}/reports/tw_equity`
+      )
+      expect(symbols.getByRole("link", { name: dollar })).toHaveAttribute(
+        "href",
+        `/${locale}/reports/global_macro_bonds`
+      )
+      // Without a dashboard the viewer can open, the ticker is plain text.
+      expect(symbols.getAllByRole("link")).toHaveLength(2)
+      expect(symbols.getByText("GBP/USD")).toBeInTheDocument()
+      expect(symbols.getByText("2330.TW")).toBeInTheDocument()
+    }
+  )
 
   it("keeps the sources collapsed until the reader expands them", () => {
     const { panel } = renderNews(

@@ -194,6 +194,11 @@ async def test_returns_todays_visible_items_with_sources_and_symbols(
             related_symbols=[
                 {"symbol": "^TWII", "kind": "index", "label": "加權指數"},
                 {"symbol": "^HSI", "kind": "index", "label": "恒生指數"},
+                {"symbol": "EUR/USD", "kind": "fx", "label": "歐元"},
+                {"symbol": "GBP/USD", "kind": "fx", "label": "英鎊"},
+                {"symbol": "DX-Y.NYB", "kind": "index", "label": "美元指數"},
+                {"symbol": "xau", "kind": "commodity", "label": "黃金"},
+                {"symbol": "XAU/USD", "kind": "commodity", "label": "黃金"},
                 {"symbol": "2330.TW", "kind": "equity", "label": "台積電"},
                 {"symbol": 7, "kind": "index"},
             ],
@@ -213,7 +218,8 @@ async def test_returns_todays_visible_items_with_sources_and_symbols(
         await newsroom.article(event, low, "javascript:alert(1)")
         await database.commit()
 
-        response = await _latest(database, linkable=frozenset({"tw_equity"}))
+        response = await _latest(database, linkable=frozenset({"tw_equity", "global_macro_bonds"}))
+        forex_only = await _latest(database, linkable=frozenset({"forex"}))
 
     assert response.edition_date == TODAY
     assert response.is_today is True
@@ -230,13 +236,29 @@ async def test_returns_todays_visible_items_with_sources_and_symbols(
         ("pasted.example", "https://pasted.example/story"),
         ("Blog", "https://blog.example/a"),
     ]
+    # The model's labels are dropped: the page names catalog symbols itself.
     assert [
-        (symbol.symbol, symbol.label, symbol.market_code) for symbol in first.related_symbols
+        (symbol.symbol, symbol.kind, symbol.market_code) for symbol in first.related_symbols
     ] == [
-        ("^TWII", "加權指數", "tw_equity"),
+        ("^TWII", "index", "tw_equity"),
         # Charted on the Hong Kong page, which this viewer cannot open.
-        ("^HSI", "恒生指數", None),
-        ("2330.TW", "台積電", None),
+        ("^HSI", "index", None),
+        ("EUR/USD", "fx", "global_macro_bonds"),
+        # Forex instruments live on the macro dashboard the forex page opens.
+        ("GBP/USD", "fx", "global_macro_bonds"),
+        ("DX-Y.NYB", "index", "global_macro_bonds"),
+        # "xau" resolves to the catalog's XAU/USD; the repeat is dropped.
+        ("XAU/USD", "commodity", "global_macro_bonds"),
+        ("2330.TW", "equity", None),
+    ]
+    assert [symbol.market_code for symbol in forex_only.items[0].related_symbols] == [
+        None,
+        None,
+        None,
+        "forex",
+        "forex",
+        None,
+        None,
     ]
 
 
@@ -487,7 +509,7 @@ async def test_endpoint_serves_the_latest_edition_without_caching(
     assert body["is_today"] is True
     assert body["items"][0]["headline"] == "Fed en"
     assert body["items"][0]["related_symbols"] == [
-        {"symbol": "^GSPC", "kind": "index", "label": "^GSPC", "market_code": "us_equity"}
+        {"symbol": "^GSPC", "kind": "index", "market_code": "us_equity"}
     ]
 
 

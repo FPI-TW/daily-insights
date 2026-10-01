@@ -507,14 +507,9 @@ describe("API client trust boundary", () => {
           summary: "摘要",
           why: "為何重要",
           related_symbols: [
-            {
-              symbol: "^TWII",
-              kind: "index",
-              label: "加權指數",
-              market_code: "tw_equity",
-            },
+            { symbol: "^TWII", kind: "index", market_code: "tw_equity" },
             // A dashboard the client does not know degrades to plain text.
-            { symbol: "X", kind: "fx", label: "X", market_code: "mars" },
+            { symbol: "X", kind: "fx", market_code: "mars" },
           ],
           sources: [
             {

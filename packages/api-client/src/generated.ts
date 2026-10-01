@@ -2539,8 +2539,6 @@ export interface components {
     NewsroomRelatedSymbol: {
       /** Kind */
       kind: string
-      /** Label */
-      label: string
       /** Market Code */
       market_code: string | null
       /** Symbol */

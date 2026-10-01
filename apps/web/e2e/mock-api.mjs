@@ -37,19 +37,16 @@ const newsroomText = {
     headline: "市場消化最新經濟數據",
     summary: "投資人在開盤前評估新公布的數據。",
     why: "利率預期變化牽動股市評價。",
-    symbols: { "^TWII": "加權指數", "^GSPC": "標普500" },
   },
   "zh-hans": {
     headline: "市场消化最新经济数据",
     summary: "投资人在开盘前评估新公布的数据。",
     why: "利率预期变化牵动股市评价。",
-    symbols: { "^TWII": "加权指数", "^GSPC": "标普500" },
   },
   en: {
     headline: "Markets respond to the latest economic signals",
     summary: "Investors assessed new data before the opening bell.",
     why: "Shifting rate expectations move equity valuations.",
-    symbols: { "^TWII": "TAIEX", "^GSPC": "S&P 500" },
   },
 }
 
@@ -78,7 +75,6 @@ function newsroomEdition(market, locale) {
           {
             symbol,
             kind: "index",
-            label: text.symbols[symbol],
             market_code: market === "tw_equity" ? "tw_equity" : "us_equity",
           },
         ],

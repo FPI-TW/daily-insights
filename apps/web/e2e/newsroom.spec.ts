@@ -38,7 +38,7 @@ test("home page shows today's key news with why it matters and sources", async (
 
   await story
     .getByRole("list", { name: "Related markets" })
-    .getByRole("link", { name: "S&P 500" })
+    .getByRole("link", { name: "S&P 500 Index" })
     .click()
   await expect(page).toHaveURL("/en/reports/us_equity")
   await expect(

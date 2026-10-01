@@ -1140,9 +1140,9 @@ export const newsroomSourceLinkSchema = z.object({
 })
 export type NewsroomSourceLink = z.infer<typeof newsroomSourceLinkSchema>
 export const newsroomRelatedSymbolSchema = z.object({
+  // Canonical dashboard symbol; the page names it from its own i18n catalog.
   symbol: z.string(),
   kind: z.string(),
-  label: z.string(),
   // The market dashboard that charts this symbol, when the viewer may open it.
   market_code: marketCodeSchema.nullable().catch(null),
 })

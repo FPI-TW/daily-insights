@@ -4057,10 +4057,6 @@
             "title": "Kind",
             "type": "string"
           },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
           "market_code": {
             "anyOf": [
               {
@@ -4077,7 +4073,7 @@
             "type": "string"
           }
         },
-        "required": ["symbol", "kind", "label", "market_code"],
+        "required": ["symbol", "kind", "market_code"],
         "title": "NewsroomRelatedSymbol",
         "type": "object"
       },

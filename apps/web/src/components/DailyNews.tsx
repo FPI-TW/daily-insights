@@ -1,4 +1,5 @@
 import { formatTimestamp, numberLocales } from "#/lib/format"
+import { relatedSymbolNameKey } from "#/lib/newsroom-symbols"
 import type {
   Locale,
   NewsroomEdition,
@@ -323,23 +324,27 @@ function RelatedSymbols({
       className="mt-4 mb-0 flex list-none flex-wrap gap-2 p-0"
       aria-label={t("newsroomRelatedSymbols")}
     >
-      {symbols.map(symbol => (
-        <li key={symbol.symbol}>
-          {symbol.market_code ? (
-            <Link
-              to="/{-$locale}/reports/$marketCode"
-              params={{ locale, marketCode: symbol.market_code }}
-              className="inline-flex rounded-full border border-chip-line bg-chip px-3 py-1 text-xs font-bold text-lagoon-deep no-underline transition-colors hover:bg-link-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lagoon-deep"
-            >
-              {symbol.label}
-            </Link>
-          ) : (
-            <span className="inline-flex rounded-full border border-line-soft px-3 py-1 text-xs font-bold text-sea-ink-soft">
-              {symbol.label}
-            </span>
-          )}
-        </li>
-      ))}
+      {symbols.map(symbol => {
+        const nameKey = relatedSymbolNameKey(symbol.symbol)
+        const name = nameKey ? t(nameKey) : symbol.symbol
+        return (
+          <li key={symbol.symbol}>
+            {symbol.market_code ? (
+              <Link
+                to="/{-$locale}/reports/$marketCode"
+                params={{ locale, marketCode: symbol.market_code }}
+                className="inline-flex rounded-full border border-chip-line bg-chip px-3 py-1 text-xs font-bold text-lagoon-deep no-underline transition-colors hover:bg-link-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lagoon-deep"
+              >
+                {name}
+              </Link>
+            ) : (
+              <span className="inline-flex rounded-full border border-line-soft px-3 py-1 text-xs font-bold text-sea-ink-soft">
+                {name}
+              </span>
+            )}
+          </li>
+        )
+      })}
     </ul>
   )
 }
