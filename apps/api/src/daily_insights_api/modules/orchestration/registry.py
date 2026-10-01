@@ -12,6 +12,7 @@ ProviderKey = Literal[
     "us_treasury",
     "new_york_fed",
     "internal_services",
+    "newsroom",
 ]
 JobKind = Literal["function", "projection"]
 TriggerKind = Literal["automatic", "manual"]
@@ -78,6 +79,7 @@ PROVIDERS = (
     ProviderDefinition("us_treasury", "U.S. Treasury"),
     ProviderDefinition("new_york_fed", "New York Fed"),
     ProviderDefinition("internal_services", "Internal Services"),
+    ProviderDefinition("newsroom", "Newsroom"),
 )
 
 FUNCTIONS = (
@@ -120,6 +122,14 @@ FUNCTIONS = (
         resources=("third_party_llm",),
     ),
     FunctionDefinition("analyst_viewpoints_sync", "internal_services", 1),
+    # Its own provider so the 08:00 assembly never waits on the legacy news
+    # refresh holding the internal_services lock.
+    FunctionDefinition(
+        "newsroom_assemble",
+        "newsroom",
+        1,
+        resources=("third_party_llm",),
+    ),
 )
 
 
@@ -203,6 +213,16 @@ JOBS = (
             FunctionStep("analyst_viewpoints_sync"),
         ),
         automatic_key="internal_services",
+        deadline_policy="routine",
+    ),
+    # Newsroom pipeline (docs/specs/newsroom-pipeline.md §6.3); independent of
+    # the legacy news jobs, which it replaces at cutover.
+    JobDefinition(
+        "newsroom_daily_assemble",
+        "function",
+        ("automatic",),
+        _steps("newsroom_assemble"),
+        automatic_key="newsroom",
         deadline_policy="routine",
     ),
     JobDefinition(
@@ -319,6 +339,7 @@ DAILY_ROUTINE = RoutineDefinition(
         "us_treasury_daily_update",
         "new_york_fed_daily_update",
         "internal_services_daily_update",
+        "newsroom_daily_assemble",
         "market_reports_publish",
         "macro_dashboard_publish",
     ),
