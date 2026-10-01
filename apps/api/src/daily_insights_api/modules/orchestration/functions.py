@@ -79,10 +79,16 @@ def _treasury_fetch_periods(
     if current_year_is_partial or (not coverage and years):
         years.add(today.year)
 
-    months = {(today.year, today.month)} if today.year not in years else set()
-    current_year_has_data = any(year == today.year for year, _ in coverage)
-    if not current_year_has_data and today.month == 1 and today.year - 1 not in years:
-        months.add((today.year - 1, 12))
+    # Refetch from the month of the latest stored observation so month-end
+    # rows published after the last run, and month starts that fall on a
+    # weekend or holiday, still have a non-empty period to read.
+    current = (today.year, today.month)
+    period = min(max(coverage, default=current), current)
+    months: set[tuple[int, int]] = set()
+    while period <= current:
+        if period[0] not in years:
+            months.add(period)
+        period = (period[0], period[1] + 1) if period[1] < 12 else (period[0] + 1, 1)
     return tuple(sorted(years)), tuple(sorted(months))
 
 

@@ -651,6 +651,19 @@ def test_treasury_fetch_periods_uses_only_current_month_when_coverage_is_complet
     ) == ((), ((2026, 9),))
 
 
+def test_treasury_fetch_periods_refetches_latest_stored_month_across_month_boundary() -> None:
+    # 2026-10-01 08:00 Taipei is still 2026-09-30 in New York, so October has
+    # no rows yet and the September month-end close must be refetched.
+    assert orchestration_functions._treasury_fetch_periods(
+        date(2026, 10, 1), _complete_treasury_coverage(through=date(2026, 9, 30))
+    ) == ((), ((2026, 9), (2026, 10)))
+    # 2026-11-01 is a Sunday: the Monday run still reads October alongside
+    # the empty November feed.
+    assert orchestration_functions._treasury_fetch_periods(
+        date(2026, 11, 2), _complete_treasury_coverage(through=date(2026, 10, 31))
+    ) == ((), ((2026, 10), (2026, 11)))
+
+
 def test_treasury_fetch_periods_backfills_missing_year_and_new_year_baseline() -> None:
     symbols = {symbol for _, symbol in TENORS}
     today = date(2026, 9, 17)
