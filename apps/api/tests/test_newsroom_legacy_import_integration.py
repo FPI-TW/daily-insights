@@ -16,7 +16,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from conftest import reset_database_schema
-from sqlalchemy import Connection, create_engine, select, text
+from sqlalchemy import Connection, create_engine, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from daily_insights_api import models as registered_models  # noqa: F401
@@ -187,6 +187,19 @@ def _seed_legacy(url: str) -> dict[str, Any]:
             _item(connection, tw, 1, "https://example.com/suppressed", _trilingual("S2"))
             _item(connection, tw, 2, "https://example.com/linked", _trilingual("T"))
             _item(connection, tw, 3, "https://example.com/taken", _trilingual("U"))
+            # The global stories again in other markets: one event per URL and
+            # date, with the global text and each market's own rank and stars.
+            _item(connection, tw, 4, "https://example.com/a", _trilingual("A-tw"), importance=2)
+            us_same_day = _edition(connection, day, "us_equity", 1)
+            _item(
+                connection,
+                us_same_day,
+                1,
+                "https://example.com/a",
+                _trilingual("A-us"),
+                importance=3,
+            )
+            _item(connection, us_same_day, 2, "https://example.com/b", _trilingual("B-us"))
             # A date the new pipeline already owns is left alone.
             us = _edition(connection, date(2026, 9, 30), "us_equity", 1)
             _item(connection, us, 1, "https://example.com/us", _trilingual("US"))
@@ -312,6 +325,7 @@ async def test_legacy_editions_become_readable_newsroom_editions(database_url: s
             assert [(row.edition_date, row.market_code) for row in legacy_editions] == [
                 (date(2026, 9, 29), "global"),
                 (date(2026, 9, 29), "tw_equity"),
+                (date(2026, 9, 29), "us_equity"),
             ]
             for edition in legacy_editions:
                 assert edition.status == "published"
@@ -366,11 +380,37 @@ async def test_legacy_editions_become_readable_newsroom_editions(database_url: s
                     select(NewsroomEditionItem).where(NewsroomEditionItem.origin == "legacy")
                 )
             ).all()
+            assert len(items) == 7
             assert {(item.why_status, item.why_en_status) for item in items} == {("ready", "ready")}
             assert all(item.why_zh_hant is None for item in items)
 
             tw = await latest_edition(database, "tw_equity", "zh-hant", today=date(2026, 9, 29))
-            assert [item.headline for item in tw.items] == ["T 臺灣標題", "U 臺灣標題"]
+            assert [(item.rank, item.stars, item.headline) for item in tw.items] == [
+                (2, 4, "T 臺灣標題"),
+                (3, 4, "U 臺灣標題"),
+                (4, 2, "A 臺灣標題"),
+            ]
+            assert tw.items[2].event_id == zh_hant.items[0].event_id
+            assert [source.url for source in tw.items[2].sources] == ["https://example.com/a"]
+            us_zh = await latest_edition(database, "us_equity", "zh-hant", today=date(2026, 9, 29))
+            assert [(item.rank, item.stars, item.headline) for item in us_zh.items] == [
+                (1, 3, "A 臺灣標題"),
+                (2, 4, "B 臺灣發佈頭條"),
+            ]
+            assert [item.event_id for item in us_zh.items] == [
+                item.event_id for item in zh_hant.items
+            ]
+            # The shared event takes the global English; B has none anywhere.
+            us_en = await latest_edition(database, "us_equity", "en", today=date(2026, 9, 29))
+            assert [item.headline for item in us_en.items] == ["A English headline"]
+            assert (
+                await database.scalar(
+                    select(func.count())
+                    .select_from(NewsroomArticle)
+                    .where(NewsroomArticle.url == "https://example.com/a")
+                )
+                == 1
+            )
             linked = await database.scalar(
                 select(NewsroomArticle).where(NewsroomArticle.url == "https://example.com/linked")
             )
@@ -398,7 +438,10 @@ async def test_legacy_editions_become_readable_newsroom_editions(database_url: s
             assert created.title == "Source headline 1"
 
             us = await database.scalar(
-                select(NewsroomEdition).where(NewsroomEdition.market_code == "us_equity")
+                select(NewsroomEdition).where(
+                    NewsroomEdition.market_code == "us_equity",
+                    NewsroomEdition.edition_date == date(2026, 9, 30),
+                )
             )
             assert us is not None and us.selection_mode == "editor"
     finally:
