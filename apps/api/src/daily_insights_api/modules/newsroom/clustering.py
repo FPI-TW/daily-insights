@@ -9,7 +9,7 @@ and grouping the cosine distances by event yields distinct candidates directly.
 """
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import date
 
@@ -24,9 +24,9 @@ from daily_insights_api.modules.newsroom.models import (
 
 CANDIDATE_EVENT_LIMIT = 5
 REPRESENTATIVE_TITLE_LIMIT = 2
-# A would-be new event joins an existing one at or above this cosine similarity.
-# Re-checked under the window lock so two concurrent articles about one story
-# cannot both open an event.
+# A would-be new event joins an event opened while its model call was in flight
+# at or above this cosine similarity. Checked under the window lock so two
+# concurrent articles about one story cannot both open an event.
 SAME_EVENT_SIMILARITY = 0.88
 MAX_MERGE_HOPS = 10
 
@@ -95,6 +95,7 @@ async def nearest_events(
     edition_date: date,
     embedding: Sequence[float],
     exclude_article_id: uuid.UUID | None = None,
+    exclude_event_ids: Collection[uuid.UUID] = (),
     limit: int = CANDIDATE_EVENT_LIMIT,
     with_titles: bool = True,
 ) -> list[CandidateEvent]:
@@ -117,6 +118,8 @@ async def nearest_events(
     )
     if exclude_article_id is not None:
         query = query.where(NewsroomArticle.id != exclude_article_id)
+    if exclude_event_ids:
+        query = query.where(NewsroomEvent.id.not_in(list(exclude_event_ids)))
     rows = (await database.execute(query)).all()
     titles = await representative_titles(database, [row.id for row in rows]) if with_titles else {}
     return [
@@ -128,6 +131,19 @@ async def nearest_events(
         )
         for row in rows
     ]
+
+
+async def open_event_ids(database: AsyncSession, edition_date: date) -> frozenset[uuid.UUID]:
+    """Every open event of the window right now; a snapshot to diff against later."""
+    return frozenset(
+        (
+            await database.scalars(
+                select(NewsroomEvent.id).where(
+                    NewsroomEvent.edition_date == edition_date, NewsroomEvent.status == "open"
+                )
+            )
+        ).all()
+    )
 
 
 async def resolve_open_event(database: AsyncSession, event_id: uuid.UUID) -> uuid.UUID | None:

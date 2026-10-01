@@ -534,12 +534,13 @@ async def test_match_on_an_event_merged_meanwhile_lands_on_the_target(
             edition_date=WINDOW,
             embedding=vector(0),
             choice=absorbed,
+            known_event_ids={target, absorbed},
         )
         await database.rollback()
     assert resolved == target
 
 
-async def test_new_event_choice_reuses_a_near_identical_event_under_the_lock(
+async def test_new_event_choice_joins_only_an_event_opened_during_the_call(
     newsroom_database: async_sessionmaker[AsyncSession],
 ) -> None:
     source_id = await _source(newsroom_database)
@@ -547,13 +548,23 @@ async def test_new_event_choice_reuses_a_near_identical_event_under_the_lock(
     await _article(newsroom_database, source_id, "Fed", angle=0, event_id=existing)
     article_id = await _article(newsroom_database, source_id, "Fed again", angle=20)
     async with newsroom_database() as database:
-        # cos(20°) ≈ 0.94 is above the threshold, so "new" joins the existing event.
+        # cos(20°) ≈ 0.94 is above the threshold: an event the model never saw is joined.
         joined = await triage.assign_event(
             database,
             article_id=article_id,
             edition_date=WINDOW,
             embedding=vector(20),
             choice=EventNew(new="Fed again"),
+            known_event_ids=set(),
+        )
+        # The same event, already known before the call, does not override the model.
+        kept_apart = await triage.assign_event(
+            database,
+            article_id=article_id,
+            edition_date=WINDOW,
+            embedding=vector(20),
+            choice=EventNew(new="Fed again"),
+            known_event_ids={existing},
         )
         far = await triage.assign_event(
             database,
@@ -561,10 +572,48 @@ async def test_new_event_choice_reuses_a_near_identical_event_under_the_lock(
             edition_date=WINDOW,
             embedding=vector(40),
             choice=EventNew(new="Something else"),
+            known_event_ids={existing, kept_apart},
         )
         await database.rollback()
     assert joined == existing
-    assert far != existing
+    assert kept_apart != existing
+    assert far not in {existing, kept_apart}
+
+
+async def test_new_event_choice_overrides_no_offered_candidate(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id = await _source(newsroom_database)
+    offered = await _event(newsroom_database, "Fed decision")
+    await _article(newsroom_database, source_id, "Fed", angle=0, event_id=offered)
+    article_id = await _queued_for_triage(newsroom_database, source_id, "Fed outlook", 10)
+    llm = FakeJsonModel(lambda payload: relevant({"new": "聯準會官員談利率展望"}))
+
+    assert await _run(_runtime(newsroom_database, llm=llm), "triage") == ["done"]
+
+    assert [c["id"] for c in llm.payloads[0]["candidate_events"]] == [str(offered)]
+    row = await _get(newsroom_database, NewsroomArticle, article_id)
+    assert row.event_id is not None and row.event_id != offered
+    assert (await _get(newsroom_database, NewsroomEvent, row.event_id)).working_title == (
+        "聯準會官員談利率展望"
+    )
+
+
+async def test_new_event_choice_ignores_events_that_predate_the_call(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id = await _source(newsroom_database)
+    # Six near-identical events: five are offered, the sixth existed but was not.
+    events = [await _event(newsroom_database, f"Story {n}") for n in range(6)]
+    for n, event_id in enumerate(events):
+        await _article(newsroom_database, source_id, f"Story {n}", angle=1 + n, event_id=event_id)
+    await _queued_for_triage(newsroom_database, source_id, "Story again", 0)
+    llm = FakeJsonModel(lambda payload: relevant({"new": "Another story"}))
+
+    assert await _run(_runtime(newsroom_database, llm=llm), "triage") == ["done"]
+
+    assert len(llm.payloads[0]["candidate_events"]) == 5
+    assert await _count(newsroom_database, NewsroomEvent) == 7
 
 
 # ------------------------------------------------------------ events service

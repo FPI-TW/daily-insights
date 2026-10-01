@@ -8,7 +8,7 @@ is serialised per window by ``clustering.lock_window``.
 
 import hashlib
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from functools import cache
@@ -138,12 +138,16 @@ async def assign_event(
     edition_date: date,
     embedding: Sequence[float],
     choice: uuid.UUID | EventNew,
+    known_event_ids: Collection[uuid.UUID],
 ) -> uuid.UUID:
     """Write-side of event assignment, serialised per window.
 
     A matched event that was merged meanwhile resolves to its merge target. A new
-    event first re-checks the window under the lock, so a story opened by a
-    concurrent article is joined instead of duplicated.
+    event first re-checks the window under the lock against events opened while
+    the model call was in flight, so a story opened by a concurrent article is
+    joined instead of duplicated. ``known_event_ids`` (the window's open events
+    before the call, plus the candidates offered) are skipped: the model already
+    judged those, and the re-check only guards against concurrency.
     """
     await clustering.lock_window(database, edition_date)
     if isinstance(choice, uuid.UUID):
@@ -156,6 +160,7 @@ async def assign_event(
         edition_date=edition_date,
         embedding=embedding,
         exclude_article_id=article_id,
+        exclude_event_ids=known_event_ids,
         limit=1,
         with_titles=False,
     )
@@ -219,6 +224,9 @@ def _triage_handler(runtime: Runtime) -> StageHandler:
         if article.embedding is None:
             return {"triage_status": "failed", "triage_error_code": "triage_embedding_missing"}
         embedding = [float(value) for value in article.embedding]
+        # Snapshot before the search: anything not in it or among the candidates
+        # was opened after the model saw the window.
+        known_event_ids = await clustering.open_event_ids(database, article.edition_date)
         candidates = await clustering.nearest_events(
             database,
             edition_date=article.edition_date,
@@ -257,6 +265,7 @@ def _triage_handler(runtime: Runtime) -> StageHandler:
                 edition_date=article.edition_date,
                 embedding=embedding,
                 choice=choice,
+                known_event_ids=known_event_ids | {candidate.id for candidate in candidates},
             )
         )
         return {
