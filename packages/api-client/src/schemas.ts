@@ -1124,3 +1124,49 @@ export type PodcastUploadBatchStatus = z.infer<
 >
 
 export type PodcastUploadReason = "initial_upload" | "update_file" | "other"
+
+// Newsroom reader edition (/api/newsroom/editions/latest): the newest
+// published edition with a story visible in the requested locale.
+export const newsroomMarketCodeSchema = z.enum([
+  "global",
+  "tw_equity",
+  "us_equity",
+])
+export type NewsroomMarketCode = z.infer<typeof newsroomMarketCodeSchema>
+export const newsroomSourceLinkSchema = z.object({
+  name: z.string(),
+  url: z.url({ protocol: /^https?$/ }),
+  published_at: z.iso.datetime({ offset: true }).nullable(),
+})
+export type NewsroomSourceLink = z.infer<typeof newsroomSourceLinkSchema>
+export const newsroomRelatedSymbolSchema = z.object({
+  symbol: z.string(),
+  kind: z.string(),
+  label: z.string(),
+  // The market dashboard that charts this symbol, when the viewer may open it.
+  market_code: marketCodeSchema.nullable().catch(null),
+})
+export type NewsroomRelatedSymbol = z.infer<typeof newsroomRelatedSymbolSchema>
+export const newsroomItemSchema = z.object({
+  id: z.uuid(),
+  event_id: z.uuid(),
+  rank: z.number().int().positive(),
+  stars: z.number().int().min(1).max(5).nullable(),
+  headline: z.string(),
+  summary: z.string(),
+  why: z.string(),
+  related_symbols: z.array(newsroomRelatedSymbolSchema),
+  sources: z.array(newsroomSourceLinkSchema),
+})
+export type NewsroomItem = z.infer<typeof newsroomItemSchema>
+export const newsroomEditionSchema = z.object({
+  market_code: newsroomMarketCodeSchema,
+  locale: localeSchema,
+  // Null with no items when no edition has a visible story yet.
+  edition_id: z.uuid().nullable(),
+  edition_date: z.iso.date().nullable(),
+  is_today: z.boolean(),
+  published_at: z.iso.datetime({ offset: true }).nullable(),
+  items: z.array(newsroomItemSchema),
+})
+export type NewsroomEdition = z.infer<typeof newsroomEditionSchema>

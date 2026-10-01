@@ -8,6 +8,7 @@ import {
   createPodcastClient,
   createMarketClient,
   createNewsClient,
+  createNewsroomClient,
   createReportClient,
 } from "../src"
 import { createServerTransport } from "../src/server"
@@ -486,6 +487,65 @@ describe("API client trust boundary", () => {
       status: "partial",
     })
     expect(transport).toHaveBeenCalledWith("/api/news/latest?locale=en")
+  })
+
+  it("requests and validates the newsroom reader edition", async () => {
+    const edition = {
+      market_code: "tw_equity",
+      locale: "zh-hant",
+      edition_id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
+      edition_date: "2026-09-30",
+      is_today: false,
+      published_at: "2026-09-30T01:00:00Z",
+      items: [
+        {
+          id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf0a",
+          event_id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf0b",
+          rank: 1,
+          stars: null,
+          headline: "標題",
+          summary: "摘要",
+          why: "為何重要",
+          related_symbols: [
+            {
+              symbol: "^TWII",
+              kind: "index",
+              label: "加權指數",
+              market_code: "tw_equity",
+            },
+            // A dashboard the client does not know degrades to plain text.
+            { symbol: "X", kind: "fx", label: "X", market_code: "mars" },
+          ],
+          sources: [
+            {
+              name: "Wire",
+              url: "https://wire.example/a",
+              published_at: null,
+            },
+          ],
+        },
+      ],
+    }
+    const transport = vi.fn(async () => Response.json(edition))
+    const result = await createNewsroomClient(transport).latestEdition(
+      "tw_equity",
+      "zh-hant"
+    )
+    expect(result.is_today).toBe(false)
+    expect(
+      result.items[0]!.related_symbols.map(symbol => symbol.market_code)
+    ).toEqual(["tw_equity", null])
+    expect(transport).toHaveBeenCalledWith(
+      "/api/newsroom/editions/latest?market=tw_equity&locale=zh-hant"
+    )
+
+    const unsafe = structuredClone(edition)
+    unsafe.items[0]!.sources[0]!.url = "javascript:alert(1)"
+    await expect(
+      createNewsroomClient(
+        vi.fn(async () => Response.json(unsafe))
+      ).latestEdition("tw_equity", "zh-hant")
+    ).rejects.toThrow()
   })
 
   it("lists the organization's markets with their visibility", async () => {
