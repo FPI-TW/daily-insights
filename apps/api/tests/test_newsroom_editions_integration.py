@@ -625,6 +625,84 @@ async def test_analysis_writes_shared_fields_and_every_market_why(
     assert await _run_stage(runtime, _binding(stages, queue.WHY)) == []
 
 
+async def test_analysis_rewrites_every_unremoved_item_pointing_at_the_event(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    rounds = 0
+
+    def answer(payload: dict[str, Any]) -> dict[str, Any]:
+        nonlocal rounds
+        rounds += 1
+        result = _analysis_answer(payload)
+        result["why"] = [
+            {"market": market, "why": f"{market} 第 {rounds} 次分析 軟體"}
+            for market in payload["markets"]
+        ]
+        return result
+
+    llm = FakeLlm({AnalysisResult: answer})
+    runtime = _runtime(newsroom_database, llm)
+    binding = _binding(analysis.register(runtime).stages, queue.ANALYSIS)
+    target, target_items = await _placed_event(newsroom_database, markets=("global",))
+    assert await _run_stage(runtime, binding) == ["done"]
+    source, source_items = await _placed_event(newsroom_database, markets=("tw_equity",))
+
+    async with newsroom_database() as database:
+        # Admin removes the global placement from the draft.
+        await database.execute(
+            update(NewsroomEditionItem)
+            .where(NewsroomEditionItem.id == target_items["global"])
+            .values(removed_at=datetime.now(UTC))
+        )
+        # Workstream ② merges source into target: articles and items move, and
+        # only the target's analysis is re-queued (item why_status untouched).
+        await database.execute(
+            update(NewsroomArticle)
+            .where(NewsroomArticle.event_id == source)
+            .values(event_id=target)
+        )
+        await database.execute(
+            update(NewsroomEvent)
+            .where(NewsroomEvent.id == source)
+            .values(status="merged", merged_into_id=target)
+        )
+        await database.execute(
+            update(NewsroomEditionItem)
+            .where(NewsroomEditionItem.id == source_items["tw_equity"])
+            .values(event_id=target)
+        )
+        # A new market placement, already hidden in its published edition.
+        edition = NewsroomEdition(
+            edition_date=EDITION_DATE,
+            market_code="us_equity",
+            auto_publish_at=clock.auto_publish_at(EDITION_DATE),
+            late_fill_deadline=clock.late_fill_deadline(EDITION_DATE),
+            status="published",
+            published_at=datetime.now(UTC),
+        )
+        database.add(edition)
+        await database.flush()
+        hidden = NewsroomEditionItem(
+            edition_id=edition.id, event_id=target, rank=1, hidden_at=datetime.now(UTC)
+        )
+        database.add(hidden)
+        await queue.enqueue(database, queue.ANALYSIS, [target])
+        await database.commit()
+
+    assert sorted(await _run_stage(runtime, binding)) == ["done", "done"]
+
+    assert llm.calls[-1][1]["markets"] == ["tw_equity", "us_equity"]
+    assert len(llm.calls) == 2
+    moved = await _get(newsroom_database, NewsroomEditionItem, source_items["tw_equity"])
+    added = await _get(newsroom_database, NewsroomEditionItem, hidden.id)
+    removed = await _get(newsroom_database, NewsroomEditionItem, target_items["global"])
+    assert (moved.why_status, moved.why_zh_hant) == ("ready", "tw_equity 第 2 次分析 軟體")
+    assert (added.why_status, added.why_zh_hans) == ("ready", "us_equity 第 2 次分析 软件")
+    assert (removed.why_status, removed.why_zh_hant) == ("ready", "global 第 1 次分析 軟體")
+    assert (await _get(newsroom_database, NewsroomEvent, target)).analysis_status == "ready"
+    assert (await _get(newsroom_database, NewsroomEvent, source)).analysis_status == "idle"
+
+
 async def test_analysis_missing_market_why_is_a_retryable_schema_error(
     newsroom_database: async_sessionmaker[AsyncSession],
 ) -> None:

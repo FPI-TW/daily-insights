@@ -181,14 +181,24 @@ def _catalog_payload() -> list[dict[str, str]]:
     return [{"symbol": entry.symbol, "kind": entry.kind} for entry in symbol_catalog().values()]
 
 
-async def _live_items(
+async def _placed_items(
     database: AsyncSession, event_id: uuid.UUID
 ) -> list[tuple[NewsroomEditionItem, str]]:
+    """Every item currently pointing at the event and not removed from its draft.
+
+    This includes items moved here by an event merge and placements added in
+    another market since the last analysis (spec §5.1: merge/split only
+    re-queue the event, not the items). Hidden and abandoned items are kept
+    too, so un-hiding never shows a "why" from an older analysis.
+    """
     rows = (
         await database.execute(
             select(NewsroomEditionItem, NewsroomEdition.market_code)
             .join(NewsroomEdition, NewsroomEdition.id == NewsroomEditionItem.edition_id)
-            .where(NewsroomEditionItem.event_id == event_id, live_item_condition())
+            .where(
+                NewsroomEditionItem.event_id == event_id,
+                NewsroomEditionItem.removed_at.is_(None),
+            )
             .order_by(NewsroomEdition.market_code)
         )
     ).all()
@@ -209,7 +219,7 @@ async def analyze_event(runtime: Runtime, database: AsyncSession, claim_: Claim)
     if not excerpts:
         # Not a failure: an admin can paste a body, which re-queues analysis (D18).
         return {"analysis_status": "needs_body"}
-    items = await _live_items(database, event.id)
+    items = await _placed_items(database, event.id)
     markets = sorted({market for _, market in items}) or ["global"]
     result = await runtime.llm.complete(
         database,
