@@ -57,6 +57,8 @@ POLL_CONCURRENCY = 4
 # is not news for this edition (the legacy discovery window was 24 hours).
 MAX_ENTRY_AGE = timedelta(hours=24)
 UNHEALTHY_AFTER = timedelta(hours=6)
+# The admin console's source management page (workstream ④).
+SOURCES_ADMIN_PATH = "/admin/newsroom/sources"
 # pg_advisory_xact_lock(classid, objid): serialises article inserts per edition
 # date so the "same title in the same edition" check cannot race.
 _INSERT_LOCK_CLASS = 0x4E520001
@@ -334,6 +336,10 @@ async def poll_source(
         return PollOutcome(source_id, "ok", inserted=inserted)
 
 
+def sources_admin_url(base_url: str) -> str:
+    return f"{base_url.rstrip('/')}{SOURCES_ADMIN_PATH}"
+
+
 async def notify_unhealthy_sources(
     session_factory: async_sessionmaker[AsyncSession],
     notifier: Notifier,
@@ -436,6 +442,9 @@ async def run_poll_cycle(
     outcomes = [item for item in await asyncio.gather(*map(guarded, source_ids)) if item]
     await queue_manual_embeddings(session_factory)
     await notify_unhealthy_sources(
-        session_factory, notifier, deps.clock(), admin_url=settings.newsroom_admin_base_url
+        session_factory,
+        notifier,
+        deps.clock(),
+        admin_url=sources_admin_url(settings.newsroom_admin_base_url),
     )
     return outcomes

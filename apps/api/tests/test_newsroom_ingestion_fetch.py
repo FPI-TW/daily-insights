@@ -20,6 +20,7 @@ from daily_insights_api.modules.newsroom.ingestion.fetching import (
     ArticleUnavailableError,
     fetch_page,
 )
+from daily_insights_api.modules.newsroom.ingestion.polling import sources_admin_url
 from daily_insights_api.modules.newsroom.ingestion.purge import purge_cutoff
 from daily_insights_api.modules.newsroom.ingestion.quality import (
     MIN_BODY_CHARS,
@@ -412,3 +413,10 @@ def test_register_binds_fetch_and_the_periodic_tasks() -> None:
         "newsroom_poll_sources": timedelta(minutes=1),
         "newsroom_purge_bodies": timedelta(minutes=10),
     }
+
+
+@pytest.mark.parametrize(
+    "base_url", ["https://insights.example.com", "https://insights.example.com/"]
+)
+def test_unhealthy_notice_links_to_the_sources_admin_page(base_url: str) -> None:
+    assert sources_admin_url(base_url) == "https://insights.example.com/admin/newsroom/sources"

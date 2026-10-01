@@ -306,7 +306,13 @@ async def test_failures_accumulate_and_notify_once_per_outage(
                 NewsroomSource.__table__.update().values(next_poll_at=None)  # type: ignore[attr-defined]
             )
             await database.commit()
-        await poll(newsroom_database, handler, now=now, notifier=notifier)
+        await poll(
+            newsroom_database,
+            handler,
+            now=now,
+            notifier=notifier,
+            newsroom_admin_base_url="https://insights.example.com/",
+        )
         now.now += timedelta(minutes=30)
 
     await tick(broken)
@@ -317,6 +323,7 @@ async def test_failures_accumulate_and_notify_once_per_outage(
     assert source.unhealthy_notified_at is not None
     assert [notice.kind for notice in notifier.sent] == ["source_unhealthy"]
     assert "Example News" in notifier.sent[0].title
+    assert notifier.sent[0].link == "https://insights.example.com/admin/newsroom/sources"
 
     await tick(serving(rss(("Recovered", "r", None))))
     source = await source_row(newsroom_database, source_id)
