@@ -199,6 +199,26 @@ def _market_score(value: Any) -> float:
     return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else 0.0
 
 
+def _signals(rows: Sequence[_ArticleRow], market: str) -> list[ArticleSignal]:
+    return [
+        ArticleSignal(row.source_id, _market_score(row.market_scores.get(market)), row.weight)
+        for row in rows
+    ]
+
+
+async def event_scores(
+    database: AsyncSession, edition_date: date, market: str
+) -> dict[uuid.UUID, float]:
+    """``market``'s score (spec §6.3 step 2) for every open event of the window.
+
+    Covers each event with at least one relevant article, whether or not it has
+    a full text or a positive score; the admin console ranks its candidate list
+    with this, while assembly additionally filters (``rank_candidates``).
+    """
+    _, articles = await _load_event_articles(database, edition_date)
+    return {event_id: event_score(_signals(rows, market)) for event_id, rows in articles.items()}
+
+
 def rank_candidates(
     titles: dict[uuid.UUID, str], articles: dict[uuid.UUID, list[_ArticleRow]], market: str
 ) -> list[Candidate]:
@@ -207,10 +227,7 @@ def rank_candidates(
     for event_id, rows in articles.items():
         if not any(row.has_body for row in rows):
             continue
-        signals = [
-            ArticleSignal(row.source_id, _market_score(row.market_scores.get(market)), row.weight)
-            for row in rows
-        ]
+        signals = _signals(rows, market)
         if max(signal.market_score for signal in signals) <= 0:
             continue
         best_first = sorted(rows, key=lambda row: (-row.trust_tier, -row.weight))

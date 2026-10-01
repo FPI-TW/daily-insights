@@ -25,12 +25,13 @@ from pydantic import (
     ValidationError,
     field_validator,
 )
-from sqlalchemy import Float, Select, and_, case, cast, distinct, func, select, update
+from sqlalchemy import and_, case, distinct, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.enums import SystemRole
 from daily_insights_api.modules.identity.api import AuthContext, require_csrf_roles, require_roles
 from daily_insights_api.modules.newsroom import (
+    assembly,
     clock,
     editlog,
     events_service,
@@ -62,9 +63,6 @@ CARD_ARTICLE_LIMIT = 8
 BODY_PREVIEW_CHARS = 4_000
 # Spec §6.1: a failing source is "unhealthy" once its last success is this old.
 UNHEALTHY_AFTER = timedelta(hours=6)
-# Spec §6.3 step 2: each extra distinct source adds 5 points, at most 20.
-SOURCE_BONUS = 5
-SOURCE_BONUS_CAP = 20
 # Ordering moves ranks out of the way first so a future unique (edition, rank)
 # constraint can never trip mid-transaction.
 RANK_SHIFT = 100_000
@@ -745,41 +743,6 @@ async def _edition_for(
     ).first()
 
 
-def _candidate_query(
-    edition_date: date, market_code: str, edition_id: uuid.UUID | None
-) -> Select[tuple[uuid.UUID | None, float]]:
-    """Open events of the window ranked by this market's score (spec §6.3 step 2)."""
-    weighted = cast(NewsroomArticle.market_scores[market_code].astext, Float) * cast(
-        NewsroomSource.weight, Float
-    )
-    bonus = func.least(
-        SOURCE_BONUS_CAP, SOURCE_BONUS * (func.count(distinct(NewsroomArticle.source_id)) - 1)
-    )
-    score = (func.coalesce(func.max(weighted), 0.0) + bonus).label("score")
-    conditions = [
-        NewsroomEvent.edition_date == edition_date,
-        NewsroomEvent.status == "open",
-        NewsroomArticle.relevant.is_(True),
-    ]
-    if edition_id is not None:
-        conditions.append(
-            NewsroomEvent.id.not_in(
-                select(NewsroomEditionItem.event_id).where(
-                    NewsroomEditionItem.edition_id == edition_id
-                )
-            )
-        )
-    return (
-        select(NewsroomArticle.event_id, score)
-        .join(NewsroomEvent, NewsroomEvent.id == NewsroomArticle.event_id)
-        .join(NewsroomSource, NewsroomSource.id == NewsroomArticle.source_id)
-        .where(and_(*conditions))
-        .group_by(NewsroomArticle.event_id)
-        .order_by(score.desc(), NewsroomArticle.event_id)
-        .limit(CANDIDATE_LIMIT)
-    )
-
-
 def _item_response(item: NewsroomEditionItem, event: NewsroomAdminEvent) -> NewsroomAdminItem:
     return NewsroomAdminItem(
         id=item.id,
@@ -1046,14 +1009,14 @@ async def edition_detail(
                 )
             ).all()
         )
-    candidate_rows = (
-        await database.execute(
-            _candidate_query(edition_date, market_code, edition.id if edition else None)
-        )
-    ).all()
-    candidate_scores = [
-        (event_id, float(score)) for event_id, score in candidate_rows if event_id is not None
-    ]
+    # Same scoring as 08:00 assembly, over every relevant open event of the
+    # window (full text or not), minus the ones this edition already holds.
+    placed = {item.event_id for item in items}
+    scores = await assembly.event_scores(database, edition_date, market_code)
+    candidate_scores = sorted(
+        ((event_id, score) for event_id, score in scores.items() if event_id not in placed),
+        key=lambda pair: (-pair[1], str(pair[0])),
+    )[:CANDIDATE_LIMIT]
     views = await _event_views(
         database,
         [item.event_id for item in items] + [event_id for event_id, _ in candidate_scores],
