@@ -1544,7 +1544,6 @@ async def test_orchestration_admin_api_enqueues_lists_gets_and_queues_conflicts(
         data_management_database,
         user,
         enabled=True,
-        daily_news_enabled=False,
         analyst_viewpoints_enabled=True,
     ) as client:
         catalog = await client.get("/api/admin/orchestration/catalog")
@@ -1555,11 +1554,8 @@ async def test_orchestration_admin_api_enqueues_lists_gets_and_queues_conflicts(
         invalid = await client.post(
             "/api/admin/orchestration/job-runs", json={"job_key": "twelve_data_daily_update"}
         )
-        forbidden_publish = await client.post(
-            "/api/admin/orchestration/job-runs", json={"job_key": "news_publish_job"}
-        )
-        disabled_news = await client.post(
-            "/api/admin/orchestration/job-runs", json={"job_key": "news_global_refresh_job"}
+        removed_news = await client.post(
+            "/api/admin/orchestration/job-runs", json={"job_key": "news_daily_update"}
         )
         taiwan = await client.post(
             "/api/admin/orchestration/job-runs", json={"job_key": "tw_equity_refresh"}
@@ -1567,10 +1563,8 @@ async def test_orchestration_admin_api_enqueues_lists_gets_and_queues_conflicts(
         fetched = await client.get(f"/api/admin/orchestration/job-runs/{created.json()['id']}")
 
     assert catalog.status_code == 200
-    assert catalog.json()["features"] == {
-        "daily_news": False,
-        "analyst_viewpoints": True,
-    }
+    assert catalog.json()["features"] == {"analyst_viewpoints": True}
+    assert not any(job["key"].startswith("news_") for job in catalog.json()["jobs"])
     assert created.status_code == 202, created.text
     assert listed.status_code == 200
     assert {item["job_key"] for item in listed.json()["items"]} == {
@@ -1579,8 +1573,7 @@ async def test_orchestration_admin_api_enqueues_lists_gets_and_queues_conflicts(
         "macro_dashboard_publish",
     }
     assert invalid.status_code == 422
-    assert forbidden_publish.status_code == 422
-    assert disabled_news.status_code == 503
+    assert removed_news.status_code == 422
     assert taiwan.status_code == 202, taiwan.text
     assert fetched.status_code == 200 and fetched.json()["job_key"] == "global_macro_refresh"
     assert len(fetched.json()["functions"]) == 6
@@ -1799,7 +1792,6 @@ async def test_orchestration_api_paginates_and_filters_job_runs_before_paginatio
     async with _admin_client(data_management_database, user, enabled=True) as client:
         all_runs = await client.get("/api/admin/orchestration/job-runs?page=1")
         last_page = await client.get("/api/admin/orchestration/job-runs?page=3")
-        news_runs = await client.get("/api/admin/orchestration/job-runs?page=1&job_group=news")
         invalid_page = await client.get("/api/admin/orchestration/job-runs?page=0")
 
     assert all_runs.status_code == 200
@@ -1808,10 +1800,9 @@ async def test_orchestration_api_paginates_and_filters_job_runs_before_paginatio
     assert all_runs.json()["page_size"] == 10
     assert all_runs.json()["total"] == 21
     assert all(run["job_key"] != "news_publish_job" for run in all_runs.json()["items"])
+    # Runs of jobs since removed from the registry stay listed as history.
     assert [run["job_key"] for run in last_page.json()["items"]] == ["news_publish_job"]
     assert last_page.json()["has_more"] is False
-    assert news_runs.status_code == 200
-    assert [run["job_key"] for run in news_runs.json()["items"]] == ["news_publish_job"]
     assert invalid_page.status_code == 422
 
 
