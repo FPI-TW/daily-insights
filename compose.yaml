@@ -106,10 +106,9 @@ services:
     environment:
       DAILY_INSIGHTS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-daily_insights}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-daily_insights}
       DAILY_INSIGHTS_RUNTIME_ROLE: newsroom-worker
-      DAILY_INSIGHTS_NEWSROOM_ENABLED: ${DAILY_INSIGHTS_NEWSROOM_ENABLED:-false}
+    # DAILY_INSIGHTS_NEWSROOM_ENABLED comes from apps/api/.env, the same value
+    # the API and orchestration worker read; while false the worker only idles.
     command: ["python", "-m", "daily_insights_api.scripts.run_newsroom_worker"]
-    # Opt-in: `docker compose --profile newsroom up` once the provider keys are in apps/api/.env.
-    profiles: ["newsroom"]
     depends_on:
       api:
         condition: service_healthy

@@ -10,6 +10,7 @@ for container in \
   daily-insights-web \
   daily-insights-orchestration-worker \
   daily-insights-podcast-media-worker \
+  daily-insights-newsroom-worker \
   daily-insights-orchestration-dispatcher \
   daily-insights-nginx; do
   if ! docker inspect "$container" >/dev/null 2>&1; then
