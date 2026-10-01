@@ -1,4 +1,3 @@
-import hashlib
 import os
 import uuid
 from collections.abc import AsyncIterator
@@ -26,7 +25,8 @@ from daily_insights_api.modules.newsroom.models import (
     NewsroomEvent,
     NewsroomSource,
 )
-from daily_insights_api.modules.newsroom.public_api import latest_edition, zh_hant_digest
+from daily_insights_api.modules.newsroom.public_api import latest_edition
+from daily_insights_api.modules.newsroom.translation import current_zh_hant_digest
 from daily_insights_api.web.app import create_app
 from daily_insights_api.web.dependencies import get_database_session
 
@@ -170,8 +170,7 @@ class _Newsroom:
         """Stamp the digest translation (③) writes over the event's current zh-hant."""
         await self.database.flush()
         await self.database.refresh(event)
-        digests = await public_api._current_digests(self.database, [event])
-        event.en_source_digest = digests[event.id]
+        event.en_source_digest = await current_zh_hant_digest(self.database, event.id)
         await self.database.flush()
 
 
@@ -443,13 +442,6 @@ async def test_english_falls_back_past_editions_whose_translation_is_stale(
 
     assert response.edition_date == TODAY - timedelta(days=9)
     assert [item.headline for item in response.items] == ["Day9 en"]
-
-
-def test_digest_matches_the_agreed_serialization() -> None:
-    serialized = '{"headline":"標題","summary":null,"whys":{"a":null,"b":"二"}}'
-    assert zh_hant_digest("標題", None, {"b": "二", "a": None}) == (
-        hashlib.sha256(serialized.encode()).hexdigest()
-    )
 
 
 def _member(role: str, organization_id: uuid.UUID | None) -> AuthContext:

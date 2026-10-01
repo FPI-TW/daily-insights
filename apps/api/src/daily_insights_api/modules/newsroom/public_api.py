@@ -8,11 +8,9 @@ Taipei; an older edition is returned with ``is_today = false`` so the page can
 say which day it shows (D16).
 """
 
-import hashlib
-import json
 import uuid
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from datetime import date, datetime
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
@@ -35,6 +33,7 @@ from daily_insights_api.modules.newsroom.models import (
     NewsroomEvent,
     NewsroomSource,
 )
+from daily_insights_api.modules.newsroom.translation import current_zh_hant_digest
 from daily_insights_api.web.dependencies import get_database_session
 
 router = APIRouter(prefix="/api/newsroom", tags=["newsroom"])
@@ -92,25 +91,9 @@ class NewsroomEditionResponse(BaseModel):
     items: list[NewsroomItemResponse]
 
 
-def zh_hant_digest(
-    headline: str | None, summary: str | None, whys: Mapping[str, str | None]
-) -> str:
-    """Digest of the zh-hant text an English translation was made from.
-
-    Must match ``translation.zh_hant_digest`` (workstream ③), which writes
-    ``newsroom_events.en_source_digest``; ``whys`` maps item id to ``why_zh_hant``
-    for every item of the event that :func:`_digest_items_filter` admits.
-    """
-    payload = json.dumps(
-        {"headline": headline, "summary": summary, "whys": dict(whys)},
-        sort_keys=True,
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def _digest_items_filter() -> ColumnElement[bool]:
+def _live_items_filter() -> ColumnElement[bool]:
+    """Items of a published edition a reader may see; mirrors the item set of
+    ``translation.visible_items_query`` that the English digest covers."""
     return and_(
         NewsroomEdition.status == "published",
         NewsroomEditionItem.removed_at.is_(None),
@@ -128,7 +111,7 @@ def _visible_items_filter(locale: Locale) -> ColumnElement[bool]:
     """
     headline, summary, why = _localized_columns(locale)
     conditions = [
-        _digest_items_filter(),
+        _live_items_filter(),
         NewsroomEvent.analysis_status == "ready",
         headline.is_not(None),
         summary.is_not(None),
@@ -159,28 +142,6 @@ def _localized_columns(locale: Locale) -> tuple[Any, Any, Any]:
     )
 
 
-async def _current_digests(
-    database: AsyncSession, events: Sequence[NewsroomEvent]
-) -> dict[uuid.UUID, str]:
-    whys: dict[uuid.UUID, dict[str, str | None]] = defaultdict(dict)
-    rows = await database.execute(
-        select(
-            NewsroomEditionItem.event_id, NewsroomEditionItem.id, NewsroomEditionItem.why_zh_hant
-        )
-        .join(NewsroomEdition, NewsroomEdition.id == NewsroomEditionItem.edition_id)
-        .where(
-            NewsroomEditionItem.event_id.in_([event.id for event in events]),
-            _digest_items_filter(),
-        )
-    )
-    for event_id, item_id, why in rows:
-        whys[event_id][str(item_id)] = why
-    return {
-        event.id: zh_hant_digest(event.headline_zh_hant, event.summary_zh_hant, whys[event.id])
-        for event in events
-    }
-
-
 async def _visible_rows(
     database: AsyncSession, edition_id: uuid.UUID, locale: Locale
 ) -> list[tuple[NewsroomEditionItem, NewsroomEvent]]:
@@ -197,7 +158,10 @@ async def _visible_rows(
     if locale != "en" or not rows:
         return rows
     # English is stale once the zh-hant it was translated from has changed.
-    digests = await _current_digests(database, [event for _, event in rows])
+    digests = {
+        event.id: await current_zh_hant_digest(database, event.id)
+        for event in {event.id: event for _, event in rows}.values()
+    }
     return [(item, event) for item, event in rows if event.en_source_digest == digests[event.id]]
 
 
