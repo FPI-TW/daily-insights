@@ -120,6 +120,12 @@ FUNCTIONS = (
         resources=("third_party_llm",),
     ),
     FunctionDefinition("analyst_viewpoints_sync", "internal_services", 1),
+    FunctionDefinition(
+        "newsroom_assemble",
+        "internal_services",
+        1,
+        resources=("third_party_llm",),
+    ),
 )
 
 
@@ -201,6 +207,9 @@ JOBS = (
                 "terminal",
             ),
             FunctionStep("analyst_viewpoints_sync"),
+            # Newsroom pipeline (docs/specs/newsroom-pipeline.md §6.3): independent
+            # of the legacy news steps above, which it replaces at cutover.
+            FunctionStep("newsroom_assemble"),
         ),
         automatic_key="internal_services",
         deadline_policy="routine",

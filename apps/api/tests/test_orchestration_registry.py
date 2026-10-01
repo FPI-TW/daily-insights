@@ -229,7 +229,21 @@ def test_automatic_provider_jobs_are_unique_and_internal_services_are_combined()
         "news_us_equity_refresh",
         "news_publish",
         "analyst_viewpoints_sync",
+        "newsroom_assemble",
     }
+
+
+def test_newsroom_assembly_runs_daily_independent_of_legacy_news() -> None:
+    definition = FUNCTION_BY_KEY["newsroom_assemble"]
+    assert definition.provider_key == "internal_services"
+    assert definition.freshness_days == 1
+    assert definition.resources == ("third_party_llm",)
+
+    internal = JOB_BY_KEY["internal_services_daily_update"]
+    assert internal.key in DAILY_ROUTINE.job_keys
+    step = next(step for step in internal.functions if step.function_key == "newsroom_assemble")
+    assert step.depends_on == ()
+    assert not any("newsroom_assemble" in other.depends_on for other in internal.functions)
 
 
 def test_manual_news_market_jobs_publish_after_their_refresh() -> None:
