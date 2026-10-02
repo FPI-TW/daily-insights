@@ -12,6 +12,7 @@ ProviderKey = Literal[
     "us_treasury",
     "new_york_fed",
     "internal_services",
+    "newsroom",
 ]
 JobKind = Literal["function", "projection"]
 TriggerKind = Literal["automatic", "manual"]
@@ -78,6 +79,7 @@ PROVIDERS = (
     ProviderDefinition("us_treasury", "U.S. Treasury"),
     ProviderDefinition("new_york_fed", "New York Fed"),
     ProviderDefinition("internal_services", "Internal Services"),
+    ProviderDefinition("newsroom", "Newsroom"),
 )
 
 FUNCTIONS = (
@@ -95,31 +97,15 @@ FUNCTIONS = (
     FunctionDefinition("institutional_market_flows", "twse", 4),
     FunctionDefinition("treasury_yield_curve", "us_treasury", 4),
     FunctionDefinition("sofr_daily_rates", "new_york_fed", 4),
+    FunctionDefinition("analyst_viewpoints_sync", "internal_services", 1),
+    # Its own provider so the 08:00 assembly never waits behind the
+    # internal_services lock.
     FunctionDefinition(
-        "news_global_refresh",
-        "internal_services",
-        1,
-        resources=("news_feeds", "third_party_llm"),
-    ),
-    FunctionDefinition(
-        "news_tw_equity_refresh",
-        "internal_services",
-        1,
-        resources=("news_feeds", "third_party_llm"),
-    ),
-    FunctionDefinition(
-        "news_us_equity_refresh",
-        "internal_services",
-        1,
-        resources=("news_feeds", "third_party_llm"),
-    ),
-    FunctionDefinition(
-        "news_publish",
-        "internal_services",
+        "newsroom_assemble",
+        "newsroom",
         1,
         resources=("third_party_llm",),
     ),
-    FunctionDefinition("analyst_viewpoints_sync", "internal_services", 1),
 )
 
 
@@ -187,42 +173,18 @@ JOBS = (
         "internal_services_daily_update",
         "function",
         ("automatic",),
-        (
-            FunctionStep("news_global_refresh"),
-            FunctionStep("news_tw_equity_refresh"),
-            FunctionStep("news_us_equity_refresh"),
-            FunctionStep(
-                "news_publish",
-                (
-                    "news_global_refresh",
-                    "news_tw_equity_refresh",
-                    "news_us_equity_refresh",
-                ),
-                "terminal",
-            ),
-            FunctionStep("analyst_viewpoints_sync"),
-        ),
+        _steps("analyst_viewpoints_sync"),
         automatic_key="internal_services",
         deadline_policy="routine",
     ),
+    # Newsroom pipeline (docs/specs/newsroom-pipeline.md §6.3).
     JobDefinition(
-        "news_daily_update",
+        "newsroom_daily_assemble",
         "function",
-        ("manual",),
-        (
-            FunctionStep("news_global_refresh"),
-            FunctionStep("news_tw_equity_refresh"),
-            FunctionStep("news_us_equity_refresh"),
-            FunctionStep(
-                "news_publish",
-                (
-                    "news_global_refresh",
-                    "news_tw_equity_refresh",
-                    "news_us_equity_refresh",
-                ),
-                "terminal",
-            ),
-        ),
+        ("automatic",),
+        _steps("newsroom_assemble"),
+        automatic_key="newsroom",
+        deadline_policy="routine",
     ),
     JobDefinition(
         "market_reports_publish",
@@ -270,39 +232,6 @@ JOBS = (
         ),
     ),
     JobDefinition(
-        "news_global_refresh_job",
-        "function",
-        ("manual",),
-        (
-            FunctionStep("news_global_refresh"),
-            FunctionStep("news_publish", ("news_global_refresh",), "terminal"),
-        ),
-    ),
-    JobDefinition(
-        "news_tw_equity_refresh_job",
-        "function",
-        ("manual",),
-        (
-            FunctionStep("news_tw_equity_refresh"),
-            FunctionStep("news_publish", ("news_tw_equity_refresh",), "terminal"),
-        ),
-    ),
-    JobDefinition(
-        "news_us_equity_refresh_job",
-        "function",
-        ("manual",),
-        (
-            FunctionStep("news_us_equity_refresh"),
-            FunctionStep("news_publish", ("news_us_equity_refresh",), "terminal"),
-        ),
-    ),
-    JobDefinition(
-        "news_publish_job",
-        "function",
-        ("manual",),
-        _steps("news_publish"),
-    ),
-    JobDefinition(
         "analyst_viewpoints_refresh",
         "function",
         ("manual",),
@@ -319,6 +248,7 @@ DAILY_ROUTINE = RoutineDefinition(
         "us_treasury_daily_update",
         "new_york_fed_daily_update",
         "internal_services_daily_update",
+        "newsroom_daily_assemble",
         "market_reports_publish",
         "macro_dashboard_publish",
     ),
@@ -349,13 +279,7 @@ MANUAL_MARKET_JOB_KEYS = (
     "us_equity_refresh",
     "tw_equity_refresh",
 )
-ADMIN_TRIGGER_JOB_KEYS = (
-    *MANUAL_MARKET_JOB_KEYS,
-    "news_daily_update",
-    "news_global_refresh_job",
-    "news_tw_equity_refresh_job",
-    "news_us_equity_refresh_job",
-)
+ADMIN_TRIGGER_JOB_KEYS = MANUAL_MARKET_JOB_KEYS
 
 
 def _assert_acyclic(nodes: set[str], edges: list[tuple[str, str]]) -> None:

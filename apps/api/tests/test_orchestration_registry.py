@@ -15,20 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionm
 
 import daily_insights_api.scripts.run_orchestration_worker as orchestration_worker_script
 from daily_insights_api.core.config import Settings
-from daily_insights_api.modules.news.contracts import SelectedCandidate, Selection
-from daily_insights_api.modules.news.failures import NewsFailure, NewsOperationError
-from daily_insights_api.modules.news.llm import ModelCall
-from daily_insights_api.modules.news.models import NewsCandidateBatch, PreparedNewsItem
 from daily_insights_api.modules.orchestration import worker
 from daily_insights_api.modules.orchestration.models import JobRun
-from daily_insights_api.modules.orchestration.news_functions import (
-    _publication_digest,
-    _refresh_error_code,
-    _refresh_status,
-    _restore_model_call,
-    _selection_failure_is_local,
-    _serialize_model_call,
-)
 from daily_insights_api.modules.orchestration.projections import (
     FrozenObservation,
     _macro_history_identity,
@@ -65,7 +53,8 @@ def test_registry_has_expected_provider_function_job_relationships() -> None:
     assert FUNCTION_BY_KEY["us_index_daily_bars"].provider_key == "yahoo_finance"
     assert FUNCTION_BY_KEY["treasury_yield_curve"].provider_key == "us_treasury"
     assert FUNCTION_BY_KEY["sofr_daily_rates"].provider_key == "new_york_fed"
-    assert FUNCTION_BY_KEY["news_publish"].provider_key == "internal_services"
+    assert FUNCTION_BY_KEY["analyst_viewpoints_sync"].provider_key == "internal_services"
+    assert not any(key.startswith("news_") for key in (*FUNCTION_BY_KEY, *JOB_BY_KEY))
     assert set(PROVIDER_BY_KEY) == {
         "twelve_data",
         "yahoo_finance",
@@ -73,6 +62,7 @@ def test_registry_has_expected_provider_function_job_relationships() -> None:
         "us_treasury",
         "new_york_fed",
         "internal_services",
+        "newsroom",
     }
     assert len(registry_digest()) == 64
 
@@ -109,108 +99,7 @@ def test_dispatcher_registers_foreign_key_targets_in_an_isolated_process() -> No
     assert completed.returncode == 0, completed.stderr
 
 
-def test_news_daily_job_refreshes_all_markets_before_publish() -> None:
-    news = JOB_BY_KEY["news_daily_update"]
-    publish = next(step for step in news.functions if step.function_key == "news_publish")
-
-    assert news.triggers == ("manual",)
-    assert publish.depends_on == (
-        "news_global_refresh",
-        "news_tw_equity_refresh",
-        "news_us_equity_refresh",
-    )
-    assert publish.dependency_policy == "terminal"
-
-
-def test_news_generation_failures_and_editorial_shortfalls_are_terminal() -> None:
-    assert _refresh_status(2, 1) == ("partial", "partial", False)
-    assert _refresh_status(2, 0) == ("succeeded", "ready", False)
-    assert _refresh_status(0, 1) == ("unavailable", "unavailable", False)
-    assert _refresh_status(0, 0) == ("unavailable", "unavailable", False)
-
-
-def test_news_refresh_only_degrades_exhausted_selection_contract_failures() -> None:
-    schema_failure = NewsOperationError(
-        NewsFailure(
-            code="selection_schema_invalid_exhausted",
-            stage="selection",
-            action="attention",
-        )
-    )
-    provider_failure = NewsOperationError(
-        NewsFailure(
-            code="provider_http_503_repair_exhausted",
-            stage="selection",
-            action="attention",
-        )
-    )
-
-    assert _selection_failure_is_local(schema_failure) is True
-    assert _selection_failure_is_local(provider_failure) is False
-    assert _refresh_error_code(2, 1, 0) == "news_selection_partial"
-    assert _refresh_error_code(0, 1, 0) == "news_selection_unavailable"
-    assert _refresh_error_code(2, 1, 1) == "news_processing_partial"
-
-
-def test_selection_checkpoint_preserves_returned_and_rejected_candidates() -> None:
-    kept = SelectedCandidate(
-        id="a" * 64,
-        topic="markets",
-        event_key="kept-event",
-        market="global",
-        importance=5,
-    )
-    rejected = kept.model_copy(
-        update={"id": "b" * 64, "event_key": "rejected-event", "market": "asia"}
-    )
-    original = ModelCall(
-        Selection(selections=(kept,)),
-        "request-id",
-        10,
-        5,
-        1,
-        "c" * 64,
-        rejected=((rejected, "off_market"),),
-        returned=(kept, rejected),
-    )
-
-    restored = _restore_model_call(_serialize_model_call(original), stage="selection")
-
-    assert restored.reused is True
-    assert restored.returned == original.returned
-    assert restored.rejected == original.rejected
-
-    batch = NewsCandidateBatch(
-        function_attempt_id=uuid.uuid4(),
-        edition_date=date(2026, 9, 17),
-        market_code="global",
-        status="partial",
-        input_digest="a" * 64,
-    )
-
-    def prepared(rank: int) -> PreparedNewsItem:
-        return PreparedNewsItem(
-            batch_id=uuid.uuid4(),
-            candidate_id=uuid.uuid4(),
-            rank=rank,
-            topic="markets",
-            importance=4,
-            market="global",
-            event_key=f"event-{rank}",
-            numeric_facts=[],
-            presentations={"en": {"headline": f"Story {rank}", "summary": "Summary"}},
-            content_digest=str(rank) * 64,
-        )
-
-    first = prepared(1)
-    second = prepared(2)
-    partial_digest = _publication_digest(batch, [first])
-    complete_digest = _publication_digest(batch, [first, second])
-    assert partial_digest != complete_digest
-    assert complete_digest == _publication_digest(batch, [first, second])
-
-
-def test_automatic_provider_jobs_are_unique_and_internal_services_are_combined() -> None:
+def test_automatic_provider_jobs_are_unique() -> None:
     automatic_provider_jobs = [
         job for job in JOB_BY_KEY.values() if job.kind == "function" and "automatic" in job.triggers
     ]
@@ -221,27 +110,38 @@ def test_automatic_provider_jobs_are_unique_and_internal_services_are_combined()
         "us_treasury",
         "new_york_fed",
         "internal_services",
+        "newsroom",
     ]
     internal = JOB_BY_KEY["internal_services_daily_update"]
-    assert {step.function_key for step in internal.functions} == {
-        "news_global_refresh",
-        "news_tw_equity_refresh",
-        "news_us_equity_refresh",
-        "news_publish",
-        "analyst_viewpoints_sync",
-    }
+    assert [step.function_key for step in internal.functions] == ["analyst_viewpoints_sync"]
 
 
-def test_manual_news_market_jobs_publish_after_their_refresh() -> None:
-    for job_key, function_key in (
-        ("news_global_refresh_job", "news_global_refresh"),
-        ("news_tw_equity_refresh_job", "news_tw_equity_refresh"),
-        ("news_us_equity_refresh_job", "news_us_equity_refresh"),
-    ):
-        job = JOB_BY_KEY[job_key]
-        publish = next(step for step in job.functions if step.function_key == "news_publish")
-        assert publish.depends_on == (function_key,)
-        assert publish.dependency_policy == "terminal"
+def test_newsroom_assembly_runs_daily_on_its_own_provider() -> None:
+    definition = FUNCTION_BY_KEY["newsroom_assemble"]
+    assert definition.provider_key == "newsroom"
+    assert PROVIDER_BY_KEY["newsroom"].display_name == "Newsroom"
+    assert definition.freshness_days == 1
+    assert definition.resources == ("third_party_llm",)
+    # Alone on its provider, so no other function holds its provider lock.
+    assert [key for key, item in FUNCTION_BY_KEY.items() if item.provider_key == "newsroom"] == [
+        "newsroom_assemble"
+    ]
+
+    job = JOB_BY_KEY["newsroom_daily_assemble"]
+    assert job.triggers == ("automatic",)
+    assert job.automatic_key == "newsroom"
+    assert job.deadline_policy == "routine"
+    assert [step.function_key for step in job.functions] == ["newsroom_assemble"]
+    assert job.key in DAILY_ROUTINE.job_keys
+    assert not any(
+        job.key in (dependency.upstream_job_key, dependency.downstream_job_key)
+        for dependency in DAILY_ROUTINE.dependencies
+    )
+    assert all(
+        "newsroom_assemble" not in {step.function_key for step in other.functions}
+        for other in JOB_BY_KEY.values()
+        if other.key != job.key
+    )
 
 
 def test_projection_jobs_are_not_provider_functions() -> None:
@@ -492,7 +392,7 @@ async def test_heartbeat_error_still_releases_provider_lock(
     assert connection.closed
 
 
-async def test_unexpected_news_publish_exception_is_safe_and_terminal(
+async def test_unexpected_handler_exception_fails_the_attempt_for_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     connection = _FakeConnection()
@@ -501,7 +401,7 @@ async def test_unexpected_news_publish_exception_is_safe_and_terminal(
         function_run_id=uuid.uuid4(),
         job_run_id=uuid.uuid4(),
         attempt_id=uuid.uuid4(),
-        function_key="news_publish",
+        function_key="analyst_viewpoints_sync",
         provider_key="internal_services",
         edition_date=date(2026, 9, 17),
         fence_token=uuid.uuid4(),
@@ -511,7 +411,7 @@ async def test_unexpected_news_publish_exception_is_safe_and_terminal(
     outcomes: list[FunctionOutcome] = []
 
     async def failing(_: ClaimedFunction) -> FunctionOutcome:
-        raise RuntimeError("unexpected publish error")
+        raise RuntimeError("unexpected sync error")
 
     async def finish(
         _sessions: async_sessionmaker[AsyncSession],
@@ -535,9 +435,9 @@ async def test_unexpected_news_publish_exception_is_safe_and_terminal(
 
     assert len(outcomes) == 1
     assert outcomes[0].status == "failed"
-    assert outcomes[0].retryable is False
-    assert outcomes[0].error_code == "unexpected_error"
-    assert outcomes[0].error_detail == "unexpected_error"
+    assert outcomes[0].retryable is True
+    assert outcomes[0].error_code == "runtimeerror"
+    assert outcomes[0].error_detail == "unexpected sync error"
     assert connection.closed
 
 

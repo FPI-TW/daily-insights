@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const getVisibleMarkets = vi.fn().mockResolvedValue([])
 const getReportDetail = vi.fn()
-const getMarketNews = vi.fn()
+const getNewsroomEdition = vi.fn()
 const getTodayAnalystViewpoints = vi.fn()
 const getMarketIndexHistory = vi.fn()
 const getMarketIndexMovingAverages = vi.fn()
@@ -20,7 +20,7 @@ vi.mock("#/lib/markets", () => ({
 }))
 
 vi.mock("#/lib/reports", () => ({ getReportDetail }))
-vi.mock("#/lib/news", () => ({ getMarketNews }))
+vi.mock("#/lib/newsroom", () => ({ getNewsroomEdition }))
 vi.mock("#/lib/analyst-viewpoints", () => ({ getTodayAnalystViewpoints }))
 vi.mock("#/lib/indices", () => ({
   chartMarketCodes: ["us_equity", "tw_equity"],
@@ -47,13 +47,11 @@ const {
 
 const news = {
   market_code: "us_equity",
-  target_items: 5,
-  edition_date: "2026-09-02",
-  revision: 1,
-  status: "complete",
   locale: "en",
-  generated_at: "2026-09-02T00:00:00+00:00",
-  caveat: null,
+  edition_id: "00000000-0000-4000-8000-000000000001",
+  edition_date: "2026-09-02",
+  is_today: true,
+  published_at: "2026-09-02T01:00:00+00:00",
   items: [],
 }
 const report = { kind: "report", report: { marketCode: "us_equity" } }
@@ -96,7 +94,7 @@ describe("market report loader", () => {
 
   it("loads the report, market news and the market's viewpoint", async () => {
     getReportDetail.mockResolvedValueOnce(report)
-    getMarketNews.mockResolvedValueOnce(news)
+    getNewsroomEdition.mockResolvedValueOnce(news)
     getMarketIndexHistory.mockResolvedValueOnce(indexHistory)
     getTodayAnalystViewpoints.mockResolvedValueOnce([
       { ...viewpoint, market_code: "tw_equity" },
@@ -116,7 +114,7 @@ describe("market report loader", () => {
     await expect(page.indexHistory).resolves.toEqual(indexHistory)
     if (!page.vixHistory) throw new Error("expected deferred VIX history")
     await expect(page.vixHistory).resolves.toEqual(vixHistory)
-    expect(getMarketNews).toHaveBeenCalledWith({
+    expect(getNewsroomEdition).toHaveBeenCalledWith({
       data: { locale: "en", marketCode: "us_equity" },
     })
     expect(getMarketIndexHistory).toHaveBeenCalledWith({
@@ -130,7 +128,7 @@ describe("market report loader", () => {
 
   it("keeps the report when market news fails", async () => {
     getReportDetail.mockResolvedValueOnce(report)
-    getMarketNews.mockRejectedValueOnce(new Error("news down"))
+    getNewsroomEdition.mockRejectedValueOnce(new Error("news down"))
     getMarketIndexHistory.mockRejectedValueOnce(new Error("indices down"))
     getVixHistory.mockRejectedValueOnce(new Error("VIX down"))
 
@@ -154,7 +152,10 @@ describe("market report loader", () => {
       kind: "not-launched",
       marketCode: "tw_equity",
     })
-    getMarketNews.mockResolvedValueOnce({ ...news, market_code: "tw_equity" })
+    getNewsroomEdition.mockResolvedValueOnce({
+      ...news,
+      market_code: "tw_equity",
+    })
     getMarketIndexHistory.mockResolvedValueOnce({
       ...indexHistory,
       marketCode: "tw_equity",
@@ -176,7 +177,7 @@ describe("market report loader", () => {
       stocks: { rows: [] },
     })
 
-    getMarketNews.mockClear()
+    getNewsroomEdition.mockClear()
     getReportDetail.mockResolvedValueOnce({
       kind: "not-generated",
       marketCode: "crypto",
@@ -196,7 +197,7 @@ describe("market report loader", () => {
       institutionalData: null,
       vixHistory: null,
     })
-    expect(getMarketNews).not.toHaveBeenCalled()
+    expect(getNewsroomEdition).not.toHaveBeenCalled()
     expect(getVixHistory).not.toHaveBeenCalled()
   })
 
@@ -212,7 +213,7 @@ describe("market report loader", () => {
 
   it("does not wait for a stalled chart before returning report and news", async () => {
     getReportDetail.mockResolvedValueOnce(report)
-    getMarketNews.mockResolvedValueOnce(news)
+    getNewsroomEdition.mockResolvedValueOnce(news)
     getMarketIndexHistory.mockImplementationOnce(
       () => new Promise<never>(() => {})
     )
@@ -230,7 +231,7 @@ describe("market report loader", () => {
   it("turns a chart deadline into local unavailable data", async () => {
     vi.useFakeTimers()
     getReportDetail.mockResolvedValueOnce(report)
-    getMarketNews.mockResolvedValueOnce(news)
+    getNewsroomEdition.mockResolvedValueOnce(news)
     getMarketIndexHistory.mockImplementationOnce(
       () => new Promise<never>(() => {})
     )
@@ -248,7 +249,7 @@ describe("market report loader", () => {
   it("turns a stalled VIX request into local unavailable data", async () => {
     vi.useFakeTimers()
     getReportDetail.mockResolvedValueOnce(report)
-    getMarketNews.mockResolvedValueOnce(news)
+    getNewsroomEdition.mockResolvedValueOnce(news)
     getMarketIndexHistory.mockResolvedValueOnce(indexHistory)
     getVixHistory.mockImplementationOnce(() => new Promise<never>(() => {}))
 
@@ -266,7 +267,7 @@ describe("market report loader", () => {
 
   it("keeps close history when moving averages reject", async () => {
     getReportDetail.mockResolvedValueOnce(report)
-    getMarketNews.mockResolvedValueOnce(news)
+    getNewsroomEdition.mockResolvedValueOnce(news)
     getMarketIndexHistory.mockResolvedValueOnce(indexHistory)
     getMarketIndexMovingAverages.mockRejectedValueOnce(new Error("ma down"))
 
@@ -284,7 +285,7 @@ describe("market report loader", () => {
   it("does not delay report or close history for a stalled moving-average request", async () => {
     vi.useFakeTimers()
     getReportDetail.mockResolvedValueOnce(report)
-    getMarketNews.mockResolvedValueOnce(news)
+    getNewsroomEdition.mockResolvedValueOnce(news)
     getMarketIndexHistory.mockResolvedValueOnce(indexHistory)
     getMarketIndexMovingAverages.mockImplementationOnce(
       () => new Promise<never>(() => {})

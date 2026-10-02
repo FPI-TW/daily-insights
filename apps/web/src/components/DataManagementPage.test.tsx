@@ -57,7 +57,7 @@ const catalogResult = {
     "us_equity_refresh",
     "tw_equity_refresh",
   ],
-  features: { daily_news: true, analyst_viewpoints: true },
+  features: { analyst_viewpoints: true },
 }
 const emptyRuns = {
   items: [],

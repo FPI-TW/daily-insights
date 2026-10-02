@@ -1,8 +1,8 @@
 import uuid
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.enums import SystemRole
@@ -63,10 +63,9 @@ def _provider_ready(provider_key: str, settings: object) -> bool:
     if provider_key == "twse":
         return bool(getattr(settings, "twse_enabled", False))
     if provider_key == "internal_services":
-        return bool(
-            getattr(settings, "daily_news_enabled", False)
-            or getattr(settings, "analyst_viewpoints_enabled", False)
-        )
+        return bool(getattr(settings, "analyst_viewpoints_enabled", False))
+    if provider_key == "newsroom":
+        return bool(getattr(settings, "newsroom_enabled", False))
     return True
 
 
@@ -150,7 +149,6 @@ async def catalog(
         routine_key=DAILY_ROUTINE.key,
         manual_market_jobs=list(MANUAL_MARKET_JOB_KEYS),
         features={
-            "daily_news": bool(getattr(settings, "daily_news_enabled", False)),
             "analyst_viewpoints": bool(getattr(settings, "analyst_viewpoints_enabled", False)),
         },
     )
@@ -167,8 +165,6 @@ async def create_job_run(
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "job_key is not admin triggerable"
         )
-    if payload.job_key.startswith("news_") and not request.app.state.settings.daily_news_enabled:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "daily news is unavailable")
     try:
         job = await enqueue_manual_job(
             database,
@@ -201,20 +197,8 @@ async def list_job_runs(
     database: Annotated[AsyncSession, Depends(get_database_session)],
     page: int = Query(1, ge=1),
     job_key: str | None = None,
-    job_group: Literal["news"] | None = None,
 ) -> JobRunList:
     filters = [JobRun.job_key == job_key] if job_key else []
-    if job_group == "news":
-        filters.append(
-            or_(
-                JobRun.job_key.startswith("news_"),
-                JobRun.id.in_(
-                    select(FunctionRun.job_run_id).where(
-                        FunctionRun.function_key.startswith("news_")
-                    )
-                ),
-            )
-        )
     total = await database.scalar(select(func.count()).select_from(JobRun).where(*filters)) or 0
     jobs = (
         await database.scalars(

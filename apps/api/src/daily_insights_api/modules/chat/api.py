@@ -45,12 +45,11 @@ from daily_insights_api.modules.model_runtime.api import (
     GenerationRecord,
     ModelConfiguration,
 )
-from daily_insights_api.modules.news.api import (
+from daily_insights_api.modules.newsroom.api import (
     GLOBAL_MARKET,
-    NewsEdition,
-    NewsItem,
-    NewsPresentation,
-    visible_news_market_codes,
+    NewsroomEdition,
+    readable_market_codes,
+    visible_item_texts,
 )
 from daily_insights_api.modules.reports.api import (
     LAUNCH_MARKET_ORDER,
@@ -491,25 +490,21 @@ async def _page_snapshot(
             )
         news: list[dict[str, object]] = []
         if page.news_edition_id is not None:
-            edition = await database.get(NewsEdition, page.news_edition_id)
-            if edition is None or (
-                edition.market_code != GLOBAL_MARKET
-                and edition.market_code not in await visible_news_market_codes(database, context)
+            edition = await database.get(NewsroomEdition, page.news_edition_id)
+            if (
+                edition is None
+                or edition.status != "published"
+                or (
+                    edition.market_code != GLOBAL_MARKET
+                    and edition.market_code not in await readable_market_codes(database, context)
+                )
             ):
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "news context unavailable")
-            result = await database.execute(
-                select(NewsItem, NewsPresentation)
-                .join(
-                    NewsPresentation,
-                    (NewsPresentation.item_id == NewsItem.id)
-                    & (NewsPresentation.locale == payload.locale),
-                )
-                .where(NewsItem.edition_id == edition.id)
-                .order_by(NewsItem.rank)
-            )
             news = [
-                {"headline": presentation.headline, "summary": presentation.summary}
-                for _, presentation in result
+                {"headline": headline, "summary": summary}
+                for headline, summary, _ in await visible_item_texts(
+                    database, edition.id, payload.locale
+                )
             ]
         return (
             _cross_page_snapshot(

@@ -20,7 +20,6 @@ import {
   podcastEpisodeListSchema,
   type PodcastEpisodeUpdateInput,
   type Locale,
-  type NewsMarketCode,
   type MemberCreateInput,
   memberListSchema,
   memberSchema,
@@ -32,7 +31,8 @@ import {
   provisionedMemberSchema,
   reportDetailSchema,
   reportListSchema,
-  latestNewsSchema,
+  newsroomEditionSchema,
+  type NewsroomMarketCode,
   analystViewpointListSchema,
   analystViewpointSyncStatusSchema,
   type LaunchMarketCode,
@@ -43,15 +43,11 @@ import {
   institutionalStocksSchema,
   marketListSchema,
   dataManagementCatalogSchema,
-  newsAdminEditionsSchema,
-  newsAdminItemSchema,
-  newsRecoverySchema,
   jobRunListSchema,
   jobRunSchema,
   orchestrationCatalogSchema,
   routineRunListSchema,
   routineRunSchema,
-  type NewsCandidatePublishInput,
   userSchema,
 } from "./schemas"
 
@@ -172,22 +168,13 @@ export function createAnalystViewpointClient(transport: ApiTransport) {
   }
 }
 
-export function createNewsClient(transport: ApiTransport) {
+export function createNewsroomClient(transport: ApiTransport) {
   return {
-    async latest(locale: Locale) {
-      const query = new URLSearchParams({ locale })
+    async latestEdition(market: NewsroomMarketCode, locale: Locale) {
+      const query = new URLSearchParams({ market, locale })
       return parseResponse(
-        await transport(`/api/news/latest?${query}`),
-        latestNewsSchema
-      )
-    },
-    async latestForMarket(locale: Locale, marketCode: NewsMarketCode) {
-      const query = new URLSearchParams({ locale })
-      return parseResponse(
-        await transport(
-          `/api/news/${encodeURIComponent(marketCode)}/latest?${query}`
-        ),
-        latestNewsSchema
+        await transport(`/api/newsroom/editions/latest?${query}`),
+        newsroomEditionSchema
       )
     },
   }
@@ -334,10 +321,9 @@ export function createAdministrationClient(transport: ApiTransport) {
         orchestrationCatalogSchema
       )
     },
-    async listJobRuns(page = 1, jobKey?: string, jobGroup?: "news") {
+    async listJobRuns(page = 1, jobKey?: string) {
       const query = new URLSearchParams({ page: String(page) })
       if (jobKey) query.set("job_key", jobKey)
-      if (jobGroup) query.set("job_group", jobGroup)
       return parseResponse(
         await transport(`/api/admin/orchestration/job-runs?${query}`),
         jobRunListSchema
@@ -399,59 +385,8 @@ export function createAdministrationClient(transport: ApiTransport) {
         twse_enabled: ready("twse"),
         markets: ["global_macro_bonds", "crypto", "us_equity"],
         rerunnable_providers: [],
-        daily_news_enabled: catalog.features.daily_news ?? false,
-        news_markets: ["global", "tw_equity", "us_equity"],
         macro_dashboard_enabled: true,
       })
-    },
-    async listNewsEditions(date?: string) {
-      const query = new URLSearchParams()
-      if (date) query.set("date", date)
-      const search = query.toString()
-      return parseResponse(
-        await transport(
-          `/api/admin/news/editions${search ? `?${search}` : ""}`
-        ),
-        newsAdminEditionsSchema
-      )
-    },
-    async newsRecoveryStatus() {
-      return parseResponse(
-        await transport("/api/admin/news/recovery"),
-        newsRecoverySchema
-      )
-    },
-    async hideNewsItem(itemId: string, csrfToken: string) {
-      return parseResponse(
-        await transport(
-          `/api/admin/news/items/${encodeURIComponent(itemId)}/hide`,
-          { method: "POST", headers: mutationHeaders(csrfToken) }
-        ),
-        newsAdminItemSchema
-      )
-    },
-    async unhideNewsItem(itemId: string, csrfToken: string) {
-      return parseResponse(
-        await transport(
-          `/api/admin/news/items/${encodeURIComponent(itemId)}/unhide`,
-          { method: "POST", headers: mutationHeaders(csrfToken) }
-        ),
-        newsAdminItemSchema
-      )
-    },
-    // Responds 202 with the queued news_publish run; the worker publishes.
-    async publishNewsCandidates(
-      input: NewsCandidatePublishInput,
-      csrfToken: string
-    ) {
-      return parseResponse(
-        await transport("/api/admin/news/candidates/publish", {
-          method: "POST",
-          headers: mutationHeaders(csrfToken),
-          body: JSON.stringify(input),
-        }),
-        jobRunSchema
-      )
     },
     async analystViewpointStatus() {
       return parseResponse(

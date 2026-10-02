@@ -32,6 +32,69 @@ const indexSymbols = new Set([
 const reportViewerRoles = ["admin", "asset_manager", "org_member"]
 const port = Number(process.argv[process.argv.indexOf("--port") + 1] || 3311)
 
+const newsroomText = {
+  "zh-hant": {
+    headline: "市場消化最新經濟數據",
+    summary: "投資人在開盤前評估新公布的數據。",
+    why: "利率預期變化牽動股市評價。",
+  },
+  "zh-hans": {
+    headline: "市场消化最新经济数据",
+    summary: "投资人在开盘前评估新公布的数据。",
+    why: "利率预期变化牵动股市评价。",
+  },
+  en: {
+    headline: "Markets respond to the latest economic signals",
+    summary: "Investors assessed new data before the opening bell.",
+    why: "Shifting rate expectations move equity valuations.",
+  },
+}
+
+// The Taiwan edition is a day old so the earlier-edition notice is exercised.
+function newsroomEdition(market, locale) {
+  const text = newsroomText[locale] ?? newsroomText["zh-hant"]
+  const symbol = market === "tw_equity" ? "^TWII" : "^GSPC"
+  const editionDate = market === "tw_equity" ? "2026-08-29" : "2026-08-30"
+  return {
+    market_code: market,
+    locale,
+    edition_id: `2${["global", "tw_equity", "us_equity"].indexOf(market)}000000-0000-4000-8000-000000000001`,
+    edition_date: editionDate,
+    is_today: market !== "tw_equity",
+    published_at: `${editionDate}T01:00:00Z`,
+    items: [
+      {
+        id: "30000000-0000-4000-8000-000000000001",
+        event_id: "31000000-0000-4000-8000-000000000001",
+        rank: 1,
+        stars: 4,
+        headline: text.headline,
+        summary: text.summary,
+        why: text.why,
+        related_symbols: [
+          {
+            symbol,
+            kind: "index",
+            market_code: market === "tw_equity" ? "tw_equity" : "us_equity",
+          },
+        ],
+        sources: [
+          {
+            name: "Example Wire",
+            url: "https://example.com/markets",
+            published_at: `${editionDate}T00:30:00Z`,
+          },
+          {
+            name: "Example Daily",
+            url: "https://daily.example.com/markets",
+            published_at: null,
+          },
+        ],
+      },
+    ],
+  }
+}
+
 let state
 
 function reset(overrides = {}) {
@@ -50,8 +113,312 @@ function reset(overrides = {}) {
     podcastEpisodes: "single",
     reports: "normal",
     requests: [],
+    newsroom: newsroomFixture(),
     ...overrides,
   }
+}
+
+// --- Newsroom review console (/api/admin/newsroom) ---------------------------
+
+const newsroomMarkets = ["global", "tw_equity", "us_equity"]
+const newsroomEditionId = "70000000-0000-4000-8000-000000000001"
+
+function taipeiDate(now = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now)
+}
+
+function newsroomEvent(id, overrides) {
+  return {
+    id,
+    edition_date: taipeiDate(),
+    working_title: "Working title",
+    status: "open",
+    merged_into_id: null,
+    created_by: "triage",
+    headline_zh_hant: null,
+    summary_zh_hant: null,
+    headline_zh_hans: null,
+    summary_zh_hans: null,
+    headline_en: null,
+    summary_en: null,
+    related_symbols: [],
+    analysis_status: "ready",
+    analysis_error_code: null,
+    analyzed_at: null,
+    en_status: "idle",
+    en_error_code: null,
+    edited_at: null,
+    article_count: 2,
+    source_count: 2,
+    body_ok_count: 1,
+    articles: [
+      {
+        id: `${id.slice(0, -1)}a`,
+        source_name: "Reuters",
+        hostname: "reuters.example",
+        title: "Fed holds rates steady",
+        url: "https://reuters.example/fed",
+        published_at: null,
+        body_status: "ok",
+      },
+    ],
+    ...overrides,
+  }
+}
+
+function newsroomFixture() {
+  const date = taipeiDate()
+  // 09:00 Taipei is 01:00 UTC on the edition date.
+  const autoPublishAt = `${date}T01:00:00+00:00`
+  return {
+    date,
+    editions: {
+      global: {
+        id: newsroomEditionId,
+        edition_date: date,
+        market_code: "global",
+        status: "draft",
+        selection_mode: "editor",
+        auto_publish_at: autoPublishAt,
+        late_fill_deadline: `${date}T04:00:00+00:00`,
+        assembled_at: `${date}T00:00:00+00:00`,
+        published_at: null,
+        published_by_user_id: null,
+        ignored_pending_triage: 0,
+        late_fill_closed_at: null,
+      },
+    },
+    events: {
+      "71000000-0000-4000-8000-000000000001": newsroomEvent(
+        "71000000-0000-4000-8000-000000000001",
+        {
+          working_title: "Fed holds rates",
+          headline_zh_hant: "聯準會維持利率不變",
+          summary_zh_hant: "聯準會宣布維持政策利率區間不變。",
+          related_symbols: [
+            { symbol: "^GSPC", kind: "index", label: "S&P 500" },
+          ],
+        }
+      ),
+      "71000000-0000-4000-8000-000000000002": newsroomEvent(
+        "71000000-0000-4000-8000-000000000002",
+        {
+          working_title: "Chip export rules",
+          analysis_status: "needs_body",
+          body_ok_count: 0,
+        }
+      ),
+      "71000000-0000-4000-8000-000000000003": newsroomEvent(
+        "71000000-0000-4000-8000-000000000003",
+        { working_title: "Oil supply cut", analysis_status: "idle" }
+      ),
+    },
+    items: [
+      {
+        id: "72000000-0000-4000-8000-000000000001",
+        edition_id: newsroomEditionId,
+        event_id: "71000000-0000-4000-8000-000000000001",
+        rank: 1,
+        stars: 5,
+        editor_score: 82,
+        origin: "model",
+        why_zh_hant: "利率路徑牽動全球資金流向。",
+        why_zh_hans: "利率路径牵动全球资金流向。",
+        why_en: null,
+        why_status: "ready",
+        why_error_code: null,
+        why_en_status: "idle",
+        removed_at: null,
+        hidden_at: null,
+        abandoned_at: null,
+      },
+      {
+        id: "72000000-0000-4000-8000-000000000002",
+        edition_id: newsroomEditionId,
+        event_id: "71000000-0000-4000-8000-000000000002",
+        rank: 2,
+        stars: 4,
+        editor_score: 70,
+        origin: "model",
+        why_zh_hant: null,
+        why_zh_hans: null,
+        why_en: null,
+        why_status: "pending",
+        why_error_code: null,
+        why_en_status: "idle",
+        removed_at: null,
+        hidden_at: null,
+        abandoned_at: null,
+      },
+    ],
+    candidates: [
+      { event_id: "71000000-0000-4000-8000-000000000003", score: 64 },
+    ],
+  }
+}
+
+function newsroomItemView(item) {
+  const { event_id: eventId, ...rest } = item
+  return { ...rest, event: state.newsroom.events[eventId] }
+}
+
+function newsroomDay(date) {
+  const counts = market => {
+    const edition = state.newsroom.editions[market]
+    const items = edition
+      ? state.newsroom.items.filter(item => item.edition_id === edition.id)
+      : []
+    return {
+      active: items.filter(item => !item.removed_at && !item.hidden_at).length,
+      removed: items.filter(item => item.removed_at).length,
+      hidden: items.filter(item => item.hidden_at).length,
+      abandoned: 0,
+      ready: items.filter(item => item.why_status === "ready").length,
+      analysis_failed: 0,
+      needs_body: items.filter(
+        item =>
+          state.newsroom.events[item.event_id].analysis_status === "needs_body"
+      ).length,
+    }
+  }
+  const sameDay = date === state.newsroom.date
+  return {
+    edition_date: date,
+    is_today: date === taipeiDate(),
+    untriaged_articles: sameDay ? 3 : 0,
+    triage_failed_articles: 0,
+    markets: newsroomMarkets.map(market => ({
+      market_code: market,
+      edition: sameDay ? (state.newsroom.editions[market] ?? null) : null,
+      counts: counts(market),
+    })),
+  }
+}
+
+function newsroomDetail(date, market) {
+  const edition =
+    date === state.newsroom.date
+      ? (state.newsroom.editions[market] ?? null)
+      : null
+  const items = edition
+    ? state.newsroom.items
+        .filter(item => item.edition_id === edition.id)
+        .sort((a, b) => a.rank - b.rank)
+        .map(newsroomItemView)
+    : []
+  return {
+    edition_date: date,
+    market_code: market,
+    edition,
+    items,
+    candidates:
+      date === state.newsroom.date
+        ? state.newsroom.candidates.map(candidate => ({
+            score: candidate.score,
+            event: state.newsroom.events[candidate.event_id],
+          }))
+        : [],
+  }
+}
+
+async function handleNewsroomAdmin(request, response, url) {
+  const prefix = "/api/admin/newsroom"
+  if (!url.pathname.startsWith(prefix)) return false
+  const role = requireRole(request, response, ["admin"])
+  if (!role) return true
+  const path = url.pathname.slice(prefix.length)
+  const write = request.method !== "GET"
+  if (write && !requireCsrf(request, response)) return true
+  const input = write ? parseJsonBody(await readBody(request)) : null
+  recordRequest(request, url, role, input ? { body: input } : undefined)
+
+  if (path === "/editions" && request.method === "GET") {
+    sendJson(
+      response,
+      200,
+      newsroomDay(url.searchParams.get("date") || taipeiDate())
+    )
+    return true
+  }
+  const detail = /^\/editions\/(\d{4}-\d{2}-\d{2})\/([a-z_]+)$/.exec(path)
+  if (detail && request.method === "GET") {
+    if (!newsroomMarkets.includes(detail[2])) {
+      sendJson(response, 422, { detail: "unknown market" })
+      return true
+    }
+    sendJson(response, 200, newsroomDetail(detail[1], detail[2]))
+    return true
+  }
+  const publish = /^\/editions\/([^/]+)\/publish$/.exec(path)
+  if (publish && request.method === "POST") {
+    const edition = Object.values(state.newsroom.editions).find(
+      candidate => candidate.id === publish[1]
+    )
+    if (!edition) {
+      sendJson(response, 404, { detail: "newsroom edition not found" })
+      return true
+    }
+    if (edition.status !== "draft") {
+      sendJson(response, 409, { detail: "edition is already published" })
+      return true
+    }
+    edition.status = "published"
+    edition.published_at = new Date().toISOString()
+    edition.published_by_user_id = adminId
+    response.writeHead(204, { "X-Request-ID": "e2e-request-id" })
+    response.end()
+    return true
+  }
+  const why = /^\/items\/([^/]+)\/why$/.exec(path)
+  if (why && request.method === "PUT") {
+    const item = state.newsroom.items.find(candidate => candidate.id === why[1])
+    if (!item) {
+      sendJson(response, 404, { detail: "newsroom item not found" })
+      return true
+    }
+    if (item.why_status !== "ready") {
+      sendJson(response, 409, { detail: "why is not ready yet" })
+      return true
+    }
+    if (typeof input?.why !== "string" || !input.why.trim()) {
+      sendJson(response, 422, { detail: "why is required" })
+      return true
+    }
+    item.why_zh_hant = input.why.trim()
+    response.writeHead(204, { "X-Request-ID": "e2e-request-id" })
+    response.end()
+    return true
+  }
+  const eventEdit = /^\/events\/([^/]+)$/.exec(path)
+  if (eventEdit && request.method === "PATCH") {
+    const event = state.newsroom.events[eventEdit[1]]
+    if (!event) {
+      sendJson(response, 404, { detail: "newsroom event not found" })
+      return true
+    }
+    if (typeof input?.headline === "string")
+      event.headline_zh_hant = input.headline
+    if (typeof input?.summary === "string")
+      event.summary_zh_hant = input.summary
+    if (Array.isArray(input?.related_symbols)) {
+      event.related_symbols = input.related_symbols
+    }
+    event.edited_at = new Date().toISOString()
+    response.writeHead(204, { "X-Request-ID": "e2e-request-id" })
+    response.end()
+    return true
+  }
+  if (path === "/sources" && request.method === "GET") {
+    sendJson(response, 200, { sources: [] })
+    return true
+  }
+  sendJson(response, 404, { detail: "Not found" })
+  return true
 }
 
 reset()
@@ -520,42 +887,20 @@ const server = createServer(async (request, response) => {
     return
   }
 
-  const marketNewsMatch = /^\/api\/news\/(tw_equity|us_equity)\/latest$/.exec(
-    url.pathname
-  )
-  if (marketNewsMatch && request.method === "GET") {
+  if (
+    url.pathname === "/api/newsroom/editions/latest" &&
+    request.method === "GET"
+  ) {
     const role = requireRole(request, response, reportViewerRoles)
     if (!role) return
-    const marketCode = marketNewsMatch[1]
+    const market = url.searchParams.get("market")
     const locale = url.searchParams.get("locale") || "zh-hant"
-    sendJson(response, 200, {
-      market_code: marketCode,
-      target_items: 5,
-      edition_id: "20000000-0000-4000-8000-000000000001",
-      edition_date: "2026-08-30",
-      revision: 1,
-      generated_at: "2026-08-30T07:30:00+08:00",
-      status: "complete",
-      locale,
-      caveat: null,
-      items: [
-        {
-          id: "30000000-0000-4000-8000-000000000001",
-          rank: 1,
-          importance: 4,
-          topic: "markets",
-          headline: "Markets respond to the latest economic signals",
-          summary: "Investors assessed new data before the opening bell.",
-          source_name: "Example Wire",
-          source_hostname: "example.com",
-          source_url: "https://example.com/markets",
-          source_published_at: "2026-08-30T06:30:00+08:00",
-          numeric_facts: [],
-          market: marketCode === "tw_equity" ? "taiwan" : "us",
-          event_key: "market-open",
-        },
-      ],
-    })
+    if (!["global", "tw_equity", "us_equity"].includes(market ?? "")) {
+      sendJson(response, 422, { detail: "unknown market" })
+      return
+    }
+    recordRequest(request, url, role)
+    sendJson(response, 200, newsroomEdition(market, locale))
     return
   }
 
@@ -971,6 +1316,8 @@ const server = createServer(async (request, response) => {
     })
     return
   }
+
+  if (await handleNewsroomAdmin(request, response, url)) return
 
   if (url.pathname === "/api/admin/podcasts" && request.method === "GET") {
     const role = requireRole(request, response, ["admin", "asset_manager"])

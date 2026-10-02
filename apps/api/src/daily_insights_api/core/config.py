@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     )
 
     environment: Environment = "development"
-    runtime_role: Literal["api", "orchestration-worker", "media-worker"] = "api"
+    runtime_role: Literal["api", "orchestration-worker", "media-worker", "newsroom-worker"] = "api"
     database_url: str | None = None
     app_name: str = "Daily Insights API"
     session_secret: SecretStr | None = None
@@ -75,18 +75,11 @@ class Settings(BaseSettings):
     analyst_viewpoints_base_url: str = "https://analyst-viewpoints.invalid"
     analyst_viewpoints_api_key: SecretStr | None = None
     analyst_viewpoints_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
-    daily_news_enabled: bool = False
-    # The article allowlist is derived from the feed registry; these only add
-    # hosts (for a temporary feed) or block registry hosts (kill switch).
+    # Newsroom ingestion: the article allowlist is derived from the source
+    # registry; these only add hosts (for a temporary source) or block
+    # registry hosts (kill switch).
     news_extra_hostnames: str = ""
     news_blocked_hostnames: str = ""
-    model_provider: str = "deepseek"
-    model_name: str = "deepseek-chat"
-    model_api_base_url: str = "https://api.deepseek.com"
-    news_model_api_key: SecretStr | None = None
-    # A selection prompt carries up to ~100k characters of source text; the
-    # provider regularly needs 30-45 seconds to answer it.
-    model_timeout_seconds: float = Field(default=120, gt=0, le=300)
     chat_user_max_pending: int = Field(default=2, gt=0)
     chat_org_max_pending: int = Field(default=8, gt=0)
     chat_user_daily_turns: int = Field(default=100, gt=0)
@@ -107,6 +100,24 @@ class Settings(BaseSettings):
     # SEC EDGAR requires a contact email in the User-Agent; without it the
     # 8-K feed is skipped rather than requested anonymously.
     sec_contact_email: str | None = None
+    # Newsroom pipeline (docs/specs/newsroom-pipeline.md). Every LLM stage has its
+    # own model setting so a stage can be swapped without touching the others.
+    newsroom_enabled: bool = False
+    newsroom_llm_base_url: str = "https://api.deepseek.com"
+    newsroom_llm_api_key: SecretStr | None = None
+    newsroom_triage_model: str = "deepseek-chat"
+    newsroom_editor_model: str = "deepseek-chat"
+    newsroom_analysis_model: str = "deepseek-chat"
+    newsroom_translate_model: str = "deepseek-chat"
+    newsroom_llm_timeout_seconds: float = Field(default=90, gt=0, le=300)
+    newsroom_embedding_base_url: str = "https://api.openai.com/v1"
+    newsroom_embedding_api_key: SecretStr | None = None
+    newsroom_embedding_model: str = "text-embedding-3-small"
+    newsroom_embedding_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    newsroom_slack_webhook_url: SecretStr | None = None
+    newsroom_admin_base_url: str = "http://localhost:3000"
+    newsroom_worker_poll_seconds: float = Field(default=2.0, ge=0.1, le=60)
+    newsroom_fetch_concurrency: int = Field(default=4, ge=1, le=20)
     report_freshness_max_age_days: int = Field(default=3, ge=1, le=30)
     r2_endpoint_url: str | None = None
     r2_bucket_name: str | None = None
@@ -120,7 +131,7 @@ class Settings(BaseSettings):
             if self.environment not in {"development", "test"}:
                 raise ValueError("database_url is required outside development and test")
             self.database_url = LOCAL_DATABASE_URL
-        if self.runtime_role == "orchestration-worker":
+        if self.runtime_role in {"orchestration-worker", "newsroom-worker"}:
             self.session_secret = None
             self.password_pepper = None
             self.r2_endpoint_url = None
@@ -156,7 +167,51 @@ class Settings(BaseSettings):
             ):
                 raise ValueError("deployment secrets must not use placeholders")
             self._validate_production_external_services()
+        # The worker is the only process that calls the providers, so it refuses
+        # to start with missing or placeholder keys in every environment.
+        if self.runtime_role == "newsroom-worker":
+            self._validate_newsroom()
         return self
+
+    def _validate_newsroom(self) -> None:
+        for setting, override in (
+            ("news_extra_hostnames", self.news_extra_hostnames),
+            ("news_blocked_hostnames", self.news_blocked_hostnames),
+        ):
+            hostnames = [item.strip().lower().rstrip(".") for item in override.split(",")]
+            if override.strip() and any(
+                not item or "/" in item or ":" in item or "." not in item for item in hostnames
+            ):
+                raise ValueError(f"{setting} must contain exact hostnames")
+        if self.guardian_api_key is not None and is_placeholder_value(
+            self.guardian_api_key.get_secret_value()
+        ):
+            raise ValueError("guardian_api_key cannot be a placeholder")
+        if self.newsroom_enabled:
+            for setting, url, key in (
+                ("newsroom_llm", self.newsroom_llm_base_url, self.newsroom_llm_api_key),
+                (
+                    "newsroom_embedding",
+                    self.newsroom_embedding_base_url,
+                    self.newsroom_embedding_api_key,
+                ),
+            ):
+                parsed = urlparse(url)
+                if parsed.scheme != "https" or not parsed.netloc:
+                    raise ValueError(f"{setting}_base_url must be an absolute HTTPS URL")
+                if (
+                    key is None
+                    or not key.get_secret_value().strip()
+                    or is_placeholder_value(key.get_secret_value())
+                ):
+                    raise ValueError(f"{setting}_api_key is required and cannot be a placeholder")
+            if (
+                self.newsroom_slack_webhook_url is not None
+                and self.newsroom_slack_webhook_url.get_secret_value().strip()
+            ):
+                webhook = urlparse(self.newsroom_slack_webhook_url.get_secret_value())
+                if webhook.scheme != "https" or webhook.netloc != "hooks.slack.com":
+                    raise ValueError("newsroom_slack_webhook_url must be a hooks.slack.com URL")
 
     def _validate_production_external_services(self) -> None:
         if self.morning_reports_enabled:
@@ -185,33 +240,6 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "analyst_viewpoints_api_key is required and cannot be a placeholder"
                 )
-        if self.daily_news_enabled:
-            model_url = urlparse(self.model_api_base_url)
-            if (
-                self.model_provider != "deepseek"
-                or model_url.scheme != "https"
-                or not model_url.netloc
-            ):
-                raise ValueError("daily news requires a DeepSeek absolute HTTPS model API URL")
-            if (
-                self.news_model_api_key is None
-                or not self.news_model_api_key.get_secret_value().strip()
-                or is_placeholder_value(self.news_model_api_key.get_secret_value())
-            ):
-                raise ValueError("news_model_api_key is required and cannot be a placeholder")
-            for setting, override in (
-                ("news_extra_hostnames", self.news_extra_hostnames),
-                ("news_blocked_hostnames", self.news_blocked_hostnames),
-            ):
-                hostnames = [item.strip().lower().rstrip(".") for item in override.split(",")]
-                if override.strip() and any(
-                    not item or "/" in item or ":" in item or "." not in item for item in hostnames
-                ):
-                    raise ValueError(f"{setting} must contain exact hostnames")
-            if self.guardian_api_key is not None and is_placeholder_value(
-                self.guardian_api_key.get_secret_value()
-            ):
-                raise ValueError("guardian_api_key cannot be a placeholder")
         if self.chat_enabled:
             chat_url = urlparse(self.chat_model_api_base_url)
             if self.chat_model_provider not in {"deepseek", "openai-compatible"}:
@@ -274,28 +302,6 @@ class MacroDashboardSchedulerSettings(BaseSettings):
         return self
 
 
-class DailyNewsSchedulerSettings(BaseSettings):
-    """Minimal runtime configuration for the database-only news scheduler."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="DAILY_INSIGHTS_",
-        env_file=API_ENV_FILE,
-        extra="ignore",
-    )
-
-    environment: Environment = "development"
-    database_url: str | None = None
-    daily_news_enabled: bool = False
-
-    @model_validator(mode="after")
-    def require_database_url(self) -> Self:
-        if self.database_url is None:
-            if self.environment not in {"development", "test"}:
-                raise ValueError("database_url is required outside development and test")
-            self.database_url = LOCAL_DATABASE_URL
-        return self
-
-
 def is_placeholder_value(value: str) -> bool:
     lowered = value.lower()
     return any(marker in lowered for marker in PLACEHOLDER_MARKERS)
@@ -309,8 +315,3 @@ def get_settings() -> Settings:
 @lru_cache
 def get_macro_dashboard_scheduler_settings() -> MacroDashboardSchedulerSettings:
     return MacroDashboardSchedulerSettings()
-
-
-@lru_cache
-def get_daily_news_scheduler_settings() -> DailyNewsSchedulerSettings:
-    return DailyNewsSchedulerSettings()

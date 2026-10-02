@@ -1,7 +1,7 @@
 import type {
   AnalystViewpoint,
-  LatestNews,
   Locale,
+  NewsroomEdition,
 } from "@daily-insights/api-client"
 import { createFileRoute, notFound, redirect } from "@tanstack/react-router"
 import { getMacroDashboard } from "#/lib/macro-dashboard.functions"
@@ -18,7 +18,7 @@ import {
 } from "#/components/MarketInformation"
 import { MarketViewpoint, ReportErrorScreen } from "#/components/Reports"
 import { getTodayAnalystViewpoints } from "#/lib/analyst-viewpoints"
-import { getMarketNews } from "#/lib/news"
+import { getNewsroomEdition } from "#/lib/newsroom"
 import {
   isNewsMarketCode,
   type NewsMarketCode,
@@ -45,7 +45,7 @@ import {
 type ReportResult = Awaited<ReturnType<typeof getReportDetail>>
 type MarketPage = {
   report: Exclude<ReportResult, { kind: "not-found" }>
-  news: { marketCode: NewsMarketCode; latest: LatestNews | null } | null
+  news: { marketCode: NewsMarketCode; latest: NewsroomEdition | null } | null
   viewpoint: AnalystViewpoint | null
   macroDashboard: Promise<MacroDashboardData | null> | null
   indexHistory: Promise<MarketIndexHistory | null> | null
@@ -213,7 +213,7 @@ export async function loadMarketPage({
       data: { marketCode: params.marketCode, locale: context.locale },
     }),
     newsMarket
-      ? getMarketNews({
+      ? getNewsroomEdition({
           data: { locale: context.locale, marketCode: newsMarket },
         })
       : Promise.resolve(null),
@@ -274,10 +274,9 @@ function ReportPage() {
   )
   const newsSection = news ? (
     <DailyNews
-      news={news.latest}
-      eyebrowKey="marketNewsEyebrow"
-      titleKey={`marketNewsTitle_${news.marketCode}`}
-      groupByMarket={false}
+      edition={news.latest}
+      eyebrowKey="newsroomMarketEyebrow"
+      titleKey={`newsroomTitle_${news.marketCode}`}
     />
   ) : null
   const marketInformation =

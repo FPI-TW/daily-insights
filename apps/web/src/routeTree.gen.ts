@@ -32,9 +32,10 @@ import { Route as Char123LocaleChar125AdminAuthenticatedAudioRouteImport } from 
 import { Route as Char123LocaleChar125AdminAuthenticatedDataManagementRouteImport } from './routes/{-$locale}/admin/_authenticated/data-management'
 import { Route as Char123LocaleChar125AdminAuthenticatedIndexDataRouteImport } from './routes/{-$locale}/admin/_authenticated/index-data'
 import { Route as Char123LocaleChar125AdminAuthenticatedMembersRouteImport } from './routes/{-$locale}/admin/_authenticated/members'
-import { Route as Char123LocaleChar125AdminAuthenticatedNewsManagementRouteImport } from './routes/{-$locale}/admin/_authenticated/news-management'
 import { Route as Char123LocaleChar125AdminAuthenticatedConversationsIndexRouteImport } from './routes/{-$locale}/admin/_authenticated/conversations/index'
 import { Route as Char123LocaleChar125AdminAuthenticatedConversationsConversationIdRouteImport } from './routes/{-$locale}/admin/_authenticated/conversations/$conversationId'
+import { Route as Char123LocaleChar125AdminAuthenticatedNewsroomIndexRouteImport } from './routes/{-$locale}/admin/_authenticated/newsroom/index'
+import { Route as Char123LocaleChar125AdminAuthenticatedNewsroomSourcesRouteImport } from './routes/{-$locale}/admin/_authenticated/newsroom/sources'
 
 const Char123LocaleChar125Route = Char123LocaleChar125RouteImport.update({
   id: '/{-$locale}',
@@ -172,12 +173,6 @@ const Char123LocaleChar125AdminAuthenticatedMembersRoute =
     path: '/members',
     getParentRoute: () => Char123LocaleChar125AdminAuthenticatedRoute,
   } as any)
-const Char123LocaleChar125AdminAuthenticatedNewsManagementRoute =
-  Char123LocaleChar125AdminAuthenticatedNewsManagementRouteImport.update({
-    id: '/news-management',
-    path: '/news-management',
-    getParentRoute: () => Char123LocaleChar125AdminAuthenticatedRoute,
-  } as any)
 const Char123LocaleChar125AdminAuthenticatedConversationsIndexRoute =
   Char123LocaleChar125AdminAuthenticatedConversationsIndexRouteImport.update({
     id: '/conversations/',
@@ -192,6 +187,18 @@ const Char123LocaleChar125AdminAuthenticatedConversationsConversationIdRoute =
       getParentRoute: () => Char123LocaleChar125AdminAuthenticatedRoute,
     } as any,
   )
+const Char123LocaleChar125AdminAuthenticatedNewsroomIndexRoute =
+  Char123LocaleChar125AdminAuthenticatedNewsroomIndexRouteImport.update({
+    id: '/newsroom/',
+    path: '/newsroom/',
+    getParentRoute: () => Char123LocaleChar125AdminAuthenticatedRoute,
+  } as any)
+const Char123LocaleChar125AdminAuthenticatedNewsroomSourcesRoute =
+  Char123LocaleChar125AdminAuthenticatedNewsroomSourcesRouteImport.update({
+    id: '/newsroom/sources',
+    path: '/newsroom/sources',
+    getParentRoute: () => Char123LocaleChar125AdminAuthenticatedRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/{-$locale}': typeof Char123LocaleChar125RouteWithChildren
@@ -214,11 +221,12 @@ export interface FileRoutesByFullPath {
   '/{-$locale}/admin/data-management': typeof Char123LocaleChar125AdminAuthenticatedDataManagementRoute
   '/{-$locale}/admin/index-data': typeof Char123LocaleChar125AdminAuthenticatedIndexDataRoute
   '/{-$locale}/admin/members': typeof Char123LocaleChar125AdminAuthenticatedMembersRoute
-  '/{-$locale}/admin/news-management': typeof Char123LocaleChar125AdminAuthenticatedNewsManagementRoute
   '/{-$locale}/podcasts/': typeof Char123LocaleChar125CustomerPodcastsIndexRoute
   '/{-$locale}/reports/': typeof Char123LocaleChar125CustomerReportsIndexRoute
   '/{-$locale}/admin/conversations/$conversationId': typeof Char123LocaleChar125AdminAuthenticatedConversationsConversationIdRoute
+  '/{-$locale}/admin/newsroom/sources': typeof Char123LocaleChar125AdminAuthenticatedNewsroomSourcesRoute
   '/{-$locale}/admin/conversations/': typeof Char123LocaleChar125AdminAuthenticatedConversationsIndexRoute
+  '/{-$locale}/admin/newsroom/': typeof Char123LocaleChar125AdminAuthenticatedNewsroomIndexRoute
 }
 export interface FileRoutesByTo {
   '/{-$locale}': typeof Char123LocaleChar125IndexRoute
@@ -237,11 +245,12 @@ export interface FileRoutesByTo {
   '/{-$locale}/admin/data-management': typeof Char123LocaleChar125AdminAuthenticatedDataManagementRoute
   '/{-$locale}/admin/index-data': typeof Char123LocaleChar125AdminAuthenticatedIndexDataRoute
   '/{-$locale}/admin/members': typeof Char123LocaleChar125AdminAuthenticatedMembersRoute
-  '/{-$locale}/admin/news-management': typeof Char123LocaleChar125AdminAuthenticatedNewsManagementRoute
   '/{-$locale}/podcasts': typeof Char123LocaleChar125CustomerPodcastsIndexRoute
   '/{-$locale}/reports': typeof Char123LocaleChar125CustomerReportsIndexRoute
   '/{-$locale}/admin/conversations/$conversationId': typeof Char123LocaleChar125AdminAuthenticatedConversationsConversationIdRoute
+  '/{-$locale}/admin/newsroom/sources': typeof Char123LocaleChar125AdminAuthenticatedNewsroomSourcesRoute
   '/{-$locale}/admin/conversations': typeof Char123LocaleChar125AdminAuthenticatedConversationsIndexRoute
+  '/{-$locale}/admin/newsroom': typeof Char123LocaleChar125AdminAuthenticatedNewsroomIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -266,11 +275,12 @@ export interface FileRoutesById {
   '/{-$locale}/admin/_authenticated/data-management': typeof Char123LocaleChar125AdminAuthenticatedDataManagementRoute
   '/{-$locale}/admin/_authenticated/index-data': typeof Char123LocaleChar125AdminAuthenticatedIndexDataRoute
   '/{-$locale}/admin/_authenticated/members': typeof Char123LocaleChar125AdminAuthenticatedMembersRoute
-  '/{-$locale}/admin/_authenticated/news-management': typeof Char123LocaleChar125AdminAuthenticatedNewsManagementRoute
   '/{-$locale}/_customer/podcasts/': typeof Char123LocaleChar125CustomerPodcastsIndexRoute
   '/{-$locale}/_customer/reports/': typeof Char123LocaleChar125CustomerReportsIndexRoute
   '/{-$locale}/admin/_authenticated/conversations/$conversationId': typeof Char123LocaleChar125AdminAuthenticatedConversationsConversationIdRoute
+  '/{-$locale}/admin/_authenticated/newsroom/sources': typeof Char123LocaleChar125AdminAuthenticatedNewsroomSourcesRoute
   '/{-$locale}/admin/_authenticated/conversations/': typeof Char123LocaleChar125AdminAuthenticatedConversationsIndexRoute
+  '/{-$locale}/admin/_authenticated/newsroom/': typeof Char123LocaleChar125AdminAuthenticatedNewsroomIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -295,11 +305,12 @@ export interface FileRouteTypes {
     | '/{-$locale}/admin/data-management'
     | '/{-$locale}/admin/index-data'
     | '/{-$locale}/admin/members'
-    | '/{-$locale}/admin/news-management'
     | '/{-$locale}/podcasts/'
     | '/{-$locale}/reports/'
     | '/{-$locale}/admin/conversations/$conversationId'
+    | '/{-$locale}/admin/newsroom/sources'
     | '/{-$locale}/admin/conversations/'
+    | '/{-$locale}/admin/newsroom/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/{-$locale}'
@@ -318,11 +329,12 @@ export interface FileRouteTypes {
     | '/{-$locale}/admin/data-management'
     | '/{-$locale}/admin/index-data'
     | '/{-$locale}/admin/members'
-    | '/{-$locale}/admin/news-management'
     | '/{-$locale}/podcasts'
     | '/{-$locale}/reports'
     | '/{-$locale}/admin/conversations/$conversationId'
+    | '/{-$locale}/admin/newsroom/sources'
     | '/{-$locale}/admin/conversations'
+    | '/{-$locale}/admin/newsroom'
   id:
     | '__root__'
     | '/{-$locale}'
@@ -346,11 +358,12 @@ export interface FileRouteTypes {
     | '/{-$locale}/admin/_authenticated/data-management'
     | '/{-$locale}/admin/_authenticated/index-data'
     | '/{-$locale}/admin/_authenticated/members'
-    | '/{-$locale}/admin/_authenticated/news-management'
     | '/{-$locale}/_customer/podcasts/'
     | '/{-$locale}/_customer/reports/'
     | '/{-$locale}/admin/_authenticated/conversations/$conversationId'
+    | '/{-$locale}/admin/_authenticated/newsroom/sources'
     | '/{-$locale}/admin/_authenticated/conversations/'
+    | '/{-$locale}/admin/_authenticated/newsroom/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -520,13 +533,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof Char123LocaleChar125AdminAuthenticatedMembersRouteImport
       parentRoute: typeof Char123LocaleChar125AdminAuthenticatedRoute
     }
-    '/{-$locale}/admin/_authenticated/news-management': {
-      id: '/{-$locale}/admin/_authenticated/news-management'
-      path: '/news-management'
-      fullPath: '/{-$locale}/admin/news-management'
-      preLoaderRoute: typeof Char123LocaleChar125AdminAuthenticatedNewsManagementRouteImport
-      parentRoute: typeof Char123LocaleChar125AdminAuthenticatedRoute
-    }
     '/{-$locale}/admin/_authenticated/conversations/': {
       id: '/{-$locale}/admin/_authenticated/conversations/'
       path: '/conversations'
@@ -539,6 +545,20 @@ declare module '@tanstack/react-router' {
       path: '/conversations/$conversationId'
       fullPath: '/{-$locale}/admin/conversations/$conversationId'
       preLoaderRoute: typeof Char123LocaleChar125AdminAuthenticatedConversationsConversationIdRouteImport
+      parentRoute: typeof Char123LocaleChar125AdminAuthenticatedRoute
+    }
+    '/{-$locale}/admin/_authenticated/newsroom/': {
+      id: '/{-$locale}/admin/_authenticated/newsroom/'
+      path: '/newsroom'
+      fullPath: '/{-$locale}/admin/newsroom/'
+      preLoaderRoute: typeof Char123LocaleChar125AdminAuthenticatedNewsroomIndexRouteImport
+      parentRoute: typeof Char123LocaleChar125AdminAuthenticatedRoute
+    }
+    '/{-$locale}/admin/_authenticated/newsroom/sources': {
+      id: '/{-$locale}/admin/_authenticated/newsroom/sources'
+      path: '/newsroom/sources'
+      fullPath: '/{-$locale}/admin/newsroom/sources'
+      preLoaderRoute: typeof Char123LocaleChar125AdminAuthenticatedNewsroomSourcesRouteImport
       parentRoute: typeof Char123LocaleChar125AdminAuthenticatedRoute
     }
   }
@@ -622,9 +642,10 @@ interface Char123LocaleChar125AdminAuthenticatedRouteChildren {
   Char123LocaleChar125AdminAuthenticatedDataManagementRoute: typeof Char123LocaleChar125AdminAuthenticatedDataManagementRoute
   Char123LocaleChar125AdminAuthenticatedIndexDataRoute: typeof Char123LocaleChar125AdminAuthenticatedIndexDataRoute
   Char123LocaleChar125AdminAuthenticatedMembersRoute: typeof Char123LocaleChar125AdminAuthenticatedMembersRoute
-  Char123LocaleChar125AdminAuthenticatedNewsManagementRoute: typeof Char123LocaleChar125AdminAuthenticatedNewsManagementRoute
   Char123LocaleChar125AdminAuthenticatedConversationsConversationIdRoute: typeof Char123LocaleChar125AdminAuthenticatedConversationsConversationIdRoute
+  Char123LocaleChar125AdminAuthenticatedNewsroomSourcesRoute: typeof Char123LocaleChar125AdminAuthenticatedNewsroomSourcesRoute
   Char123LocaleChar125AdminAuthenticatedConversationsIndexRoute: typeof Char123LocaleChar125AdminAuthenticatedConversationsIndexRoute
+  Char123LocaleChar125AdminAuthenticatedNewsroomIndexRoute: typeof Char123LocaleChar125AdminAuthenticatedNewsroomIndexRoute
 }
 
 const Char123LocaleChar125AdminAuthenticatedRouteChildren: Char123LocaleChar125AdminAuthenticatedRouteChildren =
@@ -639,12 +660,14 @@ const Char123LocaleChar125AdminAuthenticatedRouteChildren: Char123LocaleChar125A
       Char123LocaleChar125AdminAuthenticatedIndexDataRoute,
     Char123LocaleChar125AdminAuthenticatedMembersRoute:
       Char123LocaleChar125AdminAuthenticatedMembersRoute,
-    Char123LocaleChar125AdminAuthenticatedNewsManagementRoute:
-      Char123LocaleChar125AdminAuthenticatedNewsManagementRoute,
     Char123LocaleChar125AdminAuthenticatedConversationsConversationIdRoute:
       Char123LocaleChar125AdminAuthenticatedConversationsConversationIdRoute,
+    Char123LocaleChar125AdminAuthenticatedNewsroomSourcesRoute:
+      Char123LocaleChar125AdminAuthenticatedNewsroomSourcesRoute,
     Char123LocaleChar125AdminAuthenticatedConversationsIndexRoute:
       Char123LocaleChar125AdminAuthenticatedConversationsIndexRoute,
+    Char123LocaleChar125AdminAuthenticatedNewsroomIndexRoute:
+      Char123LocaleChar125AdminAuthenticatedNewsroomIndexRoute,
   }
 
 const Char123LocaleChar125AdminAuthenticatedRouteWithChildren =

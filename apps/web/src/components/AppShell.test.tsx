@@ -174,8 +174,8 @@ describe("AppShell customer navigation", () => {
     ).toBeInTheDocument()
   })
 
-  it("remeasures the admin tab highlight after leaving news management", () => {
-    location.pathname = "/zh-hant/admin/news-management"
+  it("remeasures the admin tab highlight after leaving the newsroom", () => {
+    location.pathname = "/zh-hant/admin/newsroom"
     const view = (content: string) => (
       <I18nextProvider i18n={createI18n("zh-hant")}>
         <AppShell
@@ -191,10 +191,7 @@ describe("AppShell customer navigation", () => {
 
     expect(
       within(rendered.container).getByTestId("active-indicator")
-    ).toHaveAttribute(
-      "data-active-key",
-      "zh-hant:/zh-hant/admin/news-management"
-    )
+    ).toHaveAttribute("data-active-key", "zh-hant:/zh-hant/admin/newsroom")
 
     location.pathname = "/zh-hant/admin/data-management"
     rendered.rerender(view("Data"))

@@ -15,24 +15,18 @@ SERVICES = (
     "orchestration-worker",
     "podcast-media-worker",
     "orchestration-dispatcher",
+    "newsroom-worker",
 )
 API_ENVIRONMENT_KEYS = {
-    "DAILY_INSIGHTS_DAILY_NEWS_ENABLED",
     "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY",
     "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL",
     "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED",
     "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS",
     "DAILY_INSIGHTS_DATABASE_URL",
     "DAILY_INSIGHTS_ENVIRONMENT",
-    "DAILY_INSIGHTS_MODEL_API_BASE_URL",
-    "DAILY_INSIGHTS_NEWS_MODEL_API_KEY",
-    "DAILY_INSIGHTS_MODEL_NAME",
-    "DAILY_INSIGHTS_MODEL_PROVIDER",
     "DAILY_INSIGHTS_MORNING_REPORTS_ENABLED",
-    "DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES",
+    "DAILY_INSIGHTS_NEWSROOM_ENABLED",
     "DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES",
-    "DAILY_INSIGHTS_GUARDIAN_API_KEY",
-    "DAILY_INSIGHTS_SEC_CONTACT_EMAIL",
     "DAILY_INSIGHTS_TWELVE_DATA_API_KEY",
     "DAILY_INSIGHTS_TWELVE_DATA_BASE_URL",
     "DAILY_INSIGHTS_YFINANCE_ENABLED",
@@ -45,6 +39,48 @@ API_ENVIRONMENT_KEYS = {
     "DAILY_INSIGHTS_SESSION_SECRET",
     "DAILY_INSIGHTS_TRUSTED_PROXY_CIDRS",
     "DAILY_INSIGHTS_TWSE_ENABLED",
+}
+
+# Removed with the legacy daily-news pipeline; no service may still receive them.
+REMOVED_ENVIRONMENT_KEYS = {
+    "DAILY_INSIGHTS_DAILY_NEWS_ENABLED",
+    "DAILY_INSIGHTS_MODEL_PROVIDER",
+    "DAILY_INSIGHTS_MODEL_NAME",
+    "DAILY_INSIGHTS_MODEL_API_BASE_URL",
+    "DAILY_INSIGHTS_NEWS_MODEL_API_KEY",
+    "DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS",
+}
+# The orchestration worker runs the 08:00 newsroom_assemble function.
+NEWSROOM_ASSEMBLY_KEYS = (
+    "DAILY_INSIGHTS_NEWSROOM_ENABLED",
+    "DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL",
+    "DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY",
+    "DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL",
+    "DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL",
+    "DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL",
+)
+# Ingestion settings are read only by the newsroom worker (and the blocked-host
+# kill switch by the API, for admin manual URLs).
+NEWSROOM_INGESTION_KEYS = {
+    "DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES",
+    "DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS",
+    "DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS",
+    "DAILY_INSIGHTS_GUARDIAN_API_KEY",
+    "DAILY_INSIGHTS_SEC_CONTACT_EMAIL",
+}
+NEWSROOM_WORKER_KEYS = {
+    "DAILY_INSIGHTS_ENVIRONMENT",
+    "DAILY_INSIGHTS_RUNTIME_ROLE",
+    "DAILY_INSIGHTS_DATABASE_URL",
+    *NEWSROOM_ASSEMBLY_KEYS,
+    "DAILY_INSIGHTS_NEWSROOM_TRIAGE_MODEL",
+    "DAILY_INSIGHTS_NEWSROOM_ANALYSIS_MODEL",
+    "DAILY_INSIGHTS_NEWSROOM_TRANSLATE_MODEL",
+    "DAILY_INSIGHTS_NEWSROOM_EMBEDDING_BASE_URL",
+    "DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY",
+    "DAILY_INSIGHTS_NEWSROOM_EMBEDDING_MODEL",
+    "DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES",
+    *NEWSROOM_INGESTION_KEYS,
 }
 
 
@@ -110,10 +146,9 @@ def main() -> None:
             "DAILY_INSIGHTS_TWELVE_DATA_API_KEY",
             "DAILY_INSIGHTS_YFINANCE_ENABLED",
             "DAILY_INSIGHTS_TWSE_ENABLED",
-            "DAILY_INSIGHTS_DAILY_NEWS_ENABLED",
-            "DAILY_INSIGHTS_NEWS_MODEL_API_KEY",
             "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED",
             "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY",
+            *NEWSROOM_ASSEMBLY_KEYS,
         }.issubset(worker_environment),
         "orchestration-worker must receive provider, feature, and cutover settings",
     )
@@ -132,6 +167,40 @@ def main() -> None:
         }.intersection(worker_environment),
         "orchestration-worker must not receive API authentication or R2 credentials",
     )
+    require(
+        "DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY" not in worker_environment,
+        "orchestration-worker assembles drafts without embedding and must not hold that key",
+    )
+    newsroom_environment = services["newsroom-worker"].get("environment", {})
+    require(
+        set(newsroom_environment) == NEWSROOM_WORKER_KEYS,
+        "newsroom-worker must receive exactly its database, newsroom, and ingestion settings",
+    )
+    require(
+        newsroom_environment.get("DAILY_INSIGHTS_RUNTIME_ROLE") == "newsroom-worker",
+        "newsroom-worker must use its least-privilege runtime role",
+    )
+    require(
+        services["newsroom-worker"].get("command")
+        == ["python", "-m", "daily_insights_api.scripts.run_newsroom_worker"],
+        "newsroom-worker must run the newsroom worker entry point",
+    )
+    for name in SERVICES:
+        environment = services[name].get("environment", {})
+        require(
+            not REMOVED_ENVIRONMENT_KEYS.intersection(environment),
+            f"{name} must not receive removed legacy daily-news settings",
+        )
+        if name != "newsroom-worker":
+            require(
+                not NEWSROOM_INGESTION_KEYS.intersection(environment),
+                f"{name} must not receive newsroom ingestion settings",
+            )
+        if name not in {"newsroom-worker", "orchestration-worker"}:
+            require(
+                "DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY" not in environment,
+                f"{name} must not receive the newsroom LLM key",
+            )
     dispatcher_environment = services["orchestration-dispatcher"].get("environment", {})
     require(
         set(dispatcher_environment)
@@ -177,7 +246,12 @@ def main() -> None:
         != api_environment.get("DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY"),
         "podcast-media-worker must use separate R2 credentials from the API signer",
     )
-    for name in ("orchestration-worker", "podcast-media-worker", "orchestration-dispatcher"):
+    for name in (
+        "orchestration-worker",
+        "podcast-media-worker",
+        "orchestration-dispatcher",
+        "newsroom-worker",
+    ):
         require(
             services[name].get("environment", {}).get("DAILY_INSIGHTS_ENVIRONMENT")
             == "production",

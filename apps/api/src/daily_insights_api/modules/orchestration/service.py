@@ -324,11 +324,6 @@ async def terminalize_expired_automatic_functions(
                         FunctionRun.lease_expires_at <= effective_now,
                     ),
                 ),
-                ~and_(
-                    FunctionRun.function_key == "news_publish",
-                    FunctionRun.status == "pending",
-                    FunctionRun.attempt_count == 0,
-                ),
                 FunctionRun.job_run_id.in_(
                     select(JobRun.id).where(
                         JobRun.deadline_at.is_not(None),

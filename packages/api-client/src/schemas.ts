@@ -181,20 +181,8 @@ export const dataManagementOperationSchema = z.enum([
   "morning_market",
   "index_yahoo",
   "institutional_twse",
-  "news_all",
-  "news_market",
-  "news_publish",
   "macro_dashboard",
   "provider_rerun",
-])
-export const dataManagementRunOperationGroupSchema = z.enum(["news"])
-export type DataManagementRunOperationGroup = z.infer<
-  typeof dataManagementRunOperationGroupSchema
->
-export const dataManagementNewsMarketCodeSchema = z.enum([
-  "global",
-  "tw_equity",
-  "us_equity",
 ])
 export const dataManagementRunStatusSchema = z.enum([
   "pending",
@@ -206,11 +194,6 @@ export const dataManagementRunStatusSchema = z.enum([
 ])
 export const dataManagementRunCreateSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("morning_all") }),
-  z.object({ operation: z.literal("news_all") }),
-  z.object({
-    operation: z.literal("news_market"),
-    market_code: dataManagementNewsMarketCodeSchema,
-  }),
   z.object({ operation: z.literal("macro_dashboard") }),
   z.object({
     operation: z.literal("provider_rerun"),
@@ -229,73 +212,9 @@ export const dataManagementCatalogSchema = z.object({
   rerunnable_providers: z.array(
     z.enum(["twelve_data", "yahoo_finance", "twse"])
   ),
-  daily_news_enabled: z.boolean(),
-  news_markets: z.array(dataManagementNewsMarketCodeSchema),
   macro_dashboard_enabled: z.boolean(),
 })
 export type DataManagementCatalog = z.infer<typeof dataManagementCatalogSchema>
-export const newsFailureSchema = z.object({
-  code: z.string(),
-  stage: z.enum([
-    "queued",
-    "feed",
-    "article",
-    "selection",
-    "summary",
-    "publication",
-    "complete",
-  ]),
-  action: z.enum([
-    "retry",
-    "block",
-    "repair",
-    "skip",
-    "attention",
-    "expired",
-    "cancelled",
-  ]),
-  scope: z.string(),
-  http_status: z.number().nullable(),
-  retry_after: z.iso.datetime({ offset: true }).nullable(),
-  candidate_id: z.string().nullable(),
-  locale: z.string().nullable(),
-  request_id: z.string().nullable(),
-})
-export const newsProgressSchema = z.object({
-  id: z.string(),
-  state: z.enum([
-    "queued",
-    "running",
-    "waiting_retry",
-    "needs_attention",
-    "completed",
-    "expired",
-    "cancelled",
-  ]),
-  stage: newsFailureSchema.shape.stage,
-  progress: z.record(z.string(), z.number().int().nonnegative()),
-  failures: z.array(newsFailureSchema),
-  attempt: z.number().int().nonnegative(),
-  next_retry_at: z.iso.datetime({ offset: true }).nullable(),
-  publication: z.enum([
-    "technical_degradation",
-    "editorial_shortfall",
-    "available",
-  ]),
-})
-export type NewsProgress = z.infer<typeof newsProgressSchema>
-export const newsRecoverySchema = z.object({
-  dependencies: z.array(
-    z.object({
-      scope: z.string(),
-      state: z.string(),
-      failure: newsFailureSchema.nullable(),
-      available_at: z.iso.datetime({ offset: true }).nullable(),
-      newest_article_at: z.iso.datetime({ offset: true }).nullable(),
-      updated_at: z.iso.datetime({ offset: true }),
-    })
-  ),
-})
 const dataManagementRunBaseSchema = z.object({
   id: z.uuid(),
   edition_date: z.iso.date(),
@@ -309,7 +228,6 @@ const dataManagementRunBaseSchema = z.object({
   error: z.string().nullable(),
   scheduled_for: z.iso.datetime({ offset: true }).nullish(),
   heartbeat_at: z.iso.datetime({ offset: true }).nullish(),
-  news: z.record(z.string(), newsProgressSchema).nullish(),
 })
 export const dataManagementRunSchema = z.discriminatedUnion("operation", [
   dataManagementRunBaseSchema.extend({
@@ -330,20 +248,6 @@ export const dataManagementRunSchema = z.discriminatedUnion("operation", [
   }),
   dataManagementRunBaseSchema.extend({
     operation: z.literal("institutional_twse"),
-    market_code: z.null(),
-  }),
-  dataManagementRunBaseSchema.extend({
-    operation: z.literal("news_all"),
-    market_code: z.null(),
-  }),
-  dataManagementRunBaseSchema.extend({
-    operation: z.literal("news_market"),
-    market_code: dataManagementNewsMarketCodeSchema,
-  }),
-  // Manual publication of news candidates; created through the news admin
-  // endpoint rather than the generic run form, so the create schema omits it.
-  dataManagementRunBaseSchema.extend({
-    operation: z.literal("news_publish"),
     market_code: z.null(),
   }),
   dataManagementRunBaseSchema.extend({
@@ -640,181 +544,6 @@ export const analystViewpointSyncStatusSchema = z.object({
 })
 export type AnalystViewpointSyncStatus = z.infer<
   typeof analystViewpointSyncStatusSchema
->
-
-export const newsMarketSchema = z.enum([
-  "global",
-  "us",
-  "asia",
-  "china",
-  "taiwan",
-  "europe",
-  "commodities",
-  "crypto",
-])
-export type NewsMarket = z.infer<typeof newsMarketSchema>
-export const newsTopicSchema = z.enum([
-  "markets",
-  "economy",
-  "companies",
-  "policy",
-  "technology",
-  "commodities",
-])
-export type NewsTopic = z.infer<typeof newsTopicSchema>
-export const newsItemSchema = z.object({
-  id: z.uuid(),
-  rank: z.number().int().positive(),
-  importance: z.number().int().min(1).max(5),
-  topic: newsTopicSchema,
-  headline: z.string(),
-  summary: z.string(),
-  source_name: z.string(),
-  source_hostname: z.string(),
-  source_url: z.url(),
-  source_published_at: z.iso.datetime({ offset: true }).nullable(),
-  numeric_facts: z.array(z.string()),
-  // Null on editions generated before selection metadata was persisted.
-  market: newsMarketSchema.nullable(),
-  event_key: z.string().nullable(),
-})
-export type NewsItem = z.infer<typeof newsItemSchema>
-export const newsMarketCodeSchema = z.enum(["tw_equity", "us_equity"])
-export type NewsMarketCode = z.infer<typeof newsMarketCodeSchema>
-
-export const latestNewsSchema = z.object({
-  market_code: z.string(),
-  target_items: z.number().int().positive(),
-  edition_id: z.uuid().nullable(),
-  edition_date: z.iso.date().nullable(),
-  revision: z.number().int().positive().nullable(),
-  generated_at: z.iso.datetime({ offset: true }).nullable(),
-  status: reportStatusSchema,
-  locale: localeSchema,
-  caveat: z.string().nullable(),
-  items: z.array(newsItemSchema),
-})
-export type LatestNews = z.infer<typeof latestNewsSchema>
-
-// Admin curation view of an edition: what the pipeline discovered, what the
-// model did with it and which stories are published or hidden.
-export const newsCandidateStageSchema = z.enum([
-  "discovered",
-  "fetch_failed",
-  "unused",
-  "reviewed",
-  "prepared",
-  "dropped",
-  "published",
-])
-export type NewsCandidateStage = z.infer<typeof newsCandidateStageSchema>
-export const newsCandidateDropReasonSchema = z.enum([
-  "off_market",
-  "policy",
-  "duplicate_event",
-  "summary_failed",
-  "translation_failed",
-  "reserve",
-])
-export type NewsCandidateDropReason = z.infer<
-  typeof newsCandidateDropReasonSchema
->
-export const newsItemOriginSchema = z.enum(["model", "manual"])
-export type NewsItemOrigin = z.infer<typeof newsItemOriginSchema>
-export const newsAdminItemSchema = z.object({
-  id: z.uuid(),
-  rank: z.number().int().positive(),
-  origin: newsItemOriginSchema,
-  hidden: z.boolean(),
-  hidden_at: z.iso.datetime({ offset: true }).nullable(),
-  headline: z.string(),
-  source_headline: z.string(),
-  source_name: z.string(),
-  source_hostname: z.string(),
-  source_url: z.url(),
-  source_published_at: z.iso.datetime({ offset: true }).nullable(),
-  topic: newsTopicSchema,
-  market: newsMarketSchema.nullable(),
-  importance: z.number().int().min(1).max(5),
-  event_key: z.string().nullable(),
-  // Null for items published before candidates were recorded.
-  candidate_id: z.uuid().nullable(),
-})
-export type NewsAdminItem = z.infer<typeof newsAdminItemSchema>
-export const newsAdminCandidateSchema = z.object({
-  id: z.uuid(),
-  stage: newsCandidateStageSchema,
-  drop_reason: newsCandidateDropReasonSchema.nullable(),
-  headline: z.string(),
-  source_name: z.string(),
-  hostname: z.string(),
-  url: z.url(),
-  seen_at: z.iso.datetime({ offset: true }).nullable(),
-  source_published_at: z.iso.datetime({ offset: true }).nullable(),
-  // Filled only for candidates the model returned in some selection round.
-  ai_rank: z.number().int().positive().nullable(),
-  ai_topic: z.string().nullable(),
-  ai_market: z.string().nullable(),
-  ai_importance: z.number().int().nullable(),
-  ai_event_key: z.string().nullable(),
-  item_id: z.uuid().nullable(),
-  publish_run_id: z.uuid().nullable(),
-  publish_requested_at: z.iso.datetime({ offset: true }).nullable(),
-  publish_error: z.string().nullable(),
-})
-export type NewsAdminCandidate = z.infer<typeof newsAdminCandidateSchema>
-export const newsAdminEditionCountsSchema = z.object({
-  discovered: z.number().int().nonnegative(),
-  fetch_failed: z.number().int().nonnegative(),
-  unused: z.number().int().nonnegative(),
-  reviewed: z.number().int().nonnegative(),
-  prepared: z.number().int().nonnegative(),
-  dropped: z.number().int().nonnegative(),
-  published: z.number().int().nonnegative(),
-  hidden: z.number().int().nonnegative(),
-})
-export type NewsAdminEditionCounts = z.infer<
-  typeof newsAdminEditionCountsSchema
->
-export const newsAdminEditionSchema = z.object({
-  market_code: dataManagementNewsMarketCodeSchema,
-  // Null when no edition exists for the date; the lists are then empty.
-  edition: z
-    .object({
-      id: z.uuid(),
-      revision: z.number().int().positive(),
-      status: reportStatusSchema,
-      generated_at: z.iso.datetime({ offset: true }),
-      prompt_version: z.string(),
-      target_items: z.number().int().positive(),
-      counts: newsAdminEditionCountsSchema,
-    })
-    .nullable(),
-  items: z.array(newsAdminItemSchema),
-  candidates: z.array(newsAdminCandidateSchema),
-})
-export type NewsAdminEdition = z.infer<typeof newsAdminEditionSchema>
-export const newsAdminEditionsSchema = z.object({
-  edition_date: z.iso.date(),
-  editions: z.array(newsAdminEditionSchema),
-})
-export type NewsAdminEditions = z.infer<typeof newsAdminEditionsSchema>
-export const newsCandidatePublishInputSchema = z
-  .object({
-    edition_id: z.uuid().optional(),
-    edition_date: z.iso.date().optional(),
-    market_code: dataManagementNewsMarketCodeSchema.optional(),
-    candidate_ids: z.array(z.uuid()).min(1).max(10),
-  })
-  .refine(
-    value =>
-      value.edition_id !== undefined
-        ? value.edition_date === undefined && value.market_code === undefined
-        : value.edition_date !== undefined && value.market_code !== undefined,
-    { message: "Provide edition_id or edition_date and market_code" }
-  )
-export type NewsCandidatePublishInput = z.infer<
-  typeof newsCandidatePublishInputSchema
 >
 
 export const systemRoleSchema = z.enum(["admin", "asset_manager", "org_member"])
@@ -1124,3 +853,50 @@ export type PodcastUploadBatchStatus = z.infer<
 >
 
 export type PodcastUploadReason = "initial_upload" | "update_file" | "other"
+
+// Newsroom reader edition (/api/newsroom/editions/latest): the newest
+// published edition with a story visible in the requested locale.
+export const newsroomMarketCodeSchema = z.enum([
+  "global",
+  "tw_equity",
+  "us_equity",
+])
+export type NewsroomMarketCode = z.infer<typeof newsroomMarketCodeSchema>
+export const newsroomSourceLinkSchema = z.object({
+  name: z.string(),
+  url: z.url({ protocol: /^https?$/ }),
+  published_at: z.iso.datetime({ offset: true }).nullable(),
+})
+export type NewsroomSourceLink = z.infer<typeof newsroomSourceLinkSchema>
+export const newsroomRelatedSymbolSchema = z.object({
+  // Canonical dashboard symbol; the page names it from its own i18n catalog.
+  symbol: z.string(),
+  kind: z.string(),
+  // The market dashboard that charts this symbol, when the viewer may open it.
+  market_code: marketCodeSchema.nullable().catch(null),
+})
+export type NewsroomRelatedSymbol = z.infer<typeof newsroomRelatedSymbolSchema>
+export const newsroomItemSchema = z.object({
+  id: z.uuid(),
+  event_id: z.uuid(),
+  rank: z.number().int().positive(),
+  stars: z.number().int().min(1).max(5).nullable(),
+  headline: z.string(),
+  summary: z.string(),
+  // Null only for stories migrated from the legacy pipeline.
+  why: z.string().nullable(),
+  related_symbols: z.array(newsroomRelatedSymbolSchema),
+  sources: z.array(newsroomSourceLinkSchema),
+})
+export type NewsroomItem = z.infer<typeof newsroomItemSchema>
+export const newsroomEditionSchema = z.object({
+  market_code: newsroomMarketCodeSchema,
+  locale: localeSchema,
+  // Null with no items when no edition has a visible story yet.
+  edition_id: z.uuid().nullable(),
+  edition_date: z.iso.date().nullable(),
+  is_today: z.boolean(),
+  published_at: z.iso.datetime({ offset: true }).nullable(),
+  items: z.array(newsroomItemSchema),
+})
+export type NewsroomEdition = z.infer<typeof newsroomEditionSchema>
