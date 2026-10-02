@@ -35,6 +35,7 @@ async def test_disabled_worker_idles_with_heartbeats(monkeypatch: pytest.MonkeyP
         newsroom_worker_script,
         "get_settings",
         lambda: Settings(
+            _env_file=None,
             environment="test",
             runtime_role="newsroom-worker",
             newsroom_enabled=False,
@@ -59,7 +60,7 @@ async def test_disabled_worker_once_touches_heartbeat_and_returns(
     monkeypatch.setattr(
         newsroom_worker_script,
         "get_settings",
-        lambda: Settings(environment="test", runtime_role="newsroom-worker"),
+        lambda: Settings(_env_file=None, environment="test", runtime_role="newsroom-worker"),
     )
     monkeypatch.setattr(newsroom_worker_script, "HEARTBEAT_PATH", heartbeat)
     monkeypatch.setattr(newsroom_worker_script, "create_engine", _forbid)
@@ -74,7 +75,7 @@ async def test_worker_still_requires_its_runtime_role(monkeypatch: pytest.Monkey
     monkeypatch.setattr(
         newsroom_worker_script,
         "get_settings",
-        lambda: Settings(environment="test", runtime_role="orchestration-worker"),
+        lambda: Settings(_env_file=None, environment="test", runtime_role="orchestration-worker"),
     )
     monkeypatch.setattr(newsroom_worker_script, "HEARTBEAT_PATH", heartbeat)
 
@@ -90,7 +91,7 @@ def test_main_fails_for_the_wrong_runtime_role(
     monkeypatch.setattr(
         newsroom_worker_script,
         "get_settings",
-        lambda: Settings(environment="test", runtime_role="api"),
+        lambda: Settings(_env_file=None, environment="test", runtime_role="api"),
     )
 
     assert newsroom_worker_script.main() == 1

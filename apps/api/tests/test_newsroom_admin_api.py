@@ -60,7 +60,9 @@ def _client(role: SystemRole) -> AsyncClient:
     # Never connected: every request here is rejected before a query runs.
     engine = create_async_engine("postgresql+psycopg://unused:unused@127.0.0.1:1/unused")
     app = create_app(
-        Settings(environment="test"), readiness(True), session_factory=async_sessionmaker(engine)
+        Settings(_env_file=None, environment="test"),
+        readiness(True),
+        session_factory=async_sessionmaker(engine),
     )
     user = User(
         id=uuid.uuid4(),

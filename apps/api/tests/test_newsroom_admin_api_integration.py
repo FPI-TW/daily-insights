@@ -90,7 +90,9 @@ async def admin(database: async_sessionmaker[AsyncSession]) -> User:
 async def client(
     database: async_sessionmaker[AsyncSession], admin: User
 ) -> AsyncIterator[AsyncClient]:
-    app = create_app(Settings(environment="test"), readiness(True), session_factory=database)
+    app = create_app(
+        Settings(_env_file=None, environment="test"), readiness(True), session_factory=database
+    )
     session = Session(csrf_token_hash=hash_token(CSRF_TOKEN, LOCAL_SESSION_SECRET))
 
     async def authenticated() -> AuthContext:
