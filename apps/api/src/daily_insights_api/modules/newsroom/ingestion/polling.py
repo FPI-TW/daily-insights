@@ -398,7 +398,11 @@ async def notify_unhealthy_sources(
 
 
 async def queue_manual_embeddings(session_factory: async_sessionmaker[AsyncSession]) -> int:
-    """Manual URLs embed after their fetch settles; this also covers exhausted fetches."""
+    """Manual URLs embed after their fetch settles; this also covers exhausted fetches.
+
+    Only never-triaged articles qualify: legacy history imported under the manual
+    source is already placed in its events and must not be re-triaged.
+    """
     async with session_factory() as database:
         manual_sources = select(NewsroomSource.id).where(NewsroomSource.kind == MANUAL_KIND)
         result = await database.execute(
@@ -407,6 +411,7 @@ async def queue_manual_embeddings(session_factory: async_sessionmaker[AsyncSessi
                 and_(
                     NewsroomArticle.source_id.in_(manual_sources.scalar_subquery()),
                     NewsroomArticle.embed_status == "idle",
+                    NewsroomArticle.triage_status == "idle",
                     NewsroomArticle.fetch_status.in_(("done", "failed")),
                 )
             )

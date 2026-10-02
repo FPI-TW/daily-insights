@@ -587,6 +587,29 @@ async def test_exhausted_manual_fetch_still_queues_embedding(
     assert (await article_row(newsroom_database, article_id)).embed_status == "pending"
 
 
+async def test_already_triaged_manual_articles_are_not_queued_for_embedding(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    manual = await add_source(
+        newsroom_database, key="manual", kind="manual", url=None, hostname="manual.invalid"
+    )
+    url = "https://legacy.example.org/story"
+    article_id = await add_article(
+        newsroom_database,
+        manual,
+        title="Imported legacy story",
+        url=url,
+        embed_status="idle",
+        fetch_status="done",
+        triage_status="done",
+        body_status="purged",
+    )
+
+    await poll(newsroom_database, serving(rss()))
+
+    assert (await article_row(newsroom_database, article_id)).embed_status == "idle"
+
+
 # --- purge --------------------------------------------------------------------
 
 
