@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -33,8 +34,9 @@ from daily_insights_api.modules.news.admin import router as news_admin_router
 from daily_insights_api.modules.news.router import router as news_router
 from daily_insights_api.modules.operations.health import ReadinessReport, evaluate_readiness
 from daily_insights_api.modules.orchestration.router import router as orchestration_router
-from daily_insights_api.modules.podcasts.direct_upload import router as podcast_uploads_router
 from daily_insights_api.modules.podcasts.router import router as podcasts_router
+from daily_insights_api.modules.podcasts.synchronous_upload import router as podcast_uploads_router
+from daily_insights_api.modules.podcasts.upload_cleanup import cleanup_loop
 from daily_insights_api.modules.reports.router import router as reports_router
 
 ReadinessChecker = Callable[[], Awaitable[bool]]
@@ -107,12 +109,17 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        cleanup_task = asyncio.create_task(
+            cleanup_loop(session_factory, object_store, resolved_settings)
+        )
         try:
             if resolved_settings.chat_enabled:
                 async with session_factory.begin() as database:
                     await sync_chat_model_configuration(database, resolved_settings)
             yield
         finally:
+            cleanup_task.cancel()
+            await asyncio.gather(cleanup_task, return_exceptions=True)
             app.state.password_work.close()
             if engine is not None:
                 await engine.dispose()

@@ -9,7 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.enums import AssetKind, AssetStatus
 from daily_insights_api.modules.assets.models import Asset
-from daily_insights_api.modules.assets.object_store import ObjectRef, ObjectStore
+from daily_insights_api.modules.assets.object_store import (
+    ListableObjectStore,
+    ObjectRef,
+    ObjectStore,
+)
 
 Locale = Literal["zh-hant", "zh-hans", "en"]
 MigrationStatus = Literal["planned", "verified", "cutover", "failed"]
@@ -229,6 +233,7 @@ __all__ = [
     "AssetMigrationInput",
     "AssetMigrationResult",
     "AssetStatus",
+    "ListableObjectStore",
     "MigratedObject",
     "ObjectRef",
     "ObjectStore",

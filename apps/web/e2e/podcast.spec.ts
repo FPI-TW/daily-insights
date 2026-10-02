@@ -262,7 +262,23 @@ test.describe("Podcast administration", () => {
     await expect(warning).toBeHidden()
 
     const uploadRequests = (await getMockApiState(request)).requests.filter(
-      item => item.path === "/api/admin/podcasts/uploads"
+      item => item.path === "/api/admin/podcasts/direct-uploads"
+    )
+    const requests = (await getMockApiState(request)).requests
+    expect(requests.filter(item => item.path === "/__e2e/r2-upload")).toEqual([
+      expect.objectContaining({
+        facts: {
+          size: 9,
+          conditional: "*",
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        },
+      }),
+    ])
+    expect(
+      requests.filter(item => item.path.endsWith("direct-uploads/complete"))
+    ).toHaveLength(1)
+    expect(requests.some(item => item.path.includes("upload-batches"))).toBe(
+      false
     )
     expect(uploadRequests).toHaveLength(2)
     expect(uploadRequests[0]).toMatchObject({

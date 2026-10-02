@@ -330,8 +330,10 @@ async def init_upload_batch(
     database: Database,
     store: Store,
 ) -> UploadBatchInitResponse:
-    files = payload.validated_files()
     settings: Settings = request.app.state.settings
+    if settings.environment == "production":
+        raise HTTPException(410, detail={"code": "legacy_upload_retired"})
+    files = payload.validated_files()
     if settings.r2_bucket_name is None:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, detail={"code": "r2_not_configured"}
@@ -517,6 +519,8 @@ async def finalize_upload(
     store: Store,
     request: Request,
 ) -> UploadFinalizeResponse:
+    if request.app.state.settings.environment == "production":
+        raise HTTPException(410, detail={"code": "legacy_upload_retired"})
     batch = await _owned_batch(database, batch_id, actor, for_update=True)
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "upload_batch_not_found"})

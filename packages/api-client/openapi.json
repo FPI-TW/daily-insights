@@ -794,6 +794,68 @@
         "title": "ChatStreamRequest",
         "type": "object"
       },
+      "CompleteUploadRequest": {
+        "properties": {
+          "upload_token": {
+            "maxLength": 8192,
+            "minLength": 1,
+            "title": "Upload Token",
+            "type": "string"
+          }
+        },
+        "required": ["upload_token"],
+        "title": "CompleteUploadRequest",
+        "type": "object"
+      },
+      "CompletedUpload": {
+        "properties": {
+          "asset_id": {
+            "format": "uuid",
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "episode_id": {
+            "format": "uuid",
+            "title": "Episode Id",
+            "type": "string"
+          },
+          "locale": {
+            "enum": ["zh-hant", "zh-hans", "en"],
+            "title": "Locale",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "status": {
+            "const": "completed",
+            "default": "completed",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id",
+          "episode_id",
+          "locale",
+          "sha256",
+          "duration_seconds"
+        ],
+        "title": "CompletedUpload",
+        "type": "object"
+      },
       "ComponentHealth": {
         "properties": {
           "status": {
@@ -815,6 +877,91 @@
         },
         "required": ["csrf_token"],
         "title": "CsrfTokenResponse",
+        "type": "object"
+      },
+      "DirectUploadRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/UploadRequest"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Files",
+            "type": "array"
+          },
+          "reason": {
+            "enum": ["initial_upload", "update_file", "other"],
+            "title": "Reason",
+            "type": "string"
+          },
+          "trading_date": {
+            "format": "date",
+            "title": "Trading Date",
+            "type": "string"
+          }
+        },
+        "required": ["trading_date", "reason", "files"],
+        "title": "DirectUploadRequest",
+        "type": "object"
+      },
+      "DirectUploadResponse": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/DirectUploadTarget"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": ["files"],
+        "title": "DirectUploadResponse",
+        "type": "object"
+      },
+      "DirectUploadTarget": {
+        "properties": {
+          "asset_id": {
+            "format": "uuid",
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "locale": {
+            "enum": ["zh-hant", "zh-hans", "en"],
+            "title": "Locale",
+            "type": "string"
+          },
+          "required_headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Required Headers",
+            "type": "object"
+          },
+          "upload_token": {
+            "title": "Upload Token",
+            "type": "string"
+          },
+          "upload_url": {
+            "title": "Upload Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id",
+          "locale",
+          "upload_url",
+          "upload_token",
+          "required_headers",
+          "expires_at"
+        ],
+        "title": "DirectUploadTarget",
         "type": "object"
       },
       "EconomicEvent": {
@@ -7685,6 +7832,120 @@
         },
         "summary": "Admin Create",
         "tags": ["podcasts"]
+      }
+    },
+    "/api/admin/podcasts/direct-uploads": {
+      "post": {
+        "operationId": "admin_podcast_direct_upload_sign",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectUploadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectUploadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sign Direct Upload",
+        "tags": ["podcast uploads"]
+      }
+    },
+    "/api/admin/podcasts/direct-uploads/complete": {
+      "post": {
+        "operationId": "admin_podcast_direct_upload_complete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteUploadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompletedUpload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Direct Upload",
+        "tags": ["podcast uploads"]
       }
     },
     "/api/admin/podcasts/upload-batches": {

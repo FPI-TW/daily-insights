@@ -1038,3 +1038,94 @@ describe("API client trust boundary", () => {
     expect(result.files.every(file => file.status === "failed")).toBe(true)
   })
 })
+
+it("signs and completes stateless Podcast uploads with validated responses and CSRF", async () => {
+  const assetId = "2a5e0d3e-5b2c-4d51-8f2e-6f0d3a9c1b22"
+  const calls: { path: string; init?: RequestInit }[] = []
+  const client = createPodcastAdminClient(async (path, init) => {
+    calls.push({ path, ...(init ? { init } : {}) })
+    return Response.json(
+      path.endsWith("/complete")
+        ? {
+            asset_id: assetId,
+            episode_id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
+            locale: "en",
+            status: "completed",
+            sha256: "a".repeat(64),
+            duration_seconds: 9,
+          }
+        : {
+            files: [
+              {
+                asset_id: assetId,
+                locale: "en",
+                upload_url: "https://r2.test/upload",
+                upload_token: "signed-ticket",
+                required_headers: {
+                  "Content-Type": "audio/mpeg",
+                  "If-None-Match": "*",
+                  "x-amz-meta-sha256": "a".repeat(64),
+                },
+                expires_at: "2026-10-01T10:00:00Z",
+              },
+            ],
+          }
+    )
+  })
+  const signed = await client.signDirectUploads(
+    {
+      trading_date: "2026-10-01",
+      reason: "initial_upload",
+      files: [
+        {
+          locale: "en",
+          filename: "episode.mp3",
+          size_bytes: 256 * 1024 * 1024,
+          mime_type: "audio/mpeg",
+          sha256: "a".repeat(64),
+        },
+      ],
+    },
+    "csrf-token"
+  )
+  expect(
+    await client.completeDirectUpload(
+      signed.files[0]!.upload_token,
+      "csrf-token"
+    )
+  ).toMatchObject({ status: "completed", asset_id: assetId })
+  expect(calls.map(call => call.path)).toEqual([
+    "/api/admin/podcasts/direct-uploads",
+    "/api/admin/podcasts/direct-uploads/complete",
+  ])
+  for (const call of calls) {
+    expect(call.init?.method).toBe("POST")
+    expect(new Headers(call.init?.headers).get("X-CSRF-Token")).toBe(
+      "csrf-token"
+    )
+  }
+  expect(JSON.parse(calls[1]!.init!.body as string)).toEqual({
+    upload_token: "signed-ticket",
+  })
+  const invalid = createPodcastAdminClient(async () =>
+    Response.json({ files: [{ asset_id: assetId }] })
+  )
+  await expect(
+    invalid.signDirectUploads(
+      {
+        trading_date: "2026-10-01",
+        reason: "initial_upload",
+        files: [
+          {
+            locale: "en",
+            filename: "episode.mp3",
+            size_bytes: 7,
+            mime_type: "audio/mpeg",
+            sha256: "a".repeat(64),
+          },
+        ],
+      },
+      "csrf-token"
+    )
+  ).rejects.toThrow()
+})

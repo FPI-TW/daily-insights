@@ -1088,63 +1088,31 @@ const server = createServer(async (request, response) => {
   }
 
   if (
-    url.pathname === "/api/admin/podcasts/uploads" &&
+    url.pathname === "/api/admin/podcasts/direct-uploads" &&
     request.method === "POST"
   ) {
     const role = requireRole(request, response, ["admin", "asset_manager"])
     if (!role || !requireCsrf(request, response)) return
-    const multipart = parseMultipart(request, await readBody(request))
-    if (!multipart) {
-      sendJson(response, 400, { detail: "Multipart body required" })
-      return
-    }
-    const { fields, files } = multipart
-    const confirmed =
-      fields.confirm_replacement === "true"
-        ? true
-        : fields.confirm_replacement === "false"
-          ? false
-          : null
-    let expectedVersions
-    try {
-      expectedVersions = JSON.parse(fields.expected_versions)
-    } catch {
-      expectedVersions = null
-    }
-    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(fields.trading_date || "")
-    const validReason = ["initial_upload", "update_file", "other"].includes(
-      fields.reason
-    )
-    const zhHantFile = files.zh_hant
-    const validFile =
-      zhHantFile &&
-      zhHantFile.filename === "briefing.mp3" &&
-      zhHantFile.contentType === "audio/mpeg" &&
-      zhHantFile.size > 0
-    const validExpectedVersions =
-      expectedVersions !== null &&
-      typeof expectedVersions === "object" &&
-      !Array.isArray(expectedVersions)
-    if (
-      !validDate ||
-      !validReason ||
-      confirmed === null ||
-      !validExpectedVersions ||
-      !validFile
-    ) {
-      sendJson(response, 422, { detail: "Invalid Podcast upload contract" })
-      return
-    }
+    const input = JSON.parse(await readBody(request))
+    const file = input.files[0]
     const facts = {
       csrf: "valid",
-      tradingDate: fields.trading_date,
-      reason: fields.reason,
-      confirmReplacement: confirmed,
-      expectedVersions,
-      files,
+      tradingDate: input.trading_date,
+      reason: input.reason,
+      confirmReplacement: Boolean(file.confirm_replacement),
+      expectedVersions: file.confirm_replacement
+        ? { [file.locale]: file.expected_current_version }
+        : {},
+      files: {
+        zh_hant: {
+          filename: file.filename,
+          contentType: file.mime_type,
+          size: file.size_bytes,
+        },
+      },
     }
     recordRequest(request, url, role, facts)
-    if (!confirmed) {
+    if (!file.confirm_replacement) {
       sendJson(response, 409, {
         detail: {
           code: "replacement_confirmation_required",
@@ -1153,14 +1121,77 @@ const server = createServer(async (request, response) => {
       })
       return
     }
-    if (expectedVersions["zh-hant"] !== state.audioVersion) {
-      sendJson(response, 409, { detail: "Expected audio version mismatch" })
+    if (file.expected_current_version !== state.audioVersion) {
+      sendJson(response, 409, { detail: { code: "audio_version_conflict" } })
+      return
+    }
+    state.uploadFile = file
+    sendJson(response, 200, {
+      files: [
+        {
+          asset_id: assetId,
+          locale: file.locale,
+          upload_url: `http://127.0.0.1:${port}/__e2e/r2-upload`,
+          upload_token: "e2e-upload-ticket",
+          required_headers: {
+            "Content-Type": file.mime_type,
+            "If-None-Match": "*",
+            "x-amz-meta-sha256": file.sha256,
+          },
+          expires_at: "2999-01-01T00:00:00Z",
+        },
+      ],
+    })
+    return
+  }
+
+  if (url.pathname === "/__e2e/r2-upload") {
+    response.setHeader("Access-Control-Allow-Origin", "http://127.0.0.1:3310")
+    response.setHeader("Access-Control-Allow-Methods", "PUT, OPTIONS")
+    response.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, If-None-Match, x-amz-meta-sha256"
+    )
+    if (request.method === "PUT") {
+      const body = await readBody(request)
+      recordRequest(request, url, null, {
+        size: body.length,
+        sha256: request.headers["x-amz-meta-sha256"],
+        conditional: request.headers["if-none-match"],
+      })
+      state.uploaded = true
+    }
+    response.writeHead(204)
+    response.end()
+    return
+  }
+
+  if (
+    url.pathname === "/api/admin/podcasts/direct-uploads/complete" &&
+    request.method === "POST"
+  ) {
+    const role = requireRole(request, response, ["admin", "asset_manager"])
+    if (!role || !requireCsrf(request, response)) return
+    const input = JSON.parse(await readBody(request))
+    recordRequest(request, url, role, {
+      csrf: "valid",
+      uploadToken: input.upload_token,
+    })
+    if (!state.uploaded || input.upload_token !== "e2e-upload-ticket") {
+      sendJson(response, 409, { detail: { code: "object_not_uploaded" } })
       return
     }
     state.status = "published"
     state.audioVersion += 1
     state.episodeVersion += 1
-    sendJson(response, 200, adminEpisode())
+    sendJson(response, 200, {
+      asset_id: assetId,
+      episode_id: episodeId,
+      locale: state.uploadFile.locale,
+      status: "completed",
+      sha256: state.uploadFile.sha256,
+      duration_seconds: 1,
+    })
     return
   }
 
