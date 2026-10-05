@@ -287,3 +287,7 @@ docker logs --tail=200 daily-insights-nginx
 - 告警實際送達與目標流量的 CPU、memory、disk、database、latency headroom。
 
 外部驗收完成前，狀態是「可部署，不可正式切流量」。
+
+首次切換 Podcast 同步直傳時，先完成 [一次性人工切換](podcast-upload-cutover.md)。
+舊 media worker 的停止與 session 盤點不由 CI/CD 執行；新 API 的 R2 key 需要
+list/read/write/delete，音檔同步驗證使用專用磁碟 volume，硬性上限維持 256 MiB。

@@ -5,11 +5,12 @@ import {
   type PodcastEpisodeAdmin,
   type PodcastMetadata,
   type PodcastUploadReason,
+  type PodcastDirectUploadTarget,
 } from "@daily-insights/api-client"
 import { useForm } from "@tanstack/react-form"
 import { useRouter } from "@tanstack/react-router"
 import { motion } from "motion/react"
-import { useEffect, useRef, useState, type DragEvent } from "react"
+import { useRef, useState, type DragEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { browserPodcastAdminClient } from "#/lib/admin-podcasts"
 import { requireCsrfToken } from "#/lib/auth"
@@ -31,10 +32,8 @@ type UploadProgress = {
   sha256?: string
 }
 type UploadBatchState = {
-  id: string
   tradingDate: string
   reason: PodcastUploadReason
-  status: string
   files: Partial<Record<Locale, UploadProgress>>
 }
 type SelectedPodcastFile = { locale: Locale; file: File }
@@ -45,12 +44,6 @@ type ReplacementConfirmation = Readonly<{
   currentVersions: Readonly<ExpectedVersions>
 }>
 const maxPodcastFileBytes = 256 * 1024 * 1024
-const terminalPodcastSessionStatuses = new Set([
-  "completed",
-  "failed",
-  "conflict",
-  "expired",
-])
 
 function podcastFileMimeType(file: File): string | null {
   const extension = file.name.split(".").pop()?.toLowerCase()
@@ -216,21 +209,10 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
   const [preparing, setPreparing] = useState<"hashing" | "initializing" | null>(
     null
   )
-  const idempotencyKey = useRef<string | null>(null)
   const abortControllers = useRef<Partial<Record<Locale, AbortController>>>({})
   const uploadTargets = useRef<
-    Partial<
-      Record<
-        Locale,
-        {
-          upload_url: string
-          required_headers: Record<string, string>
-          expires_at: string
-        }
-      >
-    >
+    Partial<Record<Locale, PodcastDirectUploadTarget>>
   >({})
-  const batchStatusPoller = useRef<(batchId: string) => void>(() => {})
   const [files, setFiles] = useState<PodcastFiles>({
     "zh-hant": null,
     "zh-hans": null,
@@ -250,6 +232,11 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
         ? { ...current, files: { ...current.files, [locale]: progress } }
         : current
     )
+  }
+
+  function markLocaleCompleted(locale: Locale, sha256: string) {
+    setLocaleProgress(locale, { status: "completed", progress: 100, sha256 })
+    setFiles(current => ({ ...current, [locale]: null }))
   }
 
   function clearReplacementConfirmation() {
@@ -298,11 +285,8 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
           .join("")
       }
       setPreparing("initializing")
-      const key = idempotencyKey.current ?? crypto.randomUUID()
-      idempotencyKey.current = key
-      const init = await browserPodcastAdminClient().initializeUploadBatch(
+      const init = await browserPodcastAdminClient().signDirectUploads(
         {
-          idempotency_key: key,
           trading_date: value.tradingDate,
           reason: value.reason,
           files: selected.map(({ locale, file }) => ({
@@ -322,120 +306,31 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
         },
         csrfToken
       )
-      idempotencyKey.current = null
       setReplacementConfirmation(null)
       uploadTargets.current = Object.fromEntries(
         init.files.map(item => [item.locale, item])
       )
       setBatch({
-        id: init.batch_id,
         tradingDate: value.tradingDate,
         reason: value.reason,
-        status: init.status,
         files: Object.fromEntries(
           init.files.map(item => [
             item.locale,
-            { status: item.status, progress: 0 },
+            { status: "pending_upload", progress: 0 },
           ])
         ),
       })
       await Promise.all(
         init.files.map(async target => {
-          const file = files[target.locale]
-          if (!file) return
-          const controller = new AbortController()
-          abortControllers.current[target.locale] = controller
-          setLocaleProgress(target.locale, { status: "uploading", progress: 0 })
-          try {
-            const putStatus = await putPodcastFile(
-              file,
-              target,
-              progress =>
-                setLocaleProgress(target.locale, {
-                  status: "uploading",
-                  progress,
-                }),
-              controller.signal
-            )
-            if (
-              putStatus !== 200 &&
-              putStatus !== 201 &&
-              putStatus !== 204 &&
-              putStatus !== 412
-            ) {
-              throw new Error(putStatus === 0 ? "network" : `http-${putStatus}`)
-            }
-            await browserPodcastAdminClient().finalizeUploadBatchFile(
-              init.batch_id,
-              target.locale,
-              csrfToken
-            )
-            setLocaleProgress(target.locale, {
-              status: "processing",
-              progress: 100,
-            })
-          } catch (caught) {
-            if (
-              caught instanceof DOMException &&
-              caught.name === "AbortError"
-            ) {
-              setLocaleProgress(target.locale, {
-                status: "cancelled",
-                progress: 0,
-              })
-              return
-            }
-            if (await redirectExpiredSession(caught)) return
-            // A failed PUT may have reached R2. Finalize is safe after 412 and
-            // lets the server verify the object before any retry can overwrite it.
-            try {
-              await browserPodcastAdminClient().finalizeUploadBatchFile(
-                init.batch_id,
-                target.locale,
-                csrfToken
-              )
-              setLocaleProgress(target.locale, {
-                status: "processing",
-                progress: 100,
-              })
-            } catch {
-              const reason =
-                caught instanceof Error ? caught.message : "network"
-              setLocaleProgress(target.locale, {
-                status: "failed",
-                progress: 0,
-                error: reason,
-              })
-            }
-          } finally {
-            delete abortControllers.current[target.locale]
-          }
+          const file = selected.find(
+            item => item.locale === target.locale
+          )?.file
+          if (file) await transferAndComplete(file, target, csrfToken)
         })
       )
-      await refreshBatchStatus(init.batch_id, 5)
+      await router.invalidate()
     } catch (caught) {
       if (await redirectExpiredSession(caught)) return
-      if (
-        caught instanceof ApiError &&
-        caught.status === 409 &&
-        typeof caught.detail === "object" &&
-        caught.detail !== null &&
-        "code" in caught.detail &&
-        ["upload_batch_expired", "idempotency_key_reused"].includes(
-          String(caught.detail.code)
-        )
-      ) {
-        const code = String(caught.detail.code)
-        idempotencyKey.current = null
-        setError(
-          t(
-            code === "upload_batch_expired"
-              ? "podcastUploadNewAttemptRequired"
-              : "podcastUploadNewKeyRequired"
-          )
-        )
-        return
-      }
       if (
         caught instanceof ApiError &&
         caught.status === 409 &&
@@ -459,7 +354,6 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
             }),
           })
         )
-        idempotencyKey.current = null
         return
       }
       setError(caught instanceof Error ? caught.message : t("unexpectedError"))
@@ -469,93 +363,50 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
     }
   }
 
-  async function refreshBatchStatus(batchId: string, attempts = 1) {
+  async function transferAndComplete(
+    file: File,
+    target: PodcastDirectUploadTarget,
+    csrfToken: string
+  ) {
+    const controller = new AbortController()
+    abortControllers.current[target.locale] = controller
+    setLocaleProgress(target.locale, { status: "uploading", progress: 0 })
     try {
-      let status = await browserPodcastAdminClient().uploadBatchStatus(batchId)
-      const applyStatus = (next: typeof status) => {
-        setBatch(current =>
-          current?.id === batchId
-            ? {
-                ...current,
-                status: next.status,
-                files: {
-                  ...current.files,
-                  ...Object.fromEntries(
-                    next.files.map(item => [
-                      item.locale,
-                      {
-                        status:
-                          abortControllers.current[item.locale] &&
-                          item.status === "pending_upload"
-                            ? (current.files[item.locale]?.status ??
-                              item.status)
-                            : item.status,
-                        progress:
-                          abortControllers.current[item.locale] &&
-                          item.status === "pending_upload"
-                            ? (current.files[item.locale]?.progress ?? 0)
-                            : item.status === "completed"
-                              ? 100
-                              : (current.files[item.locale]?.progress ?? 0),
-                        ...(item.sha256 ? { sha256: item.sha256 } : {}),
-                        error: item.error_code ?? undefined,
-                      },
-                    ])
-                  ),
-                },
-              }
-            : current
+      try {
+        const status = await putPodcastFile(
+          file,
+          target,
+          progress =>
+            setLocaleProgress(target.locale, { status: "uploading", progress }),
+          controller.signal
         )
+        if (![200, 201, 204, 412].includes(status))
+          throw new Error(`http-${status}`)
+      } catch (caught) {
+        if (caught instanceof DOMException && caught.name === "AbortError")
+          throw caught
+        // The PUT may have succeeded despite a lost response. Completion verifies R2.
       }
-      applyStatus(status)
-      for (let attempt = 1; attempt < attempts; attempt += 1) {
-        if (
-          !status.files.some(item =>
-            ["queued", "processing", "pending_upload"].includes(item.status)
-          )
-        ) {
-          break
-        }
-        await new Promise(resolve => window.setTimeout(resolve, 1000))
-        status = await browserPodcastAdminClient().uploadBatchStatus(batchId)
-        applyStatus(status)
-      }
-      if (status.files.some(item => item.status === "completed")) {
-        setFiles(current => ({
-          ...current,
-          ...Object.fromEntries(
-            status.files
-              .filter(item => item.status === "completed")
-              .map(item => [item.locale, null])
-          ),
-        }))
-        await router.invalidate({ sync: true })
-      }
-    } catch (caught) {
-      await redirectExpiredSession(caught)
-    }
-  }
-
-  batchStatusPoller.current = batchId => {
-    void refreshBatchStatus(batchId)
-  }
-
-  useEffect(() => {
-    if (
-      !batch ||
-      Object.values(batch.files).every(
-        progress =>
-          progress && terminalPodcastSessionStatuses.has(progress.status)
+      setLocaleProgress(target.locale, { status: "verifying", progress: 100 })
+      const result = await browserPodcastAdminClient().completeDirectUpload(
+        target.upload_token,
+        csrfToken
       )
-    ) {
-      return
+      markLocaleCompleted(target.locale, result.sha256)
+    } catch (caught) {
+      if (await redirectExpiredSession(caught)) return
+      setLocaleProgress(target.locale, {
+        status:
+          caught instanceof DOMException && caught.name === "AbortError"
+            ? "cancelled"
+            : "failed",
+        progress: 0,
+        error: caught instanceof Error ? caught.message : t("unexpectedError"),
+      })
+    } finally {
+      delete abortControllers.current[target.locale]
     }
-    const interval = window.setInterval(
-      () => batchStatusPoller.current(batch.id),
-      2_000
-    )
-    return () => window.clearInterval(interval)
-  }, [batch])
+  }
 
   async function retryLocale(targetLocale: Locale) {
     const target = uploadTargets.current[targetLocale]
@@ -565,119 +416,64 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
     setError("")
     try {
       const csrfToken = await requireCsrfToken()
-      const currentStatus = await browserPodcastAdminClient().uploadBatchStatus(
-        batch.id
-      )
-      const session = currentStatus.files.find(
-        item => item.locale === targetLocale
-      )
-      const resumeExistingSession =
-        session?.status === "pending_upload" &&
-        Date.parse(target.expires_at) > Date.now()
-      const hasBlockingSibling = currentStatus.files.some(item => {
+      // Retry completion before re-uploading, including after a lost DB response.
+      try {
+        setLocaleProgress(targetLocale, { status: "verifying", progress: 100 })
+        const result = await browserPodcastAdminClient().completeDirectUpload(
+          target.upload_token,
+          csrfToken
+        )
+        markLocaleCompleted(targetLocale, result.sha256)
+        await router.invalidate()
+        return
+      } catch (caught) {
+        if (await redirectExpiredSession(caught)) return
         if (
-          item.locale === targetLocale ||
-          terminalPodcastSessionStatuses.has(item.status)
-        ) {
-          return false
-        }
-        const siblingTarget = uploadTargets.current[item.locale]
-        return !(
-          item.status === "pending_upload" &&
-          siblingTarget &&
-          Date.parse(siblingTarget.expires_at) <= Date.now()
+          !(caught instanceof ApiError) ||
+          ![409, 410].includes(caught.status)
         )
-      })
-      if (!resumeExistingSession && hasBlockingSibling) {
-        setError(t("podcastRetryWaitingForSiblings"))
-        await refreshBatchStatus(batch.id)
-        return
-      }
-      if (session?.status === "completed") {
-        await refreshBatchStatus(batch.id)
-        return
-      }
-      if (
-        !session ||
-        ["failed", "conflict", "expired"].includes(session.status)
-      ) {
-        idempotencyKey.current = null
-        await startBatch(
-          { tradingDate: batch.tradingDate, reason: batch.reason },
-          false,
-          {},
-          [{ locale: targetLocale, file }]
+          throw caught
+        if (
+          caught.status === 409 &&
+          (caught.detail as { code?: string } | null)?.code !==
+            "object_not_uploaded"
         )
-        return
-      }
-      if (["queued", "processing"].includes(session.status)) {
-        await refreshBatchStatus(batch.id)
-        return
+          throw caught
       }
       if (Date.parse(target.expires_at) <= Date.now()) {
-        idempotencyKey.current = null
         await startBatch(
           { tradingDate: batch.tradingDate, reason: batch.reason },
           false,
           {},
           [{ locale: targetLocale, file }]
         )
-        return
+      } else {
+        await transferAndComplete(file, target, csrfToken)
+        await router.invalidate()
       }
-      const controller = new AbortController()
-      abortControllers.current[targetLocale] = controller
-      setLocaleProgress(targetLocale, { status: "uploading", progress: 0 })
-      let putStatus: number
-      try {
-        putStatus = await putPodcastFile(
-          file,
-          target,
-          progress =>
-            setLocaleProgress(targetLocale, { status: "uploading", progress }),
-          controller.signal
-        )
-      } catch (caught) {
-        if (caught instanceof DOMException && caught.name === "AbortError") {
-          setLocaleProgress(targetLocale, { status: "cancelled", progress: 0 })
-          return
-        }
-        putStatus = 0
-      } finally {
-        delete abortControllers.current[targetLocale]
-      }
-      if (![200, 201, 204, 412, 0].includes(putStatus)) {
-        throw new Error(`http-${putStatus}`)
-      }
-      await browserPodcastAdminClient().finalizeUploadBatchFile(
-        batch.id,
-        targetLocale,
-        csrfToken
-      )
-      setLocaleProgress(targetLocale, { status: "processing", progress: 100 })
-      await refreshBatchStatus(batch.id)
     } catch (caught) {
       if (!(await redirectExpiredSession(caught))) {
         setLocaleProgress(targetLocale, {
           status: "failed",
           progress: 0,
-          error: caught instanceof Error ? caught.message : "network",
+          error:
+            caught instanceof Error ? caught.message : t("unexpectedError"),
         })
-        setError(
-          caught instanceof Error ? caught.message : t("unexpectedError")
-        )
       }
     } finally {
       setPending(false)
     }
   }
 
-  const hasNonterminalBatchFiles = Boolean(
-    batch &&
-    Object.values(batch.files).some(
-      progress =>
-        progress && !terminalPodcastSessionStatuses.has(progress.status)
-    )
-  )
+  const batchStatus = batch
+    ? Object.values(batch.files).every(item => item?.status === "completed")
+      ? "completed"
+      : pending
+        ? "pending"
+        : Object.values(batch.files).some(item => item?.status === "completed")
+          ? "partial"
+          : "failed"
+    : "pending"
 
   return (
     <form
@@ -699,7 +495,7 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
             <input
               required
               type="date"
-              disabled={pending || hasNonterminalBatchFiles}
+              disabled={pending}
               value={field.state.value}
               onBlur={field.handleBlur}
               onChange={event => {
@@ -720,10 +516,19 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
               key={locale}
               locale={locale}
               file={files[locale]}
-              disabled={pending || hasNonterminalBatchFiles}
+              disabled={pending}
               onChange={file => {
                 clearReplacementConfirmation()
                 setFiles(current => ({ ...current, [locale]: file }))
+                delete uploadTargets.current[locale]
+                setBatch(current => {
+                  if (!current) return current
+                  const remaining = { ...current.files }
+                  delete remaining[locale]
+                  return Object.keys(remaining).length > 0
+                    ? { ...current, files: remaining }
+                    : null
+                })
               }}
             />
           ))}
@@ -734,7 +539,7 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
           <label>
             {t("podcastAuditReason")}
             <select
-              disabled={pending || hasNonterminalBatchFiles}
+              disabled={pending}
               value={field.state.value}
               onBlur={field.handleBlur}
               onChange={event => {
@@ -812,16 +617,9 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <strong>
               {t("podcastBatchStatus", {
-                status: t(`podcastBatch_${batch.status}`),
+                status: t(`podcastBatch_${batchStatus}`),
               })}
             </strong>
-            <button
-              type="button"
-              className="text-sm font-bold"
-              onClick={() => void refreshBatchStatus(batch.id)}
-            >
-              {t("podcastRefreshStatus")}
-            </button>
           </div>
           {podcastLocales
             .filter(item => batch.files[item])
@@ -834,29 +632,6 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
                 "conflict",
                 "pending_upload",
               ].includes(progress.status)
-              const resumablePendingUpload =
-                progress.status === "pending_upload" &&
-                !abortControllers.current[item] &&
-                Date.parse(uploadTargets.current[item]?.expires_at ?? "") >
-                  Date.now()
-              const hasNonterminalSibling = podcastLocales.some(sibling => {
-                const siblingProgress = batch.files[sibling]
-                if (
-                  sibling === item ||
-                  !siblingProgress ||
-                  terminalPodcastSessionStatuses.has(siblingProgress.status)
-                ) {
-                  return false
-                }
-                const siblingExpiresAt = Date.parse(
-                  uploadTargets.current[sibling]?.expires_at ?? ""
-                )
-                return !(
-                  siblingProgress.status === "pending_upload" &&
-                  Number.isFinite(siblingExpiresAt) &&
-                  siblingExpiresAt <= Date.now()
-                )
-              })
               return (
                 <div
                   className="grid grid-cols-[minmax(4rem,auto)_1fr_auto] items-center gap-3 text-sm"
@@ -879,17 +654,6 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
                           })}
                         </span>
                       )}
-                      {retryable &&
-                        (!resumablePendingUpload ||
-                          progress.status !== "pending_upload") &&
-                        hasNonterminalSibling && (
-                          <span
-                            className="text-xs text-sea-ink-soft"
-                            role="status"
-                          >
-                            {t("podcastRetryWaitingForSiblings")}
-                          </span>
-                        )}
                     </div>
                     {progress.status === "uploading" && (
                       <progress
@@ -913,9 +677,7 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
                     <button
                       type="button"
                       disabled={
-                        pending ||
-                        Boolean(abortControllers.current[item]) ||
-                        (!resumablePendingUpload && hasNonterminalSibling)
+                        pending || Boolean(abortControllers.current[item])
                       }
                       onClick={() => void retryLocale(item)}
                     >
@@ -927,17 +689,12 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
             })}
         </section>
       )}
-      {hasNonterminalBatchFiles && (
-        <p className="m-0 text-sm text-sea-ink-soft" role="status">
-          {t("podcastBatchWaitBeforeNewUpload")}
-        </p>
-      )}
       <form.Subscribe selector={state => state.isSubmitting}>
         {formPending => (
           <button
             className="primary-action w-fit"
             type="submit"
-            disabled={formPending || pending || hasNonterminalBatchFiles}
+            disabled={formPending || pending}
           >
             {formPending || pending
               ? t("submitting")

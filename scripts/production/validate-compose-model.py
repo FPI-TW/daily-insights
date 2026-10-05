@@ -13,7 +13,6 @@ SERVICES = (
     "web",
     "nginx",
     "orchestration-worker",
-    "podcast-media-worker",
     "orchestration-dispatcher",
 )
 API_ENVIRONMENT_KEYS = {
@@ -70,10 +69,18 @@ def main() -> None:
             service.get("container_name") == f"daily-insights-{name}",
             f"{name} must use a stable container name for reboot diagnostics",
         )
-        require("@sha256:" in service.get("image", ""), f"{name} image must use a digest")
+        require(
+            "@sha256:" in service.get("image", ""), f"{name} image must use a digest"
+        )
         require("build" not in service, f"{name} must not build on the host")
-        require(service.get("restart") == "unless-stopped", f"{name} restart policy is invalid")
-        require(service.get("read_only") is True, f"{name} root filesystem must be read-only")
+        require(
+            service.get("restart") == "unless-stopped",
+            f"{name} restart policy is invalid",
+        )
+        require(
+            service.get("read_only") is True,
+            f"{name} root filesystem must be read-only",
+        )
         require(bool(service.get("healthcheck")), f"{name} must define a healthcheck")
         stop_grace = service.get("stop_grace_period")
         require(
@@ -98,6 +105,14 @@ def main() -> None:
         api_environment.get("DAILY_INSIGHTS_TRUSTED_PROXY_CIDRS")
         == EXPECTED_PROXY_NETWORK,
         "API trusted proxy setting must match the app network",
+    )
+    require(
+        any(
+            volume.get("target") == "/var/spool/podcast-media"
+            and volume.get("type") == "volume"
+            for volume in services["api"].get("volumes", [])
+        ),
+        "API must have disk-backed audio verification spool space",
     )
     worker_environment = services["orchestration-worker"].get("environment", {})
     require(
@@ -143,41 +158,7 @@ def main() -> None:
         },
         "orchestration-dispatcher must only receive queueing and activation settings",
     )
-    media_environment = services["podcast-media-worker"].get("environment", {})
-    require(
-        {
-            "DAILY_INSIGHTS_ENVIRONMENT",
-            "DAILY_INSIGHTS_RUNTIME_ROLE",
-            "DAILY_INSIGHTS_DATABASE_URL",
-            "DAILY_INSIGHTS_R2_ENDPOINT_URL",
-            "DAILY_INSIGHTS_R2_BUCKET_NAME",
-            "DAILY_INSIGHTS_R2_ACCESS_KEY_ID",
-            "DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY",
-            "DAILY_INSIGHTS_PODCAST_MEDIA_POLL_SECONDS",
-            "DAILY_INSIGHTS_PODCAST_UPLOAD_CLEANUP_GRACE_SECONDS",
-            "DAILY_INSIGHTS_PODCAST_MEDIA_SPOOL_DIR",
-        }.issubset(media_environment),
-        "podcast-media-worker must receive its database, scoped R2, and worker settings",
-    )
-    require(
-        media_environment.get("DAILY_INSIGHTS_RUNTIME_ROLE") == "media-worker",
-        "podcast-media-worker must use its least-privilege runtime role",
-    )
-    require(
-        not {
-            "DAILY_INSIGHTS_SESSION_SECRET",
-            "DAILY_INSIGHTS_PASSWORD_PEPPER",
-        }.intersection(media_environment),
-        "podcast-media-worker must not receive API authentication secrets",
-    )
-    require(
-        media_environment.get("DAILY_INSIGHTS_R2_ACCESS_KEY_ID")
-        != api_environment.get("DAILY_INSIGHTS_R2_ACCESS_KEY_ID")
-        and media_environment.get("DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY")
-        != api_environment.get("DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY"),
-        "podcast-media-worker must use separate R2 credentials from the API signer",
-    )
-    for name in ("orchestration-worker", "podcast-media-worker", "orchestration-dispatcher"):
+    for name in ("orchestration-worker", "orchestration-dispatcher"):
         require(
             services[name].get("environment", {}).get("DAILY_INSIGHTS_ENVIRONMENT")
             == "production",
@@ -185,7 +166,10 @@ def main() -> None:
         )
         require(not services[name].get("ports"), f"{name} must not publish a host port")
     web_environment = services["web"].get("environment", {})
-    require(web_environment.get("APP_ENV") == "production", "Web environment must be production")
+    require(
+        web_environment.get("APP_ENV") == "production",
+        "Web environment must be production",
+    )
     require(
         web_environment.get("API_INTERNAL_URL") == "http://api:8000",
         "Web must use the internal API service URL",
@@ -215,7 +199,10 @@ def main() -> None:
         for entry in app_network.get("ipam", {}).get("config", [])
         if entry.get("subnet")
     ]
-    require(subnets == [EXPECTED_PROXY_NETWORK], "production app network must use its pinned CIDR")
+    require(
+        subnets == [EXPECTED_PROXY_NETWORK],
+        "production app network must use its pinned CIDR",
+    )
     ipaddress.ip_network(subnets[0], strict=True)
 
     command = [str(item) for item in services["api"].get("command", [])]

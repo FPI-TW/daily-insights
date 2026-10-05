@@ -443,6 +443,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/admin/podcasts/direct-uploads": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Sign Direct Upload */
+    post: operations["admin_podcast_direct_upload_sign"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/podcasts/direct-uploads/complete": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Complete Direct Upload */
+    post: operations["admin_podcast_direct_upload_complete"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/admin/podcasts/upload-batches": {
     parameters: {
       query?: never
@@ -1329,6 +1363,39 @@ export interface components {
         | components["schemas"]["ReportsIndexContext"]
         | components["schemas"]["ReportDetailContext"]
     }
+    /** CompleteUploadRequest */
+    CompleteUploadRequest: {
+      /** Upload Token */
+      upload_token: string
+    }
+    /** CompletedUpload */
+    CompletedUpload: {
+      /**
+       * Asset Id
+       * Format: uuid
+       */
+      asset_id: string
+      /** Duration Seconds */
+      duration_seconds: number | null
+      /**
+       * Episode Id
+       * Format: uuid
+       */
+      episode_id: string
+      /**
+       * Locale
+       * @enum {string}
+       */
+      locale: "zh-hant" | "zh-hans" | "en"
+      /** Sha256 */
+      sha256: string
+      /**
+       * Status
+       * @default completed
+       * @constant
+       */
+      status: "completed"
+    }
     /** ComponentHealth */
     ComponentHealth: {
       /**
@@ -1341,6 +1408,52 @@ export interface components {
     CsrfTokenResponse: {
       /** Csrf Token */
       csrf_token: string
+    }
+    /** DirectUploadRequest */
+    DirectUploadRequest: {
+      /** Files */
+      files: components["schemas"]["UploadRequest"][]
+      /**
+       * Reason
+       * @enum {string}
+       */
+      reason: "initial_upload" | "update_file" | "other"
+      /**
+       * Trading Date
+       * Format: date
+       */
+      trading_date: string
+    }
+    /** DirectUploadResponse */
+    DirectUploadResponse: {
+      /** Files */
+      files: components["schemas"]["DirectUploadTarget"][]
+    }
+    /** DirectUploadTarget */
+    DirectUploadTarget: {
+      /**
+       * Asset Id
+       * Format: uuid
+       */
+      asset_id: string
+      /**
+       * Expires At
+       * Format: date-time
+       */
+      expires_at: string
+      /**
+       * Locale
+       * @enum {string}
+       */
+      locale: "zh-hant" | "zh-hans" | "en"
+      /** Required Headers */
+      required_headers: {
+        [key: string]: string
+      }
+      /** Upload Token */
+      upload_token: string
+      /** Upload Url */
+      upload_url: string
     }
     /** EconomicEvent */
     EconomicEvent: {
@@ -4400,6 +4513,76 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["PodcastEpisodeAdminResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  admin_podcast_direct_upload_sign: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DirectUploadRequest"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["DirectUploadResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  admin_podcast_direct_upload_complete: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CompleteUploadRequest"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["CompletedUpload"]
         }
       }
       /** @description Validation Error */
