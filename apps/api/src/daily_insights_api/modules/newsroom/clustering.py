@@ -22,7 +22,7 @@ from daily_insights_api.modules.newsroom.models import (
     NewsroomSource,
 )
 
-CANDIDATE_EVENT_LIMIT = 5
+CANDIDATE_EVENT_LIMIT = 10
 REPRESENTATIVE_TITLE_LIMIT = 2
 # A would-be new event joins an event opened while its model call was in flight
 # at or above this cosine similarity. Checked under the window lock so two

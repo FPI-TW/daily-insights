@@ -17,7 +17,7 @@ from daily_insights_api import models as registered_models  # noqa: F401
 from daily_insights_api.core.config import Settings
 from daily_insights_api.core.models import Base
 from daily_insights_api.modules.identity.models import User
-from daily_insights_api.modules.newsroom import clock, events_service, triage
+from daily_insights_api.modules.newsroom import clock, clustering, events_service, triage
 from daily_insights_api.modules.newsroom.contracts import EventNew
 from daily_insights_api.modules.newsroom.events_service import EventServiceError
 from daily_insights_api.modules.newsroom.models import (
@@ -385,10 +385,11 @@ async def test_article_joins_the_matched_window_event(
         newsroom_database, trusted, "Trusted: Fed", angle=4, event_id=fed, seen_minutes=5
     )
     await _article(newsroom_database, minor, "Late minor", angle=0, event_id=fed, seen_minutes=9)
-    # Six more open events in the window: only the nearest five are offered.
-    others = [await _event(newsroom_database, f"Other {n}") for n in range(6)]
+    # More open events than the limit: only the nearest ones are offered.
+    limit = clustering.CANDIDATE_EVENT_LIMIT
+    others = [await _event(newsroom_database, f"Other {n}") for n in range(limit + 1)]
     for n, other in enumerate(others):
-        await _article(newsroom_database, minor, f"Other {n}", angle=20 + 10 * n, event_id=other)
+        await _article(newsroom_database, minor, f"Other {n}", angle=20 + 5 * n, event_id=other)
     # Neither another window's event nor a merged event is a candidate.
     yesterday = await _event(newsroom_database, "Yesterday", edition_date=WINDOW - timedelta(1))
     await _article(
@@ -415,7 +416,7 @@ async def test_article_joins_the_matched_window_event(
     assert await _run(_runtime(newsroom_database, llm=llm), "triage") == ["done"]
 
     candidates = llm.payloads[0]["candidate_events"]
-    assert [c["id"] for c in candidates] == [str(fed), *(str(o) for o in others[:4])]
+    assert [c["id"] for c in candidates] == [str(fed), *(str(o) for o in others[: limit - 1])]
     assert candidates[0] == {
         "id": str(fed),
         "working_title": "Fed decision",
@@ -423,7 +424,9 @@ async def test_article_joins_the_matched_window_event(
     }
     assert candidates[1]["titles"] == ["Other 0"]
     assert (await _get(newsroom_database, NewsroomArticle, article_id)).event_id == fed
-    assert await _count(newsroom_database, NewsroomEvent) == 9
+    assert (
+        await _count(newsroom_database, NewsroomEvent) == limit + 4
+    )  # fed, the others, yesterday and merged
 
 
 async def test_irrelevant_article_is_scored_but_not_clustered(
@@ -603,8 +606,9 @@ async def test_new_event_choice_ignores_events_that_predate_the_call(
     newsroom_database: async_sessionmaker[AsyncSession],
 ) -> None:
     source_id = await _source(newsroom_database)
-    # Six near-identical events: five are offered, the sixth existed but was not.
-    events = [await _event(newsroom_database, f"Story {n}") for n in range(6)]
+    # Near-identical events beyond the limit: one existed but was not offered.
+    limit = clustering.CANDIDATE_EVENT_LIMIT
+    events = [await _event(newsroom_database, f"Story {n}") for n in range(limit + 1)]
     for n, event_id in enumerate(events):
         await _article(newsroom_database, source_id, f"Story {n}", angle=1 + n, event_id=event_id)
     await _queued_for_triage(newsroom_database, source_id, "Story again", 0)
@@ -612,8 +616,8 @@ async def test_new_event_choice_ignores_events_that_predate_the_call(
 
     assert await _run(_runtime(newsroom_database, llm=llm), "triage") == ["done"]
 
-    assert len(llm.payloads[0]["candidate_events"]) == 5
-    assert await _count(newsroom_database, NewsroomEvent) == 7
+    assert len(llm.payloads[0]["candidate_events"]) == limit
+    assert await _count(newsroom_database, NewsroomEvent) == limit + 2
 
 
 # ------------------------------------------------------------ events service
