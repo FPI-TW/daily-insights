@@ -58,6 +58,12 @@ class EditorResult(_Strict):
     ratings: list[EditorRating]
 
 
+class DuplicateGroups(_Strict):
+    """Candidate event ids that report the same core event, one list per story."""
+
+    groups: list[list[str]] = Field(default_factory=list)
+
+
 class RelatedSymbol(_Strict):
     symbol: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
     kind: Literal["index", "equity", "fx", "commodity", "rate", "crypto"]

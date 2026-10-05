@@ -16,9 +16,14 @@ from daily_insights_api.modules.newsroom.assembly import (
     apply_quota,
     event_score,
     fallback_selection,
+    validate_duplicate_groups,
     validate_ratings,
 )
-from daily_insights_api.modules.newsroom.contracts import EditorRating, EditorResult
+from daily_insights_api.modules.newsroom.contracts import (
+    DuplicateGroups,
+    EditorRating,
+    EditorResult,
+)
 from daily_insights_api.modules.newsroom.models import NewsroomEditionItem, NewsroomEvent
 from daily_insights_api.modules.newsroom.translation import (
     _english_is_current,
@@ -273,3 +278,12 @@ async def test_newsroom_assemble_waits_for_the_window_to_close() -> None:
     assert outcome.status == "unavailable"
     assert outcome.error_code == "newsroom_window_open"
     assert outcome.retryable
+
+
+def test_duplicate_groups_keep_known_ids_once_and_drop_singletons() -> None:
+    result = DuplicateGroups(groups=[["a", "b", "a", "zzz"], ["b", "c"], ["c", "d"], ["e"]])
+
+    assert validate_duplicate_groups(result, {"a", "b", "c", "d", "e"}) == [
+        ["a", "b"],
+        ["c", "d"],
+    ]

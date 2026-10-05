@@ -10,6 +10,7 @@ retries fall back to score order (D5).
 
 import asyncio
 import logging
+import math
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
@@ -20,8 +21,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from daily_insights_api.modules.newsroom import clock, queue
-from daily_insights_api.modules.newsroom.contracts import EditorResult
+from daily_insights_api.modules.newsroom import clock, events_service, queue
+from daily_insights_api.modules.newsroom.contracts import DuplicateGroups, EditorResult
 from daily_insights_api.modules.newsroom.models import (
     MARKET_CODES,
     NewsroomArticle,
@@ -39,6 +40,13 @@ from daily_insights_api.modules.newsroom.worker import Runtime
 logger = logging.getLogger(__name__)
 
 EDITOR_PROMPT_VERSION = "newsroom.editor.v1"
+DEDUPE_PROMPT_VERSION = "newsroom.dedupe.v2"
+DEDUPE_HEADLINES = 3
+# The model alone over-groups related stories (same company, same theme); a
+# merge also needs near-identical working titles. Measured on real windows:
+# true repeats scored 0.90-0.99, the model's false groups 0.47-0.69, and a
+# preview against its result 0.80-0.83.
+DEDUPE_TITLE_SIMILARITY = 0.85
 CANDIDATE_LIMIT = 30
 HEADLINES_PER_EVENT = 5
 MULTI_SOURCE_BONUS = 5.0
@@ -247,6 +255,130 @@ def rank_candidates(
     return candidates[:CANDIDATE_LIMIT]
 
 
+# --- Duplicate merge --------------------------------------------------------------
+
+
+def validate_duplicate_groups(result: DuplicateGroups, known: set[str]) -> list[list[str]]:
+    """Usable groups only: known ids, each in one group, two or more per group.
+
+    The merge is best effort, so unknown or repeated ids are dropped rather than
+    failing the assembly.
+    """
+    seen: set[str] = set()
+    groups: list[list[str]] = []
+    for group in result.groups:
+        ids = [
+            event_id
+            for event_id in dict.fromkeys(item.strip() for item in group)
+            if event_id in known and event_id not in seen
+        ]
+        if len(ids) >= 2:
+            groups.append(ids)
+            seen.update(ids)
+    return groups
+
+
+def _dedupe_payload(candidates: Sequence[Candidate]) -> dict[str, Any]:
+    return {
+        "events": [
+            {
+                "event_id": str(candidate.event_id),
+                "working_title": candidate.working_title,
+                "headlines": [title for title, _ in candidate.headlines[:DEDUPE_HEADLINES]],
+            }
+            for candidate in candidates
+        ]
+    }
+
+
+def _cosine(left: Sequence[float], right: Sequence[float]) -> float:
+    dot = sum(a * b for a, b in zip(left, right, strict=True))
+    norm = math.sqrt(sum(a * a for a in left)) * math.sqrt(sum(b * b for b in right))
+    return dot / norm if norm else 0.0
+
+
+async def merge_duplicate_candidates(
+    runtime: Runtime,
+    titles: dict[uuid.UUID, str],
+    articles: dict[uuid.UUID, list[_ArticleRow]],
+) -> int:
+    """Merge candidates that triage split from one story; returns events merged away.
+
+    Per-article triage sometimes opens several events for one big story (similar
+    "market awaits X" events crowd the real one out of its nearest candidates),
+    which spends quota slots on repeats. One model call over every market's
+    candidates proposes groups; an event joins its group's best-covered event
+    only when their working titles are near-identical as well.
+    """
+    union: dict[uuid.UUID, Candidate] = {}
+    for market in MARKET_CODES:
+        for candidate in rank_candidates(titles, articles, market):
+            kept = union.get(candidate.event_id)
+            if kept is None or candidate.score > kept.score:
+                union[candidate.event_id] = candidate
+    if len(union) < 2:
+        return 0
+    event_ids = list(union)
+    async with runtime.session_factory() as database:
+        try:
+            result = await runtime.llm.complete(
+                database,
+                model=runtime.settings.newsroom_editor_model,
+                system=load_prompt("dedupe"),
+                payload=_dedupe_payload(list(union.values())),
+                result_type=DuplicateGroups,
+                audit=CallAudit("editor", None, DEDUPE_PROMPT_VERSION),
+            )
+            groups = validate_duplicate_groups(result, {str(event_id) for event_id in union})
+            vectors = (
+                dict(
+                    zip(
+                        event_ids,
+                        await runtime.embedder.embed(
+                            database,
+                            [titles[event_id] for event_id in event_ids],
+                            audit=CallAudit("embed", None, DEDUPE_PROMPT_VERSION),
+                        ),
+                        strict=True,
+                    )
+                )
+                if groups
+                else {}
+            )
+        except (RetryableStageError, FatalStageError) as error:
+            await database.rollback()
+            database.add_all(error.audit_rows)
+            await database.commit()
+            logger.warning("newsroom.dedupe_failed", extra={"error_code": error.code})
+            return 0
+        merged = 0
+        for group in groups:
+            ids = [uuid.UUID(event_id) for event_id in group]
+            target = max(ids, key=lambda event_id: (len(articles[event_id]), union[event_id].score))
+            sources = [
+                event_id
+                for event_id in ids
+                if event_id != target
+                and _cosine(vectors[target], vectors[event_id]) >= DEDUPE_TITLE_SIMILARITY
+            ]
+            if not sources:
+                continue
+            try:
+                async with database.begin_nested():
+                    await events_service.merge_events(
+                        database, target_id=target, source_ids=sources, user_id=None
+                    )
+            except events_service.EventServiceError as error:
+                logger.warning(
+                    "newsroom.dedupe_merge_skipped",
+                    extra={"target_event_id": str(target), "error_code": error.code},
+                )
+                continue
+            merged += len(sources)
+        await database.commit()
+    return merged
+
+
 # --- Editor pass -----------------------------------------------------------------
 
 
@@ -333,6 +465,7 @@ class AssemblyReport:
     edition_date: date
     ignored_pending_triage: int
     markets: list[MarketReport] = field(default_factory=list)
+    merged_duplicates: int = 0
 
     @property
     def assembled(self) -> list[MarketReport]:
@@ -342,6 +475,7 @@ class AssemblyReport:
         return {
             "edition_date": self.edition_date.isoformat(),
             "ignored_pending_triage": self.ignored_pending_triage,
+            "merged_duplicates": self.merged_duplicates,
             "markets": [
                 {
                     "market": market.market,
@@ -602,7 +736,11 @@ async def assemble_editions(
         )
     async with runtime.session_factory() as database:
         titles, articles = await _load_event_articles(database, edition_date)
-    report = AssemblyReport(edition_date, ignored)
+    merged = await merge_duplicate_candidates(runtime, titles, articles)
+    if merged:
+        async with runtime.session_factory() as database:
+            titles, articles = await _load_event_articles(database, edition_date)
+    report = AssemblyReport(edition_date, ignored, merged_duplicates=merged)
     for market in MARKET_CODES:
         report.markets.append(
             await _assemble_market(
@@ -630,6 +768,8 @@ async def assemble_editions(
         ]
         if ignored:
             lines.append(f"組稿時仍有 {ignored} 篇文章未完成初篩 已忽略")
+        if merged:
+            lines.append(f"已合併 {merged} 個重複事件")
         await runtime.notifier.send(
             Notice(
                 kind="draft_ready",

@@ -1,6 +1,6 @@
 import os
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -26,6 +26,7 @@ from daily_insights_api.modules.newsroom import (
 )
 from daily_insights_api.modules.newsroom.contracts import (
     AnalysisResult,
+    DuplicateGroups,
     EditorResult,
     TranslationResult,
     WhyResult,
@@ -93,6 +94,9 @@ class FakeLlm:
         audit: CallAudit,
     ) -> Any:
         assert system
+        if result_type is DuplicateGroups and result_type not in self.responders:
+            # Tests that do not exercise the duplicate merge see no duplicates.
+            return DuplicateGroups()
         self.calls.append((audit.stage, payload))
         response = self.responders[result_type](payload)
         if isinstance(response, Exception):
@@ -113,14 +117,29 @@ class NoEmbedder:
         raise AssertionError("not used")
 
 
-def _runtime(session_factory: async_sessionmaker[AsyncSession], llm: FakeLlm) -> Runtime:
+def _runtime(
+    session_factory: async_sessionmaker[AsyncSession], llm: FakeLlm, embedder: Any = None
+) -> Runtime:
     return Runtime(
         settings=Settings(newsroom_enabled=True, newsroom_admin_base_url="https://admin.test/"),
         session_factory=session_factory,
         llm=llm,
-        embedder=NoEmbedder(),
+        embedder=embedder or NoEmbedder(),
         notifier=LogNotifier(),
     )
+
+
+class TitleEmbedder:
+    """Unit vectors per working title; titles sharing a prefix point the same way."""
+
+    def __init__(self, directions: dict[str, list[float]]) -> None:
+        self.directions = directions
+
+    async def embed(
+        self, database: AsyncSession, texts: Sequence[str], *, audit: CallAudit
+    ) -> list[list[float]]:
+        del database, audit
+        return [next(v for k, v in self.directions.items() if text.startswith(k)) for text in texts]
 
 
 def _notices(runtime: Runtime) -> LogNotifier:
@@ -1091,3 +1110,73 @@ async def test_stage_error_after_retries_marks_analysis_failed(
     event = await _get(newsroom_database, NewsroomEvent, event_id)
     assert event.analysis_status == "failed"
     assert event.analysis_error_code == "analysis_timeout"
+
+
+async def test_assembly_merges_duplicate_candidates_before_rating(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    reuters = await _source(newsroom_database, "reuters")
+    cna = await _source(newsroom_database, "cna")
+    covered = await _event(
+        newsroom_database,
+        "payrolls-a",
+        sources=[reuters, cna],
+        scores={"global": 90, "tw_equity": 0, "us_equity": 80},
+    )
+    repeat = await _event(
+        newsroom_database,
+        "payrolls-b",
+        sources=[cna],
+        scores={"global": 88, "tw_equity": 0, "us_equity": 78},
+    )
+    other = await _event(
+        newsroom_database, "oil", sources=[cna], scores={"global": 70, "tw_equity": 0}
+    )
+    preview = await _event(
+        newsroom_database, "preview", sources=[cna], scores={"global": 60, "us_equity": 50}
+    )
+
+    def groups(payload: dict[str, Any]) -> dict[str, Any]:
+        ids = {event["working_title"]: event["event_id"] for event in payload["events"]}
+        assert set(ids) == {"payrolls-a", "payrolls-b", "oil", "preview"}
+        # The model over-groups the preview; an unknown id and a singleton are ignored.
+        return {
+            "groups": [
+                [ids["payrolls-b"], ids["payrolls-a"], ids["preview"], "unknown"],
+                [ids["oil"]],
+            ]
+        }
+
+    llm = FakeLlm(
+        {DuplicateGroups: groups, EditorResult: _stars_by_title({"payrolls-a": 5}, default=3)}
+    )
+    embedder = TitleEmbedder({"payrolls": [1.0, 0.0], "preview": [0.6, 0.8], "oil": [0.0, 1.0]})
+    runtime = _runtime(newsroom_database, llm, embedder)
+
+    report = await assembly.assemble_editions(runtime, EDITION_DATE, sleep=_no_sleep)
+
+    assert report.merged_duplicates == 1
+    merged = await _get(newsroom_database, NewsroomEvent, repeat)
+    assert (merged.status, merged.merged_into_id) == ("merged", covered)
+    async with newsroom_database() as database:
+        moved = (
+            await database.scalars(
+                select(NewsroomArticle.event_id).where(NewsroomArticle.event_id == covered)
+            )
+        ).all()
+        edit_log = (await database.scalars(select(NewsroomEditLog))).all()
+    assert len(moved) == 3
+    assert edit_log == []
+    editions = await _editions(newsroom_database)
+    global_items = await _items(newsroom_database, editions["global"].id)
+    # The preview's title is not near-identical, so it stays its own event.
+    assert (await _get(newsroom_database, NewsroomEvent, preview)).status == "open"
+    assert [item.event_id for item in global_items] == [covered, other, preview]
+    editor_titles = {
+        event["working_title"]
+        for stage, payload in llm.calls
+        if "market" in payload
+        for event in payload["events"]
+    }
+    assert "payrolls-b" not in editor_titles
+    assert "已合併 1 個重複事件" in _notices(runtime).sent[0].lines

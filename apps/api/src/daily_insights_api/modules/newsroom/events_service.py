@@ -6,6 +6,7 @@ assignment lock (``clustering.lock_window``) so triage never attaches an article
 to an event mid-change. The caller owns the transaction and commits.
 """
 
+import logging
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
@@ -19,6 +20,8 @@ from daily_insights_api.modules.newsroom.models import (
     NewsroomEditionItem,
     NewsroomEvent,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class EventServiceError(ValueError):
@@ -103,9 +106,12 @@ async def merge_events(
     *,
     target_id: uuid.UUID,
     source_ids: Sequence[uuid.UUID],
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None,
 ) -> None:
     """Move every article of ``source_ids`` into ``target_id``; sources become ``merged``.
+
+    ``user_id`` is ``None`` for the assembly's automatic duplicate merge, which
+    logs instead of writing the admin edit log (that log requires an admin).
 
     Edition items pointing at a source event move to the target (or are dropped
     when the target is already in that edition; a removed target item is then
@@ -187,6 +193,12 @@ async def merge_events(
         events[source].merged_into_id = target_id
     await database.flush()
     requeued = await _requeue_if_placed(database, [target_id])
+    if user_id is None:
+        logger.info(
+            "newsroom.events_auto_merged",
+            extra={"target_event_id": str(target_id), "source_event_ids": _ids(sources)},
+        )
+        return
 
     editlog.record_edit(
         database,
