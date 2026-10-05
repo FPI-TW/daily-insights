@@ -609,6 +609,7 @@ const server = createServer(async (request, response) => {
         unit,
         source: "E2E fixture",
         status: "ok",
+        base_dates: {},
         points: Array.from({ length: 400 }, (_, day) => ({
           date: new Date(Date.UTC(2026, 8, 4) - (399 - day) * 86400000)
             .toISOString()

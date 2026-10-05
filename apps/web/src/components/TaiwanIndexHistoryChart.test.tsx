@@ -138,7 +138,7 @@ describe("TaiwanIndexHistoryChart", () => {
       <TaiwanIndexHistoryChart
         history={history}
         locale="en"
-        movingAverages={Promise.resolve(averages)}
+        movingAverages={averages}
       />
     )
     await waitFor(() =>
@@ -208,21 +208,25 @@ describe("TaiwanIndexHistoryChart", () => {
     )
   })
   it("keeps the initial averages request pending while showing available candles", async () => {
-    let resolve!: (value: IndexMovingAverageMap) => void
-    const promise = new Promise<IndexMovingAverageMap>(done => {
-      resolve = done
-    })
-    show(
+    const { rerender } = show(
       <TaiwanIndexHistoryChart
         history={history}
         locale="en"
-        movingAverages={promise}
+        movingAveragesPending
       />
     )
     expect(screen.getByText("Loading moving averages…")).toBeVisible()
     expect(screen.queryByText(/currently unavailable/)).toBeNull()
     expect(within(candles()).getByTestId("index-chart")).toBeInTheDocument()
-    resolve(averages)
+    rerender(
+      <I18nextProvider i18n={createI18n("en")}>
+        <TaiwanIndexHistoryChart
+          history={history}
+          locale="en"
+          movingAverages={averages}
+        />
+      </I18nextProvider>
+    )
     await waitFor(() =>
       expect(
         screen.getByRole("meter", { name: "20MA bias" })

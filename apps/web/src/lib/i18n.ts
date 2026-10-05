@@ -903,6 +903,8 @@ const resources: Resource = {
       podcastBatchReplacementWarning:
         "以下語系已有音檔：{{locales}}。確認後將覆寫檔案。",
       podcastMissingLocales: "缺少語系：{{locales}}",
+      marketNewsLoading: "正在載入市場新聞。",
+      marketNavigationLoading: "正在載入市場導覽。",
       dailyNewsEyebrow: "每日精選",
       dailyNewsTitle: "本日重大新聞",
       dailyNewsUnavailable: "本日重大新聞尚未產生，請稍後再試。",
@@ -1825,6 +1827,8 @@ const resources: Resource = {
       podcastBatchReplacementWarning:
         "以下语言已有音频：{{locales}}。确认后将覆盖文件。",
       podcastMissingLocales: "缺少语言：{{locales}}",
+      marketNewsLoading: "正在加载市场新闻。",
+      marketNavigationLoading: "正在加载市场导航。",
       dailyNewsEyebrow: "每日精选",
       dailyNewsTitle: "本日重大新闻",
       dailyNewsUnavailable: "本日重大新闻尚未生成，请稍后再试。",
@@ -2791,6 +2795,8 @@ const resources: Resource = {
       podcastBatchReplacementWarning:
         "Audio already exists for: {{locales}}. Confirm to overwrite the files.",
       podcastMissingLocales: "Missing languages: {{locales}}",
+      marketNewsLoading: "Loading market news",
+      marketNavigationLoading: "Loading market navigation",
       dailyNewsEyebrow: "DAILY SELECTION",
       dailyNewsTitle: "Today’s major news",
       dailyNewsUnavailable:

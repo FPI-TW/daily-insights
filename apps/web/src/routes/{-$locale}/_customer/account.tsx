@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useRouter } from "@tanstack/react-router"
 import { Check } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
@@ -12,7 +13,10 @@ import {
   requireCsrfToken,
 } from "#/lib/auth"
 import { fadeIn, reveal, toast, useEnterAnimation } from "#/lib/motion"
-import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
+import {
+  clearMarketQueries,
+  useSessionExpiryRedirect,
+} from "#/lib/useSessionExpiry"
 
 export const Route = createFileRoute("/{-$locale}/_customer/account")({
   component: AccountPage,
@@ -71,6 +75,7 @@ function AccountPage() {
   const { locale, user } = Route.useRouteContext()
   const { t } = useTranslation()
   const router = useRouter()
+  const queryClient = useQueryClient()
   const animate = useEnterAnimation()
   const redirectExpiredSession = useSessionExpiryRedirect(locale, "customer")
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false)
@@ -110,6 +115,7 @@ function AccountPage() {
     setSignOutError(null)
     try {
       await browserAuthClient().logout(await requireCsrfToken())
+      clearMarketQueries(queryClient)
       rememberCsrfToken(null)
       await router.invalidate()
       await router.navigate({ to: "/{-$locale}/login", params: { locale } })

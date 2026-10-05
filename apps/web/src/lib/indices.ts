@@ -1,19 +1,9 @@
 import {
-  createMarketClient,
-  marketCodeSchema,
   trackedIndexCatalog,
   type IndexDailyBar,
   type IndexMovingAverages,
   type MarketCode,
 } from "@daily-insights/api-client"
-import { createServerTransport } from "@daily-insights/api-client/server"
-import { createServerFn } from "@tanstack/react-start"
-import {
-  getRequestHeader,
-  setResponseHeader,
-} from "@tanstack/react-start/server"
-import { z } from "zod"
-
 export type IndexHistorySeries = {
   symbol: string
   bars: IndexDailyBar[]
@@ -38,20 +28,6 @@ export type VixHistory = {
 }
 
 export type IndexMovingAverageMap = Record<string, IndexMovingAverages>
-
-const historyRangeSchema = z.object({
-  start: z.iso.date(),
-  end: z.iso.date(),
-})
-
-const marketIndexRequestSchema = z.object({
-  marketCode: marketCodeSchema,
-  range: historyRangeSchema.optional(),
-})
-
-const vixHistoryRequestSchema = z.object({
-  range: historyRangeSchema.optional(),
-})
 
 export const chartMarketCodes = ["us_equity", "tw_equity"] as const
 
@@ -127,85 +103,6 @@ export function twoYearTaipeiRange(now = taipeiDateParts()) {
   const start = isoDate(targetYear, now.month, Math.min(now.day, lastDay))
   return { start, end }
 }
-
-function serverMarketClient() {
-  const apiUrl = process.env.API_INTERNAL_URL
-  if (!apiUrl) throw new Error("API_INTERNAL_URL is required by the web server")
-  const cookie = getRequestHeader("cookie")
-  const requestId = getRequestHeader("x-request-id")
-  return createMarketClient(
-    createServerTransport(apiUrl, {
-      ...(cookie ? { cookie } : {}),
-      ...(requestId ? { requestId } : {}),
-    })
-  )
-}
-
-export const getMarketIndexHistory = createServerFn({ method: "GET" })
-  .validator(marketIndexRequestSchema)
-  .handler(async ({ data }): Promise<MarketIndexHistory> => {
-    setResponseHeader("Cache-Control", "no-store")
-    const range = data.range ?? twoYearTaipeiRange()
-    if (
-      !(chartMarketCodes as readonly MarketCode[]).includes(data.marketCode)
-    ) {
-      return {
-        marketCode: data.marketCode,
-        ...range,
-        series: [],
-        failedSymbols: [],
-      }
-    }
-
-    const client = serverMarketClient()
-    const symbols = indexChartSymbolsForMarket(data.marketCode)
-    const outcomes = await Promise.allSettled(
-      symbols.map(symbol => client.indexDailyBars(symbol, range))
-    )
-
-    return {
-      marketCode: data.marketCode,
-      ...range,
-      ...indexHistoryOutcomes(symbols, outcomes),
-    }
-  })
-
-export const getMarketIndexMovingAverages = createServerFn({ method: "GET" })
-  .validator(marketIndexRequestSchema)
-  .handler(async ({ data }): Promise<IndexMovingAverageMap> => {
-    setResponseHeader("Cache-Control", "no-store")
-    if (
-      !(chartMarketCodes as readonly MarketCode[]).includes(data.marketCode)
-    ) {
-      return {}
-    }
-    const range = data.range ?? twoYearTaipeiRange()
-    const client = serverMarketClient()
-    const symbols = indexChartSymbolsForMarket(data.marketCode)
-    const outcomes = await Promise.allSettled(
-      symbols.map(symbol => client.indexMovingAverages(symbol, range))
-    )
-    return indexMovingAverageOutcomes(symbols, outcomes)
-  })
-
-export const getVixHistory = createServerFn({ method: "GET" })
-  .validator(vixHistoryRequestSchema)
-  .handler(async ({ data }): Promise<VixHistory> => {
-    setResponseHeader("Cache-Control", "no-store")
-    const range = data.range ?? twoYearTaipeiRange()
-    const client = serverMarketClient()
-    const [bars, indicators] = await Promise.allSettled([
-      client.indexDailyBars(VIX_SYMBOL, range),
-      client.indexMovingAverages(VIX_SYMBOL, range),
-    ])
-    if (bars.status === "rejected") throw bars.reason
-    return {
-      symbol: VIX_SYMBOL,
-      ...range,
-      bars: bars.value,
-      indicators: indicators.status === "fulfilled" ? indicators.value : null,
-    }
-  })
 
 export function indexNameKey(symbol: string) {
   return (
