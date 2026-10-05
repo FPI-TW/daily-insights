@@ -176,3 +176,25 @@ without another provider request.
 Provenance 的 response digest 保留完整原始回應，query fingerprint 對應實際
 請求；record count 與 as-of 則對應接受的已完成日線。重試若持續遇到歷史衝突、
 EOD 多重符合或 schema／metadata 異常，應調查供應商回應，不能放寬契約。
+
+## Data management display
+
+Data Management shows localized status icons at the routine, job, function, and
+attempt levels. Refresh jobs (`function`) and publication jobs (`projection`)
+have distinct labels and icons. The publication-only `news_publish_job` also
+uses the publication label despite its function kind; mixed refresh jobs retain
+the refresh label. Displayed execution times use Asia/Taipei.
+The daily routine section includes the catalog's
+Taipei date and preceding four calendar days, newest edition first; future dates
+and older routines are excluded from the fetched routine records.
+
+Latest results retain native pagination. Jobs are grouped only by a shared
+`routine_run_id` or explicit `depends_on` / `downstream_jobs` links; separate
+manual executions with the same job key and edition remain separate. Within each
+page-local group, dependency precedence determines the displayed steps, then
+start time (or queue time for pending jobs) breaks ties. This is a display order;
+independent jobs may run concurrently, and scheduler execution is unchanged.
+Linked job IDs absent from the page are disclosed rather than fetched or inferred.
+Step numbers restart within each group and page. A thicker outer outline marks
+each task group; individual steps retain their thin borders. Native details, errors, and
+active-job cancellation remain available.
