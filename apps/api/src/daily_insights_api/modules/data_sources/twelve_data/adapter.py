@@ -3,7 +3,7 @@ import json
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from itertools import pairwise
+from itertools import groupby, pairwise
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
@@ -19,9 +19,10 @@ from daily_insights_api.modules.data_sources.twelve_data.transport import (
     TwelveDataTransportResponse,
 )
 
-TWELVE_DATA_CONTRACT_VERSION = "2026-09-17.v7"
+TWELVE_DATA_CONTRACT_VERSION = "2026-10-05.v8"
 TWELVE_DATA_CONTRACT_HASH = hashlib.sha256(
-    b"twelve-data:eod,time_series,completed-daily-bars,dp11:2026-09-17.v7"
+    b"twelve-data:eod,time_series,completed-daily-bars,dp11,"
+    b"raw-nondescending,completed-ohlc-range,exact-duplicates,unique-eod-row:2026-10-05.v8"
 ).hexdigest()
 # Commodity 1day metadata is inconsistent: most USD commodities spell out
 # "US Dollar", while HG1 (with type=commodity) returns the ISO code. Both
@@ -127,11 +128,11 @@ class TwelveDataAdapter:
             provenances.append(group_eods.provenance)
         results: dict[str, CompletedPriceResult] = {}
         for symbol in symbols:
-            series = await self.get_daily_bars(
+            series = await self._get_daily_bars(
                 market=market,
                 symbol=symbol,
                 expected_currency=expected_currencies[symbol],
-                outputsize=max(2, outputsize),
+                outputsize=max(4, outputsize),
                 expected_asset_type=(expected_asset_types or {}).get(symbol),
                 symbol_type=types.get(symbol),
                 # `/eod` is requested at 11 decimal places. Match that
@@ -139,10 +140,9 @@ class TwelveDataAdapter:
                 # rejected merely because `/time_series` defaults to 5 dp.
                 dp=11,
                 minimum_items=2,
+                eod_anchor=eods[symbol],
             )
-            completed = tuple(
-                item for item in series.items if item.trade_date <= eods[symbol].as_of
-            )
+            completed = series.items
             if len(completed) < 2:
                 raise DataSourceContractError(
                     "Twelve Data returned fewer than two completed sessions"
@@ -182,6 +182,35 @@ class TwelveDataAdapter:
         timezone: str | None = None,
         minimum_items: int | None = None,
     ) -> DailyBarsResult:
+        """Fetch strictly ascending daily bars without duplicate resolution."""
+        return await self._get_daily_bars(
+            market=market,
+            symbol=symbol,
+            expected_currency=expected_currency,
+            outputsize=outputsize,
+            expected_asset_type=expected_asset_type,
+            symbol_type=symbol_type,
+            dp=dp,
+            end_date=end_date,
+            timezone=timezone,
+            minimum_items=minimum_items,
+        )
+
+    async def _get_daily_bars(
+        self,
+        *,
+        market: MarketCode,
+        symbol: str,
+        expected_currency: str,
+        outputsize: int,
+        expected_asset_type: str | None = None,
+        symbol_type: str | None = None,
+        dp: int | None = None,
+        end_date: date | None = None,
+        timezone: str | None = None,
+        minimum_items: int | None = None,
+        eod_anchor: EodResult | None = None,
+    ) -> DailyBarsResult:
         if not 1 <= outputsize <= 5_000:
             raise ValueError("outputsize must be between 1 and 5000")
         if dp is not None and not 0 <= dp <= 11:
@@ -220,6 +249,10 @@ class TwelveDataAdapter:
             raise DataSourceContractError(
                 "Twelve Data time-series asset type did not match the launch manifest"
             )
+        # Validate the full response schema first, and never hide source reordering
+        # behind the EOD cutoff or normalization. Equal future dates are harmless.
+        if any(left.datetime > right.datetime for left, right in pairwise(payload.values)):
+            raise DataSourceContractError("Twelve Data time series must be strictly ascending")
         items = tuple(
             DailyBar(
                 instrument_source_id=symbol,
@@ -234,7 +267,20 @@ class TwelveDataAdapter:
                 source="twelve_data",
             )
             for item in payload.values
+            if eod_anchor is None or item.datetime <= eod_anchor.as_of
         )
+        if any(
+            item.low is None
+            or item.high is None
+            or item.open is None
+            or item.close is None
+            or not item.low <= item.open <= item.high
+            or not item.low <= item.close <= item.high
+            for item in items
+        ):
+            raise DataSourceContractError("Twelve Data daily bars violated the OHLC range")
+        if eod_anchor is not None:
+            items = _completed_bars(items, eod_anchor)
         if not items:
             raise DataSourceContractError("Twelve Data returned an empty time series")
         required_items = outputsize if minimum_items is None else minimum_items
@@ -302,6 +348,32 @@ class TwelveDataAdapter:
                 len(items),
             ),
         )
+
+
+def _completed_bars(items: tuple[DailyBar, ...], eod: EodResult) -> tuple[DailyBar, ...]:
+    """Resolve only consumed-value duplicates and uniquely EOD-matched full rows.
+
+    EOD corroborates date and close; the selected provider row owns its OHL and
+    nullable volume. Every candidate has already passed schema and range checks.
+    """
+    completed: list[DailyBar] = []
+    for trade_date, group in groupby(items, key=lambda item: item.trade_date):
+        distinct: list[DailyBar] = []
+        for item in group:
+            if item not in distinct:
+                distinct.append(item)
+        if len(distinct) == 1:
+            completed.append(distinct[0])
+        elif trade_date == eod.as_of:
+            matches = [item for item in distinct if item.close == eod.close]
+            if len(matches) != 1:
+                raise DataSourceContractError(
+                    "Twelve Data EOD duplicate did not match one distinct daily row"
+                )
+            completed.append(matches[0])
+        else:
+            raise DataSourceContractError("Twelve Data historical daily bars conflict")
+    return tuple(completed)
 
 
 def _parse_eods(

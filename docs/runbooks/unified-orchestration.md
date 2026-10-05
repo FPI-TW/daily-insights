@@ -154,3 +154,25 @@ jobs are backfilled to one attempt because historical projection attempt counts
 were not recorded; new claims are counted exactly. FunctionRun attempt counts
 already exist and are retained, so exhausted waiting functions are reconciled
 without another provider request.
+
+## Twelve Data 已完成日線契約
+
+契約 `2026-10-05.v8` 的 completed-price 路徑以官方 `/eod` 日期與 close
+為錨點，`/time_series` 維持 `order=ASC`、`dp=11`，至少請求 4 筆原始資料，
+最大 `outputsize` 仍為 5000；不足兩個不同的已完成日期仍拒收，不補值或改取未收盤資料。
+
+先驗證完整回應 schema、symbol、interval、currency 與預期 asset type，以及全部
+原始日期沒有倒序，再排除 EOD 日期之後的日線。未來資料即使不會採用，若 schema
+異常仍拒收。所有保留候選均須符合有限 OHLC、非負 optional volume，以及
+`low <= open/close <= high`，包含最後不被選取的衝突候選；不另加通用價格正值限制。
+
+同日的 datetime、OHLC 與 nullable volume 完全相同時可合併；`None` 與 `0`
+不同。歷史日期存在衝突即拒收。只有 EOD 當日的衝突允許用 exact Decimal close
+核對：必須恰有一種不同完整日線符合官方 close，才保留該完整供應商 row。沒有符合、
+或多種不同 OHLC／volume 同時符合 close 都拒收。不可排序修補、盲取最後一筆、
+混用欄位或改寫 close。EOD 僅佐證日期與 close，OHL／volume 仍是通過範圍驗證的
+供應商資料。通用 `get_daily_bars` 仍要求日期嚴格遞增，不啟用此重複處理。
+
+Provenance 的 response digest 保留完整原始回應，query fingerprint 對應實際
+請求；record count 與 as-of 則對應接受的已完成日線。重試若持續遇到歷史衝突、
+EOD 多重符合或 schema／metadata 異常，應調查供應商回應，不能放寬契約。
