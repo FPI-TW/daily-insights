@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import json
 from datetime import date
 from decimal import Decimal
 
@@ -11,7 +13,11 @@ from daily_insights_api.modules.data_sources.errors import (
     DataSourceContractError,
     DataSourceTransientError,
 )
-from daily_insights_api.modules.data_sources.twelve_data.adapter import TwelveDataAdapter
+from daily_insights_api.modules.data_sources.twelve_data.adapter import (
+    TWELVE_DATA_CONTRACT_HASH,
+    CompletedPricesResult,
+    TwelveDataAdapter,
+)
 from daily_insights_api.modules.data_sources.twelve_data.transport import (
     RetryPolicy,
     TwelveDataTransport,
@@ -602,3 +608,352 @@ async def test_commodity_eod_rejects_incomplete_or_invalid_batch_contract(
             symbols=("XBR/USD", "XAU/USD"),
             expected_currencies={"XBR/USD": "USD", "XAU/USD": "USD"},
         )
+
+
+def _bar(
+    trade_date: str,
+    close: str,
+    *,
+    open_: str | None = None,
+    high: str | None = None,
+    low: str | None = None,
+    volume: int | None = None,
+) -> dict[str, object]:
+    price = Decimal(close)
+    return {
+        "datetime": trade_date,
+        "open": open_ or close,
+        "high": high or str(price + 1),
+        "low": low or str(price - 1),
+        "close": close,
+        "volume": volume,
+    }
+
+
+def _completed_adapter(
+    values: list[dict[str, object]],
+    *,
+    symbol: str = "XAU/USD",
+    eod_date: str = "2026-10-04",
+    eod_close: str = "4137.51110",
+    currency: str = "US Dollar",
+    asset_type: str = "Precious Metal",
+    requests: list[httpx.Request] | None = None,
+) -> TwelveDataAdapter:
+    def respond(request: httpx.Request) -> httpx.Response:
+        if requests is not None:
+            requests.append(request)
+        payload: dict[str, object]
+        if request.url.path == "/eod":
+            payload = {
+                "symbol": symbol,
+                "exchange": "COMMODITY",
+                "datetime": eod_date,
+                "close": eod_close,
+            }
+        else:
+            payload = {
+                "meta": {
+                    "symbol": symbol,
+                    "interval": "1day",
+                    "currency_quote": currency,
+                    "type": asset_type,
+                },
+                "values": values,
+                "status": "ok",
+            }
+        return httpx.Response(200, json=payload, request=request)
+
+    return TwelveDataAdapter(transport(httpx.MockTransport(respond)))
+
+
+async def _completed_result(
+    adapter: TwelveDataAdapter,
+    *,
+    symbol: str = "XAU/USD",
+    outputsize: int = 2,
+    asset_type: str = "Precious Metal",
+) -> CompletedPricesResult:
+    return await adapter.get_completed_prices(
+        market="global_macro_bonds",
+        symbols=(symbol,),
+        expected_currencies={symbol: "USD"},
+        expected_asset_types={symbol: asset_type},
+        symbol_types={symbol: "commodity"} if asset_type == "Precious Metal" else None,
+        outputsize=outputsize,
+    )
+
+
+@pytest.mark.parametrize(
+    "symbol,official_close,other_close,previous_close",
+    [
+        ("XAU/USD", "4137.51110", "4137.63144", "4130.12000"),
+        ("XAG/USD", "60.36723", "60.36886", "60.00000"),
+    ],
+)
+@pytest.mark.parametrize("reverse", [False, True])
+async def test_completed_prices_choose_unique_full_eod_row_independent_of_duplicate_order(
+    symbol: str, official_close: str, other_close: str, previous_close: str, reverse: bool
+) -> None:
+    official = _bar("2026-10-04", official_close, volume=17)
+    other = _bar("2026-10-04", other_close, volume=23)
+    candidates = [official, other] if reverse else [other, official]
+    result = await _completed_result(
+        _completed_adapter(
+            [_bar("2026-10-03", previous_close), *candidates],
+            symbol=symbol,
+            eod_close=official_close,
+        ),
+        symbol=symbol,
+    )
+    item = result.items[0]
+    assert item.as_of == date(2026, 10, 4)
+    assert item.close == Decimal(official_close)
+    assert item.previous_close == Decimal(previous_close)
+    assert item.bars[-1].open == Decimal(str(official["open"]))
+    assert item.bars[-1].high == Decimal(str(official["high"]))
+    assert item.bars[-1].low == Decimal(str(official["low"]))
+    assert item.bars[-1].volume == 17
+    assert len(item.bars) == 2
+
+
+async def test_completed_fx_excludes_valid_duplicate_rows_beyond_official_eod() -> None:
+    values = [
+        _bar("2026-10-02", "1.17"),
+        _bar("2026-10-03", "1.18"),
+        _bar("2026-10-04", "1.19"),
+        _bar("2026-10-04", "1.20"),
+    ]
+    result = await _completed_result(
+        _completed_adapter(
+            values,
+            symbol="EUR/USD",
+            eod_date="2026-10-03",
+            eod_close="1.18",
+            asset_type="Physical Currency",
+        ),
+        symbol="EUR/USD",
+        asset_type="Physical Currency",
+    )
+    item = result.items[0]
+    assert [bar.trade_date for bar in item.bars] == [date(2026, 10, 2), date(2026, 10, 3)]
+    assert item.previous_close == Decimal("1.17")
+    assert item.provenances[-1].record_count == 2
+    assert item.provenances[-1].as_of == date(2026, 10, 3)
+
+
+async def test_completed_prices_collapse_consumed_value_identical_rows_only() -> None:
+    previous = _bar("2026-10-03", "4130")
+    official = _bar("2026-10-04", "4137.51110")
+    equivalent = {**official, "close": "4137.51110000", "unused_provider_field": "ignored"}
+    result = await _completed_result(
+        _completed_adapter([previous, dict(previous), official, equivalent])
+    )
+    assert len(result.items[0].bars) == 2
+    assert result.items[0].bars[-1].volume is None
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"open": "4137"}, {"high": "4140"}, {"low": "4130"}, {"volume": 1}, {"volume": 0}],
+)
+async def test_completed_prices_reject_distinct_eod_rows_with_same_official_close(
+    change: dict[str, object],
+) -> None:
+    official = _bar("2026-10-04", "4137.51110")
+    with pytest.raises(DataSourceContractError, match="one distinct"):
+        await _completed_result(
+            _completed_adapter([_bar("2026-10-03", "4130"), official, {**official, **change}])
+        )
+
+
+async def test_completed_prices_reject_eod_conflict_without_matching_close() -> None:
+    with pytest.raises(DataSourceContractError, match="one distinct"):
+        await _completed_result(
+            _completed_adapter(
+                [
+                    _bar("2026-10-03", "4130"),
+                    _bar("2026-10-04", "4137"),
+                    _bar("2026-10-04", "4138"),
+                ]
+            )
+        )
+
+
+@pytest.mark.parametrize("field,value", [("close", "4131"), ("volume", 0)])
+async def test_completed_prices_reject_conflicting_historical_rows(
+    field: str, value: object
+) -> None:
+    previous = _bar("2026-10-03", "4130")
+    with pytest.raises(DataSourceContractError, match=r"historical.*conflict"):
+        await _completed_result(
+            _completed_adapter(
+                [previous, {**previous, field: value}, _bar("2026-10-04", "4137.51110")]
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "dates",
+    [
+        ["2026-10-04", "2026-10-03"],
+        ["2026-10-03", "2026-10-04", "2026-10-06", "2026-10-05"],
+        ["2026-10-03", "2026-10-05", "2026-10-04"],
+    ],
+)
+async def test_completed_prices_reject_raw_descending_dates_even_after_cutoff(
+    dates: list[str],
+) -> None:
+    with pytest.raises(DataSourceContractError, match="strictly ascending"):
+        await _completed_result(_completed_adapter([_bar(day, "4137.51110") for day in dates]))
+
+
+@pytest.mark.parametrize("change", [{"high": "4136"}, {"low": "4139"}, {"open": "4140"}])
+async def test_completed_prices_validate_nonmatching_candidate_before_selection(
+    change: dict[str, object],
+) -> None:
+    nonmatching = {**_bar("2026-10-04", "4137.63144"), **change}
+    with pytest.raises(DataSourceContractError, match="OHLC range"):
+        await _completed_result(
+            _completed_adapter(
+                [_bar("2026-10-03", "4130"), nonmatching, _bar("2026-10-04", "4137.51110")]
+            )
+        )
+
+
+@pytest.mark.parametrize("day", ["2026-10-04", "2026-10-05"])
+@pytest.mark.parametrize(
+    "change",
+    [{"open": None}, {"close": "NaN"}, {"high": "Infinity"}, {"volume": -1}],
+)
+async def test_completed_prices_reject_schema_invalid_current_or_future_candidate(
+    day: str, change: dict[str, object]
+) -> None:
+    with pytest.raises(DataSourceContractError, match="reviewed contract"):
+        await _completed_result(
+            _completed_adapter(
+                [
+                    _bar("2026-10-03", "4130"),
+                    _bar("2026-10-04", "4137.51110"),
+                    {**_bar(day, "4138"), **change},
+                ]
+            )
+        )
+
+
+async def test_completed_prices_count_distinct_completed_sessions_for_history() -> None:
+    official = _bar("2026-10-04", "4137.51110")
+    with pytest.raises(DataSourceContractError, match="required history"):
+        await _completed_result(
+            _completed_adapter([official, dict(official), _bar("2026-10-05", "4138")])
+        )
+
+
+async def test_completed_prices_reject_latest_date_that_is_not_official_eod() -> None:
+    with pytest.raises(DataSourceContractError, match="did not match"):
+        await _completed_result(
+            _completed_adapter([_bar("2026-10-02", "4120"), _bar("2026-10-03", "4130")])
+        )
+
+
+@pytest.mark.parametrize("currency,asset_type", [("Euro", "Precious Metal"), ("US Dollar", "ETF")])
+async def test_completed_prices_preserve_metadata_validation(
+    currency: str,
+    asset_type: str,
+) -> None:
+    with pytest.raises(DataSourceContractError, match="launch manifest"):
+        await _completed_result(
+            _completed_adapter(
+                [_bar("2026-10-03", "4130"), _bar("2026-10-04", "4137.51110")],
+                currency=currency,
+                asset_type=asset_type,
+            )
+        )
+
+
+@pytest.mark.parametrize("outputsize,requested", [(1, 4), (2, 4), (400, 400), (5000, 5000)])
+async def test_completed_prices_provenance_records_raw_response_and_actual_query(
+    outputsize: int, requested: int
+) -> None:
+    requests: list[httpx.Request] = []
+    result = await _completed_result(
+        _completed_adapter(
+            [
+                _bar("2026-10-03", "4130"),
+                _bar("2026-10-04", "4137.63144"),
+                _bar("2026-10-04", "4137.51110"),
+                _bar("2026-10-05", "4138"),
+            ],
+            requests=requests,
+        ),
+        outputsize=outputsize,
+    )
+    request = requests[-1]
+    params = {
+        "symbol": "XAU/USD",
+        "interval": "1day",
+        "outputsize": requested,
+        "order": "ASC",
+        "type": "commodity",
+        "dp": 11,
+    }
+    assert {key: value for key, value in request.url.params.items() if key != "apikey"} == {
+        key: str(value) for key, value in params.items()
+    }
+    provenance = result.items[0].provenances[-1]
+    assert (
+        provenance.query_fingerprint
+        == hashlib.sha256(
+            json.dumps(sorted(params.items()), separators=(",", ":")).encode()
+        ).hexdigest()
+    )
+    # Rebuild the identical mock response bytes, including rejected/future rows.
+    payload = {
+        "meta": {
+            "symbol": "XAU/USD",
+            "interval": "1day",
+            "currency_quote": "US Dollar",
+            "type": "Precious Metal",
+        },
+        "values": [
+            _bar("2026-10-03", "4130"),
+            _bar("2026-10-04", "4137.63144"),
+            _bar("2026-10-04", "4137.51110"),
+            _bar("2026-10-05", "4138"),
+        ],
+        "status": "ok",
+    }
+    assert (
+        provenance.response_digest
+        == hashlib.sha256(httpx.Response(200, json=payload).content).hexdigest()
+    )
+    assert provenance.record_count == 2
+    assert provenance.as_of == date(2026, 10, 4)
+    assert provenance.contract_version == "2026-10-05.v8"
+    assert provenance.contract_hash == TWELVE_DATA_CONTRACT_HASH
+    assert (
+        provenance.contract_hash
+        != hashlib.sha256(
+            b"twelve-data:eod,time_series,completed-daily-bars,dp11:2026-09-17.v7"
+        ).hexdigest()
+    )
+
+
+async def test_completed_prices_enforce_provider_outputsize_upper_bound() -> None:
+    with pytest.raises(ValueError, match="outputsize"):
+        await _completed_result(_completed_adapter([]), outputsize=5001)
+
+
+async def test_generic_daily_bars_still_reject_identical_duplicate_dates() -> None:
+    official = _bar("2026-10-04", "4137.51110")
+    with pytest.raises(DataSourceContractError, match="strictly ascending"):
+        await _completed_adapter([official, dict(official)]).get_daily_bars(
+            market="global_macro_bonds", symbol="XAU/USD", expected_currency="USD", outputsize=2
+        )
+
+
+async def test_completed_prices_do_not_impose_universal_price_positivity() -> None:
+    result = await _completed_result(
+        _completed_adapter([_bar("2026-10-03", "-1"), _bar("2026-10-04", "4137.51110")])
+    )
+    assert result.items[0].previous_close == Decimal("-1")

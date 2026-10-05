@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react"
 import { I18nextProvider } from "react-i18next"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -254,15 +255,54 @@ describe("DataManagementPage", () => {
       screen.getByText("daily_market_update_v1", { exact: false })
     )
     expect(
-      screen.getByText(/^function · twelve_data_daily_update · succeeded$/)
+      screen.getAllByText("twelve_data_daily_update", { exact: false })[0]
     ).toBeInTheDocument()
     expect(
       screen.getByText("commodity_daily_bars", { exact: false })
     ).toBeInTheDocument()
-    expect(screen.getByText("Attempt 1 · succeeded")).toBeInTheDocument()
+    expect(screen.getByText("Attempt 1 ·", { exact: false })).toHaveTextContent(
+      "Succeeded"
+    )
+    for (const label of ["Running", "Succeeded", "Refresh", "Publish"]) {
+      for (const badge of screen.getAllByText(label))
+        expect(badge.querySelector("svg")).not.toBeNull()
+    }
     expect(
       screen.getByText("Depends on: twelve_data_daily_update")
     ).toBeInTheDocument()
+  })
+
+  it("limits routines to five Taipei calendar dates and orders newest first", async () => {
+    catalog.mockResolvedValue(catalogResult)
+    listRuns.mockResolvedValue(emptyRuns)
+    listRoutines.mockResolvedValue({
+      ...emptyRoutines,
+      items: ["2026-09-02", "2026-09-03", "2026-09-08", "2026-09-07"].map(
+        date => ({
+          id: date,
+          routine_key: `routine-${date}`,
+          edition_date: date,
+          status: "succeeded",
+          scheduled_for: `${date}T00:00:00Z`,
+          deadline_at: `${date}T02:00:00Z`,
+          created_at: `${date}T00:00:00Z`,
+          jobs: [],
+        })
+      ),
+    })
+    renderPage()
+    const heading = await screen.findByRole("heading", {
+      name: "Daily update routines",
+    })
+    const section = heading.closest("section")!
+    expect(within(section).queryByText(/routine-2026-09-02/)).toBeNull()
+    expect(within(section).queryByText(/routine-2026-09-08/)).toBeNull()
+    expect(
+      [...section.querySelectorAll("summary")].map(item => item.textContent)
+    ).toEqual([
+      expect.stringContaining("routine-2026-09-07"),
+      expect.stringContaining("routine-2026-09-03"),
+    ])
   })
 
   it("redirects expired mutations", async () => {
