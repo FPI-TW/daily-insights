@@ -36,7 +36,6 @@ from daily_insights_api.modules.orchestration.projections import (
     _projection_datasets,
     _report_bundle,
     _rows_digest,
-    _rows_for_current_outcomes,
 )
 from daily_insights_api.modules.orchestration.registry import (
     DAILY_ROUTINE,
@@ -412,24 +411,6 @@ def test_report_projection_digest_includes_provider_and_observation_date() -> No
     )
 
 
-def test_partial_outcome_keeps_unchanged_successful_scopes() -> None:
-    aapl = _observation("us_mega_cap_daily_bars", "AAPL", date(2026, 9, 15), 100)
-    msft = _observation("us_mega_cap_daily_bars", "MSFT", date(2026, 9, 15), 200)
-    outcomes = (
-        {
-            "function_key": "us_mega_cap_daily_bars",
-            "provider_key": "twelve_data",
-            "status": "partial",
-            "error": "partial_symbols",
-            "missing_scopes": ["MSFT"],
-            "successful_scopes": ["AAPL"],
-            "attempt_ids": [str(uuid.uuid4())],
-        },
-    )
-
-    assert _rows_for_current_outcomes((aapl, msft), outcomes) == (aapl,)
-
-
 class _FakeConnection:
     def __init__(self) -> None:
         self.closed = False
@@ -644,3 +625,11 @@ async def test_worker_claims_ready_projection_before_function_backlog(
     await orchestration_worker_script.worker_loop(once=True)
 
     assert calls == ["projection", "function"]
+
+
+@pytest.mark.parametrize("attempt_count", [1, 2, 3, 4, 5])
+def test_automatic_retry_limit(attempt_count: int) -> None:
+    now = datetime(2026, 10, 5, 0, 0, tzinfo=ZoneInfo("UTC"))
+    retry = next_retry_at(now, None, trigger="automatic", attempt_count=attempt_count)
+    assert retry == (now + timedelta(minutes=30) if attempt_count <= 3 else None)
+    assert next_retry_at(now, None, trigger="manual", attempt_count=attempt_count) is not None

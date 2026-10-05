@@ -29,6 +29,8 @@ from daily_insights_api.modules.orchestration.registry import (
 
 TAIPEI = ZoneInfo("Asia/Taipei")
 RETRY_INTERVAL = timedelta(minutes=30)
+MAX_AUTOMATIC_RETRIES = 3
+MAX_AUTOMATIC_ATTEMPTS = 1 + MAX_AUTOMATIC_RETRIES
 MANUAL_RETRY_WINDOW = timedelta(hours=1)
 LEASE_DURATION = timedelta(minutes=10)
 ROUTINE_ENQUEUE_LOCK = 5_239_842_371_114_300
@@ -314,8 +316,9 @@ async def terminalize_expired_automatic_functions(
 ) -> int:
     effective_now = now or datetime.now(UTC)
     expired = list(
-        await database.scalars(
-            select(FunctionRun)
+        await database.execute(
+            select(FunctionRun, JobRun.trigger)
+            .join(JobRun, JobRun.id == FunctionRun.job_run_id)
             .where(
                 or_(
                     FunctionRun.status.in_(("pending", "retry_wait")),
@@ -329,20 +332,23 @@ async def terminalize_expired_automatic_functions(
                     FunctionRun.status == "pending",
                     FunctionRun.attempt_count == 0,
                 ),
-                FunctionRun.job_run_id.in_(
-                    select(JobRun.id).where(
-                        JobRun.deadline_at.is_not(None),
-                        JobRun.deadline_at <= effective_now,
-                    )
+                or_(
+                    and_(JobRun.deadline_at.is_not(None), JobRun.deadline_at <= effective_now),
+                    and_(
+                        FunctionRun.attempt_count >= MAX_AUTOMATIC_ATTEMPTS,
+                        JobRun.trigger == "automatic",
+                    ),
                 ),
             )
             .order_by(FunctionRun.created_at, FunctionRun.id)
             .limit(RECONCILIATION_BATCH_SIZE)
-            .with_for_update(skip_locked=True)
+            .with_for_update(skip_locked=True, of=FunctionRun)
         )
     )
-    expired_ids = [function_run.id for function_run in expired]
-    running_ids = [function_run.id for function_run in expired if function_run.status == "running"]
+    expired_ids = [function_run.id for function_run, _ in expired]
+    running_ids = [
+        function_run.id for function_run, _ in expired if function_run.status == "running"
+    ]
     if running_ids:
         await database.execute(
             update(FunctionAttempt)
@@ -354,7 +360,7 @@ async def terminalize_expired_automatic_functions(
                 status="failed",
                 finished_at=effective_now,
                 error_code="lease_expired",
-                error_detail="worker lease expired at the job deadline",
+                error_detail="worker lease expired before terminal reconciliation",
             )
         )
     partial_ids = set(
@@ -367,7 +373,7 @@ async def terminalize_expired_automatic_functions(
             .distinct()
         )
     )
-    for function_run in expired:
+    for function_run, trigger in expired:
         function_run.status = "partial" if function_run.id in partial_ids else "unavailable"
         function_run.completed_at = effective_now
         function_run.next_attempt_at = None
@@ -375,12 +381,18 @@ async def terminalize_expired_automatic_functions(
         function_run.lease_token = None
         function_run.lease_expires_at = None
         function_run.heartbeat_at = effective_now
-        function_run.error = "deadline_reached"
+        function_run.error = (
+            "retry_limit_reached"
+            if function_run.attempt_count >= MAX_AUTOMATIC_ATTEMPTS and trigger == "automatic"
+            else "deadline_reached"
+        )
     await database.commit()
     return len(expired)
 
 
 async def retry_due(function_run: FunctionRun, job_run: JobRun, now: datetime) -> bool:
+    if job_run.trigger == "automatic" and function_run.attempt_count >= MAX_AUTOMATIC_ATTEMPTS:
+        return False
     if function_run.status not in {"pending", "retry_wait"}:
         return False
     if function_run.next_attempt_at is not None and function_run.next_attempt_at > now:
@@ -388,7 +400,11 @@ async def retry_due(function_run: FunctionRun, job_run: JobRun, now: datetime) -
     return job_run.deadline_at is None or now < job_run.deadline_at
 
 
-def next_retry_at(now: datetime, deadline_at: datetime | None) -> datetime | None:
+def next_retry_at(
+    now: datetime, deadline_at: datetime | None, *, trigger: str = "manual", attempt_count: int = 0
+) -> datetime | None:
+    if trigger == "automatic" and attempt_count >= MAX_AUTOMATIC_ATTEMPTS:
+        return None
     candidate = now + RETRY_INTERVAL
     return candidate if deadline_at is None or candidate < deadline_at else None
 

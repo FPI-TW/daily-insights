@@ -8,8 +8,15 @@ on routine/provider edition identity makes dispatcher restarts idempotent.
 `orchestration-worker` executes functions under a process-wide provider lock.
 Functions sharing Twelve Data, Yahoo Finance, or TWSE reuse the same provider
 client; TWSE also retains one pacing context. Failures retry every 30 minutes,
-only for missing scopes. Attempts persist a bounded safe reason for every failed
-symbol, month, source, or model stage; operators must not infer a cause from
+only for missing scopes. Automatic functions and projection jobs allow one initial
+attempt plus at most three retries (four claims total), persisted across worker
+restarts. The deadline may stop retries earlier. Expired leases consume an attempt;
+exhausted runs become terminal with `retry_limit_reached`, retaining any partial
+result and the provider failure details in FunctionAttempt history. Automatic
+news market refreshes proceed independently when another market is waiting to
+retry or has failed; provider locks still prevent concurrent provider access.
+Manual news jobs retain their existing systemic-failure guard. Attempts persist a
+bounded safe reason for every failed symbol, month, source, or model stage; operators must not infer a cause from
 record counts alone. The 10:00 deadline is soft: no new automatic attempt
 starts at or after the deadline, but an in-flight attempt may finish.
 The Compose definitions start the worker with
@@ -29,8 +36,22 @@ jobs or the feature-specific news and analyst jobs.
 Market reports, the Macro Dashboard, and news publish as soon as their upstream
 dependencies become terminal; there is no approval gate for automatic or market
 refresh publication. Reports and the dashboard freeze typed inputs and
-provenance first and do not call external providers. News refresh functions
-prepare candidate batches, so the automatic `news_publish` step only publishes
+provenance first and do not call external providers. A failed or partial refresh
+does not remove previously persisted observations, including older fallback
+observations within the 740-day history window. Publications keep the actual
+source dates and attempt provenance; job results remain degraded when upstream
+updates failed. Healthy sources continue to publish new observations while failed
+sources retain their last successful values. If no usable report observations
+remain after a failed refresh, publication is preserved rather than replaced with
+an empty report. When raw fallback observations are absent and a failed refresh
+would remove an available report block, the existing report is preserved. This
+may defer healthy updates within that report until its missing inputs recover;
+other markets continue updating. The Macro Dashboard restores missing failed-source
+histories from its existing snapshot together with their original source references,
+while healthy histories update. It preserves the entire snapshot when all sources
+are unavailable. News refresh failures do not publish empty editions or
+replace existing editions; zero-content editorial results remain distinct. News
+refresh functions prepare candidate batches, so the automatic `news_publish` step only publishes
 those prepared results after all three market refresh functions finish. The
 admin “新聞候選與上架” workflow remains available and creates a separate manual
 `news_publish_job`; that manual candidate path may refetch the selected article
@@ -117,3 +138,12 @@ schema migration and restores them only after migration succeeds.
 If migration succeeded but no RoutineRun exists yet, the installation is
 activation-pending: a same-day retry may run at any hour with activation set to
 today or the next Taipei date.
+
+## Retry-limit rollout
+
+Apply migration `20261005_0031` before starting the updated worker. It adds
+`job_runs.attempt_count` for durable projection claims. Already-started projection
+jobs are backfilled to one attempt because historical projection attempt counts
+were not recorded; new claims are counted exactly. FunctionRun attempt counts
+already exist and are retained, so exhausted waiting functions are reconciled
+without another provider request.
