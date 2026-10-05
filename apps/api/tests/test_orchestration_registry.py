@@ -45,7 +45,11 @@ from daily_insights_api.modules.orchestration.registry import (
     registry_digest,
     validate_registry,
 )
-from daily_insights_api.modules.orchestration.service import next_retry_at, routine_window
+from daily_insights_api.modules.orchestration.service import (
+    MANUAL_RETRY_WINDOW,
+    next_retry_at,
+    routine_window,
+)
 from daily_insights_api.modules.orchestration.worker import (
     ClaimedFunction,
     FunctionOutcome,
@@ -280,12 +284,24 @@ def test_routine_window_and_retry_respect_taipei_soft_deadline() -> None:
 
     assert scheduled == datetime(2026, 9, 17, 8, tzinfo=ZoneInfo("Asia/Taipei"))
     assert deadline == datetime(2026, 9, 17, 10, tzinfo=ZoneInfo("Asia/Taipei"))
-    assert next_retry_at(scheduled, deadline) == datetime(
-        2026, 9, 17, 8, 30, tzinfo=ZoneInfo("Asia/Taipei")
+    assert next_retry_at(scheduled, deadline, attempt_count=1) == datetime(
+        2026, 9, 17, 8, 5, tzinfo=ZoneInfo("Asia/Taipei")
     )
+    assert next_retry_at(
+        datetime(2026, 9, 17, 9, 54, tzinfo=ZoneInfo("Asia/Taipei")),
+        deadline,
+        attempt_count=2,
+    ) == datetime(2026, 9, 17, 9, 59, tzinfo=ZoneInfo("Asia/Taipei"))
     assert (
-        next_retry_at(datetime(2026, 9, 17, 9, 45, tzinfo=ZoneInfo("Asia/Taipei")), deadline)
+        next_retry_at(
+            datetime(2026, 9, 17, 9, 55, tzinfo=ZoneInfo("Asia/Taipei")),
+            deadline,
+            attempt_count=3,
+        )
         is None
+    )
+    assert next_retry_at(scheduled, deadline) == datetime(
+        2026, 9, 17, 8, 5, tzinfo=ZoneInfo("Asia/Taipei")
     )
     assert DAILY_ROUTINE.deadline_hour == 10
 
@@ -627,9 +643,22 @@ async def test_worker_claims_ready_projection_before_function_backlog(
     assert calls == ["projection", "function"]
 
 
-@pytest.mark.parametrize("attempt_count", [1, 2, 3, 4, 5])
-def test_automatic_retry_limit(attempt_count: int) -> None:
+@pytest.mark.parametrize("attempt_count", [0, 1, 2, 3, 4, 5])
+def test_retry_limit(attempt_count: int) -> None:
     now = datetime(2026, 10, 5, 0, 0, tzinfo=ZoneInfo("UTC"))
-    retry = next_retry_at(now, None, trigger="automatic", attempt_count=attempt_count)
-    assert retry == (now + timedelta(minutes=30) if attempt_count <= 3 else None)
-    assert next_retry_at(now, None, trigger="manual", attempt_count=attempt_count) is not None
+    retry = next_retry_at(now, None, attempt_count=attempt_count)
+    assert retry == (now + timedelta(minutes=5) if attempt_count <= 3 else None)
+
+
+@pytest.mark.parametrize("elapsed_minutes", [54, 55, 60])
+def test_manual_retry_respects_one_hour_soft_deadline(elapsed_minutes: int) -> None:
+    started = datetime(2026, 10, 5, 0, 0, tzinfo=ZoneInfo("UTC"))
+    assert MANUAL_RETRY_WINDOW == timedelta(hours=1)
+    retry = next_retry_at(
+        started + timedelta(minutes=elapsed_minutes),
+        started + MANUAL_RETRY_WINDOW,
+        attempt_count=1,
+    )
+    assert retry == (
+        started + timedelta(minutes=elapsed_minutes + 5) if elapsed_minutes < 55 else None
+    )

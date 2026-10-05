@@ -29,25 +29,19 @@ from daily_insights_api.modules.orchestration.models import (
 from daily_insights_api.modules.orchestration.registry import FUNCTION_BY_KEY
 from daily_insights_api.modules.orchestration.service import (
     LEASE_DURATION,
-    MAX_AUTOMATIC_ATTEMPTS,
+    MAX_ATTEMPTS,
+    NEWS_REFRESH_FUNCTION_KEYS,
     RECONCILIATION_BATCH_SIZE,
     SUCCESS_FUNCTION_STATUSES,
     TERMINAL_FUNCTION_STATUSES,
+    fail_pending_news_siblings,
     function_dependencies_ready,
     job_dependencies_ready,
     next_retry_at,
-    terminalize_expired_automatic_functions,
+    terminalize_expired_functions,
 )
 
 AttemptStatus = Literal["succeeded", "no_change", "partial", "unavailable", "failed", "cancelled"]
-
-NEWS_REFRESH_FUNCTION_KEYS = frozenset(
-    {
-        "news_global_refresh",
-        "news_tw_equity_refresh",
-        "news_us_equity_refresh",
-    }
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,10 +144,7 @@ async def _ready_candidates(
             .join(JobRun, JobRun.id == FunctionRun.job_run_id)
             .where(
                 JobRun.status.in_(("pending", "running")),
-                or_(
-                    JobRun.trigger != "automatic",
-                    FunctionRun.attempt_count < MAX_AUTOMATIC_ATTEMPTS,
-                ),
+                FunctionRun.attempt_count < MAX_ATTEMPTS,
                 ~blocked_by_dependency,
                 or_(
                     JobRun.trigger == "automatic",
@@ -206,7 +197,7 @@ async def claim_ready_function(
 ) -> ClaimedFunction | None:
     effective_now = now or datetime.now(UTC)
     async with session_factory() as deadline_database:
-        await terminalize_expired_automatic_functions(deadline_database, now=effective_now)
+        await terminalize_expired_functions(deadline_database, now=effective_now)
     for function_run_id, provider_key in await _ready_candidates(session_factory, effective_now):
         connection = await engine.connect()
         try:
@@ -314,7 +305,7 @@ def _attempt_scope(function_run: FunctionRun) -> dict[str, Any]:
 
 
 def _claimable(function_run: FunctionRun, job_run: JobRun, now: datetime) -> bool:
-    if job_run.trigger == "automatic" and function_run.attempt_count >= MAX_AUTOMATIC_ATTEMPTS:
+    if function_run.attempt_count >= MAX_ATTEMPTS:
         return False
     if job_run.status not in {"pending", "running"}:
         return False
@@ -446,7 +437,6 @@ async def finish_function(
                 next_retry_at(
                     effective_now,
                     job_run.deadline_at,
-                    trigger=job_run.trigger,
                     attempt_count=function_run.attempt_count,
                 )
                 if outcome.retryable and outcome.status in {"partial", "unavailable", "failed"}
@@ -482,9 +472,7 @@ async def finish_function(
                     function_run.result = stored_result
                 function_run.error = (
                     "retry_limit_reached"
-                    if outcome.retryable
-                    and job_run.trigger == "automatic"
-                    and function_run.attempt_count >= MAX_AUTOMATIC_ATTEMPTS
+                    if outcome.retryable and function_run.attempt_count >= MAX_ATTEMPTS
                     else outcome.error_code
                 )
                 if (
@@ -492,7 +480,7 @@ async def finish_function(
                     and function_run.function_key in NEWS_REFRESH_FUNCTION_KEYS
                     and outcome.status == "failed"
                 ):
-                    await _fail_pending_news_siblings(
+                    await fail_pending_news_siblings(
                         database,
                         function_run=function_run,
                         error_code=outcome.error_code,
@@ -505,36 +493,6 @@ async def finish_function(
         await aggregate_job(session_factory, claimed.job_run_id, now=effective_now)
         await aggregate_routines(session_factory, now=effective_now)
         return True
-
-
-async def _fail_pending_news_siblings(
-    database: AsyncSession,
-    *,
-    function_run: FunctionRun,
-    error_code: str | None,
-    now: datetime,
-) -> None:
-    safe_code = error_code or "news_sibling_systemic_failure"
-    await database.execute(
-        update(FunctionRun)
-        .where(
-            FunctionRun.job_run_id == function_run.job_run_id,
-            FunctionRun.id != function_run.id,
-            FunctionRun.function_key.in_(NEWS_REFRESH_FUNCTION_KEYS),
-            FunctionRun.status.in_(("pending", "retry_wait")),
-        )
-        .values(
-            status="failed",
-            completed_at=now,
-            next_attempt_at=None,
-            error=safe_code,
-            result={
-                "outcome": "blocked_by_news_sibling",
-                "upstream_function_key": function_run.function_key,
-                "error_code": safe_code,
-            },
-        )
-    )
 
 
 def _merge_partial_results(
