@@ -336,8 +336,9 @@ export function IndexHistoryChart({
                 },
               ],
               matrix: {
-                left: 0,
-                right: 0,
+                // Keep the pixel-aligned matrix stroke inside the canvas.
+                left: 1,
+                right: 1,
                 top: 4,
                 bottom: 54,
                 x: { show: false, data: [null] },

@@ -314,3 +314,11 @@ catalog／JobRun 契約及現有 enqueue／history／dependency UI，保留 GET 
 三次、POST 帶 CSRF 與正確 job_key、失敗不自動重試及已載入內容保留的檢查；不修改
 管理功能。另加入 hover preload 無市場 API 請求，以及問答跨市場載入期間重置／最新
 publication、news context 更新的回歸測試。
+
+## 圖表矩陣外框修正（2026-10-05）
+
+美股指數趨勢、VIX 與台股加權指數的 ECharts matrix 左右各保留 1px 內距。
+ECharts 6 的矩陣會將 1px 邊框對齊至正向半像素；右側貼齊 canvas 時，
+描邊會落在畫布外而遭裁切。內距讓四邊完整呈現，保留內部分隔線與原有資料配置。
+瀏覽器回歸測試直接檢查實際 canvas 四邊像素，涵蓋桌面、手機、DPR 1/2、
+縮放視窗及明暗主題切換。
