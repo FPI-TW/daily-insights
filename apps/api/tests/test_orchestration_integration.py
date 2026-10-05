@@ -72,7 +72,7 @@ from daily_insights_api.modules.orchestration.service import (
     RECONCILIATION_BATCH_SIZE,
     cancel_job_run,
     create_daily_routine,
-    terminalize_expired_automatic_functions,
+    terminalize_expired_functions,
 )
 from daily_insights_api.modules.orchestration.worker import (
     AttemptStatus,
@@ -344,7 +344,7 @@ async def test_retryable_news_failure_pauses_sibling_markets_until_recovery(
     )
 
     recovered = await claim_ready_function(
-        engine, sessions, owner="news-recovered", now=now + timedelta(minutes=31)
+        engine, sessions, owner="news-recovered", now=now + timedelta(minutes=6)
     )
     assert recovered is not None and recovered.function_run_id == claimed.function_run_id
 
@@ -353,7 +353,7 @@ async def test_retryable_news_failure_pauses_sibling_markets_until_recovery(
 
     await execute_claimed(recovered, sessions, succeeded)
     sibling = await claim_ready_function(
-        engine, sessions, owner="news-next-market", now=now + timedelta(minutes=31, seconds=1)
+        engine, sessions, owner="news-next-market", now=now + timedelta(minutes=6, seconds=1)
     )
     assert sibling is not None and sibling.function_run_id != claimed.function_run_id
     await sibling.connection.close()
@@ -2829,7 +2829,7 @@ async def test_deadline_preserves_partial_result_from_retry_wait(
         assert job is not None and job.deadline_at is not None
         deadline = job.deadline_at
     async with sessions() as database:
-        assert await terminalize_expired_automatic_functions(database, now=deadline) >= 1
+        assert await terminalize_expired_functions(database, now=deadline) >= 1
     async with sessions() as database:
         function = await database.get(FunctionRun, claimed.function_run_id)
         assert function is not None and function.status == "partial"
@@ -3092,7 +3092,7 @@ async def test_deadline_recovers_expired_running_lease_and_reconciles_job(
         job_id = job.id
 
     async with sessions() as database:
-        assert await terminalize_expired_automatic_functions(database, now=now) == 1
+        assert await terminalize_expired_functions(database, now=now) == 1
     await reconcile_function_jobs(sessions, now=now)
 
     async with sessions() as database:
@@ -3153,10 +3153,7 @@ async def test_deadline_terminalization_processes_a_bounded_batch(
             )
 
     async with sessions() as database:
-        assert (
-            await terminalize_expired_automatic_functions(database, now=now)
-            == RECONCILIATION_BATCH_SIZE
-        )
+        assert await terminalize_expired_functions(database, now=now) == RECONCILIATION_BATCH_SIZE
     async with sessions() as database:
         status_counts: dict[str, int] = {
             status: count
@@ -3169,7 +3166,7 @@ async def test_deadline_terminalization_processes_a_bounded_batch(
         assert status_counts == {"partial": RECONCILIATION_BATCH_SIZE, "pending": 1}
 
     async with sessions() as database:
-        assert await terminalize_expired_automatic_functions(database, now=now) == 1
+        assert await terminalize_expired_functions(database, now=now) == 1
     async with sessions() as database:
         status_counts = {
             status: count
@@ -3823,7 +3820,7 @@ async def test_news_publish_blocks_deadline_terminalized_system_failure(
         publish_id = publish_function.id
 
     async with sessions() as database:
-        assert await terminalize_expired_automatic_functions(database, now=now) == 3
+        assert await terminalize_expired_functions(database, now=now) == 3
     async with sessions.begin() as database:
         refreshes = list(
             await database.scalars(
@@ -4093,8 +4090,10 @@ async def test_news_publish_retry_is_not_runnable_after_provider_deadline(
 
 
 @pytest.mark.parametrize("first_partial", [False, True])
-async def test_automatic_function_stops_after_three_retries(
+@pytest.mark.parametrize("trigger", ["automatic", "manual"])
+async def test_function_stops_after_three_retries(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    trigger: str,
     first_partial: bool,
 ) -> None:
     engine, sessions = orchestration_database
@@ -4103,12 +4102,12 @@ async def test_automatic_function_stops_after_three_retries(
         job = JobRun(
             job_key="bounded_refresh",
             kind="function",
-            trigger="automatic",
+            trigger=trigger,
             automatic_key="bounded",
             registry_version="test",
             registry_snapshot={},
             edition_date=now.date(),
-            deadline_at=now + timedelta(days=1),
+            deadline_at=now + timedelta(hours=1),
             status="pending",
         )
         database.add(job)
@@ -4165,9 +4164,11 @@ async def test_automatic_function_stops_after_three_retries(
         assert all(attempt.error_code == "upstream_timeout" for attempt in attempts)
 
 
-@pytest.mark.parametrize("status", ["retry_wait", "running"])
-async def test_exhausted_automatic_function_is_reconciled_before_new_claim(
+@pytest.mark.parametrize("status", ["pending", "retry_wait", "running"])
+@pytest.mark.parametrize("trigger", ["automatic", "manual"])
+async def test_exhausted_function_is_reconciled_before_new_claim(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    trigger: str,
     status: str,
 ) -> None:
     engine, sessions = orchestration_database
@@ -4176,12 +4177,12 @@ async def test_exhausted_automatic_function_is_reconciled_before_new_claim(
         job = JobRun(
             job_key="exhausted",
             kind="function",
-            trigger="automatic",
+            trigger=trigger,
             automatic_key="exhausted",
             registry_version="test",
             registry_snapshot={},
             edition_date=now.date(),
-            deadline_at=now + timedelta(days=1),
+            deadline_at=now + timedelta(hours=1),
             status="running",
         )
         database.add(job)
@@ -4216,6 +4217,249 @@ async def test_exhausted_automatic_function_is_reconciled_before_new_claim(
         assert stored_run is not None and stored_run.status == "unavailable"
         assert stored_run.error == "retry_limit_reached"
         assert stored_run.attempt_count == 4 and stored_run.lease_token is None
+
+
+@pytest.mark.parametrize("status", ["retry_wait", "running"])
+@pytest.mark.parametrize("trigger", ["manual", "automatic"])
+@pytest.mark.parametrize("has_partial", [False, True])
+async def test_restored_exhausted_news_applies_manual_systemic_failure_policy(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    status: str,
+    trigger: str,
+    has_partial: bool,
+) -> None:
+    engine, sessions = orchestration_database
+    now = datetime.now(UTC)
+    retained_result = {"batch_id": str(uuid.uuid4()), "prepared": 2}
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_daily_update",
+            kind="function",
+            trigger=trigger,
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now + timedelta(hours=1),
+            status="running",
+        )
+        database.add(job)
+        await database.flush()
+        source = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_global_refresh",
+            provider_key="internal_services",
+            scope={},
+            status=status,
+            attempt_count=4,
+            result=retained_result if has_partial else None,
+            error="provider_http_429",
+            next_attempt_at=now + timedelta(minutes=5),
+            lease_token=uuid.uuid4() if status == "running" else None,
+            lease_expires_at=now - timedelta(seconds=1) if status == "running" else None,
+        )
+        siblings = [
+            FunctionRun(
+                job_run_id=job.id,
+                function_key=key,
+                provider_key="internal_services",
+                scope={},
+                status="pending",
+            )
+            for key in ("news_tw_equity_refresh", "news_us_equity_refresh")
+        ]
+        publish = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_publish",
+            provider_key="internal_services",
+            scope={},
+            status="pending",
+        )
+        database.add_all([source, *siblings, publish])
+        await database.flush()
+        database.add_all(
+            FunctionDependency(
+                upstream_function_run_id=refresh.id,
+                downstream_function_run_id=publish.id,
+                policy="terminal",
+            )
+            for refresh in [source, *siblings]
+        )
+        database.add(
+            FunctionAttempt(
+                function_run_id=source.id,
+                attempt_number=4,
+                function_key=source.function_key,
+                provider_key=source.provider_key,
+                scope={},
+                fence_token=source.lease_token or uuid.uuid4(),
+                status="running" if status == "running" else "failed",
+                error_code=None if status == "running" else "provider_http_429",
+            )
+        )
+        if has_partial:
+            database.add(
+                FunctionAttempt(
+                    function_run_id=source.id,
+                    attempt_number=1,
+                    function_key=source.function_key,
+                    provider_key=source.provider_key,
+                    scope={},
+                    fence_token=uuid.uuid4(),
+                    status="partial",
+                    result=retained_result,
+                )
+            )
+        source_id, job_id, publish_id = source.id, job.id, publish.id
+        sibling_ids = [sibling.id for sibling in siblings]
+
+    claimed = await claim_ready_function(engine, sessions, owner="restored-news", now=now)
+    assert claimed is not None
+    assert (
+        claimed.function_run_id == publish_id
+        if trigger == "manual"
+        else (claimed.function_run_id in sibling_ids)
+    )
+    async with sessions() as database:
+        restored = await database.get(FunctionRun, source_id)
+        assert restored is not None
+        assert restored.status == ("partial" if has_partial else "unavailable")
+        assert restored.result == (retained_result if has_partial else None)
+        assert restored.error == "retry_limit_reached"
+        assert restored.attempt_count == 4 and restored.lease_token is None
+        sibling_runs = list(
+            await database.scalars(select(FunctionRun).where(FunctionRun.id.in_(sibling_ids)))
+        )
+        if trigger == "manual":
+            expected_error = "lease_expired" if status == "running" else "provider_http_429"
+            assert all(sibling.status == "failed" for sibling in sibling_runs)
+            assert all(sibling.error == expected_error for sibling in sibling_runs)
+            assert all(
+                sibling.result
+                == {
+                    "outcome": "blocked_by_news_sibling",
+                    "upstream_function_key": "news_global_refresh",
+                    "error_code": expected_error,
+                }
+                for sibling in sibling_runs
+            )
+        else:
+            assert sorted(sibling.status for sibling in sibling_runs) == ["pending", "running"]
+
+    async def succeeded(_: ClaimedFunction) -> FunctionOutcome:
+        return FunctionOutcome(status="succeeded")
+
+    await execute_claimed(claimed, sessions, succeeded)
+    if trigger == "manual":
+        async with sessions() as database:
+            stored_job = await database.get(JobRun, job_id)
+            assert stored_job is not None and stored_job.status == "partial"
+            assert stored_job.completed_at is not None
+
+
+@pytest.mark.parametrize("latest_status", ["partial", "unavailable"])
+async def test_restored_exhausted_manual_local_news_failure_allows_healthy_siblings(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    latest_status: str,
+) -> None:
+    engine, sessions = orchestration_database
+    now = datetime.now(UTC)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_daily_update",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now + timedelta(hours=1),
+            status="running",
+        )
+        database.add(job)
+        await database.flush()
+        source = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_global_refresh",
+            provider_key="internal_services",
+            scope={},
+            status="retry_wait",
+            attempt_count=4,
+        )
+        sibling = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_us_equity_refresh",
+            provider_key="internal_services",
+            scope={},
+            status="pending",
+        )
+        database.add_all([source, sibling])
+        await database.flush()
+        database.add_all(
+            FunctionAttempt(
+                function_run_id=source.id,
+                attempt_number=number,
+                function_key=source.function_key,
+                provider_key=source.provider_key,
+                scope={},
+                fence_token=uuid.uuid4(),
+                status=attempt_status,
+                error_code=error,
+            )
+            for number, attempt_status, error in (
+                (1, "failed", "provider_http_429"),
+                (4, latest_status, "selection_schema_invalid_exhausted"),
+            )
+        )
+        sibling_id = sibling.id
+    claimed = await claim_ready_function(engine, sessions, owner="healthy-news", now=now)
+    assert claimed is not None and claimed.function_run_id == sibling_id
+    await claimed.connection.invalidate()
+    await claimed.connection.close()
+
+
+async def test_exhausted_reconciliation_skips_locked_job_and_preserves_cancellation(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, sessions = orchestration_database
+    now = datetime.now(UTC)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_daily_update",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now + timedelta(hours=1),
+            status="running",
+        )
+        database.add(job)
+        await database.flush()
+        source = FunctionRun(
+            job_run_id=job.id,
+            function_key="news_global_refresh",
+            provider_key="internal_services",
+            scope={},
+            status="retry_wait",
+            attempt_count=4,
+        )
+        database.add(source)
+        await database.flush()
+        job_id, source_id = job.id, source.id
+    async with sessions.begin() as cancelling:
+        await cancelling.scalar(select(JobRun).where(JobRun.id == job_id).with_for_update())
+        async with sessions() as reconciling:
+            assert (
+                await asyncio.wait_for(
+                    terminalize_expired_functions(reconciling, now=now), timeout=2
+                )
+                == 0
+            )
+        assert await cancel_job_run(cancelling, job_run_id=job_id) is not None
+    async with sessions() as database:
+        assert await terminalize_expired_functions(database, now=now) == 0
+        cancelled_source = await database.get(FunctionRun, source_id)
+        assert cancelled_source is not None and cancelled_source.status == "cancelled"
+        assert cancelled_source.error == "cancelled_by_admin"
 
 
 @pytest.mark.parametrize("retryable", [True, False])
@@ -4266,8 +4510,10 @@ async def test_automatic_news_failure_allows_healthy_sibling_refresh(
         await execute_claimed(sibling, sessions, succeed)
 
 
-async def test_automatic_projection_stops_after_three_retries(
+@pytest.mark.parametrize("trigger", ["automatic", "manual"])
+async def test_projection_stops_after_three_retries(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    trigger: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, sessions = orchestration_database
@@ -4276,12 +4522,12 @@ async def test_automatic_projection_stops_after_three_retries(
         job = JobRun(
             job_key="market_reports_publish",
             kind="projection",
-            trigger="automatic",
+            trigger=trigger,
             automatic_key="bounded-projection",
             registry_version="test",
             registry_snapshot={},
             edition_date=now.date(),
-            deadline_at=now + timedelta(days=1),
+            deadline_at=now + timedelta(hours=1),
             status="pending",
         )
         database.add(job)
@@ -4314,9 +4560,13 @@ async def test_automatic_projection_stops_after_three_retries(
 
 
 @pytest.mark.parametrize("status", ["pending", "running"])
-async def test_exhausted_automatic_projection_cannot_be_reclaimed(
+@pytest.mark.parametrize("started", [False, True])
+@pytest.mark.parametrize("trigger", ["automatic", "manual"])
+async def test_exhausted_projection_cannot_be_reclaimed(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    trigger: str,
     status: str,
+    started: bool,
 ) -> None:
     _, sessions = orchestration_database
     now = datetime.now(UTC)
@@ -4324,14 +4574,14 @@ async def test_exhausted_automatic_projection_cannot_be_reclaimed(
         job = JobRun(
             job_key="market_reports_publish",
             kind="projection",
-            trigger="automatic",
+            trigger=trigger,
             automatic_key="exhausted-projection",
             registry_version="test",
             registry_snapshot={},
             edition_date=now.date(),
-            deadline_at=now + timedelta(days=1),
+            deadline_at=now + timedelta(hours=1),
             status=status,
-            started_at=now,
+            started_at=now if started else None,
             attempt_count=4,
             lease_expires_at=now - timedelta(seconds=1),
         )
@@ -4657,8 +4907,10 @@ async def test_dashboard_all_failed_sources_preserve_existing_snapshot(
 
 
 @pytest.mark.parametrize("kind", ["function", "projection"])
-async def test_automatic_crashed_workers_consume_durable_retry_budget(
+@pytest.mark.parametrize("trigger", ["automatic", "manual"])
+async def test_crashed_workers_consume_durable_retry_budget(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    trigger: str,
     kind: str,
 ) -> None:
     engine, sessions = orchestration_database
@@ -4667,12 +4919,12 @@ async def test_automatic_crashed_workers_consume_durable_retry_budget(
         job = JobRun(
             job_key="market_reports_publish" if kind == "projection" else "crashed_refresh",
             kind=kind,
-            trigger="automatic",
+            trigger=trigger,
             automatic_key="crashed-workers",
             registry_version="test",
             registry_snapshot={},
             edition_date=now.date(),
-            deadline_at=now + timedelta(days=1),
+            deadline_at=now + timedelta(hours=1),
             status="pending",
         )
         database.add(job)

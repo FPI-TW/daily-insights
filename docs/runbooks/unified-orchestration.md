@@ -7,15 +7,21 @@ on routine/provider edition identity makes dispatcher restarts idempotent.
 
 `orchestration-worker` executes functions under a process-wide provider lock.
 Functions sharing Twelve Data, Yahoo Finance, or TWSE reuse the same provider
-client; TWSE also retains one pacing context. Failures retry every 30 minutes,
-only for missing scopes. Automatic functions and projection jobs allow one initial
+client; TWSE also retains one pacing context. Manual and automatic failures retry
+5 minutes after a failed attempt, only for missing scopes. All functions and
+projection jobs allow one initial
 attempt plus at most three retries (four claims total), persisted across worker
 restarts. The deadline may stop retries earlier. Expired leases consume an attempt;
 exhausted runs become terminal with `retry_limit_reached`, retaining any partial
 result and the provider failure details in FunctionAttempt history. Automatic
 news market refreshes proceed independently when another market is waiting to
 retry or has failed; provider locks still prevent concurrent provider access.
-Manual news jobs retain their existing systemic-failure guard. Attempts persist a
+Manual news jobs retain their existing systemic-failure guard. Reconciliation
+applies the same guard to an exhausted waiting refresh whose latest attempt failed,
+including a fourth claim whose worker lease expired. Pending sibling markets become
+terminal so publication can proceed; retained partial content remains available.
+Local partial or unavailable outcomes do not stop healthy sibling refreshes.
+Attempts persist a
 bounded safe reason for every failed symbol, month, source, or model stage; operators must not infer a cause from
 record counts alone. The 10:00 deadline is soft: no new automatic attempt
 starts at or after the deadline, but an in-flight attempt may finish.
@@ -24,8 +30,9 @@ The Compose definitions start the worker with
 claim loop. The worker entry point does not independently reject a missing or
 incorrect role, so operators must verify both the command and environment rather
 than treating a heartbeat alone as proof of the least-privilege boundary.
-Manual jobs use a one-hour soft deadline. This allows the immediate attempt and
-one 30-minute retry without leaving the admin UI permanently pending. An
+Manual jobs use a one-hour soft deadline and the same five-minute interval and
+three-retry limit (one initial attempt plus up to three retries). The deadline
+may stop retries earlier without leaving the admin UI permanently pending. An
 in-flight attempt may finish; after the deadline remaining retryable functions
 become terminal and dependent degraded publications may proceed. Publication
 functions and projection jobs that only become ready at the deadline

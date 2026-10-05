@@ -61,7 +61,7 @@ from daily_insights_api.modules.news.models import (
 )
 from daily_insights_api.modules.orchestration.models import FunctionRun, JobRun
 from daily_insights_api.modules.orchestration.service import (
-    terminalize_expired_automatic_functions,
+    terminalize_expired_functions,
 )
 from daily_insights_api.modules.orchestration.worker import _ready_candidates
 from daily_insights_api.scripts import run_institutional_flows, run_morning_reports
@@ -1683,7 +1683,7 @@ async def test_manual_news_deadline_terminalizes_refresh_but_keeps_publish_runna
         publish_id = publish.id
 
     async with data_management_database() as database:
-        assert await terminalize_expired_automatic_functions(database, now=datetime.now(UTC)) == 1
+        assert await terminalize_expired_functions(database, now=datetime.now(UTC)) == 1
     async with data_management_database() as database:
         loaded_refresh = await database.scalar(
             select(FunctionRun).where(

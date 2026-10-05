@@ -29,7 +29,7 @@ from daily_insights_api.modules.orchestration.models import (
 )
 from daily_insights_api.modules.orchestration.registry import FUNCTION_BY_KEY, REGISTRY_VERSION
 from daily_insights_api.modules.orchestration.service import (
-    MAX_AUTOMATIC_ATTEMPTS,
+    MAX_ATTEMPTS,
     TERMINAL_RUN_STATUSES,
     next_retry_at,
 )
@@ -126,13 +126,13 @@ async def claim_ready_projection(
                 JobRun.kind == "projection",
                 or_(
                     and_(JobRun.deadline_at.is_not(None), JobRun.deadline_at <= now),
-                    and_(
-                        JobRun.trigger == "automatic",
-                        JobRun.attempt_count >= MAX_AUTOMATIC_ATTEMPTS,
-                    ),
+                    JobRun.attempt_count >= MAX_ATTEMPTS,
                 ),
                 or_(
-                    and_(JobRun.status == "pending", JobRun.started_at.is_not(None)),
+                    and_(
+                        JobRun.status == "pending",
+                        or_(JobRun.started_at.is_not(None), JobRun.attempt_count >= MAX_ATTEMPTS),
+                    ),
                     and_(
                         JobRun.status == "running",
                         JobRun.lease_expires_at.is_not(None),
@@ -144,10 +144,7 @@ async def claim_ready_projection(
                 status="failed",
                 error=case(
                     (
-                        and_(
-                            JobRun.trigger == "automatic",
-                            JobRun.attempt_count >= MAX_AUTOMATIC_ATTEMPTS,
-                        ),
+                        JobRun.attempt_count >= MAX_ATTEMPTS,
                         "retry_limit_reached",
                     ),
                     else_="deadline_reached",
@@ -166,9 +163,7 @@ async def claim_ready_projection(
                 .where(
                     JobRun.kind == "projection",
                     JobRun.status.in_(("pending", "running")),
-                    or_(
-                        JobRun.trigger != "automatic", JobRun.attempt_count < MAX_AUTOMATIC_ATTEMPTS
-                    ),
+                    JobRun.attempt_count < MAX_ATTEMPTS,
                     (JobRun.next_attempt_at.is_(None) | (JobRun.next_attempt_at <= now)),
                     (JobRun.lease_expires_at.is_(None) | (JobRun.lease_expires_at < now)),
                     or_(
@@ -290,9 +285,7 @@ async def execute_projection(
         if job is None:
             return
         retry_at = (
-            next_retry_at(
-                now, job.deadline_at, trigger=job.trigger, attempt_count=job.attempt_count
-            )
+            next_retry_at(now, job.deadline_at, attempt_count=job.attempt_count)
             if status == "failed"
             else None
         )
@@ -300,9 +293,7 @@ async def execute_projection(
         job.result = result
         job.error = (
             "retry_limit_reached"
-            if status == "failed"
-            and job.trigger == "automatic"
-            and job.attempt_count >= MAX_AUTOMATIC_ATTEMPTS
+            if status == "failed" and job.attempt_count >= MAX_ATTEMPTS
             else error
         )
         job.next_attempt_at = retry_at
