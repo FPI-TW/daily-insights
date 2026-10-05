@@ -136,17 +136,46 @@ class OpenAICompatibleJsonModel:
         result_type: type[ResultT],
         audit: CallAudit,
     ) -> ResultT:
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            },
+        ]
+        failed_rows: list[NewsroomLlmCall] = []
+        for attempt in range(1 + REPAIR_ATTEMPTS):
+            outcome = await self._attempt(model, messages, result_type, audit)
+            if isinstance(outcome, _Answer):
+                database.add_all(failed_rows)
+                database.add(outcome.row)
+                return outcome.result
+            failed_rows.append(outcome.row)
+            if attempt == REPAIR_ATTEMPTS or outcome.content is None:
+                error = RetryableStageError(outcome.code)
+                error.audit_rows.extend(failed_rows)
+                raise error
+            # Temperature 0 makes a plain retry repeat the same broken answer, so
+            # the repair turn shows the model its output and what was wrong.
+            messages = [
+                *messages,
+                {"role": "assistant", "content": outcome.content},
+                {"role": "user", "content": _repair_instruction(outcome.problems)},
+            ]
+        raise AssertionError("unreachable")
+
+    async def _attempt[R: BaseModel](
+        self,
+        model: str,
+        messages: list[dict[str, str]],
+        result_type: type[R],
+        audit: CallAudit,
+    ) -> "_Answer[R] | _Invalid":
         body = {
             "model": model,
             "response_format": {"type": "json_object"},
             "temperature": 0,
-            "messages": [
-                {"role": "system", "content": system},
-                {
-                    "role": "user",
-                    "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-                },
-            ],
+            "messages": messages,
         }
         started = time.monotonic()
         response: httpx.Response | None = None
@@ -169,45 +198,64 @@ class OpenAICompatibleJsonModel:
             )
             raise _fail(classified, row) from error
         usage: dict[str, Any] | None = None
+        content: str | None = None
         try:
             data = response.json()
             usage = data.get("usage") if isinstance(data.get("usage"), dict) else None
-            parsed = json.loads(data["choices"][0]["message"]["content"])
-        except (KeyError, IndexError, TypeError, AttributeError, json.JSONDecodeError) as error:
+            raw = data["choices"][0]["message"]["content"]
+            content = raw if isinstance(raw, str) else None
+            parsed = json.loads(raw)
+        except (KeyError, IndexError, TypeError, AttributeError, json.JSONDecodeError):
             code = f"{audit.stage}_provider_invalid_json"
             row = _audit_row(
-                audit,
-                model=model,
-                started=started,
-                response=response,
-                usage=usage,
-                error_code=code,
+                audit, model=model, started=started, response=response, usage=usage, error_code=code
             )
-            raise _fail(RetryableStageError(code), row) from error
+            return _Invalid(code, row, content, "the reply was not a valid JSON object")
         try:
             result = result_type.model_validate(parsed)
         except ValidationError as error:
             code = f"{audit.stage}_schema_invalid"
             row = _audit_row(
-                audit,
-                model=model,
-                started=started,
-                response=response,
-                usage=usage,
-                error_code=code,
+                audit, model=model, started=started, response=response, usage=usage, error_code=code
             )
-            raise _fail(RetryableStageError(code), row) from error
-        database.add(
-            _audit_row(
-                audit,
-                model=model,
-                started=started,
-                response=response,
-                usage=usage,
-                error_code=None,
-            )
+            return _Invalid(code, row, content, _validation_problems(error))
+        row = _audit_row(
+            audit, model=model, started=started, response=response, usage=usage, error_code=None
         )
-        return result
+        return _Answer(result, row)
+
+
+REPAIR_ATTEMPTS = 1
+
+
+@dataclass(frozen=True, slots=True)
+class _Answer[R: BaseModel]:
+    result: R
+    row: NewsroomLlmCall
+
+
+@dataclass(frozen=True, slots=True)
+class _Invalid:
+    code: str
+    row: NewsroomLlmCall
+    content: str | None
+    problems: str
+
+
+def _validation_problems(error: ValidationError) -> str:
+    parts = []
+    for issue in error.errors()[:8]:
+        location = ".".join(str(part) for part in issue["loc"]) or "(root)"
+        parts.append(f"{location}: {issue['msg']}")
+    return "; ".join(parts)
+
+
+def _repair_instruction(problems: str) -> str:
+    return (
+        f"Your previous reply did not match the required JSON shape ({problems}). "
+        "Reply again with one complete JSON object that follows the field definitions in "
+        "the system message, include every required field, and output nothing but JSON."
+    )
 
 
 class Embedder(Protocol):

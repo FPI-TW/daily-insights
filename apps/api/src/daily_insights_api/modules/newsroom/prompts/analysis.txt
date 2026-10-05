@@ -17,3 +17,7 @@
   依各市場的角度分別撰寫；只說明影響管道與值得關注之處，不得做多空、漲跌預測或情緒判斷，也不得給投資建議。
 
 全部文字使用繁體中文（台灣用語），專有名詞可保留原文。只輸出 JSON，不要任何說明文字。
+
+四個欄位都必須輸出，缺一不可（related_symbols 沒有標的時輸出空陣列）。請依下列順序輸出，先寫 why 與 related_symbols，最後才寫 summary：
+
+{"headline": "...", "why": [{"market": "tw_equity", "why": "..."}], "related_symbols": [], "summary": "..."}

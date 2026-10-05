@@ -45,7 +45,7 @@ from daily_insights_api.modules.reports.api import (
     INSTRUMENTS,
 )
 
-ANALYSIS_PROMPT_VERSION = "newsroom.analysis.v1"
+ANALYSIS_PROMPT_VERSION = "newsroom.analysis.v2"
 WHY_PROMPT_VERSION = "newsroom.why.v1"
 MAX_ANALYSIS_ARTICLES = 5
 ARTICLE_EXCERPT_CHARS = 8_000
