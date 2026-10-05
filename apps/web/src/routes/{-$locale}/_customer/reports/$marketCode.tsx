@@ -1,327 +1,294 @@
-import type {
-  AnalystViewpoint,
-  LatestNews,
-  Locale,
+import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router"
+import {
+  marketCodeSchema,
+  launchMarketCodeSchema,
 } from "@daily-insights/api-client"
-import { createFileRoute, notFound, redirect } from "@tanstack/react-router"
-import { getMacroDashboard } from "#/lib/macro-dashboard.functions"
-import type { MacroDashboardData } from "#/lib/macro-dashboard"
-import { getVisibleMarkets } from "#/lib/markets"
+import { useEffect, useRef, useState } from "react"
 import { DailyNews, DailyNewsLoading } from "#/components/DailyNews"
 import {
-  CryptoMarketInformation,
-  GlobalMacroMarketInformation,
-  MarketInformationLoading,
-  OtherMarketInformation,
-  TaiwanEquityMarketInformation,
-  UsEquityMarketInformation,
-} from "#/components/MarketInformation"
-import { MarketViewpoint, ReportErrorScreen } from "#/components/Reports"
-import { getTodayAnalystViewpoints } from "#/lib/analyst-viewpoints"
-import { getMarketNews } from "#/lib/news"
-import {
-  isNewsMarketCode,
-  type NewsMarketCode,
-} from "#/lib/provisional-reports"
-import { getReportDetail } from "#/lib/reports"
-import {
-  chartMarketCodes,
-  getMarketIndexHistory,
-  getMarketIndexMovingAverages,
-  getVixHistory,
-  twoYearTaipeiRange,
-  type IndexMovingAverageMap,
-  type MarketIndexHistory,
-  type VixHistory,
-} from "#/lib/indices"
+  AnalystViewpointsLoading,
+  MarketViewpoint,
+  ReportErrorScreen,
+  ReportLoadingScreen,
+} from "#/components/Reports"
+import { ReportInformation } from "#/components/MarketInformation"
+import { MarketQuerySection } from "#/components/MarketQuerySection"
+import { marketQueries, useMarketQuery } from "#/lib/market-queries"
+import { isNewsMarketCode } from "#/lib/provisional-reports"
+import { twoYearTaipeiRange } from "#/lib/indices"
+import { institutionalFlowRange } from "#/lib/institutional-flows"
 import { useChatPageContext } from "#/components/PageContextChat"
 import {
-  getTaiwanInstitutionalFlows,
-  getTaiwanInstitutionalStocks,
-  institutionalFlowRange,
-  type TaiwanInstitutionalData,
-} from "#/lib/institutional-flows"
-
-type ReportResult = Awaited<ReturnType<typeof getReportDetail>>
-type MarketPage = {
-  report: Exclude<ReportResult, { kind: "not-found" }>
-  news: { marketCode: NewsMarketCode; latest: LatestNews | null } | null
-  viewpoint: AnalystViewpoint | null
-  macroDashboard: Promise<MacroDashboardData | null> | null
-  indexHistory: Promise<MarketIndexHistory | null> | null
-  indexMovingAverages: Promise<IndexMovingAverageMap> | null
-  institutionalData: Promise<TaiwanInstitutionalData> | null
-  vixHistory: Promise<VixHistory | null> | null
-}
-
-export const INDEX_HISTORY_DEADLINE_MS = 10_000
-export const INDEX_MOVING_AVERAGES_DEADLINE_MS = 10_000
-export const INSTITUTIONAL_DATA_DEADLINE_MS = 10_000
-export const VIX_HISTORY_DEADLINE_MS = 10_000
-
-export function withIndexHistoryDeadline(
-  history: Promise<MarketIndexHistory>,
-  deadlineMs = INDEX_HISTORY_DEADLINE_MS
-): Promise<MarketIndexHistory | null> {
-  return new Promise(resolve => {
-    const deadline = setTimeout(() => resolve(null), deadlineMs)
-    void history.then(
-      value => {
-        clearTimeout(deadline)
-        resolve(value)
-      },
-      () => {
-        clearTimeout(deadline)
-        resolve(null)
-      }
-    )
-  })
-}
-
-export function withMovingAverageDeadline(
-  movingAverages: Promise<IndexMovingAverageMap>,
-  deadlineMs = INDEX_MOVING_AVERAGES_DEADLINE_MS
-): Promise<IndexMovingAverageMap> {
-  return new Promise(resolve => {
-    const deadline = setTimeout(() => resolve({}), deadlineMs)
-    void movingAverages.then(
-      value => {
-        clearTimeout(deadline)
-        resolve(value)
-      },
-      () => {
-        clearTimeout(deadline)
-        resolve({})
-      }
-    )
-  })
-}
-
-export function withInstitutionalDataDeadline(
-  data: Promise<TaiwanInstitutionalData>,
-  deadlineMs = INSTITUTIONAL_DATA_DEADLINE_MS
-): Promise<TaiwanInstitutionalData> {
-  return new Promise(resolve => {
-    const deadline = setTimeout(
-      () => resolve({ flows: null, stocks: null }),
-      deadlineMs
-    )
-    void data.then(
-      value => {
-        clearTimeout(deadline)
-        resolve(value)
-      },
-      () => {
-        clearTimeout(deadline)
-        resolve({ flows: null, stocks: null })
-      }
-    )
-  })
-}
-
-export function withVixHistoryDeadline(
-  history: Promise<VixHistory>,
-  deadlineMs = VIX_HISTORY_DEADLINE_MS
-): Promise<VixHistory | null> {
-  return new Promise(resolve => {
-    const deadline = setTimeout(() => resolve(null), deadlineMs)
-    void history.then(
-      value => {
-        clearTimeout(deadline)
-        resolve(value)
-      },
-      () => {
-        clearTimeout(deadline)
-        resolve(null)
-      }
-    )
-  })
-}
-
-// The report is the primary content; market news is secondary and degrades to
-// its unavailable state instead of failing the route.
-export async function loadMarketPage({
-  params,
-  context,
-}: {
-  params: { marketCode: string }
-  context: { locale: Locale }
-}): Promise<MarketPage> {
-  if (params.marketCode === "forex") {
-    const markets = await getVisibleMarkets({ data: context.locale })
-    if (markets.some(market => market.code === "global_macro_bonds")) {
-      throw redirect({
-        to: "/{-$locale}/reports/$marketCode",
-        params: { locale: context.locale, marketCode: "global_macro_bonds" },
-        replace: true,
-      })
-    }
-  }
-  const macroDashboard =
-    params.marketCode === "global_macro_bonds"
-      ? getMacroDashboard().catch(() => null)
-      : null
-  const newsMarket = isNewsMarketCode(params.marketCode)
-    ? params.marketCode
-    : null
-  const supportsIndexChart = (chartMarketCodes as readonly string[]).includes(
-    params.marketCode
-  )
-  const indexRange = supportsIndexChart ? twoYearTaipeiRange() : null
-  const indexHistory = supportsIndexChart
-    ? withIndexHistoryDeadline(
-        getMarketIndexHistory({
-          data: {
-            marketCode: params.marketCode as "us_equity" | "tw_equity",
-            range: indexRange!,
-          },
-        })
-      )
-    : null
-  const indexMovingAverages = supportsIndexChart
-    ? withMovingAverageDeadline(
-        getMarketIndexMovingAverages({
-          data: {
-            marketCode: params.marketCode as "us_equity" | "tw_equity",
-            range: indexRange!,
-          },
-        })
-      )
-    : null
-  const institutionalData =
-    params.marketCode === "tw_equity" && indexRange
-      ? withInstitutionalDataDeadline(
-          Promise.allSettled([
-            getTaiwanInstitutionalFlows({
-              data: institutionalFlowRange(indexRange.end),
-            }),
-            getTaiwanInstitutionalStocks({
-              data: { date: indexRange.end, locale: context.locale },
-            }),
-          ]).then(([flows, stocks]) => ({
-            flows: flows.status === "fulfilled" ? flows.value : null,
-            stocks: stocks.status === "fulfilled" ? stocks.value : null,
-          }))
-        )
-      : null
-  const vixHistory =
-    params.marketCode === "us_equity" && indexRange
-      ? withVixHistoryDeadline(getVixHistory({ data: { range: indexRange } }))
-      : null
-  const [report, news, viewpoints] = await Promise.allSettled([
-    getReportDetail({
-      data: { marketCode: params.marketCode, locale: context.locale },
-    }),
-    newsMarket
-      ? getMarketNews({
-          data: { locale: context.locale, marketCode: newsMarket },
-        })
-      : Promise.resolve(null),
-    getTodayAnalystViewpoints(),
-  ])
-  if (report.status === "rejected") throw report.reason
-  if (report.value.kind === "not-found") throw notFound()
-  // The analyst's bullets are secondary like the news: absent, not fatal.
-  const viewpoint =
-    viewpoints.status === "fulfilled"
-      ? (viewpoints.value.find(
-          item => item.market_code === params.marketCode
-        ) ?? null)
-      : null
-  return {
-    report: report.value,
-    news: newsMarket
-      ? {
-          marketCode: newsMarket,
-          latest: news.status === "fulfilled" ? news.value : null,
-        }
-      : null,
-    viewpoint,
-    macroDashboard,
-    indexHistory,
-    indexMovingAverages,
-    institutionalData,
-    vixHistory,
-  }
-}
+  IndexHistoryChart,
+  IndexHistoryLoading,
+} from "#/components/IndexHistoryChart"
+import {
+  TaiwanIndexHistoryChart,
+  TaiwanIndexHistoryLoading,
+} from "#/components/TaiwanIndexHistoryChart"
+import {
+  TaiwanInstitutionalFlowsLoading,
+  FlowPanel,
+  StocksPanel,
+} from "#/components/TaiwanInstitutionalFlows"
+import { DashboardSection } from "#/components/DashboardPrimitives"
+import {
+  UsIndexPerformanceTable,
+  UsIndexPerformanceTableLoading,
+} from "#/components/UsIndexPerformanceTable"
+import {
+  VixHistoryChart,
+  VixHistoryLoading,
+} from "#/components/VixHistoryChart"
+import {
+  MacroDashboard,
+  MacroDashboardLoading,
+} from "#/components/MacroDashboard"
 
 export const Route = createFileRoute(
   "/{-$locale}/_customer/reports/$marketCode"
 )({
-  loader: loadMarketPage,
-  pendingComponent: MarketPageLoading,
+  beforeLoad: ({ params }) => {
+    if (!marketCodeSchema.safeParse(params.marketCode).success) throw notFound()
+  },
   errorComponent: ReportErrorScreen,
   component: ReportPage,
 })
-
 function ReportPage() {
-  const {
-    report,
-    news,
-    viewpoint,
-    macroDashboard,
-    indexHistory,
-    indexMovingAverages,
-    institutionalData,
-    vixHistory,
-  } = Route.useLoaderData()
-  const { marketCode } = Route.useParams()
-  const { locale } = Route.useRouteContext()
+  const { marketCode: rawCode } = Route.useParams()
+  const marketCode = marketCodeSchema.parse(rawCode)
+  const { locale, user } = Route.useRouteContext()
+  const navigate = useNavigate()
+  const queries = marketQueries(user, locale)
+  const markets = useMarketQuery(queries.markets(), locale)
+  const mergedForex =
+    marketCode === "forex" &&
+    markets.data?.some(m => m.code === "global_macro_bonds")
+  const ready =
+    marketCode !== "forex" || (markets.data !== undefined && !mergedForex)
+  const reportReady =
+    ready &&
+    (launchMarketCodeSchema.safeParse(marketCode).success ||
+      markets.data !== undefined)
+  const redirected = useRef(false)
+  useEffect(() => {
+    if (mergedForex && !redirected.current) {
+      redirected.current = true
+      void navigate({
+        to: "/{-$locale}/reports/$marketCode",
+        params: { locale, marketCode: "global_macro_bonds" },
+        replace: true,
+      })
+    }
+    if (marketCode !== "forex") redirected.current = false
+  }, [locale, marketCode, mergedForex, navigate])
+  const [range] = useState(() => twoYearTaipeiRange())
+  const isChart = marketCode === "us_equity" || marketCode === "tw_equity"
+  const report = useMarketQuery(queries.report(marketCode), locale, reportReady)
+  const news = useMarketQuery(
+    queries.news(marketCode),
+    locale,
+    ready && isNewsMarketCode(marketCode)
+  )
+  const viewpoints = useMarketQuery(queries.viewpoints(), locale, ready)
+  const macro = useMarketQuery(
+    queries.macro(),
+    locale,
+    ready && marketCode === "global_macro_bonds"
+  )
+  const history = useMarketQuery(
+    queries.history(marketCode, range),
+    locale,
+    ready && isChart
+  )
+  const averages = useMarketQuery(
+    queries.averages(marketCode, range),
+    locale,
+    ready && isChart
+  )
+  const vix = useMarketQuery(
+    queries.vix(range),
+    locale,
+    ready && marketCode === "us_equity"
+  )
+  const vixAverages = useMarketQuery(
+    queries.vixAverages(range),
+    locale,
+    ready && marketCode === "us_equity"
+  )
+  const flows = useMarketQuery(
+    queries.flows(institutionalFlowRange(range.end)),
+    locale,
+    ready && marketCode === "tw_equity"
+  )
+  const stocks = useMarketQuery(
+    queries.stocks(range.end),
+    locale,
+    ready && marketCode === "tw_equity"
+  )
   useChatPageContext(
-    report.kind === "report" && report.report.publicationId
-      ? { kind: "report_detail", publication_id: report.report.publicationId }
+    report.data?.kind === "report" && report.data.report.publicationId
+      ? {
+          kind: "report_detail",
+          publication_id: report.data.report.publicationId,
+        }
       : null
   )
-  const newsSection = news ? (
-    <DailyNews
-      news={news.latest}
-      eyebrowKey="marketNewsEyebrow"
-      titleKey={`marketNewsTitle_${news.marketCode}`}
-      groupByMarket={false}
-    />
-  ) : null
-  const marketInformation =
-    marketCode === "global_macro_bonds" && macroDashboard ? (
-      <GlobalMacroMarketInformation
-        dashboard={macroDashboard}
-        locale={locale}
-      />
-    ) : marketCode === "crypto" ? (
-      <CryptoMarketInformation locale={locale} report={report} />
-    ) : marketCode === "us_equity" ? (
-      <UsEquityMarketInformation
-        indexHistory={indexHistory}
-        indexMovingAverages={indexMovingAverages}
-        locale={locale}
-        report={report}
-        vixHistory={vixHistory}
-      />
-    ) : marketCode === "tw_equity" ? (
-      <TaiwanEquityMarketInformation
-        indexHistory={indexHistory}
-        indexMovingAverages={indexMovingAverages}
-        institutionalData={institutionalData}
-        locale={locale}
-        report={report}
-      />
-    ) : (
-      <OtherMarketInformation locale={locale} report={report} />
-    )
-  return (
-    <>
-      {newsSection}
-      {viewpoint ? <MarketViewpoint viewpoint={viewpoint} /> : null}
-      {marketInformation}
-    </>
+  if (
+    report.data?.kind === "not-found" ||
+    (!launchMarketCodeSchema.safeParse(marketCode).success &&
+      markets.data &&
+      !markets.data.some(m => m.code === marketCode))
   )
-}
-
-function MarketPageLoading() {
-  const { marketCode } = Route.useParams()
+    throw notFound()
+  const viewpoint = viewpoints.data?.find(
+    item => item.market_code === marketCode
+  )
   return (
     <>
-      {isNewsMarketCode(marketCode) ? <DailyNewsLoading /> : null}
-      <MarketInformationLoading />
+      {isNewsMarketCode(marketCode) ? (
+        <MarketQuerySection query={news} loading={<DailyNewsLoading />}>
+          {data => (
+            <DailyNews
+              news={data ?? null}
+              eyebrowKey="marketNewsEyebrow"
+              titleKey={`marketNewsTitle_${marketCode}`}
+              groupByMarket={false}
+            />
+          )}
+        </MarketQuerySection>
+      ) : null}
+      <MarketQuerySection
+        query={viewpoints}
+        loading={<AnalystViewpointsLoading />}
+      >
+        {() => (viewpoint ? <MarketViewpoint viewpoint={viewpoint} /> : null)}
+      </MarketQuerySection>
+      {marketCode === "global_macro_bonds" ? (
+        <MarketQuerySection query={macro} loading={<MacroDashboardLoading />}>
+          {data => <MacroDashboard data={data ?? null} locale={locale} />}
+        </MarketQuerySection>
+      ) : (
+        <div
+          className={
+            marketCode === "us_equity"
+              ? "grid min-w-0 gap-4 xl:grid-cols-2"
+              : "min-w-0"
+          }
+        >
+          {marketCode === "us_equity" ? (
+            <div className="flex min-w-0 flex-col">
+              <MarketQuerySection
+                query={history}
+                loading={<UsIndexPerformanceTableLoading />}
+              >
+                {data => (
+                  <UsIndexPerformanceTable
+                    history={data ?? null}
+                    locale={locale}
+                  />
+                )}
+              </MarketQuerySection>
+            </div>
+          ) : null}
+          <div className="min-w-0">
+            <MarketQuerySection
+              query={report}
+              loading={<ReportLoadingScreen />}
+            >
+              {data =>
+                data && data.kind !== "not-found" ? (
+                  <ReportInformation locale={locale} report={data} />
+                ) : null
+              }
+            </MarketQuerySection>
+          </div>
+        </div>
+      )}
+      {isChart ? (
+        <>
+          <MarketQuerySection
+            query={history}
+            loading={
+              marketCode === "tw_equity" ? (
+                <TaiwanIndexHistoryLoading />
+              ) : (
+                <IndexHistoryLoading />
+              )
+            }
+          >
+            {data =>
+              marketCode === "tw_equity" ? (
+                <TaiwanIndexHistoryChart
+                  history={data ?? null}
+                  locale={locale}
+                  movingAverages={averages.data ?? null}
+                  movingAveragesPending={averages.isPending}
+                />
+              ) : (
+                <IndexHistoryChart
+                  history={data ?? null}
+                  locale={locale}
+                  movingAverages={averages.data ?? null}
+                  movingAveragesPending={averages.isPending}
+                />
+              )
+            }
+          </MarketQuerySection>
+          <MarketQuerySection query={averages} loading={null}>
+            {() => null}
+          </MarketQuerySection>
+        </>
+      ) : null}
+      {marketCode === "us_equity" ? (
+        <MarketQuerySection query={vix} loading={<VixHistoryLoading />}>
+          {data => (
+            <VixHistoryChart
+              history={
+                data ? { ...data, indicators: vixAverages.data ?? null } : null
+              }
+              locale={locale}
+            />
+          )}
+        </MarketQuerySection>
+      ) : null}
+      {marketCode === "us_equity" ? (
+        <MarketQuerySection query={vixAverages} loading={null}>
+          {() => null}
+        </MarketQuerySection>
+      ) : null}
+      {marketCode === "tw_equity" ? (
+        <div className="mt-6 min-w-0">
+          <DashboardSection>
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,560px),1fr))] items-start gap-6">
+              <div className="min-w-0">
+                <MarketQuerySection
+                  query={flows}
+                  loading={<TaiwanInstitutionalFlowsLoading />}
+                >
+                  {data => (
+                    <FlowPanel
+                      flows={data ?? null}
+                      history={history.data ?? null}
+                      locale={locale}
+                    />
+                  )}
+                </MarketQuerySection>
+              </div>
+              <div className="min-w-0">
+                <MarketQuerySection
+                  query={stocks}
+                  loading={<TaiwanInstitutionalFlowsLoading />}
+                >
+                  {data => (
+                    <StocksPanel stocks={data ?? null} locale={locale} />
+                  )}
+                </MarketQuerySection>
+              </div>
+            </div>
+          </DashboardSection>
+        </div>
+      ) : null}
     </>
   )
 }

@@ -15,11 +15,13 @@ import {
 } from "#/lib/motion"
 
 export function DailyNewsLoading() {
+  const { t } = useTranslation()
   const animate = useEnterAnimation()
   return (
     <motion.section
       className="surface-panel mb-6 animate-pulse p-5"
       role="status"
+      aria-label={t("marketNewsLoading")}
       aria-live="polite"
       variants={fadeIn}
       initial={animate ? "hidden" : false}

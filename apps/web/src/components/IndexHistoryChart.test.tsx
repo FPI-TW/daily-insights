@@ -247,7 +247,7 @@ describe("IndexHistoryChart", () => {
           ],
         }}
         locale="en"
-        movingAverages={Promise.resolve({
+        movingAverages={{
           "^DJI": {
             symbol: "^DJI",
             market_code: "us_equity",
@@ -312,7 +312,7 @@ describe("IndexHistoryChart", () => {
               points: [],
             },
           },
-        })}
+        }}
       />
     )
 

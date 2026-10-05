@@ -1,80 +1,56 @@
-import type { LatestNews, Locale } from "@daily-insights/api-client"
-import { createFileRoute, useLoaderData } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import {
   ReportErrorScreen,
   ReportList,
-  ReportLoadingScreen,
+  AnalystViewpointsLoading,
 } from "#/components/Reports"
-import { getReportList } from "#/lib/reports"
 import { DailyNews, DailyNewsLoading } from "#/components/DailyNews"
-import { getLatestNews } from "#/lib/news"
-import { getTodayAnalystViewpoints } from "#/lib/analyst-viewpoints"
 import { useChatPageContext } from "#/components/PageContextChat"
+import { marketQueries, useMarketQuery } from "#/lib/market-queries"
+import { MarketQuerySection } from "#/components/MarketQuerySection"
 
 export const Route = createFileRoute("/{-$locale}/_customer/reports/")({
-  loader: loadReportsAndNews,
-  pendingComponent: ReportsAndNewsLoading,
-  pendingMs: 0,
   errorComponent: ReportErrorScreen,
   component: ReportsPage,
 })
-
-type ReportsAndNews = {
-  reports: Awaited<ReturnType<typeof getReportList>>
-  news: LatestNews | null
-  viewpoints: Awaited<ReturnType<typeof getTodayAnalystViewpoints>>
-}
-
-// The news panel is secondary: a news API failure must not replace the
-// report list with the route error screen, so only the report request is
-// allowed to reject and news degrades to its unavailable state.
-export async function loadReportsAndNews({
-  context,
-}: {
-  context: { locale: Locale }
-}): Promise<ReportsAndNews> {
-  const [reports, news, viewpoints] = await Promise.allSettled([
-    getReportList({ data: context.locale }),
-    getLatestNews({ data: context.locale }),
-    getTodayAnalystViewpoints(),
-  ])
-  if (reports.status === "rejected") throw reports.reason
-  return {
-    reports: reports.value,
-    news: news.status === "fulfilled" ? news.value : null,
-    viewpoints: viewpoints.status === "fulfilled" ? viewpoints.value : [],
-  }
-}
-
-function ReportsAndNewsLoading() {
-  return (
-    <>
-      <DailyNewsLoading />
-      <ReportLoadingScreen />
-    </>
-  )
-}
 function ReportsPage() {
-  const { reports, news, viewpoints } = Route.useLoaderData()
-  const markets = useLoaderData({
-    from: "/{-$locale}/_customer/reports",
-  })
-  const publicationIds = reports.flatMap(report =>
+  const { user, locale } = Route.useRouteContext()
+  const queries = marketQueries(user, locale)
+  const markets = useMarketQuery(queries.markets(), locale)
+  const reports = useMarketQuery(queries.reports(), locale)
+  const news = useMarketQuery(queries.news(), locale)
+  const viewpoints = useMarketQuery(queries.viewpoints(), locale)
+  const publicationIds = (reports.data ?? []).flatMap(report =>
     report.publicationId ? [report.publicationId] : []
   )
   useChatPageContext(
-    publicationIds.length
+    publicationIds.length || news.data?.edition_id
       ? {
           kind: "reports_index",
           publication_ids: publicationIds,
-          news_edition_id: news?.edition_id ?? null,
+          news_edition_id: news.data?.edition_id ?? null,
         }
       : null
   )
   return (
     <>
-      <DailyNews news={news} />
-      <ReportList viewpoints={viewpoints} markets={markets} />
+      <MarketQuerySection query={news} loading={<DailyNewsLoading />}>
+        {data => <DailyNews news={data ?? null} />}
+      </MarketQuerySection>
+      <MarketQuerySection query={reports} loading={null}>
+        {() => null}
+      </MarketQuerySection>
+      <MarketQuerySection
+        query={viewpoints}
+        loading={<AnalystViewpointsLoading />}
+      >
+        {data => (
+          <ReportList
+            viewpoints={data ?? []}
+            {...(markets.data ? { markets: markets.data } : {})}
+          />
+        )}
+      </MarketQuerySection>
     </>
   )
 }

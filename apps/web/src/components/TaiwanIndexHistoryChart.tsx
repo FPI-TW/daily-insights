@@ -1,6 +1,6 @@
 import { ClientOnly } from "@tanstack/react-router"
 import ReactECharts from "echarts-for-react"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { z } from "zod"
 import type { IndexMovingAverages, Locale } from "@daily-insights/api-client"
@@ -973,33 +973,15 @@ export function TaiwanIndexHistoryChart({
   history,
   locale,
   movingAverages = null,
+  movingAveragesPending = false,
 }: {
   history: MarketIndexHistory | null
   locale: Locale
-  movingAverages?: Promise<IndexMovingAverageMap> | null
+  movingAverages?: IndexMovingAverageMap | null
+  movingAveragesPending?: boolean
 }) {
   const { t } = useTranslation()
   const [selectedSymbol, setSelectedSymbol] = useState("")
-  const [state, setState] = useState<{
-    source: Promise<IndexMovingAverageMap> | null
-    values: IndexMovingAverageMap
-  }>({ source: null, values: {} })
-  useEffect(() => {
-    let active = true
-    const source = movingAverages
-    if (source)
-      void source.then(
-        values => {
-          if (active) setState({ source, values })
-        },
-        () => {
-          if (active) setState({ source, values: {} })
-        }
-      )
-    return () => {
-      active = false
-    }
-  }, [movingAverages])
   const selected =
     history?.series.find(item => item.symbol === selectedSymbol) ??
     history?.series[0]
@@ -1016,9 +998,8 @@ export function TaiwanIndexHistoryChart({
         </p>
       </section>
     )
-  const pending = movingAverages !== null && state.source !== movingAverages
-  const averages =
-    state.source === movingAverages ? state.values[selected.symbol] : undefined
+  const pending = movingAveragesPending
+  const averages = movingAverages?.[selected.symbol]
   return (
     <div className="mt-6 min-w-0">
       <DashboardSection>

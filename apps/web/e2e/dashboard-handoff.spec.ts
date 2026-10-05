@@ -36,9 +36,10 @@ for (const locale of locales) {
           exact: true,
         })
       ).toBeVisible()
-      // Oil/gold and copper/gold now have separate charts, plus curve, DXY and FX.
+      // Oil/gold and copper/gold have separate charts, plus curve, DXY,
+      // Asian FX normalized performance and the selected currency pair.
       // Taiwan also renders the independently loaded institutional-flow chart.
-      const count = market === "tw_equity" ? 3 : 5
+      const count = market === "tw_equity" ? 3 : 6
       await expect(page.locator("canvas")).toHaveCount(count, {
         timeout: 15_000,
       })
@@ -84,6 +85,17 @@ for (const locale of locales) {
         expect(apostropheWidth).toBeLessThan(8)
       }
       if (market === "global_macro_bonds") {
+        await expect(
+          page.getByRole("heading", {
+            name:
+              locale === "en"
+                ? "Asian currency relative performance (Base 100)"
+                : locale === "zh-hans"
+                  ? "亚洲货币相对走势（Base 100）"
+                  : "亞洲貨幣相對走勢（Base 100）",
+            exact: true,
+          })
+        ).toBeVisible()
         const introduction = page.getByText(
           locale === "en"
             ? "Macro, bonds and global currencies in one view."
@@ -150,7 +162,7 @@ for (const locale of locales) {
         await expect(
           page.getByText(publishedReport[locale], { exact: true })
         ).toHaveCount(0)
-        await expect(page.locator("canvas")).toHaveCount(5)
+        await expect(page.locator("canvas")).toHaveCount(6)
       }
       expect(errors).toEqual([])
     })

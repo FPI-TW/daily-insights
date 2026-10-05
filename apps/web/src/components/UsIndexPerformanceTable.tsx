@@ -109,7 +109,7 @@ export function UsIndexPerformanceTable({
   }
   return (
     <section
-      className="surface-panel h-full min-w-0 p-5"
+      className="surface-panel min-w-0 flex-1 p-5"
       aria-labelledby="us-index-table-title"
     >
       <h2 id="us-index-table-title" className="m-0 text-base font-extrabold">

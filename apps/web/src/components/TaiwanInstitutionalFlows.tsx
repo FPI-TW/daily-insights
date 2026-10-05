@@ -48,7 +48,7 @@ function directionClass(value: number) {
   return value > 0 ? "text-market-up" : "text-market-down"
 }
 
-function FlowPanel({
+export function FlowPanel({
   flows,
   history,
   locale,
@@ -97,7 +97,8 @@ function FlowPanel({
   const rightMax = indexMax + indexPadding
   const latest = dailyValues.at(-1) ?? 0
   const sum = dailyValues.reduce((total, value) => total + value, 0)
-  const ready = visible.length > 0 && indexNumbers.length > 0
+  const ready = visible.length > 0
+  const hasIndex = indexNumbers.length > 0
 
   return (
     <DashboardPanel
@@ -170,7 +171,12 @@ function FlowPanel({
               notMerge
               option={{
                 animation: false,
-                grid: { left: 48, right: 56, top: 14, bottom: 58 },
+                grid: {
+                  left: 48,
+                  right: hasIndex ? 56 : 14,
+                  top: 14,
+                  bottom: 58,
+                },
                 tooltip: {
                   trigger: "axis",
                   formatter: (params: Array<{ dataIndex: number }>) => {
@@ -179,7 +185,11 @@ function FlowPanel({
                     return [
                       dates[index],
                       `${t("flowTitle")}: ${signed(values[index] ?? 0, locale, 1)} ${t("flowUnitNet")}`,
-                      `${t("flowLegendIndex")}: ${indexValue == null ? "—" : new Intl.NumberFormat(numberLocales[locale], { maximumFractionDigits: 0 }).format(indexValue)}`,
+                      ...(hasIndex
+                        ? [
+                            `${t("flowLegendIndex")}: ${indexValue == null ? "—" : new Intl.NumberFormat(numberLocales[locale], { maximumFractionDigits: 0 }).format(indexValue)}`,
+                          ]
+                        : []),
                     ].join("<br/>")
                   },
                 },
@@ -188,7 +198,7 @@ function FlowPanel({
                   data: [
                     t("flowLegendBuy"),
                     t("flowLegendSell"),
-                    t("flowLegendIndex"),
+                    ...(hasIndex ? [t("flowLegendIndex")] : []),
                   ],
                   itemWidth: 10,
                   itemHeight: 10,
@@ -224,21 +234,27 @@ function FlowPanel({
                       lineStyle: { color: colors.gridSoft, type: "dashed" },
                     },
                   },
-                  {
-                    type: "value",
-                    min: rightMin,
-                    max: rightMax,
-                    interval: (rightMax - rightMin) / 6,
-                    splitNumber: 6,
-                    axisLabel: {
-                      color: colors.text,
-                      fontFamily: "monospace",
-                      fontSize: 10,
-                      formatter: (value: number) =>
-                        Math.round(value).toLocaleString(numberLocales[locale]),
-                    },
-                    splitLine: { show: false },
-                  },
+                  ...(hasIndex
+                    ? [
+                        {
+                          type: "value",
+                          min: rightMin,
+                          max: rightMax,
+                          interval: (rightMax - rightMin) / 6,
+                          splitNumber: 6,
+                          axisLabel: {
+                            color: colors.text,
+                            fontFamily: "monospace",
+                            fontSize: 10,
+                            formatter: (value: number) =>
+                              Math.round(value).toLocaleString(
+                                numberLocales[locale]
+                              ),
+                          },
+                          splitLine: { show: false },
+                        },
+                      ]
+                    : []),
                 ],
                 series: [
                   {
@@ -267,16 +283,23 @@ function FlowPanel({
                     barGap: "-100%",
                     itemStyle: { color: colors.down, opacity: 0.75 },
                   },
-                  {
-                    name: t("flowLegendIndex"),
-                    type: "line",
-                    yAxisIndex: 1,
-                    data: indexValues,
-                    symbol: "none",
-                    connectNulls: false,
-                    lineStyle: { color: colors.indexSeries[0], width: 1.6 },
-                    itemStyle: { color: colors.indexSeries[0] },
-                  },
+                  ...(hasIndex
+                    ? [
+                        {
+                          name: t("flowLegendIndex"),
+                          type: "line",
+                          yAxisIndex: 1,
+                          data: indexValues,
+                          symbol: "none",
+                          connectNulls: false,
+                          lineStyle: {
+                            color: colors.indexSeries[0],
+                            width: 1.6,
+                          },
+                          itemStyle: { color: colors.indexSeries[0] },
+                        },
+                      ]
+                    : []),
                 ],
               }}
             />
@@ -378,7 +401,7 @@ function FlowTable({
   )
 }
 
-function StocksPanel({
+export function StocksPanel({
   stocks,
   locale,
 }: {

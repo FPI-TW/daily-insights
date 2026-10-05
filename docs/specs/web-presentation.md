@@ -266,3 +266,51 @@
 這是 Twelve Data `market_movers` 端點的本質：依漲跌**幅**排序的 top movers
 永遠是雞蛋水餃股。對投顧晨報沒有參考價值，**但這是資料選擇問題，前端無法修正**。
 需要在 manifest 層改為指數成分股或市值前段標的的變動。此項屬於後端 manifest 擴充範圍。
+
+# 6. 2026-10-05 市場資料改由瀏覽器載入
+
+市場 layout、報告總覽與市場詳情保留既有伺服器登入／強制改密碼 guards。
+登入檢查完成後，SSR 立即輸出頁首、導覽框架及帶 `role="status"`、`aria-live`
+的 skeleton。這三個路由沒有市場資料 loader，因此 SSR 與 hover preload 都不呼叫
+markets、reports、news、analyst viewpoints 或指數／法人／宏觀資料端點。
+
+Hydration 完成後，各區塊使用 TanStack Query 與 `createBrowserTransport` 直接存取
+同源 `/api`，沿用 Nitro／nginx proxy；API clients 與宏觀 schema 驗證回應。
+市場清單與今日分析師觀點可跨頁共用，新聞、報告、宏觀、指數收盤、均線、VIX、
+法人資金與個股清單各自完成即可顯示。VIX 收盤與其技術指標也獨立請求；均線失敗
+不阻擋價格圖，台灣法人與個股不等待指數歷史。保留新聞、分析師觀點、市場資訊、
+技術圖、法人資料的內容順序，以及美股指數表與大型股同列的版面。
+美股指數表／報告與台股法人／個股各自保有固定 grid 欄位，報告 caveat、背景刷新
+提示與局部錯誤留在所屬欄位內，不把相鄰內容推到下一列。
+美股指數表以 flex 剩餘空間延伸，不使用百分比高度擠出狀態提示。法人資金圖與最新／
+累積數值在 flows 完成後立即顯示；加權指數右軸與疊圖僅在對應歷史資料可用時加入。
+
+Query key 以 user ID、organization ID 隔離，再加入資料依賴的 market、locale、
+日期／range；今日觀點不依語言而重複建立 cache。資料 60 秒內保持 fresh，無 observer
+的 cache 保留 5 分鐘。mount、視窗重新顯示與 reconnect 只對 stale 資料背景刷新。
+不輪詢、不自動重試。同一 key 已有內容時刷新保留內容，局部提示 pending；失敗顯示
+局部錯誤與重試按鈕，不清掉成功區塊。指數多 symbol 保留部分成功結果，401 不降級
+成部分失敗。Query cancellation 傳至實際 fetch；圖表／均線／VIX／法人每個 request
+10 秒 timeout，宏觀 60 秒，deadline 包括讀取回應 body。
+
+靜態無效 market 仍同步 404。已知但未推出的 market 等瀏覽器確認可見清單後顯示
+原 not-launched 狀態；隱藏市場 404。report_not_generated 的 404 detail 仍由 Zod
+辨識；其他 404 顯示 not-found。無 organization 的內部使用者保留 markets 403
+全 catalog preview 與 reports 403 空清單行為。
+
+forex 先查共用可見市場，確認 global_macro_bonds 可見後以 replace 轉址，期間不請求
+forex 內容。報告問答切換市場先回到 global context，publication／news ID 隨目前頁面
+資料到達更新。登出與 session 401 取消並清除市場 cache，session expiry 導向仍共用
+`useSessionExpiryRedirect`，同一 session 的多個 401 去重。
+
+新增驗收覆蓋：三語總覽／台美市場 JavaScript-disabled SSR 無市場 API 請求；瀏覽器
+intercept 延遲新聞、報告、均線時，先看見 shell 與獨立成功區塊；局部 retry、forex、
+not-generated／not-launched／404、401 轉址。單元／元件測試覆蓋 hydration gate、
+獨立完成、背景 cache 保留、取消、10／60 秒 timeout、key 隔離與 fresh reuse。
+
+驗收 fixture 維護：宏觀 mock histories 補上既有 schema 必需的 `base_dates`；宏觀圖表
+驗收包含原已存在的亞洲貨幣 Base 100 圖，共六張。新聞管理 E2E 使用目前 orchestration
+catalog／JobRun 契約及現有 enqueue／history／dependency UI，保留 GET 暫時錯誤重試
+三次、POST 帶 CSRF 與正確 job_key、失敗不自動重試及已載入內容保留的檢查；不修改
+管理功能。另加入 hover preload 無市場 API 請求，以及問答跨市場載入期間重置／最新
+publication、news context 更新的回歸測試。
