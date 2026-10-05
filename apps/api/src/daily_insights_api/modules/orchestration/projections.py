@@ -9,7 +9,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -29,6 +29,7 @@ from daily_insights_api.modules.orchestration.models import (
 )
 from daily_insights_api.modules.orchestration.registry import FUNCTION_BY_KEY, REGISTRY_VERSION
 from daily_insights_api.modules.orchestration.service import (
+    MAX_AUTOMATIC_ATTEMPTS,
     TERMINAL_RUN_STATUSES,
     next_retry_at,
 )
@@ -123,8 +124,13 @@ async def claim_ready_projection(
             update(JobRun)
             .where(
                 JobRun.kind == "projection",
-                JobRun.deadline_at.is_not(None),
-                JobRun.deadline_at <= now,
+                or_(
+                    and_(JobRun.deadline_at.is_not(None), JobRun.deadline_at <= now),
+                    and_(
+                        JobRun.trigger == "automatic",
+                        JobRun.attempt_count >= MAX_AUTOMATIC_ATTEMPTS,
+                    ),
+                ),
                 or_(
                     and_(JobRun.status == "pending", JobRun.started_at.is_not(None)),
                     and_(
@@ -136,7 +142,16 @@ async def claim_ready_projection(
             )
             .values(
                 status="failed",
-                error="deadline_reached",
+                error=case(
+                    (
+                        and_(
+                            JobRun.trigger == "automatic",
+                            JobRun.attempt_count >= MAX_AUTOMATIC_ATTEMPTS,
+                        ),
+                        "retry_limit_reached",
+                    ),
+                    else_="deadline_reached",
+                ),
                 next_attempt_at=None,
                 completed_at=now,
                 lease_owner=None,
@@ -151,6 +166,9 @@ async def claim_ready_projection(
                 .where(
                     JobRun.kind == "projection",
                     JobRun.status.in_(("pending", "running")),
+                    or_(
+                        JobRun.trigger != "automatic", JobRun.attempt_count < MAX_AUTOMATIC_ATTEMPTS
+                    ),
                     (JobRun.next_attempt_at.is_(None) | (JobRun.next_attempt_at <= now)),
                     (JobRun.lease_expires_at.is_(None) | (JobRun.lease_expires_at < now)),
                     or_(
@@ -169,6 +187,7 @@ async def claim_ready_projection(
                 continue
             token = uuid.uuid4()
             job.status = "running"
+            job.attempt_count += 1
             job.started_at = job.started_at or now
             job.lease_owner = owner
             job.lease_token = token
@@ -270,10 +289,22 @@ async def execute_projection(
         )
         if job is None:
             return
-        retry_at = next_retry_at(now, job.deadline_at) if status == "failed" else None
+        retry_at = (
+            next_retry_at(
+                now, job.deadline_at, trigger=job.trigger, attempt_count=job.attempt_count
+            )
+            if status == "failed"
+            else None
+        )
         job.status = "pending" if retry_at is not None else status
         job.result = result
-        job.error = error
+        job.error = (
+            "retry_limit_reached"
+            if status == "failed"
+            and job.trigger == "automatic"
+            and job.attempt_count >= MAX_AUTOMATIC_ATTEMPTS
+            else error
+        )
         job.next_attempt_at = retry_at
         job.completed_at = None if retry_at is not None else now
         job.lease_owner = None
@@ -332,13 +363,18 @@ async def freeze_projection_inputs(
         if existing is not None:
             return await _load_frozen(database, existing.id)
         cutoff = datetime.now(UTC)
+        function_outcomes = await _current_projection_function_outcomes(database, job.id)
         rows = await _latest_eligible_observations(
             database,
             job.edition_date,
             cutoff,
             datasets=_projection_datasets(job),
+            preserved_datasets=frozenset(
+                str(outcome["function_key"])
+                for outcome in function_outcomes
+                if outcome["status"] in {"partial", "unavailable", "failed", "cancelled"}
+            ),
         )
-        function_outcomes = await _current_projection_function_outcomes(database, job.id)
         payload = [
             {
                 "kind": row.kind,
@@ -437,43 +473,6 @@ async def _frozen_function_outcomes(
     return tuple(value for value in values if isinstance(value, dict))
 
 
-def _rows_for_current_outcomes(
-    rows: tuple[FrozenObservation, ...], outcomes: tuple[dict[str, Any], ...]
-) -> tuple[FrozenObservation, ...]:
-    by_function = {
-        str(outcome.get("function_key")): outcome
-        for outcome in outcomes
-        if outcome.get("function_key")
-    }
-    partial_symbols: dict[str, set[str]] = {}
-    for function_key, outcome in by_function.items():
-        if outcome.get("status") != "partial":
-            continue
-        successful_scopes = {
-            value for value in outcome.get("successful_scopes", []) if isinstance(value, str)
-        }
-        if successful_scopes:
-            partial_symbols[function_key] = successful_scopes
-            continue
-        attempt_ids = {
-            uuid.UUID(value) for value in outcome.get("attempt_ids", []) if isinstance(value, str)
-        }
-        partial_symbols[function_key] = {
-            row.symbol
-            for row in rows
-            if row.dataset_key == function_key and row.function_attempt_id in attempt_ids
-        }
-    unavailable_statuses = {"unavailable", "failed", "cancelled"}
-    return tuple(
-        row
-        for row in rows
-        if by_function.get(row.dataset_key, {}).get("status") not in unavailable_statuses
-        and (
-            row.dataset_key not in partial_symbols or row.symbol in partial_symbols[row.dataset_key]
-        )
-    )
-
-
 def _outcome_attempt_ids(outcomes: tuple[dict[str, Any], ...]) -> set[uuid.UUID]:
     return {
         uuid.UUID(value)
@@ -489,6 +488,7 @@ async def _latest_eligible_observations(
     cutoff: datetime,
     *,
     datasets: frozenset[str],
+    preserved_datasets: frozenset[str] = frozenset(),
 ) -> tuple[FrozenObservation, ...]:
     history_start = edition_date - timedelta(days=740)
     market_rows = (
@@ -545,7 +545,7 @@ async def _latest_eligible_observations(
                 freshness[series_identity] = (
                     edition_date - observation.observation_date
                 ).days <= definition.freshness_days
-            if not freshness[series_identity]:
+            if not freshness[series_identity] and series.dataset_key not in preserved_datasets:
                 continue
             result.append(
                 FrozenObservation(
@@ -684,10 +684,15 @@ async def publish_market_reports(
                 for outcome in frozen_outcomes
                 if outcome.get("function_key") in REPORT_DATASETS[market_code]
             )
-            rows = _rows_for_current_outcomes(
-                tuple(row for row in frozen if row.dataset_key in REPORT_DATASETS[market_code]),
-                relevant_outcomes,
-            )
+            # Persisted observations remain usable when a new refresh fails.
+            rows = tuple(row for row in frozen if row.dataset_key in REPORT_DATASETS[market_code])
+            if not rows and any(
+                outcome.get("status") in {"partial", "unavailable", "failed", "cancelled"}
+                for outcome in relevant_outcomes
+            ):
+                actions[market_code] = "preserved"
+                market_statuses[market_code] = "unavailable"
+                continue
             digest = _rows_digest(market_code, rows, relevant_outcomes)
             await database.execute(
                 select(func.pg_advisory_xact_lock(_publication_lock(market_code, job.edition_date)))
@@ -721,6 +726,38 @@ async def publish_market_reports(
                 market_statuses[market_code] = str(latest.content.get("status", "unavailable"))
                 continue
             bundle = _report_bundle(cast(LaunchMarketCode, market_code), rows)
+            if any(
+                outcome.get("status") in {"partial", "unavailable", "failed", "cancelled"}
+                for outcome in relevant_outcomes
+            ):
+                previous = await database.scalar(
+                    select(ReportPublication)
+                    .where(
+                        ReportPublication.report_key == "daily-market",
+                        ReportPublication.market_code == market_code,
+                        ReportPublication.edition_date <= job.edition_date,
+                    )
+                    .order_by(
+                        ReportPublication.edition_date.desc(), ReportPublication.revision.desc()
+                    )
+                    .limit(1)
+                )
+                current_ok_blocks = {
+                    block.id for block in bundle.content.blocks if block.status == "ok"
+                }
+                previous_blocks = previous.content.get("blocks", []) if previous is not None else []
+                if isinstance(previous_blocks, list) and any(
+                    isinstance(block, dict)
+                    and block.get("status") == "ok"
+                    and block.get("id") not in current_ok_blocks
+                    for block in previous_blocks
+                ):
+                    assert previous is not None
+                    actions[market_code] = "preserved"
+                    market_statuses[market_code] = str(
+                        previous.content.get("status", "unavailable")
+                    )
+                    continue
             publication = ReportPublication(
                 pipeline_run_id=None,
                 projection_job_run_id=job.id,
@@ -753,7 +790,10 @@ async def publish_market_reports(
     return {
         "markets": actions,
         "market_statuses": market_statuses,
-        "partial": any(status != "complete" for status in market_statuses.values()),
+        "partial": any(status != "complete" for status in market_statuses.values())
+        or any(
+            outcome.get("status") not in {"succeeded", "no_change"} for outcome in frozen_outcomes
+        ),
     }
 
 
@@ -1038,9 +1078,7 @@ async def publish_macro_dashboard(
     relevant_outcomes = tuple(
         outcome for outcome in frozen_outcomes if outcome.get("function_key") in MACRO_DATASETS
     )
-    rows = _rows_for_current_outcomes(
-        tuple(row for row in frozen if row.dataset_key in MACRO_DATASETS), relevant_outcomes
-    )
+    rows = tuple(row for row in frozen if row.dataset_key in MACRO_DATASETS)
     if not rows:
         return {
             "action": "preserved",
@@ -1091,8 +1129,6 @@ async def publish_macro_dashboard(
         )
         if job is None:
             raise ValueError("projection lease is no longer current")
-        payload = dashboard.model_dump(mode="json")
-        input_digest = _rows_digest("macro_dashboard", rows, relevant_outcomes)
         source_references = [
             {
                 "provider": row.provider_key,
@@ -1110,13 +1146,65 @@ async def publish_macro_dashboard(
             .where(MacroDashboardSnapshot.scope_key == "global_macro_bonds")
             .with_for_update()
         )
+        preserved_histories: list[str] = []
+        if existing is not None:
+            failed_datasets = {
+                str(outcome["function_key"])
+                for outcome in relevant_outcomes
+                if outcome.get("status") in {"partial", "unavailable", "failed", "cancelled"}
+            }
+            prior_dashboard = MacroDashboard.model_validate(existing.payload)
+            prior_histories = {history.id: history for history in prior_dashboard.histories}
+            specs = {
+                identifier: (dataset, symbol)
+                for dataset, identifier, symbol, _, _ in _macro_history_specs()
+            }
+            for index, history in enumerate(dashboard.histories):
+                dataset, symbol = specs[history.id]
+                prior = prior_histories.get(history.id)
+                if (
+                    history.status != "ok"
+                    and dataset in failed_datasets
+                    and prior is not None
+                    and prior.status == "ok"
+                    and prior.points
+                ):
+                    dashboard.histories[index] = prior
+                    preserved_histories.append(history.id)
+                    source_references.extend(
+                        reference
+                        for reference in existing.source_references or []
+                        if reference.get("dataset") == dataset and reference.get("symbol") == symbol
+                    )
+        missing_histories = [
+            history.id for history in dashboard.histories if history.status != "ok"
+        ]
+        payload = dashboard.model_dump(mode="json")
+        input_digest = _rows_digest("macro_dashboard", rows, relevant_outcomes)
+        if preserved_histories:
+            input_digest = hashlib.sha256(
+                json.dumps(
+                    {
+                        "rows_digest": input_digest,
+                        "histories": payload["histories"],
+                        "sources": source_references,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
         if existing is not None and existing.input_digest == input_digest:
             missing = datasets - {row.dataset_key for row in rows}
             return {
                 "action": "no_change",
                 "missing_datasets": sorted(missing),
                 "missing_histories": missing_histories,
-                "partial": bool(missing_histories),
+                "preserved_histories": preserved_histories,
+                "partial": bool(missing_histories)
+                or any(
+                    outcome.get("status") not in {"succeeded", "no_change"}
+                    for outcome in relevant_outcomes
+                ),
             }
         current_cutoff = await database.scalar(
             select(ProjectionInputFreeze.cutoff_at).where(
@@ -1146,7 +1234,12 @@ async def publish_macro_dashboard(
                 "action": "superseded",
                 "missing_datasets": sorted(missing),
                 "missing_histories": missing_histories,
-                "partial": bool(missing_histories),
+                "preserved_histories": preserved_histories,
+                "partial": bool(missing_histories)
+                or any(
+                    outcome.get("status") not in {"succeeded", "no_change"}
+                    for outcome in relevant_outcomes
+                ),
             }
         if existing is None:
             database.add(
@@ -1173,7 +1266,11 @@ async def publish_macro_dashboard(
         "action": "published",
         "missing_datasets": sorted(missing),
         "missing_histories": missing_histories,
-        "partial": bool(missing_histories),
+        "preserved_histories": preserved_histories,
+        "partial": bool(missing_histories)
+        or any(
+            outcome.get("status") not in {"succeeded", "no_change"} for outcome in relevant_outcomes
+        ),
     }
 
 

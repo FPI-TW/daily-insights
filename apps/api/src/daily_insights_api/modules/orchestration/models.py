@@ -108,6 +108,7 @@ class JobRun(UUIDPrimaryKeyMixin, Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT")
     )
     payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     lease_owner: Mapped[str | None] = mapped_column(String(200))
     lease_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

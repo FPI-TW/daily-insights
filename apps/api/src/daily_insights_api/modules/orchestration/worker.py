@@ -29,6 +29,7 @@ from daily_insights_api.modules.orchestration.models import (
 from daily_insights_api.modules.orchestration.registry import FUNCTION_BY_KEY
 from daily_insights_api.modules.orchestration.service import (
     LEASE_DURATION,
+    MAX_AUTOMATIC_ATTEMPTS,
     RECONCILIATION_BATCH_SIZE,
     SUCCESS_FUNCTION_STATUSES,
     TERMINAL_FUNCTION_STATUSES,
@@ -149,8 +150,13 @@ async def _ready_candidates(
             .join(JobRun, JobRun.id == FunctionRun.job_run_id)
             .where(
                 JobRun.status.in_(("pending", "running")),
+                or_(
+                    JobRun.trigger != "automatic",
+                    FunctionRun.attempt_count < MAX_AUTOMATIC_ATTEMPTS,
+                ),
                 ~blocked_by_dependency,
                 or_(
+                    JobRun.trigger == "automatic",
                     FunctionRun.function_key.not_in(NEWS_REFRESH_FUNCTION_KEYS),
                     ~blocked_by_news_sibling,
                 ),
@@ -236,7 +242,9 @@ async def claim_ready_function(
                         raise _SkipClaim
                     if not await function_dependencies_ready(database, function_run.id):
                         raise _SkipClaim
-                    if not await _news_siblings_allow_claim(database, function_run):
+                    if job_run.trigger != "automatic" and not await _news_siblings_allow_claim(
+                        database, function_run
+                    ):
                         raise _SkipClaim
 
                     if function_run.status == "running":
@@ -306,6 +314,8 @@ def _attempt_scope(function_run: FunctionRun) -> dict[str, Any]:
 
 
 def _claimable(function_run: FunctionRun, job_run: JobRun, now: datetime) -> bool:
+    if job_run.trigger == "automatic" and function_run.attempt_count >= MAX_AUTOMATIC_ATTEMPTS:
+        return False
     if job_run.status not in {"pending", "running"}:
         return False
     if (
@@ -436,6 +446,8 @@ async def finish_function(
                 next_retry_at(
                     effective_now,
                     job_run.deadline_at,
+                    trigger=job_run.trigger,
+                    attempt_count=function_run.attempt_count,
                 )
                 if outcome.retryable and outcome.status in {"partial", "unavailable", "failed"}
                 else None
@@ -468,9 +480,16 @@ async def finish_function(
                 function_run.missing_scopes = list(outcome.missing_scopes) or None
                 if not preserve_partial_result:
                     function_run.result = stored_result
-                function_run.error = outcome.error_code
+                function_run.error = (
+                    "retry_limit_reached"
+                    if outcome.retryable
+                    and job_run.trigger == "automatic"
+                    and function_run.attempt_count >= MAX_AUTOMATIC_ATTEMPTS
+                    else outcome.error_code
+                )
                 if (
-                    function_run.function_key in NEWS_REFRESH_FUNCTION_KEYS
+                    job_run.trigger != "automatic"
+                    and function_run.function_key in NEWS_REFRESH_FUNCTION_KEYS
                     and outcome.status == "failed"
                 ):
                     await _fail_pending_news_siblings(
