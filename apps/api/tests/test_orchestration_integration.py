@@ -11,6 +11,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from conftest import remigrate_database
+from pydantic import SecretStr
 from sqlalchemy import event, func, select, text, update
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.ext.asyncio import (
@@ -27,7 +28,13 @@ import daily_insights_api.modules.orchestration.projections as orchestration_pro
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.analyst_viewpoints.api import AnalystViewpointSyncError
 from daily_insights_api.modules.analyst_viewpoints.models import AnalystViewpointSyncRun
-from daily_insights_api.modules.data_sources.api import TaiexDailyBar, TaiexDailyBars
+from daily_insights_api.modules.data_sources.api import (
+    DailyBar,
+    TaiexDailyBar,
+    TaiexDailyBars,
+    TwelveDataAdapter,
+    TwelveDataTransport,
+)
 from daily_insights_api.modules.news.contracts import (
     Candidate,
     LocalizedSummary,
@@ -46,6 +53,7 @@ from daily_insights_api.modules.news.models import (
     PreparedNewsItem,
 )
 from daily_insights_api.modules.news.service import ExtractionOutcome
+from daily_insights_api.modules.orchestration.facts import store_market_bars
 from daily_insights_api.modules.orchestration.models import (
     FunctionAttempt,
     FunctionDependency,
@@ -92,6 +100,278 @@ from daily_insights_api.modules.reports.macro_diagnostics import record_failure
 from daily_insights_api.modules.reports.models import ReportPublication
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.mark.parametrize("trigger", ["automatic", "manual"])
+@pytest.mark.parametrize(
+    "function_key,symbol,market,asset_type,history_id",
+    [
+        ("fx_daily_bars", "EUR/USD", "forex", "Physical Currency", "eur_usd"),
+        ("commodity_daily_bars", "XAU/USD", "global_macro_bonds", "Precious Metal", "gold"),
+    ],
+)
+async def test_twelve_duplicate_history_recovers_persisted_gaps_and_dashboard_idempotently(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    trigger: str,
+    function_key: str,
+    symbol: str,
+    market: str,
+    asset_type: str,
+    history_id: str,
+) -> None:
+    engine, sessions = orchestration_database
+    edition = date(2026, 10, 7)
+    now = datetime.now(UTC)
+    seed_token = uuid.uuid4()
+
+    def bar(day: int, close: str) -> DailyBar:
+        return DailyBar(
+            instrument_source_id=symbol,
+            market=market,
+            symbol=symbol,
+            trade_date=date(2026, 10, day),
+            open=Decimal(close),
+            high=Decimal(close) + 1,
+            low=Decimal(close) - 1,
+            close=Decimal(close),
+            volume=None,
+            source="twelve_data",
+        )
+
+    async with sessions.begin() as database:
+        seed_job = JobRun(
+            job_key="twelve_data_daily_update",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=date(2026, 10, 5),
+            status="succeeded",
+        )
+        database.add(seed_job)
+        await database.flush()
+        seed_function = FunctionRun(
+            job_run_id=seed_job.id,
+            function_key=function_key,
+            provider_key="twelve_data",
+            scope={},
+            status="running",
+            lease_token=seed_token,
+        )
+        database.add(seed_function)
+        await database.flush()
+        seed_attempt = FunctionAttempt(
+            function_run_id=seed_function.id,
+            attempt_number=1,
+            provider_key="twelve_data",
+            function_key=function_key,
+            scope={},
+            fence_token=seed_token,
+            status="succeeded",
+        )
+        database.add(seed_attempt)
+        await database.flush()
+        assert (
+            await store_market_bars(
+                database,
+                function_run_id=seed_function.id,
+                fence_token=seed_token,
+                function_attempt_id=seed_attempt.id,
+                provider_key="twelve_data",
+                dataset_key=function_key,
+                symbol=symbol,
+                market=market,
+                unit="USD",
+                contract_version="2026-10-05.v8",
+                bars=(bar(3, "99"), bar(4, "100")),
+            )
+            == 2
+        )
+        seed_function.status = "succeeded"
+
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.url.params["symbol"] == symbol
+        if request.url.path == "/eod":
+            payload: dict[str, Any] = {
+                "symbol": symbol,
+                "exchange": "COMMODITY",
+                "datetime": "2026-10-06",
+                "close": "103",
+            }
+        else:
+            payload = {
+                "meta": {
+                    "symbol": symbol,
+                    "interval": "1day",
+                    "currency_quote": "US Dollar",
+                    "type": asset_type,
+                },
+                "values": [
+                    {
+                        "datetime": item.trade_date.isoformat(),
+                        "open": str(item.open),
+                        "high": str(item.high),
+                        "low": str(item.low),
+                        "close": str(item.close),
+                        "volume": item.volume,
+                    }
+                    for item in (
+                        bar(3, "99"),
+                        bar(4, "100"),
+                        bar(4, "101"),
+                        bar(5, "102"),
+                        bar(6, "103"),
+                        bar(7, "104"),
+                    )
+                ],
+                "status": "ok",
+            }
+        return httpx.Response(200, json=payload, request=request)
+
+    transport = TwelveDataTransport(
+        base_url="https://api.twelvedata.test",
+        api_key=SecretStr("test-only-key"),
+        client=httpx.AsyncClient(
+            base_url="https://api.twelvedata.test", transport=httpx.MockTransport(respond)
+        ),
+    )
+    adapter = TwelveDataAdapter(transport)
+    settings = Settings(environment="test", twelve_data_api_key=SecretStr("test-only-key"))
+    attempt_ids: list[uuid.UUID] = []
+    try:
+        for run_number in (1, 2):
+            async with sessions.begin() as database:
+                job = JobRun(
+                    job_key="twelve_data_daily_update",
+                    kind="function",
+                    trigger=trigger,
+                    automatic_key=f"duplicate-recovery-{run_number}",
+                    registry_version="test",
+                    registry_snapshot={},
+                    edition_date=edition,
+                    status="pending",
+                    deadline_at=now + timedelta(hours=1),
+                )
+                database.add(job)
+                await database.flush()
+                function = FunctionRun(
+                    job_run_id=job.id,
+                    function_key=function_key,
+                    provider_key="twelve_data",
+                    scope={"missing_scopes": [symbol]},
+                    status="pending",
+                )
+                database.add(function)
+                await database.flush()
+                function_id = function.id
+            claimed = await claim_ready_function(engine, sessions, owner="duplicate-recovery")
+            assert claimed is not None and claimed.function_run_id == function_id
+            attempt_ids.append(claimed.attempt_id)
+            await execute_claimed(
+                claimed,
+                sessions,
+                partial(orchestration_functions._run_twelve, settings, sessions, adapter=adapter),
+            )
+            async with sessions() as database:
+                attempt = await database.get(FunctionAttempt, claimed.attempt_id)
+                assert attempt is not None
+                assert attempt.status == ("succeeded" if run_number == 1 else "no_change")
+                assert attempt.record_count == (3 if run_number == 1 else 0)
+                assert attempt.source_as_of == date(2026, 10, 6)
+                assert attempt.error_code is None and attempt.payload_digest is not None
+                assert [metadata["endpoint"] for metadata in attempt.request_metadata] == [
+                    "/eod",
+                    "/time_series",
+                ]
+                assert attempt.request_metadata[-1]["source_as_of"] == "2026-10-06"
+                assert attempt.request_metadata[-1]["record_count"] == 4
+                assert "test-only-key" not in str(attempt.request_metadata)
+        assert [request.url.path for request in requests] == [
+            "/eod",
+            "/time_series",
+            "/eod",
+            "/time_series",
+        ]
+        assert [requests[index].url.params["outputsize"] for index in (1, 3)] == ["16", "12"]
+    finally:
+        await transport.close()
+
+    async with sessions() as database:
+        series = (await database.scalars(select(MarketDailySeries))).one()
+        # This is the immutable initial contract marker; corrections are
+        # represented by new observations and the current request provenance.
+        assert series.contract_version == "2026-10-05.v8"
+        observations = list(
+            await database.scalars(
+                select(MarketDailyObservation).order_by(
+                    MarketDailyObservation.observation_date,
+                    MarketDailyObservation.version,
+                )
+            )
+        )
+        assert [(item.observation_date.day, item.version, item.close) for item in observations] == [
+            (3, 1, Decimal("99")),
+            (4, 1, Decimal("100")),
+            (4, 2, Decimal("101")),
+            (5, 1, Decimal("102")),
+            (6, 1, Decimal("103")),
+        ]
+        assert all(item.function_attempt_id == attempt_ids[0] for item in observations[2:])
+
+    owner, token = "duplicate-dashboard", uuid.uuid4()
+    async with sessions.begin() as database:
+        projection = JobRun(
+            job_key="macro_dashboard_publish",
+            kind="projection",
+            trigger=trigger,
+            automatic_key="duplicate-dashboard",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=edition,
+            status="running",
+            lease_owner=owner,
+            lease_token=token,
+        )
+        database.add(projection)
+        await database.flush()
+        projection_id = projection.id
+    frozen = await freeze_projection_inputs(
+        sessions, job_run_id=projection_id, owner=owner, fence_token=token
+    )
+    result = await publish_macro_dashboard(
+        sessions,
+        job_run_id=projection_id,
+        owner=owner,
+        fence_token=token,
+        frozen=frozen,
+    )
+    assert result["action"] == "published"
+    async with sessions() as database:
+        snapshot = await database.get(MacroDashboardSnapshot, "global_macro_bonds")
+        assert snapshot is not None
+        history = next(item for item in snapshot.payload["histories"] if item["id"] == history_id)
+        assert history["status"] == "ok"
+        assert [Point.model_validate(point) for point in history["points"]] == [
+            Point(date=date(2026, 10, day), value=Decimal(value))
+            for day, value in ((3, "99"), (4, "101"), (5, "102"), (6, "103"))
+        ]
+        assert any(
+            reference["date"] == "2026-10-06"
+            and reference["function_attempt_id"] == str(attempt_ids[0])
+            for reference in snapshot.source_references
+        )
+    assert (
+        await publish_macro_dashboard(
+            sessions,
+            job_run_id=projection_id,
+            owner=owner,
+            fence_token=token,
+            frozen=frozen,
+        )
+    )["action"] == "no_change"
 
 
 def test_partial_news_result_keeps_batch_with_more_prepared_items() -> None:
