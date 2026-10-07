@@ -1,5 +1,7 @@
 import hashlib
 import json
+import logging
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -19,10 +21,13 @@ from daily_insights_api.modules.data_sources.twelve_data.transport import (
     TwelveDataTransportResponse,
 )
 
-TWELVE_DATA_CONTRACT_VERSION = "2026-10-05.v8"
+logger = logging.getLogger(__name__)
+
+TWELVE_DATA_CONTRACT_VERSION = "2026-10-07.v9"
 TWELVE_DATA_CONTRACT_HASH = hashlib.sha256(
     b"twelve-data:eod,time_series,completed-daily-bars,dp11,"
-    b"raw-nondescending,completed-ohlc-range,exact-duplicates,unique-eod-row:2026-10-05.v8"
+    b"raw-nondescending,consumed-ohlc-range,last-full-row-by-response-order,"
+    b"exact-latest-eod,raw-outputsize,unique-minimum-items:2026-10-07.v9"
 ).hexdigest()
 # Commodity 1day metadata is inconsistent: most USD commodities spell out
 # "US Dollar", while HG1 (with type=commodity) returns the ISO code. Both
@@ -182,7 +187,7 @@ class TwelveDataAdapter:
         timezone: str | None = None,
         minimum_items: int | None = None,
     ) -> DailyBarsResult:
-        """Fetch strictly ascending daily bars without duplicate resolution."""
+        """Fetch unique daily bars, keeping the last provider row per date."""
         return await self._get_daily_bars(
             market=market,
             symbol=symbol,
@@ -250,9 +255,23 @@ class TwelveDataAdapter:
                 "Twelve Data time-series asset type did not match the launch manifest"
             )
         # Validate the full response schema first, and never hide source reordering
-        # behind the EOD cutoff or normalization. Equal future dates are harmless.
+        # behind the EOD cutoff or normalization.
         if any(left.datetime > right.datetime for left, right in pairwise(payload.values)):
             raise DataSourceContractError("Twelve Data time series must be strictly ascending")
+        # Report the entire valid raw sequence, including dates after the EOD
+        # cutoff. A warning describes duplicates, not successful acceptance:
+        # consumed OHLC, unique-count or EOD checks may still reject this response.
+        date_counts = Counter(item.datetime for item in payload.values)
+        duplicate_dates = [day for day, count in date_counts.items() if count > 1]
+        if duplicate_dates:
+            logger.warning(
+                "Twelve Data duplicate daily rows: symbol=%s duplicate_date_count=%s "
+                "removed_row_count=%s date_samples=%s",
+                symbol,
+                len(duplicate_dates),
+                sum(count - 1 for count in date_counts.values()),
+                [day.isoformat() for day in duplicate_dates[:10]],
+            )
         items = tuple(
             DailyBar(
                 instrument_source_id=symbol,
@@ -279,13 +298,16 @@ class TwelveDataAdapter:
             for item in items
         ):
             raise DataSourceContractError("Twelve Data daily bars violated the OHLC range")
-        if eod_anchor is not None:
-            items = _completed_bars(items, eod_anchor)
+        # Every consumed raw candidate must pass OHLC validation before any
+        # duplicate is discarded. Never sort or combine fields between rows.
+        items = _last_daily_bars(items)
         if not items:
             raise DataSourceContractError("Twelve Data returned an empty time series")
-        required_items = outputsize if minimum_items is None else minimum_items
-        if required_items < 1 or required_items > outputsize:
+        if minimum_items is not None and not 1 <= minimum_items <= outputsize:
             raise ValueError("minimum_items must be between 1 and outputsize")
+        if minimum_items is None and len(payload.values) < outputsize:
+            raise DataSourceContractError("Twelve Data returned less than the required history")
+        required_items = min(2, outputsize) if minimum_items is None else minimum_items
         if len(items) < required_items:
             raise DataSourceContractError("Twelve Data returned less than the required history")
         if any(
@@ -350,30 +372,9 @@ class TwelveDataAdapter:
         )
 
 
-def _completed_bars(items: tuple[DailyBar, ...], eod: EodResult) -> tuple[DailyBar, ...]:
-    """Resolve only consumed-value duplicates and uniquely EOD-matched full rows.
-
-    EOD corroborates date and close; the selected provider row owns its OHL and
-    nullable volume. Every candidate has already passed schema and range checks.
-    """
-    completed: list[DailyBar] = []
-    for trade_date, group in groupby(items, key=lambda item: item.trade_date):
-        distinct: list[DailyBar] = []
-        for item in group:
-            if item not in distinct:
-                distinct.append(item)
-        if len(distinct) == 1:
-            completed.append(distinct[0])
-        elif trade_date == eod.as_of:
-            matches = [item for item in distinct if item.close == eod.close]
-            if len(matches) != 1:
-                raise DataSourceContractError(
-                    "Twelve Data EOD duplicate did not match one distinct daily row"
-                )
-            completed.append(matches[0])
-        else:
-            raise DataSourceContractError("Twelve Data historical daily bars conflict")
-    return tuple(completed)
+def _last_daily_bars(items: tuple[DailyBar, ...]) -> tuple[DailyBar, ...]:
+    """Keep the last entire row of each already validated, nondecreasing date."""
+    return tuple(tuple(group)[-1] for _, group in groupby(items, key=lambda item: item.trade_date))
 
 
 def _parse_eods(

@@ -157,7 +157,11 @@ without another provider request.
 
 ## Twelve Data 已完成日線契約
 
-契約 `2026-10-05.v8` 的 completed-price 路徑以官方 `/eod` 日期與 close
+契約 `2026-10-07.v9` 在所有 Twelve Data 日線入口（自動、手動 completed-price
+與通用歷史讀取）按供應商原始回應順序，對同日保留最後一筆完整 row。這是本專案
+採用的確定性政策，不代表供應商保證最後一筆是正確或最新修訂。
+
+completed-price 路徑以官方 `/eod` 日期與 exact Decimal close
 為錨點，`/time_series` 維持 `order=ASC`、`dp=11`，至少請求 4 筆原始資料，
 最大 `outputsize` 仍為 5000；不足兩個不同的已完成日期仍拒收，不補值或改取未收盤資料。
 
@@ -166,16 +170,34 @@ without another provider request.
 異常仍拒收。所有保留候選均須符合有限 OHLC、非負 optional volume，以及
 `low <= open/close <= high`，包含最後不被選取的衝突候選；不另加通用價格正值限制。
 
-同日的 datetime、OHLC 與 nullable volume 完全相同時可合併；`None` 與 `0`
-不同。歷史日期存在衝突即拒收。只有 EOD 當日的衝突允許用 exact Decimal close
-核對：必須恰有一種不同完整日線符合官方 close，才保留該完整供應商 row。沒有符合、
-或多種不同 OHLC／volume 同時符合 close 都拒收。不可排序修補、盲取最後一筆、
-混用欄位或改寫 close。EOD 僅佐證日期與 close，OHL／volume 仍是通過範圍驗證的
-供應商資料。通用 `get_daily_bars` 仍要求日期嚴格遞增，不啟用此重複處理。
+同日無論兩筆、三筆、完全相同或 OHLC／nullable volume 不同，都採最後完整 row，
+不混用欄位、不排序修補、不跳過非法候選。`None` 與 `0` 保留各自原值。完成去重後，
+最新已完成日的日期與最後 row 的 exact Decimal close 必須符合 `/eod`；只有較前
+row 符合時仍拒收，不改選該 row，也不以 warning 放行。EOD 僅佐證日期與 close，
+OHL／volume 仍是通過範圍驗證的供應商資料。OHLC 範圍檢查維持原作用範圍：
+completed-price 的未來 row 不檢查範圍，但完整 schema 與原始日期順序仍須有效；
+通用歷史讀取的所有 raw row 都須通過 OHLC 範圍檢查。
+
+通用 `get_daily_bars` 未指定 `minimum_items` 時，原始回應筆數仍須達到實際
+`outputsize`，允許去重後略少（例如 400 筆原始 row 得到 399 個日期），不補抓。
+`outputsize >= 2` 至少須有兩個不同日期，`outputsize=1` 保留單日支援。
+明確指定的 `minimum_items` 須在 1 到 `outputsize` 之間，並按接受的不同日期數
+檢查。completed-price 一律至少需要兩個不同已完成日期。
+
+每次通過 schema、metadata 與原始日期順序檢查的重複回應，記錄一則彙總 warning：
+symbol、重複日期數、移除 row 數及至多十個日期樣本，不記錄憑證或完整回應。
+彙總涵蓋全部原始日期，包括 EOD 之後被排除的日期；移除 row 數指同日多餘筆數，
+不包含 EOD cutoff 排除的筆數。warning 在 OHLC／有效筆數／EOD 最終核對之前
+記錄，因此有 warning 不代表回應已被接受。
 
 Provenance 的 response digest 保留完整原始回應，query fingerprint 對應實際
-請求；record count 與 as-of 則對應接受的已完成日線。重試若持續遇到歷史衝突、
-EOD 多重符合或 schema／metadata 異常，應調查供應商回應，不能放寬契約。
+請求；record count 與 as-of 則對應接受的唯一日線（completed-price 僅含已完成日期）。
+新來源使用 v9 契約；既有 `MarketDailySeries.contract_version` 是初建標記，不回寫。
+已存日期的行情修訂以新的 `MarketDailyObservation.version` 保存，缺少日期新增
+version 1，重複更新相同 OHLC／volume 不新增版本；attempt metadata 與 dashboard
+source references 追蹤實際來源。重試維持五分鐘間隔、最多四次嘗試。EOD 不符、
+schema／metadata 異常、日期倒序或有效日期不足時，應調查回應，不能以 warning
+取代拒收。
 
 ## Data management display
 
