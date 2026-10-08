@@ -1,7 +1,9 @@
 """Removal exercises real PostgreSQL transactions and an idempotent object store."""
 
 import asyncio
+import threading
 import uuid
+from contextvars import ContextVar
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -14,7 +16,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from test_phase3_podcast_integration import PodcastHarness, _direct_payload, _login, _metadata
 from test_phase3_podcast_integration import podcast_harness as podcast_harness
-from test_synchronous_podcast_upload import complete, put, sign
+from test_synchronous_podcast_upload import BODY, SHA, complete, final_ref, put, sign
 
 from daily_insights_api.core.enums import AssetKind, AssetStatus
 from daily_insights_api.modules.assets.models import Asset
@@ -151,7 +153,8 @@ async def test_published_requires_unpublish_and_stale_ticket_cannot_recreate(
         response.status_code == 409
         and response.json()["detail"]["code"] == "episode_must_be_unpublished"
     )
-    assert ref in podcast_harness.store.objects
+    assert ref not in podcast_harness.store.objects
+    assert final_ref(podcast_harness, target) in podcast_harness.store.objects
     _, outstanding = await sign(podcast_harness, locale="en")
     outstanding_ref = put(podcast_harness, outstanding)
     unpublish = await podcast_harness.admin.post(
@@ -1064,3 +1067,157 @@ async def test_public_cli_refreshes_cached_manifest_before_replay(
                 )
             )
         ).all() == ["cutover"]
+
+
+@pytest.mark.parametrize("phase", ["pending", "shared_final"])
+@pytest.mark.parametrize("lost_delete_response", [False, True])
+async def test_cancelled_removal_drains_thread_delete_before_retry_and_recreation(
+    podcast_harness: PodcastHarness,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+    lost_delete_response: bool,
+) -> None:
+    from daily_insights_api.modules.podcasts import removal
+    from daily_insights_api.modules.podcasts.lifecycle import lock_upload_date
+
+    csrf, old = await sign(podcast_harness)
+    put(podcast_harness, old)
+    uploaded = await complete(podcast_harness, csrf, old)
+    assert uploaded.status_code == 200, uploaded.text
+    episode_id = uploaded.json()["episode_id"]
+    card = await admin_card(podcast_harness, episode_id)
+    unpublished = await podcast_harness.admin.post(
+        f"/api/admin/podcasts/{episode_id}/unpublish",
+        json={"expected_version": card["version"]},
+    )
+    assert unpublished.status_code == 200
+    final = final_ref(podcast_harness, old)
+    original_context = ContextVar("podcast_original_removal", default=False)
+    retry_context = ContextVar("podcast_removal_retry", default=False)
+    classified = asyncio.Event()
+    release_classification = asyncio.Event()
+    retry_lock = asyncio.Event()
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    original_commit = AsyncSession.commit
+    original_delete = podcast_harness.store.delete
+    calls = 0
+
+    async def pause_after_classification(database: AsyncSession) -> None:
+        sharing = original_context.get() and any(
+            isinstance(obj, PodcastDeletionObject) and obj.status == "shared"
+            for obj in database.dirty
+        )
+        await original_commit(database)
+        if sharing:
+            classified.set()
+            await asyncio.wait_for(release_classification.wait(), 5)
+
+    def sdk_delete() -> None:
+        started.set()
+        try:
+            assert release.wait(10), "test did not release the SDK deletion"
+            podcast_harness.store.objects.pop(final, None)
+            if lost_delete_response:
+                raise EndpointConnectionError(endpoint_url="https://r2.test")
+        finally:
+            finished.set()
+
+    async def delayed_first_delete(ref: ObjectRef) -> None:
+        nonlocal calls
+        if ref == final:
+            calls += 1
+            if calls == 1:
+                await asyncio.to_thread(sdk_delete)
+                return
+        await original_delete(ref)
+
+    async def observe_retry_lock(database: AsyncSession, trading_date: date) -> None:
+        if retry_context.get():
+            retry_lock.set()
+        await lock_upload_date(database, trading_date)
+
+    async def run_original() -> Any:
+        original_context.set(True)
+        return await remove(podcast_harness.admin, episode_id, unpublished.json()["version"])
+
+    async def run_retry(version: int) -> Any:
+        retry_context.set(True)
+        return await remove(podcast_harness.admin, episode_id, version)
+
+    second_id = None
+    if phase == "shared_final":
+        # Two real episodes initially share the asset. Pause the first remover
+        # after its durable shared classification, then let the second finish.
+        # The first must now delete in its final shared-target recheck.
+        async with podcast_harness.session_factory() as database:
+            first = await database.get(PodcastEpisode, episode_id)
+            assert first is not None
+            second = PodcastEpisode(
+                trading_date=date(2026, 10, 2),
+                created_by_user_id=first.created_by_user_id,
+                cover_asset_id=uuid.UUID(uploaded.json()["asset_id"]),
+            )
+            database.add(second)
+            await database.commit()
+            second_id = str(second.id)
+        monkeypatch.setattr(AsyncSession, "commit", pause_after_classification)
+    monkeypatch.setattr(podcast_harness.store, "delete", delayed_first_delete)
+    monkeypatch.setattr(removal, "lock_upload_date", observe_retry_lock)
+    pending = asyncio.create_task(run_original())
+    retry: asyncio.Task[Any] | None = None
+    try:
+        if second_id is not None:
+            await asyncio.wait_for(classified.wait(), 5)
+            outcome = await remove(podcast_harness.admin, second_id)
+            assert outcome.status_code == 204, outcome.text
+            assert final in podcast_harness.store.objects
+            release_classification.set()
+        assert await asyncio.to_thread(started.wait, 5)
+        frozen = await admin_card(podcast_harness, episode_id)
+        assert frozen["deletion"] is not None
+        # Confirm the test reaches each intended storage-deletion branch.
+        async with podcast_harness.session_factory() as database:
+            status = await database.scalar(
+                select(PodcastDeletionObject.status)
+                .join(PodcastDeletionJob, PodcastDeletionObject.job_id == PodcastDeletionJob.id)
+                .where(PodcastDeletionJob.episode_id == uuid.UUID(episode_id))
+            )
+            assert status == ("pending" if phase == "pending" else "shared")
+        pending.cancel()
+        await asyncio.sleep(0)
+        pending.cancel()
+        await asyncio.sleep(0)
+        retry = asyncio.create_task(run_retry(frozen["version"]))
+        await asyncio.wait_for(retry_lock.wait(), 5)
+        assert not pending.done(), "cancelled remover released locks during SDK deletion"
+        assert not retry.done(), "retry acquired the date before SDK deletion finished"
+        assert not finished.is_set()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(pending, 5)
+        outcome = await asyncio.wait_for(retry, 5)
+        assert outcome.status_code == 204, outcome.text
+        assert finished.is_set()
+        _, fresh = await sign(podcast_harness)
+        put(podcast_harness, fresh)
+        recreated = await complete(podcast_harness, csrf, fresh)
+        assert recreated.status_code == 200, recreated.text
+        assert recreated.json()["episode_id"] != episode_id
+        assert final_ref(podcast_harness, fresh) == final
+        assert podcast_harness.store.objects[final] == (BODY, "audio/mpeg", SHA)
+        stale = await complete(podcast_harness, csrf, old)
+        assert stale.status_code == 409
+        assert stale.json()["detail"]["code"] == "upload_generation_conflict"
+        assert (
+            await remove(podcast_harness.admin, episode_id, frozen["version"])
+        ).status_code == 204
+        async with podcast_harness.session_factory() as database:
+            asset = await database.get(Asset, recreated.json()["asset_id"])
+            assert asset is not None and asset.object_key == final.key
+        assert final in podcast_harness.store.objects
+    finally:
+        release_classification.set()
+        release.set()
+        tasks = [pending] + ([retry] if retry is not None else [])
+        await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), 5)
+        assert await asyncio.to_thread(finished.wait, 5)

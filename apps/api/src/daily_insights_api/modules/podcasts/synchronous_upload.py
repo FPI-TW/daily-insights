@@ -8,7 +8,7 @@ import logging
 import tempfile
 import uuid
 from datetime import UTC, date, datetime, timedelta
-from typing import Literal
+from typing import BinaryIO, Literal
 
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -33,6 +33,7 @@ from daily_insights_api.modules.podcasts.direct_upload import (
 from daily_insights_api.modules.podcasts.direct_upload import (
     router as router,
 )
+from daily_insights_api.modules.podcasts.io import finish_io as finish_io
 from daily_insights_api.modules.podcasts.lifecycle import (
     date_generation,
     require_generation,
@@ -47,6 +48,7 @@ from daily_insights_api.modules.podcasts.service import (
     audio_duration_seconds,
     serialized_chapters,
 )
+from daily_insights_api.modules.podcasts.storage_paths import final_audio_key
 
 logger = logging.getLogger(__name__)
 UPLOAD_PREFIX = "podcasts/direct/"
@@ -61,7 +63,7 @@ class DirectUploadRequest(BaseModel):
 
 class UploadTicket(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    version: Literal[1] = 1
+    version: Literal[1, 2] = 1
     actor_id: uuid.UUID
     asset_id: uuid.UUID
     trading_date: date
@@ -78,6 +80,17 @@ class UploadTicket(BaseModel):
         return (
             f"{UPLOAD_PREFIX}{self.expires}/{self.trading_date}/"
             f"{self.file.locale}/{self.asset_id}.{extension}"
+        )
+
+    @property
+    def registered_key(self) -> str:
+        if self.version == 1:
+            return self.object_key
+        return final_audio_key(
+            self.trading_date,
+            self.file.locale,
+            (self.file.expected_current_version or 0) + 1,
+            self.file.mime_type,
         )
 
 
@@ -139,12 +152,21 @@ async def _completed(database: AsyncSession, ticket: UploadTicket) -> CompletedU
             select(Asset, PodcastEpisodeAudioVariant)
             .join(PodcastEpisodeAudioVariant, PodcastEpisodeAudioVariant.asset_id == Asset.id)
             .where(Asset.id == ticket.asset_id)
+            .execution_options(populate_existing=True)
         )
     ).one_or_none()
     if row is None:
         return None
     asset, variant = row
-    if asset.object_key != ticket.object_key or asset.uploaded_by_user_id != ticket.actor_id:
+    if (
+        asset.object_key != ticket.registered_key
+        or asset.uploaded_by_user_id != ticket.actor_id
+        or asset.sha256 != ticket.file.sha256
+        or asset.size_bytes != ticket.file.size_bytes
+        or asset.mime_type != ticket.file.mime_type
+        or variant.locale != ticket.file.locale
+        or variant.version != (ticket.file.expected_current_version or 0) + 1
+    ):
         raise HTTPException(409, detail={"code": "upload_identity_conflict"})
     return CompletedUpload(
         asset_id=asset.id,
@@ -164,7 +186,7 @@ async def delete_unreferenced(
     if referenced is not None:
         return False
     try:
-        await store.delete(ref)
+        await finish_io(store.delete(ref))
     except OBJECT_STORE_ERRORS:
         logger.warning("Podcast object deletion deferred to orphan cleanup")
         return False
@@ -195,6 +217,7 @@ async def sign_direct_upload(
         select(PodcastEpisode)
         .where(PodcastEpisode.trading_date == payload.trading_date)
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if episode is not None:
         require_mutable(episode)
@@ -234,6 +257,7 @@ async def sign_direct_upload(
     targets = []
     for item, _, mime in files:
         ticket = UploadTicket(
+            version=2,
             actor_id=actor.user.id,
             asset_id=uuid.uuid4(),
             trading_date=payload.trading_date,
@@ -268,8 +292,16 @@ async def sign_direct_upload(
 
 
 async def verify_audio(
-    store: ObjectStore, ref: ObjectRef, ticket: UploadTicket, *, spool_dir: str | None = None
+    store: ObjectStore,
+    ref: ObjectRef,
+    ticket: UploadTicket,
+    *,
+    spool_dir: str | None = None,
+    spool: BinaryIO | None = None,
 ) -> tuple[int | None, list[dict[str, object]]]:
+    if spool is None:
+        with tempfile.TemporaryFile(dir=spool_dir) as owned_spool:
+            return await verify_audio(store, ref, ticket, spool=owned_spool)
     metadata = await store.head(ref)
     if metadata is None:
         raise HTTPException(409, detail={"code": "object_not_uploaded"})
@@ -283,21 +315,57 @@ async def verify_audio(
     digest = hashlib.sha256()
     size = 0
     # Bound memory independently of the unchanged 256 MiB upload limit.
-    with tempfile.TemporaryFile(dir=spool_dir) as spool:
-        async for chunk in store.read(ref):
-            size += len(chunk)
-            if size > expected.size_bytes or size > MAX_PODCAST_AUDIO_BYTES:
-                raise HTTPException(422, detail={"code": "uploaded_size_mismatch"})
-            digest.update(chunk)
-            await asyncio.to_thread(spool.write, chunk)
-        if size != expected.size_bytes or digest.hexdigest() != expected.sha256:
-            raise HTTPException(422, detail={"code": "uploaded_sha256_mismatch"})
-        after = await store.head(ref)
-        if after != metadata:
-            raise HTTPException(422, detail={"code": "object_changed_during_verification"})
-        duration = await asyncio.to_thread(audio_duration_seconds, spool)
-        chapters = await asyncio.to_thread(audio_chapters, spool, expected.mime_type)
-        return duration, serialized_chapters(chapters)
+    async for chunk in store.read(ref):
+        size += len(chunk)
+        if size > expected.size_bytes or size > MAX_PODCAST_AUDIO_BYTES:
+            raise HTTPException(422, detail={"code": "uploaded_size_mismatch"})
+        digest.update(chunk)
+        spool.write(chunk)
+    if size != expected.size_bytes or digest.hexdigest() != expected.sha256:
+        raise HTTPException(422, detail={"code": "uploaded_sha256_mismatch"})
+    after = await store.head(ref)
+    if after != metadata:
+        raise HTTPException(422, detail={"code": "object_changed_during_verification"})
+    duration = await finish_io(asyncio.to_thread(audio_duration_seconds, spool))
+    chapters = await finish_io(asyncio.to_thread(audio_chapters, spool, expected.mime_type))
+    return duration, serialized_chapters(chapters)
+
+
+async def current_audio(
+    database: AsyncSession,
+    ticket: UploadTicket,
+) -> tuple[PodcastEpisode | None, PodcastEpisodeAudioVariant | None]:
+    await _lock_upload_date(database, ticket.trading_date)
+    await require_generation(database, ticket.trading_date, ticket.generation)
+    episode = await database.scalar(
+        select(PodcastEpisode)
+        .where(PodcastEpisode.trading_date == ticket.trading_date)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    current = None
+    if episode is not None:
+        require_mutable(episode)
+        current = await database.scalar(
+            select(PodcastEpisodeAudioVariant)
+            .where(
+                PodcastEpisodeAudioVariant.episode_id == episode.id,
+                PodcastEpisodeAudioVariant.locale == ticket.file.locale,
+                PodcastEpisodeAudioVariant.is_active.is_(True),
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    version = current.version if current else None
+    if version != ticket.file.expected_current_version:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "audio_version_conflict",
+                "current_versions": {ticket.file.locale: version},
+            },
+        )
+    return episode, current
 
 
 async def register_audio(
@@ -308,16 +376,8 @@ async def register_audio(
     chapters: list[dict[str, object]],
     request_id: str,
 ) -> CompletedUpload:
-    await _lock_upload_date(database, ticket.trading_date)
-    await require_generation(database, ticket.trading_date, ticket.generation)
-    episode = await database.scalar(
-        select(PodcastEpisode)
-        .where(PodcastEpisode.trading_date == ticket.trading_date)
-        .with_for_update()
-    )
+    episode, current = await current_audio(database, ticket)
     created = episode is None
-    if episode is not None:
-        require_mutable(episode)
     if episode is None:
         episode = PodcastEpisode(
             trading_date=ticket.trading_date,
@@ -327,24 +387,7 @@ async def register_audio(
         )
         database.add(episode)
         await database.flush()
-    current = await database.scalar(
-        select(PodcastEpisodeAudioVariant)
-        .where(
-            PodcastEpisodeAudioVariant.episode_id == episode.id,
-            PodcastEpisodeAudioVariant.locale == ticket.file.locale,
-            PodcastEpisodeAudioVariant.is_active.is_(True),
-        )
-        .with_for_update()
-    )
     version = current.version if current else None
-    if version != ticket.file.expected_current_version:
-        raise HTTPException(
-            409,
-            detail={
-                "code": "audio_version_conflict",
-                "current_versions": {ticket.file.locale: version},
-            },
-        )
     before = {"status": episode.status, "version": episode.version, "locale_version": version}
     if current is not None:
         current.is_active = False
@@ -449,51 +492,99 @@ async def complete_direct_upload(
     if datetime.now(UTC).timestamp() >= ticket.expires:
         raise HTTPException(410, detail={"code": "upload_token_expired"})
     committing = False
-    verified = False
+    created_final = False
+    final_ref = ObjectRef(bucket=ref.bucket, key=ticket.registered_key)
+
+    async def compensate() -> CompletedUpload | None:
+        # Rollback releases advisory locks. Reacquire date first before checking
+        # references or deleting this attempt's objects, including archived refs.
+        await _lock_upload_date(database, ticket.trading_date)
+        await lock_upload_object(database, ticket.asset_id)
+        recovered = await _completed(database, ticket)
+        if recovered is not None:
+            if ticket.version == 2:
+                await delete_unreferenced(database, store, ref)
+            await database.commit()
+            return recovered
+        if created_final:
+            await delete_unreferenced(database, store, final_ref)
+        await delete_unreferenced(database, store, ref)
+        await database.commit()
+        return None
+
     try:
-        # Below nginx's ten-minute limit; retain the object for a later retry.
-        async with asyncio.timeout(540):
-            duration, chapters = await verify_audio(
-                store,
-                ref,
-                ticket,
-                spool_dir=settings.podcast_media_spool_dir
-                if settings.environment == "production"
-                else None,
-            )
-        verified = True
+        await current_audio(database, ticket)
+        with tempfile.TemporaryFile(
+            dir=settings.podcast_media_spool_dir if settings.environment == "production" else None
+        ) as spool:
+            # Conditional final writes use the verified bytes, never a mutable copy source.
+            async with asyncio.timeout(540):
+                duration, chapters = await verify_audio(store, ref, ticket, spool=spool)
+                if ticket.version == 2:
+                    referenced = await database.scalar(
+                        select(Asset.id).where(Asset.object_key == final_ref.key)
+                    )
+                    if referenced is not None:
+                        raise HTTPException(409, detail={"code": "upload_destination_conflict"})
+                    spool.seek(0)
+                    created_final = await finish_io(
+                        store.put_if_absent(
+                            final_ref,
+                            spool,
+                            size_bytes=ticket.file.size_bytes,
+                            mime_type=ticket.file.mime_type,
+                            sha256=ticket.file.sha256,
+                        )
+                    )
+                    if not created_final:
+                        # Unknown preexisting objects must be verified and never compensated.
+                        try:
+                            spool.seek(0)
+                            spool.truncate()
+                            await verify_audio(store, final_ref, ticket, spool=spool)
+                        except HTTPException as error:
+                            raise HTTPException(
+                                409, detail={"code": "upload_destination_conflict"}
+                            ) from error
         result = await register_audio(
-            database, ticket, ref, duration, chapters, request.state.request_id
+            database, ticket, final_ref, duration, chapters, request.state.request_id
         )
         committing = True
         await database.commit()
+        if ticket.version == 2:
+            # A failed cleanup cannot turn a committed upload into a failed registration.
+            try:
+                await _lock_upload_date(database, ticket.trading_date)
+                await lock_upload_object(database, ticket.asset_id)
+                await delete_unreferenced(database, store, ref)
+                await database.commit()
+            except SQLAlchemyError:
+                await database.rollback()
+                logger.warning("Podcast staging cleanup deferred")
         return result
     except HTTPException as error:
         await database.rollback()
-        if error.status_code == 422 or (verified and error.status_code == 409):
-            await lock_upload_object(database, ticket.asset_id)
-            await delete_unreferenced(database, store, ref)
-            await database.commit()
+        if error.status_code in {422, 409}:
+            try:
+                await compensate()
+            except SQLAlchemyError:
+                await database.rollback()
+                logger.warning("Podcast compensation deferred; database unavailable")
         raise
     except SQLAlchemyError:
         await database.rollback()
-        # A commit exception can mean the commit reached PostgreSQL. Recheck on
-        # a fresh transaction under the same object lock before compensation.
         try:
-            await _lock_upload_date(database, ticket.trading_date)
-            await require_generation(database, ticket.trading_date, ticket.generation)
-            await lock_upload_object(database, ticket.asset_id)
-            recovered = await _completed(database, ticket)
+            recovered = await compensate()
             if recovered is not None:
                 return recovered
-            await delete_unreferenced(database, store, ref)
-            await database.commit()
         except SQLAlchemyError:
             await database.rollback()
-            logger.warning("Podcast database outcome unavailable; object retained for cleanup")
+            logger.warning("Podcast database outcome unavailable; objects retained for cleanup")
         raise HTTPException(
             503, detail={"code": "upload_registration_unavailable", "commit_attempted": committing}
         ) from None
     except (*OBJECT_STORE_ERRORS, TimeoutError, OSError):
+        # A cancelled SDK thread may have completed a write. Keep all objects;
+        # retries verify conditional-create collisions and cleanup uses date locks.
         await database.rollback()
         raise HTTPException(503, detail={"code": "upload_storage_unavailable"}) from None

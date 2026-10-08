@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.modules.assets.api import Asset, ObjectRef, ObjectStore
 from daily_insights_api.modules.audit.api import record_audit_event
+from daily_insights_api.modules.podcasts.io import finish_io
 from daily_insights_api.modules.podcasts.lifecycle import lock_upload_date, lock_upload_object
 from daily_insights_api.modules.podcasts.models import (
     PodcastDateGeneration,
@@ -48,7 +49,7 @@ async def _shared(database: AsyncSession, asset_id: uuid.UUID, episode_id: uuid.
 
 async def _delete_object(store: ObjectStore, target: PodcastDeletionObject) -> None:
     try:
-        await store.delete(ObjectRef(bucket=target.bucket, key=target.object_key))
+        await finish_io(store.delete(ObjectRef(bucket=target.bucket, key=target.object_key)))
     except ClientError as error:
         if error.response.get("Error", {}).get("Code") not in {"NoSuchKey", "NotFound", "404"}:
             raise

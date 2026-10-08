@@ -132,6 +132,125 @@ async function submit() {
 }
 
 describe("AudioManagementPage synchronous direct uploads", () => {
+  it.each([
+    ["episode", "audio/mpeg"],
+    ["mp3", "audio/mpeg"],
+    ["episode.", "audio/mpeg"],
+    ["episode.mp3.exe", "audio/mpeg"],
+    ["episode.wav", "audio/wav"],
+    ["episode.mp3", "video/mp4"],
+    ["episode.mp4", "audio/mpeg"],
+  ])(
+    "rejects selection and drop of %s (%s) before hashing or networking",
+    (name, type) => {
+      setup()
+      const input = document.getElementById("podcast-file-en")!
+      const invalid = new File(["bad"], name, { type })
+      selectFile(input, invalid)
+      expect(screen.getByRole("alert")).toHaveTextContent(".mp3 or .mp4")
+      expect(screen.getByText("episode.mp3")).toBeVisible()
+      fireEvent.drop(input.parentElement!, {
+        dataTransfer: { files: { item: () => invalid } },
+      })
+      expect(screen.getByRole("alert")).toHaveTextContent(".mp3 or .mp4")
+      expect(screen.getByText("episode.mp3")).toBeVisible()
+      expect(crypto.subtle.digest).not.toHaveBeenCalled()
+      expect(signDirectUploads).not.toHaveBeenCalled()
+      expect(completeDirectUpload).not.toHaveBeenCalled()
+      expect(input).toHaveValue("")
+    }
+  )
+
+  it.each([
+    ["episode.MP3", "audio/mp3", "audio/mpeg", "select"],
+    ["episode.MP4", "video/mp4", "audio/mp4", "drop"],
+    ["episode.Mp3", "", "audio/mpeg", "drop"],
+    ["episode.Mp4", "", "audio/mp4", "select"],
+  ])(
+    "accepts %s via %s and clears its slot error",
+    async (name, type, mime, method) => {
+      setup()
+      const input = document.getElementById("podcast-file-en")!
+      selectFile(input, new File(["bad"], "bad.exe"))
+      const valid = new File(["podcast"], name, { type })
+      if (method === "drop") {
+        fireEvent.drop(input.parentElement!, {
+          dataTransfer: { files: { item: () => valid } },
+        })
+      } else selectFile(input, valid)
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+      await submit()
+      await screen.findByText("Complete")
+      expect(signDirectUploads.mock.calls[0]?.[0].files[0]).toMatchObject({
+        filename: name,
+        mime_type: mime,
+      })
+    }
+  )
+
+  it("clears a selection error when removing the retained file", () => {
+    setup()
+    selectFile(
+      document.getElementById("podcast-file-en")!,
+      new File(["bad"], "bad.exe")
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }))
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    expect(screen.queryByText("episode.mp3")).not.toBeInTheDocument()
+  })
+
+  it("preserves replacement confirmation after invalid selection", async () => {
+    setup()
+    signDirectUploads.mockRejectedValueOnce(
+      new ApiError(409, null, "Replacement required", {
+        code: "replacement_confirmation_required",
+        current_versions: { en: 2 },
+      })
+    )
+    await submit()
+    await screen.findByRole("button", { name: "Confirm overwrite" })
+    selectFile(
+      document.getElementById("podcast-file-en")!,
+      new File(["bad"], "bad.exe")
+    )
+    expect(
+      screen.getByRole("button", { name: "Confirm overwrite" })
+    ).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Confirm overwrite" }))
+    await screen.findByText("Complete")
+    expect(signDirectUploads.mock.calls[1]?.[0].files[0]).toMatchObject({
+      filename: "episode.mp3",
+      expected_current_version: 2,
+    })
+  })
+
+  it("preserves a failed batch and retry receipt after invalid drop", async () => {
+    setup()
+    completeDirectUpload.mockRejectedValueOnce(new Error("network"))
+    await submit()
+    await screen.findByText("Failed")
+    const input = document.getElementById("podcast-file-en")!
+    fireEvent.drop(input.parentElement!, {
+      dataTransfer: { files: { item: () => new File(["bad"], "bad.exe") } },
+    })
+    expect(screen.getByRole("button", { name: "Retry" })).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    await screen.findByText("Complete")
+    expect(signDirectUploads).toHaveBeenCalledTimes(1)
+    expect(completeDirectUpload).toHaveBeenCalledTimes(2)
+  })
+
+  it("validates the retained file again at submit before hashing or signing", async () => {
+    setup()
+    const changed = new File(["podcast"], "valid.mp3", { type: "audio/mpeg" })
+    selectFile(document.getElementById("podcast-file-en")!, changed)
+    Object.defineProperty(changed, "name", { value: "spoof.mp3.exe" })
+    fireEvent.click(screen.getByRole("button", { name: "Upload audio" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(".mp3 or .mp4")
+    expect(crypto.subtle.digest).not.toHaveBeenCalled()
+    expect(signDirectUploads).not.toHaveBeenCalled()
+  })
+
   it("uploads with signed headers and finishes without polling", async () => {
     setup()
     await submit()

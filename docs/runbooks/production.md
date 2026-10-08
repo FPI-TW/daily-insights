@@ -295,10 +295,19 @@ upload immediately; version conflicts still require explicit replacement.
 
 Confirmed registration failures remove unreferenced objects. Ambiguous commits
 are rechecked before deletion; unavailable DB/storage retains the object for
-retry. Every five minutes API cleanup scans only `podcasts/direct/`, waits for
-both URL expiry and last modification plus the default 24-hour grace, then
-checks DB references under the completion lock. Active and archived assets are
-protected. Failed deletions and late objects are retried by later sweeps.
+retry. Browser PUT uses temporary `podcasts/direct/{expires}/{trading-date}/{locale}/{asset-id}.{ext}`.
+New v2 completions register `podcasts/YYYY/MM/DD/{locale}/podcast_{version}.{mp3|mp4}`
+with padded dates and the locale variant version, then clean staging after commit.
+Existing files and v1 completions retain their paths. Verify replacement preserves
+archived versions and a retry returns the same asset even after staging deletion.
+Every five minutes cleanup scans only exact staging and final grammars under `podcasts/`.
+Staging requires URL expiry and last modification plus the default 24-hour grace;
+final orphans require last modification plus grace. Under the date lock, cleanup
+rechecks modification time and all DB references. Active and archived assets are
+protected; malformed dates, legacy/import and unrelated paths are skipped.
+Final collisions require matching size/MIME/full SHA and no DB references; otherwise
+409 leaves the destination untouched. Unknown commit/write outcomes retain objects.
+Failed deletions and late objects are retried by later sweeps.
 
 7. For routine recovery after this schema-boundary migration, keep every legacy
    scheduler and worker quiesced, apply a forward fix, and rerun `deploy.sh`.
