@@ -22,7 +22,7 @@ Phase 4 上線驗收仍待執行。八大市場正式內容與報告前端在此
 - 獨立的客戶與管理端登入入口、route guard、導覽與登出導向；
 - `/admin/audio` 音檔管理頁、三個可點擊／拖放的語系 slot、R2 upload 及發布
   控制；
-- browser 上傳使用無狀態簽署、不可變 UUID object key、直接 R2 PUT，以及
+- browser 上傳使用無狀態簽署、不可變 UUID 暫存 key 與日期／語系／版本正式 key、直接 R2 PUT，以及
   API 同步驗證與資料庫登記；不再依賴音檔處理 worker 或批次輪詢；
 - PostgreSQL + fake R2 端到端測試，覆蓋建立、發布拒絕、音檔登記、角色限制、
   locale fallback、同路徑覆寫及下架；
@@ -56,8 +56,10 @@ Phase 4 上線驗收仍待執行。八大市場正式內容與報告前端在此
 3. Frontend → Server → R2 → DB：
    `POST /api/admin/podcasts/direct-uploads/complete` 提交憑證，Server 同步
    檢查 HEAD、完整 SHA-256、時長與章節，以 transaction 寫入 Asset、variant
-   與 audit，成功才回傳完成。日期鎖只用於資料切換，同一 asset ID 的提交
-   與清理使用共同的 PostgreSQL advisory lock。
+   與 audit，成功才回傳完成。v2 使用已驗證 spool，以 `put_if_absent` 建立
+   `podcasts/YYYY/MM/DD/{locale}/podcast_{logical_version}.{mp3|mp4}`；月日補零、
+   版本對應該交易日／語系的 variant。commit 成功後才刪暫存物件。日期鎖涵蓋
+   generation／版本檢查、驗證、正式檔建立與登記；清理與補償也先取得日期鎖。
 
 各語系獨立提交；部分失敗不回滾已完成語系。後端確認完成後，Frontend
 清除該語系的選檔，保留完成進度與 checksum；正常完成及重試憑證取得成功結果
@@ -70,9 +72,21 @@ Frontend 顯示 PUT 進度及驗證等待，失敗後可重試或重新上傳。
 
 確定驗證失敗、版本衝突或 DB 回滾且物件未被引用時，執行補償刪除。
 提交結果不明時，在新交易重新查證；DB 不可用或 R2 暫時失敗時保留物件，
-允許重試。API lifespan 每五分鐘掃描新 prefix，僅在憑證到期與最後修改時間
+允許重試。API lifespan 每五分鐘掃描 `podcasts/` 的指定 grammar；暫存僅在憑證到期與最後修改時間
 均超過 cleanup grace（預設 24 小時）後，刪除未被任何 Asset 引用的物件。
-archived 版本同樣受保護；刪除失敗及晚到物件會在後續掃描重試。
+archived 版本同樣受保護；刪除失敗及晚到物件會在後續掃描重試。正式檔只掃描
+完整且有效日期、ASCII 數字的新版 grammar，最後修改時間須超過 grace，日期鎖內重新檢查
+修改時間與 DB 引用。不符合格式、無效日期、legacy/import key 不清理。
+
+v1 憑證仍可在原 UUID 路徑完成；既有檔案不搬移，播放依 DB object key。
+正式檔碰撞僅可重用未被引用且 size／MIME／完整 SHA 相同的檔案；否則回傳
+409，不覆寫或刪除。補償只刪此次確定新建且仍未引用的正式檔；DB 結果不明
+保留物件。逾時或取消（包括重複取消）會等待已開始的寫入／刪除 I/O 結束
+才釋放日期鎖，避免晚到操作破壞新登記的物件。
+
+選檔與拖放立即驗證最末端 `.mp3`／`.mp4` 副檔名（不分大小寫）和相容 MIME，
+並在語系欄位顯示錯誤。無效檔案不改變既有選檔、替換確認或重試狀態；送出前
+再驗證一次，通過後才雜湊、簽署及上傳。
 
 正式 API 使用專用磁碟 volume `/var/spool/podcast-media`，不受 `/tmp` 的
 64 MiB tmpfs 限制。同步內容驗證最長九分鐘，nginx complete endpoint 最長
@@ -160,9 +174,10 @@ podcast_episode_audio_variants
   拖放。一次請求至少一檔、最多三檔，不要求固定必備語系。
 - 上傳原因使用固定選單：`initial_upload`（初次上傳）、`update_file`
   （更新檔案）、`other`（其他）。
-- browser direct upload 使用
+- browser direct PUT 暫存使用
   `podcasts/direct/{expires}/{trading-date}/{locale}/{asset-uuid}.{ext}`，僅支援
-  `mp3`／`mp4`；來源檔名不進入 key。每次簽署建立新 key，不覆寫舊音檔。
+  `mp3`／`mp4`；v2 complete 建立日期／語系／版本正式 key。來源檔名不進入
+  key，每次簽署建立新暫存 key，不覆寫舊音檔。
 - 每檔提供 64 位小寫 SHA-256，與檔案資訊綁定簽章憑證。R2 PUT 簽署
   `Content-Type`、`If-None-Match: *`、`x-amz-meta-sha256`；API 比對 HEAD
   與串流 bytes 的 checksum，前後 HEAD 必須一致，才啟用 Asset。
@@ -217,7 +232,7 @@ publication、show/series/season、episode number、收聽分析、留言、訂�
   警告。
 - 同一 `trading_date + locale` 已有 active audio 時，登記或上傳新檔第一次
   必須回傳 replacement-required 警告，不得直接改變 active mapping。
-- 管理者明確確認後，direct upload 會使用新的 UUID R2 key，不覆寫原 object；
+- 管理者明確確認後，direct upload 會使用新的版本正式 R2 key，不覆寫原 object；
   complete 取得 episode 與 variant 鎖後確認 expected current locale version，
   以單一 DB transaction 切換版本、遞增 episode version 並寫 audit。
   同語系競態的後完成者回傳衝突；不同語系可各自完成。介入的下架／編輯
@@ -282,7 +297,7 @@ key 使用 resolved audio locale：例如英文頁面 fallback 至 `zh-hant` 時
   Podcast 結果。
 - 同一交易日不得建立第二個 logical episode；同 locale replacement 未經明確
   確認不得改變 active audio。
-- browser replacement 必須明確確認並帶 expected current version，以新 UUID
+- browser replacement 必須明確確認並帶 expected current version，以新的日期／語系／版本
   key 及原子 variant mapping 切換；已登記舊版本保留，不由孤兒清理刪除。
   內部 multipart 工具保留原有 stable-key 覆寫與跨格式 key 切換行為。
 - requested locale variant 存在時必須播放相符檔案；不存在時依
@@ -316,9 +331,11 @@ copy、cutover 與人工清理舊路徑，不等同完成通用 asset deletion�
 
 移除會先提交 `podcast_deletion_jobs`／`podcast_deletion_objects` 清單、凍結節目並遞增版本，再逐檔刪除及提交進度；檔案不存在視為成功。所有檔案處理完畢才在同一交易刪除節目、翻譯、variants 與未被引用的 Assets，並記錄完成稽核。稽核、移除 job／object tombstones、upload batches／sessions 與匯入操作紀錄保留，支援回復與重播辨識。
 
+移除的逐檔刪除及最後共用檔案重新檢查，都會在日期／物件鎖內等待 SDK 刪除完成；取消（包括重複取消）不會提早釋放鎖，避免晚到刪除破壞同日重建的正式檔。
+
 儲存或 DB 錯誤回傳 `503 episode_removal_incomplete`，凍結卡片及進度保留，使用最新版本手動重試同一端點；已完成的檔案不重複處理，外部刪除後 DB 回滾則可安全重做冪等刪除。完成交易回應遺失時，可用原請求版本或凍結版本重播，已完成 tombstone 回傳 `204`。
 
-`podcast_date_generations` 永久保存每個交易日的 upload generation，移除開始即遞增。新簽署 ticket 綁定 generation，舊格式預設 `0`；completion（含已完成重播）及 legacy worker／batch 都檢查 generation，因此舊 ticket 在節目移除或同日重建後不能恢復檔案。移除期間禁止發布、metadata／chapters 編輯、上傳與匯入；完成後才允許同日期新上傳。鎖順序統一為日期、節目／batch、物件 advisory lock、Asset row；orphan cleanup 只取物件鎖，不反向等待日期。
+`podcast_date_generations` 永久保存每個交易日的 upload generation，移除開始即遞增。新簽署 ticket 綁定 generation，舊格式預設 `0`；completion（含已完成重播）及 legacy worker／batch 都檢查 generation，因此舊 ticket 在節目移除或同日重建後不能恢復檔案。移除期間禁止發布、metadata／chapters 編輯、上傳與匯入；完成後才允許同日期新上傳。鎖順序統一為日期、節目／batch、物件 advisory lock、Asset row；同步上傳 orphan cleanup 先取日期鎖，再視情況取得暫存 Asset 的物件 advisory lock，最終 orphan sweep 僅取日期鎖。
 
 完成交易會以 asset ID 排序取得所有物件鎖，重新檢查先前判定共用的物件。不同日期的節目同時移除同一 Asset 時，最後一個引用的移除者必須先清除物件，才提交節目／Asset 清理及完成狀態；最後階段儲存或 DB 失敗仍可重試，不會永久豁免曾經共用的檔案。
 
