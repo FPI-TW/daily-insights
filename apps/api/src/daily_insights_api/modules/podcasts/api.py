@@ -139,12 +139,20 @@ class PodcastAudioVariantResponse(PodcastContract):
     chapters_source: ChaptersSource = "none"
 
 
+class PodcastRemovalProgress(PodcastContract):
+    status: Literal["pending"] = "pending"
+    total_objects: int = Field(ge=0)
+    cleared_objects: int = Field(ge=0)
+    retained_objects: int = Field(ge=0)
+
+
 class PodcastEpisodeAdminResponse(PodcastContract):
     id: uuid.UUID
     trading_date: date
     status: Literal["draft", "published"]
     version: int
     metadata: tuple[PodcastMetadata, ...]
+    deletion: PodcastRemovalProgress | None = None
     metadata_source: MetadataSource = "derived"
     audio_variants: tuple[PodcastAudioVariantResponse, ...]
     cover_asset_id: uuid.UUID | None

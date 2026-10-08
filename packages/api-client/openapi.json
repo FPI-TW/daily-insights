@@ -4513,6 +4513,16 @@
             ],
             "title": "Cover Asset Id"
           },
+          "deletion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PodcastRemovalProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -4834,6 +4844,35 @@
         },
         "required": ["expected_version"],
         "title": "PodcastPublicationRequest",
+        "type": "object"
+      },
+      "PodcastRemovalProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "cleared_objects": {
+            "minimum": 0.0,
+            "title": "Cleared Objects",
+            "type": "integer"
+          },
+          "retained_objects": {
+            "minimum": 0.0,
+            "title": "Retained Objects",
+            "type": "integer"
+          },
+          "status": {
+            "const": "pending",
+            "default": "pending",
+            "title": "Status",
+            "type": "string"
+          },
+          "total_objects": {
+            "minimum": 0.0,
+            "title": "Total Objects",
+            "type": "integer"
+          }
+        },
+        "required": ["total_objects", "cleared_objects", "retained_objects"],
+        "title": "PodcastRemovalProgress",
         "type": "object"
       },
       "Point": {
@@ -8171,6 +8210,64 @@
       }
     },
     "/api/admin/podcasts/{episode_id}": {
+      "delete": {
+        "operationId": "admin_podcasts_remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "episode_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Episode Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PodcastPublicationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Remove",
+        "tags": ["podcasts"]
+      },
       "put": {
         "operationId": "admin_podcasts_update",
         "parameters": [

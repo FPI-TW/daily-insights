@@ -309,3 +309,21 @@ key 使用 resolved audio locale：例如英文頁面 fallback 至 `zh-hant` 時
 Podcast 先行版目前沒有會阻擋 domain schema 的產品問題。通用 asset upload、
 掃毒、刪除／復原與版本保留期限仍屬 Phase 6A；Podcast 搬移僅授權 verified
 copy、cutover 與人工清理舊路徑，不等同完成通用 asset deletion。
+
+## 未發布節目的永久移除
+
+`admin` 與 `asset_manager` 可移除整集 `draft` Podcast，包含從未發布的節目。已發布節目的移除按鈕停用並提示先下架；確認視窗列出日期、所有語言、歷史音檔與不可復原性。移除包含已登記的封面及 active／archived 音檔，保留其他節目共用的 Asset／檔案與未登記的匯入來源。
+
+移除會先提交 `podcast_deletion_jobs`／`podcast_deletion_objects` 清單、凍結節目並遞增版本，再逐檔刪除及提交進度；檔案不存在視為成功。所有檔案處理完畢才在同一交易刪除節目、翻譯、variants 與未被引用的 Assets，並記錄完成稽核。稽核、移除 job／object tombstones、upload batches／sessions 與匯入操作紀錄保留，支援回復與重播辨識。
+
+儲存或 DB 錯誤回傳 `503 episode_removal_incomplete`，凍結卡片及進度保留，使用最新版本手動重試同一端點；已完成的檔案不重複處理，外部刪除後 DB 回滾則可安全重做冪等刪除。完成交易回應遺失時，可用原請求版本或凍結版本重播，已完成 tombstone 回傳 `204`。
+
+`podcast_date_generations` 永久保存每個交易日的 upload generation，移除開始即遞增。新簽署 ticket 綁定 generation，舊格式預設 `0`；completion（含已完成重播）及 legacy worker／batch 都檢查 generation，因此舊 ticket 在節目移除或同日重建後不能恢復檔案。移除期間禁止發布、metadata／chapters 編輯、上傳與匯入；完成後才允許同日期新上傳。鎖順序統一為日期、節目／batch、物件 advisory lock、Asset row；orphan cleanup 只取物件鎖，不反向等待日期。
+
+完成交易會以 asset ID 排序取得所有物件鎖，重新檢查先前判定共用的物件。不同日期的節目同時移除同一 Asset 時，最後一個引用的移除者必須先清除物件，才提交節目／Asset 清理及完成狀態；最後階段儲存或 DB 失敗仍可重試，不會永久豁免曾經共用的檔案。
+
+支援的 `migrate_podcast_assets` CLI 也遵守日期凍結與物件鎖，並在 `asset_migration_entries.podcast_generation` 保存首次登記時的 generation（既有紀錄預設 `0`）。舊 verified／cutover manifest 在移除或同日重建後會因 `migration_generation_conflict` 被拒絕，不能重新綁定新 generation。多日期 inventory 按日期、asset ID 排序取鎖；copy／verify 在原有 DB 交易內持鎖，避免移除期間重新建立已刪檔案，因此同日期管理操作可能等待匯入完成。失敗時 DB 交易回滾，來源及已複製但尚未登記的物件仍依既有 manifest 流程保留供人工處理。
+
+CLI 重跑 inventory 時，會在任何 copy／輸出寫入之前核對既有 manifest 的 cutover 狀態、entry identity 與 generation；已完成或過期的 inventory 被拒絕時不會重建已刪物件或改動新錄音。全新 inventory 與同一 generation 的 verified 重試仍可執行。
+
+複製前檢查也跨 manifest 核對每個 target 與 Asset ID 的永久歸屬；subset、重組或混入新項目不能繞過既有紀錄。其他 manifest 已持有的項目回傳 `migration_entry_owned_by_another_manifest`，整份 inventory 在任何複製前被拒絕，同一 manifest 的合法 verified 重試仍保留。

@@ -797,6 +797,8 @@ function EpisodeManager({
   const redirectExpiredSession = useSessionExpiryRedirect(locale, "admin")
   const [error, setError] = useState("")
   const [pending, setPending] = useState(false)
+  const [removing, setRemoving] = useState(false)
+  const frozen = Boolean(episode.deletion) || removing
   const available = new Set(
     episode.audio_variants
       .filter(item => item.is_active)
@@ -827,6 +829,43 @@ function EpisodeManager({
       setError(caught instanceof Error ? caught.message : t("unexpectedError"))
     } finally {
       setPending(false)
+    }
+  }
+
+  async function removeEpisode() {
+    if (
+      !window.confirm(
+        t("podcastRemoveConfirmation", { date: episode.trading_date })
+      )
+    )
+      return
+    setPending(true)
+    setRemoving(true)
+    setError("")
+    try {
+      await browserPodcastAdminClient().remove(
+        episode.id,
+        { expected_version: episode.version },
+        await requireCsrfToken()
+      )
+      await router.invalidate({ sync: true })
+    } catch (caught) {
+      if (await redirectExpiredSession(caught)) return
+      setError(
+        caught instanceof ApiError && caught.status === 503
+          ? t("podcastRemovalIncomplete")
+          : caught instanceof ApiError && caught.status === 409
+            ? t("podcastRemovalConflict")
+            : caught instanceof Error
+              ? caught.message
+              : t("unexpectedError")
+      )
+      // Initialization increments the version even when storage later fails.
+      // Reload the retained card before allowing a manual retry.
+      await router.invalidate({ sync: true })
+    } finally {
+      setPending(false)
+      setRemoving(false)
     }
   }
 
@@ -865,7 +904,7 @@ function EpisodeManager({
         {episode.metadata.find(item => item.locale === locale)?.title ??
           episode.metadata[0]?.title}
       </p>
-      {canEditMetadata && (
+      {canEditMetadata && !frozen && (
         <MetadataEditor
           key={`${episode.metadata_source}:${episode.metadata.map(item => item.title).join("|")}`}
           episode={episode}
@@ -881,6 +920,7 @@ function EpisodeManager({
         </p>
       )}
       {canPublish &&
+        !frozen &&
         episode.audio_variants
           .filter(item => item.is_active)
           .map(variant => (
@@ -897,14 +937,49 @@ function EpisodeManager({
             className="primary-action"
             data-action="publication"
             type="button"
-            disabled={pending}
+            disabled={pending || frozen}
             onClick={() => void changePublication()}
           >
             {episode.status === "draft"
               ? t("podcastPublish")
               : t("podcastUnpublish")}
           </button>
+          <button
+            className="rounded-lg border border-market-down/40 px-4 py-2 text-sm font-bold text-market-down disabled:cursor-not-allowed disabled:opacity-50"
+            data-action="removal"
+            type="button"
+            disabled={pending || episode.status === "published"}
+            title={
+              episode.status === "published"
+                ? t("podcastRemoveUnpublishFirst")
+                : undefined
+            }
+            onClick={() => void removeEpisode()}
+          >
+            {episode.deletion ? t("podcastRemovalRetry") : t("podcastRemove")}
+          </button>
+          {episode.status === "published" && (
+            <p className="m-0 text-sm text-sea-ink-soft">
+              {t("podcastRemoveUnpublishFirst")}
+            </p>
+          )}
         </div>
+      )}
+      {frozen && (
+        <p
+          className="col-span-full m-0 text-sm font-bold text-market-caution"
+          role="status"
+          aria-live="polite"
+        >
+          {removing
+            ? t("podcastRemoving")
+            : t("podcastRemovalProgress", {
+                cleared:
+                  (episode.deletion?.cleared_objects ?? 0) +
+                  (episode.deletion?.retained_objects ?? 0),
+                total: episode.deletion?.total_objects ?? 0,
+              })}
+        </p>
       )}
       {error && (
         <p className="m-0 text-sm font-bold text-red-700" role="alert">

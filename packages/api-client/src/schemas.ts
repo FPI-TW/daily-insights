@@ -958,6 +958,18 @@ export type PodcastAudioVariantResponse = z.infer<
   typeof podcastAudioVariantResponseSchema
 >
 
+export const podcastRemovalRequestSchema = z.object({
+  expected_version: z.number().int().positive(),
+})
+export type PodcastRemovalInput = z.infer<typeof podcastRemovalRequestSchema>
+
+export const podcastRemovalProgressSchema = z.object({
+  status: z.literal("pending"),
+  total_objects: z.number().int().nonnegative(),
+  cleared_objects: z.number().int().nonnegative(),
+  retained_objects: z.number().int().nonnegative(),
+})
+
 export const podcastEpisodeAdminSchema = z.object({
   id: z.uuid(),
   trading_date: z.iso.date(),
@@ -965,6 +977,7 @@ export const podcastEpisodeAdminSchema = z.object({
   version: z.number().int().positive(),
   metadata: z.array(podcastMetadataSchema),
   metadata_source: podcastMetadataSourceSchema.default("derived"),
+  deletion: podcastRemovalProgressSchema.nullable().optional(),
   audio_variants: z.array(podcastAudioVariantResponseSchema),
   cover_asset_id: z.uuid().nullable(),
   published_at: z.iso.datetime({ offset: true }).nullable(),

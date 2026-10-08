@@ -12,7 +12,7 @@ from typing import Literal
 
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,11 +29,17 @@ from daily_insights_api.modules.podcasts.direct_upload import (
     UploadBatchRequest,
     UploadReason,
     UploadRequest,
-    _lock_upload_date,
 )
 from daily_insights_api.modules.podcasts.direct_upload import (
     router as router,
 )
+from daily_insights_api.modules.podcasts.lifecycle import (
+    date_generation,
+    require_generation,
+    require_mutable,
+)
+from daily_insights_api.modules.podcasts.lifecycle import lock_upload_date as _lock_upload_date
+from daily_insights_api.modules.podcasts.lifecycle import lock_upload_object as lock_upload_object
 from daily_insights_api.modules.podcasts.media_worker import OBJECT_STORE_ERRORS
 from daily_insights_api.modules.podcasts.models import PodcastEpisode, PodcastEpisodeAudioVariant
 from daily_insights_api.modules.podcasts.service import (
@@ -64,6 +70,7 @@ class UploadTicket(BaseModel):
     expires: int
     episode_version: int | None
     began_published: bool
+    generation: int = Field(default=0, ge=0)
 
     @property
     def object_key(self) -> str:
@@ -126,12 +133,6 @@ def decode_ticket(token: str, settings: Settings) -> UploadTicket:
         raise HTTPException(403, detail={"code": "invalid_upload_token"}) from error
 
 
-async def lock_upload_object(database: AsyncSession, asset_id: uuid.UUID) -> None:
-    # Shared by completion, compensation and orphan cleanup, across API replicas.
-    key = int.from_bytes(hashlib.sha256(asset_id.bytes).digest()[:8], "big", signed=True)
-    await database.execute(select(func.pg_advisory_xact_lock(key)))
-
-
 async def _completed(database: AsyncSession, ticket: UploadTicket) -> CompletedUpload | None:
     row = (
         await database.execute(
@@ -188,9 +189,15 @@ async def sign_direct_upload(
     files = UploadBatchRequest(
         idempotency_key="stateless-upload-validation", **payload.model_dump()
     ).validated_files()
+    await _lock_upload_date(database, payload.trading_date)
+    generation = await date_generation(database, payload.trading_date)
     episode = await database.scalar(
-        select(PodcastEpisode).where(PodcastEpisode.trading_date == payload.trading_date)
+        select(PodcastEpisode)
+        .where(PodcastEpisode.trading_date == payload.trading_date)
+        .with_for_update()
     )
+    if episode is not None:
+        require_mutable(episode)
     versions: dict[str, int] = {}
     if episode is not None:
         variants = await database.scalars(
@@ -235,6 +242,7 @@ async def sign_direct_upload(
             expires=expires,
             episode_version=episode.version if episode else None,
             began_published=episode.status == "published" if episode else False,
+            generation=generation,
         )
         url = await store.presign_put(
             ObjectRef(bucket=settings.r2_bucket_name, key=ticket.object_key),
@@ -301,12 +309,15 @@ async def register_audio(
     request_id: str,
 ) -> CompletedUpload:
     await _lock_upload_date(database, ticket.trading_date)
+    await require_generation(database, ticket.trading_date, ticket.generation)
     episode = await database.scalar(
         select(PodcastEpisode)
         .where(PodcastEpisode.trading_date == ticket.trading_date)
         .with_for_update()
     )
     created = episode is None
+    if episode is not None:
+        require_mutable(episode)
     if episode is None:
         episode = PodcastEpisode(
             trading_date=ticket.trading_date,
@@ -429,6 +440,8 @@ async def complete_direct_upload(
     if settings.r2_bucket_name is None:
         raise HTTPException(503, detail={"code": "r2_not_configured"})
     ref = ObjectRef(bucket=settings.r2_bucket_name, key=ticket.object_key)
+    await _lock_upload_date(database, ticket.trading_date)
+    await require_generation(database, ticket.trading_date, ticket.generation)
     await lock_upload_object(database, ticket.asset_id)
     previous = await _completed(database, ticket)
     if previous is not None:
@@ -467,6 +480,8 @@ async def complete_direct_upload(
         # A commit exception can mean the commit reached PostgreSQL. Recheck on
         # a fresh transaction under the same object lock before compensation.
         try:
+            await _lock_upload_date(database, ticket.trading_date)
+            await require_generation(database, ticket.trading_date, ticket.generation)
             await lock_upload_object(database, ticket.asset_id)
             recovered = await _completed(database, ticket)
             if recovered is not None:

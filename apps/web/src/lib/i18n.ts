@@ -864,6 +864,18 @@ const resources: Resource = {
       podcastSaveMetadata: "儲存內容",
       podcastPublish: "發布",
       podcastUnpublish: "下架",
+      podcastRemove: "永久移除",
+      podcastRemoveUnpublishFirst: "請先下架，再永久移除。",
+      podcastRemoveConfirmation:
+        "永久移除 {{date}} 的整集 Podcast？所有語言、歷史音檔、封面及相關資料都會移除；共用檔案會保留。此操作無法復原。",
+      podcastRemoving: "正在移除整集 Podcast…",
+      podcastRemovalProgress:
+        "移除尚未完成：已處理 {{cleared}} / {{total}} 個檔案。可手動重試。",
+      podcastRemovalRetry: "重試移除",
+      podcastRemovalIncomplete:
+        "移除尚未完成，節目已凍結。請重試以繼續清理剩餘檔案。",
+      podcastRemovalConflict:
+        "節目狀態或版本已變更，已重新載入；請確認後重試。",
       podcastUnpublishConfirmation:
         "確定要下架此日期的 Podcast 嗎？下架後客戶將無法收聽。",
       podcastImportAudio: "登記 R2 音檔",
@@ -1809,6 +1821,18 @@ const resources: Resource = {
       podcastSaveMetadata: "保存内容",
       podcastPublish: "发布",
       podcastUnpublish: "下架",
+      podcastRemove: "永久移除",
+      podcastRemoveUnpublishFirst: "请先下架，再永久移除。",
+      podcastRemoveConfirmation:
+        "永久移除 {{date}} 的整集 Podcast？所有语言、历史音频、封面及相关资料都会移除；共用文件会保留。此操作无法恢复。",
+      podcastRemoving: "正在移除整集 Podcast…",
+      podcastRemovalProgress:
+        "移除尚未完成：已处理 {{cleared}} / {{total}} 个文件。可手动重试。",
+      podcastRemovalRetry: "重试移除",
+      podcastRemovalIncomplete:
+        "移除尚未完成，节目已冻结。请重试以继续清理剩余文件。",
+      podcastRemovalConflict:
+        "节目状态或版本已变更，已重新加载；请确认后重试。",
       podcastUnpublishConfirmation:
         "确定要下架此日期的 Podcast 吗？下架后客户将无法收听。",
       podcastImportAudio: "登记 R2 音频",
@@ -2790,6 +2814,18 @@ const resources: Resource = {
       podcastSaveMetadata: "Save content",
       podcastPublish: "Publish",
       podcastUnpublish: "Unpublish",
+      podcastRemove: "Permanently remove",
+      podcastRemoveUnpublishFirst: "Unpublish this episode before removing it.",
+      podcastRemoveConfirmation:
+        "Permanently remove the entire Podcast for {{date}}? All languages, historical audio, cover, and related data will be removed; shared files will be retained. This cannot be undone.",
+      podcastRemoving: "Removing the entire Podcast…",
+      podcastRemovalProgress:
+        "Removal incomplete: {{cleared}} / {{total}} files processed. Retry manually to continue.",
+      podcastRemovalRetry: "Retry removal",
+      podcastRemovalIncomplete:
+        "Removal is incomplete and the episode is frozen. Retry to clear the remaining files.",
+      podcastRemovalConflict:
+        "The episode state or version changed. The card has been refreshed; review it and retry.",
       podcastUnpublishConfirmation:
         "Unpublish this date's Podcast? Customers will no longer be able to listen to it.",
       podcastImportAudio: "Register R2 audio",

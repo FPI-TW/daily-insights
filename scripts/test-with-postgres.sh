@@ -66,9 +66,9 @@ fi
 phase2b_table_count="$(
   docker exec "$container_id" \
     psql -U daily_insights -d daily_insights_test -Atc \
-    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('active_model_configuration', 'asset_migration_manifests', 'asset_migration_entries', 'podcast_episodes', 'podcast_episode_translations', 'podcast_episode_audio_variants')"
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('active_model_configuration', 'asset_migration_manifests', 'asset_migration_entries', 'podcast_episodes', 'podcast_episode_translations', 'podcast_episode_audio_variants', 'podcast_date_generations', 'podcast_deletion_jobs', 'podcast_deletion_objects')"
 )"
-if [ "$phase2b_table_count" -ne 6 ]; then
+if [ "$phase2b_table_count" -ne 9 ]; then
   echo "Phase 2B foundation tables 未正確建立。" >&2
   exit 1
 fi
@@ -79,7 +79,7 @@ DAILY_INSIGHTS_DATABASE_URL="$database_url" \
 phase2b_downgrade_table_count="$(
   docker exec "$container_id" \
     psql -U daily_insights -d daily_insights_test -Atc \
-    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('active_model_configuration', 'asset_migration_manifests', 'asset_migration_entries', 'podcast_episodes', 'podcast_episode_translations', 'podcast_episode_audio_variants')"
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('active_model_configuration', 'asset_migration_manifests', 'asset_migration_entries', 'podcast_episodes', 'podcast_episode_translations', 'podcast_episode_audio_variants', 'podcast_date_generations', 'podcast_deletion_jobs', 'podcast_deletion_objects')"
 )"
 phase2b_downgrade_trigger_count="$(
   docker exec "$container_id" \
