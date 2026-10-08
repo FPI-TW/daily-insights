@@ -901,7 +901,7 @@ const resources: Resource = {
       podcastUploadNewKeyRequired: "無法繼續此上傳嘗試，請再次提交保留的音檔。",
       podcastVerifiedSha256: "已驗證 SHA-256：{{sha256}}",
       podcastUploadInvalidType:
-        "請使用副檔名與 MIME type 相符的 MP3 或 MP4 音檔。",
+        "請選擇 .mp3 或 .mp4 音檔，副檔名須與 MIME type 相符。",
       podcastBatchProgress: "批次上傳進度",
       podcastBatchWaitBeforeNewUpload:
         "目前批次仍有音檔處理中，請等待完成後再開始新的上傳。",
@@ -1857,7 +1857,7 @@ const resources: Resource = {
       podcastUploadNewKeyRequired: "无法继续此次上传，请再次提交保留的音频。",
       podcastVerifiedSha256: "已验证 SHA-256：{{sha256}}",
       podcastUploadInvalidType:
-        "请使用扩展名与 MIME type 相符的 MP3 或 MP4 音频。",
+        "请选择 .mp3 或 .mp4 音频，扩展名须与 MIME type 相符。",
       podcastBatchProgress: "批次上传进度",
       podcastBatchWaitBeforeNewUpload:
         "当前批次仍有音频处理中，请等待完成后再开始新的上传。",
@@ -2853,7 +2853,7 @@ const resources: Resource = {
         "This upload attempt cannot be resumed. Submit the retained files again.",
       podcastVerifiedSha256: "Verified SHA-256: {{sha256}}",
       podcastUploadInvalidType:
-        "Choose an MP3 or MP4 whose extension matches its MIME type.",
+        "Choose a .mp3 or .mp4 audio file whose extension matches its MIME type.",
       podcastBatchProgress: "Upload batch progress",
       podcastBatchWaitBeforeNewUpload:
         "This batch still has files in progress. Wait for them to finish before starting another upload.",

@@ -47,3 +47,17 @@ GitHub Actions、deploy.sh 或 migration。一般部署只啟動新 Compose 的�
 重新整理遺失選檔時可立即選檔重新開始；新簽署不建立 DB 占用。
 已 PUT 但未登記的音檔在簽署期限及最後修改時間皆超過預設 24 小時 grace 後，
 由 API 每五分鐘掃描回收。已成功登記的憑證可冪等重送，即使期限已過。
+
+## v2 正式儲存路徑相容性
+
+新簽署發出內部 v2 HMAC 憑證，browser PUT 仍使用
+`podcasts/direct/{expires}/{trading_date}/{locale}/{asset_id}.{mp3|mp4}` 暫存。
+complete 先驗證 generation／目前版本、HEAD、完整 SHA、時長和章節，再由 spool
+以 conditional create 建立 `podcasts/YYYY/MM/DD/{locale}/podcast_{version}.{mp3|mp4}`。
+月份日期補零，version 與該語系 variant 一致；DB commit 後清暫存。
+
+不用搬移既有物件、改 DB schema 或重簽未到期 v1 憑證；v1 仍登記原路徑。
+驗收時確認舊播放、v1 complete、v2 替換及 response-lost retry 都正常。
+日期鎖內清理超過 grace 的未引用新版正式孤兒；archived 引用、舊路徑及不相關
+物件保留。碰撞不覆寫，只有未引用且 size／MIME／完整 SHA 一致才可重用。
+DB 結果不明或儲存逾時保留物件供重試；不要人工刪除仍被 Asset 引用的版本。

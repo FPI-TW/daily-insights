@@ -46,7 +46,7 @@ type ReplacementConfirmation = Readonly<{
 const maxPodcastFileBytes = 256 * 1024 * 1024
 
 function podcastFileMimeType(file: File): string | null {
-  const extension = file.name.split(".").pop()?.toLowerCase()
+  const extension = /\.(mp3|mp4)$/i.exec(file.name)?.[1]?.toLowerCase()
   if (
     extension === "mp3" &&
     ["audio/mpeg", "audio/mp3", ""].includes(file.type)
@@ -213,6 +213,9 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
   const uploadTargets = useRef<
     Partial<Record<Locale, PodcastDirectUploadTarget>>
   >({})
+  const [slotErrors, setSlotErrors] = useState<Partial<Record<Locale, string>>>(
+    {}
+  )
   const [files, setFiles] = useState<PodcastFiles>({
     "zh-hant": null,
     "zh-hans": null,
@@ -260,13 +263,16 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
       setError(t("podcastUploadAtLeastOne"))
       return
     }
-    for (const { file } of selected) {
+    for (const { locale, file } of selected) {
       if (file.size === 0 || file.size > maxPodcastFileBytes) {
         setError(t("podcastUploadTooLarge"))
         return
       }
       if (!podcastFileMimeType(file)) {
-        setError(t("podcastUploadInvalidType"))
+        setSlotErrors(current => ({
+          ...current,
+          [locale]: t("podcastUploadInvalidType"),
+        }))
         return
       }
     }
@@ -517,7 +523,16 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
               locale={locale}
               file={files[locale]}
               disabled={pending}
+              error={slotErrors[locale]}
               onChange={file => {
+                if (file && !podcastFileMimeType(file)) {
+                  setSlotErrors(current => ({
+                    ...current,
+                    [locale]: t("podcastUploadInvalidType"),
+                  }))
+                  return
+                }
+                setSlotErrors(current => ({ ...current, [locale]: undefined }))
                 clearReplacementConfirmation()
                 setFiles(current => ({ ...current, [locale]: file }))
                 delete uploadTargets.current[locale]
@@ -710,11 +725,13 @@ function PodcastFileSlot({
   locale,
   file,
   disabled = false,
+  error,
   onChange,
 }: {
   locale: Locale
   file: File | null
   disabled?: boolean
+  error: string | undefined
   onChange: (file: File | null) => void
 }) {
   const { t } = useTranslation()
@@ -730,52 +747,69 @@ function PodcastFileSlot({
   }
 
   return (
-    <div
-      className={
-        dragging
-          ? "relative min-h-32 rounded-lg border-2 border-dashed border-lagoon bg-lagoon/10 text-center"
-          : "relative min-h-32 rounded-lg border-2 border-dashed border-line bg-link-hover text-center transition-colors hover:border-lagoon"
-      }
-      onDragEnter={event => {
-        event.preventDefault()
-        if (!disabled) setDragging(true)
-      }}
-      onDragOver={event => event.preventDefault()}
-      onDragLeave={() => setDragging(false)}
-      onDrop={receiveDrop}
-    >
-      <input
-        className="sr-only"
-        id={inputId}
-        type="file"
-        accept=".mp3,.mp4,audio/mpeg,audio/mp4,video/mp4"
-        disabled={disabled}
-        onChange={event => onChange(event.target.files?.item(0) ?? null)}
-      />
-      <label
+    <div className="grid gap-2">
+      <div
         className={
-          disabled
-            ? "absolute inset-0 grid place-items-center gap-2 p-4 text-sm font-bold text-sea-ink"
-            : "absolute inset-0 grid cursor-pointer place-items-center gap-2 p-4 text-sm font-bold text-sea-ink"
+          dragging
+            ? "relative min-h-32 rounded-lg border-2 border-dashed border-lagoon bg-lagoon/10 text-center"
+            : "relative min-h-32 rounded-lg border-2 border-dashed border-line bg-link-hover text-center transition-colors hover:border-lagoon"
         }
-        htmlFor={inputId}
+        onDragEnter={event => {
+          event.preventDefault()
+          if (!disabled) setDragging(true)
+        }}
+        onDragOver={event => event.preventDefault()}
+        onDragLeave={() => setDragging(false)}
+        onDrop={receiveDrop}
       >
-        <strong className="text-xs tracking-[0.08em] text-kicker uppercase">
-          {locale}
-        </strong>
-        <span className="max-w-full overflow-hidden text-ellipsis">
-          {file ? file.name : t("podcastUploadSlotPrompt")}
-        </span>
-      </label>
-      {file && (
-        <button
-          className="absolute right-2 bottom-2 z-10 px-2 py-1 text-xs"
-          type="button"
+        <input
+          className="sr-only"
+          id={inputId}
+          type="file"
+          accept=".mp3,.mp4,audio/mpeg,audio/mp4,video/mp4"
           disabled={disabled}
-          onClick={() => onChange(null)}
+          onChange={event => {
+            const selected = event.target.files?.item(0)
+            event.target.value = ""
+            if (selected) onChange(selected)
+          }}
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? `${inputId}-error` : undefined}
+        />
+        <label
+          className={
+            disabled
+              ? "absolute inset-0 grid place-items-center gap-2 p-4 text-sm font-bold text-sea-ink"
+              : "absolute inset-0 grid cursor-pointer place-items-center gap-2 p-4 text-sm font-bold text-sea-ink"
+          }
+          htmlFor={inputId}
         >
-          {t("podcastUploadRemove")}
-        </button>
+          <strong className="text-xs tracking-[0.08em] text-kicker uppercase">
+            {locale}
+          </strong>
+          <span className="max-w-full overflow-hidden text-ellipsis">
+            {file ? file.name : t("podcastUploadSlotPrompt")}
+          </span>
+        </label>
+        {file && (
+          <button
+            className="absolute right-2 bottom-2 z-10 px-2 py-1 text-xs"
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(null)}
+          >
+            {t("podcastUploadRemove")}
+          </button>
+        )}
+      </div>
+      {error && (
+        <p
+          id={`${inputId}-error`}
+          className="m-0 text-sm text-destructive"
+          role="alert"
+        >
+          {error}
+        </p>
       )}
     </div>
   )
