@@ -48,6 +48,9 @@ function reset(overrides = {}) {
     metadata: null,
     metadataSource: "derived",
     podcastEpisodes: "single",
+    removal: "normal",
+    removed: false,
+    deletion: null,
     reports: "normal",
     requests: [],
     ...overrides,
@@ -207,6 +210,7 @@ function adminEpisode({
       },
     ],
     metadata_source: state.metadataSource,
+    deletion: state.deletion,
     audio_variants: [
       {
         asset_id: assetId,
@@ -225,6 +229,7 @@ function adminEpisode({
 }
 
 function adminEpisodes() {
+  if (state.removed) return []
   if (state.podcastEpisodes !== "grouped") return [adminEpisode()]
   return [
     adminEpisode({
@@ -978,6 +983,50 @@ const server = createServer(async (request, response) => {
     if (!role) return
     recordRequest(request, url, role)
     sendJson(response, 200, adminEpisodes())
+    return
+  }
+
+  if (
+    url.pathname === `/api/admin/podcasts/${episodeId}` &&
+    request.method === "DELETE"
+  ) {
+    const role = requireRole(request, response, ["admin", "asset_manager"])
+    if (!role || !requireCsrf(request, response)) return
+    const input = parseJsonBody(await readBody(request))
+    recordRequest(request, url, role, {
+      csrf: "valid",
+      expectedVersion: input?.expected_version,
+    })
+    if (input?.expected_version !== state.episodeVersion) {
+      sendJson(response, 409, { detail: { code: "episode_version_conflict" } })
+      return
+    }
+    if (state.status === "published") {
+      sendJson(response, 409, {
+        detail: { code: "episode_must_be_unpublished" },
+      })
+      return
+    }
+    if (!state.deletion) {
+      state.episodeVersion += 1
+      state.deletion = {
+        status: "pending",
+        total_objects: 2,
+        cleared_objects: 1,
+        retained_objects: 0,
+      }
+    }
+    if (state.removal === "fail_once") {
+      state.removal = "normal"
+      sendJson(response, 503, {
+        detail: { code: "episode_removal_incomplete", episode_id: episodeId },
+      })
+      return
+    }
+    state.removed = true
+    state.deletion = null
+    response.writeHead(204, { "X-Request-ID": "e2e-request-id" })
+    response.end()
     return
   }
 

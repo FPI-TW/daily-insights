@@ -556,7 +556,8 @@ export interface paths {
     /** Admin Update */
     put: operations["admin_podcasts_update"]
     post?: never
-    delete?: never
+    /** Admin Remove */
+    delete: operations["admin_podcasts_remove"]
     options?: never
     head?: never
     patch?: never
@@ -2773,6 +2774,7 @@ export interface components {
       audio_variants: components["schemas"]["PodcastAudioVariantResponse"][]
       /** Cover Asset Id */
       cover_asset_id: string | null
+      deletion?: components["schemas"]["PodcastRemovalProgress"] | null
       /**
        * Id
        * Format: uuid
@@ -2912,6 +2914,21 @@ export interface components {
     PodcastPublicationRequest: {
       /** Expected Version */
       expected_version: number
+    }
+    /** PodcastRemovalProgress */
+    PodcastRemovalProgress: {
+      /** Cleared Objects */
+      cleared_objects: number
+      /** Retained Objects */
+      retained_objects: number
+      /**
+       * Status
+       * @default pending
+       * @constant
+       */
+      status: "pending"
+      /** Total Objects */
+      total_objects: number
     }
     /** Point */
     Point: {
@@ -4756,6 +4773,41 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["PodcastEpisodeAdminResponse"]
         }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  admin_podcasts_remove: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        episode_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PodcastPublicationRequest"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
       }
       /** @description Validation Error */
       422: {

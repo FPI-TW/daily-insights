@@ -1129,3 +1129,25 @@ it("signs and completes stateless Podcast uploads with validated responses and C
     )
   ).rejects.toThrow()
 })
+
+describe("Podcast removal client", () => {
+  it("sends a validated DELETE with version and CSRF and accepts empty 204", async () => {
+    const transport = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    await expect(createPodcastAdminClient(transport).remove("episode", { expected_version: 2 }, "csrf")).resolves.toBeUndefined()
+    expect(transport).toHaveBeenCalledWith("/api/admin/podcasts/episode", expect.objectContaining({ method: "DELETE", headers: expect.objectContaining({ "X-CSRF-Token": "csrf" }), body: JSON.stringify({ expected_version: 2 }) }))
+    await expect(createPodcastAdminClient(transport).remove("episode", { expected_version: 0 }, "csrf")).rejects.toThrow()
+    expect(transport).toHaveBeenCalledTimes(1)
+  })
+
+  it("retains the incomplete-removal code for retry and rejects premature success", async () => {
+    const detail = { code: "episode_removal_incomplete", episode_id: "episode" }
+    const client = createPodcastAdminClient(async () => Response.json({ detail }, { status: 503 }))
+    await expect(client.remove("episode", { expected_version: 2 }, "csrf")).rejects.toMatchObject({ status: 503, detail })
+    await expect(createPodcastAdminClient(async () => Response.json({ status: "pending" })).remove("episode", { expected_version: 2 }, "csrf")).rejects.toThrow("Unexpected Podcast removal response")
+  })
+
+  it("exports deletion in generated OpenAPI", () => {
+    expect(openapi.paths["/api/admin/podcasts/{episode_id}"].delete.operationId).toBe("admin_podcasts_remove")
+    expect(openapi.paths["/api/admin/podcasts/{episode_id}"].delete.responses).toHaveProperty("204")
+  })
+})

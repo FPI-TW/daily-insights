@@ -9,20 +9,21 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { I18nextProvider } from "react-i18next"
 import { createI18n } from "#/lib/i18n"
 import { AudioManagementPage } from "./AudioManagementPage"
-import { ApiError } from "@daily-insights/api-client"
+import { ApiError, type PodcastEpisodeAdmin } from "@daily-insights/api-client"
 
-const { signDirectUploads, completeDirectUpload, invalidate } = vi.hoisted(
-  () => ({
+const { signDirectUploads, completeDirectUpload, removeEpisode, invalidate } =
+  vi.hoisted(() => ({
     signDirectUploads: vi.fn(),
     completeDirectUpload: vi.fn(),
+    removeEpisode: vi.fn(),
     invalidate: vi.fn(),
-  })
-)
+  }))
 
 vi.mock("#/lib/admin-podcasts", () => ({
   browserPodcastAdminClient: () => ({
     signDirectUploads,
     completeDirectUpload,
+    remove: removeEpisode,
   }),
 }))
 vi.mock("#/lib/auth", () => ({
@@ -72,6 +73,7 @@ afterEach(() => {
   signDirectUploads.mockReset()
   completeDirectUpload.mockReset()
   invalidate.mockReset()
+  removeEpisode.mockReset()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   vi.clearAllMocks()
@@ -323,5 +325,117 @@ describe("AudioManagementPage synchronous direct uploads", () => {
     )
     expect(MockUploadRequest.last).toBe(previousRequest)
     expect(signDirectUploads).toHaveBeenCalledTimes(1)
+  })
+})
+
+const removableEpisode: PodcastEpisodeAdmin = {
+  id: "10000000-0000-4000-8000-000000000001",
+  trading_date: "2026-10-01",
+  status: "draft",
+  version: 1,
+  metadata: [{ locale: "en", title: "Removal test", summary: "Summary" }],
+  metadata_source: "derived",
+  audio_variants: [],
+  cover_asset_id: null,
+  published_at: null,
+}
+
+function removalPage(episode: PodcastEpisodeAdmin = removableEpisode) {
+  return (
+    <I18nextProvider i18n={createI18n("en")}>
+      <AudioManagementPage episodes={[episode]} canPublish locale="en" />
+    </I18nextProvider>
+  )
+}
+
+describe("AudioManagementPage whole episode removal", () => {
+  it("disables removal on published episodes and explains unpublishing first", () => {
+    render(removalPage({ ...removableEpisode, status: "published" }))
+    expect(
+      screen.getByRole("button", { name: "Permanently remove" })
+    ).toBeDisabled()
+    expect(
+      screen.getByText("Unpublish this episode before removing it.")
+    ).toBeVisible()
+  })
+
+  it("confirms date, all languages, history, and irreversibility; cancel sends no request", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false)
+    render(removalPage())
+    fireEvent.click(screen.getByRole("button", { name: "Permanently remove" }))
+    expect(confirm).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /2026-10-01.*All languages, historical audio.*cannot be undone/
+      )
+    )
+    expect(removeEpisode).not.toHaveBeenCalled()
+    expect(invalidate).not.toHaveBeenCalled()
+  })
+
+  it("keeps the card and disables actions while removal is pending", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true)
+    let finish!: () => void
+    removeEpisode.mockReturnValue(
+      new Promise<void>(resolve => {
+        finish = resolve
+      })
+    )
+    render(removalPage())
+    fireEvent.click(screen.getByRole("button", { name: "Permanently remove" }))
+    await screen.findByText("Removing the entire Podcast…")
+    expect(screen.getByText("Removal test")).toBeVisible()
+    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: "Permanently remove" })
+    ).toBeDisabled()
+    expect(invalidate).not.toHaveBeenCalled()
+    finish()
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ sync: true }))
+    expect(removeEpisode).toHaveBeenCalledWith(
+      removableEpisode.id,
+      { expected_version: 1 },
+      "csrf"
+    )
+  })
+
+  it("refreshes failed removal progress and retries using the refreshed version", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true)
+    removeEpisode
+      .mockRejectedValueOnce(
+        new ApiError(503, "req", "failed", {
+          code: "episode_removal_incomplete",
+        })
+      )
+      .mockResolvedValueOnce(undefined)
+    const view = render(removalPage())
+    fireEvent.click(screen.getByRole("button", { name: "Permanently remove" }))
+    await screen.findByText(
+      "Removal is incomplete and the episode is frozen. Retry to clear the remaining files."
+    )
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ sync: true }))
+    view.rerender(
+      removalPage({
+        ...removableEpisode,
+        version: 2,
+        deletion: {
+          status: "pending",
+          total_objects: 3,
+          cleared_objects: 1,
+          retained_objects: 0,
+        },
+      })
+    )
+    await screen.findByText(
+      "Removal incomplete: 1 / 3 files processed. Retry manually to continue."
+    )
+    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "Retry removal" }))
+    await waitFor(() =>
+      expect(removeEpisode).toHaveBeenLastCalledWith(
+        removableEpisode.id,
+        { expected_version: 2 },
+        "csrf"
+      )
+    )
   })
 })

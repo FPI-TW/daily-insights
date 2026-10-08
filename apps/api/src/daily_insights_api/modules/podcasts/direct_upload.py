@@ -7,7 +7,7 @@ from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +15,14 @@ from daily_insights_api.core.config import Settings
 from daily_insights_api.core.enums import SystemRole
 from daily_insights_api.modules.assets.api import ObjectRef, ObjectStore
 from daily_insights_api.modules.identity.api import AuthContext, require_csrf_roles, require_roles
+from daily_insights_api.modules.podcasts.lifecycle import (
+    date_generation,
+    require_generation,
+    require_mutable,
+)
+from daily_insights_api.modules.podcasts.lifecycle import (
+    lock_upload_date as _lock_upload_date,
+)
 from daily_insights_api.modules.podcasts.models import (
     PodcastEpisode,
     PodcastEpisodeAudioVariant,
@@ -31,7 +39,7 @@ MIME_BY_EXTENSION = {".mp3": "audio/mpeg", ".mp4": "audio/mp4"}
 MIME_ALIASES = {"audio/mp3": "audio/mpeg", "video/mp4": "audio/mp4"}
 Locale = Literal["zh-hant", "zh-hans", "en"]
 UploadReason = Literal["initial_upload", "update_file", "other"]
-PODCAST_UPLOAD_LOCK_NAMESPACE = 0x504F4443
+
 AssetWrite = Annotated[
     AuthContext,
     Depends(require_csrf_roles(SystemRole.ADMIN, SystemRole.ASSET_MANAGER)),
@@ -224,21 +232,6 @@ async def _sessions_for_batch(
     return list((await database.scalars(statement.order_by(PodcastUploadSession.locale))).all())
 
 
-async def _lock_upload_date(
-    database: AsyncSession,
-    trading_date: date,
-) -> None:
-    """Serialize direct-upload initialization for one logical episode date."""
-    await database.execute(
-        select(
-            func.pg_advisory_xact_lock(
-                PODCAST_UPLOAD_LOCK_NAMESPACE,
-                trading_date.toordinal(),
-            )
-        )
-    )
-
-
 async def _expire_stale_pending_sessions(
     database: AsyncSession,
     trading_date: date,
@@ -313,6 +306,7 @@ async def _idempotent_init_response(
         raise HTTPException(
             status.HTTP_409_CONFLICT, detail={"code": "idempotency_key_reused"}
         ) from None
+    await require_generation(database, existing.trading_date, existing.generation)
     if existing.expires_at <= datetime.now(UTC):
         raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "upload_batch_expired"})
     return _init_response(existing, sessions)
@@ -339,6 +333,7 @@ async def init_upload_batch(
             status.HTTP_503_SERVICE_UNAVAILABLE, detail={"code": "r2_not_configured"}
         )
 
+    await _lock_upload_date(database, payload.trading_date)
     digest = _payload_hash(payload)
     replay = await _idempotent_init_response(
         database,
@@ -362,6 +357,7 @@ async def init_upload_batch(
     if replay is not None:
         return replay
 
+    generation = await date_generation(database, payload.trading_date)
     now = datetime.now(UTC)
     await _expire_stale_pending_sessions(database, payload.trading_date, now)
 
@@ -376,6 +372,7 @@ async def init_upload_batch(
                     )
                     .where(
                         PodcastUploadBatch.trading_date == payload.trading_date,
+                        PodcastUploadBatch.generation == generation,
                         PodcastUploadSession.status.in_(("pending_upload", "queued", "processing")),
                     )
                 )
@@ -396,6 +393,7 @@ async def init_upload_batch(
     )
     current_versions: dict[str, int | None] = {item.locale: None for item, _, _ in files}
     if episode is not None:
+        require_mutable(episode)
         active = (
             await database.scalars(
                 select(PodcastEpisodeAudioVariant).where(
@@ -441,6 +439,7 @@ async def init_upload_batch(
         reason=payload.reason,
         episode_id=episode.id if episode is not None else None,
         base_episode_version=episode.version if episode is not None else 1,
+        generation=generation,
         began_published=episode.status == "published" if episode is not None else False,
         applied_count=0,
         status="open",
@@ -521,7 +520,11 @@ async def finalize_upload(
 ) -> UploadFinalizeResponse:
     if request.app.state.settings.environment == "production":
         raise HTTPException(410, detail={"code": "legacy_upload_retired"})
-    batch = await _owned_batch(database, batch_id, actor, for_update=True)
+    batch = await _owned_batch(database, batch_id, actor)
+    if batch is not None:
+        await _lock_upload_date(database, batch.trading_date)
+        await require_generation(database, batch.trading_date, batch.generation)
+        batch = await _owned_batch(database, batch_id, actor, for_update=True)
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "upload_batch_not_found"})
     session = await database.scalar(

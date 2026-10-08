@@ -16,6 +16,8 @@ import {
   podcastDirectUploadRequestSchema,
   podcastDirectUploadTargetSchema,
   podcastCompletedUploadSchema,
+  podcastRemovalRequestSchema,
+  type PodcastRemovalInput,
   podcastEpisodeAdminListSchema,
   podcastEpisodeAdminSchema,
   type PodcastEpisodeCreateInput,
@@ -562,6 +564,16 @@ export function createAdministrationClient(transport: ApiTransport) {
 
 export function createPodcastAdminClient(transport: ApiTransport) {
   return {
+    async remove(episodeId: string, input: PodcastRemovalInput, csrfToken: string) {
+      const payload = podcastRemovalRequestSchema.parse(input)
+      const response = await transport(`/api/admin/podcasts/${episodeId}`, {
+        method: "DELETE",
+        headers: mutationHeaders(csrfToken),
+        body: JSON.stringify(payload),
+      })
+      if (!response.ok) await parseResponse(response, z.unknown())
+      if (response.status !== 204) throw new Error("Unexpected Podcast removal response")
+    },
     async list() {
       return parseResponse(
         await transport("/api/admin/podcasts"),

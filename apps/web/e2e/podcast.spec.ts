@@ -764,3 +764,113 @@ test.describe("Mounted session expiry", () => {
     ).toBe(true)
   })
 })
+
+test.describe("Whole unpublished Podcast removal", () => {
+  test("published removal is disabled with an unpublish-first hint", async ({
+    page,
+    context,
+  }) => {
+    await authenticateAs(context, "admin")
+    await openHydrated(page, "/en/admin/audio", '[data-action="removal"]')
+    await expect(
+      page.getByRole("button", { name: "Permanently remove" })
+    ).toBeDisabled()
+    await expect(
+      page.getByText("Unpublish this episode before removing it.")
+    ).toBeVisible()
+  })
+
+  test("canceling the irreversible confirmation retains every card", async ({
+    page,
+    context,
+    request,
+  }) => {
+    await resetMockApi(request, { status: "draft" })
+    await authenticateAs(context, "asset_manager")
+    await openHydrated(page, "/en/admin/audio", '[data-action="removal"]')
+    page.once("dialog", async dialog => {
+      expect(dialog.message()).toContain("2026-07-24")
+      expect(dialog.message()).toContain("All languages, historical audio")
+      expect(dialog.message()).toContain("cannot be undone")
+      await dialog.dismiss()
+    })
+    await page.getByRole("button", { name: "Permanently remove" }).click()
+    await expect(page.locator('[data-action="removal"]')).toBeEnabled()
+    expect(
+      (await getMockApiState(request)).requests.filter(
+        item => item.method === "DELETE"
+      )
+    ).toHaveLength(0)
+  })
+
+  for (const role of ["admin", "asset_manager"] as const) {
+    test(`${role} confirms removal and the completed card disappears`, async ({
+      page,
+      context,
+      request,
+    }) => {
+      await resetMockApi(request, { status: "draft" })
+      await authenticateAs(context, role)
+      await openHydrated(page, "/en/admin/audio", '[data-action="removal"]')
+      page.once("dialog", dialog => dialog.accept())
+      await page.getByRole("button", { name: "Permanently remove" }).click()
+      await expect(page.locator('[data-action="removal"]')).toHaveCount(0)
+      const deletion = (await getMockApiState(request)).requests.find(
+        item => item.method === "DELETE"
+      )
+      expect(deletion).toMatchObject({
+        role,
+        path: `/api/admin/podcasts/${episodeId}`,
+        facts: { csrf: "valid", expectedVersion: 2 },
+      })
+    })
+  }
+
+  test("pending removal retains the card, failure shows progress, retry uses refreshed version", async ({
+    page,
+    context,
+    request,
+  }) => {
+    await resetMockApi(request, { status: "draft", removal: "fail_once" })
+    await authenticateAs(context, "admin")
+    await openHydrated(page, "/en/admin/audio", '[data-action="removal"]')
+    let release!: () => void
+    const held = new Promise<void>(resolve => {
+      release = resolve
+    })
+    await page.route(`**/api/admin/podcasts/${episodeId}`, async route => {
+      if (route.request().method() === "DELETE") await held
+      await route.continue()
+    })
+    page.once("dialog", dialog => dialog.accept())
+    await page.getByRole("button", { name: "Permanently remove" }).click()
+    await expect(page.getByText("Removing the entire Podcast…")).toBeVisible()
+    await expect(
+      page.getByRole("button", { name: "Publish", exact: true })
+    ).toBeDisabled()
+    await expect(
+      page.getByRole("button", { name: "Permanently remove" })
+    ).toBeDisabled()
+    release()
+    await expect(
+      page.getByText(
+        "Removal is incomplete and the episode is frozen. Retry to clear the remaining files."
+      )
+    ).toBeVisible()
+    await expect(
+      page.getByText(
+        "Removal incomplete: 1 / 2 files processed. Retry manually to continue."
+      )
+    ).toBeVisible()
+    await expect(
+      page.getByRole("button", { name: "Publish", exact: true })
+    ).toBeDisabled()
+    page.once("dialog", dialog => dialog.accept())
+    await page.getByRole("button", { name: "Retry removal" }).click()
+    await expect(page.locator('[data-action="removal"]')).toHaveCount(0)
+    const attempts = (await getMockApiState(request)).requests.filter(
+      item => item.method === "DELETE"
+    )
+    expect(attempts.map(item => item.facts?.expectedVersion)).toEqual([2, 3])
+  })
+})
