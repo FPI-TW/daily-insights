@@ -1,3 +1,8 @@
+import {
+  toTaipeiDateTimeInput,
+  fromTaipeiDateTimeInput,
+  formatTrialExpiry,
+} from "#/lib/trial-members"
 import { formatDateStamp } from "#/lib/format"
 import {
   ApiError,
@@ -44,6 +49,32 @@ export function MemberManagementPage({
 }) {
   const { t } = useTranslation()
   const animate = useEnterAnimation()
+  const router = useRouter()
+  const [memberFilter, setMemberFilter] = useState<"all" | "regular" | "trial">(
+    "all"
+  )
+  useEffect(() => {
+    const deadlines = directory
+      .flatMap(entry => entry.members)
+      .filter(
+        member =>
+          member.member_type === "trial" &&
+          !member.trial_expired &&
+          member.trial_expires_at
+      )
+      .map(member => Date.parse(member.trial_expires_at!))
+    if (deadlines.length === 0) return
+    const timer = window.setTimeout(
+      () => {
+        void router.invalidate()
+      },
+      Math.max(
+        1000,
+        Math.min(2147483647, Math.min(...deadlines) - Date.now() + 100)
+      )
+    )
+    return () => window.clearTimeout(timer)
+  }, [directory, router])
   const [selectedOrganizationId, setSelectedOrganizationId] = useState(
     directory[0]?.organization.id ?? ""
   )
@@ -63,6 +94,11 @@ export function MemberManagementPage({
   const selectedEntry =
     directory.find(entry => entry.organization.id === selectedOrganizationId) ??
     directory[0]
+
+  const visibleMembers =
+    selectedEntry?.members.filter(
+      member => memberFilter === "all" || member.member_type === memberFilter
+    ) ?? []
 
   return (
     <main className="page-shell">
@@ -173,9 +209,26 @@ export function MemberManagementPage({
               <section className="mt-7" aria-labelledby="member-list-title">
                 <div className="mb-3 flex items-center justify-between gap-4">
                   <h2 id="member-list-title">{t("memberListTitle")}</h2>
-                  <span>{selectedEntry.members.length}</span>
+                  <span>{visibleMembers.length}</span>
                 </div>
-                {selectedEntry.members.length === 0 ? (
+                <div
+                  className="mb-4 flex flex-wrap gap-2"
+                  role="group"
+                  aria-label={t("memberTypeFilter")}
+                >
+                  {(["all", "regular", "trial"] as const).map(type => (
+                    <button
+                      type="button"
+                      key={type}
+                      aria-pressed={memberFilter === type}
+                      className="rounded-lg border border-line px-3 py-2 text-sm aria-pressed:border-lagoon aria-pressed:bg-lagoon aria-pressed:text-white"
+                      onClick={() => setMemberFilter(type)}
+                    >
+                      {t(`memberType_${type}`)}
+                    </button>
+                  ))}
+                </div>
+                {visibleMembers.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-line bg-surface p-8 text-center">
                     <h3 className="mt-0">{t("memberEmptyTitle")}</h3>
                     <p className="mb-0 text-sea-ink-soft">
@@ -184,9 +237,9 @@ export function MemberManagementPage({
                   </div>
                 ) : (
                   <div className="grid gap-3">
-                    {selectedEntry.members.map(member => (
+                    {visibleMembers.map(member => (
                       <MemberCard
-                        key={member.user_id}
+                        key={`${member.user_id}:${member.member_type}:${member.trial_expires_at ?? "regular"}`}
                         member={member}
                         organizationId={selectedEntry.organization.id}
                         locale={locale}
@@ -388,6 +441,8 @@ function CreateMemberForm({
       displayName: "",
       email: "",
       reason: "new_seat",
+      memberType: "regular" as "regular" | "trial",
+      trialDays: 7,
     },
     onSubmit: async ({ value }) => {
       setError("")
@@ -397,6 +452,10 @@ function CreateMemberForm({
           {
             display_name: value.displayName,
             email: value.email,
+            member_type: value.memberType,
+            ...(value.memberType === "trial"
+              ? { trial_days: value.trialDays }
+              : {}),
             reason: value.reason,
           },
           await requireCsrfToken()
@@ -463,6 +522,56 @@ function CreateMemberForm({
           )}
         </form.Field>
       </div>
+      <form.Field name="memberType">
+        {field => (
+          <label>
+            {t("memberTypeLabel")}
+            <select
+              value={field.state.value}
+              onBlur={field.handleBlur}
+              onChange={event =>
+                field.handleChange(
+                  event.target.value === "trial" ? "trial" : "regular"
+                )
+              }
+            >
+              <option value="regular">{t("memberType_regular")}</option>
+              <option value="trial">{t("memberType_trial")}</option>
+            </select>
+          </label>
+        )}
+      </form.Field>
+      <form.Subscribe selector={state => state.values.memberType}>
+        {type =>
+          type === "trial" && (
+            <>
+              <form.Field name="trialDays">
+                {field => (
+                  <label>
+                    {t("trialDays")}
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      required
+                      value={
+                        Number.isNaN(field.state.value) ? "" : field.state.value
+                      }
+                      onBlur={field.handleBlur}
+                      onChange={event =>
+                        field.handleChange(event.target.valueAsNumber)
+                      }
+                    />
+                  </label>
+                )}
+              </form.Field>
+              <p className="m-0 text-sm text-sea-ink-soft">
+                {t("trialCreationHint")}
+              </p>
+            </>
+          )
+        }
+      </form.Subscribe>
       <form.Field name="reason">
         {field => (
           <label>
@@ -561,6 +670,7 @@ function MemberCard({
     defaultValues: {
       displayName: member.display_name,
       reason: "access_review",
+      trialExpiry: toTaipeiDateTimeInput(member.trial_expires_at),
     },
     onSubmit: async ({ value }) => {
       setError("")
@@ -571,6 +681,10 @@ function MemberCard({
           member.user_id,
           {
             display_name: value.displayName,
+            ...(member.member_type === "trial" &&
+            value.trialExpiry !== toTaipeiDateTimeInput(member.trial_expires_at)
+              ? { trial_expires_at: fromTaipeiDateTimeInput(value.trialExpiry) }
+              : {}),
             reason: value.reason,
           },
           await requireCsrfToken()
@@ -579,12 +693,40 @@ function MemberCard({
         await router.invalidate({ sync: true })
       } catch (caught) {
         if (await redirectExpiredSession(caught)) return
-        setError(t("unexpectedError"))
+        setError(
+          caught instanceof ApiError && caught.status === 409
+            ? t("trialSeatConflict")
+            : t("unexpectedError")
+        )
       } finally {
         setPendingAction("")
       }
     },
   })
+
+  async function convertToRegular() {
+    if (!window.confirm(t("trialConvertConfirmation"))) return
+    setPendingAction("convert")
+    setError("")
+    try {
+      await browserAdministrationClient().updateMember(
+        organizationId,
+        member.user_id,
+        { member_type: "regular", reason: form.getFieldValue("reason") },
+        await requireCsrfToken()
+      )
+      await router.invalidate({ sync: true })
+    } catch (caught) {
+      if (await redirectExpiredSession(caught)) return
+      setError(
+        caught instanceof ApiError && caught.status === 409
+          ? t("trialSeatConflict")
+          : t("unexpectedError")
+      )
+    } finally {
+      setPendingAction("")
+    }
+  }
 
   async function changeStatus() {
     const reason = form.getFieldValue("reason")
@@ -604,7 +746,11 @@ function MemberCard({
       await router.invalidate({ sync: true })
     } catch (caught) {
       if (await redirectExpiredSession(caught)) return
-      setError(t("unexpectedError"))
+      setError(
+        caught instanceof ApiError && caught.status === 409
+          ? t("trialSeatConflict")
+          : t("unexpectedError")
+      )
     } finally {
       setPendingAction("")
     }
@@ -629,7 +775,11 @@ function MemberCard({
       await router.invalidate({ sync: true })
     } catch (caught) {
       if (await redirectExpiredSession(caught)) return
-      setError(t("unexpectedError"))
+      setError(
+        caught instanceof ApiError && caught.status === 409
+          ? t("trialSeatConflict")
+          : t("unexpectedError")
+      )
     } finally {
       setPendingAction("")
     }
@@ -684,6 +834,27 @@ function MemberCard({
           </dd>
         </div>
       </dl>
+      <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+        <span className="rounded-full bg-link-hover px-3 py-1 font-bold">
+          {t(`memberType_${member.member_type}`)}
+        </span>
+        {member.member_type === "trial" && (
+          <>
+            <span className="font-bold text-sea-ink-soft">
+              {t(member.trial_expired ? "trialExpired" : "trialActive")}
+            </span>
+            <p className="m-0 w-full text-sea-ink-soft">
+              {t("trialExpiresAt")}:{" "}
+              <time dateTime={member.trial_expires_at ?? undefined}>
+                {formatTrialExpiry(member.trial_expires_at, locale)}
+              </time>
+            </p>
+            {member.trial_expired && (
+              <p className="m-0 text-sea-ink-soft">{t("trialExpiredHint")}</p>
+            )}
+          </>
+        )}
+      </div>
       <details className="border-t border-line pt-3">
         <summary className="cursor-pointer text-sm font-extrabold text-lagoon-deep">
           {t("manageMember")}
@@ -708,6 +879,25 @@ function MemberCard({
               </label>
             )}
           </form.Field>
+          {member.member_type === "trial" && (
+            <form.Field name="trialExpiry">
+              {field => (
+                <label>
+                  {t("trialExpiresAt")}
+                  <input
+                    type="datetime-local"
+                    required
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={event => field.handleChange(event.target.value)}
+                  />
+                  <span className="text-sm font-normal text-sea-ink-soft">
+                    {t("trialEditHint")}
+                  </span>
+                </label>
+              )}
+            </form.Field>
+          )}
           <form.Field name="reason">
             {field => (
               <label>
@@ -750,6 +940,17 @@ function MemberCard({
                   ? t("suspendMember")
                   : t("activateMember")}
             </button>
+            {member.member_type === "trial" && (
+              <button
+                type="button"
+                disabled={pendingAction !== ""}
+                onClick={() => void convertToRegular()}
+              >
+                {pendingAction === "convert"
+                  ? t("submitting")
+                  : t("trialConvert")}
+              </button>
+            )}
             <button
               className="border-market-up/30 bg-market-up/10 font-bold text-market-up hover:bg-market-up/15"
               type="button"

@@ -48,7 +48,15 @@ class ChatMessageResponse(BaseModel):
     created_at: datetime
 
 
+class TokenUsageSummary(BaseModel):
+    input_tokens: int | None
+    output_tokens: int | None
+    total_tokens: int | None
+    completeness: Literal["complete", "partial", "unavailable"]
+
+
 class ChatConversationListItem(BaseModel):
+    usage: TokenUsageSummary
     id: uuid.UUID
     organization_id: uuid.UUID
     user_id: uuid.UUID
@@ -81,6 +89,7 @@ class ChatGenerationResponse(BaseModel):
 
 
 class ChatConversationDetailResponse(BaseModel):
+    usage: TokenUsageSummary
     id: uuid.UUID
     organization_id: uuid.UUID
     user_id: uuid.UUID

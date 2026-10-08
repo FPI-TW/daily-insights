@@ -34,7 +34,7 @@ def generate_temporary_password() -> str:
         secrets.choice("!@#$%^&*-_=+"),
     ]
     alphabet = string.ascii_letters + string.digits + "!@#$%^&*-_=+"
-    characters.extend(secrets.choice(alphabet) for _ in range(20))
+    characters.extend(secrets.choice(alphabet) for _ in range(8))
     secrets.SystemRandom().shuffle(characters)
     return "".join(characters)
 

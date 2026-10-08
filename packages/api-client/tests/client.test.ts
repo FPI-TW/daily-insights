@@ -832,6 +832,9 @@ describe("API client trust boundary", () => {
       captured = init
       return Response.json(
         {
+          member_type: "regular",
+          trial_expires_at: null,
+          trial_expired: false,
           membership_id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
           user_id: "9322a09a-6a02-421b-a966-a5cd5f44056e",
           email: "member@example.com",

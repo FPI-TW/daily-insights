@@ -1154,3 +1154,295 @@ async def test_login_global_budget_is_atomic_for_rotating_ips_and_emails(harness
         )
     )
     assert sum(results) == 3
+
+
+async def provision_trial(
+    harness: Harness, csrf: str, org: uuid.UUID, email: str, **fields: object
+) -> dict[str, Any]:
+    response = await harness.client.post(
+        f"/api/admin/organizations/{org}/members",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "email": email,
+            "display_name": "Trial",
+            "reason": "trial acceptance",
+            "member_type": "trial",
+            **fields,
+        },
+    )
+    assert response.status_code == 201, response.text
+    result: dict[str, Any] = response.json()
+    assert len(result["temporary_password"]) == 12
+    return result
+
+
+async def test_trial_login_expiry_sessions_seats_and_conversion(harness: Harness) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from daily_insights_api.modules.identity.session_models import Session
+    from daily_insights_api.modules.tenancy.models import Membership
+
+    csrf = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    org = await create_organization(harness, csrf, slug="trial-lifecycle", seat_limit=1)
+    trial = await provision_trial(harness, csrf, org, "trial@example.com")
+    expiry = datetime.fromisoformat(trial["trial_expires_at"])
+    joined = datetime.fromisoformat(trial["joined_at"])
+    assert expiry - joined == timedelta(days=7)
+    assert trial["member_type"] == "trial" and not trial["trial_expired"]
+    admin_cookies = dict(harness.client.cookies)
+    member_csrf = await login(harness.client, "trial@example.com", trial["temporary_password"])
+    changed = await harness.client.post(
+        "/api/auth/change-password",
+        headers={"X-CSRF-Token": member_csrf},
+        json={"current_password": trial["temporary_password"], "new_password": MEMBER_PASSWORD},
+    )
+    assert changed.status_code == 200, changed.text
+    member_cookies = dict(harness.client.cookies)
+    assert (await harness.client.get("/api/auth/me")).status_code == 200
+    async with harness.session_factory.begin() as database:
+        sessions = (
+            await database.scalars(
+                select(Session).where(Session.user_id == uuid.UUID(trial["user_id"]))
+            )
+        ).all()
+        assert sessions and all(session.expires_at <= expiry for session in sessions)
+        # Expiry must be checked on every request, independently of session TTL.
+        await database.execute(
+            update(Membership)
+            .where(Membership.user_id == uuid.UUID(trial["user_id"]))
+            .values(trial_expires_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
+    assert (await harness.client.get("/api/auth/me")).status_code == 401
+    assert (
+        await harness.client.post(
+            "/api/auth/change-password",
+            headers={"X-CSRF-Token": changed.json()["csrf_token"]},
+            json={"current_password": MEMBER_PASSWORD, "new_password": "Another123!"},
+        )
+    ).status_code == 401
+    assert (
+        await harness.client.post(
+            "/api/auth/login", json={"email": "trial@example.com", "password": MEMBER_PASSWORD}
+        )
+    ).status_code == 401
+    harness.client.cookies.clear()
+    harness.client.cookies.update(admin_cookies)
+    organization = (await harness.client.get(f"/api/admin/organizations/{org}")).json()
+    assert organization["seat_count"] == 0
+    members = (await harness.client.get(f"/api/admin/organizations/{org}/members")).json()
+    assert members[0]["trial_expired"]
+    second = await provision_trial(harness, csrf, org, "second@example.com", trial_days=2)
+    assert datetime.fromisoformat(second["trial_expires_at"]) - datetime.fromisoformat(
+        second["joined_at"]
+    ) == timedelta(days=2)
+    member_path = f"/api/admin/organizations/{org}/members/{trial['user_id']}"
+    for payload in [
+        {"member_type": "regular"},
+        {"trial_expires_at": (datetime.now(UTC) + timedelta(days=2)).isoformat()},
+    ]:
+        conflict = await harness.client.patch(
+            member_path, headers={"X-CSRF-Token": csrf}, json={"reason": "renew", **payload}
+        )
+        assert conflict.status_code == 409, conflict.text
+    removed = await harness.client.delete(
+        f"/api/admin/organizations/{org}/members/{second['user_id']}?reason=release",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert removed.status_code == 204
+    suspended = await harness.client.patch(
+        member_path,
+        headers={"X-CSRF-Token": csrf},
+        json={"reason": "suspend", "status": "suspended"},
+    )
+    assert suspended.status_code == 200
+    renewed = await harness.client.patch(
+        member_path,
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "reason": "renew",
+            "trial_expires_at": (datetime.now(UTC) + timedelta(days=2)).isoformat(),
+        },
+    )
+    assert renewed.status_code == 200, renewed.text
+    assert renewed.json()["status"] == "suspended"
+    assert not renewed.json()["trial_expired"]
+    converted = await harness.client.patch(
+        member_path,
+        headers={"X-CSRF-Token": csrf},
+        json={"reason": "convert", "member_type": "regular", "status": "active"},
+    )
+    assert converted.status_code == 200, converted.text
+    assert converted.json()["trial_expires_at"] is None
+    assert converted.json()["member_type"] == "regular"
+    rejected = await harness.client.patch(
+        member_path,
+        headers={"X-CSRF-Token": csrf},
+        json={"reason": "not allowed", "member_type": "trial"},
+    )
+    assert rejected.status_code == 422
+    harness.client.cookies.clear()
+    harness.client.cookies.update(member_cookies)
+    assert (await harness.client.get("/api/auth/me")).status_code == 401
+    await login(harness.client, "trial@example.com", MEMBER_PASSWORD)
+    assert (await harness.client.get("/api/auth/me")).status_code == 200
+    async with harness.session_factory() as database:
+        events = (
+            await database.scalars(
+                select(AuditEvent).where(AuditEvent.action == "membership.updated")
+            )
+        ).all()
+        assert any(event.after and event.after.get("member_type") == "regular" for event in events)
+
+
+async def test_trial_renewal_and_creation_cannot_take_same_last_seat(harness: Harness) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    csrf = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    org = await create_organization(harness, csrf, slug="trial-concurrent", seat_limit=1)
+    trial = await provision_trial(harness, csrf, org, "expired@example.com")
+    path = f"/api/admin/organizations/{org}/members/{trial['user_id']}"
+    expire = await harness.client.patch(
+        path,
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "reason": "shorten",
+            "trial_expires_at": (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+        },
+    )
+    assert expire.status_code == 200
+    renew, create = await asyncio.gather(
+        harness.client.patch(
+            path,
+            headers={"X-CSRF-Token": csrf},
+            json={
+                "reason": "renew",
+                "trial_expires_at": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+            },
+        ),
+        harness.client.post(
+            f"/api/admin/organizations/{org}/members",
+            headers={"X-CSRF-Token": csrf},
+            json={"email": "new@example.com", "display_name": "New", "reason": "seat"},
+        ),
+    )
+    assert sorted([renew.status_code, create.status_code]) in ([200, 409], [201, 409])
+    organization = (await harness.client.get(f"/api/admin/organizations/{org}")).json()
+    assert organization["seat_count"] == 1
+
+
+async def test_conversation_usage_list_detail_filters_and_pagination(harness: Harness) -> None:
+    from daily_insights_api.core.enums import GenerationStatus, MessageRole
+    from daily_insights_api.modules.chat.models import Conversation, Message
+    from daily_insights_api.modules.model_runtime.models import GenerationRecord, ModelConfiguration
+
+    csrf = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    org = await create_organization(harness, csrf, slug="usage", seat_limit=1)
+    member = await provision_trial(harness, csrf, org, "usage@example.com")
+    async with harness.session_factory.begin() as database:
+        config = ModelConfiguration(
+            version=1, provider="test", requested_model="test", prompt_version="v1"
+        )
+        database.add(config)
+        await database.flush()
+        conversations = [
+            Conversation(organization_id=org, user_id=uuid.UUID(member["user_id"]))
+            for _ in range(2)
+        ]
+        database.add_all(conversations)
+        await database.flush()
+        first_id, second_id = [conversation.id for conversation in conversations]
+        for sequence, (inputs, outputs) in enumerate([(12, 34), (None, 5), (0, 0), (None, None)]):
+            message = Message(
+                conversation_id=first_id,
+                sequence_number=sequence,
+                role=MessageRole.ASSISTANT,
+                content="answer",
+                status=GenerationStatus.ERROR if sequence == 1 else GenerationStatus.COMPLETE,
+            )
+            database.add(message)
+            await database.flush()
+            database.add(
+                GenerationRecord(
+                    message_id=message.id,
+                    model_configuration_id=config.id,
+                    model_configuration_version=1,
+                    provider="test",
+                    requested_model="test",
+                    prompt_version="v1",
+                    input_tokens=inputs,
+                    output_tokens=outputs,
+                    status=message.status,
+                )
+            )
+    response = await harness.client.get(
+        f"/api/admin/conversations?organization_id={org}&member_id={member['user_id']}&limit=1"
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    items = result["items"]
+    assert result["next_cursor"]
+    next_page = await harness.client.get(
+        f"/api/admin/conversations?organization_id={org}&limit=1&cursor={result['next_cursor']}"
+    )
+    items += next_page.json()["items"]
+    assert len(items) == 2 and {item["id"] for item in items} == {str(first_id), str(second_id)}
+    for item in items:
+        detail = await harness.client.get(f"/api/admin/conversations/{item['id']}")
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["usage"] == item["usage"]
+        if item["id"] == str(first_id):
+            assert item["usage"] == {
+                "input_tokens": 12,
+                "output_tokens": 39,
+                "total_tokens": 51,
+                "completeness": "partial",
+            }
+            assert item["message_count"] == 4
+        else:
+            assert item["usage"]["total_tokens"] is None
+            assert item["usage"]["completeness"] == "unavailable"
+    assert (
+        await harness.client.get(f"/api/admin/conversations?organization_id={uuid.uuid4()}")
+    ).json()["items"] == []
+
+
+async def test_active_trial_extension_preserves_session_and_immediate_expiry_revokes(
+    harness: Harness,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    csrf = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    org = await create_organization(harness, csrf, slug="active-trial", seat_limit=1)
+    trial = await provision_trial(harness, csrf, org, "active-trial@example.com")
+    admin_cookies = dict(harness.client.cookies)
+    await login(harness.client, "active-trial@example.com", trial["temporary_password"])
+    member_cookies = dict(harness.client.cookies)
+    harness.client.cookies.clear()
+    harness.client.cookies.update(admin_cookies)
+    path = f"/api/admin/organizations/{org}/members/{trial['user_id']}"
+    extended = await harness.client.patch(
+        path,
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "reason": "extend",
+            "trial_expires_at": (datetime.now(UTC) + timedelta(days=10)).isoformat(),
+        },
+    )
+    assert extended.status_code == 200
+    harness.client.cookies.clear()
+    harness.client.cookies.update(member_cookies)
+    assert (await harness.client.get("/api/auth/me")).status_code == 200
+    harness.client.cookies.clear()
+    harness.client.cookies.update(admin_cookies)
+    shortened = await harness.client.patch(
+        path,
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "reason": "end trial",
+            "trial_expires_at": (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+        },
+    )
+    assert shortened.status_code == 200
+    harness.client.cookies.clear()
+    harness.client.cookies.update(member_cookies)
+    assert (await harness.client.get("/api/auth/me")).status_code == 401

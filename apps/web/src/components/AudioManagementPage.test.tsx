@@ -8,7 +8,10 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { I18nextProvider } from "react-i18next"
 import { createI18n } from "#/lib/i18n"
-import { AudioManagementPage } from "./AudioManagementPage"
+import {
+  AudioManagementPage,
+  groupEpisodesByMonth,
+} from "./AudioManagementPage"
 import { ApiError, type PodcastEpisodeAdmin } from "@daily-insights/api-client"
 
 const { signDirectUploads, completeDirectUpload, removeEpisode, invalidate } =
@@ -557,4 +560,24 @@ describe("AudioManagementPage whole episode removal", () => {
       )
     )
   })
+})
+
+it("groups dates across year boundaries without mutating the source", () => {
+  const episodes = ["2026-12-31", "2027-01-01", "2026-12-01"].map(
+    (date, index) => ({
+      ...removableEpisode,
+      id: String(index),
+      trading_date: date,
+    })
+  )
+  expect(
+    groupEpisodesByMonth(episodes).map(group => [
+      group.month,
+      group.episodes.map(episode => episode.trading_date),
+    ])
+  ).toEqual([
+    ["2027-01", ["2027-01-01"]],
+    ["2026-12", ["2026-12-31", "2026-12-01"]],
+  ])
+  expect(episodes[0]?.trading_date).toBe("2026-12-31")
 })

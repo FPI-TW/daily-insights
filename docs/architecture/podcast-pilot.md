@@ -344,3 +344,13 @@ copy、cutover 與人工清理舊路徑，不等同完成通用 asset deletion�
 CLI 重跑 inventory 時，會在任何 copy／輸出寫入之前核對既有 manifest 的 cutover 狀態、entry identity 與 generation；已完成或過期的 inventory 被拒絕時不會重建已刪物件或改動新錄音。全新 inventory 與同一 generation 的 verified 重試仍可執行。
 
 複製前檢查也跨 manifest 核對每個 target 與 Asset ID 的永久歸屬；subset、重組或混入新項目不能繞過既有紀錄。其他 manifest 已持有的項目回傳 `migration_entry_owned_by_another_manifest`，整份 inventory 在任何複製前被拒絕，同一 manifest 的合法 verified 重試仍保留。
+
+## 後台音檔 UX（2026-10-08）
+
+- 依交易日期分年月，月份與音檔由新到舊；月份標題包含集數。
+- 卡片預設每排一張，`md` 起兩張，`xl` 起三張，沿用後台既有寬度及 design tokens。
+- 每張卡片以內容區與底部操作區分隔，同排底部按鈕對齊。下架前不可移除的提示
+  使用獨立保留高度區域，不與上下架、移除按鈕一起換行；錯誤放在操作列下方。
+- 保留多語系標題／摘要／章節編輯、缺少語系提示、版本檢查、不可復原移除確認與重試。
+- Playwright 於 390、768、1280、1440px 驗證欄數、溢出與上下架前後按鈕位置；
+  單元測試涵蓋跨年分組，既有音檔回歸測試持續執行。

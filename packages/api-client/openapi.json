@@ -467,6 +467,9 @@
             "title": "Organization Id",
             "type": "string"
           },
+          "usage": {
+            "$ref": "#/components/schemas/TokenUsageSummary"
+          },
           "user_id": {
             "format": "uuid",
             "title": "User Id",
@@ -474,6 +477,7 @@
           }
         },
         "required": [
+          "usage",
           "id",
           "organization_id",
           "user_id",
@@ -531,6 +535,9 @@
             ],
             "title": "Title"
           },
+          "usage": {
+            "$ref": "#/components/schemas/TokenUsageSummary"
+          },
           "user_id": {
             "format": "uuid",
             "title": "User Id",
@@ -538,6 +545,7 @@
           }
         },
         "required": [
+          "usage",
           "id",
           "organization_id",
           "user_id",
@@ -3021,11 +3029,29 @@
             "title": "Email",
             "type": "string"
           },
+          "member_type": {
+            "default": "regular",
+            "enum": ["regular", "trial"],
+            "title": "Member Type",
+            "type": "string"
+          },
           "reason": {
             "maxLength": 500,
             "minLength": 1,
             "title": "Reason",
             "type": "string"
+          },
+          "trial_days": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trial Days"
           }
         },
         "required": ["email", "display_name", "reason"],
@@ -3047,6 +3073,11 @@
             "title": "Joined At",
             "type": "string"
           },
+          "member_type": {
+            "enum": ["regular", "trial"],
+            "title": "Member Type",
+            "type": "string"
+          },
           "membership_id": {
             "format": "uuid",
             "title": "Membership Id",
@@ -3059,6 +3090,22 @@
           "status": {
             "$ref": "#/components/schemas/UserStatus"
           },
+          "trial_expired": {
+            "title": "Trial Expired",
+            "type": "boolean"
+          },
+          "trial_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trial Expires At"
+          },
           "user_id": {
             "format": "uuid",
             "title": "User Id",
@@ -3066,6 +3113,9 @@
           }
         },
         "required": [
+          "member_type",
+          "trial_expires_at",
+          "trial_expired",
           "membership_id",
           "user_id",
           "email",
@@ -3092,6 +3142,18 @@
             ],
             "title": "Display Name"
           },
+          "member_type": {
+            "anyOf": [
+              {
+                "enum": ["regular", "trial"],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Type"
+          },
           "reason": {
             "maxLength": 500,
             "minLength": 1,
@@ -3107,6 +3169,18 @@
                 "type": "null"
               }
             ]
+          },
+          "trial_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trial Expires At"
           }
         },
         "required": ["reason"],
@@ -5043,6 +5117,11 @@
             "title": "Joined At",
             "type": "string"
           },
+          "member_type": {
+            "enum": ["regular", "trial"],
+            "title": "Member Type",
+            "type": "string"
+          },
           "membership_id": {
             "format": "uuid",
             "title": "Membership Id",
@@ -5059,6 +5138,22 @@
             "title": "Temporary Password",
             "type": "string"
           },
+          "trial_expired": {
+            "title": "Trial Expired",
+            "type": "boolean"
+          },
+          "trial_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trial Expires At"
+          },
           "user_id": {
             "format": "uuid",
             "title": "User Id",
@@ -5066,6 +5161,9 @@
           }
         },
         "required": [
+          "member_type",
+          "trial_expires_at",
+          "trial_expired",
           "membership_id",
           "user_id",
           "email",
@@ -5798,6 +5896,56 @@
         },
         "required": ["id"],
         "title": "TableColumn",
+        "type": "object"
+      },
+      "TokenUsageSummary": {
+        "properties": {
+          "completeness": {
+            "enum": ["complete", "partial", "unavailable"],
+            "title": "Completeness",
+            "type": "string"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "total_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Tokens"
+          }
+        },
+        "required": [
+          "input_tokens",
+          "output_tokens",
+          "total_tokens",
+          "completeness"
+        ],
+        "title": "TokenUsageSummary",
         "type": "object"
       },
       "UploadBatchInitResponse": {

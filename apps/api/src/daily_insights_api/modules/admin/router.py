@@ -1,9 +1,9 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,6 +54,10 @@ async def _seat_count(database: AsyncSession, organization_id: uuid.UUID) -> int
         .where(
             Membership.organization_id == organization_id,
             Membership.removed_at.is_(None),
+            or_(
+                Membership.trial_expires_at.is_(None),
+                Membership.trial_expires_at > datetime.now(UTC),
+            ),
         )
     )
     return int(count or 0)
@@ -77,6 +81,9 @@ async def _organization_response(
 
 def _member_response(membership: Membership, user: User) -> MemberResponse:
     return MemberResponse(
+        member_type="trial" if membership.member_type == "trial" else "regular",
+        trial_expires_at=membership.trial_expires_at,
+        trial_expired=membership.trial_expired(datetime.now(UTC)),
         membership_id=membership.id,
         user_id=user.id,
         email=user.email,
@@ -459,6 +466,16 @@ async def create_member(
         user.status = UserStatus.ACTIVE
 
     now = datetime.now(UTC)
+    try:
+        trial_expiry = (
+            now + timedelta(days=payload.trial_days or 7)
+            if payload.member_type == "trial"
+            else None
+        )
+    except OverflowError as error:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "trial duration is too large"
+        ) from error
     if membership is None:
         membership = Membership(
             organization_id=organization.id,
@@ -470,6 +487,8 @@ async def create_member(
         membership.joined_at = now
         membership.removed_at = None
         membership.removed_by_user_id = None
+    membership.member_type = payload.member_type
+    membership.trial_expires_at = trial_expiry
     try:
         await database.flush()
     except IntegrityError as error:
@@ -483,7 +502,12 @@ async def create_member(
         target_type="membership",
         target_id=str(membership.id),
         reason=payload.reason,
-        after={"user_id": str(user.id), "email": user.email},
+        after={
+            "user_id": str(user.id),
+            "email": user.email,
+            "member_type": membership.member_type,
+            "trial_expires_at": trial_expiry.isoformat() if trial_expiry else None,
+        },
         request_id=request.state.request_id,
     )
     try:
@@ -536,7 +560,42 @@ async def update_member(
     database: Annotated[AsyncSession, Depends(get_database_session)],
 ) -> MemberResponse:
     membership, user = await _get_active_member(database, organization_id, user_id)
-    before = {"display_name": user.display_name, "status": user.status.value}
+    now = datetime.now(UTC)
+    was_expired = membership.trial_expired(now)
+    before = {
+        "display_name": user.display_name,
+        "status": user.status.value,
+        "member_type": membership.member_type,
+        "trial_expires_at": membership.trial_expires_at.isoformat()
+        if membership.trial_expires_at
+        else None,
+    }
+    if membership.member_type == "regular" and (
+        payload.member_type == "trial" or payload.trial_expires_at is not None
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "regular members cannot become trials"
+        )
+    next_type = payload.member_type or membership.member_type
+    next_expiry = (
+        None if next_type == "regular" else payload.trial_expires_at or membership.trial_expires_at
+    )
+    if was_expired and (next_expiry is None or next_expiry > now):
+        organization = await _get_organization(database, organization_id)
+        if await _seat_count(database, organization_id) >= organization.seat_limit:
+            raise HTTPException(status.HTTP_409_CONFLICT, "organization seat limit reached")
+    trial_changed = (
+        next_type != membership.member_type or next_expiry != membership.trial_expires_at
+    )
+    membership.member_type = next_type
+    membership.trial_expires_at = next_expiry
+    if trial_changed and (was_expired or membership.trial_expired(now)):
+        # Renewal must not revive expired sessions; immediate expiry also revokes them.
+        await database.execute(
+            update(Session)
+            .where(Session.user_id == user.id, Session.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
     if payload.display_name is not None:
         user.display_name = payload.display_name.strip()
     if payload.status is not None:
@@ -560,7 +619,14 @@ async def update_member(
         target_id=str(membership.id),
         reason=payload.reason,
         before=before,
-        after={"display_name": user.display_name, "status": user.status.value},
+        after={
+            "display_name": user.display_name,
+            "status": user.status.value,
+            "member_type": membership.member_type,
+            "trial_expires_at": membership.trial_expires_at.isoformat()
+            if membership.trial_expires_at
+            else None,
+        },
         request_id=request.state.request_id,
     )
     await database.commit()

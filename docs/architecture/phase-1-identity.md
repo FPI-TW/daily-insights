@@ -7,7 +7,10 @@ tests.
 
 - There is no public registration.
 - An admin or the bootstrap command provisions an account and receives a
-  cryptographically random temporary password exactly once.
+  cryptographically random 12-character temporary password exactly once.
+  The shared generator guarantees lowercase, uppercase, digit and symbol characters
+  for customer members, internal accounts and bootstrap admins; existing passwords
+  and the eight-character minimum for user-selected passwords are unchanged.
 - PostgreSQL stores only a versioned scrypt hash. A separate deployment secret
   is appended as a password pepper.
 - A provisioned user may authenticate, inspect their own identity, change the
@@ -48,7 +51,12 @@ MFA, password recovery, and Singapore-region SES are confirmed follow-up work.
 ## Contractual seats
 
 - Every organization has a positive `seat_limit`.
-- Every non-removed membership occupies one seat, including a suspended user.
+- Every non-removed regular membership and unexpired trial membership occupies one
+  seat, including a suspended user. Expired trials retain their account and history
+  but release their seat immediately, without a scheduled cleanup job.
+- Renewing an expired trial or converting it to regular membership checks capacity
+  under the same organization row lock as provisioning. A full organization returns
+  HTTP 409; reducing the seat limit also uses the current, expiry-aware occupancy.
 - Membership removal is logical: it timestamps the membership and preserves
   conversation referential integrity while releasing the seat.
 - Provisioning locks the organization row before counting occupied seats.
@@ -89,3 +97,49 @@ reason, contract reference, actor, request ID, and before/after evidence.
 - contract limit changes and rejection below occupancy;
 - default visibility, tenant-specific restrictions, ignored spoofed tenant
   headers, and audit records.
+
+## Trial memberships (2026-10-08)
+
+Trial is a membership category, not a new system role. Trials retain `org_member`
+permissions and the organization's market policies. The admin directory supports
+all, regular and trial filters; account suspension remains a separate state.
+
+- `POST /api/admin/organizations/{organization_id}/members` accepts `member_type`
+  (`regular` by default, or `trial`) and positive integer `trial_days`. Trials default
+  to seven days, starting at provisioning, with each day exactly 24 hours.
+- `PATCH` on the member accepts a timezone-aware `trial_expires_at` to shorten,
+  extend or renew a trial, or `member_type: regular` to convert it. Regular-to-trial
+  conversion is rejected. Trial-only inputs on a regular member are rejected.
+- Responses include `member_type`, `trial_expires_at` and `trial_expired`. The
+  database requires a deadline for trials and a null deadline for regular members.
+  Migration `20261008_0033` leaves all existing memberships regular.
+- Deadlines are stored in UTC. The editor explicitly displays and interprets Taipei
+  time (UTC+8), independent of the browser's timezone. An open directory refreshes
+  at the next known deadline to update status and available seats.
+- At `now >= trial_expires_at`, login, password change and subsequent protected API
+  requests fail authentication. Trial sessions cannot outlive the deadline. Already
+  started downloads or generations may finish.
+- Renewing or converting an expired trial revokes existing sessions and requires
+  a fresh login; shortening a deadline to the past also revokes sessions. Active
+  trials keep their sessions when extended or converted, with the original session
+  expiry unchanged. Every request still checks the current membership deadline.
+  Editing deadlines or converting does not reactivate a suspended account.
+- Creation and updates retain category/deadline before and after values in the
+  existing audit trail. No account or conversation is deleted on expiry.
+
+Acceptance is covered by trial schema, migration and identity integration tests,
+including concurrent last-seat renewal versus provisioning, stale-session rejection,
+first-password-change gating, suspension preservation and conversion conflicts.
+
+### Validation evidence (2026-10-08)
+
+- Implemented from `origin/main` at `44e1b7f` on `feat/admin-ux-trial-members`.
+- `pnpm check` passed: 289 web tests, 34 API-client tests, 1,159 API tests,
+  OpenAPI drift checking, formatting, lint, type checks and both production builds.
+- After the final session-renewal and detail-usage adjustments, 48 targeted API
+  tests and all 289 web tests passed; final type, format and lint checks passed.
+- Existing browser regression: 66 passed. The four new audio layout tests passed
+  after measuring document coordinates rather than viewport scroll position;
+  the final five-test layout run also verified month grouping and long titles.
+- Database tests used a disposable PostgreSQL 17 container with a dedicated test
+  database. No existing database or remote deployment was modified.

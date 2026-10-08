@@ -18,6 +18,12 @@ describe("ConversationDetail", () => {
       <I18nextProvider i18n={i18n}>
         <ConversationDetail
           conversation={{
+            usage: {
+              input_tokens: 12,
+              output_tokens: 34,
+              total_tokens: 46,
+              completeness: "complete",
+            },
             id: "00000000-0000-4000-8000-000000000001",
             organization_id: "00000000-0000-4000-8000-000000000002",
             user_id: "00000000-0000-4000-8000-000000000003",
@@ -49,8 +55,11 @@ describe("ConversationDetail", () => {
     ).toBeInTheDocument()
     expect(screen.getByText("deepseek-chat / deepseek-v3")).toBeInTheDocument()
     expect(screen.getByText("sha256:context (Truncated)")).toBeInTheDocument()
-    expect(screen.getByText("12 / 34")).toBeInTheDocument()
+    expect(screen.getAllByText("46")).toHaveLength(2)
+    expect(screen.getAllByText("Input tokens")).toHaveLength(2)
     expect(screen.getByText("provider_timeout")).toBeInTheDocument()
-    expect(document.querySelectorAll("dl dt")).toHaveLength(8)
+    expect(
+      screen.getByRole("region", { name: "Token usage summary" })
+    ).toBeInTheDocument()
   })
 })
