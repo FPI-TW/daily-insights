@@ -2,6 +2,7 @@ import asyncio
 import os
 import uuid
 from collections.abc import AsyncIterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -1174,6 +1175,705 @@ async def provision_trial(
     result: dict[str, Any] = response.json()
     assert len(result["temporary_password"]) == 12
     return result
+
+
+@pytest.mark.parametrize("work_phase", ["clear", "rehash"])
+async def test_trial_login_rolls_back_expiry_during_login_work(
+    harness: Harness,
+    monkeypatch: pytest.MonkeyPatch,
+    work_phase: str,
+) -> None:
+    from datetime import UTC, datetime, timedelta, tzinfo
+
+    from daily_insights_api.core import security
+    from daily_insights_api.modules.identity.rate_limit import clear_login_attempts
+    from daily_insights_api.modules.identity.session_models import Session
+    from daily_insights_api.modules.tenancy.models import Membership
+
+    csrf = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    organization_id = await create_organization(
+        harness, csrf, slug="login-work-expiry", seat_limit=1
+    )
+    member = await provision_trial(harness, csrf, organization_id, "login-work@example.com")
+    user_id = uuid.UUID(str(member["user_id"]))
+    password = str(member["temporary_password"])
+    clock_time = datetime.now(UTC)
+    deadline = clock_time + timedelta(hours=1)
+    assert harness.settings.password_pepper is not None
+    pepper = harness.settings.password_pepper.get_secret_value()
+    with monkeypatch.context() as temporary:
+        if work_phase == "rehash":
+            temporary.setattr(security, "SCRYPT_N", security.SCRYPT_N // 2)
+        original_hash = hash_password(password, pepper)
+    assert security.password_needs_rehash(original_hash) == (work_phase == "rehash")
+    async with harness.session_factory.begin() as database:
+        await database.execute(
+            update(Membership)
+            .where(Membership.user_id == user_id)
+            .values(trial_expires_at=deadline)
+        )
+        await database.execute(
+            update(User).where(User.id == user_id).values(password_hash=original_hash)
+        )
+
+    async def snapshot() -> dict[str, list[dict[str, Any]]]:
+        async with harness.session_factory() as database:
+            return {
+                model.__tablename__: [
+                    dict(row)
+                    for row in (
+                        await database.execute(select(model.__table__).order_by(model.id))
+                    ).mappings()
+                ]
+                for model in (User, Membership, Session, AuditEvent)
+            }
+
+    before = await snapshot()
+    cleared_attempts = False
+    rehashed_password = False
+
+    class Clock:
+        @staticmethod
+        def now(tz: tzinfo) -> datetime:
+            return clock_time.astimezone(tz)
+
+    async def clear_then_expire(*args: Any, **kwargs: Any) -> None:
+        nonlocal clock_time, cleared_attempts
+        await clear_login_attempts(*args, **kwargs)
+        cleared_attempts = True
+        if work_phase == "clear":
+            clock_time = deadline
+
+    def rehash_then_expire(password: str, pepper: str) -> str:
+        nonlocal clock_time, rehashed_password
+        result = hash_password(password, pepper)
+        assert result != original_hash and not security.password_needs_rehash(result)
+        rehashed_password = True
+        clock_time = deadline
+        return result
+
+    monkeypatch.setattr(identity_router, "datetime", Clock)
+    monkeypatch.setattr(identity_router, "clear_login_attempts", clear_then_expire)
+    monkeypatch.setattr(identity_router, "hash_password", rehash_then_expire)
+    rejected = await harness.client.post(
+        "/api/auth/login", json={"email": member["email"], "password": password}
+    )
+    assert cleared_attempts
+    assert rehashed_password == (work_phase == "rehash")
+    assert clock_time == deadline
+    assert rejected.status_code == 401, rejected.text
+    assert rejected.json() == {"detail": "invalid credentials"}
+    assert "set-cookie" not in rejected.headers
+    assert await snapshot() == before
+
+
+async def test_valid_trial_login_rehashes_legacy_password(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from daily_insights_api.core import security
+    from daily_insights_api.modules.identity.session_models import Session
+    from daily_insights_api.modules.tenancy.models import Membership
+
+    csrf = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    organization_id = await create_organization(
+        harness, csrf, slug="legacy-trial-login", seat_limit=1
+    )
+    member = await provision_trial(harness, csrf, organization_id, "legacy-trial@example.com")
+    user_id = uuid.UUID(str(member["user_id"]))
+    password = str(member["temporary_password"])
+    assert harness.settings.password_pepper is not None
+    pepper = harness.settings.password_pepper.get_secret_value()
+    with monkeypatch.context() as temporary:
+        temporary.setattr(security, "SCRYPT_N", security.SCRYPT_N // 2)
+        legacy_hash = hash_password(password, pepper)
+    assert security.password_needs_rehash(legacy_hash)
+    deadline = datetime.now(UTC) + timedelta(hours=1)
+    async with harness.session_factory.begin() as database:
+        await database.execute(
+            update(User).where(User.id == user_id).values(password_hash=legacy_hash)
+        )
+        await database.execute(
+            update(Membership)
+            .where(Membership.user_id == user_id)
+            .values(trial_expires_at=deadline)
+        )
+
+    response = await harness.client.post(
+        "/api/auth/login", json={"email": member["email"], "password": password}
+    )
+    assert response.status_code == 200, response.text
+    assert "set-cookie" in response.headers
+    assert (await harness.client.get("/api/auth/me")).status_code == 200
+    async with harness.session_factory() as database:
+        user = await database.get(User, user_id)
+        assert user is not None
+        assert user.password_hash != legacy_hash
+        assert not security.password_needs_rehash(user.password_hash)
+        assert verify_password(password, user.password_hash, pepper)
+        assert user.must_change_password
+        session = (await database.scalars(select(Session).where(Session.user_id == user_id))).one()
+        assert session.expires_at == deadline
+        events = (
+            await database.scalars(
+                select(AuditEvent).where(
+                    AuditEvent.actor_user_id == user_id, AuditEvent.action == "identity.login"
+                )
+            )
+        ).all()
+        assert len(events) == 1
+
+
+@pytest.mark.parametrize(
+    ("member_type", "invalidation"),
+    [
+        ("trial", "renew"),
+        ("trial", "convert"),
+        ("trial", "trial-expiry"),
+        ("internal", "logout"),
+        ("regular", "logout"),
+        ("trial", "logout"),
+        ("internal", "session-expiry"),
+        ("regular", "session-expiry"),
+        ("trial", "session-expiry"),
+        ("internal", "password-change"),
+        ("regular", "password-change"),
+        ("trial", "password-change"),
+    ],
+)
+async def test_waiting_password_change_revalidates_session_before_mutation(
+    harness: Harness,
+    monkeypatch: pytest.MonkeyPatch,
+    member_type: str,
+    invalidation: str,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from daily_insights_api.modules.identity.session_models import Session
+    from daily_insights_api.modules.tenancy.models import Membership
+
+    admin_csrf = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    organization_id: uuid.UUID | None = None
+    if member_type == "internal":
+        email = "admin@example.com"
+        current_password = "AdminPassword123!"
+        app = create_app(harness.settings, ready, harness.session_factory)
+        member_client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+        member_csrf = await login(member_client, email, current_password)
+        async with harness.session_factory() as database:
+            user_id = await database.scalar(select(User.id).where(User.email == email))
+        assert user_id is not None
+    else:
+        organization_id = await create_organization(
+            harness, admin_csrf, slug="waiting-password-change", seat_limit=1
+        )
+        email = "waiting@example.com"
+        member = (
+            await provision_trial(harness, admin_csrf, organization_id, email)
+            if member_type == "trial"
+            else await provision_member(harness, admin_csrf, organization_id, email=email)
+        )
+        user_id = uuid.UUID(str(member["user_id"]))
+        current_password = MEMBER_PASSWORD
+        member_client, member_csrf = await activate_member(harness, member)
+
+    reached_lock = asyncio.Event()
+    resume = asyncio.Event()
+    waiting_request = ContextVar("waiting_password_request", default=False)
+    original_scalar = AsyncSession.scalar
+    lock_table = "organizations" if organization_id is not None else "users"
+
+    async def pause_before_lifecycle_lock(
+        database: AsyncSession, statement: Any, *args: Any, **kwargs: Any
+    ) -> Any:
+        if waiting_request.get() and f"FROM {lock_table}" in str(statement):
+            waiting_request.set(False)
+            reached_lock.set()
+            await asyncio.wait_for(resume.wait(), 10)
+        return await original_scalar(database, statement, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncSession, "scalar", pause_before_lifecycle_lock)
+
+    async def request_password_change() -> Any:
+        waiting_request.set(True)
+        return await member_client.post(
+            "/api/auth/change-password",
+            headers={"X-CSRF-Token": member_csrf},
+            json={
+                "current_password": current_password,
+                "new_password": "RejectedWaitingPassword123!",
+            },
+        )
+
+    async def snapshot() -> dict[str, list[dict[str, Any]]]:
+        async with harness.session_factory() as database:
+            return {
+                model.__tablename__: [
+                    dict(row)
+                    for row in (
+                        await database.execute(select(model.__table__).order_by(model.id))
+                    ).mappings()
+                ]
+                for model in (User, Membership, Session, AuditEvent)
+            }
+
+    pending = asyncio.create_task(request_password_change())
+    try:
+        await asyncio.wait_for(reached_lock.wait(), 5)
+        if invalidation in {"renew", "convert"}:
+            path = f"/api/admin/organizations/{organization_id}/members/{user_id}"
+            expired = await harness.client.patch(
+                path,
+                headers={"X-CSRF-Token": admin_csrf},
+                json={
+                    "reason": "expire while password request waits",
+                    "trial_expires_at": (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+                },
+            )
+            assert expired.status_code == 200, expired.text
+            reopened = await harness.client.patch(
+                path,
+                headers={"X-CSRF-Token": admin_csrf},
+                json={
+                    "reason": "reopen while password request waits",
+                    **(
+                        {"trial_expires_at": (datetime.now(UTC) + timedelta(days=2)).isoformat()}
+                        if invalidation == "renew"
+                        else {"member_type": "regular"}
+                    ),
+                },
+            )
+            assert reopened.status_code == 200, reopened.text
+        elif invalidation == "logout":
+            logged_out = await member_client.post(
+                "/api/auth/logout", headers={"X-CSRF-Token": member_csrf}
+            )
+            assert logged_out.status_code == 204, logged_out.text
+        elif invalidation == "password-change":
+            changed_first = await member_client.post(
+                "/api/auth/change-password",
+                headers={"X-CSRF-Token": member_csrf},
+                json={
+                    "current_password": current_password,
+                    "new_password": "FirstChangedPassword123!",
+                },
+            )
+            assert changed_first.status_code == 200, changed_first.text
+            current_password = "FirstChangedPassword123!"
+        else:
+            async with harness.session_factory.begin() as database:
+                if invalidation == "session-expiry":
+                    await database.execute(
+                        update(Session)
+                        .where(Session.user_id == user_id, Session.revoked_at.is_(None))
+                        .values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
+                    )
+                else:
+                    await database.execute(
+                        update(Membership)
+                        .where(Membership.user_id == user_id)
+                        .values(trial_expires_at=datetime.now(UTC) - timedelta(seconds=1))
+                    )
+
+        before = await snapshot()
+        resume.set()
+        rejected = await asyncio.wait_for(pending, 5)
+        assert rejected.status_code == 401, rejected.text
+        assert rejected.json() == {"detail": "invalid or expired session"}
+        assert "set-cookie" not in rejected.headers
+        assert await snapshot() == before
+        if invalidation != "password-change":
+            assert (await member_client.get("/api/auth/me")).status_code == 401
+        if invalidation != "trial-expiry":
+            await login(member_client, email, current_password)
+            assert (await member_client.get("/api/auth/me")).status_code == 200
+    finally:
+        resume.set()
+        if not pending.done():
+            pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
+        await member_client.aclose()
+
+
+@pytest.mark.parametrize("work_phase", ["verify", "hash", "revocation"])
+@pytest.mark.parametrize(
+    ("member_type", "expiry"),
+    [
+        ("internal", "session"),
+        ("regular", "session"),
+        ("trial", "session"),
+        ("trial", "membership"),
+    ],
+)
+async def test_password_change_rolls_back_expiry_during_credential_work(
+    harness: Harness,
+    monkeypatch: pytest.MonkeyPatch,
+    work_phase: str,
+    member_type: str,
+    expiry: str,
+) -> None:
+    from datetime import UTC, datetime, timedelta, tzinfo
+
+    from sqlalchemy.sql.dml import Update
+
+    from daily_insights_api.modules.identity.session_models import Session
+    from daily_insights_api.modules.tenancy.models import Membership
+
+    admin_csrf = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    app = create_app(harness.settings, ready, harness.session_factory)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        if member_type == "internal":
+            email = "admin@example.com"
+            current_password = "AdminPassword123!"
+            async with harness.session_factory() as database:
+                user_id = await database.scalar(select(User.id).where(User.email == email))
+            assert user_id is not None
+        else:
+            organization_id = await create_organization(
+                harness, admin_csrf, slug="credential-work-expiry", seat_limit=1
+            )
+            email = "credential-work@example.com"
+            member = (
+                await provision_trial(harness, admin_csrf, organization_id, email)
+                if member_type == "trial"
+                else await provision_member(harness, admin_csrf, organization_id, email=email)
+            )
+            user_id = uuid.UUID(str(member["user_id"]))
+            # Keep the initial-password flag set to verify it also rolls back.
+            current_password = str(member["temporary_password"])
+        csrf = await login(client, email, current_password)
+
+        clock_time = datetime.now(UTC)
+        deadline = clock_time + timedelta(hours=1)
+        async with harness.session_factory.begin() as database:
+            await database.execute(
+                update(Session)
+                .where(Session.user_id == user_id, Session.revoked_at.is_(None))
+                .values(
+                    expires_at=deadline if expiry == "session" else deadline + timedelta(hours=1)
+                )
+            )
+            if member_type == "trial":
+                await database.execute(
+                    update(Membership)
+                    .where(Membership.user_id == user_id)
+                    .values(
+                        trial_expires_at=(
+                            deadline if expiry == "membership" else deadline + timedelta(hours=1)
+                        )
+                    )
+                )
+
+        async def snapshot() -> dict[str, list[dict[str, Any]]]:
+            async with harness.session_factory() as database:
+                return {
+                    model.__tablename__: [
+                        dict(row)
+                        for row in (
+                            await database.execute(select(model.__table__).order_by(model.id))
+                        ).mappings()
+                    ]
+                    for model in (User, Membership, Session, AuditEvent)
+                }
+
+        before = await snapshot()
+        reached_expiry = False
+        revocations_flushed = False
+        original_execute = AsyncSession.execute
+
+        class Clock:
+            @staticmethod
+            def now(tz: tzinfo) -> datetime:
+                return clock_time.astimezone(tz)
+
+        def verify_then_expire(password: str, encoded: str, pepper: str) -> bool:
+            nonlocal clock_time, reached_expiry
+            result = verify_password(password, encoded, pepper)
+            if work_phase == "verify":
+                clock_time = deadline
+                reached_expiry = True
+            return result
+
+        def hash_then_expire(password: str, pepper: str) -> str:
+            nonlocal clock_time, reached_expiry
+            result = hash_password(password, pepper)
+            if work_phase == "hash":
+                clock_time = deadline
+                reached_expiry = True
+            return result
+
+        async def revoke_then_expire(
+            database: AsyncSession, statement: Any, *args: Any, **kwargs: Any
+        ) -> Any:
+            nonlocal clock_time, reached_expiry, revocations_flushed
+            result = await original_execute(database, statement, *args, **kwargs)
+            if isinstance(statement, Update) and str(statement.table) == "sessions":
+                # The ORM autoflush and SQL revocations have actually run before
+                # expiry; equality of persisted snapshots therefore proves rollback.
+                stored_hash, must_change_password = (
+                    await original_execute(
+                        database,
+                        select(User.password_hash, User.must_change_password).where(
+                            User.id == user_id
+                        ),
+                    )
+                ).one()
+                assert must_change_password is False
+                assert harness.settings.password_pepper is not None
+                assert verify_password(
+                    "RejectedExpiredPassword123!",
+                    stored_hash,
+                    harness.settings.password_pepper.get_secret_value(),
+                )
+                active_sessions = await database.scalar(
+                    select(Session.id).where(
+                        Session.user_id == user_id, Session.revoked_at.is_(None)
+                    )
+                )
+                assert active_sessions is None
+                revocations_flushed = True
+                if work_phase == "revocation":
+                    clock_time = deadline
+                    reached_expiry = True
+            return result
+
+        monkeypatch.setattr(identity_router, "datetime", Clock)
+        monkeypatch.setattr(identity_router, "verify_password", verify_then_expire)
+        monkeypatch.setattr(identity_router, "hash_password", hash_then_expire)
+        monkeypatch.setattr(AsyncSession, "execute", revoke_then_expire)
+        rejected = await client.post(
+            "/api/auth/change-password",
+            headers={"X-CSRF-Token": csrf},
+            json={
+                "current_password": current_password,
+                "new_password": "RejectedExpiredPassword123!",
+            },
+        )
+        assert reached_expiry
+        assert revocations_flushed == (work_phase == "revocation")
+        assert rejected.status_code == 401, rejected.text
+        assert rejected.json() == {"detail": "invalid or expired session"}
+        assert "set-cookie" not in rejected.headers
+        assert await snapshot() == before
+
+
+async def test_removed_regular_cannot_be_reprovisioned_as_trial_without_mutation(
+    harness: Harness,
+) -> None:
+    from daily_insights_api.modules.identity.session_models import Session
+    from daily_insights_api.modules.tenancy.models import Membership
+
+    csrf = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    org = await create_organization(harness, csrf, slug="restore-regular-rejection", seat_limit=1)
+    member = await provision_member(harness, csrf, org, email="removed-regular@example.com")
+    member_client, _ = await activate_member(harness, member)
+    try:
+        removed = await harness.client.delete(
+            f"/api/admin/organizations/{org}/members/{member['user_id']}",
+            headers={"X-CSRF-Token": csrf},
+            params={"reason": "remove regular"},
+        )
+        assert removed.status_code == 204
+
+        async def snapshot() -> dict[str, list[dict[str, Any]]]:
+            async with harness.session_factory() as database:
+                return {
+                    model.__tablename__: [
+                        dict(row)
+                        for row in (
+                            await database.execute(select(model.__table__).order_by(model.id))
+                        ).mappings()
+                    ]
+                    for model in (User, Membership, Session, AuditEvent)
+                }
+
+        before = await snapshot()
+        rejected = await harness.client.post(
+            f"/api/admin/organizations/{org}/members",
+            headers={"X-CSRF-Token": csrf},
+            json={
+                "email": " REMOVED-REGULAR@example.com ",
+                "display_name": "Must not change",
+                "reason": "try bypassing conversion restriction",
+                "member_type": "trial",
+                "trial_days": 14,
+            },
+        )
+        assert rejected.status_code == 409, rejected.text
+        assert rejected.json() == {"detail": "regular members cannot become trials"}
+        assert await snapshot() == before
+        organization = (await harness.client.get(f"/api/admin/organizations/{org}")).json()
+        assert organization["seat_count"] == 0
+        assert (await member_client.get("/api/auth/me")).status_code == 401
+    finally:
+        await member_client.aclose()
+
+
+@pytest.mark.parametrize(
+    ("original_type", "restored_type"),
+    [("regular", "regular"), ("trial", "trial"), ("trial", "regular")],
+)
+async def test_removed_member_reprovisioning_preserves_credentials_seats_and_audit(
+    harness: Harness, original_type: str, restored_type: str
+) -> None:
+    from datetime import datetime, timedelta
+
+    csrf = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    org = await create_organization(harness, csrf, slug="restore-audit", seat_limit=1)
+    payload = {
+        "email": "restore@example.com",
+        "display_name": "Original",
+        "reason": "original provisioning",
+        "member_type": original_type,
+        **({"trial_days": 2} if original_type == "trial" else {}),
+    }
+    created = await harness.client.post(
+        f"/api/admin/organizations/{org}/members",
+        headers={"X-CSRF-Token": csrf},
+        json=payload,
+    )
+    assert created.status_code == 201, created.text
+    member = created.json()
+    original_expiry = (
+        datetime.fromisoformat(member["trial_expires_at"]).isoformat()
+        if member["trial_expires_at"]
+        else None
+    )
+    member_client, _ = await activate_member(harness, member)
+    try:
+        removed = await harness.client.delete(
+            f"/api/admin/organizations/{org}/members/{member['user_id']}",
+            headers={"X-CSRF-Token": csrf},
+            params={"reason": "  remove for reprovisioning  "},
+        )
+        assert removed.status_code == 204
+        seat_holder = await provision_member(harness, csrf, org, email="seat-holder@example.com")
+        restore_payload = {
+            **payload,
+            "display_name": "Restored",
+            "reason": "restore membership",
+            "member_type": restored_type,
+            **({"trial_days": 11} if restored_type == "trial" else {}),
+        }
+        if restored_type == "regular":
+            restore_payload.pop("trial_days", None)
+        full = await harness.client.post(
+            f"/api/admin/organizations/{org}/members",
+            headers={"X-CSRF-Token": csrf},
+            json=restore_payload,
+        )
+        assert full.status_code == 409, full.text
+        released = await harness.client.delete(
+            f"/api/admin/organizations/{org}/members/{seat_holder['user_id']}",
+            headers={"X-CSRF-Token": csrf},
+            params={"reason": "release seat"},
+        )
+        assert released.status_code == 204
+        restored = await harness.client.post(
+            f"/api/admin/organizations/{org}/members",
+            headers={"X-CSRF-Token": csrf},
+            json=restore_payload,
+        )
+        assert restored.status_code == 201, restored.text
+        assert restored.headers["Cache-Control"] == "no-store"
+        result = restored.json()
+        assert result["membership_id"] == member["membership_id"]
+        assert result["user_id"] == member["user_id"]
+        assert result["member_type"] == restored_type
+        assert result["status"] == "active" and result["must_change_password"]
+        assert result["display_name"] == "Restored"
+        assert result["temporary_password"] != member["temporary_password"]
+        if restored_type == "trial":
+            assert datetime.fromisoformat(result["trial_expires_at"]) - datetime.fromisoformat(
+                result["joined_at"]
+            ) == timedelta(days=11)
+            assert result["trial_expires_at"] != member["trial_expires_at"]
+        else:
+            assert result["trial_expires_at"] is None
+        organization = (await harness.client.get(f"/api/admin/organizations/{org}")).json()
+        assert organization["seat_count"] == 1
+        assert (await member_client.get("/api/auth/me")).status_code == 401
+        stale_password = await member_client.post(
+            "/api/auth/login",
+            json={"email": member["email"], "password": MEMBER_PASSWORD},
+        )
+        assert stale_password.status_code == 401
+        await login(member_client, member["email"], result["temporary_password"])
+        assert (await member_client.get("/api/auth/me")).json()["must_change_password"]
+        assert (await member_client.get("/api/markets")).status_code == 403
+
+        audit = await harness.client.get(
+            "/api/admin/audit-events", params={"organization_id": str(org)}
+        )
+        events = [event for event in audit.json() if event["target_id"] == member["membership_id"]]
+        assert len(events) == 3
+        creation = next(event for event in events if event["action"] == "membership.created")
+        removal = next(event for event in events if event["action"] == "membership.removed")
+        restoration = next(event for event in events if event["action"] == "membership.restored")
+        assert creation["before"] is None
+        assert creation["reason"] == "original provisioning"
+        assert removal["reason"] == "remove for reprovisioning"
+        assert restoration["reason"] == "restore membership"
+        assert removal["before"] == creation["after"]
+        assert removal["before"]["member_type"] == original_type
+        assert removal["before"]["trial_expires_at"] == original_expiry
+        assert removal["before"]["status"] == "active"
+        assert removal["before"]["removed_at"] is None
+        assert removal["before"]["removed_by_user_id"] is None
+        assert removal["after"]["member_type"] == original_type
+        assert removal["after"]["trial_expires_at"] == original_expiry
+        assert removal["after"]["status"] == "suspended"
+        assert removal["after"]["removed_at"] is not None
+        assert removal["after"]["removed_by_user_id"] == removal["actor_user_id"]
+        assert restoration["before"] == removal["after"]
+        assert restoration["after"]["member_type"] == restored_type
+        assert restoration["after"]["trial_expires_at"] == (
+            datetime.fromisoformat(result["trial_expires_at"]).isoformat()
+            if result["trial_expires_at"]
+            else None
+        )
+        assert restoration["after"]["status"] == "active"
+        assert (
+            restoration["after"]["joined_at"]
+            == datetime.fromisoformat(result["joined_at"]).isoformat()
+        )
+        assert restoration["after"]["removed_at"] is None
+        assert restoration["after"]["removed_by_user_id"] is None
+    finally:
+        await member_client.aclose()
+
+
+async def test_removed_regular_can_be_provisioned_as_trial_in_another_organization(
+    harness: Harness,
+) -> None:
+    from daily_insights_api.modules.tenancy.models import Membership
+
+    csrf = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    original_org = await create_organization(harness, csrf, slug="original-org", seat_limit=1)
+    new_org = await create_organization(harness, csrf, slug="new-org", seat_limit=1)
+    member = await provision_member(harness, csrf, original_org, email="move@example.com")
+    removed = await harness.client.delete(
+        f"/api/admin/organizations/{original_org}/members/{member['user_id']}",
+        headers={"X-CSRF-Token": csrf},
+        params={"reason": "leave original organization"},
+    )
+    assert removed.status_code == 204
+    new_member = await provision_trial(harness, csrf, new_org, "move@example.com")
+    assert new_member["user_id"] == member["user_id"]
+    assert new_member["membership_id"] != member["membership_id"]
+    async with harness.session_factory() as database:
+        original = await database.get(Membership, uuid.UUID(str(member["membership_id"])))
+        assert original is not None
+        assert original.member_type == "regular" and original.trial_expires_at is None
+        assert original.removed_at is not None
+        event = await database.scalar(
+            select(AuditEvent).where(
+                AuditEvent.target_id == new_member["membership_id"],
+                AuditEvent.action == "membership.created",
+            )
+        )
+        assert event is not None and event.before is None
 
 
 async def test_trial_login_expiry_sessions_seats_and_conversion(harness: Harness) -> None:

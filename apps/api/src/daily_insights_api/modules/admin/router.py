@@ -94,6 +94,23 @@ def _member_response(membership: Membership, user: User) -> MemberResponse:
     )
 
 
+def _membership_audit_snapshot(membership: Membership, user: User) -> dict[str, str | None]:
+    return {
+        "user_id": str(user.id),
+        "email": user.email,
+        "status": user.status.value,
+        "member_type": membership.member_type,
+        "trial_expires_at": membership.trial_expires_at.isoformat()
+        if membership.trial_expires_at
+        else None,
+        "joined_at": membership.joined_at.isoformat(),
+        "removed_at": membership.removed_at.isoformat() if membership.removed_at else None,
+        "removed_by_user_id": str(membership.removed_by_user_id)
+        if membership.removed_by_user_id
+        else None,
+    }
+
+
 def _internal_user_response(user: User) -> InternalUserResponse:
     return InternalUserResponse(
         id=user.id,
@@ -433,6 +450,18 @@ async def create_member(
                 Membership.user_id == user.id,
             )
         )
+        if (
+            membership is not None
+            and membership.member_type == "regular"
+            and payload.member_type == "trial"
+        ):
+            raise HTTPException(status.HTTP_409_CONFLICT, "regular members cannot become trials")
+
+    before = (
+        _membership_audit_snapshot(membership, user)
+        if membership is not None and user is not None
+        else None
+    )
 
     settings: Settings = request.app.state.settings
     assert settings.password_pepper is not None
@@ -498,16 +527,12 @@ async def create_member(
         database,
         actor_user_id=actor.user.id,
         organization_id=organization.id,
-        action="membership.created",
+        action="membership.restored" if before is not None else "membership.created",
         target_type="membership",
         target_id=str(membership.id),
         reason=payload.reason,
-        after={
-            "user_id": str(user.id),
-            "email": user.email,
-            "member_type": membership.member_type,
-            "trial_expires_at": trial_expiry.isoformat() if trial_expiry else None,
-        },
+        before=before,
+        after=_membership_audit_snapshot(membership, user),
         request_id=request.state.request_id,
     )
     try:
@@ -650,7 +675,7 @@ async def remove_member(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "reason must not be blank")
     membership, user = await _get_active_member(database, organization_id, user_id)
     now = datetime.now(UTC)
-    before_status = user.status.value
+    before = _membership_audit_snapshot(membership, user)
     membership.removed_at = now
     membership.removed_by_user_id = actor.user.id
     user.status = UserStatus.SUSPENDED
@@ -667,13 +692,8 @@ async def remove_member(
         target_type="membership",
         target_id=str(membership.id),
         reason=reason,
-        before={
-            "user_id": str(user.id),
-            "email": user.email,
-            "status": before_status,
-            "removed_at": None,
-        },
-        after={"status": user.status.value, "removed_at": now.isoformat()},
+        before=before,
+        after=_membership_audit_snapshot(membership, user),
         request_id=request.state.request_id,
     )
     await database.commit()
