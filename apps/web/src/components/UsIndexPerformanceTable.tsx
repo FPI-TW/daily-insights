@@ -1,13 +1,12 @@
 import { ResponsiveTable } from "./ResponsiveTable"
 import type { Locale } from "@daily-insights/api-client"
 import { useTranslation } from "react-i18next"
+import { directionClass, formatChange, formatNumber } from "#/lib/format"
 import {
-  directionClass,
-  formatChange,
-  formatNumber,
+  indexNameKey,
   percentageChange,
-} from "#/lib/format"
-import { indexNameKey, type MarketIndexHistory } from "#/lib/indices"
+  type MarketIndexHistory,
+} from "#/lib/indices"
 
 const usIndexSymbols = ["^GSPC", "^NDX", "^DJI", "^SOX", "^RUT"] as const
 

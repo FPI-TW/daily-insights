@@ -120,6 +120,35 @@ export function indexNameKey(symbol: string) {
   )[symbol]
 }
 
+function finiteNumber(raw: string | number | null | undefined) {
+  if (raw == null) return null
+  const value = Number(raw)
+  return Number.isFinite(value) ? value : null
+}
+
+/** Points moved from `baseline` to `close`, or null when either is missing
+ * or non-numeric. */
+export function pointChange(
+  close: string | number | null | undefined,
+  baseline: string | number | null | undefined
+): number | null {
+  const latest = finiteNumber(close)
+  const previous = finiteNumber(baseline)
+  if (latest === null || previous === null) return null
+  return latest - previous
+}
+
+/** Percent move from `baseline` to `close`; also null for a zero baseline. */
+export function percentageChange(
+  close: string | number | null | undefined,
+  baseline: string | number | null | undefined
+): number | null {
+  const points = pointChange(close, baseline)
+  const previous = finiteNumber(baseline)
+  if (points === null || previous === null || previous === 0) return null
+  return (points / previous) * 100
+}
+
 export const biasPeriods = [20, 60, 120] as const
 export type BiasPoint = { date: string; value: number | null }
 

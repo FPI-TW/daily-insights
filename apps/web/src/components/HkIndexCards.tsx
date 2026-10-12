@@ -1,12 +1,12 @@
 import type { IndexLatestBar, Locale } from "@daily-insights/api-client"
 import { useTranslation } from "react-i18next"
+import { directionClass, formatChange, formatNumber } from "#/lib/format"
 import {
-  directionClass,
-  formatChange,
-  formatNumber,
+  indexNameKey,
   percentageChange,
-} from "#/lib/format"
-import { indexNameKey, trackedSymbolsForMarket } from "#/lib/indices"
+  pointChange,
+  trackedSymbolsForMarket,
+} from "#/lib/indices"
 
 // Display codes as the market quotes them, not Yahoo's ticker spelling.
 const displayCodes: Record<string, string> = {
@@ -62,9 +62,7 @@ export function HkIndexCards({
         const bar = bySymbol.get(symbol)
         const percent = percentageChange(bar?.close, bar?.previous_close)
         const points =
-          bar && percent !== null
-            ? Number(bar.close) - Number(bar.previous_close)
-            : null
+          percent === null ? null : pointChange(bar?.close, bar?.previous_close)
         const change = formatChange(percent, locale, {
           flatLabel: t("reportChangeFlat"),
         })
