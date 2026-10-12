@@ -128,7 +128,7 @@ export function DataManagementPage({ locale }: { locale: Locale }) {
           {errorMessage}
         </p>
       ) : null}
-      <section className="grid max-w-5xl gap-5 md:grid-cols-3">
+      <section className="grid max-w-5xl gap-5 md:grid-cols-2 xl:grid-cols-4">
         {MARKET_JOBS.map(job => (
           <article key={job.key} className="surface-panel p-5">
             <h2 className="m-0 text-lg font-extrabold">{t(job.label)}</h2>
