@@ -107,7 +107,9 @@ CloudWatch, security-group control, and future scaling are clearer with EC2.
   tracing in logs.
 - Rotate application secrets on a documented schedule and immediately after
   suspected exposure. R2 credentials should be scoped to the required bucket
-  and operations.
+  and operations. The orchestration worker receives the same R2 variables as
+  the API because it uploads heatmap PNGs; issue it a token limited to
+  object read/write/delete on that one bucket, never account-wide access.
 
 ## RDS backup and restore
 
