@@ -90,15 +90,21 @@ export function HkIndexCards({
             <p
               className={`mt-1 mb-0 flex gap-3 font-mono text-sm font-bold tabular-nums ${colour}`}
             >
-              <span>
-                {points === null
-                  ? "—"
-                  : formatChange(points, locale, {
-                      percent: false,
-                      flatLabel: t("reportChangeFlat"),
-                    }).text}
-              </span>
-              <span>{change.text}</span>
+              {change.direction === "flat" ? (
+                <span>{change.text}</span>
+              ) : (
+                <>
+                  <span>
+                    {points === null
+                      ? "—"
+                      : formatChange(points, locale, {
+                          percent: false,
+                          flatLabel: t("reportChangeFlat"),
+                        }).text}
+                  </span>
+                  <span>{change.text}</span>
+                </>
+              )}
             </p>
           </section>
         )

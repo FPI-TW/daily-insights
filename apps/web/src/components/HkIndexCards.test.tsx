@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, render, screen, within } from "@testing-library/react"
 import { I18nextProvider } from "react-i18next"
 import { afterEach, describe, expect, it } from "vitest"
 import type { IndexLatestBar } from "@daily-insights/api-client"
@@ -61,8 +61,9 @@ describe("HkIndexCards", () => {
 
     const vix = screen.getByRole("region", { name: "港股 VIX" })
     expect(vix).toHaveTextContent("HSI VIX")
-    expect(vix).toHaveTextContent("持平")
     expect(vix).toHaveClass("border-l-line")
+    const vixChange = within(vix).getByText("持平")
+    expect(vixChange.parentElement?.textContent).toBe("持平")
   })
 
   it("keeps a placeholder card for symbols without rows or a previous close", async () => {
