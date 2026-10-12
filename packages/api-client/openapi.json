@@ -5599,7 +5599,7 @@
             "type": "integer"
           },
           "kind": {
-            "enum": ["overview", "legend", "sector"],
+            "enum": ["overview", "legend"],
             "title": "Kind",
             "type": "string"
           },
@@ -5610,10 +5610,6 @@
           "slug": {
             "title": "Slug",
             "type": "string"
-          },
-          "symbol_count": {
-            "title": "Symbol Count",
-            "type": "integer"
           },
           "url": {
             "title": "Url",
@@ -5628,7 +5624,6 @@
           "kind",
           "slug",
           "name",
-          "symbol_count",
           "width",
           "height",
           "url",

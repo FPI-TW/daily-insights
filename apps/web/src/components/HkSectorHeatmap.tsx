@@ -13,14 +13,6 @@ export function HkSectorHeatmapLoading() {
     >
       <div className="h-3 w-32 animate-pulse rounded bg-line" />
       <div className="mt-4 aspect-[2/1] w-full animate-pulse rounded bg-line" />
-      <div className="mt-4 grid gap-4">
-        {Array.from({ length: 2 }, (_, index) => (
-          <div
-            key={index}
-            className="aspect-[2/1] animate-pulse rounded bg-line"
-          />
-        ))}
-      </div>
     </section>
   )
 }
@@ -60,7 +52,6 @@ export function HkSectorHeatmap({
       ? [overview]
       : []
   const legend = heatmap.images.find(image => image.kind === "legend")
-  const sectors = heatmap.images.filter(image => image.kind === "sector")
   return (
     <section
       className="surface-panel mt-4 p-5"
@@ -75,8 +66,8 @@ export function HkSectorHeatmap({
         </p>
       </div>
       {overviewRows.map((image, index) => (
-        // Every image links to its full-size PNG: the tiles' labels are drawn
-        // at 1920px, so sectors take a full column and the original stays a click away.
+        // The tiles' labels are drawn at 1920px, so each half takes the full
+        // content width and the whole overview stays a click away.
         <a
           key={image.slug}
           className="mt-4 block"
@@ -106,38 +97,6 @@ export function HkSectorHeatmap({
           height={legend.height}
           alt={t("hkSectorHeatmapLegendAlt")}
         />
-      ) : null}
-      {sectors.length ? (
-        <div className="mt-4 grid gap-4">
-          {sectors.map(image => (
-            <figure key={image.slug} className="m-0 min-w-0">
-              <a
-                className="block"
-                href={image.url}
-                target="_blank"
-                rel="noreferrer"
-                title={t("hkSectorHeatmapOpenFullSize")}
-              >
-                <img
-                  className="h-auto w-full rounded"
-                  src={image.url}
-                  width={image.width}
-                  height={image.height}
-                  loading="lazy"
-                  alt={t("hkSectorHeatmapSectorAlt", { name: image.name })}
-                />
-              </a>
-              <figcaption className="mt-1 flex justify-between gap-2 text-xs text-sea-ink-soft">
-                <span className="font-bold text-sea-ink">{image.name}</span>
-                <span>
-                  {t("hkSectorHeatmapSymbolCount", {
-                    count: image.symbol_count,
-                  })}
-                </span>
-              </figcaption>
-            </figure>
-          ))}
-        </div>
       ) : null}
     </section>
   )

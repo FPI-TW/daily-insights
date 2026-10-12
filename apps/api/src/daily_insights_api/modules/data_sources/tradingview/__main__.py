@@ -21,7 +21,7 @@ def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
     for image in captured.images:
         (args.out / f"{image.slug}.png").write_bytes(image.png)
-        print(f"ok  {image.slug}.png  {image.width}x{image.height}  ({image.symbol_count} symbols)")
+        print(f"ok  {image.slug}.png  {image.width}x{image.height}")
     manifest = {
         "captured_at": captured.captured_at.isoformat(),
         "data_source": captured.data_source,
@@ -30,8 +30,6 @@ def main() -> None:
                 "kind": image.kind,
                 "slug": image.slug,
                 "name": image.name,
-                "symbol_count": image.symbol_count,
-                "market_cap": image.market_cap,
                 "sort_order": image.sort_order,
                 "width": image.width,
                 "height": image.height,

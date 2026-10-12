@@ -12,29 +12,35 @@ function image(
   kind: SectorHeatmapImage["kind"],
   slug: string,
   name: string,
-  symbol_count = 0
+  width = 1920
 ): SectorHeatmapImage {
   return {
     kind,
     slug,
     name,
-    symbol_count,
-    width: 1920,
-    height: kind === "legend" ? 34 : 953,
+    width,
+    height: kind === "legend" ? 34 : 989,
     url: `https://signed.test/${slug}.png`,
     expires_in_seconds: 900,
   }
 }
 
-const heatmap: SectorHeatmap = {
+const whole: SectorHeatmap = {
   data_source: "HSI",
   edition_date: "2026-10-12",
   captured_at: "2026-10-12T00:05:00+00:00",
   images: [
     image("overview", "overview", "Overview"),
     image("legend", "legend", "Legend"),
-    image("sector", "finance", "Finance", 21),
-    image("sector", "commercial_services", "Commercial Services", 1),
+  ],
+}
+const split: SectorHeatmap = {
+  ...whole,
+  images: [
+    whole.images[0]!,
+    image("overview", "overview_left", "Overview (left)", 1155),
+    image("overview", "overview_right", "Overview (right)", 765),
+    whole.images[1]!,
   ],
 }
 
@@ -49,10 +55,8 @@ async function renderLocalized(
 afterEach(cleanup)
 
 describe("HkSectorHeatmap", () => {
-  it("shows the overview, legend and every sector with its constituent count", async () => {
-    await renderLocalized(
-      <HkSectorHeatmap heatmap={heatmap} locale="zh-hant" />
-    )
+  it("shows the whole overview with the legend and a full-size link", async () => {
+    await renderLocalized(<HkSectorHeatmap heatmap={whole} locale="zh-hant" />)
     const region = screen.getByRole("region", { name: "港股產業熱力圖" })
     expect(region).toHaveTextContent("2026年10月12日 收盤")
     const overview = within(region).getByRole("img", {
@@ -60,41 +64,21 @@ describe("HkSectorHeatmap", () => {
     })
     expect(overview).toHaveAttribute("src", "https://signed.test/overview.png")
     expect(overview).toHaveAttribute("width", "1920")
-    expect(overview).toHaveAttribute("height", "953")
+    expect(overview).toHaveAttribute("height", "989")
+    expect(overview.closest("a")).toHaveAttribute("target", "_blank")
+    expect(overview.closest("a")).toHaveAttribute("title", "開啟原始大小")
     expect(
       within(region).getByRole("img", { name: "漲跌幅顏色圖例" })
     ).toHaveAttribute("height", "34")
-    const finance = within(region).getByRole("img", {
-      name: "Finance 產業熱力圖",
-    })
-    expect(finance).toHaveAttribute("loading", "lazy")
-    // The link takes its name from the image inside it; the title is the hint.
-    const fullSize = within(region).getAllByRole("link")
-    expect(fullSize.map(link => link.getAttribute("href"))).toEqual([
-      "https://signed.test/overview.png",
-      "https://signed.test/finance.png",
-      "https://signed.test/commercial_services.png",
-    ])
-    expect(fullSize[0]).toHaveAttribute("target", "_blank")
-    expect(fullSize[0]).toHaveAttribute("title", "開啟原始大小")
-    expect(region).toHaveTextContent("21 檔成分股")
-    expect(region).toHaveTextContent("1 檔成分股")
+    expect(within(region).getAllByRole("img")).toHaveLength(2)
   })
 
   it("stacks the overview halves and links each to the whole image", async () => {
-    const split: SectorHeatmap = {
-      ...heatmap,
-      images: [
-        image("overview", "overview", "Overview"),
-        image("overview", "overview_left", "Overview (left)"),
-        image("overview", "overview_right", "Overview (right)"),
-        ...heatmap.images.slice(1),
-      ],
-    }
     await renderLocalized(<HkSectorHeatmap heatmap={split} locale="en" />, "en")
     const region = screen.getByRole("region", {
       name: "Hong Kong sector heatmap",
     })
+    expect(region).toHaveTextContent("Oct 12, 2026 close")
     expect(
       within(region).queryByRole("img", {
         name: "Hang Seng constituents sector heatmap overview",
@@ -114,19 +98,6 @@ describe("HkSectorHeatmap", () => {
         "href",
         "https://signed.test/overview.png"
       )
-  })
-
-  it("pluralises constituent counts in English", async () => {
-    await renderLocalized(
-      <HkSectorHeatmap heatmap={heatmap} locale="en" />,
-      "en"
-    )
-    const region = screen.getByRole("region", {
-      name: "Hong Kong sector heatmap",
-    })
-    expect(region).toHaveTextContent("Oct 12, 2026 close")
-    expect(region).toHaveTextContent("21 constituents")
-    expect(region).toHaveTextContent("1 constituent")
   })
 
   it("announces loading and the empty ledger", async () => {

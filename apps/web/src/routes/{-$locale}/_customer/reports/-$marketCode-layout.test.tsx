@@ -231,13 +231,12 @@ describe("market desktop grid cells", () => {
       captured_at: "2026-10-12T00:05:00+00:00",
       images: [
         {
-          kind: "sector",
-          slug: "finance",
-          name: "Finance",
-          symbol_count: 21,
+          kind: "overview",
+          slug: "overview",
+          name: "Overview",
           width: 1920,
-          height: 953,
-          url: "https://signed.test/finance.png",
+          height: 989,
+          url: "https://signed.test/overview.png",
           expires_in_seconds: 900,
         },
       ],
@@ -249,8 +248,10 @@ describe("market desktop grid cells", () => {
       name: "Hong Kong sector heatmap",
     })
     expect(
-      within(heatmap).getByRole("img", { name: "Finance sector heatmap" })
-    ).toHaveAttribute("src", "https://signed.test/finance.png")
+      within(heatmap).getByRole("img", {
+        name: "Hang Seng constituents sector heatmap overview",
+      })
+    ).toHaveAttribute("src", "https://signed.test/overview.png")
     expect(screen.getAllByRole("region")).toHaveLength(4)
     expect(screen.queryByText("Report not launched yet")).toBeNull()
     expect(screen.queryByText("Index history")).toBeNull()

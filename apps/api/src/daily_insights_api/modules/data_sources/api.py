@@ -21,7 +21,6 @@ from daily_insights_api.modules.data_sources.provider import (
 from daily_insights_api.modules.data_sources.tradingview import (
     CapturedHeatmap,
     HeatmapImage,
-    SectorSummary,
     capture_sector_heatmap,
 )
 from daily_insights_api.modules.data_sources.twelve_data import (
@@ -88,7 +87,6 @@ __all__ = [
     "Provenance",
     "ProviderPage",
     "RetryPolicy",
-    "SectorSummary",
     "TaiexDailyBar",
     "TaiexDailyBars",
     "TwelveDataAdapter",

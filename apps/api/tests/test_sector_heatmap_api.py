@@ -100,16 +100,8 @@ async def test_latest_edition_is_returned_with_signed_urls_in_display_order(
 ) -> None:
     store = SigningObjectStore()
     older = EDITION - timedelta(days=1)
-    await _seed_edition(
-        session_factory, store, monkeypatch, older, _captured(("Finance", 20, 400.0))
-    )
-    await _seed_edition(
-        session_factory,
-        store,
-        monkeypatch,
-        EDITION,
-        _captured(("Finance", 21, 500.0), ("Utilities", 6, 90.0), seed=b"today"),
-    )
+    await _seed_edition(session_factory, store, monkeypatch, older, _captured(halves=False))
+    await _seed_edition(session_factory, store, monkeypatch, EDITION, _captured(b"today"))
 
     async with _client(session_factory, object_store=store) as client:
         latest = await client.get("/api/markets/hk/sector-heatmap")
@@ -125,22 +117,21 @@ async def test_latest_edition_is_returned_with_signed_urls_in_display_order(
     assert datetime.fromisoformat(body["captured_at"]).tzinfo is not None
     assert [(image["kind"], image["slug"], image["name"]) for image in body["images"]] == [
         ("overview", "overview", "Overview"),
+        ("overview", "overview_left", "Overview (left)"),
+        ("overview", "overview_right", "Overview (right)"),
         ("legend", "legend", "Legend"),
-        ("sector", "finance", "Finance"),
-        ("sector", "utilities", "Utilities"),
     ]
-    finance = body["images"][2]
-    assert finance["symbol_count"] == 21
-    assert (finance["width"], finance["height"]) == (1920, 953)
-    assert finance["expires_in_seconds"] == 600
+    right = body["images"][2]
+    assert (right["width"], right["height"]) == (765, 989)
+    assert right["expires_in_seconds"] == 600
     assert (
-        finance["url"]
-        == "https://signed.test/daily-insights-test/heatmaps/hsi/2026-10-12/finance.png?ttl=600"
+        right["url"]
+        == "https://signed.test/daily-insights-test/heatmaps/hsi/2026-10-12/overview_right.png?ttl=600"
     )
 
     assert dated.status_code == 200
     assert dated.json()["edition_date"] == older.isoformat()
-    assert [image["slug"] for image in dated.json()["images"]] == ["overview", "legend", "finance"]
+    assert [image["slug"] for image in dated.json()["images"]] == ["overview", "legend"]
     assert missing.status_code == 404
 
 
@@ -160,9 +151,7 @@ async def test_heatmap_follows_hong_kong_market_visibility(
     session_factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = SigningObjectStore()
-    await _seed_edition(
-        session_factory, store, monkeypatch, EDITION, _captured(("Finance", 21, 500.0))
-    )
+    await _seed_edition(session_factory, store, monkeypatch, EDITION, _captured())
     hidden_from = uuid.uuid4()
     author_id = uuid.uuid4()
     async with session_factory.begin() as database:
@@ -200,4 +189,4 @@ async def test_heatmap_follows_hong_kong_market_visibility(
 
     assert hidden.status_code == 404
     assert preview.status_code == 200, preview.text
-    assert len(preview.json()["images"]) == 3
+    assert len(preview.json()["images"]) == 4

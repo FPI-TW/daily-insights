@@ -179,10 +179,9 @@ export const institutionalStocksSchema = z.object({
 })
 export type InstitutionalStocks = z.infer<typeof institutionalStocksSchema>
 export const sectorHeatmapImageSchema = z.object({
-  kind: z.enum(["overview", "legend", "sector"]),
+  kind: z.enum(["overview", "legend"]),
   slug: z.string().min(1),
   name: z.string().min(1),
-  symbol_count: z.number().int().nonnegative(),
   width: z.number().int().positive(),
   height: z.number().int().positive(),
   url: z.url(),

@@ -266,8 +266,7 @@ async def get_hk_sector_heatmap(
         SectorHeatmapImageResponse(
             kind=row.kind,
             slug=row.slug,
-            name=row.sector_name,
-            symbol_count=row.symbol_count,
+            name=row.name,
             width=row.width,
             height=row.height,
             url=await object_store.presign_get(

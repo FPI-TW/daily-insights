@@ -163,10 +163,9 @@ class InstitutionalStocksResponse(BaseModel):
 
 
 class SectorHeatmapImageResponse(BaseModel):
-    kind: Literal["overview", "legend", "sector"]
+    kind: Literal["overview", "legend"]
     slug: str
     name: str
-    symbol_count: int
     width: int
     height: int
     url: str
@@ -177,5 +176,5 @@ class SectorHeatmapResponse(BaseModel):
     data_source: str
     edition_date: date
     captured_at: datetime
-    # Ordered for display: overview, legend, then sectors by market cap.
+    # Ordered for display: the overview, its left/right halves, then the legend.
     images: list[SectorHeatmapImageResponse]

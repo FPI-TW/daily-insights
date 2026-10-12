@@ -306,9 +306,7 @@ async def store_sector_heatmap_images(
             database.add(row)
         if row.sha256 != image.sha256:
             changed += 1
-        row.sector_name = image.name
-        row.symbol_count = image.symbol_count
-        row.market_cap = Decimal(str(image.market_cap)) if image.market_cap is not None else None
+        row.name = image.name
         row.sort_order = image.sort_order
         row.object_key = object_key
         row.sha256 = image.sha256

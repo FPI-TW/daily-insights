@@ -4,7 +4,6 @@ import uuid
 import zlib
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
 from typing import Any, BinaryIO, cast
 
 import pytest
@@ -29,7 +28,6 @@ from daily_insights_api.modules.data_sources.errors import (
 )
 from daily_insights_api.modules.data_sources.tradingview.heatmap import (
     CapturedHeatmap,
-    SectorSummary,
     assemble_heatmap,
 )
 from daily_insights_api.modules.markets.models import SectorHeatmapImage
@@ -54,16 +52,15 @@ def _png(width: int, height: int, seed: bytes = b"") -> bytes:
     )
 
 
-def _captured(*sectors: tuple[str, int, float], seed: bytes = b"") -> CapturedHeatmap:
+def _captured(seed: bytes = b"", *, halves: bool = True) -> CapturedHeatmap:
     return assemble_heatmap(
         "HSI",
         CAPTURED_AT,
         _png(1920, 989, seed),
         _png(400, 34, seed),
-        [
-            (SectorSummary(name, count, cap), _png(1920, 953, seed + name.encode()))
-            for name, count, cap in sectors
-        ],
+        overview_halves=(_png(1155, 989, seed + b"L"), _png(765, 989, seed + b"R"))
+        if halves
+        else None,
     )
 
 
@@ -267,7 +264,7 @@ async def test_capture_is_uploaded_recorded_and_idempotent(
 ) -> None:
     _, sessions = heatmap_database
     store = FakeObjectStore()
-    captured = _captured(("Finance", 21, 500.0), ("Utilities", 6, 90.0))
+    captured = _captured()
 
     async def capture(**_: object) -> CapturedHeatmap:
         return captured
@@ -285,30 +282,26 @@ async def test_capture_is_uploaded_recorded_and_idempotent(
     assert first.fetched_at == CAPTURED_AT
     assert first.result == {"images": 4, "uploaded": 4, "removed_objects": 0}
     assert sorted(store.objects) == [
-        "heatmaps/hsi/2026-10-12/finance.png",
         "heatmaps/hsi/2026-10-12/legend.png",
         "heatmaps/hsi/2026-10-12/overview.png",
-        "heatmaps/hsi/2026-10-12/utilities.png",
+        "heatmaps/hsi/2026-10-12/overview_left.png",
+        "heatmaps/hsi/2026-10-12/overview_right.png",
     ]
     rows = await _rows(sessions)
     assert [(row.kind, row.slug, row.sort_order) for row in rows] == [
         ("overview", "overview", 0),
-        ("legend", "legend", 1),
-        ("sector", "finance", 2),
-        ("sector", "utilities", 3),
+        ("overview", "overview_left", 1),
+        ("overview", "overview_right", 2),
+        ("legend", "legend", 3),
     ]
-    finance = rows[2]
-    assert (finance.sector_name, finance.symbol_count, finance.market_cap) == (
-        "Finance",
-        21,
-        Decimal("500"),
-    )
-    assert finance.market_code == "hk_equity"
-    assert finance.function_attempt_id == claimed.attempt_id
-    assert (finance.width, finance.height, finance.size_bytes) == (
+    overview = rows[0]
+    assert overview.name == "Overview"
+    assert overview.market_code == "hk_equity"
+    assert overview.function_attempt_id == claimed.attempt_id
+    assert (overview.width, overview.height, overview.size_bytes) == (
         1920,
-        953,
-        len(finance_png(captured)),
+        989,
+        len(captured.images[0].png),
     )
 
     # The same capture again changes nothing and uploads nothing.
@@ -319,22 +312,14 @@ async def test_capture_is_uploaded_recorded_and_idempotent(
     assert second.result == {"images": 4, "uploaded": 0, "removed_objects": 0}
 
 
-def finance_png(captured: CapturedHeatmap) -> bytes:
-    return next(image.png for image in captured.images if image.slug == "finance")
-
-
-async def test_rerun_replaces_changed_images_and_drops_vanished_sectors(
+async def test_rerun_replaces_changed_images_and_drops_vanished_halves(
     heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, sessions = heatmap_database
     store = FakeObjectStore()
-    captures = iter(
-        [
-            _captured(("Finance", 21, 500.0), ("Utilities", 6, 90.0)),
-            _captured(("Finance", 22, 510.0), seed=b"v2"),
-        ]
-    )
+    # The second capture found no gutter, so the halves disappear.
+    captures = iter([_captured(), _captured(b"v2", halves=False)])
 
     async def capture(**_: object) -> CapturedHeatmap:
         return next(captures)
@@ -349,16 +334,17 @@ async def test_rerun_replaces_changed_images_and_drops_vanished_sectors(
     )
 
     assert outcome.status == "succeeded"
-    assert outcome.result == {"images": 3, "uploaded": 3, "removed_objects": 1}
-    assert store.deleted == ["heatmaps/hsi/2026-10-12/utilities.png"]
+    assert outcome.result == {"images": 2, "uploaded": 2, "removed_objects": 2}
+    assert sorted(store.deleted) == [
+        "heatmaps/hsi/2026-10-12/overview_left.png",
+        "heatmaps/hsi/2026-10-12/overview_right.png",
+    ]
     assert sorted(store.objects) == [
-        "heatmaps/hsi/2026-10-12/finance.png",
         "heatmaps/hsi/2026-10-12/legend.png",
         "heatmaps/hsi/2026-10-12/overview.png",
     ]
     rows = await _rows(sessions)
-    assert [row.slug for row in rows] == ["overview", "legend", "finance"]
-    assert rows[2].symbol_count == 22
+    assert [(row.slug, row.sort_order) for row in rows] == [("overview", 0), ("legend", 1)]
 
 
 async def test_editions_past_retention_are_removed_from_ledger_and_bucket(
@@ -367,7 +353,7 @@ async def test_editions_past_retention_are_removed_from_ledger_and_bucket(
 ) -> None:
     _, sessions = heatmap_database
     store = FakeObjectStore()
-    captured = _captured(("Finance", 21, 500.0))
+    captured = _captured(halves=False)
 
     async def capture(**_: object) -> CapturedHeatmap:
         return captured
@@ -386,9 +372,8 @@ async def test_editions_past_retention_are_removed_from_ledger_and_bucket(
         _settings(), sessions, await _running_attempt(sessions), store
     )
 
-    assert outcome.result == {"images": 3, "uploaded": 3, "removed_objects": 3}
+    assert outcome.result == {"images": 2, "uploaded": 2, "removed_objects": 2}
     assert sorted(store.deleted) == [
-        f"heatmaps/hsi/{old_edition.isoformat()}/finance.png",
         f"heatmaps/hsi/{old_edition.isoformat()}/legend.png",
         f"heatmaps/hsi/{old_edition.isoformat()}/overview.png",
     ]
@@ -403,7 +388,7 @@ async def test_stale_fence_cancels_without_touching_the_ledger(
     store = FakeObjectStore()
 
     async def capture(**_: object) -> CapturedHeatmap:
-        return _captured(("Finance", 21, 500.0))
+        return _captured()
 
     monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
     claimed = await _running_attempt(sessions)

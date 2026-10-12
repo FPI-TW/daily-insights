@@ -3282,13 +3282,11 @@ export interface components {
        * Kind
        * @enum {string}
        */
-      kind: "overview" | "legend" | "sector"
+      kind: "overview" | "legend"
       /** Name */
       name: string
       /** Slug */
       slug: string
-      /** Symbol Count */
-      symbol_count: number
       /** Url */
       url: string
       /** Width */

@@ -543,8 +543,6 @@ const resources: Resource = {
       hkSectorHeatmapOverviewPartAlt:
         "恆生指數成分股產業熱力圖總覽（第 {{index}} 段）",
       hkSectorHeatmapLegendAlt: "漲跌幅顏色圖例",
-      hkSectorHeatmapSectorAlt: "{{name}} 產業熱力圖",
-      hkSectorHeatmapSymbolCount: "{{count}} 檔成分股",
       hkSectorHeatmapOpenFullSize: "開啟原始大小",
       usIndexTableLoading: "正在載入美股五大指數表現。",
       usIndexTableUnavailable: "目前無法載入美股五大指數資料。",
@@ -1509,8 +1507,6 @@ const resources: Resource = {
       hkSectorHeatmapOverviewPartAlt:
         "恒生指数成分股行业热力图总览（第 {{index}} 段）",
       hkSectorHeatmapLegendAlt: "涨跌幅颜色图例",
-      hkSectorHeatmapSectorAlt: "{{name}} 行业热力图",
-      hkSectorHeatmapSymbolCount: "{{count}} 只成分股",
       hkSectorHeatmapOpenFullSize: "打开原始大小",
       usIndexTableLoading: "正在加载美股五大指数表现。",
       usIndexTableUnavailable: "目前无法加载美股五大指数数据。",
@@ -2496,9 +2492,6 @@ const resources: Resource = {
       hkSectorHeatmapOverviewPartAlt:
         "Hang Seng constituents sector heatmap overview, part {{index}}",
       hkSectorHeatmapLegendAlt: "Price change colour legend",
-      hkSectorHeatmapSectorAlt: "{{name}} sector heatmap",
-      hkSectorHeatmapSymbolCount_one: "{{count}} constituent",
-      hkSectorHeatmapSymbolCount_other: "{{count}} constituents",
       hkSectorHeatmapOpenFullSize: "Open full size",
       usIndexTableLoading: "Loading US five-index performance.",
       usIndexTableUnavailable: "US five-index data is temporarily unavailable.",

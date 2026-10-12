@@ -752,7 +752,6 @@ describe("API client trust boundary", () => {
             kind: "overview",
             slug: "overview",
             name: "Overview",
-            symbol_count: 0,
             width: 1920,
             height: 989,
             url: "https://signed.test/heatmaps/hsi/2026-10-12/overview.png",

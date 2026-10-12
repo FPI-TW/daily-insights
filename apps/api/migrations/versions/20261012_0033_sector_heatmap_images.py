@@ -25,9 +25,7 @@ def upgrade() -> None:
         sa.Column("edition_date", sa.Date(), nullable=False),
         sa.Column("kind", sa.String(10), nullable=False),
         sa.Column("slug", sa.String(100), nullable=False),
-        sa.Column("sector_name", sa.String(100), nullable=False),
-        sa.Column("symbol_count", sa.Integer(), nullable=False),
-        sa.Column("market_cap", sa.Numeric(24, 2), nullable=True),
+        sa.Column("name", sa.String(100), nullable=False),
         sa.Column("sort_order", sa.Integer(), nullable=False),
         sa.Column("object_key", sa.String(200), nullable=False),
         sa.Column("sha256", sa.String(64), nullable=False),
@@ -59,9 +57,7 @@ def upgrade() -> None:
             "data_source", "edition_date", "slug", name="uq_sector_heatmap_image_date_slug"
         ),
         sa.UniqueConstraint("object_key", name="uq_sector_heatmap_image_object_key"),
-        sa.CheckConstraint("kind IN ('overview', 'legend', 'sector')", name="kind_valid"),
-        sa.CheckConstraint("symbol_count >= 0", name="symbol_count_nonnegative"),
-        sa.CheckConstraint("market_cap IS NULL OR market_cap >= 0", name="market_cap_nonnegative"),
+        sa.CheckConstraint("kind IN ('overview', 'legend')", name="kind_valid"),
         sa.CheckConstraint("sort_order >= 0", name="sort_order_nonnegative"),
         sa.CheckConstraint("char_length(sha256) = 64", name="sha256_length"),
         sa.CheckConstraint(
