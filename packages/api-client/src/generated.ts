@@ -794,6 +794,29 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/markets/hk/sector-heatmap": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Get Hk Sector Heatmap
+     * @description The stored TradingView heatmap PNGs for one edition, newest by default.
+     *
+     *     The bucket is private, so every image comes with a signed URL that lives as
+     *     long as the podcast audio links do.
+     */
+    get: operations["get_hk_sector_heatmap_api_markets_hk_sector_heatmap_get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/markets/indices": {
     parameters: {
       query?: never
@@ -3249,6 +3272,45 @@ export interface components {
       /** Status */
       status: string
     }
+    /** SectorHeatmapImageResponse */
+    SectorHeatmapImageResponse: {
+      /** Expires In Seconds */
+      expires_in_seconds: number
+      /** Height */
+      height: number
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "overview" | "legend" | "sector"
+      /** Name */
+      name: string
+      /** Slug */
+      slug: string
+      /** Symbol Count */
+      symbol_count: number
+      /** Url */
+      url: string
+      /** Width */
+      width: number
+    }
+    /** SectorHeatmapResponse */
+    SectorHeatmapResponse: {
+      /**
+       * Captured At
+       * Format: date-time
+       */
+      captured_at: string
+      /** Data Source */
+      data_source: string
+      /**
+       * Edition Date
+       * Format: date
+       */
+      edition_date: string
+      /** Images */
+      images: components["schemas"]["SectorHeatmapImageResponse"][]
+    }
     /** SeriesBlock */
     SeriesBlock: {
       /** Caveat */
@@ -5192,6 +5254,37 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["MarketResponse"][]
+        }
+      }
+    }
+  }
+  get_hk_sector_heatmap_api_markets_hk_sector_heatmap_get: {
+    parameters: {
+      query?: {
+        date?: string | null
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["SectorHeatmapResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
         }
       }
     }

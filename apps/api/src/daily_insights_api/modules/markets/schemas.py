@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
@@ -160,3 +160,22 @@ class InstitutionalStocksResponse(BaseModel):
     contract_hash: str
     endpoint: str
     rows: list[InstitutionalStockFlowResponse]
+
+
+class SectorHeatmapImageResponse(BaseModel):
+    kind: Literal["overview", "legend", "sector"]
+    slug: str
+    name: str
+    symbol_count: int
+    width: int
+    height: int
+    url: str
+    expires_in_seconds: int
+
+
+class SectorHeatmapResponse(BaseModel):
+    data_source: str
+    edition_date: date
+    captured_at: datetime
+    # Ordered for display: overview, legend, then sectors by market cap.
+    images: list[SectorHeatmapImageResponse]

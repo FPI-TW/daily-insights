@@ -108,18 +108,19 @@ class FakeObjectStore:
         raise NotImplementedError
 
 
+DEFAULT_SETTINGS: dict[str, Any] = {
+    "environment": "test",
+    "tradingview_enabled": True,
+    "r2_endpoint_url": "https://account.r2.cloudflarestorage.com",
+    "r2_bucket_name": "daily-insights-test",
+    "r2_access_key_id": SecretStr("key"),
+    "r2_secret_access_key": SecretStr("secret"),
+    "tradingview_heatmap_retention_days": 30,
+}
+
+
 def _settings(**overrides: Any) -> Settings:
-    values: dict[str, Any] = {
-        "environment": "test",
-        "tradingview_enabled": True,
-        "r2_endpoint_url": "https://account.r2.cloudflarestorage.com",
-        "r2_bucket_name": "daily-insights-test",
-        "r2_access_key_id": SecretStr("key"),
-        "r2_secret_access_key": SecretStr("secret"),
-        "tradingview_heatmap_retention_days": 30,
-    }
-    values.update(overrides)
-    return Settings.model_validate(values)
+    return Settings.model_validate({**DEFAULT_SETTINGS, **overrides})
 
 
 def _claimed(

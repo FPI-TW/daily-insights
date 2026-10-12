@@ -178,6 +178,24 @@ export const institutionalStocksSchema = z.object({
   rows: z.array(institutionalStockFlowSchema),
 })
 export type InstitutionalStocks = z.infer<typeof institutionalStocksSchema>
+export const sectorHeatmapImageSchema = z.object({
+  kind: z.enum(["overview", "legend", "sector"]),
+  slug: z.string().min(1),
+  name: z.string().min(1),
+  symbol_count: z.number().int().nonnegative(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  url: z.url(),
+  expires_in_seconds: z.number().int().positive(),
+})
+export const sectorHeatmapSchema = z.object({
+  data_source: z.string().min(1),
+  edition_date: z.iso.date(),
+  captured_at: z.iso.datetime({ offset: true }),
+  images: z.array(sectorHeatmapImageSchema),
+})
+export type SectorHeatmapImage = z.infer<typeof sectorHeatmapImageSchema>
+export type SectorHeatmap = z.infer<typeof sectorHeatmapSchema>
 export const dataManagementOperationSchema = z.enum([
   "morning_all",
   "morning_market",

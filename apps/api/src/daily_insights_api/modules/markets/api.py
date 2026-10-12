@@ -10,6 +10,8 @@ from daily_insights_api.modules.markets.schemas import (
     IndexLatestBarResponse,
     IndexMovingAveragesResponse,
     MarketResponse,
+    SectorHeatmapImageResponse,
+    SectorHeatmapResponse,
 )
 from daily_insights_api.modules.markets.service import (
     AUTOMATIC_SHORT_REFRESH_PERIOD,
@@ -31,6 +33,7 @@ from daily_insights_api.modules.markets.service import (
     market_responses,
     refresh_index_daily_bars,
     refresh_taiex_daily_bars,
+    sector_heatmap_rows,
     select_index_refresh_period,
     select_taiex_refresh_months,
     store_index_daily_bars,
@@ -58,6 +61,8 @@ __all__ = [
     "InstitutionalStockFlow",
     "MarketResponse",
     "SectorHeatmapImage",
+    "SectorHeatmapImageResponse",
+    "SectorHeatmapResponse",
     "TaiexRefresh",
     "index_daily_bars",
     "index_moving_averages",
@@ -68,6 +73,7 @@ __all__ = [
     "market_responses",
     "refresh_index_daily_bars",
     "refresh_taiex_daily_bars",
+    "sector_heatmap_rows",
     "select_index_refresh_period",
     "select_taiex_refresh_months",
     "store_index_daily_bars",

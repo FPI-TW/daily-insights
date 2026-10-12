@@ -46,6 +46,7 @@ from daily_insights_api.modules.markets.models import (
     InstitutionalStockFlow,
     Market,
     OrganizationMarketPolicy,
+    SectorHeatmapImage,
 )
 from daily_insights_api.modules.markets.schemas import (
     IndexDailyBarResponse,
@@ -1265,3 +1266,27 @@ async def institutional_stock_rows(
         )
         for row in rows
     ]
+
+
+async def sector_heatmap_rows(
+    database: AsyncSession, *, market_code: str, edition_date: date | None
+) -> list[SectorHeatmapImage]:
+    """One edition's ledger rows in display order; the newest edition by default."""
+    if edition_date is None:
+        edition_date = await database.scalar(
+            select(func.max(SectorHeatmapImage.edition_date)).where(
+                SectorHeatmapImage.market_code == market_code
+            )
+        )
+        if edition_date is None:
+            return []
+    return list(
+        await database.scalars(
+            select(SectorHeatmapImage)
+            .where(
+                SectorHeatmapImage.market_code == market_code,
+                SectorHeatmapImage.edition_date == edition_date,
+            )
+            .order_by(SectorHeatmapImage.sort_order)
+        )
+    )

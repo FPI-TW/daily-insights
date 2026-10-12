@@ -1,6 +1,7 @@
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from sqlalchemy import (
     BigInteger,
@@ -188,7 +189,8 @@ class InstitutionalStockFlow(TimestampMixin, Base):
     source_fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-HEATMAP_IMAGE_KINDS: tuple[str, ...] = ("overview", "legend", "sector")
+HeatmapImageKind = Literal["overview", "legend", "sector"]
+HEATMAP_IMAGE_KINDS: tuple[HeatmapImageKind, ...] = ("overview", "legend", "sector")
 _HEATMAP_IMAGE_KIND_SQL = ", ".join(f"'{kind}'" for kind in HEATMAP_IMAGE_KINDS)
 
 
@@ -223,7 +225,7 @@ class SectorHeatmapImage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         String(50), ForeignKey("markets.code", ondelete="RESTRICT"), nullable=False
     )
     edition_date: Mapped[date] = mapped_column(Date, nullable=False)
-    kind: Mapped[str] = mapped_column(String(10), nullable=False)
+    kind: Mapped[HeatmapImageKind] = mapped_column(String(10), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), nullable=False)
     sector_name: Mapped[str] = mapped_column(String(100), nullable=False)
     symbol_count: Mapped[int] = mapped_column(Integer, nullable=False)
