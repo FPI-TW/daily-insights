@@ -81,6 +81,41 @@ describe("HkSectorHeatmap", () => {
     expect(region).toHaveTextContent("1 檔成分股")
   })
 
+  it("stacks the overview halves and links each to the whole image", async () => {
+    const split: SectorHeatmap = {
+      ...heatmap,
+      images: [
+        image("overview", "overview", "Overview"),
+        image("overview", "overview_left", "Overview (left)"),
+        image("overview", "overview_right", "Overview (right)"),
+        ...heatmap.images.slice(1),
+      ],
+    }
+    await renderLocalized(<HkSectorHeatmap heatmap={split} locale="en" />, "en")
+    const region = screen.getByRole("region", {
+      name: "Hong Kong sector heatmap",
+    })
+    expect(
+      within(region).queryByRole("img", {
+        name: "Hang Seng constituents sector heatmap overview",
+      })
+    ).toBeNull()
+    const parts = [1, 2].map(index =>
+      within(region).getByRole("img", {
+        name: `Hang Seng constituents sector heatmap overview, part ${index}`,
+      })
+    )
+    expect(parts.map(part => part.getAttribute("src"))).toEqual([
+      "https://signed.test/overview_left.png",
+      "https://signed.test/overview_right.png",
+    ])
+    for (const part of parts)
+      expect(part.closest("a")).toHaveAttribute(
+        "href",
+        "https://signed.test/overview.png"
+      )
+  })
+
   it("pluralises constituent counts in English", async () => {
     await renderLocalized(
       <HkSectorHeatmap heatmap={heatmap} locale="en" />,

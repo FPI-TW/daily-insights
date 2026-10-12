@@ -16,6 +16,7 @@ Three things about the page are not documented and were found by trial:
 
 import asyncio
 import hashlib
+import io
 import json
 import re
 import struct
@@ -24,6 +25,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import quote
+
+from PIL import Image
 
 from daily_insights_api.modules.data_sources.errors import (
     DataSourceContractError,
@@ -39,6 +42,14 @@ CHROMIUM_ARGS = ("--no-sandbox", "--disable-dev-shm-usage")
 LEGEND_SELECTOR = '[class*="legend-"]'
 MIN_CANVAS_WIDTH = 100
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# The treemap squeezes the small sectors into the right-hand columns, so the
+# overview is split at a column gutter and shown as two stacked halves. A
+# gutter is a full-height run of near-white pixels; sector headers are light
+# too but never full-height. The gutter nearest 60% of the width keeps the
+# large sectors together on the left and gives the crowded side the most room.
+GUTTER_LUMINANCE = 225
+GUTTER_SEARCH_RANGE = (0.15, 0.85)
+GUTTER_TARGET = 0.6
 
 HeatmapImageKind = Literal["overview", "legend", "sector"]
 
@@ -123,6 +134,39 @@ def png_size(data: bytes) -> tuple[int, int]:
     return width, height
 
 
+def column_gutters(png: bytes) -> tuple[int, ...]:
+    """x positions (gutter centres) of full-height light columns inside the search range."""
+    image = Image.open(io.BytesIO(png)).convert("L")
+    width, height = image.size
+    first, last = int(width * GUTTER_SEARCH_RANGE[0]), int(width * GUTTER_SEARCH_RANGE[1])
+    luminance = image.tobytes()  # row-major, one byte per pixel
+    runs: list[list[int]] = []
+    for x in range(first, last):
+        if min(luminance[y * width + x] for y in range(height)) < GUTTER_LUMINANCE:
+            continue
+        if runs and runs[-1][1] == x - 1:
+            runs[-1][1] = x
+        else:
+            runs.append([x, x])
+    return tuple((start + end) // 2 for start, end in runs)
+
+
+def split_overview(png: bytes) -> tuple[bytes, bytes] | None:
+    """Left and right halves cut at the gutter nearest GUTTER_TARGET, or None without one."""
+    gutters = column_gutters(png)
+    if not gutters:
+        return None
+    image = Image.open(io.BytesIO(png))
+    width, height = image.size
+    cut = min(gutters, key=lambda x: abs(x - width * GUTTER_TARGET))
+    halves = []
+    for box in ((0, 0, cut, height), (cut, 0, width, height)):
+        buffer = io.BytesIO()
+        image.crop(box).save(buffer, format="PNG")
+        halves.append(buffer.getvalue())
+    return halves[0], halves[1]
+
+
 def _image(
     kind: HeatmapImageKind,
     slug: str,
@@ -154,12 +198,15 @@ def assemble_heatmap(
     overview_png: bytes,
     legend_png: bytes,
     sector_pngs: Sequence[tuple[SectorSummary, bytes]],
+    overview_halves: tuple[bytes, bytes] | None = None,
 ) -> CapturedHeatmap:
-    images = [
-        _image("overview", "overview", "Overview", overview_png, 0),
-        _image("legend", "legend", "Legend", legend_png, 1),
-    ]
-    for position, (summary, png) in enumerate(sector_pngs, start=2):
+    images = [_image("overview", "overview", "Overview", overview_png, 0)]
+    if overview_halves is not None:
+        left, right = overview_halves
+        images.append(_image("overview", "overview_left", "Overview (left)", left, 1))
+        images.append(_image("overview", "overview_right", "Overview (right)", right, 2))
+    images.append(_image("legend", "legend", "Legend", legend_png, len(images)))
+    for position, (summary, png) in enumerate(sector_pngs, start=len(images)):
         images.append(
             _image(
                 "sector",
@@ -255,4 +302,11 @@ async def capture_sector_heatmap(
                 await browser.close()
     except PlaywrightError as error:
         raise DataSourceTransientError(f"heatmap capture failed at {stage}: {error}") from error
-    return assemble_heatmap(data_source, captured_at, overview_png, legend_png, sector_pngs)
+    return assemble_heatmap(
+        data_source,
+        captured_at,
+        overview_png,
+        legend_png,
+        sector_pngs,
+        overview_halves=split_overview(overview_png),
+    )
