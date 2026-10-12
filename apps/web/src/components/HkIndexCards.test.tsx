@@ -80,13 +80,14 @@ describe("HkIndexCards", () => {
     expect(screen.queryByText(/46,000/)).toBeNull()
     const hsi = screen.getByRole("region", { name: "Hang Seng Index" })
     expect(hsi).toHaveTextContent("24,211.35")
-    expect(hsi).toHaveTextContent("—")
+    expect(within(hsi).getByText("—").parentElement?.textContent).toBe("—")
     expect(hsi).toHaveClass("border-l-line")
     const hsce = screen.getByRole("region", {
       name: "Hang Seng China Enterprises Index",
     })
     expect(hsce).toHaveTextContent("HSCEI")
-    expect(hsce).toHaveTextContent("—")
+    expect(within(hsce).getAllByText("—")).toHaveLength(2)
+    expect(hsce.textContent?.match(/—/g)).toHaveLength(2)
     expect(screen.getAllByRole("region")).toHaveLength(3)
   })
 

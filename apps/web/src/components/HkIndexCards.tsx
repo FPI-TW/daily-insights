@@ -91,17 +91,18 @@ export function HkIndexCards({
             <p
               className={`mt-1 mb-0 flex gap-3 font-mono text-sm font-bold tabular-nums ${colour}`}
             >
-              {change.direction === "flat" ? (
+              {points === null || change.direction === "flat" ? (
+                // One label covers both columns: "flat" or the missing dash.
                 <span>{change.text}</span>
               ) : (
                 <>
                   <span>
-                    {points === null
-                      ? "—"
-                      : formatChange(points, locale, {
-                          percent: false,
-                          flatLabel: t("reportChangeFlat"),
-                        }).text}
+                    {
+                      formatChange(points, locale, {
+                        percent: false,
+                        flatLabel: t("reportChangeFlat"),
+                      }).text
+                    }
                   </span>
                   <span>{change.text}</span>
                 </>
