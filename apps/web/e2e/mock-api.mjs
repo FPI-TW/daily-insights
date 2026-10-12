@@ -205,7 +205,10 @@ function adminEpisode({
       },
       {
         locale: "en",
-        title: "Market Morning Brief",
+        title:
+          state.podcastEpisodes === "grouped"
+            ? "Market Morning Brief — Global markets and economic developments with detailed commentary"
+            : "Market Morning Brief",
         summary: "An English summary for browser testing.",
       },
     ],
@@ -237,6 +240,10 @@ function adminEpisodes() {
       tradingDate: "2026-06-30",
     }),
     adminEpisode(),
+    adminEpisode({
+      id: "10000000-0000-4000-8000-000000000005",
+      tradingDate: "2026-07-25",
+    }),
     adminEpisode({
       id: "10000000-0000-4000-8000-000000000003",
       tradingDate: "2026-07-26",

@@ -6,6 +6,33 @@ import { brandTitles } from "./brand"
 const resources: Resource = {
   "zh-hant": {
     translation: {
+      audioEpisodeCount: "{{count}} 集",
+      tokenTotal: "Token 合計",
+      tokenInput: "輸入 tokens",
+      tokenOutput: "輸出 tokens",
+      tokenUnavailable: "未提供",
+      tokenKnown: "已知用量",
+      tokenSummary: "Token 用量摘要",
+      tokenPartialNotice: "部分生成未回傳完整用量，僅加總已知數值。",
+      memberTypeLabel: "會員類型",
+      memberTypeFilter: "會員分類",
+      memberType_all: "全部",
+      memberType_regular: "一般會員",
+      memberType_trial: "試用會員",
+      trialDays: "試用天數",
+      trialCreationHint:
+        "從建立時起算，每天為 24 小時；到期後停止登入並釋放席次。",
+      trialActive: "試用中",
+      trialExpired: "已到期",
+      trialExpiresAt: "試用到期時間（台北 UTC+8）",
+      trialExpiredHint:
+        "此會員已不占用席次，延長期限或轉一般會員時會重新檢查席次。",
+      trialEditHint: "到期後恢復須重新登入；調整期限不會自動解除停用。",
+      trialConvert: "轉為一般會員",
+      trialConvertConfirmation:
+        "確定轉為一般會員？試用期限將移除；已到期會員須重新登入。",
+      trialSeatConflict: "組織席次已滿，請先釋放席次再恢復試用或轉為一般會員。",
+
       sectionTechnical: "指數技術面",
       biasTitle: "台股乖離率",
       biasSub: "{{window}} · 20/60/120MA 乖離帶",
@@ -963,6 +990,33 @@ const resources: Resource = {
   },
   "zh-hans": {
     translation: {
+      audioEpisodeCount: "{{count}} 集",
+      tokenTotal: "Token 合计",
+      tokenInput: "输入 tokens",
+      tokenOutput: "输出 tokens",
+      tokenUnavailable: "未提供",
+      tokenKnown: "已知用量",
+      tokenSummary: "Token 用量摘要",
+      tokenPartialNotice: "部分生成未返回完整用量，仅汇总已知数值。",
+      memberTypeLabel: "会员类型",
+      memberTypeFilter: "会员分类",
+      memberType_all: "全部",
+      memberType_regular: "一般会员",
+      memberType_trial: "试用会员",
+      trialDays: "试用天数",
+      trialCreationHint:
+        "从创建时起算，每天为 24 小时；到期后停止登录并释放席位。",
+      trialActive: "试用中",
+      trialExpired: "已到期",
+      trialExpiresAt: "试用到期时间（台北 UTC+8）",
+      trialExpiredHint:
+        "此会员已不占用席位，延长期限或转普通会员时会重新检查席位。",
+      trialEditHint: "到期后恢复须重新登录；调整期限不会自动解除停用。",
+      trialConvert: "转为普通会员",
+      trialConvertConfirmation:
+        "确定转为普通会员？试用期限将移除；已到期会员须重新登录。",
+      trialSeatConflict: "组织席位已满，请先释放席位再恢复试用或转为普通会员。",
+
       sectionTechnical: "指数技术面",
       biasTitle: "台股乖离率",
       biasSub: "{{window}} · 20/60/120MA 乖离带",
@@ -1917,6 +1971,37 @@ const resources: Resource = {
   },
   en: {
     translation: {
+      audioEpisodeCount_one: "{{count}} episode",
+      audioEpisodeCount_other: "{{count}} episodes",
+      tokenTotal: "Total tokens",
+      tokenInput: "Input tokens",
+      tokenOutput: "Output tokens",
+      tokenUnavailable: "Not reported",
+      tokenKnown: "Known usage",
+      tokenSummary: "Token usage summary",
+      tokenPartialNotice:
+        "Some generations did not report full usage; only known counts are included.",
+      memberTypeLabel: "Member type",
+      memberTypeFilter: "Member category",
+      memberType_all: "All",
+      memberType_regular: "Regular members",
+      memberType_trial: "Trial members",
+      trialDays: "Trial days",
+      trialCreationHint:
+        "Starts at creation, with 24 hours per day. Expiry blocks access and releases the seat.",
+      trialActive: "Trial active",
+      trialExpired: "Trial expired",
+      trialExpiresAt: "Trial expiry (Taipei UTC+8)",
+      trialExpiredHint:
+        "This member no longer occupies a seat. Renewal or conversion requires an available seat.",
+      trialEditHint:
+        "Renewal after expiry requires a new login. Changing the deadline does not reactivate a suspended account.",
+      trialConvert: "Convert to regular",
+      trialConvertConfirmation:
+        "Convert to a regular member? The trial deadline will be removed. Expired members must sign in again.",
+      trialSeatConflict:
+        "No seats available. Free a seat before renewing or converting this member.",
+
       sectionTechnical: "Index technicals",
       biasTitle: "TAIEX bias",
       biasSub: "{{window}} · 20/60/120MA bias bands",

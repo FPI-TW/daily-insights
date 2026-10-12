@@ -858,6 +858,9 @@ export type Organization = z.infer<typeof organizationSchema>
 export const organizationListSchema = z.array(organizationSchema)
 
 export const memberSchema = z.object({
+  member_type: z.enum(["regular", "trial"]),
+  trial_expires_at: z.iso.datetime({ offset: true }).nullable(),
+  trial_expired: z.boolean(),
   membership_id: z.uuid(),
   user_id: z.uuid(),
   email: z.string().min(1),
@@ -883,12 +886,16 @@ export type OrganizationCreateInput = {
 }
 
 export type MemberCreateInput = {
+  member_type?: "regular" | "trial"
+  trial_days?: number
   email: string
   display_name: string
   reason: string
 }
 
 export type MemberUpdateInput = {
+  member_type?: "regular" | "trial"
+  trial_expires_at?: string
   display_name?: string
   status?: "active" | "suspended"
   reason: string

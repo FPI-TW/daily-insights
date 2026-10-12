@@ -1245,6 +1245,7 @@ export interface components {
        * Format: uuid
        */
       organization_id: string
+      usage: components["schemas"]["TokenUsageSummary"]
       /**
        * User Id
        * Format: uuid
@@ -1276,6 +1277,7 @@ export interface components {
       organization_id: string
       /** Title */
       title: string | null
+      usage: components["schemas"]["TokenUsageSummary"]
       /**
        * User Id
        * Format: uuid
@@ -2213,8 +2215,16 @@ export interface components {
       display_name: string
       /** Email */
       email: string
+      /**
+       * Member Type
+       * @default regular
+       * @enum {string}
+       */
+      member_type: "regular" | "trial"
       /** Reason */
       reason: string
+      /** Trial Days */
+      trial_days?: number | null
     }
     /** MemberResponse */
     MemberResponse: {
@@ -2228,6 +2238,11 @@ export interface components {
        */
       joined_at: string
       /**
+       * Member Type
+       * @enum {string}
+       */
+      member_type: "regular" | "trial"
+      /**
        * Membership Id
        * Format: uuid
        */
@@ -2235,6 +2250,10 @@ export interface components {
       /** Must Change Password */
       must_change_password: boolean
       status: components["schemas"]["UserStatus"]
+      /** Trial Expired */
+      trial_expired: boolean
+      /** Trial Expires At */
+      trial_expires_at: string | null
       /**
        * User Id
        * Format: uuid
@@ -2245,9 +2264,13 @@ export interface components {
     MemberUpdate: {
       /** Display Name */
       display_name?: string | null
+      /** Member Type */
+      member_type?: ("regular" | "trial") | null
       /** Reason */
       reason: string
       status?: components["schemas"]["UserStatus"] | null
+      /** Trial Expires At */
+      trial_expires_at?: string | null
     }
     /**
      * MessageRole
@@ -3003,6 +3026,11 @@ export interface components {
        */
       joined_at: string
       /**
+       * Member Type
+       * @enum {string}
+       */
+      member_type: "regular" | "trial"
+      /**
        * Membership Id
        * Format: uuid
        */
@@ -3012,6 +3040,10 @@ export interface components {
       status: components["schemas"]["UserStatus"]
       /** Temporary Password */
       temporary_password: string
+      /** Trial Expired */
+      trial_expired: boolean
+      /** Trial Expires At */
+      trial_expires_at: string | null
       /**
        * User Id
        * Format: uuid
@@ -3324,6 +3356,20 @@ export interface components {
       id: string
       /** Unit Code */
       unit_code?: string | null
+    }
+    /** TokenUsageSummary */
+    TokenUsageSummary: {
+      /**
+       * Completeness
+       * @enum {string}
+       */
+      completeness: "complete" | "partial" | "unavailable"
+      /** Input Tokens */
+      input_tokens: number | null
+      /** Output Tokens */
+      output_tokens: number | null
+      /** Total Tokens */
+      total_tokens: number | null
     }
     /** UploadBatchInitResponse */
     UploadBatchInitResponse: {

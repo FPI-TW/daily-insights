@@ -100,6 +100,7 @@ async def login(
     )
     organization_id = None
     organization_is_active = True
+    membership: Membership | None = None
     if user is not None and user.system_role == SystemRole.ORG_MEMBER:
         organization_id = await database.scalar(
             select(Membership.organization_id).where(
@@ -136,6 +137,7 @@ async def login(
         organization_is_active = (
             organization is not None
             and membership is not None
+            and not membership.trial_expired(datetime.now(UTC))
             and user is not None
             and organization.status == OrganizationStatus.ACTIVE
         )
@@ -164,6 +166,7 @@ async def login(
         and user.status == UserStatus.ACTIVE
         and password_is_valid
         and organization_is_active
+        and (membership is None or not membership.trial_expired(datetime.now(UTC)))
     )
     if not valid or user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials")
@@ -176,7 +179,16 @@ async def login(
     )
     if password_needs_rehash(user.password_hash):
         user.password_hash = await password_work.run(hash_password, payload.password, pepper)
-    session, token, csrf_token = create_session(database, user=user, settings=settings)
+    # Authorize issuance after all awaited login work. An expired trial rejects
+    # the uncommitted transaction, including any legacy password rehash.
+    if membership is not None and membership.trial_expired(datetime.now(UTC)):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials")
+    session, token, csrf_token = create_session(
+        database,
+        user=user,
+        settings=settings,
+        trial_expires_at=membership.trial_expires_at if membership else None,
+    )
     await database.flush()
     context = AuthContext(user=user, session=session, organization_id=organization_id)
     record_audit_event(
@@ -247,6 +259,7 @@ async def change_password(
     database: Annotated[AsyncSession, Depends(get_database_session)],
 ) -> AuthenticationResponse:
     settings: Settings = request.app.state.settings
+    membership: Membership | None = None
     if context.organization_id is not None:
         organization = await database.scalar(
             select(Organization).where(Organization.id == context.organization_id).with_for_update()
@@ -262,7 +275,7 @@ async def change_password(
             )
             .with_for_update()
         )
-        if membership is None:
+        if membership is None or membership.trial_expired(datetime.now(UTC)):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or expired session")
     locked_user = await database.scalar(
         select(User)
@@ -271,6 +284,23 @@ async def change_password(
         .with_for_update()
     )
     if locked_user is None or locked_user.status != UserStatus.ACTIVE:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or expired session")
+    # AuthContext was read before acquiring the lifecycle locks. Refresh and
+    # lock its session too, so a concurrent revocation cannot mint credentials.
+    locked_session = await database.scalar(
+        select(Session)
+        .where(Session.id == context.session.id)
+        .execution_options(populate_existing=True)
+        .with_for_update()
+    )
+    now = datetime.now(UTC)
+    if (
+        locked_session is None
+        or locked_session.user_id != locked_user.id
+        or locked_session.revoked_at is not None
+        or locked_session.expires_at <= now
+        or (membership is not None and membership.trial_expired(now))
+    ):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or expired session")
     assert settings.password_pepper is not None
     pepper = settings.password_pepper.get_secret_value()
@@ -286,6 +316,12 @@ async def change_password(
     except PasswordPolicyError as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
 
+    now = datetime.now(UTC)
+    if locked_session.expires_at <= now or (
+        membership is not None and membership.trial_expired(now)
+    ):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or expired session")
+
     locked_user.password_hash = new_password_hash
     locked_user.must_change_password = False
     await database.execute(
@@ -293,10 +329,19 @@ async def change_password(
         .where(Session.user_id == locked_user.id, Session.revoked_at.is_(None))
         .values(revoked_at=datetime.now(UTC))
     )
+    # Issuance is authorized here, after awaited database work. The initiating
+    # session was intentionally revoked above; expiry still prevents renewal.
+    # An HTTP error closes the uncommitted session and rolls back all mutations.
+    now = datetime.now(UTC)
+    if locked_session.expires_at <= now or (
+        membership is not None and membership.trial_expired(now)
+    ):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or expired session")
     new_session, token, csrf_token = create_session(
         database,
         user=locked_user,
         settings=settings,
+        trial_expires_at=membership.trial_expires_at if membership else None,
     )
     await database.flush()
     record_audit_event(
