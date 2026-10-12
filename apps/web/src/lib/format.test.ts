@@ -4,6 +4,7 @@ import {
   formatChange,
   formatIsoDate,
   formatNumber,
+  percentageChange,
   unitLabel,
 } from "./format"
 
@@ -75,6 +76,17 @@ describe("formatChange", () => {
     expect(directionClass("up")).toBe("text-market-up")
     expect(directionClass("down")).toBe("text-market-down")
     expect(directionClass("flat")).toBe("text-sea-ink-soft")
+  })
+})
+
+describe("percentageChange", () => {
+  it("returns the percent move and null for missing, non-numeric or zero baselines", () => {
+    expect(percentageChange("110", "100")).toBeCloseTo(10)
+    expect(percentageChange(95, "100")).toBeCloseTo(-5)
+    expect(percentageChange("100", null)).toBeNull()
+    expect(percentageChange(undefined, "100")).toBeNull()
+    expect(percentageChange("abc", "100")).toBeNull()
+    expect(percentageChange("100", "0")).toBeNull()
   })
 })
 

@@ -89,6 +89,19 @@ export function formatChange(
   }
 }
 
+/** Percent move from `baseline` to `close`, or null when either side is
+ * missing, non-numeric or the baseline is zero. */
+export function percentageChange(
+  close: string | number | null | undefined,
+  baseline: string | number | null | undefined
+): number | null {
+  if (close == null || baseline == null) return null
+  const latest = toNumber(close)
+  const previous = toNumber(baseline)
+  if (latest === null || previous === null || previous === 0) return null
+  return ((latest - previous) / previous) * 100
+}
+
 /** Direction of pre-formatted text (test fixtures and translated values). */
 export function literalDirection(text: string): Direction {
   if (text.startsWith("+")) return "up"

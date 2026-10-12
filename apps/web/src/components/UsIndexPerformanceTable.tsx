@@ -1,7 +1,12 @@
 import { ResponsiveTable } from "./ResponsiveTable"
 import type { Locale } from "@daily-insights/api-client"
 import { useTranslation } from "react-i18next"
-import { directionClass, formatChange, formatNumber } from "#/lib/format"
+import {
+  directionClass,
+  formatChange,
+  formatNumber,
+  percentageChange,
+} from "#/lib/format"
 import { indexNameKey, type MarketIndexHistory } from "#/lib/indices"
 
 const usIndexSymbols = ["^GSPC", "^NDX", "^DJI", "^SOX", "^RUT"] as const
@@ -12,19 +17,6 @@ type Performance = {
   monthly: number | null
   ytd: number | null
   symbol: (typeof usIndexSymbols)[number]
-}
-
-function percentageChange(close: string, baseline: string | undefined) {
-  const latest = Number(close)
-  const previous = Number(baseline)
-  if (
-    !Number.isFinite(latest) ||
-    !Number.isFinite(previous) ||
-    previous === 0
-  ) {
-    return null
-  }
-  return ((latest - previous) / previous) * 100
 }
 
 /** Bars are settled closes. Monthly/YTD baselines are the last settled closes

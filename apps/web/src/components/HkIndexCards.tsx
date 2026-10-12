@@ -1,6 +1,11 @@
 import type { IndexLatestBar, Locale } from "@daily-insights/api-client"
 import { useTranslation } from "react-i18next"
-import { directionClass, formatChange, formatNumber } from "#/lib/format"
+import {
+  directionClass,
+  formatChange,
+  formatNumber,
+  percentageChange,
+} from "#/lib/format"
 import { indexNameKey, trackedSymbolsForMarket } from "#/lib/indices"
 
 // Display codes as the market quotes them, not Yahoo's ticker spelling.
@@ -55,15 +60,11 @@ export function HkIndexCards({
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
       {trackedSymbolsForMarket("hk_equity").map(symbol => {
         const bar = bySymbol.get(symbol)
-        const close = bar ? Number(bar.close) : null
-        const previous =
-          bar?.previous_close == null ? null : Number(bar.previous_close)
+        const percent = percentageChange(bar?.close, bar?.previous_close)
         const points =
-          close === null || previous === null ? null : close - previous
-        const percent =
-          points === null || previous === null || previous === 0
-            ? null
-            : (points / previous) * 100
+          bar && percent !== null
+            ? Number(bar.close) - Number(bar.previous_close)
+            : null
         const change = formatChange(percent, locale, {
           flatLabel: t("reportChangeFlat"),
         })
