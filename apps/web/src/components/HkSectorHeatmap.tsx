@@ -13,8 +13,8 @@ export function HkSectorHeatmapLoading() {
     >
       <div className="h-3 w-32 animate-pulse rounded bg-line" />
       <div className="mt-4 aspect-[2/1] w-full animate-pulse rounded bg-line" />
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
-        {Array.from({ length: 4 }, (_, index) => (
+      <div className="mt-4 grid gap-4">
+        {Array.from({ length: 2 }, (_, index) => (
           <div
             key={index}
             className="aspect-[2/1] animate-pulse rounded bg-line"
@@ -64,7 +64,7 @@ export function HkSectorHeatmap({
       </div>
       {overview ? (
         // Every image links to its full-size PNG: the tiles' labels are drawn
-        // at 1920px and only stay legible when the viewer can open the original.
+        // at 1920px, so sectors take a full column and the original stays a click away.
         <a
           className="mt-4 block"
           href={overview.url}
@@ -91,7 +91,7 @@ export function HkSectorHeatmap({
         />
       ) : null}
       {sectors.length ? (
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <div className="mt-4 grid gap-4">
           {sectors.map(image => (
             <figure key={image.slug} className="m-0 min-w-0">
               <a
