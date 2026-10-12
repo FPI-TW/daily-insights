@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api.core.config import Settings
@@ -26,11 +28,15 @@ from daily_insights_api.modules.data_sources.api import (
     TwelveDataTransport,
     TwseAdapter,
     YfinanceAdapter,
+    YfinanceDailyBars,
 )
 from daily_insights_api.modules.markets.api import (
+    AUTOMATIC_SHORT_REFRESH_PERIOD,
     INSTITUTIONAL_MARKET_CODE,
+    MAX_FETCH_CONCURRENCY,
     TAIEX_INCREMENTAL_MONTHS,
     TAIEX_SYMBOL,
+    select_index_refresh_period,
     select_taiex_refresh_months,
     store_index_daily_bars,
     store_institutional_market_flows,
@@ -43,7 +49,7 @@ from daily_insights_api.modules.orchestration.facts import (
     store_interest_rates,
     store_market_bars,
 )
-from daily_insights_api.modules.orchestration.models import JobRun
+from daily_insights_api.modules.orchestration.models import JobRun, MarketDailySeries
 from daily_insights_api.modules.orchestration.news_functions import build_news_handlers
 from daily_insights_api.modules.orchestration.worker import (
     AttemptStatus,
@@ -391,13 +397,39 @@ async def _run_yahoo(
         for item in YAHOO_MANIFESTS[claimed.function_key]
         if not retry_scopes or item[0] in retry_scopes
     )
-    for symbol, market, unit in manifest:
+    # A symbol that already has a series only needs the short window; a new
+    # one (first deployment, or a symbol just added to the catalog) gets the
+    # two-year bootstrap. Fetches run with bounded concurrency so one slow
+    # Yahoo answer does not push the whole attempt past its deadline; writes
+    # stay sequential and in manifest order because the session is not safe
+    # for concurrent use.
+    stored = await _stored_yahoo_symbols(
+        session_factory,
+        provider_key=claimed.provider_key,
+        dataset_key=claimed.function_key,
+        symbols=[symbol for symbol, _market, _unit in manifest],
+    )
+    semaphore = asyncio.Semaphore(MAX_FETCH_CONCURRENCY)
+
+    async def fetch(symbol: str, market: str) -> YfinanceDailyBars | Exception:
+        async with semaphore:
+            try:
+                return await adapter.get_daily_bars(
+                    market=market,  # type: ignore[arg-type]
+                    symbol=symbol,
+                    period=select_index_refresh_period(
+                        period=AUTOMATIC_SHORT_REFRESH_PERIOD,
+                        has_stored_bars=symbol in stored,
+                    ),
+                )
+            except Exception as error:
+                return error
+
+    fetched = await asyncio.gather(*(fetch(symbol, market) for symbol, market, _unit in manifest))
+    for (symbol, market, unit), result in zip(manifest, fetched, strict=True):
         try:
-            result = await adapter.get_daily_bars(
-                market=market,  # type: ignore[arg-type]
-                symbol=symbol,
-                period="2y",
-            )
+            if isinstance(result, Exception):
+                raise result
             async with session_factory.begin() as database:
                 inserted += await store_market_bars(
                     database,
@@ -458,6 +490,32 @@ async def _run_yahoo(
         error_detail=_failure_detail(failure_reasons),
         retryable=bool(failures),
     )
+
+
+async def _stored_yahoo_symbols(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    provider_key: str,
+    dataset_key: str,
+    symbols: list[str],
+) -> set[str]:
+    """Symbols whose series already exists for this dataset.
+
+    store_market_bars creates the series and its first observations in one
+    transaction, so an existing series means a previous attempt landed.
+    """
+    async with session_factory() as database:
+        return set(
+            (
+                await database.scalars(
+                    select(MarketDailySeries.symbol).where(
+                        MarketDailySeries.provider_key == provider_key,
+                        MarketDailySeries.dataset_key == dataset_key,
+                        MarketDailySeries.symbol.in_(symbols),
+                    )
+                )
+            ).all()
+        )
 
 
 def _twse_adapter(settings: Settings) -> TwseAdapter:
