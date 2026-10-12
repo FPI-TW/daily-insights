@@ -121,6 +121,9 @@ services:
       DAILY_INSIGHTS_R2_BUCKET_NAME: ${DAILY_INSIGHTS_R2_BUCKET_NAME:?set DAILY_INSIGHTS_R2_BUCKET_NAME}
       DAILY_INSIGHTS_R2_ACCESS_KEY_ID: ${DAILY_INSIGHTS_R2_ACCESS_KEY_ID:?set DAILY_INSIGHTS_R2_ACCESS_KEY_ID from GitHub Secrets}
       DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY: ${DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY:?set DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY from GitHub Secrets}
+      # Chromium writes its profile and crash dumps under HOME and /tmp; both
+      # must land on the tmpfs because the root filesystem is read-only.
+      HOME: /tmp
     command:
       ["python", "-m", "daily_insights_api.scripts.run_orchestration_worker"]
     healthcheck:
@@ -138,7 +141,8 @@ services:
     stop_grace_period: 45s
     read_only: true
     tmpfs:
-      - /tmp:size=32m,mode=1777
+      # Headless Chromium needs room for its profile, cache and the PNGs in flight.
+      - /tmp:size=256m,mode=1777
     cap_drop:
       - ALL
     security_opt:

@@ -6,7 +6,7 @@ export pnpm_config_verify_deps_before_run := false
 	migrate bootstrap-admin format format-check lint type-check test test-db \
 	generate-morning-reports generate-daily-news backfill-index-daily-bars \
 	check-index-catalog check-nginx check-production-deployment \
-	check build
+	capture-hsi-heatmap check build
 
 help: ## 顯示可用指令
 	@awk 'BEGIN {FS = ":.*## "; printf "Daily Insights 開發指令：\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -90,6 +90,13 @@ type-check: ## 執行 Web 與 API 型別檢查
 
 test: ## 執行 Web 與 API 測試
 	pnpm test
+
+capture-hsi-heatmap: ## 在 worker 映像內擷取 TradingView HSI 熱力圖到 output/heatmap/hsi（可傳 OUT，除錯用）
+	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
+	mkdir -p $(or $(OUT),output/heatmap/hsi)
+	docker compose run --rm --build -e HOME=/tmp \
+		-v $$(cd $(or $(OUT),output/heatmap/hsi) && pwd):/output orchestration-worker \
+		python -m daily_insights_api.modules.data_sources.tradingview --out /output
 
 check-index-catalog: ## 驗證 Python 與 API client 的指數 catalog 契約
 	uv run --project apps/api pytest -c apps/api/pyproject.toml \

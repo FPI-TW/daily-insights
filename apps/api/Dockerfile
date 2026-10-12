@@ -16,6 +16,14 @@ RUN mkdir -p /var/spool/podcast-media && chown nobody:nogroup /var/spool/podcast
 
 ENV PATH="/app/.venv/bin:${PATH}"
 
+# The orchestration worker screenshots TradingView's heatmap. Playwright's
+# headless shell is a third of a full Chromium and is what headless launches
+# use; it is installed system-wide so the unprivileged runtime user can load it.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN playwright install --with-deps chromium-headless-shell \
+    && chmod -R a+rX /ms-playwright \
+    && rm -rf /var/lib/apt/lists/*
+
 USER nobody
 EXPOSE 8000
 
