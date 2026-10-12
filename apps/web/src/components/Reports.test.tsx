@@ -14,9 +14,9 @@ import {
   ReportList,
   ReportLoadingScreen,
   ReportNotGeneratedScreen,
-  ReportNotLaunchedScreen,
   ReportShell,
 } from "./Reports"
+import { ReportInformation } from "./MarketInformation"
 import { LocaleSwitcher } from "./LocaleSwitcher"
 import { createI18n } from "#/lib/i18n"
 import type { NavMarket } from "#/lib/markets"
@@ -214,18 +214,24 @@ describe("three-market report presentation", () => {
     expect(section).not.toHaveTextContent("Crypto")
   })
 
-  it("omits the Hong Kong not-launched notice", async () => {
+  it("lets the route hide the not-launched notice while retaining its shared shell", async () => {
     await renderLocalized(
-      <ReportNotLaunchedScreen locale="en" marketCode="hk_equity" />,
+      <ReportInformation
+        locale="en"
+        report={{ kind: "not-launched", marketCode: "hk_equity" }}
+      />,
       "en"
     )
-    expect(screen.queryByRole("status")).toBeNull()
-    expect(screen.queryByText("Report not launched yet")).toBeNull()
-  })
-  it("omits the Taiwan not-launched notice while retaining its shared shell", async () => {
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Report not launched yet"
+    )
     await renderLocalized(
       <ReportShell locale="en" markets={markets} activeMarket="tw_equity">
-        <ReportNotLaunchedScreen locale="en" marketCode="tw_equity" />
+        <ReportInformation
+          locale="en"
+          report={{ kind: "not-launched", marketCode: "tw_equity" }}
+          hideNotLaunched
+        />
       </ReportShell>,
       "en"
     )

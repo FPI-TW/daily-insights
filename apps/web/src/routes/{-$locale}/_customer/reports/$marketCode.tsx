@@ -85,6 +85,8 @@ function ReportPage() {
   }, [locale, marketCode, mergedForex, navigate])
   const [range] = useState(() => twoYearTaipeiRange())
   const isChart = marketCode === "us_equity" || marketCode === "tw_equity"
+  // Markets without a morning report that still fill the page themselves.
+  const hasOwnContent = marketCode === "tw_equity" || marketCode === "hk_equity"
   const report = useMarketQuery(queries.report(marketCode), locale, reportReady)
   const news = useMarketQuery(
     queries.news(marketCode),
@@ -212,7 +214,11 @@ function ReportPage() {
             >
               {data =>
                 data && data.kind !== "not-found" ? (
-                  <ReportInformation locale={locale} report={data} />
+                  <ReportInformation
+                    locale={locale}
+                    report={data}
+                    hideNotLaunched={hasOwnContent}
+                  />
                 ) : null
               }
             </MarketQuerySection>

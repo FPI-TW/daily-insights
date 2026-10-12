@@ -810,10 +810,8 @@ export function ReportNotLaunchedScreen({
   locale?: Locale
   marketCode: MarketCode
 }) {
+  void marketCode
   const { t } = useTranslation()
-  // These markets have no morning report yet but already carry their own
-  // content, so the notice would only push it down the page.
-  if (marketCode === "tw_equity" || marketCode === "hk_equity") return null
   return (
     <section
       className="surface-panel p-10 text-center"

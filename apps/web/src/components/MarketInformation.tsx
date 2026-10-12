@@ -16,10 +16,14 @@ export function ReportInformation({
   locale,
   report,
   leadingBlock,
+  hideNotLaunched = false,
 }: {
   locale: Locale
   report: MarketReportState
   leadingBlock?: ReactNode
+  /** The route sets this for markets that already render their own content
+   * (index cards, charts), where the notice would only push it down. */
+  hideNotLaunched?: boolean
 }) {
   if (report.kind === "not-generated")
     return (
@@ -29,7 +33,7 @@ export function ReportInformation({
       />
     )
   if (report.kind === "not-launched")
-    return (
+    return hideNotLaunched ? null : (
       <ReportNotLaunchedScreen locale={locale} marketCode={report.marketCode} />
     )
   return (
