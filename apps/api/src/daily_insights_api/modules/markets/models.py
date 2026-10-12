@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    Integer,
     Numeric,
     String,
     UniqueConstraint,
@@ -185,3 +186,55 @@ class InstitutionalStockFlow(TimestampMixin, Base):
     sell_shares: Mapped[int] = mapped_column(BigInteger, nullable=False)
     net_shares: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+HEATMAP_IMAGE_KINDS: tuple[str, ...] = ("overview", "legend", "sector")
+_HEATMAP_IMAGE_KIND_SQL = ", ".join(f"'{kind}'" for kind in HEATMAP_IMAGE_KINDS)
+
+
+class SectorHeatmapImage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """One captured heatmap PNG for one edition date.
+
+    The bytes live in R2 under ``object_key``; this row is the ledger the read
+    API uses to list a day's images, sign their URLs, and expire old objects.
+    Re-capturing a day upserts on (data_source, edition_date, slug) so a rerun
+    replaces the day's images instead of growing a second set.
+    """
+
+    __tablename__ = "sector_heatmap_images"
+    __table_args__ = (
+        CheckConstraint(f"kind IN ({_HEATMAP_IMAGE_KIND_SQL})", name="kind_valid"),
+        CheckConstraint("symbol_count >= 0", name="symbol_count_nonnegative"),
+        CheckConstraint("market_cap IS NULL OR market_cap >= 0", name="market_cap_nonnegative"),
+        CheckConstraint("sort_order >= 0", name="sort_order_nonnegative"),
+        CheckConstraint("char_length(sha256) = 64", name="sha256_length"),
+        CheckConstraint(
+            "size_bytes > 0 AND width > 0 AND height > 0", name="image_dimensions_positive"
+        ),
+        UniqueConstraint(
+            "data_source", "edition_date", "slug", name="uq_sector_heatmap_image_date_slug"
+        ),
+        UniqueConstraint("object_key", name="uq_sector_heatmap_image_object_key"),
+        Index("ix_sector_heatmap_images_market_date", "market_code", "edition_date"),
+    )
+
+    data_source: Mapped[str] = mapped_column(String(20), nullable=False)
+    market_code: Mapped[str] = mapped_column(
+        String(50), ForeignKey("markets.code", ondelete="RESTRICT"), nullable=False
+    )
+    edition_date: Mapped[date] = mapped_column(Date, nullable=False)
+    kind: Mapped[str] = mapped_column(String(10), nullable=False)
+    slug: Mapped[str] = mapped_column(String(100), nullable=False)
+    sector_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    symbol_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    market_cap: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    object_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    width: Mapped[int] = mapped_column(Integer, nullable=False)
+    height: Mapped[int] = mapped_column(Integer, nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    function_attempt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("function_attempts.id", ondelete="RESTRICT"), nullable=False
+    )

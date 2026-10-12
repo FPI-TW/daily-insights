@@ -65,6 +65,7 @@ EXPECTED_TABLES = {
     "report_pipeline_runs",
     "report_publications",
     "routine_runs",
+    "sector_heatmap_images",
     "sessions",
     "source_runs",
     "users",
