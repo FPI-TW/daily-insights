@@ -324,7 +324,7 @@ const resources: Resource = {
       dataManagementProvider_twse: "TWSE",
       dataManagementIndex: "國際指數更新",
       dataManagementIndexDescription:
-        "以 Yahoo Finance 更新 8 檔已追蹤指數的最近資料。加權指數不在此處，請用「台股證交所資料」。",
+        "以 Yahoo Finance 更新所有已追蹤指數的最近資料。加權指數不在此處，請用「台股證交所資料」。",
       dataManagementIndexAction: "更新國際指數",
       dataManagementInstitutional: "台股證交所資料",
       dataManagementInstitutionalDescription:
@@ -1287,7 +1287,7 @@ const resources: Resource = {
       dataManagementProvider_twse: "TWSE",
       dataManagementIndex: "国际指数更新",
       dataManagementIndexDescription:
-        "以 Yahoo Finance 更新 8 档已追踪指数的最近数据。加权指数不在此处，请用「台股证交所数据」。",
+        "以 Yahoo Finance 更新所有已追踪指数的最近数据。加权指数不在此处，请用「台股证交所数据」。",
       dataManagementIndexAction: "更新国际指数",
       dataManagementInstitutional: "台股证交所数据",
       dataManagementInstitutionalDescription:
@@ -2259,7 +2259,7 @@ const resources: Resource = {
       dataManagementProvider_twse: "TWSE",
       dataManagementIndex: "International index update",
       dataManagementIndexDescription:
-        "Update recent data for the eight indices Yahoo Finance supplies. TAIEX is not here; use Taiwan exchange data.",
+        "Update recent data for every index Yahoo Finance supplies. TAIEX is not here; use Taiwan exchange data.",
       dataManagementIndexAction: "Update international indices",
       dataManagementInstitutional: "Taiwan exchange data",
       dataManagementInstitutionalDescription:
