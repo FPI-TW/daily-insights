@@ -66,11 +66,18 @@ describe("HkIndexCards", () => {
     expect(vixChange.parentElement?.textContent).toBe("持平")
   })
 
-  it("keeps a placeholder card for symbols without rows or a previous close", async () => {
+  it("keeps a placeholder card for symbols without rows or a previous close and ignores other markets", async () => {
     await renderLocalized(
-      <HkIndexCards locale="en" bars={[bar("^HSI", "24211.35", null)]} />,
+      <HkIndexCards
+        locale="en"
+        bars={[
+          bar("^HSI", "24211.35", null),
+          { ...bar("^DJI", "46000", "45000"), market_code: "us_equity" },
+        ]}
+      />,
       "en"
     )
+    expect(screen.queryByText(/46,000/)).toBeNull()
     const hsi = screen.getByRole("region", { name: "Hang Seng Index" })
     expect(hsi).toHaveTextContent("24,211.35")
     expect(hsi).toHaveTextContent("—")

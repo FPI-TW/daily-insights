@@ -120,7 +120,7 @@ describe("market browser queries", () => {
       options.queryFn({ signal: new AbortController().signal })
     ).rejects.toHaveProperty("status", 401)
   })
-  it("keeps only the requested market's latest index bars", async () => {
+  it("caches the latest index bars for every market under one key", async () => {
     const latest = (symbol: string, market_code: string) => ({
       ...bar,
       symbol,
@@ -133,14 +133,18 @@ describe("market browser queries", () => {
         json([latest("^DJI", "us_equity"), latest("^HSI", "hk_equity")])
       )
     vi.stubGlobal("fetch", fetch)
-    const result = await marketQueries(scope, "en")
-      .latestIndices("hk_equity")
-      .queryFn({ signal: new AbortController().signal })
+    const options = marketQueries(scope, "en").latestIndices()
+    const result = await options.queryFn({
+      signal: new AbortController().signal,
+    })
     expect(fetch).toHaveBeenCalledWith(
       "/api/markets/indices",
       expect.anything()
     )
-    expect(result.map(item => item.symbol)).toEqual(["^HSI"])
+    expect(result.map(item => item.symbol)).toEqual(["^DJI", "^HSI"])
+    expect(options.queryKey).toEqual(
+      marketQueries(scope, "zh-hant").latestIndices().queryKey
+    )
   })
   it("isolates user, organization, locale and range; shares viewpoints across locales", () => {
     const en = marketQueries(scope, "en")

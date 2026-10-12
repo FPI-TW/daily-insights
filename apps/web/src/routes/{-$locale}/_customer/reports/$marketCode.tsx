@@ -130,7 +130,7 @@ function ReportPage() {
     ready && marketCode === "tw_equity"
   )
   const hkIndices = useMarketQuery(
-    queries.latestIndices("hk_equity"),
+    queries.latestIndices(),
     locale,
     ready && marketCode === "hk_equity"
   )

@@ -212,14 +212,13 @@ export function marketQueries(scope: MarketScope, locale: Locale) {
         },
         10_000
       ),
-    latestIndices: (marketCode: MarketCode) =>
+    // One cached list for every market; the API already scopes it to the
+    // viewer's visible markets and each consumer picks its own symbols.
+    latestIndices: () =>
       query(
         "latest-indices",
-        [marketCode],
-        async transport =>
-          (await createMarketClient(transport).latestIndexBars()).filter(
-            bar => bar.market_code === marketCode
-          ),
+        [],
+        transport => createMarketClient(transport).latestIndexBars(),
         10_000
       ),
     vix: (range: { start: string; end: string }) =>
