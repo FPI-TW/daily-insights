@@ -38,19 +38,7 @@ export function HkSectorHeatmap({
       </section>
     )
   }
-  const overview = heatmap.images.find(
-    image => image.kind === "overview" && image.slug === "overview"
-  )
-  // The capture splits the overview at a sector gutter so the crowded right
-  // side gets a full row of its own; the whole image stays the link target.
-  const overviewParts = heatmap.images.filter(
-    image => image.kind === "overview" && image.slug !== "overview"
-  )
-  const overviewRows = overviewParts.length
-    ? overviewParts
-    : overview
-      ? [overview]
-      : []
+  const overview = heatmap.images.find(image => image.kind === "overview")
   const legend = heatmap.images.find(image => image.kind === "legend")
   return (
     <section
@@ -65,30 +53,25 @@ export function HkSectorHeatmap({
           })}
         </p>
       </div>
-      {overviewRows.map((image, index) => (
-        // The tiles' labels are drawn at 1920px, so each half takes the full
-        // content width and the whole overview stays a click away.
+      {overview ? (
+        // The tile labels are drawn at 1920px; the image takes the full content
+        // width and the original stays a click away.
         <a
-          key={image.slug}
           className="mt-4 block"
-          href={(overview ?? image).url}
+          href={overview.url}
           target="_blank"
           rel="noreferrer"
           title={t("hkSectorHeatmapOpenFullSize")}
         >
           <img
             className="h-auto w-full rounded"
-            src={image.url}
-            width={image.width}
-            height={image.height}
-            alt={
-              overviewParts.length
-                ? t("hkSectorHeatmapOverviewPartAlt", { index: index + 1 })
-                : t("hkSectorHeatmapOverviewAlt")
-            }
+            src={overview.url}
+            width={overview.width}
+            height={overview.height}
+            alt={t("hkSectorHeatmapOverviewAlt")}
           />
         </a>
-      ))}
+      ) : null}
       {legend ? (
         <img
           className="mt-3 h-auto max-w-full"

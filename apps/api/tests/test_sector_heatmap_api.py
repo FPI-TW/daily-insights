@@ -100,7 +100,7 @@ async def test_latest_edition_is_returned_with_signed_urls_in_display_order(
 ) -> None:
     store = SigningObjectStore()
     older = EDITION - timedelta(days=1)
-    await _seed_edition(session_factory, store, monkeypatch, older, _captured(halves=False))
+    await _seed_edition(session_factory, store, monkeypatch, older, _captured())
     await _seed_edition(session_factory, store, monkeypatch, EDITION, _captured(b"today"))
 
     async with _client(session_factory, object_store=store) as client:
@@ -117,16 +117,14 @@ async def test_latest_edition_is_returned_with_signed_urls_in_display_order(
     assert datetime.fromisoformat(body["captured_at"]).tzinfo is not None
     assert [(image["kind"], image["slug"], image["name"]) for image in body["images"]] == [
         ("overview", "overview", "Overview"),
-        ("overview", "overview_left", "Overview (left)"),
-        ("overview", "overview_right", "Overview (right)"),
         ("legend", "legend", "Legend"),
     ]
-    right = body["images"][2]
-    assert (right["width"], right["height"]) == (765, 989)
-    assert right["expires_in_seconds"] == 600
+    overview = body["images"][0]
+    assert (overview["width"], overview["height"]) == (1920, 989)
+    assert overview["expires_in_seconds"] == 600
     assert (
-        right["url"]
-        == "https://signed.test/daily-insights-test/heatmaps/hsi/2026-10-12/overview_right.png?ttl=600"
+        overview["url"]
+        == "https://signed.test/daily-insights-test/heatmaps/hsi/2026-10-12/overview.png?ttl=600"
     )
 
     assert dated.status_code == 200
@@ -189,4 +187,4 @@ async def test_heatmap_follows_hong_kong_market_visibility(
 
     assert hidden.status_code == 404
     assert preview.status_code == 200, preview.text
-    assert len(preview.json()["images"]) == 4
+    assert len(preview.json()["images"]) == 2

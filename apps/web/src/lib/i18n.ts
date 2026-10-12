@@ -540,8 +540,6 @@ const resources: Resource = {
       hkSectorHeatmapLoading: "正在載入港股產業熱力圖。",
       hkSectorHeatmapUnavailable: "目前尚無港股產業熱力圖。",
       hkSectorHeatmapOverviewAlt: "恆生指數成分股產業熱力圖總覽",
-      hkSectorHeatmapOverviewPartAlt:
-        "恆生指數成分股產業熱力圖總覽（第 {{index}} 段）",
       hkSectorHeatmapLegendAlt: "漲跌幅顏色圖例",
       hkSectorHeatmapOpenFullSize: "開啟原始大小",
       usIndexTableLoading: "正在載入美股五大指數表現。",
@@ -1504,8 +1502,6 @@ const resources: Resource = {
       hkSectorHeatmapLoading: "正在加载港股行业热力图。",
       hkSectorHeatmapUnavailable: "目前尚无港股行业热力图。",
       hkSectorHeatmapOverviewAlt: "恒生指数成分股行业热力图总览",
-      hkSectorHeatmapOverviewPartAlt:
-        "恒生指数成分股行业热力图总览（第 {{index}} 段）",
       hkSectorHeatmapLegendAlt: "涨跌幅颜色图例",
       hkSectorHeatmapOpenFullSize: "打开原始大小",
       usIndexTableLoading: "正在加载美股五大指数表现。",
@@ -2489,8 +2485,6 @@ const resources: Resource = {
         "No Hong Kong sector heatmap is available yet.",
       hkSectorHeatmapOverviewAlt:
         "Hang Seng constituents sector heatmap overview",
-      hkSectorHeatmapOverviewPartAlt:
-        "Hang Seng constituents sector heatmap overview, part {{index}}",
       hkSectorHeatmapLegendAlt: "Price change colour legend",
       hkSectorHeatmapOpenFullSize: "Open full size",
       usIndexTableLoading: "Loading US five-index performance.",

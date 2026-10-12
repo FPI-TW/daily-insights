@@ -11,14 +11,13 @@ import { HkSectorHeatmap, HkSectorHeatmapLoading } from "./HkSectorHeatmap"
 function image(
   kind: SectorHeatmapImage["kind"],
   slug: string,
-  name: string,
-  width = 1920
+  name: string
 ): SectorHeatmapImage {
   return {
     kind,
     slug,
     name,
-    width,
+    width: 1920,
     height: kind === "legend" ? 34 : 989,
     url: `https://signed.test/${slug}.png`,
     expires_in_seconds: 900,
@@ -34,16 +33,6 @@ const whole: SectorHeatmap = {
     image("legend", "legend", "Legend"),
   ],
 }
-const split: SectorHeatmap = {
-  ...whole,
-  images: [
-    whole.images[0]!,
-    image("overview", "overview_left", "Overview (left)", 1155),
-    image("overview", "overview_right", "Overview (right)", 765),
-    whole.images[1]!,
-  ],
-}
-
 async function renderLocalized(
   ui: React.ReactNode,
   locale: "zh-hant" | "zh-hans" | "en" = "zh-hant"
@@ -71,33 +60,6 @@ describe("HkSectorHeatmap", () => {
       within(region).getByRole("img", { name: "漲跌幅顏色圖例" })
     ).toHaveAttribute("height", "34")
     expect(within(region).getAllByRole("img")).toHaveLength(2)
-  })
-
-  it("stacks the overview halves and links each to the whole image", async () => {
-    await renderLocalized(<HkSectorHeatmap heatmap={split} locale="en" />, "en")
-    const region = screen.getByRole("region", {
-      name: "Hong Kong sector heatmap",
-    })
-    expect(region).toHaveTextContent("Oct 12, 2026 close")
-    expect(
-      within(region).queryByRole("img", {
-        name: "Hang Seng constituents sector heatmap overview",
-      })
-    ).toBeNull()
-    const parts = [1, 2].map(index =>
-      within(region).getByRole("img", {
-        name: `Hang Seng constituents sector heatmap overview, part ${index}`,
-      })
-    )
-    expect(parts.map(part => part.getAttribute("src"))).toEqual([
-      "https://signed.test/overview_left.png",
-      "https://signed.test/overview_right.png",
-    ])
-    for (const part of parts)
-      expect(part.closest("a")).toHaveAttribute(
-        "href",
-        "https://signed.test/overview.png"
-      )
   })
 
   it("announces loading and the empty ledger", async () => {

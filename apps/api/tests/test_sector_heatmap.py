@@ -28,6 +28,7 @@ from daily_insights_api.modules.data_sources.errors import (
 )
 from daily_insights_api.modules.data_sources.tradingview.heatmap import (
     CapturedHeatmap,
+    HeatmapImage,
     assemble_heatmap,
 )
 from daily_insights_api.modules.markets.models import SectorHeatmapImage
@@ -52,16 +53,8 @@ def _png(width: int, height: int, seed: bytes = b"") -> bytes:
     )
 
 
-def _captured(seed: bytes = b"", *, halves: bool = True) -> CapturedHeatmap:
-    return assemble_heatmap(
-        "HSI",
-        CAPTURED_AT,
-        _png(1920, 989, seed),
-        _png(400, 34, seed),
-        overview_halves=(_png(1155, 989, seed + b"L"), _png(765, 989, seed + b"R"))
-        if halves
-        else None,
-    )
+def _captured(seed: bytes = b"") -> CapturedHeatmap:
+    return assemble_heatmap("HSI", CAPTURED_AT, _png(1920, 989, seed), _png(400, 34, seed))
 
 
 class FakeObjectStore:
@@ -277,22 +270,18 @@ async def test_capture_is_uploaded_recorded_and_idempotent(
     )
 
     assert first.status == "succeeded"
-    assert first.record_count == 4
+    assert first.record_count == 2
     assert first.source_as_of == EDITION
     assert first.fetched_at == CAPTURED_AT
-    assert first.result == {"images": 4, "uploaded": 4, "removed_objects": 0}
+    assert first.result == {"images": 2, "uploaded": 2, "removed_objects": 0}
     assert sorted(store.objects) == [
         "heatmaps/hsi/2026-10-12/legend.png",
         "heatmaps/hsi/2026-10-12/overview.png",
-        "heatmaps/hsi/2026-10-12/overview_left.png",
-        "heatmaps/hsi/2026-10-12/overview_right.png",
     ]
     rows = await _rows(sessions)
     assert [(row.kind, row.slug, row.sort_order) for row in rows] == [
         ("overview", "overview", 0),
-        ("overview", "overview_left", 1),
-        ("overview", "overview_right", 2),
-        ("legend", "legend", 3),
+        ("legend", "legend", 1),
     ]
     overview = rows[0]
     assert overview.name == "Overview"
@@ -309,17 +298,35 @@ async def test_capture_is_uploaded_recorded_and_idempotent(
         _settings(), sessions, await _running_attempt(sessions), store
     )
     assert second.status == "no_change"
-    assert second.result == {"images": 4, "uploaded": 0, "removed_objects": 0}
+    assert second.result == {"images": 2, "uploaded": 0, "removed_objects": 0}
 
 
-async def test_rerun_replaces_changed_images_and_drops_vanished_halves(
+async def test_rerun_replaces_changed_images_and_drops_vanished_slugs(
     heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, sessions = heatmap_database
     store = FakeObjectStore()
-    # The second capture found no gutter, so the halves disappear.
-    captures = iter([_captured(), _captured(b"v2", halves=False)])
+    # A slug the new capture no longer produces (here: a legacy half) is dropped.
+    first = _captured()
+    first = CapturedHeatmap(
+        first.data_source,
+        first.captured_at,
+        (
+            *first.images,
+            HeatmapImage(
+                kind="overview",
+                slug="overview_left",
+                name="Overview (left)",
+                sort_order=2,
+                png=_png(900, 989),
+                width=900,
+                height=989,
+                sha256="c" * 64,
+            ),
+        ),
+    )
+    captures = iter([first, _captured(b"v2")])
 
     async def capture(**_: object) -> CapturedHeatmap:
         return next(captures)
@@ -334,11 +341,8 @@ async def test_rerun_replaces_changed_images_and_drops_vanished_halves(
     )
 
     assert outcome.status == "succeeded"
-    assert outcome.result == {"images": 2, "uploaded": 2, "removed_objects": 2}
-    assert sorted(store.deleted) == [
-        "heatmaps/hsi/2026-10-12/overview_left.png",
-        "heatmaps/hsi/2026-10-12/overview_right.png",
-    ]
+    assert outcome.result == {"images": 2, "uploaded": 2, "removed_objects": 1}
+    assert store.deleted == ["heatmaps/hsi/2026-10-12/overview_left.png"]
     assert sorted(store.objects) == [
         "heatmaps/hsi/2026-10-12/legend.png",
         "heatmaps/hsi/2026-10-12/overview.png",
@@ -353,7 +357,7 @@ async def test_editions_past_retention_are_removed_from_ledger_and_bucket(
 ) -> None:
     _, sessions = heatmap_database
     store = FakeObjectStore()
-    captured = _captured(halves=False)
+    captured = _captured()
 
     async def capture(**_: object) -> CapturedHeatmap:
         return captured

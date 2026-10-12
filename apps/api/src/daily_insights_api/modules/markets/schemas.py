@@ -176,5 +176,5 @@ class SectorHeatmapResponse(BaseModel):
     data_source: str
     edition_date: date
     captured_at: datetime
-    # Ordered for display: the overview, its left/right halves, then the legend.
+    # Ordered for display: the overview, then the legend.
     images: list[SectorHeatmapImageResponse]

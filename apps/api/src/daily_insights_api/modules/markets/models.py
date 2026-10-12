@@ -199,10 +199,9 @@ class SectorHeatmapImage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     The bytes live in R2 under ``object_key``; this row is the ledger the read
     API uses to list a day's images, sign their URLs, and expire old objects.
-    A day holds the whole-market overview (plus its two display halves) and
-    the colour legend. Re-capturing a day upserts on (data_source,
-    edition_date, slug) so a rerun replaces the images instead of growing a
-    second set.
+    A day holds the whole-market overview and the colour legend. Re-capturing
+    a day upserts on (data_source, edition_date, slug) so a rerun replaces the
+    images instead of growing a second set.
     """
 
     __tablename__ = "sector_heatmap_images"
