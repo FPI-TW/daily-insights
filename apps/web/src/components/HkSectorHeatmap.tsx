@@ -13,8 +13,8 @@ export function HkSectorHeatmapLoading() {
     >
       <div className="h-3 w-32 animate-pulse rounded bg-line" />
       <div className="mt-4 aspect-[2/1] w-full animate-pulse rounded bg-line" />
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {Array.from({ length: 6 }, (_, index) => (
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        {Array.from({ length: 4 }, (_, index) => (
           <div
             key={index}
             className="aspect-[2/1] animate-pulse rounded bg-line"
@@ -63,13 +63,23 @@ export function HkSectorHeatmap({
         </p>
       </div>
       {overview ? (
-        <img
-          className="mt-4 h-auto w-full rounded"
-          src={overview.url}
-          width={overview.width}
-          height={overview.height}
-          alt={t("hkSectorHeatmapOverviewAlt")}
-        />
+        // Every image links to its full-size PNG: the tiles' labels are drawn
+        // at 1920px and only stay legible when the viewer can open the original.
+        <a
+          className="mt-4 block"
+          href={overview.url}
+          target="_blank"
+          rel="noreferrer"
+          title={t("hkSectorHeatmapOpenFullSize")}
+        >
+          <img
+            className="h-auto w-full rounded"
+            src={overview.url}
+            width={overview.width}
+            height={overview.height}
+            alt={t("hkSectorHeatmapOverviewAlt")}
+          />
+        </a>
       ) : null}
       {legend ? (
         <img
@@ -81,17 +91,25 @@ export function HkSectorHeatmap({
         />
       ) : null}
       {sectors.length ? (
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
           {sectors.map(image => (
             <figure key={image.slug} className="m-0 min-w-0">
-              <img
-                className="h-auto w-full rounded"
-                src={image.url}
-                width={image.width}
-                height={image.height}
-                loading="lazy"
-                alt={t("hkSectorHeatmapSectorAlt", { name: image.name })}
-              />
+              <a
+                className="block"
+                href={image.url}
+                target="_blank"
+                rel="noreferrer"
+                title={t("hkSectorHeatmapOpenFullSize")}
+              >
+                <img
+                  className="h-auto w-full rounded"
+                  src={image.url}
+                  width={image.width}
+                  height={image.height}
+                  loading="lazy"
+                  alt={t("hkSectorHeatmapSectorAlt", { name: image.name })}
+                />
+              </a>
               <figcaption className="mt-1 flex justify-between gap-2 text-xs text-sea-ink-soft">
                 <span className="font-bold text-sea-ink">{image.name}</span>
                 <span>

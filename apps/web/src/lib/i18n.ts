@@ -543,6 +543,7 @@ const resources: Resource = {
       hkSectorHeatmapLegendAlt: "漲跌幅顏色圖例",
       hkSectorHeatmapSectorAlt: "{{name}} 產業熱力圖",
       hkSectorHeatmapSymbolCount: "{{count}} 檔成分股",
+      hkSectorHeatmapOpenFullSize: "開啟原始大小",
       usIndexTableLoading: "正在載入美股五大指數表現。",
       usIndexTableUnavailable: "目前無法載入美股五大指數資料。",
       usIndexTableEmpty: "目前沒有可顯示的美股五大指數日線。",
@@ -1506,6 +1507,7 @@ const resources: Resource = {
       hkSectorHeatmapLegendAlt: "涨跌幅颜色图例",
       hkSectorHeatmapSectorAlt: "{{name}} 行业热力图",
       hkSectorHeatmapSymbolCount: "{{count}} 只成分股",
+      hkSectorHeatmapOpenFullSize: "打开原始大小",
       usIndexTableLoading: "正在加载美股五大指数表现。",
       usIndexTableUnavailable: "目前无法加载美股五大指数数据。",
       usIndexTableEmpty: "目前没有可显示的美股五大指数日线。",
@@ -2491,6 +2493,7 @@ const resources: Resource = {
       hkSectorHeatmapSectorAlt: "{{name}} sector heatmap",
       hkSectorHeatmapSymbolCount_one: "{{count}} constituent",
       hkSectorHeatmapSymbolCount_other: "{{count}} constituents",
+      hkSectorHeatmapOpenFullSize: "Open full size",
       usIndexTableLoading: "Loading US five-index performance.",
       usIndexTableUnavailable: "US five-index data is temporarily unavailable.",
       usIndexTableEmpty:

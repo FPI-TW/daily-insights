@@ -68,6 +68,15 @@ describe("HkSectorHeatmap", () => {
       name: "Finance 產業熱力圖",
     })
     expect(finance).toHaveAttribute("loading", "lazy")
+    // The link takes its name from the image inside it; the title is the hint.
+    const fullSize = within(region).getAllByRole("link")
+    expect(fullSize.map(link => link.getAttribute("href"))).toEqual([
+      "https://signed.test/overview.png",
+      "https://signed.test/finance.png",
+      "https://signed.test/commercial_services.png",
+    ])
+    expect(fullSize[0]).toHaveAttribute("target", "_blank")
+    expect(fullSize[0]).toHaveAttribute("title", "開啟原始大小")
     expect(region).toHaveTextContent("21 檔成分股")
     expect(region).toHaveTextContent("1 檔成分股")
   })
