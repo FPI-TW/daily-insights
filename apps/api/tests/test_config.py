@@ -56,6 +56,25 @@ def test_orchestration_worker_does_not_require_api_or_r2_secrets() -> None:
     assert settings.r2_secret_access_key is None
 
 
+def test_orchestration_worker_keeps_r2_credentials_for_heatmap_uploads() -> None:
+    settings = Settings.model_validate(
+        {
+            "environment": "production",
+            "runtime_role": "orchestration-worker",
+            "database_url": "postgresql+psycopg://worker:secret@example.invalid/app",
+            "r2_endpoint_url": "https://account.r2.cloudflarestorage.com",
+            "r2_bucket_name": "daily-insights-production",
+            "r2_access_key_id": SecretStr("r2-access-key"),
+            "r2_secret_access_key": SecretStr("r2-secret-key"),
+        }
+    )
+
+    assert settings.r2_bucket_name == "daily-insights-production"
+    assert settings.r2_access_key_id is not None
+    assert settings.r2_access_key_id.get_secret_value() == "r2-access-key"
+    assert settings.session_secret is None
+
+
 def test_macro_scheduler_requires_only_a_production_database_url() -> None:
     settings = MacroDashboardSchedulerSettings.model_validate(
         {

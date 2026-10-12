@@ -120,14 +120,7 @@ class Settings(BaseSettings):
             if self.environment not in {"development", "test"}:
                 raise ValueError("database_url is required outside development and test")
             self.database_url = LOCAL_DATABASE_URL
-        if self.runtime_role == "orchestration-worker":
-            self.session_secret = None
-            self.password_pepper = None
-            self.r2_endpoint_url = None
-            self.r2_bucket_name = None
-            self.r2_access_key_id = None
-            self.r2_secret_access_key = None
-        elif self.runtime_role == "media-worker":
+        if self.runtime_role in {"orchestration-worker", "media-worker"}:
             self.session_secret = None
             self.password_pepper = None
         if self.session_secret is None and self.runtime_role == "api":
@@ -224,8 +217,6 @@ class Settings(BaseSettings):
                 or is_placeholder_value(self.chat_model_api_key.get_secret_value())
             ):
                 raise ValueError("chat_model_api_key is required and cannot be a placeholder")
-        if self.runtime_role not in {"api", "media-worker"}:
-            return
         required_r2_values = {
             "r2_endpoint_url": self.r2_endpoint_url,
             "r2_bucket_name": self.r2_bucket_name,
