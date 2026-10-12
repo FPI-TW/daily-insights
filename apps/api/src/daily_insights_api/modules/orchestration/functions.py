@@ -138,15 +138,20 @@ TWELVE_BOOTSTRAP = {
     "us_mega_cap_daily_bars": 400,
 }
 
+
+def _tracked_index_manifest(market_code: str) -> tuple[tuple[str, str, str], ...]:
+    """Every Yahoo-supplied index of one market, straight from the catalog."""
+    return tuple(
+        (symbol, market, "index")
+        for symbol, market in TRACKED_INDICES.items()
+        if market == market_code and symbol != TAIEX_SYMBOL
+    )
+
+
 YAHOO_MANIFESTS: dict[str, tuple[tuple[str, str, str], ...]] = {
-    "us_index_daily_bars": tuple(
-        (symbol, "us_equity", "index")
-        for symbol in ("^DJI", "^GSPC", "^NDX", "^RUT", "^SOX", "^VIX")
-    ),
-    "hk_index_daily_bars": tuple(
-        (symbol, "hk_equity", "index") for symbol in ("^HSI", "^HSCE", "^HSIL")
-    ),
-    "cn_index_daily_bars": (("000001.SS", "cn_equity", "index"),),
+    "us_index_daily_bars": _tracked_index_manifest("us_equity"),
+    "hk_index_daily_bars": _tracked_index_manifest("hk_equity"),
+    "cn_index_daily_bars": _tracked_index_manifest("cn_equity"),
     "dxy_daily_bars": (("DX-Y.NYB", "forex", "index"),),
 }
 

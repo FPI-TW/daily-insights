@@ -15,11 +15,13 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionm
 
 import daily_insights_api.scripts.run_orchestration_worker as orchestration_worker_script
 from daily_insights_api.core.config import Settings
+from daily_insights_api.modules.markets.api import YFINANCE_INDICES
 from daily_insights_api.modules.news.contracts import SelectedCandidate, Selection
 from daily_insights_api.modules.news.failures import NewsFailure, NewsOperationError
 from daily_insights_api.modules.news.llm import ModelCall
 from daily_insights_api.modules.news.models import NewsCandidateBatch, PreparedNewsItem
 from daily_insights_api.modules.orchestration import worker
+from daily_insights_api.modules.orchestration.functions import YAHOO_MANIFESTS
 from daily_insights_api.modules.orchestration.models import JobRun
 from daily_insights_api.modules.orchestration.news_functions import (
     _publication_digest,
@@ -234,6 +236,25 @@ def test_automatic_provider_jobs_are_unique_and_internal_services_are_combined()
         "news_publish",
         "analyst_viewpoints_sync",
     }
+
+
+def test_every_yahoo_index_is_scheduled_by_exactly_one_manifest() -> None:
+    # The manifests are derived from TRACKED_INDICES, so adding a symbol to the
+    # catalog is enough for the daily job to fetch it; this pins that contract.
+    scheduled = [
+        symbol
+        for key, entries in YAHOO_MANIFESTS.items()
+        if key.endswith("_index_daily_bars")
+        for symbol, _market, _kind in entries
+    ]
+
+    assert sorted(scheduled) == sorted(YFINANCE_INDICES)
+    assert len(scheduled) == len(set(scheduled))
+    assert [symbol for symbol, _market, _kind in YAHOO_MANIFESTS["hk_index_daily_bars"]] == [
+        "^HSI",
+        "^HSCE",
+        "^HSIL",
+    ]
 
 
 def test_manual_hk_refresh_runs_the_hong_kong_index_function_only() -> None:
