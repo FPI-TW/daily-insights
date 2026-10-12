@@ -45,6 +45,7 @@ vi.mock("#/lib/market-queries", () => ({
         "vixAverages",
         "flows",
         "stocks",
+        "latestIndices",
       ].map(key => [key, () => ({ queryKey: [key] })])
     ),
   useMarketQuery: ({ queryKey }: { queryKey: [string] }) =>
@@ -121,6 +122,7 @@ beforeEach(() => {
     "vixAverages",
     "flows",
     "stocks",
+    "latestIndices",
   ])
     state.results.set(key, {
       data: undefined,
@@ -202,6 +204,31 @@ describe("market desktop grid cells", () => {
     expect(within(historyCell).getByText("6,000.00")).toBeVisible()
     expect(within(reportCell).getByText("AAPL")).toBeVisible()
     expect(Array.from(grid.children)).toEqual([historyCell, reportCell])
+  })
+  it("shows HK index cards without a not-launched notice", () => {
+    state.marketCode = "hk_equity"
+    query("markets").data = [{ code: "us_equity" }, { code: "hk_equity" }]
+    query("report").data = { kind: "not-launched", marketCode: "hk_equity" }
+    query("latestIndices").data = [
+      {
+        symbol: "^HSI",
+        market_code: "hk_equity",
+        trade_date: "2026-10-09",
+        open: null,
+        high: null,
+        low: null,
+        close: "24211.35",
+        volume: null,
+        trade_value: null,
+        previous_close: "23785.79",
+      },
+    ]
+    render(page())
+    const hsi = screen.getByRole("region", { name: "Hang Seng Index" })
+    expect(within(hsi).getByText("24,211.35")).toBeVisible()
+    expect(screen.getAllByRole("region")).toHaveLength(3)
+    expect(screen.queryByText("Report not launched yet")).toBeNull()
+    expect(screen.queryByText("Index history")).toBeNull()
   })
   it("keeps TW stocks beside retained flows while either column refreshes or fails", () => {
     state.marketCode = "tw_equity"

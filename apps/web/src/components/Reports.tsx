@@ -30,7 +30,6 @@ type Translate = ReturnType<typeof useTranslation>["t"]
 
 const HIDDEN_REPORT_NAV_MARKETS = new Set<MarketCode>([
   "crypto",
-  "hk_equity",
   "cn_equity",
   "tw_index_derivatives",
 ])
@@ -812,7 +811,9 @@ export function ReportNotLaunchedScreen({
   marketCode: MarketCode
 }) {
   const { t } = useTranslation()
-  if (marketCode === "tw_equity") return null
+  // These markets have no morning report yet but already carry their own
+  // content, so the notice would only push it down the page.
+  if (marketCode === "tw_equity" || marketCode === "hk_equity") return null
   return (
     <section
       className="surface-panel p-10 text-center"

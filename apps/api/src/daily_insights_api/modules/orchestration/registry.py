@@ -270,6 +270,12 @@ JOBS = (
         ),
     ),
     JobDefinition(
+        "hk_equity_refresh",
+        "function",
+        ("manual",),
+        _steps("hk_index_daily_bars"),
+    ),
+    JobDefinition(
         "news_global_refresh_job",
         "function",
         ("manual",),
@@ -348,6 +354,7 @@ MANUAL_MARKET_JOB_KEYS = (
     "global_macro_refresh",
     "us_equity_refresh",
     "tw_equity_refresh",
+    "hk_equity_refresh",
 )
 ADMIN_TRIGGER_JOB_KEYS = (
     *MANUAL_MARKET_JOB_KEYS,

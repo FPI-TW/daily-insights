@@ -41,6 +41,7 @@ from daily_insights_api.modules.orchestration.registry import (
     DAILY_ROUTINE,
     FUNCTION_BY_KEY,
     JOB_BY_KEY,
+    MANUAL_MARKET_JOB_KEYS,
     PROVIDER_BY_KEY,
     registry_digest,
     validate_registry,
@@ -233,6 +234,14 @@ def test_automatic_provider_jobs_are_unique_and_internal_services_are_combined()
         "news_publish",
         "analyst_viewpoints_sync",
     }
+
+
+def test_manual_hk_refresh_runs_the_hong_kong_index_function_only() -> None:
+    job = JOB_BY_KEY["hk_equity_refresh"]
+
+    assert job.triggers == ("manual",)
+    assert [step.function_key for step in job.functions] == ["hk_index_daily_bars"]
+    assert "hk_equity_refresh" in MANUAL_MARKET_JOB_KEYS
 
 
 def test_manual_news_market_jobs_publish_after_their_refresh() -> None:

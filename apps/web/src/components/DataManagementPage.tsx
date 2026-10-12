@@ -34,6 +34,11 @@ const MARKET_JOBS = [
     label: "reportMarket_tw_equity",
     action: "dataManagementInstitutionalAction",
   },
+  {
+    key: "hk_equity_refresh",
+    label: "reportMarket_hk_equity",
+    action: "dataManagementHkAction",
+  },
 ] as const
 
 export function DataManagementPage({ locale }: { locale: Locale }) {

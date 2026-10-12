@@ -82,6 +82,11 @@ describe("trackedSymbolsForMarket", () => {
       "^VIX",
     ])
     expect(trackedSymbolsForMarket("tw_equity")).toEqual(["^TWII"])
+    expect(trackedSymbolsForMarket("hk_equity")).toEqual([
+      "^HSI",
+      "^HSCE",
+      "^HSIL",
+    ])
   })
 
   it("fans out without requiring an organization-backed market list", () => {

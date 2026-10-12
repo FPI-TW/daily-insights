@@ -43,6 +43,8 @@ export const indexSymbolSchema = z.enum([
   "^SOX",
   "^VIX",
   "^HSI",
+  "^HSCE",
+  "^HSIL",
   "^TWII",
   "000001.SS",
 ])

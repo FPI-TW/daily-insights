@@ -112,6 +112,9 @@ export function indexNameKey(symbol: string) {
       "^NDX": "indexNameNdx",
       "^RUT": "indexNameRut",
       "^SOX": "indexNameSox",
+      "^HSI": "indexNameHsi",
+      "^HSCE": "indexNameHsce",
+      "^HSIL": "indexNameHsil",
       "^TWII": "indexNameTwii",
     } satisfies Record<string, string>
   )[symbol]

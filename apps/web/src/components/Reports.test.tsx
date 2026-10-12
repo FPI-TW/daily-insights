@@ -162,6 +162,7 @@ describe("three-market report presentation", () => {
       "Global macro",
       "US equities",
       "Taiwan equities",
+      "Hong Kong equities",
     ])
     expect(links[2]).toHaveAttribute(
       "data-params",
@@ -213,6 +214,14 @@ describe("three-market report presentation", () => {
     expect(section).not.toHaveTextContent("Crypto")
   })
 
+  it("omits the Hong Kong not-launched notice", async () => {
+    await renderLocalized(
+      <ReportNotLaunchedScreen locale="en" marketCode="hk_equity" />,
+      "en"
+    )
+    expect(screen.queryByRole("status")).toBeNull()
+    expect(screen.queryByText("Report not launched yet")).toBeNull()
+  })
   it("omits the Taiwan not-launched notice while retaining its shared shell", async () => {
     await renderLocalized(
       <ReportShell locale="en" markets={markets} activeMarket="tw_equity">

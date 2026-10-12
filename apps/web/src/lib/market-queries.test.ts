@@ -120,6 +120,28 @@ describe("market browser queries", () => {
       options.queryFn({ signal: new AbortController().signal })
     ).rejects.toHaveProperty("status", 401)
   })
+  it("keeps only the requested market's latest index bars", async () => {
+    const latest = (symbol: string, market_code: string) => ({
+      ...bar,
+      symbol,
+      market_code,
+      previous_close: "100",
+    })
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        json([latest("^DJI", "us_equity"), latest("^HSI", "hk_equity")])
+      )
+    vi.stubGlobal("fetch", fetch)
+    const result = await marketQueries(scope, "en")
+      .latestIndices("hk_equity")
+      .queryFn({ signal: new AbortController().signal })
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/markets/indices",
+      expect.anything()
+    )
+    expect(result.map(item => item.symbol)).toEqual(["^HSI"])
+  })
   it("isolates user, organization, locale and range; shares viewpoints across locales", () => {
     const en = marketQueries(scope, "en")
     expect(en.reports().queryKey).not.toEqual(

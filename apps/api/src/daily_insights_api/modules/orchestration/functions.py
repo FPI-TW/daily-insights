@@ -143,7 +143,9 @@ YAHOO_MANIFESTS: dict[str, tuple[tuple[str, str, str], ...]] = {
         (symbol, "us_equity", "index")
         for symbol in ("^DJI", "^GSPC", "^NDX", "^RUT", "^SOX", "^VIX")
     ),
-    "hk_index_daily_bars": (("^HSI", "hk_equity", "index"),),
+    "hk_index_daily_bars": tuple(
+        (symbol, "hk_equity", "index") for symbol in ("^HSI", "^HSCE", "^HSIL")
+    ),
     "cn_index_daily_bars": (("000001.SS", "cn_equity", "index"),),
     "dxy_daily_bars": (("DX-Y.NYB", "forex", "index"),),
 }

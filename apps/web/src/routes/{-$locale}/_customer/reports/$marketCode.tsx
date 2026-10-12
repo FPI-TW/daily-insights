@@ -32,6 +32,7 @@ import {
   StocksPanel,
 } from "#/components/TaiwanInstitutionalFlows"
 import { DashboardSection } from "#/components/DashboardPrimitives"
+import { HkIndexCards, HkIndexCardsLoading } from "#/components/HkIndexCards"
 import {
   UsIndexPerformanceTable,
   UsIndexPerformanceTableLoading,
@@ -126,6 +127,11 @@ function ReportPage() {
     locale,
     ready && marketCode === "tw_equity"
   )
+  const hkIndices = useMarketQuery(
+    queries.latestIndices("hk_equity"),
+    locale,
+    ready && marketCode === "hk_equity"
+  )
   useChatPageContext(
     report.data?.kind === "report" && report.data.report.publicationId
       ? {
@@ -192,6 +198,14 @@ function ReportPage() {
             </div>
           ) : null}
           <div className="min-w-0">
+            {marketCode === "hk_equity" ? (
+              <MarketQuerySection
+                query={hkIndices}
+                loading={<HkIndexCardsLoading />}
+              >
+                {data => <HkIndexCards bars={data ?? null} locale={locale} />}
+              </MarketQuerySection>
+            ) : null}
             <MarketQuerySection
               query={report}
               loading={<ReportLoadingScreen />}
