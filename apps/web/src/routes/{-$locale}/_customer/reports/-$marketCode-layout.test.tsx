@@ -46,6 +46,7 @@ vi.mock("#/lib/market-queries", () => ({
         "flows",
         "stocks",
         "latestIndices",
+        "hkSectorHeatmap",
       ].map(key => [key, () => ({ queryKey: [key] })])
     ),
   useMarketQuery: ({ queryKey }: { queryKey: [string] }) =>
@@ -123,6 +124,7 @@ beforeEach(() => {
     "flows",
     "stocks",
     "latestIndices",
+    "hkSectorHeatmap",
   ])
     state.results.set(key, {
       data: undefined,
@@ -223,10 +225,33 @@ describe("market desktop grid cells", () => {
         previous_close: "23785.79",
       },
     ]
+    query("hkSectorHeatmap").data = {
+      data_source: "HSI",
+      edition_date: "2026-10-12",
+      captured_at: "2026-10-12T00:05:00+00:00",
+      images: [
+        {
+          kind: "sector",
+          slug: "finance",
+          name: "Finance",
+          symbol_count: 21,
+          width: 1920,
+          height: 953,
+          url: "https://signed.test/finance.png",
+          expires_in_seconds: 900,
+        },
+      ],
+    }
     render(page())
     const hsi = screen.getByRole("region", { name: "Hang Seng Index" })
     expect(within(hsi).getByText("24,211.35")).toBeVisible()
-    expect(screen.getAllByRole("region")).toHaveLength(3)
+    const heatmap = screen.getByRole("region", {
+      name: "Hong Kong sector heatmap",
+    })
+    expect(
+      within(heatmap).getByRole("img", { name: "Finance sector heatmap" })
+    ).toHaveAttribute("src", "https://signed.test/finance.png")
+    expect(screen.getAllByRole("region")).toHaveLength(4)
     expect(screen.queryByText("Report not launched yet")).toBeNull()
     expect(screen.queryByText("Index history")).toBeNull()
   })

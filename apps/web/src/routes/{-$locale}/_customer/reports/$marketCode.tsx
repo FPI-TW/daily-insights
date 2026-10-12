@@ -34,6 +34,10 @@ import {
 import { DashboardSection } from "#/components/DashboardPrimitives"
 import { HkIndexCards, HkIndexCardsLoading } from "#/components/HkIndexCards"
 import {
+  HkSectorHeatmap,
+  HkSectorHeatmapLoading,
+} from "#/components/HkSectorHeatmap"
+import {
   UsIndexPerformanceTable,
   UsIndexPerformanceTableLoading,
 } from "#/components/UsIndexPerformanceTable"
@@ -134,6 +138,11 @@ function ReportPage() {
     locale,
     ready && marketCode === "hk_equity"
   )
+  const hkHeatmap = useMarketQuery(
+    queries.hkSectorHeatmap(),
+    locale,
+    ready && marketCode === "hk_equity"
+  )
   useChatPageContext(
     report.data?.kind === "report" && report.data.report.publicationId
       ? {
@@ -206,6 +215,16 @@ function ReportPage() {
                 loading={<HkIndexCardsLoading />}
               >
                 {data => <HkIndexCards bars={data ?? null} locale={locale} />}
+              </MarketQuerySection>
+            ) : null}
+            {marketCode === "hk_equity" ? (
+              <MarketQuerySection
+                query={hkHeatmap}
+                loading={<HkSectorHeatmapLoading />}
+              >
+                {data => (
+                  <HkSectorHeatmap heatmap={data ?? null} locale={locale} />
+                )}
               </MarketQuerySection>
             ) : null}
             <MarketQuerySection

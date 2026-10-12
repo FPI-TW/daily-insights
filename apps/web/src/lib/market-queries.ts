@@ -221,6 +221,22 @@ export function marketQueries(scope: MarketScope, locale: Locale) {
         transport => createMarketClient(transport).latestIndexBars(),
         10_000
       ),
+    // The API answers 404 until the first capture lands; that is "no heatmap
+    // yet", not a failure to retry.
+    hkSectorHeatmap: () =>
+      query(
+        "hk-sector-heatmap",
+        [],
+        async transport => {
+          try {
+            return await createMarketClient(transport).hkSectorHeatmap()
+          } catch (error) {
+            if (error instanceof ApiError && error.status === 404) return null
+            throw error
+          }
+        },
+        10_000
+      ),
     vix: (range: { start: string; end: string }) =>
       query(
         "vix",
