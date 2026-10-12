@@ -1,14 +1,17 @@
 import hashlib
 import json
 import uuid
-from datetime import date, datetime
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import cast
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from daily_insights_api.modules.data_sources.api import DailyBar
+from daily_insights_api.modules.data_sources.api import DailyBar, HeatmapImage
+from daily_insights_api.modules.markets.api import SectorHeatmapImage
 from daily_insights_api.modules.orchestration.models import (
     FunctionRun,
     InterestRateObservation,
@@ -235,3 +238,96 @@ async def store_interest_rates(
         )
         inserted += 1
     return inserted
+
+
+async def sector_heatmap_digests(
+    database: AsyncSession, *, data_source: str, edition_date: date
+) -> dict[str, str]:
+    """slug -> sha256 of the images already recorded for one edition date."""
+    rows = await database.execute(
+        select(SectorHeatmapImage.slug, SectorHeatmapImage.sha256).where(
+            SectorHeatmapImage.data_source == data_source,
+            SectorHeatmapImage.edition_date == edition_date,
+        )
+    )
+    return {cast(str, slug): cast(str, digest) for slug, digest in rows}
+
+
+@dataclass(frozen=True, slots=True)
+class StoredHeatmapImages:
+    changed: int
+    # Object keys whose rows were removed: sectors that disappeared from the day
+    # plus editions older than the retention window. The caller deletes them
+    # from R2 after the transaction commits so a rollback never orphans a row.
+    removed_object_keys: tuple[str, ...]
+
+
+async def store_sector_heatmap_images(
+    database: AsyncSession,
+    *,
+    function_run_id: uuid.UUID,
+    fence_token: uuid.UUID,
+    function_attempt_id: uuid.UUID,
+    data_source: str,
+    market_code: str,
+    edition_date: date,
+    captured_at: datetime,
+    images: Sequence[tuple[HeatmapImage, str]],
+    retention_days: int,
+) -> StoredHeatmapImages | None:
+    """Upsert one edition's ledger rows; None when the fence is stale."""
+    if not await fence_is_current(
+        database, function_run_id=function_run_id, fence_token=fence_token
+    ):
+        return None
+    existing = {
+        row.slug: row
+        for row in await database.scalars(
+            select(SectorHeatmapImage)
+            .where(
+                SectorHeatmapImage.data_source == data_source,
+                SectorHeatmapImage.edition_date == edition_date,
+            )
+            .with_for_update()
+        )
+    }
+    changed = 0
+    for image, object_key in images:
+        row = existing.pop(image.slug, None)
+        if row is None:
+            row = SectorHeatmapImage(
+                data_source=data_source,
+                market_code=market_code,
+                edition_date=edition_date,
+                kind=image.kind,
+                slug=image.slug,
+                sha256="",
+            )
+            database.add(row)
+        if row.sha256 != image.sha256:
+            changed += 1
+        row.sector_name = image.name
+        row.symbol_count = image.symbol_count
+        row.market_cap = Decimal(str(image.market_cap)) if image.market_cap is not None else None
+        row.sort_order = image.sort_order
+        row.object_key = object_key
+        row.sha256 = image.sha256
+        row.size_bytes = len(image.png)
+        row.width = image.width
+        row.height = image.height
+        row.captured_at = captured_at
+        row.function_attempt_id = function_attempt_id
+    removed = [row.object_key for row in existing.values()]
+    for row in existing.values():
+        await database.delete(row)
+    expired = await database.scalars(
+        select(SectorHeatmapImage).where(
+            SectorHeatmapImage.data_source == data_source,
+            SectorHeatmapImage.edition_date < edition_date - timedelta(days=retention_days),
+        )
+    )
+    for row in expired:
+        removed.append(row.object_key)
+        await database.delete(row)
+    await database.flush()
+    return StoredHeatmapImages(changed=changed, removed_object_keys=tuple(removed))

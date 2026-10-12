@@ -3,6 +3,7 @@
 from daily_insights_api.modules.markets.models import (
     InstitutionalMarketFlow,
     InstitutionalStockFlow,
+    SectorHeatmapImage,
 )
 from daily_insights_api.modules.markets.schemas import (
     IndexDailyBarResponse,
@@ -56,6 +57,7 @@ __all__ = [
     "InstitutionalMarketFlow",
     "InstitutionalStockFlow",
     "MarketResponse",
+    "SectorHeatmapImage",
     "TaiexRefresh",
     "index_daily_bars",
     "index_moving_averages",

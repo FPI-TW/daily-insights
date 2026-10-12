@@ -67,6 +67,8 @@ def _provider_ready(provider_key: str, settings: object) -> bool:
             getattr(settings, "daily_news_enabled", False)
             or getattr(settings, "analyst_viewpoints_enabled", False)
         )
+    if provider_key == "tradingview":
+        return bool(getattr(settings, "tradingview_enabled", False))
     return True
 
 

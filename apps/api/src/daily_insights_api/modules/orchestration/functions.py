@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -17,18 +18,23 @@ from daily_insights_api.modules.analyst_viewpoints.api import (
     record_sync_execution,
     sync_viewpoints,
 )
+from daily_insights_api.modules.assets.api import ObjectRef, ObjectStore, R2ObjectStore
 from daily_insights_api.modules.data_sources.api import (
     TAIEX_CONTRACT_VERSION,
     TRACKED_INDICES,
     TWELVE_DATA_CONTRACT_VERSION,
     YFINANCE_CONTRACT_VERSION,
     DailyBar,
+    DataSourceContractError,
+    DataSourceTransientError,
+    HeatmapImage,
     RetryPolicy,
     TwelveDataAdapter,
     TwelveDataTransport,
     TwseAdapter,
     YfinanceAdapter,
     YfinanceDailyBars,
+    capture_sector_heatmap,
 )
 from daily_insights_api.modules.markets.api import (
     AUTOMATIC_SHORT_REFRESH_PERIOD,
@@ -46,8 +52,10 @@ from daily_insights_api.modules.orchestration.facts import (
     fence_is_current,
     interest_rate_month_coverage,
     latest_market_date,
+    sector_heatmap_digests,
     store_interest_rates,
     store_market_bars,
+    store_sector_heatmap_images,
 )
 from daily_insights_api.modules.orchestration.models import JobRun, MarketDailySeries
 from daily_insights_api.modules.orchestration.news_functions import build_news_handlers
@@ -67,6 +75,12 @@ from daily_insights_api.modules.reports.api import (
 
 TwelveManifest = tuple[tuple[str, str, str, str | None, str | None], ...]
 TREASURY_REQUEST_TIMEOUT_SECONDS = 30.0
+HEATMAP_DATA_SOURCE = "HSI"
+HEATMAP_MARKET_CODE = "hk_equity"
+
+
+def heatmap_object_key(data_source: str, edition_date: date, slug: str) -> str:
+    return f"heatmaps/{data_source.lower()}/{edition_date.isoformat()}/{slug}.png"
 
 
 def _treasury_fetch_periods(
@@ -179,6 +193,17 @@ def build_function_handlers(
     twelve_adapter = TwelveDataAdapter(twelve_transport) if twelve_transport is not None else None
     yahoo_adapter = YfinanceAdapter(timeout_seconds=settings.yfinance_timeout_seconds)
     twse_adapter = _twse_adapter(settings)
+    object_store: ObjectStore | None = (
+        R2ObjectStore.from_credentials(
+            endpoint_url=settings.r2_endpoint_url,
+            access_key_id=settings.r2_access_key_id.get_secret_value(),
+            secret_access_key=settings.r2_secret_access_key.get_secret_value(),
+        )
+        if settings.r2_endpoint_url is not None
+        and settings.r2_access_key_id is not None
+        and settings.r2_secret_access_key is not None
+        else None
+    )
 
     async def twelve(claimed: ClaimedFunction) -> FunctionOutcome:
         return await _run_twelve(settings, session_factory, claimed, twelve_adapter)
@@ -195,6 +220,9 @@ def build_function_handlers(
     async def twse_market(claimed: ClaimedFunction) -> FunctionOutcome:
         return await _run_twse_market_flows(settings, session_factory, claimed, twse_adapter)
 
+    async def tradingview(claimed: ClaimedFunction) -> FunctionOutcome:
+        return await _run_tradingview_heatmap(settings, session_factory, claimed, object_store)
+
     handlers: dict[str, FunctionHandler] = {}
     for key in TWELVE_MANIFESTS:
         handlers[key] = twelve
@@ -208,6 +236,7 @@ def build_function_handlers(
             "treasury_yield_curve": _bind(_run_treasury, settings, session_factory),
             "sofr_daily_rates": _bind(_run_sofr, settings, session_factory),
             "analyst_viewpoints_sync": _bind(_run_analyst, settings, session_factory),
+            "hsi_sector_heatmap": tradingview,
         }
     )
     handlers.update(build_news_handlers(settings, session_factory))
@@ -894,6 +923,84 @@ async def _run_analyst(
         missing_scopes=missing,
         result=result.model_dump(mode="json"),
         retryable=bool(missing),
+    )
+
+
+async def _run_tradingview_heatmap(
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+    claimed: ClaimedFunction,
+    object_store: ObjectStore | None,
+) -> FunctionOutcome:
+    if not settings.tradingview_enabled:
+        return FunctionOutcome(status="unavailable", error_code="tradingview_disabled")
+    if object_store is None or settings.r2_bucket_name is None:
+        return FunctionOutcome(status="unavailable", error_code="r2_not_configured")
+    try:
+        captured = await capture_sector_heatmap(
+            data_source=HEATMAP_DATA_SOURCE,
+            timeout_seconds=settings.tradingview_timeout_seconds,
+        )
+    except DataSourceTransientError as error:
+        return FunctionOutcome(
+            status="unavailable",
+            error_code="heatmap_capture_failed",
+            error_detail=_safe_error_detail(error),
+            retryable=True,
+        )
+    except DataSourceContractError as error:
+        return FunctionOutcome(
+            status="unavailable",
+            error_code="heatmap_contract_drift",
+            error_detail=_safe_error_detail(error),
+        )
+    bucket = settings.r2_bucket_name
+    uploaded = 0
+    async with session_factory.begin() as database:
+        known = await sector_heatmap_digests(
+            database, data_source=HEATMAP_DATA_SOURCE, edition_date=claimed.edition_date
+        )
+        keyed: list[tuple[HeatmapImage, str]] = []
+        for image in captured.images:
+            key = heatmap_object_key(HEATMAP_DATA_SOURCE, claimed.edition_date, image.slug)
+            keyed.append((image, key))
+            if known.get(image.slug) == image.sha256:
+                continue
+            # A rerun on the same day replaces the day's objects in place.
+            await object_store.overwrite(
+                ObjectRef(bucket, key),
+                io.BytesIO(image.png),
+                size_bytes=len(image.png),
+                mime_type="image/png",
+                sha256=image.sha256,
+            )
+            uploaded += 1
+        stored = await store_sector_heatmap_images(
+            database,
+            function_run_id=claimed.function_run_id,
+            fence_token=claimed.fence_token,
+            function_attempt_id=claimed.attempt_id,
+            data_source=HEATMAP_DATA_SOURCE,
+            market_code=HEATMAP_MARKET_CODE,
+            edition_date=claimed.edition_date,
+            captured_at=captured.captured_at,
+            images=keyed,
+            retention_days=settings.tradingview_heatmap_retention_days,
+        )
+        if stored is None:
+            return FunctionOutcome(status="cancelled", error_code="cancelled")
+    for key in stored.removed_object_keys:
+        await object_store.delete(ObjectRef(bucket, key))
+    return FunctionOutcome(
+        status="succeeded" if stored.changed else "no_change",
+        source_as_of=claimed.edition_date,
+        fetched_at=captured.captured_at,
+        record_count=stored.changed,
+        result={
+            "images": len(captured.images),
+            "uploaded": uploaded,
+            "removed_objects": len(stored.removed_object_keys),
+        },
     )
 
 

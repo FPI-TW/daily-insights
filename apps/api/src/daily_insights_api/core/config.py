@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     twse_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     twse_request_interval_seconds: float = Field(default=6.0, ge=0, le=60)
     twse_retry_attempts: int = Field(default=3, ge=1, le=5)
+    # TradingView's heatmap is screenshotted with a headless browser; it is
+    # opt-in because the worker image needs Chromium and R2 credentials.
+    tradingview_enabled: bool = False
+    tradingview_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    tradingview_heatmap_retention_days: int = Field(default=90, ge=1, le=365)
     orchestration_enabled: bool = False
     orchestration_activation_date: date | None = None
     orchestration_worker_concurrency: int = Field(default=6, ge=1, le=20)

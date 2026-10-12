@@ -79,7 +79,9 @@ def test_registry_has_expected_provider_function_job_relationships() -> None:
         "us_treasury",
         "new_york_fed",
         "internal_services",
+        "tradingview",
     }
+    assert FUNCTION_BY_KEY["hsi_sector_heatmap"].provider_key == "tradingview"
     assert len(registry_digest()) == 64
 
 
@@ -226,6 +228,7 @@ def test_automatic_provider_jobs_are_unique_and_internal_services_are_combined()
         "twse",
         "us_treasury",
         "new_york_fed",
+        "tradingview",
         "internal_services",
     ]
     internal = JOB_BY_KEY["internal_services_daily_update"]
@@ -257,12 +260,19 @@ def test_every_yahoo_index_is_scheduled_by_exactly_one_manifest() -> None:
     ]
 
 
-def test_manual_hk_refresh_runs_the_hong_kong_index_function_only() -> None:
+def test_manual_hk_refresh_runs_the_hong_kong_index_and_heatmap_functions() -> None:
     job = JOB_BY_KEY["hk_equity_refresh"]
 
     assert job.triggers == ("manual",)
-    assert [step.function_key for step in job.functions] == ["hk_index_daily_bars"]
+    assert [step.function_key for step in job.functions] == [
+        "hk_index_daily_bars",
+        "hsi_sector_heatmap",
+    ]
     assert "hk_equity_refresh" in MANUAL_MARKET_JOB_KEYS
+    # The daily routine captures the heatmap through its own provider job so the
+    # TradingView lock never serialises behind Yahoo.
+    assert "tradingview_daily_update" in DAILY_ROUTINE.job_keys
+    assert JOB_BY_KEY["tradingview_daily_update"].automatic_key == "tradingview"
 
 
 def test_manual_news_market_jobs_publish_after_their_refresh() -> None:

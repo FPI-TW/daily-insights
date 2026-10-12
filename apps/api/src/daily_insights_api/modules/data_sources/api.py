@@ -18,6 +18,12 @@ from daily_insights_api.modules.data_sources.dto import MarketCode
 from daily_insights_api.modules.data_sources.provider import (
     MarketDataProvider,
 )
+from daily_insights_api.modules.data_sources.tradingview import (
+    CapturedHeatmap,
+    HeatmapImage,
+    SectorSummary,
+    capture_sector_heatmap,
+)
 from daily_insights_api.modules.data_sources.twelve_data import (
     TWELVE_DATA_CONTRACT_HASH,
     TWELVE_DATA_CONTRACT_VERSION,
@@ -61,6 +67,7 @@ __all__ = [
     "TWSE_CONTRACT_HASH",
     "TWSE_CONTRACT_VERSION",
     "YFINANCE_CONTRACT_VERSION",
+    "CapturedHeatmap",
     "CompletedPriceResult",
     "CompletedPricesResult",
     "DailyBar",
@@ -71,6 +78,7 @@ __all__ = [
     "DataSourceTransientError",
     "EodResult",
     "EodsResult",
+    "HeatmapImage",
     "IndexSymbol",
     "Instrument",
     "InstrumentQuery",
@@ -80,6 +88,7 @@ __all__ = [
     "Provenance",
     "ProviderPage",
     "RetryPolicy",
+    "SectorSummary",
     "TaiexDailyBar",
     "TaiexDailyBars",
     "TwelveDataAdapter",
@@ -92,4 +101,5 @@ __all__ = [
     "UnsupportedMarketError",
     "YfinanceAdapter",
     "YfinanceDailyBars",
+    "capture_sector_heatmap",
 ]
