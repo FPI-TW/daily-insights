@@ -58,6 +58,8 @@ from daily_insights_api.modules.orchestration.models import (
     FunctionAttempt,
     FunctionDependency,
     FunctionRun,
+    InterestRateObservation,
+    InterestRateSeries,
     JobDependency,
     JobRun,
     MarketDailyObservation,
@@ -5105,6 +5107,79 @@ async def test_dashboard_keeps_failed_source_history_while_healthy_source_update
         frozen=frozen,
     )
     assert repeated["action"] == "no_change"
+
+
+async def test_dashboard_keeps_latest_rate_when_source_has_no_new_data(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, sessions = orchestration_database
+    # Columbus Day 2026-10-12: New York Fed has not published past 10-08 when
+    # the Taipei run for the 10-13 edition fetches successfully with no change.
+    edition, latest = date(2026, 10, 13), date(2026, 10, 8)
+    owner, token = "holiday-dashboard", uuid.uuid4()
+    async with sessions() as database:
+        await create_daily_routine(database, edition_date=edition)
+    async with sessions.begin() as database:
+        projection = await database.scalar(
+            select(JobRun).where(JobRun.job_key == "macro_dashboard_publish")
+        )
+        assert projection is not None
+        projection.status, projection.lease_owner, projection.lease_token = "running", owner, token
+        projection_id = projection.id
+        function = await database.scalar(
+            select(FunctionRun).where(FunctionRun.function_key == "sofr_daily_rates")
+        )
+        assert function is not None
+        function.status = "no_change"
+        attempt = FunctionAttempt(
+            function_run_id=function.id,
+            attempt_number=1,
+            provider_key="new_york_fed",
+            function_key="sofr_daily_rates",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="no_change",
+        )
+        database.add(attempt)
+        series = InterestRateSeries(
+            provider_key="new_york_fed",
+            dataset_key="sofr_daily_rates",
+            symbol="SOFR",
+            market="global_macro_bonds",
+            unit="percent",
+            contract_version="test",
+        )
+        database.add(series)
+        await database.flush()
+        database.add(
+            InterestRateObservation(
+                series_id=series.id,
+                function_attempt_id=attempt.id,
+                observation_date=latest,
+                version=1,
+                value=Decimal("3.87"),
+                value_digest="a" * 64,
+            )
+        )
+    frozen = await freeze_projection_inputs(
+        sessions, job_run_id=projection_id, owner=owner, fence_token=token
+    )
+    result = await publish_macro_dashboard(
+        sessions,
+        job_run_id=projection_id,
+        owner=owner,
+        fence_token=token,
+        frozen=frozen,
+    )
+    assert "sofr" not in result["missing_histories"]
+    async with sessions() as database:
+        snapshot = await database.get(MacroDashboardSnapshot, "global_macro_bonds")
+        assert snapshot is not None
+        sofr = next(item for item in snapshot.payload["histories"] if item["id"] == "sofr")
+        assert sofr["status"] == "ok"
+        assert [Point.model_validate(point) for point in sofr["points"]] == [
+            Point(date=latest, value=Decimal("3.87"))
+        ]
 
 
 async def test_dashboard_all_failed_sources_preserve_existing_snapshot(
