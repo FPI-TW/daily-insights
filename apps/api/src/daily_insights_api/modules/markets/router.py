@@ -268,7 +268,12 @@ async def get_hk_sector_heatmap(
             },
         )
     settings: Settings = request.app.state.settings
-    assert settings.r2_bucket_name is not None
+    if settings.r2_bucket_name is None:
+        # The app builds a store from endpoint and keys alone, so a development
+        # box with no bucket reaches here; answer like the podcast endpoints do.
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, detail={"code": "r2_not_configured"}
+        )
     expires_in = timedelta(seconds=settings.r2_signed_url_ttl_seconds)
     images = [
         SectorHeatmapImageResponse(

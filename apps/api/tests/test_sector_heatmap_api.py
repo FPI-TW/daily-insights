@@ -3,6 +3,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -62,8 +63,9 @@ def _client(
     object_store: ObjectStore | None,
     role: SystemRole = SystemRole.ORG_MEMBER,
     organization_id: uuid.UUID | None = ORGANIZATION_ID,
+    settings: dict[str, Any] | None = None,
 ) -> AsyncClient:
-    values = {**DEFAULT_SETTINGS, "r2_signed_url_ttl_seconds": 600}
+    values = {**DEFAULT_SETTINGS, "r2_signed_url_ttl_seconds": 600, **(settings or {})}
     if object_store is None:
         # Without credentials the app builds no store of its own either.
         values.update(r2_endpoint_url=None, r2_access_key_id=None, r2_secret_access_key=None)
@@ -147,15 +149,26 @@ async def test_latest_edition_is_returned_with_signed_urls_in_display_order(
 
 async def test_empty_ledger_and_missing_object_store_are_reported(
     session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async with _client(session_factory, object_store=SigningObjectStore()) as client:
         empty = await client.get("/api/markets/hk/sector-heatmap")
     async with _client(session_factory, object_store=None) as client:
         unconfigured = await client.get("/api/markets/hk/sector-heatmap")
+    # A development box often sets endpoint and keys but no bucket: the app
+    # still builds a store, and a stored edition must answer 503, not 500.
+    store = SigningObjectStore()
+    await _seed_edition(session_factory, store, monkeypatch, EDITION)
+    async with _client(
+        session_factory, object_store=store, settings={"r2_bucket_name": None}
+    ) as client:
+        no_bucket = await client.get("/api/markets/hk/sector-heatmap")
 
     assert empty.status_code == 404
     assert empty.json()["detail"]["code"] == "sector_heatmap_not_captured"
     assert unconfigured.status_code == 503
+    assert no_bucket.status_code == 503
+    assert no_bucket.json()["detail"]["code"] == "r2_not_configured"
 
 
 async def test_heatmap_follows_hong_kong_market_visibility(
