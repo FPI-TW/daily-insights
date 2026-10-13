@@ -258,7 +258,15 @@ async def get_hk_sector_heatmap(
         database, market_code=HEATMAP_MARKET_CODE, edition_date=requested_date
     )
     if not rows:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "sector heatmap not found")
+        # Structured like report_not_generated so the web app can tell "nothing
+        # captured yet" from the plain "index not found" a hidden market gets.
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            {
+                "code": "sector_heatmap_not_captured",
+                "message": "no sector heatmap has been captured",
+            },
+        )
     settings: Settings = request.app.state.settings
     assert settings.r2_bucket_name is not None
     expires_in = timedelta(seconds=settings.r2_signed_url_ttl_seconds)

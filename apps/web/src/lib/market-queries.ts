@@ -105,6 +105,9 @@ function preserveAuthFailure(
   }
 }
 const notGenerated = z.object({ code: z.literal("report_not_generated") })
+const heatmapNotCaptured = z.object({
+  code: z.literal("sector_heatmap_not_captured"),
+})
 export function marketQueries(scope: MarketScope, locale: Locale) {
   const query = <T>(
     resource: string,
@@ -221,8 +224,9 @@ export function marketQueries(scope: MarketScope, locale: Locale) {
         transport => createMarketClient(transport).latestIndexBars(),
         10_000
       ),
-    // The API answers 404 until the first capture lands; that is "no heatmap
-    // yet", not a failure to retry.
+    // The API answers a coded 404 until the first capture lands; that is "no
+    // heatmap yet", not a failure to retry. Any other 404 (a market this
+    // organization cannot see answers "index not found") stays an error.
     hkSectorHeatmap: () =>
       query(
         "hk-sector-heatmap",
@@ -231,7 +235,12 @@ export function marketQueries(scope: MarketScope, locale: Locale) {
           try {
             return await createMarketClient(transport).hkSectorHeatmap()
           } catch (error) {
-            if (error instanceof ApiError && error.status === 404) return null
+            if (
+              error instanceof ApiError &&
+              error.status === 404 &&
+              heatmapNotCaptured.safeParse(error.detail).success
+            )
+              return null
             throw error
           }
         },

@@ -192,6 +192,32 @@ describe("market browser queries", () => {
     client.clear()
     vi.restoreAllMocks()
   })
+  it("treats only the coded 404 as 'no heatmap yet'", async () => {
+    const options = marketQueries(scope, "en")
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          json({ detail: { code: "sector_heatmap_not_captured" } }, 404)
+        )
+    )
+    await expect(
+      options
+        .hkSectorHeatmap()
+        .queryFn({ signal: new AbortController().signal })
+    ).resolves.toBeNull()
+    // A market the organization cannot see must not look like an empty ledger.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(json({ detail: "index not found" }, 404))
+    )
+    await expect(
+      options
+        .hkSectorHeatmap()
+        .queryFn({ signal: new AbortController().signal })
+    ).rejects.toMatchObject({ status: 404 })
+  })
   it("validates report_not_generated discrimination and internal-user 403 preview", async () => {
     const options = marketQueries(scope, "en")
     vi.stubGlobal(

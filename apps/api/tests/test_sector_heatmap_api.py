@@ -143,6 +143,7 @@ async def test_empty_ledger_and_missing_object_store_are_reported(
         unconfigured = await client.get("/api/markets/hk/sector-heatmap")
 
     assert empty.status_code == 404
+    assert empty.json()["detail"]["code"] == "sector_heatmap_not_captured"
     assert unconfigured.status_code == 503
 
 
@@ -187,5 +188,8 @@ async def test_heatmap_follows_hong_kong_market_visibility(
         preview = await staff.get("/api/markets/hk/sector-heatmap")
 
     assert hidden.status_code == 404
+    # A hidden market is indistinguishable from a missing index, not from an
+    # empty ledger: the web app must not render it as "no heatmap yet".
+    assert hidden.json()["detail"] == "index not found"
     assert preview.status_code == 200, preview.text
     assert len(preview.json()["images"]) == 2
