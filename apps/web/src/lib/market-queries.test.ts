@@ -6,6 +6,7 @@ import {
   marketQueryKey,
   marketQueryPolicy,
   marketTransport,
+  heatmapRefetchInterval,
 } from "./market-queries"
 import { clearMarketQueries } from "./useSessionExpiry"
 
@@ -191,6 +192,18 @@ describe("market browser queries", () => {
     expect(client.getQueryData(["unrelated"])).toBe("keep")
     client.clear()
     vi.restoreAllMocks()
+  })
+  it("refetches the heatmap before its signed URLs expire", () => {
+    const image = (expires_in_seconds: number) => ({ expires_in_seconds })
+    expect(heatmapRefetchInterval(null)).toBe(false)
+    expect(heatmapRefetchInterval({ images: [] })).toBe(false)
+    // 80% of the shortest TTL, so the open-full-size link never goes stale.
+    expect(heatmapRefetchInterval({ images: [image(900), image(600)] })).toBe(
+      480_000
+    )
+    expect(
+      marketQueries(scope, "en").hkSectorHeatmap().refetchInterval
+    ).toEqual(expect.any(Function))
   })
   it("treats only the coded 404 as 'no heatmap yet'", async () => {
     const options = marketQueries(scope, "en")
