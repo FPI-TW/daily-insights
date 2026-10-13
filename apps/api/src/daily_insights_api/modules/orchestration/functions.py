@@ -53,7 +53,7 @@ from daily_insights_api.modules.orchestration.facts import (
     fence_is_current,
     interest_rate_month_coverage,
     latest_market_date,
-    sector_heatmap_digests,
+    lock_sector_heatmap_rows,
     store_interest_rates,
     store_market_bars,
     store_sector_heatmap_images,
@@ -1014,14 +1014,18 @@ async def _run_tradingview_heatmap(
             return FunctionOutcome(
                 status="unavailable", error_code="hk_bars_missing", retryable=True
             )
-        known = await sector_heatmap_digests(
+        # The uploads run inside this transaction on purpose: the fence lock
+        # above is what stops a stale attempt overwriting a newer one's objects.
+        # It is two small PNGs once a day, so the connection is held for seconds.
+        existing = await lock_sector_heatmap_rows(
             database, data_source=HEATMAP_DATA_SOURCE, edition_date=edition
         )
         keyed: list[tuple[HeatmapImage, str]] = []
         for image in captured.images:
             key = heatmap_object_key(HEATMAP_DATA_SOURCE, edition, image.slug)
             keyed.append((image, key))
-            if known.get(image.slug) == image.sha256:
+            row = existing.get(image.slug)
+            if row is not None and row.sha256 == image.sha256:
                 continue
             # A rerun on the same day replaces the day's objects in place.
             await object_store.overwrite(
@@ -1042,6 +1046,7 @@ async def _run_tradingview_heatmap(
             edition_date=edition,
             captured_at=captured.captured_at,
             images=keyed,
+            existing=existing,
             retention_days=settings.tradingview_heatmap_retention_days,
         )
         if stored is None:
@@ -1053,8 +1058,9 @@ async def _run_tradingview_heatmap(
         # fails after the objects are gone just repeats them next run.
         for key in stored.removed_object_keys:
             await object_store.delete(ObjectRef(bucket, key))
+    # A retention sweep that only deleted objects still changed the bucket.
     return FunctionOutcome(
-        status="succeeded" if stored.changed else "no_change",
+        status="succeeded" if stored.changed or stored.removed_object_keys else "no_change",
         source_as_of=edition,
         fetched_at=captured.captured_at,
         record_count=stored.changed,

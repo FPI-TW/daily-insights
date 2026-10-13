@@ -443,6 +443,38 @@ async def test_missing_hk_bars_are_unavailable_and_retryable(
     assert await _rows(sessions) == []
 
 
+async def test_a_sweep_that_only_removes_objects_is_not_no_change(
+    heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, sessions = heatmap_database
+    store = FakeObjectStore()
+    captured = _captured()
+
+    async def capture(**_: object) -> CapturedHeatmap:
+        return captured
+
+    monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
+    old_edition = SETTLED - timedelta(days=31)
+    keep_longer = _settings(tradingview_heatmap_retention_days=60)
+    await orchestration_functions._run_tradingview_heatmap(
+        keep_longer, sessions, await _running_attempt(sessions, settled=old_edition), store
+    )
+    await orchestration_functions._run_tradingview_heatmap(
+        keep_longer, sessions, await _running_attempt(sessions), store
+    )
+
+    # Same capture, shorter retention: no row changes, two objects removed.
+    outcome = await orchestration_functions._run_tradingview_heatmap(
+        _settings(), sessions, await _running_attempt(sessions), store
+    )
+
+    assert outcome.status == "succeeded"
+    assert outcome.record_count == 0
+    assert outcome.result == {"images": 2, "uploaded": 0, "removed_objects": 2}
+    assert {row.edition_date for row in await _rows(sessions)} == {SETTLED}
+
+
 async def test_failed_object_delete_keeps_the_rows_for_the_next_run(
     heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
     monkeypatch: pytest.MonkeyPatch,

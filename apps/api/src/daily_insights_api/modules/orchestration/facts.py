@@ -1,7 +1,7 @@
 import hashlib
 import json
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -240,17 +240,23 @@ async def store_interest_rates(
     return inserted
 
 
-async def sector_heatmap_digests(
+async def lock_sector_heatmap_rows(
     database: AsyncSession, *, data_source: str, edition_date: date
-) -> dict[str, str]:
-    """slug -> sha256 of the images already recorded for one edition date."""
-    rows = await database.execute(
-        select(SectorHeatmapImage.slug, SectorHeatmapImage.sha256).where(
+) -> dict[str, SectorHeatmapImage]:
+    """slug -> the edition's ledger rows, locked for the rest of the transaction.
+
+    Read once: the caller compares digests against these to skip unchanged
+    uploads, then hands the same rows to store_sector_heatmap_images.
+    """
+    rows = await database.scalars(
+        select(SectorHeatmapImage)
+        .where(
             SectorHeatmapImage.data_source == data_source,
             SectorHeatmapImage.edition_date == edition_date,
         )
+        .with_for_update()
     )
-    return {cast(str, slug): cast(str, digest) for slug, digest in rows}
+    return {row.slug: row for row in rows}
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,24 +280,19 @@ async def store_sector_heatmap_images(
     edition_date: date,
     captured_at: datetime,
     images: Sequence[tuple[HeatmapImage, str]],
+    existing: Mapping[str, SectorHeatmapImage],
     retention_days: int,
 ) -> StoredHeatmapImages | None:
-    """Upsert one edition's ledger rows; None when the fence is stale."""
+    """Upsert one edition's ledger rows; None when the fence is stale.
+
+    `existing` is the edition's rows from lock_sector_heatmap_rows in this
+    same transaction.
+    """
     if not await fence_is_current(
         database, function_run_id=function_run_id, fence_token=fence_token
     ):
         return None
-    existing = {
-        row.slug: row
-        for row in await database.scalars(
-            select(SectorHeatmapImage)
-            .where(
-                SectorHeatmapImage.data_source == data_source,
-                SectorHeatmapImage.edition_date == edition_date,
-            )
-            .with_for_update()
-        )
-    }
+    existing = dict(existing)
     changed = 0
     for image, object_key in images:
         row = existing.pop(image.slug, None)
