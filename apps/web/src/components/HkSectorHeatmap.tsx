@@ -12,7 +12,7 @@ export function HkSectorHeatmapLoading() {
       aria-label={t("hkSectorHeatmapLoading")}
     >
       <div className="h-3 w-32 animate-pulse rounded bg-line" />
-      <div className="mt-4 aspect-[2/1] w-full animate-pulse rounded bg-line" />
+      <div className="mt-4 aspect-2/1 w-full animate-pulse rounded bg-line" />
     </section>
   )
 }
