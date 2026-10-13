@@ -507,10 +507,11 @@ async def test_editions_past_retention_are_removed_from_ledger_and_bucket(
         # Monday 09:00 and 15:59 HKT: trading (the lunch break still counts).
         (datetime(2026, 10, 12, 1, 0, tzinfo=UTC), True, date(2026, 10, 9)),
         (datetime(2026, 10, 12, 7, 59, tzinfo=UTC), True, date(2026, 10, 9)),
-        # Monday 16:14 HKT: the closing auction is still settling.
-        (datetime(2026, 10, 12, 8, 14, tzinfo=UTC), True, date(2026, 10, 9)),
-        # Monday 16:15 HKT: today is complete.
-        (datetime(2026, 10, 12, 8, 15, tzinfo=UTC), False, date(2026, 10, 12)),
+        # Monday 16:29 HKT: the closing auction's result is still in the
+        # 15-minute delay.
+        (datetime(2026, 10, 12, 8, 29, tzinfo=UTC), True, date(2026, 10, 9)),
+        # Monday 16:30 HKT: today is complete.
+        (datetime(2026, 10, 12, 8, 30, tzinfo=UTC), False, date(2026, 10, 12)),
         # Saturday noon HKT: Friday.
         (datetime(2026, 10, 17, 4, 0, tzinfo=UTC), False, date(2026, 10, 16)),
         # National Day (Thu 1 Oct) is a holiday: Friday morning dates to Wednesday.

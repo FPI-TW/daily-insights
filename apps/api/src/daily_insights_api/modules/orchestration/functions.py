@@ -94,9 +94,11 @@ HONG_KONG = ZoneInfo("Asia/Hong_Kong")
 # stays up past that horizon would date captures to the calendar's last day.
 HK_CALENDAR = exchange_calendars.get_calendar("XHKG", start="2025-01-01")
 # The heatmap moves once the pre-open auction starts and settles once the
-# closing auction has; TradingView draws both before the official bells.
+# closing auction has (16:10); TradingView's HKEX feed is 15 minutes delayed
+# (scanner ``update_mode`` is ``delayed_streaming_900``), so the auction's
+# result reaches the page around 16:25.
 HK_AUCTION_BEFORE_OPEN = pd.Timedelta(minutes=30)
-HK_AUCTION_AFTER_CLOSE = pd.Timedelta(minutes=15)
+HK_AUCTION_AFTER_CLOSE = pd.Timedelta(minutes=30)
 
 
 def _utcnow() -> datetime:
