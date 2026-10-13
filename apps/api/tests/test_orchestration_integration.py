@@ -2513,7 +2513,7 @@ async def test_daily_routine_is_idempotent_and_worker_persists_attempts(
     async with sessions() as database:
         assert await database.scalar(select(func.count()).select_from(RoutineRun)) == 1
         assert await database.scalar(select(func.count()).select_from(JobRun)) == 9
-        assert await database.scalar(select(func.count()).select_from(JobDependency)) == 9
+        assert await database.scalar(select(func.count()).select_from(JobDependency)) == 8
 
     claimed = await claim_ready_function(engine, sessions, owner="integration-worker")
     assert claimed is not None

@@ -5,11 +5,13 @@ import hashlib
 import io
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import exchange_calendars
 import httpx
+import pandas as pd
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -84,12 +86,36 @@ from daily_insights_api.modules.reports.api import (
 TwelveManifest = tuple[tuple[str, str, str, str | None, str | None], ...]
 TREASURY_REQUEST_TIMEOUT_SECONDS = 30.0
 HEATMAP_DATA_SOURCE = "HSI"
-HEATMAP_INDEX_SYMBOL = "^HSI"
 HONG_KONG = ZoneInfo("Asia/Hong_Kong")
-# The heatmap shows the current session once the opening auction starts moving
-# prices, and the closing auction has settled a few minutes after 16:00.
-HK_SESSION_OPEN = time(9, 0)
-HK_SESSION_CLOSE = time(16, 15)
+# HKEX's trading calendar: holidays and half-day sessions, a year ahead. The
+# heatmap is dated by it alone, so it never waits for a Yahoo bar and the
+# morning window before the open is not spent waiting on another job.
+# ponytail: built once per process with a one-year horizon; a worker that
+# stays up past that horizon would date captures to the calendar's last day.
+HK_CALENDAR = exchange_calendars.get_calendar("XHKG", start="2025-01-01")
+# The heatmap moves once the pre-open auction starts and settles once the
+# closing auction has; TradingView draws both before the official bells.
+HK_AUCTION_BEFORE_OPEN = pd.Timedelta(minutes=30)
+HK_AUCTION_AFTER_CLOSE = pd.Timedelta(minutes=15)
+
+
+def _utcnow() -> datetime:
+    """Seam for tests; the heatmap gates read the clock before capturing."""
+    return datetime.now(UTC)
+
+
+def _market_open_outcome(*, manual: bool) -> FunctionOutcome:
+    """Retrying would not help: the session lasts seven hours and the retry
+    budget fifteen minutes. An operator pressing "refresh" during Taiwan
+    office hours gets a skip they can read, the scheduled job a plain
+    failure it should never reach (it runs at 08:00 Taipei)."""
+    if manual:
+        return FunctionOutcome(status="no_change", result={"skipped": "hk_market_open"})
+    return FunctionOutcome(status="unavailable", error_code="hk_market_open")
+
+
+class _LeaseLost(Exception):
+    """Leaves the heatmap transaction by rollback: a return would commit it."""
 
 
 def _function_run_lock(function_run_id: uuid.UUID) -> int:
@@ -100,19 +126,21 @@ def _function_run_lock(function_run_id: uuid.UUID) -> int:
 def hk_heatmap_session(captured_at: datetime) -> tuple[bool, date]:
     """(Hong Kong is trading, date of the last completed session) at that instant.
 
-    Weekday calendar only. A holiday looks like a session that never produced a
-    bar; the caller accepts that once the day is in the past, since the capture
-    then shows the last session that did trade.
+    Holidays and half-day sessions come from the exchange calendar, so the
+    morning after a holiday dates a capture to the last session that traded,
+    and a Christmas Eve capture at 12:30 is already a settled half day.
     """
-    local = captured_at.astimezone(HONG_KONG)
-    weekday = local.weekday() < 5
-    trading = weekday and HK_SESSION_OPEN <= local.time() < HK_SESSION_CLOSE
-    last_session = local.date()
-    if not weekday or local.time() < HK_SESSION_CLOSE:
-        last_session -= timedelta(days=1)
-    while last_session.weekday() >= 5:
-        last_session -= timedelta(days=1)
-    return trading, last_session
+    at = pd.Timestamp(captured_at)
+    local_date = pd.Timestamp(captured_at.astimezone(HONG_KONG).date())
+    trading = bool(HK_CALENDAR.is_session(local_date)) and (
+        HK_CALENDAR.session_open(local_date) - HK_AUCTION_BEFORE_OPEN
+        <= at
+        < HK_CALENDAR.session_close(local_date) + HK_AUCTION_AFTER_CLOSE
+    )
+    session = HK_CALENDAR.date_to_session(local_date, direction="previous")
+    if at < HK_CALENDAR.session_close(session) + HK_AUCTION_AFTER_CLOSE:
+        session = HK_CALENDAR.previous_session(session)
+    return trading, session.date()
 
 
 def heatmap_object_key(data_source: str, edition_date: date, slug: str) -> str:
@@ -196,11 +224,15 @@ TWELVE_BOOTSTRAP = {
 
 
 def _tracked_index_manifest(market_code: str) -> tuple[tuple[str, str, str], ...]:
-    """Every Yahoo-supplied index of one market, straight from the catalog."""
+    """The catalog's indices of one market, each fetched from Yahoo.
+
+    Only the US, Hong Kong and China markets are passed in; ^TWII belongs to
+    tw_equity and comes from the exchange, so it never appears here.
+    """
     return tuple(
         (symbol, market, "index")
         for symbol, market in TRACKED_INDICES.items()
-        if market == market_code and symbol != TAIEX_SYMBOL
+        if market == market_code
     )
 
 
@@ -1009,18 +1041,13 @@ async def _run_tradingview_heatmap(
             for_update=False,
         ):
             return FunctionOutcome(status="cancelled", error_code="cancelled")
-        if (
-            await latest_market_date(
-                database,
-                provider_key="yahoo_finance",
-                dataset_key="hk_index_daily_bars",
-                symbol=HEATMAP_INDEX_SYMBOL,
-            )
-            is None
-        ):
-            return FunctionOutcome(
-                status="unavailable", error_code="hk_bars_missing", retryable=True
-            )
+        job_run = await database.get(JobRun, claimed.job_run_id)
+        manual = job_run is not None and job_run.trigger == "manual"
+    # The session gate also runs here, on the clock, so a run during the
+    # session does not pay for a browser session it would throw away. It runs
+    # again on the capture's own timestamp below, which is the one that counts.
+    if hk_heatmap_session(_utcnow())[0]:
+        return _market_open_outcome(manual=manual)
     try:
         captured = await capture_sector_heatmap(
             data_source=HEATMAP_DATA_SOURCE,
@@ -1042,100 +1069,87 @@ async def _run_tradingview_heatmap(
     # A capture taken while Hong Kong trades shows an unfinished session. There
     # is no settled bar to date it by, and dating it to the previous bar would
     # overwrite that day's snapshot in place, so it is not stored at all.
-    trading, last_session = hk_heatmap_session(captured.captured_at)
+    # The authoritative gate: the capture's own timestamp, taken when the
+    # pixels were, so a run that started just before the open is still caught.
+    # Outside the session the capture shows the last completed session, and
+    # that is the edition it is filed under.
+    trading, edition = hk_heatmap_session(captured.captured_at)
     if trading:
-        return FunctionOutcome(status="unavailable", error_code="hk_market_open", retryable=True)
+        return _market_open_outcome(manual=manual)
     bucket = settings.r2_bucket_name
     uploaded = 0
-    async with session_factory.begin() as database:
-        # Attempts of this function run take turns through an advisory lock,
-        # not a lock on the function_runs row: the row stays free for the
-        # worker's heartbeat while the R2 I/O below runs. A stale attempt that
-        # gets through the plain fence read here is caught by the locking
-        # fence check right before commit, and because turns do not overlap
-        # the newer attempt's uploads always land after the stale one's.
-        await database.execute(
-            select(func.pg_advisory_xact_lock(_function_run_lock(claimed.function_run_id)))
-        )
-        if not await fence_is_current(
-            database,
-            function_run_id=claimed.function_run_id,
-            fence_token=claimed.fence_token,
-            for_update=False,
-        ):
-            return FunctionOutcome(status="cancelled", error_code="cancelled")
-        # The routine fires at 08:00 Taipei, before Hong Kong opens, so the
-        # capture shows the last settled session, not the routine's date. Date
-        # it by the newest ^HSI bar so it agrees with the index cards beside it.
-        edition = await latest_market_date(
-            database,
-            provider_key="yahoo_finance",
-            dataset_key="hk_index_daily_bars",
-            symbol=HEATMAP_INDEX_SYMBOL,
-        )
-        if edition is None:
-            return FunctionOutcome(
-                status="unavailable", error_code="hk_bars_missing", retryable=True
+    try:
+        async with session_factory.begin() as database:
+            # Attempts of this function run take turns through an advisory lock,
+            # not a lock on the function_runs row: the row stays free for the
+            # worker's heartbeat while the R2 I/O below runs. A stale attempt that
+            # gets through the plain fence read here is caught by the locking
+            # fence check right before commit, and because turns do not overlap
+            # the newer attempt's uploads always land after the stale one's.
+            await database.execute(
+                select(func.pg_advisory_xact_lock(_function_run_lock(claimed.function_run_id)))
             )
-        # After today's close the capture shows today, but Yahoo publishes the
-        # settled bar hours later. Until it lands, dating the capture to the
-        # previous bar would overwrite that day's snapshot: wait instead. Once
-        # the session day is behind us a missing bar means a holiday, and the
-        # newest bar's session is what the capture shows.
-        if edition < last_session == captured.captured_at.astimezone(HONG_KONG).date():
-            return FunctionOutcome(
-                status="unavailable", error_code="hk_bars_pending", retryable=True
+            if not await fence_is_current(
+                database,
+                function_run_id=claimed.function_run_id,
+                fence_token=claimed.fence_token,
+                for_update=False,
+            ):
+                return FunctionOutcome(status="cancelled", error_code="cancelled")
+            existing = await lock_sector_heatmap_rows(
+                database, data_source=HEATMAP_DATA_SOURCE, edition_date=edition
             )
-        existing = await lock_sector_heatmap_rows(
-            database, data_source=HEATMAP_DATA_SOURCE, edition_date=edition
-        )
-        keyed: list[tuple[HeatmapImage, str]] = []
-        for image in captured.images:
-            key = heatmap_object_key(HEATMAP_DATA_SOURCE, edition, image.slug)
-            keyed.append((image, key))
-            ref = ObjectRef(bucket, key)
-            row = existing.get(image.slug)
-            if row is not None and row.sha256 == image.sha256:
-                # Unchanged on the ledger, but a stale attempt may have left
-                # its own bytes under this key before it was rolled back, so
-                # the bucket has the last word on whether to upload again.
-                head = await object_store.head(ref)
-                if head is not None and head.sha256 == image.sha256:
-                    continue
-            # A rerun on the same day replaces the day's objects in place.
-            await object_store.overwrite(
-                ref,
-                io.BytesIO(image.png),
-                size_bytes=len(image.png),
-                mime_type="image/png",
-                sha256=image.sha256,
+            keyed: list[tuple[HeatmapImage, str]] = []
+            for image in captured.images:
+                key = heatmap_object_key(HEATMAP_DATA_SOURCE, edition, image.slug)
+                keyed.append((image, key))
+                ref = ObjectRef(bucket, key)
+                row = existing.get(image.slug)
+                if row is not None and row.sha256 == image.sha256:
+                    # Unchanged on the ledger, but a stale attempt may have left
+                    # its own bytes under this key before it was rolled back, so
+                    # the bucket has the last word on whether to upload again.
+                    head = await object_store.head(ref)
+                    if head is not None and head.sha256 == image.sha256:
+                        continue
+                # A rerun on the same day replaces the day's objects in place.
+                await object_store.overwrite(
+                    ref,
+                    io.BytesIO(image.png),
+                    size_bytes=len(image.png),
+                    mime_type="image/png",
+                    sha256=image.sha256,
+                )
+                uploaded += 1
+            stored = await store_sector_heatmap_images(
+                database,
+                function_attempt_id=claimed.attempt_id,
+                data_source=HEATMAP_DATA_SOURCE,
+                market_code=HEATMAP_MARKET_CODE,
+                edition_date=edition,
+                captured_at=captured.captured_at,
+                images=keyed,
+                existing=existing,
+                retention_days=settings.tradingview_heatmap_retention_days,
             )
-            uploaded += 1
-        stored = await store_sector_heatmap_images(
-            database,
-            function_attempt_id=claimed.attempt_id,
-            data_source=HEATMAP_DATA_SOURCE,
-            market_code=HEATMAP_MARKET_CODE,
-            edition_date=edition,
-            captured_at=captured.captured_at,
-            images=keyed,
-            existing=existing,
-            retention_days=settings.tradingview_heatmap_retention_days,
-        )
-        # Delete the objects before the row deletions commit. A delete that
-        # fails rolls the rows back, so the next run finds them and retries;
-        # committing first would drop the only record of the key and orphan
-        # the object for good. R2 deletes are idempotent, so a commit that
-        # fails after the objects are gone just repeats them next run.
-        for key in stored.removed_object_keys:
-            await object_store.delete(ObjectRef(bucket, key))
-        # The last word before commit, with the row locked and no I/O after it.
-        if not await fence_is_current(
-            database,
-            function_run_id=claimed.function_run_id,
-            fence_token=claimed.fence_token,
-        ):
-            return FunctionOutcome(status="cancelled", error_code="cancelled")
+            # Delete the objects before the row deletions commit. A delete that
+            # fails rolls the rows back, so the next run finds them and retries;
+            # committing first would drop the only record of the key and orphan
+            # the object for good. R2 deletes are idempotent, so a commit that
+            # fails after the objects are gone just repeats them next run.
+            for key in stored.removed_object_keys:
+                await object_store.delete(ObjectRef(bucket, key))
+            # The last word before commit, with the row locked and no I/O after
+            # it. Leaving the `begin()` block normally commits, so a stale attempt
+            # must leave it by exception for its rows and deletions to roll back.
+            if not await fence_is_current(
+                database,
+                function_run_id=claimed.function_run_id,
+                fence_token=claimed.fence_token,
+            ):
+                raise _LeaseLost
+    except _LeaseLost:
+        return FunctionOutcome(status="cancelled", error_code="cancelled")
     # A retention sweep that only deleted objects still changed the bucket.
     return FunctionOutcome(
         status="succeeded" if stored.changed or stored.removed_object_keys else "no_change",

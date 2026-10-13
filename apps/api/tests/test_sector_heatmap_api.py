@@ -10,7 +10,12 @@ from conftest import remigrate_database, reset_database_schema
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from test_health import readiness
-from test_sector_heatmap import DEFAULT_SETTINGS, FakeObjectStore, _captured, _running_attempt
+from test_sector_heatmap import (
+    DEFAULT_SETTINGS,
+    FakeObjectStore,
+    _captured_after,
+    _running_attempt,
+)
 
 import daily_insights_api.modules.orchestration.functions as orchestration_functions
 from daily_insights_api.core.config import Settings
@@ -80,11 +85,16 @@ async def _seed_edition(
     store: FakeObjectStore,
     monkeypatch: pytest.MonkeyPatch,
     edition_date: date,
-    captured: CapturedHeatmap,
+    seed: bytes = b"",
 ) -> None:
+    # Captured the morning after the edition's bar, with the worker's clock
+    # pinned there too, so neither gate mistakes the seed for a live session.
+    captured = _captured_after(edition_date, seed)
+
     async def capture(**_: object) -> CapturedHeatmap:
         return captured
 
+    monkeypatch.setattr(orchestration_functions, "_utcnow", lambda: captured.captured_at)
     monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
     outcome = await orchestration_functions._run_tradingview_heatmap(
         Settings.model_validate(DEFAULT_SETTINGS),
@@ -100,9 +110,10 @@ async def test_latest_edition_is_returned_with_signed_urls_in_display_order(
     session_factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = SigningObjectStore()
-    older = EDITION - timedelta(days=1)
-    await _seed_edition(session_factory, store, monkeypatch, older, _captured())
-    await _seed_edition(session_factory, store, monkeypatch, EDITION, _captured(b"today"))
+    # The previous session: EDITION is a Monday, so Friday.
+    older = EDITION - timedelta(days=3)
+    await _seed_edition(session_factory, store, monkeypatch, older)
+    await _seed_edition(session_factory, store, monkeypatch, EDITION, b"today")
 
     async with _client(session_factory, object_store=store) as client:
         latest = await client.get("/api/markets/hk/sector-heatmap")
@@ -151,7 +162,7 @@ async def test_heatmap_follows_hong_kong_market_visibility(
     session_factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = SigningObjectStore()
-    await _seed_edition(session_factory, store, monkeypatch, EDITION, _captured())
+    await _seed_edition(session_factory, store, monkeypatch, EDITION)
     hidden_from = uuid.uuid4()
     author_id = uuid.uuid4()
     async with session_factory.begin() as database:

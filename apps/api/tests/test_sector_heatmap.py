@@ -11,7 +11,7 @@ import pytest
 import pytest_asyncio
 from conftest import remigrate_database
 from pydantic import SecretStr
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -33,6 +33,7 @@ from daily_insights_api.modules.data_sources.tradingview.heatmap import (
     HeatmapImage,
     assemble_heatmap,
 )
+from daily_insights_api.modules.markets.api import store_index_daily_bars
 from daily_insights_api.modules.markets.models import SectorHeatmapImage
 from daily_insights_api.modules.orchestration.facts import store_market_bars
 from daily_insights_api.modules.orchestration.models import FunctionAttempt, FunctionRun, JobRun
@@ -61,6 +62,27 @@ def _png(width: int, height: int, seed: bytes = b"") -> bytes:
 
 def _captured(seed: bytes = b"", captured_at: datetime = CAPTURED_AT) -> CapturedHeatmap:
     return assemble_heatmap("HSI", captured_at, _png(1920, 989, seed), _png(400, 34, seed))
+
+
+def _captured_after(settled: date, seed: bytes = b"") -> CapturedHeatmap:
+    """A capture at 08:05 HKT the morning after `settled`, so it is dated to it."""
+    morning = datetime.combine(settled + timedelta(days=1), datetime.min.time(), tzinfo=UTC)
+    return _captured(seed, morning + timedelta(minutes=5))
+
+
+def _capture_in_order(monkeypatch: pytest.MonkeyPatch, captures: list[CapturedHeatmap]) -> None:
+    """Hand the worker one prepared capture per run, in call order.
+
+    The clock the pre-capture gates read follows the capture about to be
+    taken, as it would in production where both come from the same run.
+    """
+    queue = list(captures)
+
+    async def capture(**_: object) -> CapturedHeatmap:
+        return queue.pop(0)
+
+    monkeypatch.setattr(orchestration_functions, "_utcnow", lambda: queue[0].captured_at)
+    monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
 
 
 class FakeObjectStore:
@@ -132,6 +154,7 @@ def _settings(**overrides: Any) -> Settings:
 def _claimed(
     *,
     function_run_id: uuid.UUID | None = None,
+    job_run_id: uuid.UUID | None = None,
     attempt_id: uuid.UUID | None = None,
     fence_token: uuid.UUID | None = None,
     edition_date: date = EDITION,
@@ -139,7 +162,7 @@ def _claimed(
     return ClaimedFunction(
         connection=cast(AsyncConnection, None),
         function_run_id=function_run_id or uuid.uuid4(),
-        job_run_id=uuid.uuid4(),
+        job_run_id=job_run_id or uuid.uuid4(),
         attempt_id=attempt_id or uuid.uuid4(),
         function_key="hsi_sector_heatmap",
         provider_key="tradingview",
@@ -201,6 +224,13 @@ async def test_capture_failures_map_to_retryable_and_terminal_outcomes(
     assert outcome.error_detail is not None and str(error) in outcome.error_detail
 
 
+@pytest.fixture(autouse=True)
+def _clock_at_default_capture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The worker reads the clock before capturing; pin it to the default capture
+    time so the pre-capture gate agrees with the stubbed captures."""
+    monkeypatch.setattr(orchestration_functions, "_utcnow", lambda: CAPTURED_AT)
+
+
 @pytest_asyncio.fixture
 async def heatmap_database() -> AsyncIterator[tuple[AsyncEngine, async_sessionmaker[AsyncSession]]]:
     database_url = os.getenv("DAILY_INSIGHTS_TEST_DATABASE_URL")
@@ -219,18 +249,19 @@ async def _running_attempt(
     sessions: async_sessionmaker[AsyncSession],
     edition_date: date = EDITION,
     settled: date | None = SETTLED,
+    trigger: str = "manual",
 ) -> ClaimedFunction:
     """A job -> function run -> attempt chain whose lease matches the fence.
 
-    `settled` is the newest ^HSI bar on record (None stores no bar), which is
-    what the heatmap edition is derived from.
+    `settled` is the newest ^HSI bar on record (None stores no bar), written to
+    both tables the worker fills, as the index cards beside the heatmap read it.
     """
     fence = uuid.uuid4()
     async with sessions.begin() as database:
         job = JobRun(
             job_key="hk_equity_refresh",
             kind="function",
-            trigger="manual",
+            trigger=trigger,
             registry_version="test",
             registry_snapshot={},
             edition_date=edition_date,
@@ -261,6 +292,20 @@ async def _running_attempt(
         database.add(attempt)
         await database.flush()
         if settled is not None:
+            bar = DailyBar(
+                instrument_source_id="^HSI",
+                market="hk_equity",
+                symbol="^HSI",
+                trade_date=settled,
+                close=Decimal("26000"),
+            )
+            await store_index_daily_bars(
+                database,
+                bars=[bar],
+                provider="yfinance",
+                contract_version="test",
+                source_fetched_at=CAPTURED_AT,
+            )
             await store_market_bars(
                 database,
                 function_run_id=function.id,
@@ -272,18 +317,11 @@ async def _running_attempt(
                 market="hk_equity",
                 unit="index",
                 contract_version="test",
-                bars=(
-                    DailyBar(
-                        instrument_source_id="^HSI",
-                        market="hk_equity",
-                        symbol="^HSI",
-                        trade_date=settled,
-                        close=Decimal("26000"),
-                    ),
-                ),
+                bars=(bar,),
             )
         return _claimed(
             function_run_id=function.id,
+            job_run_id=job.id,
             attempt_id=attempt.id,
             fence_token=fence,
             edition_date=edition_date,
@@ -436,17 +474,15 @@ async def test_editions_past_retention_are_removed_from_ledger_and_bucket(
 ) -> None:
     _, sessions = heatmap_database
     store = FakeObjectStore()
-    captured = _captured()
-
-    async def capture(**_: object) -> CapturedHeatmap:
-        return captured
-
-    monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
     old_edition = SETTLED - timedelta(days=31)
+    kept_edition = SETTLED - timedelta(days=30)
+    # Each seed capture is taken the morning after its own settled bar.
+    _capture_in_order(
+        monkeypatch, [_captured_after(old_edition), _captured_after(kept_edition), _captured()]
+    )
     await orchestration_functions._run_tradingview_heatmap(
         _settings(), sessions, await _running_attempt(sessions, settled=old_edition), store
     )
-    kept_edition = SETTLED - timedelta(days=30)
     await orchestration_functions._run_tradingview_heatmap(
         _settings(), sessions, await _running_attempt(sessions, settled=kept_edition), store
     )
@@ -471,10 +507,21 @@ async def test_editions_past_retention_are_removed_from_ledger_and_bucket(
         # Monday 09:00 and 15:59 HKT: trading (the lunch break still counts).
         (datetime(2026, 10, 12, 1, 0, tzinfo=UTC), True, date(2026, 10, 9)),
         (datetime(2026, 10, 12, 7, 59, tzinfo=UTC), True, date(2026, 10, 9)),
-        # Monday 16:15 HKT: the closing auction has settled, today is complete.
+        # Monday 16:14 HKT: the closing auction is still settling.
+        (datetime(2026, 10, 12, 8, 14, tzinfo=UTC), True, date(2026, 10, 9)),
+        # Monday 16:15 HKT: today is complete.
         (datetime(2026, 10, 12, 8, 15, tzinfo=UTC), False, date(2026, 10, 12)),
         # Saturday noon HKT: Friday.
         (datetime(2026, 10, 17, 4, 0, tzinfo=UTC), False, date(2026, 10, 16)),
+        # National Day (Thu 1 Oct) is a holiday: Friday morning dates to Wednesday.
+        (datetime(2026, 10, 2, 0, 5, tzinfo=UTC), False, date(2026, 9, 30)),
+        # Chung Yeung falls on Monday 19 Oct: 11:00 that day is not trading, and
+        # Tuesday morning dates to the previous Friday.
+        (datetime(2026, 10, 19, 3, 0, tzinfo=UTC), False, date(2026, 10, 16)),
+        (datetime(2026, 10, 20, 0, 5, tzinfo=UTC), False, date(2026, 10, 16)),
+        # Christmas Eve is a half day closing at 12:00: 11:00 trades, 12:30 is settled.
+        (datetime(2026, 12, 24, 3, 0, tzinfo=UTC), True, date(2026, 12, 23)),
+        (datetime(2026, 12, 24, 4, 30, tzinfo=UTC), False, date(2026, 12, 24)),
     ],
 )
 def test_hk_heatmap_session_follows_the_hong_kong_clock(
@@ -483,9 +530,22 @@ def test_hk_heatmap_session_follows_the_hong_kong_clock(
     assert orchestration_functions.hk_heatmap_session(captured_at) == (trading, last_session)
 
 
+@pytest.mark.parametrize(
+    ("trigger", "expected"),
+    [
+        # An operator's refresh during the session is a readable skip, not a
+        # failure that burns the retry budget in fifteen minutes.
+        ("manual", ("no_change", None, False)),
+        # The scheduled job should never be here (it runs before the open); if
+        # it is, say so plainly and do not retry into the same session.
+        ("automatic", ("unavailable", "hk_market_open", False)),
+    ],
+)
 async def test_capture_during_the_session_is_not_stored(
     heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
     monkeypatch: pytest.MonkeyPatch,
+    trigger: str,
+    expected: tuple[str, str | None, bool],
 ) -> None:
     """An intraday capture must not overwrite the last settled day's snapshot."""
     _, sessions = heatmap_database
@@ -509,92 +569,14 @@ async def test_capture_during_the_session_is_not_stored(
     settled_objects = dict(store.objects)
 
     outcome = await orchestration_functions._run_tradingview_heatmap(
-        _settings(), sessions, await _running_attempt(sessions), store
+        _settings(), sessions, await _running_attempt(sessions, trigger=trigger), store
     )
 
-    assert (outcome.status, outcome.error_code, outcome.retryable) == (
-        "unavailable",
-        "hk_market_open",
-        True,
-    )
+    assert (outcome.status, outcome.error_code, outcome.retryable) == expected
+    if trigger == "manual":
+        assert outcome.result == {"skipped": "hk_market_open"}
     assert {row.slug: row.sha256 for row in await _rows(sessions)} == settled
     assert store.objects == settled_objects
-
-
-async def test_capture_after_close_waits_for_the_settled_bar(
-    heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _, sessions = heatmap_database
-    store = FakeObjectStore()
-    # Monday 17:00 HKT: today's close is on screen, Yahoo's bar is still Friday's.
-    captured = _captured(b"close", datetime(2026, 10, 12, 9, 0, tzinfo=UTC))
-
-    async def capture(**_: object) -> CapturedHeatmap:
-        return captured
-
-    monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
-
-    outcome = await orchestration_functions._run_tradingview_heatmap(
-        _settings(), sessions, await _running_attempt(sessions), store
-    )
-
-    assert (outcome.status, outcome.error_code, outcome.retryable) == (
-        "unavailable",
-        "hk_bars_pending",
-        True,
-    )
-    assert store.objects == {}
-    assert await _rows(sessions) == []
-
-
-async def test_morning_after_a_holiday_keeps_the_newest_bar(
-    heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _, sessions = heatmap_database
-    store = FakeObjectStore()
-    # Tuesday 08:05 HKT after a Monday holiday: Friday's bar is the newest and
-    # the capture shows Friday's session, so it is dated Friday.
-    captured = _captured(b"", datetime(2026, 10, 13, 0, 5, tzinfo=UTC))
-
-    async def capture(**_: object) -> CapturedHeatmap:
-        return captured
-
-    monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
-
-    outcome = await orchestration_functions._run_tradingview_heatmap(
-        _settings(), sessions, await _running_attempt(sessions), store
-    )
-
-    assert outcome.status == "succeeded"
-    assert outcome.source_as_of == SETTLED
-    assert {row.edition_date for row in await _rows(sessions)} == {SETTLED}
-
-
-async def test_missing_hk_bars_are_unavailable_and_retryable(
-    heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _, sessions = heatmap_database
-    store = FakeObjectStore()
-
-    async def capture(**_: object) -> CapturedHeatmap:
-        raise AssertionError("must not pay for a browser session without a ^HSI series")
-
-    monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
-
-    outcome = await orchestration_functions._run_tradingview_heatmap(
-        _settings(), sessions, await _running_attempt(sessions, settled=None), store
-    )
-
-    assert (outcome.status, outcome.error_code, outcome.retryable) == (
-        "unavailable",
-        "hk_bars_missing",
-        True,
-    )
-    assert store.objects == {}
-    assert await _rows(sessions) == []
 
 
 async def test_a_sweep_that_only_removes_objects_is_not_no_change(
@@ -603,13 +585,8 @@ async def test_a_sweep_that_only_removes_objects_is_not_no_change(
 ) -> None:
     _, sessions = heatmap_database
     store = FakeObjectStore()
-    captured = _captured()
-
-    async def capture(**_: object) -> CapturedHeatmap:
-        return captured
-
-    monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
     old_edition = SETTLED - timedelta(days=31)
+    _capture_in_order(monkeypatch, [_captured_after(old_edition), _captured(), _captured()])
     keep_longer = _settings(tradingview_heatmap_retention_days=60)
     await orchestration_functions._run_tradingview_heatmap(
         keep_longer, sessions, await _running_attempt(sessions, settled=old_edition), store
@@ -644,13 +621,8 @@ async def test_failed_object_delete_keeps_the_rows_for_the_next_run(
             await super().delete(target)
 
     store = FlakyDeleteStore()
-    captured = _captured()
-
-    async def capture(**_: object) -> CapturedHeatmap:
-        return captured
-
-    monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
     old_edition = SETTLED - timedelta(days=31)
+    _capture_in_order(monkeypatch, [_captured_after(old_edition), _captured(), _captured()])
     await orchestration_functions._run_tradingview_heatmap(
         _settings(), sessions, await _running_attempt(sessions, settled=old_edition), store
     )
@@ -681,6 +653,71 @@ async def test_failed_object_delete_keeps_the_rows_for_the_next_run(
         "heatmaps/hsi/2026-10-09/legend.png",
         "heatmaps/hsi/2026-10-09/overview.png",
     ]
+
+
+@pytest.mark.parametrize(
+    ("now", "trigger", "expected"),
+    [
+        # Monday 11:00 HKT: the session is open.
+        (datetime(2026, 10, 12, 3, 0, tzinfo=UTC), "manual", ("no_change", None)),
+        (datetime(2026, 10, 12, 3, 0, tzinfo=UTC), "automatic", ("unavailable", "hk_market_open")),
+    ],
+)
+async def test_gate_runs_before_the_browser_session(
+    heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+    now: datetime,
+    trigger: str,
+    expected: tuple[str, str | None],
+) -> None:
+    _, sessions = heatmap_database
+    monkeypatch.setattr(orchestration_functions, "_utcnow", lambda: now)
+
+    async def capture(**_: object) -> CapturedHeatmap:
+        raise AssertionError("must not pay for a browser session the gate would discard")
+
+    monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
+
+    outcome = await orchestration_functions._run_tradingview_heatmap(
+        _settings(), sessions, await _running_attempt(sessions, trigger=trigger), FakeObjectStore()
+    )
+
+    assert (outcome.status, outcome.error_code) == expected
+
+
+async def test_lease_lost_during_upload_rolls_the_ledger_back(
+    heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fence check that fails after writes must leave the transaction by rollback."""
+    _, sessions = heatmap_database
+    claimed = await _running_attempt(sessions)
+
+    class LeaseStealingStore(FakeObjectStore):
+        async def overwrite(self, target: ObjectRef, content: BinaryIO, **kwargs: Any) -> None:
+            await super().overwrite(target, content, **kwargs)
+            # Another worker takes the lease over while this attempt is mid-upload.
+            async with sessions.begin() as database:
+                await database.execute(
+                    update(FunctionRun)
+                    .where(FunctionRun.id == claimed.function_run_id)
+                    .values(lease_token=uuid.uuid4())
+                )
+
+    store = LeaseStealingStore()
+
+    async def capture(**_: object) -> CapturedHeatmap:
+        return _captured()
+
+    monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
+
+    outcome = await orchestration_functions._run_tradingview_heatmap(
+        _settings(), sessions, claimed, store
+    )
+
+    assert outcome.status == "cancelled"
+    # The rows this attempt upserted were rolled back, not committed.
+    assert await _rows(sessions) == []
 
 
 async def test_stale_fence_cancels_without_touching_the_ledger(

@@ -156,7 +156,6 @@ async def capture_sector_heatmap(
         # requestAnimationFrame quiescence if frames come out blank.
         await asyncio.sleep(settle_seconds)
 
-    captured_at = datetime.now(UTC)
     try:
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(args=list(CHROMIUM_ARGS))
@@ -168,6 +167,9 @@ async def capture_sector_heatmap(
                 async with page.expect_response(is_scan, timeout=timeout_ms):
                     await page.goto(heatmap_url(data_source), wait_until="domcontentloaded")
                 await settle()
+                # Stamped here, not at launch: the browser start, page load and
+                # settle take tens of seconds, and the session gate reads this.
+                captured_at = datetime.now(UTC)
                 overview_png = await canvas_png(page)
                 legend = page.locator(LEGEND_SELECTOR).first
                 await legend.wait_for(state="visible", timeout=timeout_ms)

@@ -284,11 +284,7 @@ JOBS = (
         "hk_equity_refresh",
         "function",
         ("manual",),
-        (
-            FunctionStep("hk_index_daily_bars"),
-            # The heatmap is dated by the newest ^HSI bar, so the bars go first.
-            FunctionStep("hsi_sector_heatmap", ("hk_index_daily_bars",), "terminal"),
-        ),
+        _steps("hk_index_daily_bars", "hsi_sector_heatmap"),
     ),
     JobDefinition(
         "news_global_refresh_job",
@@ -355,10 +351,6 @@ DAILY_ROUTINE = RoutineDefinition(
         ),
         JobDependencyDefinition("us_treasury_daily_update", "macro_dashboard_publish", "terminal"),
         JobDependencyDefinition("new_york_fed_daily_update", "macro_dashboard_publish", "terminal"),
-        # The heatmap is dated by the newest ^HSI bar, so it waits for Yahoo.
-        JobDependencyDefinition(
-            "yahoo_finance_daily_update", "tradingview_daily_update", "terminal"
-        ),
     ),
     scheduled_hour=8,
     deadline_hour=10,

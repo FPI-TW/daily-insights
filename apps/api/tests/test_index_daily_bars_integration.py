@@ -360,8 +360,11 @@ async def test_worker_window_predicate_bootstraps_when_served_bars_are_missing(
     the served table would never be refilled.
     """
     today = _taipei_today()
-    # Ledger: ^HSI settled yesterday. Served table: nothing.
+    # Ledger: ^HSI settled yesterday. Served table: nothing, as after an
+    # operator re-points the symbol's provider and deletes its rows.
     await _running_attempt(session_factory, settled=today - timedelta(days=1))
+    async with session_factory.begin() as database:
+        await database.execute(delete(IndexDailyBar).where(IndexDailyBar.symbol == "^HSI"))
 
     async def predicate() -> dict[str, date]:
         return await orchestration_functions._latest_yahoo_bar_dates(

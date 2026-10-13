@@ -23,6 +23,7 @@ dependencies = [
   "sqlalchemy[asyncio]>=2.0.41,<3",
   "uvicorn[standard]>=0.35,<1",
   "yfinance>=1.7,<2",
+  "exchange-calendars>=4.13,<5",
 ]
 
 [dependency-groups]
@@ -60,6 +61,6 @@ plugins = ["pydantic.mypy"]
 files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
-# yfinance ships no py.typed marker and has no stub package.
-module = ["alembic.*", "defusedxml.*", "langdetect.*", "yfinance.*"]
+# yfinance and exchange_calendars ship no py.typed marker and have no stubs.
+module = ["alembic.*", "defusedxml.*", "exchange_calendars.*", "langdetect.*", "yfinance.*"]
 ignore_missing_imports = true
