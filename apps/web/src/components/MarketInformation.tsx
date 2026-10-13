@@ -33,9 +33,7 @@ export function ReportInformation({
       />
     )
   if (report.kind === "not-launched")
-    return hideNotLaunched ? null : (
-      <ReportNotLaunchedScreen locale={locale} marketCode={report.marketCode} />
-    )
+    return hideNotLaunched ? null : <ReportNotLaunchedScreen />
   return (
     <ReportDetail
       locale={locale}
