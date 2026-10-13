@@ -27,19 +27,26 @@ def fact_digest(values: dict[str, object]) -> str:
 
 
 async def fence_is_current(
-    database: AsyncSession, *, function_run_id: uuid.UUID, fence_token: uuid.UUID
+    database: AsyncSession,
+    *,
+    function_run_id: uuid.UUID,
+    fence_token: uuid.UUID,
+    for_update: bool = True,
 ) -> bool:
-    return bool(
-        await database.scalar(
-            select(FunctionRun.id)
-            .where(
-                FunctionRun.id == function_run_id,
-                FunctionRun.status == "running",
-                FunctionRun.lease_token == fence_token,
-            )
-            .with_for_update()
-        )
+    """Whether this attempt still holds the function run's lease.
+
+    The default locks the function_runs row until the transaction ends, which
+    also blocks the worker's heartbeat UPDATE on that row; pass for_update=False
+    when network I/O follows and another lock serialises the attempts.
+    """
+    query = select(FunctionRun.id).where(
+        FunctionRun.id == function_run_id,
+        FunctionRun.status == "running",
+        FunctionRun.lease_token == fence_token,
     )
+    if for_update:
+        query = query.with_for_update()
+    return bool(await database.scalar(query))
 
 
 async def store_market_bars(
@@ -272,8 +279,6 @@ class StoredHeatmapImages:
 async def store_sector_heatmap_images(
     database: AsyncSession,
     *,
-    function_run_id: uuid.UUID,
-    fence_token: uuid.UUID,
     function_attempt_id: uuid.UUID,
     data_source: str,
     market_code: str,
@@ -282,16 +287,12 @@ async def store_sector_heatmap_images(
     images: Sequence[tuple[HeatmapImage, str]],
     existing: Mapping[str, SectorHeatmapImage],
     retention_days: int,
-) -> StoredHeatmapImages | None:
-    """Upsert one edition's ledger rows; None when the fence is stale.
+) -> StoredHeatmapImages:
+    """Upsert one edition's ledger rows.
 
     `existing` is the edition's rows from lock_sector_heatmap_rows in this
-    same transaction.
+    same transaction. The caller owns the fence check.
     """
-    if not await fence_is_current(
-        database, function_run_id=function_run_id, fence_token=fence_token
-    ):
-        return None
     existing = dict(existing)
     changed = 0
     for image, object_key in images:

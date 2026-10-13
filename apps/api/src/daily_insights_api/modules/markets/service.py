@@ -1184,6 +1184,9 @@ async def store_institutional_stock_flows(
 # The one market these flows are collected for. data_management passes it back
 # in when it stores a run's rows, so it lives with the tables it belongs to.
 INSTITUTIONAL_MARKET_CODE = "tw_equity"
+# The one market the TradingView sector heatmap is captured for; the worker
+# stamps its ledger rows with it and the read endpoint filters by it.
+HEATMAP_MARKET_CODE = "hk_equity"
 # The five stored categories folded into the three the product reports on.
 # foreign_dealer goes with foreign, never with the dealer books; see the note on
 # INVESTOR_TYPES in models.py. TWSE has reported it as 0 on every day observed so

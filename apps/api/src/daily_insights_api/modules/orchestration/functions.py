@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import uuid
 from collections.abc import Awaitable, Callable
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 from sqlalchemy import func, select
@@ -38,6 +40,7 @@ from daily_insights_api.modules.data_sources.api import (
 )
 from daily_insights_api.modules.markets.api import (
     AUTOMATIC_SHORT_REFRESH_PERIOD,
+    HEATMAP_MARKET_CODE,
     INSTITUTIONAL_MARKET_CODE,
     MAX_FETCH_CONCURRENCY,
     TAIEX_INCREMENTAL_MONTHS,
@@ -81,8 +84,35 @@ from daily_insights_api.modules.reports.api import (
 TwelveManifest = tuple[tuple[str, str, str, str | None, str | None], ...]
 TREASURY_REQUEST_TIMEOUT_SECONDS = 30.0
 HEATMAP_DATA_SOURCE = "HSI"
-HEATMAP_MARKET_CODE = "hk_equity"
 HEATMAP_INDEX_SYMBOL = "^HSI"
+HONG_KONG = ZoneInfo("Asia/Hong_Kong")
+# The heatmap shows the current session once the opening auction starts moving
+# prices, and the closing auction has settled a few minutes after 16:00.
+HK_SESSION_OPEN = time(9, 0)
+HK_SESSION_CLOSE = time(16, 15)
+
+
+def _function_run_lock(function_run_id: uuid.UUID) -> int:
+    """Advisory lock key serialising the attempts of one function run."""
+    return int.from_bytes(function_run_id.bytes[:8], "big", signed=True)
+
+
+def hk_heatmap_session(captured_at: datetime) -> tuple[bool, date]:
+    """(Hong Kong is trading, date of the last completed session) at that instant.
+
+    Weekday calendar only. A holiday looks like a session that never produced a
+    bar; the caller accepts that once the day is in the past, since the capture
+    then shows the last session that did trade.
+    """
+    local = captured_at.astimezone(HONG_KONG)
+    weekday = local.weekday() < 5
+    trading = weekday and HK_SESSION_OPEN <= local.time() < HK_SESSION_CLOSE
+    last_session = local.date()
+    if not weekday or local.time() < HK_SESSION_CLOSE:
+        last_session -= timedelta(days=1)
+    while last_session.weekday() >= 5:
+        last_session -= timedelta(days=1)
+    return trading, last_session
 
 
 def heatmap_object_key(data_source: str, edition_date: date, slug: str) -> str:
@@ -968,6 +998,29 @@ async def _run_tradingview_heatmap(
         return FunctionOutcome(status="unavailable", error_code="tradingview_disabled")
     if object_store is None or settings.r2_bucket_name is None:
         return FunctionOutcome(status="unavailable", error_code="r2_not_configured")
+    # Cheap exits before the headless browser session: a lost lease or a
+    # missing ^HSI series would only throw the capture away afterwards. Both
+    # are read again under the lock below, where they are authoritative.
+    async with session_factory() as database:
+        if not await fence_is_current(
+            database,
+            function_run_id=claimed.function_run_id,
+            fence_token=claimed.fence_token,
+            for_update=False,
+        ):
+            return FunctionOutcome(status="cancelled", error_code="cancelled")
+        if (
+            await latest_market_date(
+                database,
+                provider_key="yahoo_finance",
+                dataset_key="hk_index_daily_bars",
+                symbol=HEATMAP_INDEX_SYMBOL,
+            )
+            is None
+        ):
+            return FunctionOutcome(
+                status="unavailable", error_code="hk_bars_missing", retryable=True
+            )
     try:
         captured = await capture_sector_heatmap(
             data_source=HEATMAP_DATA_SOURCE,
@@ -986,24 +1039,34 @@ async def _run_tradingview_heatmap(
             error_code="heatmap_contract_drift",
             error_detail=_safe_error_detail(error),
         )
+    # A capture taken while Hong Kong trades shows an unfinished session. There
+    # is no settled bar to date it by, and dating it to the previous bar would
+    # overwrite that day's snapshot in place, so it is not stored at all.
+    trading, last_session = hk_heatmap_session(captured.captured_at)
+    if trading:
+        return FunctionOutcome(status="unavailable", error_code="hk_market_open", retryable=True)
     bucket = settings.r2_bucket_name
     uploaded = 0
     async with session_factory.begin() as database:
-        # Lock the fence before touching R2: a stale attempt must never
-        # overwrite objects a newer attempt already uploaded. The row lock is
-        # held until this transaction commits, so the ledger and the bucket
-        # always describe the same attempt's bytes.
+        # Attempts of this function run take turns through an advisory lock,
+        # not a lock on the function_runs row: the row stays free for the
+        # worker's heartbeat while the R2 I/O below runs. A stale attempt that
+        # gets through the plain fence read here is caught by the locking
+        # fence check right before commit, and because turns do not overlap
+        # the newer attempt's uploads always land after the stale one's.
+        await database.execute(
+            select(func.pg_advisory_xact_lock(_function_run_lock(claimed.function_run_id)))
+        )
         if not await fence_is_current(
             database,
             function_run_id=claimed.function_run_id,
             fence_token=claimed.fence_token,
+            for_update=False,
         ):
             return FunctionOutcome(status="cancelled", error_code="cancelled")
         # The routine fires at 08:00 Taipei, before Hong Kong opens, so the
         # capture shows the last settled session, not the routine's date. Date
         # it by the newest ^HSI bar so it agrees with the index cards beside it.
-        # ponytail: a manual capture during the HK session is still dated to the
-        # last settled bar; read TradingView's own timestamp if that matters.
         edition = await latest_market_date(
             database,
             provider_key="yahoo_finance",
@@ -1014,9 +1077,15 @@ async def _run_tradingview_heatmap(
             return FunctionOutcome(
                 status="unavailable", error_code="hk_bars_missing", retryable=True
             )
-        # The uploads run inside this transaction on purpose: the fence lock
-        # above is what stops a stale attempt overwriting a newer one's objects.
-        # It is two small PNGs once a day, so the connection is held for seconds.
+        # After today's close the capture shows today, but Yahoo publishes the
+        # settled bar hours later. Until it lands, dating the capture to the
+        # previous bar would overwrite that day's snapshot: wait instead. Once
+        # the session day is behind us a missing bar means a holiday, and the
+        # newest bar's session is what the capture shows.
+        if edition < last_session == captured.captured_at.astimezone(HONG_KONG).date():
+            return FunctionOutcome(
+                status="unavailable", error_code="hk_bars_pending", retryable=True
+            )
         existing = await lock_sector_heatmap_rows(
             database, data_source=HEATMAP_DATA_SOURCE, edition_date=edition
         )
@@ -1024,12 +1093,18 @@ async def _run_tradingview_heatmap(
         for image in captured.images:
             key = heatmap_object_key(HEATMAP_DATA_SOURCE, edition, image.slug)
             keyed.append((image, key))
+            ref = ObjectRef(bucket, key)
             row = existing.get(image.slug)
             if row is not None and row.sha256 == image.sha256:
-                continue
+                # Unchanged on the ledger, but a stale attempt may have left
+                # its own bytes under this key before it was rolled back, so
+                # the bucket has the last word on whether to upload again.
+                head = await object_store.head(ref)
+                if head is not None and head.sha256 == image.sha256:
+                    continue
             # A rerun on the same day replaces the day's objects in place.
             await object_store.overwrite(
-                ObjectRef(bucket, key),
+                ref,
                 io.BytesIO(image.png),
                 size_bytes=len(image.png),
                 mime_type="image/png",
@@ -1038,8 +1113,6 @@ async def _run_tradingview_heatmap(
             uploaded += 1
         stored = await store_sector_heatmap_images(
             database,
-            function_run_id=claimed.function_run_id,
-            fence_token=claimed.fence_token,
             function_attempt_id=claimed.attempt_id,
             data_source=HEATMAP_DATA_SOURCE,
             market_code=HEATMAP_MARKET_CODE,
@@ -1049,8 +1122,6 @@ async def _run_tradingview_heatmap(
             existing=existing,
             retention_days=settings.tradingview_heatmap_retention_days,
         )
-        if stored is None:
-            return FunctionOutcome(status="cancelled", error_code="cancelled")
         # Delete the objects before the row deletions commit. A delete that
         # fails rolls the rows back, so the next run finds them and retries;
         # committing first would drop the only record of the key and orphan
@@ -1058,6 +1129,13 @@ async def _run_tradingview_heatmap(
         # fails after the objects are gone just repeats them next run.
         for key in stored.removed_object_keys:
             await object_store.delete(ObjectRef(bucket, key))
+        # The last word before commit, with the row locked and no I/O after it.
+        if not await fence_is_current(
+            database,
+            function_run_id=claimed.function_run_id,
+            fence_token=claimed.fence_token,
+        ):
+            return FunctionOutcome(status="cancelled", error_code="cancelled")
     # A retention sweep that only deleted objects still changed the bucket.
     return FunctionOutcome(
         status="succeeded" if stored.changed or stored.removed_object_keys else "no_change",

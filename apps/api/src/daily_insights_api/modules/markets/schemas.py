@@ -4,6 +4,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, PlainSerializer, WithJsonSchema
 
+from daily_insights_api.modules.data_sources.api import HeatmapImageKind
+
 # A stored zero comes back from Numeric(20,10) as Decimal("0E-10"), and Pydantic
 # would put that exponent form on the wire. It fails the pattern this schema
 # itself declares in the OpenAPI document, and every client that reads these as
@@ -163,7 +165,7 @@ class InstitutionalStocksResponse(BaseModel):
 
 
 class SectorHeatmapImageResponse(BaseModel):
-    kind: Literal["overview", "legend"]
+    kind: HeatmapImageKind
     slug: str
     name: str
     width: int

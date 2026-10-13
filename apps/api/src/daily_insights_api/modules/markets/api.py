@@ -15,6 +15,7 @@ from daily_insights_api.modules.markets.schemas import (
 )
 from daily_insights_api.modules.markets.service import (
     AUTOMATIC_SHORT_REFRESH_PERIOD,
+    HEATMAP_MARKET_CODE,
     INSTITUTIONAL_MARKET_CODE,
     MAX_FETCH_CONCURRENCY,
     TAIEX_INCREMENTAL_MONTHS,
@@ -47,6 +48,7 @@ from daily_insights_api.modules.markets.service import (
 
 __all__ = [
     "AUTOMATIC_SHORT_REFRESH_PERIOD",
+    "HEATMAP_MARKET_CODE",
     "INSTITUTIONAL_MARKET_CODE",
     "MAX_FETCH_CONCURRENCY",
     "TAIEX_INCREMENTAL_MONTHS",

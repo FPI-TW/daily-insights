@@ -1,7 +1,6 @@
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal
 
 from sqlalchemy import (
     BigInteger,
@@ -22,6 +21,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from daily_insights_api.core.models import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from daily_insights_api.modules.data_sources.api import HEATMAP_IMAGE_KINDS, HeatmapImageKind
 
 
 class Market(Base):
@@ -189,8 +189,6 @@ class InstitutionalStockFlow(TimestampMixin, Base):
     source_fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-HeatmapImageKind = Literal["overview", "legend"]
-HEATMAP_IMAGE_KINDS: tuple[HeatmapImageKind, ...] = ("overview", "legend")
 _HEATMAP_IMAGE_KIND_SQL = ", ".join(f"'{kind}'" for kind in HEATMAP_IMAGE_KINDS)
 
 

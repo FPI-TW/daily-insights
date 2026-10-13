@@ -19,8 +19,10 @@ from daily_insights_api.modules.data_sources.provider import (
     MarketDataProvider,
 )
 from daily_insights_api.modules.data_sources.tradingview import (
+    HEATMAP_IMAGE_KINDS,
     CapturedHeatmap,
     HeatmapImage,
+    HeatmapImageKind,
     capture_sector_heatmap,
 )
 from daily_insights_api.modules.data_sources.twelve_data import (
@@ -58,6 +60,7 @@ from daily_insights_api.modules.data_sources.yfinance.adapter import YFINANCE_CO
 
 __all__ = [
     "BFI82U_ENDPOINT",
+    "HEATMAP_IMAGE_KINDS",
     "T86_ENDPOINT",
     "TAIEX_CONTRACT_VERSION",
     "TRACKED_INDICES",
@@ -78,6 +81,7 @@ __all__ = [
     "EodResult",
     "EodsResult",
     "HeatmapImage",
+    "HeatmapImageKind",
     "IndexSymbol",
     "Instrument",
     "InstrumentQuery",

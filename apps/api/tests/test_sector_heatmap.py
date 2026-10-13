@@ -59,17 +59,25 @@ def _png(width: int, height: int, seed: bytes = b"") -> bytes:
     )
 
 
-def _captured(seed: bytes = b"") -> CapturedHeatmap:
-    return assemble_heatmap("HSI", CAPTURED_AT, _png(1920, 989, seed), _png(400, 34, seed))
+def _captured(seed: bytes = b"", captured_at: datetime = CAPTURED_AT) -> CapturedHeatmap:
+    return assemble_heatmap("HSI", captured_at, _png(1920, 989, seed), _png(400, 34, seed))
 
 
 class FakeObjectStore:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
+        self.digests: dict[str, str] = {}
         self.deleted: list[str] = []
 
     async def head(self, ref: ObjectRef) -> ObjectMetadata | None:
-        raise NotImplementedError
+        if ref.key not in self.objects:
+            return None
+        return ObjectMetadata(
+            ref=ref,
+            size_bytes=len(self.objects[ref.key]),
+            mime_type="image/png",
+            sha256=self.digests[ref.key],
+        )
 
     async def copy_if_absent(self, source: ObjectRef, target: ObjectRef, *, sha256: str) -> bool:
         raise NotImplementedError
@@ -87,9 +95,11 @@ class FakeObjectStore:
         body = content.read()
         assert len(body) == size_bytes
         self.objects[target.key] = body
+        self.digests[target.key] = sha256
 
     async def delete(self, target: ObjectRef) -> None:
         self.objects.pop(target.key, None)
+        self.digests.pop(target.key, None)
         self.deleted.append(target.key)
 
     def read(self, ref: ObjectRef) -> AsyncIterator[bytes]:
@@ -168,15 +178,21 @@ async def test_disabled_flag_and_missing_r2_are_unavailable_without_capturing(
     ],
 )
 async def test_capture_failures_map_to_retryable_and_terminal_outcomes(
-    monkeypatch: pytest.MonkeyPatch, error: Exception, code: str, retryable: bool
+    heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    code: str,
+    retryable: bool,
 ) -> None:
+    _, sessions = heatmap_database
+
     async def capture(**_: object) -> CapturedHeatmap:
         raise error
 
     monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
 
     outcome = await orchestration_functions._run_tradingview_heatmap(
-        _settings(), cast(async_sessionmaker[AsyncSession], None), _claimed(), FakeObjectStore()
+        _settings(), sessions, await _running_attempt(sessions), FakeObjectStore()
     )
 
     assert outcome.status == "unavailable"
@@ -335,6 +351,35 @@ async def test_capture_is_uploaded_recorded_and_idempotent(
     assert second.result == {"images": 2, "uploaded": 0, "removed_objects": 0}
 
 
+async def test_unchanged_capture_still_uploads_when_the_bucket_disagrees(
+    heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale attempt's rolled-back upload must not survive behind a matching ledger."""
+    _, sessions = heatmap_database
+    store = FakeObjectStore()
+    captured = _captured()
+
+    async def capture(**_: object) -> CapturedHeatmap:
+        return captured
+
+    monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
+    await orchestration_functions._run_tradingview_heatmap(
+        _settings(), sessions, await _running_attempt(sessions), store
+    )
+    # A stale attempt left different bytes under the overview key, then rolled back.
+    store.objects["heatmaps/hsi/2026-10-09/overview.png"] = b"stale"
+    store.digests["heatmaps/hsi/2026-10-09/overview.png"] = "f" * 64
+
+    outcome = await orchestration_functions._run_tradingview_heatmap(
+        _settings(), sessions, await _running_attempt(sessions), store
+    )
+
+    assert outcome.status == "no_change"
+    assert outcome.result == {"images": 2, "uploaded": 1, "removed_objects": 0}
+    assert store.objects["heatmaps/hsi/2026-10-09/overview.png"] == captured.images[0].png
+
+
 async def test_rerun_replaces_changed_images_and_drops_vanished_slugs(
     heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
     monkeypatch: pytest.MonkeyPatch,
@@ -418,6 +463,115 @@ async def test_editions_past_retention_are_removed_from_ledger_and_bucket(
     assert {row.edition_date for row in await _rows(sessions)} == {kept_edition, SETTLED}
 
 
+@pytest.mark.parametrize(
+    ("captured_at", "trading", "last_session"),
+    [
+        # Monday 08:05 HKT: before the open, Friday is the last completed session.
+        (datetime(2026, 10, 12, 0, 5, tzinfo=UTC), False, date(2026, 10, 9)),
+        # Monday 09:00 and 15:59 HKT: trading (the lunch break still counts).
+        (datetime(2026, 10, 12, 1, 0, tzinfo=UTC), True, date(2026, 10, 9)),
+        (datetime(2026, 10, 12, 7, 59, tzinfo=UTC), True, date(2026, 10, 9)),
+        # Monday 16:15 HKT: the closing auction has settled, today is complete.
+        (datetime(2026, 10, 12, 8, 15, tzinfo=UTC), False, date(2026, 10, 12)),
+        # Saturday noon HKT: Friday.
+        (datetime(2026, 10, 17, 4, 0, tzinfo=UTC), False, date(2026, 10, 16)),
+    ],
+)
+def test_hk_heatmap_session_follows_the_hong_kong_clock(
+    captured_at: datetime, trading: bool, last_session: date
+) -> None:
+    assert orchestration_functions.hk_heatmap_session(captured_at) == (trading, last_session)
+
+
+async def test_capture_during_the_session_is_not_stored(
+    heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An intraday capture must not overwrite the last settled day's snapshot."""
+    _, sessions = heatmap_database
+    store = FakeObjectStore()
+    captures = iter(
+        [
+            _captured(),
+            # Monday 11:00 HKT, a manual trigger while Hong Kong trades.
+            _captured(b"intraday", datetime(2026, 10, 12, 3, 0, tzinfo=UTC)),
+        ]
+    )
+
+    async def capture(**_: object) -> CapturedHeatmap:
+        return next(captures)
+
+    monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
+    await orchestration_functions._run_tradingview_heatmap(
+        _settings(), sessions, await _running_attempt(sessions), store
+    )
+    settled = {row.slug: row.sha256 for row in await _rows(sessions)}
+    settled_objects = dict(store.objects)
+
+    outcome = await orchestration_functions._run_tradingview_heatmap(
+        _settings(), sessions, await _running_attempt(sessions), store
+    )
+
+    assert (outcome.status, outcome.error_code, outcome.retryable) == (
+        "unavailable",
+        "hk_market_open",
+        True,
+    )
+    assert {row.slug: row.sha256 for row in await _rows(sessions)} == settled
+    assert store.objects == settled_objects
+
+
+async def test_capture_after_close_waits_for_the_settled_bar(
+    heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, sessions = heatmap_database
+    store = FakeObjectStore()
+    # Monday 17:00 HKT: today's close is on screen, Yahoo's bar is still Friday's.
+    captured = _captured(b"close", datetime(2026, 10, 12, 9, 0, tzinfo=UTC))
+
+    async def capture(**_: object) -> CapturedHeatmap:
+        return captured
+
+    monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
+
+    outcome = await orchestration_functions._run_tradingview_heatmap(
+        _settings(), sessions, await _running_attempt(sessions), store
+    )
+
+    assert (outcome.status, outcome.error_code, outcome.retryable) == (
+        "unavailable",
+        "hk_bars_pending",
+        True,
+    )
+    assert store.objects == {}
+    assert await _rows(sessions) == []
+
+
+async def test_morning_after_a_holiday_keeps_the_newest_bar(
+    heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, sessions = heatmap_database
+    store = FakeObjectStore()
+    # Tuesday 08:05 HKT after a Monday holiday: Friday's bar is the newest and
+    # the capture shows Friday's session, so it is dated Friday.
+    captured = _captured(b"", datetime(2026, 10, 13, 0, 5, tzinfo=UTC))
+
+    async def capture(**_: object) -> CapturedHeatmap:
+        return captured
+
+    monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
+
+    outcome = await orchestration_functions._run_tradingview_heatmap(
+        _settings(), sessions, await _running_attempt(sessions), store
+    )
+
+    assert outcome.status == "succeeded"
+    assert outcome.source_as_of == SETTLED
+    assert {row.edition_date for row in await _rows(sessions)} == {SETTLED}
+
+
 async def test_missing_hk_bars_are_unavailable_and_retryable(
     heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
     monkeypatch: pytest.MonkeyPatch,
@@ -426,7 +580,7 @@ async def test_missing_hk_bars_are_unavailable_and_retryable(
     store = FakeObjectStore()
 
     async def capture(**_: object) -> CapturedHeatmap:
-        return _captured()
+        raise AssertionError("must not pay for a browser session without a ^HSI series")
 
     monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
 
@@ -542,6 +696,12 @@ async def test_stale_fence_cancels_without_touching_the_ledger(
     monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
     claimed = await _running_attempt(sessions)
     claimed.fence_token = uuid.uuid4()
+    # A lost lease is noticed before the browser session, not after it.
+    monkeypatch.setattr(
+        orchestration_functions,
+        "capture_sector_heatmap",
+        lambda **_: (_ for _ in ()).throw(AssertionError("must not capture")),
+    )
 
     outcome = await orchestration_functions._run_tradingview_heatmap(
         _settings(), sessions, claimed, store

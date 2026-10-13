@@ -14,7 +14,7 @@ import re
 import struct
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Literal, get_args
 from urllib.parse import quote
 
 from daily_insights_api.modules.data_sources.errors import (
@@ -31,7 +31,10 @@ CHROMIUM_ARGS = ("--no-sandbox", "--disable-dev-shm-usage")
 LEGEND_SELECTOR = '[class*="legend-"]'
 MIN_CANVAS_WIDTH = 100
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# The one declaration: markets' ledger CHECK constraint and response schema
+# both import it, so a new kind is added here and nowhere else.
 HeatmapImageKind = Literal["overview", "legend"]
+HEATMAP_IMAGE_KINDS: tuple[HeatmapImageKind, ...] = get_args(HeatmapImageKind)
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,18 +122,34 @@ async def capture_sector_heatmap(
         return response.url.startswith(SCANNER_URL_PREFIX) and response.request.method == "POST"
 
     async def canvas_clip(page: Page) -> FloatRect:
+        # Page coordinates, not viewport ones: the screenshot below is taken
+        # with full_page so a canvas taller than the viewport is not cropped.
         rect: FloatRect | None = await page.evaluate(
             """() => {
                 const rects = [...document.querySelectorAll("canvas")]
                     .map(c => c.getBoundingClientRect())
                     .sort((a, b) => b.width * b.height - a.width * a.height)
                 const r = rects[0]
-                return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null
+                return r
+                    ? { x: r.x + window.scrollX, y: r.y + window.scrollY,
+                        width: r.width, height: r.height }
+                    : null
             }"""
         )
         if rect is None or rect["width"] < MIN_CANVAS_WIDTH:
             raise DataSourceContractError("heatmap canvas not found")
         return rect
+
+    async def canvas_png(page: Page) -> bytes:
+        clip = await canvas_clip(page)
+        png = await page.screenshot(clip=clip, full_page=True)
+        # A clip Playwright could not honour comes back silently smaller.
+        expected = (round(clip["width"]), round(clip["height"]))
+        if png_size(png) != expected:
+            raise DataSourceContractError(
+                f"heatmap canvas screenshot is {png_size(png)}, expected {expected}"
+            )
+        return png
 
     async def settle() -> None:
         # ponytail: fixed delay instead of hooking the canvas renderer; hook
@@ -149,7 +168,7 @@ async def capture_sector_heatmap(
                 async with page.expect_response(is_scan, timeout=timeout_ms):
                     await page.goto(heatmap_url(data_source), wait_until="domcontentloaded")
                 await settle()
-                overview_png = await page.screenshot(clip=await canvas_clip(page))
+                overview_png = await canvas_png(page)
                 legend = page.locator(LEGEND_SELECTOR).first
                 await legend.wait_for(state="visible", timeout=timeout_ms)
                 legend_png = await legend.screenshot()

@@ -18,6 +18,7 @@ from daily_insights_api.modules.data_sources.api import (
 )
 from daily_insights_api.modules.identity.api import AuthContext, require_password_changed
 from daily_insights_api.modules.markets.api import (
+    HEATMAP_MARKET_CODE,
     INSTITUTIONAL_MARKET_CODE,
     IndexDailyBarResponse,
     IndexLatestBarResponse,
@@ -54,7 +55,6 @@ MAX_BARS_RANGE_YEARS = 10
 INDEX_MARKETS: dict[str, str] = {symbol: market for symbol, market in TRACKED_INDICES.items()}
 INTERNAL_PREVIEW_ROLES = frozenset({SystemRole.ADMIN, SystemRole.ASSET_MANAGER})
 MAX_INSTITUTIONAL_RANGE_DAYS = 180
-HEATMAP_MARKET_CODE = "hk_equity"
 
 
 def _earliest_allowed_start(end: date) -> date:
