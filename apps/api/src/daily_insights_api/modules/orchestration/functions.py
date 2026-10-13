@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api.core.config import Settings
@@ -42,6 +42,7 @@ from daily_insights_api.modules.markets.api import (
     MAX_FETCH_CONCURRENCY,
     TAIEX_INCREMENTAL_MONTHS,
     TAIEX_SYMBOL,
+    latest_index_bar_dates,
     select_index_refresh_period,
     select_taiex_refresh_months,
     store_index_daily_bars,
@@ -57,7 +58,11 @@ from daily_insights_api.modules.orchestration.facts import (
     store_market_bars,
     store_sector_heatmap_images,
 )
-from daily_insights_api.modules.orchestration.models import JobRun, MarketDailySeries
+from daily_insights_api.modules.orchestration.models import (
+    JobRun,
+    MarketDailyObservation,
+    MarketDailySeries,
+)
 from daily_insights_api.modules.orchestration.news_functions import build_news_handlers
 from daily_insights_api.modules.orchestration.worker import (
     AttemptStatus,
@@ -77,6 +82,7 @@ TwelveManifest = tuple[tuple[str, str, str, str | None, str | None], ...]
 TREASURY_REQUEST_TIMEOUT_SECONDS = 30.0
 HEATMAP_DATA_SOURCE = "HSI"
 HEATMAP_MARKET_CODE = "hk_equity"
+HEATMAP_INDEX_SYMBOL = "^HSI"
 
 
 def heatmap_object_key(data_source: str, edition_date: date, slug: str) -> str:
@@ -426,13 +432,15 @@ async def _run_yahoo(
         for item in YAHOO_MANIFESTS[claimed.function_key]
         if not retry_scopes or item[0] in retry_scopes
     )
-    # A symbol that already has a series only needs the short window; a new
-    # one (first deployment, or a symbol just added to the catalog) gets the
-    # two-year bootstrap. Fetches run with bounded concurrency so one slow
+    # A symbol whose newest bar is less than a week old only needs the short
+    # window; one with an older bar (worker or Yahoo was down) gets a window
+    # that reaches back past it, and a new one (first deployment, or a symbol
+    # just added to the catalog) gets the two-year bootstrap. Fetches run with
+    # bounded concurrency so one slow
     # Yahoo answer does not push the whole attempt past its deadline; writes
     # stay sequential and in manifest order because the session is not safe
     # for concurrent use.
-    stored = await _stored_yahoo_symbols(
+    latest_dates = await _latest_yahoo_bar_dates(
         session_factory,
         provider_key=claimed.provider_key,
         dataset_key=claimed.function_key,
@@ -448,7 +456,8 @@ async def _run_yahoo(
                     symbol=symbol,
                     period=select_index_refresh_period(
                         period=AUTOMATIC_SHORT_REFRESH_PERIOD,
-                        has_stored_bars=symbol in stored,
+                        latest_bar_date=latest_dates.get(symbol),
+                        today=claimed.edition_date,
                     ),
                 )
             except Exception as error:
@@ -521,30 +530,53 @@ async def _run_yahoo(
     )
 
 
-async def _stored_yahoo_symbols(
+async def _latest_yahoo_bar_dates(
     session_factory: async_sessionmaker[AsyncSession],
     *,
     provider_key: str,
     dataset_key: str,
     symbols: list[str],
-) -> set[str]:
-    """Symbols whose series already exists for this dataset.
+) -> dict[str, date]:
+    """symbol -> the date the next fetch must reach back past; absent = bootstrap.
 
-    store_market_bars creates the series and its first observations in one
-    transaction, so an existing series means a previous attempt landed.
+    The worker fills two tables: the orchestration ledger that reports project
+    from, and index_daily_bars that the index endpoints serve (tracked symbols
+    only). Either one being behind must widen the window, so a tracked symbol
+    reports the older of its two newest dates and is absent unless both tables
+    hold it. That keeps this in step with the admin refresh, which sizes its
+    window from index_daily_bars alone: re-pointing a symbol's provider deletes
+    its rows there, and the next run of either path re-bootstraps it.
     """
     async with session_factory() as database:
-        return set(
-            (
-                await database.scalars(
-                    select(MarketDailySeries.symbol).where(
+        ledger = {
+            symbol: latest
+            for symbol, latest in (
+                await database.execute(
+                    select(
+                        MarketDailySeries.symbol,
+                        func.max(MarketDailyObservation.observation_date),
+                    )
+                    .join(
+                        MarketDailyObservation,
+                        MarketDailyObservation.series_id == MarketDailySeries.id,
+                    )
+                    .where(
                         MarketDailySeries.provider_key == provider_key,
                         MarketDailySeries.dataset_key == dataset_key,
                         MarketDailySeries.symbol.in_(symbols),
                     )
+                    .group_by(MarketDailySeries.symbol)
                 )
-            ).all()
-        )
+            ).tuples()
+        }
+        tracked = [symbol for symbol in symbols if symbol in TRACKED_INDICES]
+        served = await latest_index_bar_dates(database, tracked)
+        for symbol in tracked:
+            if symbol in ledger and symbol in served:
+                ledger[symbol] = min(ledger[symbol], served[symbol])
+            else:
+                ledger.pop(symbol, None)
+        return ledger
 
 
 def _twse_adapter(settings: Settings) -> TwseAdapter:
@@ -957,12 +989,37 @@ async def _run_tradingview_heatmap(
     bucket = settings.r2_bucket_name
     uploaded = 0
     async with session_factory.begin() as database:
+        # Lock the fence before touching R2: a stale attempt must never
+        # overwrite objects a newer attempt already uploaded. The row lock is
+        # held until this transaction commits, so the ledger and the bucket
+        # always describe the same attempt's bytes.
+        if not await fence_is_current(
+            database,
+            function_run_id=claimed.function_run_id,
+            fence_token=claimed.fence_token,
+        ):
+            return FunctionOutcome(status="cancelled", error_code="cancelled")
+        # The routine fires at 08:00 Taipei, before Hong Kong opens, so the
+        # capture shows the last settled session, not the routine's date. Date
+        # it by the newest ^HSI bar so it agrees with the index cards beside it.
+        # ponytail: a manual capture during the HK session is still dated to the
+        # last settled bar; read TradingView's own timestamp if that matters.
+        edition = await latest_market_date(
+            database,
+            provider_key="yahoo_finance",
+            dataset_key="hk_index_daily_bars",
+            symbol=HEATMAP_INDEX_SYMBOL,
+        )
+        if edition is None:
+            return FunctionOutcome(
+                status="unavailable", error_code="hk_bars_missing", retryable=True
+            )
         known = await sector_heatmap_digests(
-            database, data_source=HEATMAP_DATA_SOURCE, edition_date=claimed.edition_date
+            database, data_source=HEATMAP_DATA_SOURCE, edition_date=edition
         )
         keyed: list[tuple[HeatmapImage, str]] = []
         for image in captured.images:
-            key = heatmap_object_key(HEATMAP_DATA_SOURCE, claimed.edition_date, image.slug)
+            key = heatmap_object_key(HEATMAP_DATA_SOURCE, edition, image.slug)
             keyed.append((image, key))
             if known.get(image.slug) == image.sha256:
                 continue
@@ -982,18 +1039,23 @@ async def _run_tradingview_heatmap(
             function_attempt_id=claimed.attempt_id,
             data_source=HEATMAP_DATA_SOURCE,
             market_code=HEATMAP_MARKET_CODE,
-            edition_date=claimed.edition_date,
+            edition_date=edition,
             captured_at=captured.captured_at,
             images=keyed,
             retention_days=settings.tradingview_heatmap_retention_days,
         )
         if stored is None:
             return FunctionOutcome(status="cancelled", error_code="cancelled")
-    for key in stored.removed_object_keys:
-        await object_store.delete(ObjectRef(bucket, key))
+        # Delete the objects before the row deletions commit. A delete that
+        # fails rolls the rows back, so the next run finds them and retries;
+        # committing first would drop the only record of the key and orphan
+        # the object for good. R2 deletes are idempotent, so a commit that
+        # fails after the objects are gone just repeats them next run.
+        for key in stored.removed_object_keys:
+            await object_store.delete(ObjectRef(bucket, key))
     return FunctionOutcome(
         status="succeeded" if stored.changed else "no_change",
-        source_as_of=claimed.edition_date,
+        source_as_of=edition,
         fetched_at=captured.captured_at,
         record_count=stored.changed,
         result={

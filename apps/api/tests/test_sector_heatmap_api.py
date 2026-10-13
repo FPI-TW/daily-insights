@@ -89,7 +89,8 @@ async def _seed_edition(
     outcome = await orchestration_functions._run_tradingview_heatmap(
         Settings.model_validate(DEFAULT_SETTINGS),
         session_factory,
-        await _running_attempt(session_factory, edition_date),
+        # The edition follows the newest settled ^HSI bar, so seed one dated as asked.
+        await _running_attempt(session_factory, edition_date, settled=edition_date),
         store,
     )
     assert outcome.status == "succeeded"

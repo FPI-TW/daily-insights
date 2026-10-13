@@ -4,6 +4,7 @@ import uuid
 import zlib
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from typing import Any, BinaryIO, cast
 
 import pytest
@@ -22,6 +23,7 @@ from sqlalchemy.ext.asyncio import (
 import daily_insights_api.modules.orchestration.functions as orchestration_functions
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.assets.object_store import ObjectMetadata, ObjectRef
+from daily_insights_api.modules.data_sources.dto import DailyBar
 from daily_insights_api.modules.data_sources.errors import (
     DataSourceContractError,
     DataSourceTransientError,
@@ -32,12 +34,16 @@ from daily_insights_api.modules.data_sources.tradingview.heatmap import (
     assemble_heatmap,
 )
 from daily_insights_api.modules.markets.models import SectorHeatmapImage
+from daily_insights_api.modules.orchestration.facts import store_market_bars
 from daily_insights_api.modules.orchestration.models import FunctionAttempt, FunctionRun, JobRun
 from daily_insights_api.modules.orchestration.worker import ClaimedFunction
 
 pytestmark = pytest.mark.integration
 
+# The routine runs Monday 2026-10-12 at 08:00 Taipei, before Hong Kong opens,
+# so the capture shows Friday's close and is dated by that settled bar.
 EDITION = date(2026, 10, 12)
+SETTLED = date(2026, 10, 9)
 CAPTURED_AT = datetime(2026, 10, 12, 0, 5, tzinfo=UTC)
 
 
@@ -194,9 +200,15 @@ async def heatmap_database() -> AsyncIterator[tuple[AsyncEngine, async_sessionma
 
 
 async def _running_attempt(
-    sessions: async_sessionmaker[AsyncSession], edition_date: date = EDITION
+    sessions: async_sessionmaker[AsyncSession],
+    edition_date: date = EDITION,
+    settled: date | None = SETTLED,
 ) -> ClaimedFunction:
-    """A job -> function run -> attempt chain whose lease matches the fence."""
+    """A job -> function run -> attempt chain whose lease matches the fence.
+
+    `settled` is the newest ^HSI bar on record (None stores no bar), which is
+    what the heatmap edition is derived from.
+    """
     fence = uuid.uuid4()
     async with sessions.begin() as database:
         job = JobRun(
@@ -232,6 +244,28 @@ async def _running_attempt(
         )
         database.add(attempt)
         await database.flush()
+        if settled is not None:
+            await store_market_bars(
+                database,
+                function_run_id=function.id,
+                fence_token=fence,
+                function_attempt_id=attempt.id,
+                provider_key="yahoo_finance",
+                dataset_key="hk_index_daily_bars",
+                symbol="^HSI",
+                market="hk_equity",
+                unit="index",
+                contract_version="test",
+                bars=(
+                    DailyBar(
+                        instrument_source_id="^HSI",
+                        market="hk_equity",
+                        symbol="^HSI",
+                        trade_date=settled,
+                        close=Decimal("26000"),
+                    ),
+                ),
+            )
         return _claimed(
             function_run_id=function.id,
             attempt_id=attempt.id,
@@ -271,12 +305,12 @@ async def test_capture_is_uploaded_recorded_and_idempotent(
 
     assert first.status == "succeeded"
     assert first.record_count == 2
-    assert first.source_as_of == EDITION
+    assert first.source_as_of == SETTLED
     assert first.fetched_at == CAPTURED_AT
     assert first.result == {"images": 2, "uploaded": 2, "removed_objects": 0}
     assert sorted(store.objects) == [
-        "heatmaps/hsi/2026-10-12/legend.png",
-        "heatmaps/hsi/2026-10-12/overview.png",
+        "heatmaps/hsi/2026-10-09/legend.png",
+        "heatmaps/hsi/2026-10-09/overview.png",
     ]
     rows = await _rows(sessions)
     assert [(row.kind, row.slug, row.sort_order) for row in rows] == [
@@ -342,10 +376,10 @@ async def test_rerun_replaces_changed_images_and_drops_vanished_slugs(
 
     assert outcome.status == "succeeded"
     assert outcome.result == {"images": 2, "uploaded": 2, "removed_objects": 1}
-    assert store.deleted == ["heatmaps/hsi/2026-10-12/overview_left.png"]
+    assert store.deleted == ["heatmaps/hsi/2026-10-09/overview_left.png"]
     assert sorted(store.objects) == [
-        "heatmaps/hsi/2026-10-12/legend.png",
-        "heatmaps/hsi/2026-10-12/overview.png",
+        "heatmaps/hsi/2026-10-09/legend.png",
+        "heatmaps/hsi/2026-10-09/overview.png",
     ]
     rows = await _rows(sessions)
     assert [(row.slug, row.sort_order) for row in rows] == [("overview", 0), ("legend", 1)]
@@ -363,13 +397,13 @@ async def test_editions_past_retention_are_removed_from_ledger_and_bucket(
         return captured
 
     monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
-    old_edition = EDITION - timedelta(days=31)
+    old_edition = SETTLED - timedelta(days=31)
     await orchestration_functions._run_tradingview_heatmap(
-        _settings(), sessions, await _running_attempt(sessions, old_edition), store
+        _settings(), sessions, await _running_attempt(sessions, settled=old_edition), store
     )
-    kept_edition = EDITION - timedelta(days=30)
+    kept_edition = SETTLED - timedelta(days=30)
     await orchestration_functions._run_tradingview_heatmap(
-        _settings(), sessions, await _running_attempt(sessions, kept_edition), store
+        _settings(), sessions, await _running_attempt(sessions, settled=kept_edition), store
     )
 
     outcome = await orchestration_functions._run_tradingview_heatmap(
@@ -381,7 +415,86 @@ async def test_editions_past_retention_are_removed_from_ledger_and_bucket(
         f"heatmaps/hsi/{old_edition.isoformat()}/legend.png",
         f"heatmaps/hsi/{old_edition.isoformat()}/overview.png",
     ]
-    assert {row.edition_date for row in await _rows(sessions)} == {kept_edition, EDITION}
+    assert {row.edition_date for row in await _rows(sessions)} == {kept_edition, SETTLED}
+
+
+async def test_missing_hk_bars_are_unavailable_and_retryable(
+    heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, sessions = heatmap_database
+    store = FakeObjectStore()
+
+    async def capture(**_: object) -> CapturedHeatmap:
+        return _captured()
+
+    monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
+
+    outcome = await orchestration_functions._run_tradingview_heatmap(
+        _settings(), sessions, await _running_attempt(sessions, settled=None), store
+    )
+
+    assert (outcome.status, outcome.error_code, outcome.retryable) == (
+        "unavailable",
+        "hk_bars_missing",
+        True,
+    )
+    assert store.objects == {}
+    assert await _rows(sessions) == []
+
+
+async def test_failed_object_delete_keeps_the_rows_for_the_next_run(
+    heatmap_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, sessions = heatmap_database
+
+    class FlakyDeleteStore(FakeObjectStore):
+        fail_deletes = False
+
+        async def delete(self, target: ObjectRef) -> None:
+            if self.fail_deletes:
+                raise RuntimeError("r2 unreachable")
+            await super().delete(target)
+
+    store = FlakyDeleteStore()
+    captured = _captured()
+
+    async def capture(**_: object) -> CapturedHeatmap:
+        return captured
+
+    monkeypatch.setattr(orchestration_functions, "capture_sector_heatmap", capture)
+    old_edition = SETTLED - timedelta(days=31)
+    await orchestration_functions._run_tradingview_heatmap(
+        _settings(), sessions, await _running_attempt(sessions, settled=old_edition), store
+    )
+
+    # The retention sweep's R2 delete fails: the expired rows must survive so a
+    # later run still knows which objects to delete.
+    store.fail_deletes = True
+    with pytest.raises(RuntimeError, match="r2 unreachable"):
+        await orchestration_functions._run_tradingview_heatmap(
+            _settings(), sessions, await _running_attempt(sessions), store
+        )
+    assert {row.edition_date for row in await _rows(sessions)} == {old_edition}
+    # The expired objects are still there for the retry; the new edition's
+    # uploads landed before the failure and are simply re-verified next run.
+    assert {
+        f"heatmaps/hsi/{old_edition.isoformat()}/legend.png",
+        f"heatmaps/hsi/{old_edition.isoformat()}/overview.png",
+    } <= set(store.objects)
+
+    store.fail_deletes = False
+    outcome = await orchestration_functions._run_tradingview_heatmap(
+        _settings(), sessions, await _running_attempt(sessions), store
+    )
+
+    assert outcome.result == {"images": 2, "uploaded": 2, "removed_objects": 2}
+    assert {row.edition_date for row in await _rows(sessions)} == {SETTLED}
+    assert sorted(store.objects) == [
+        "heatmaps/hsi/2026-10-09/legend.png",
+        "heatmaps/hsi/2026-10-09/overview.png",
+    ]
 
 
 async def test_stale_fence_cancels_without_touching_the_ledger(
@@ -404,6 +517,8 @@ async def test_stale_fence_cancels_without_touching_the_ledger(
 
     assert outcome.status == "cancelled"
     assert await _rows(sessions) == []
+    # The stale attempt must not have uploaded anything either.
+    assert store.objects == {}
 
 
 def test_object_keys_are_namespaced_by_source_and_edition() -> None:

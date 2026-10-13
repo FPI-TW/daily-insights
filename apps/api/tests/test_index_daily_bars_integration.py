@@ -17,7 +17,9 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from test_health import readiness
+from test_sector_heatmap import _running_attempt
 
+import daily_insights_api.modules.orchestration.functions as orchestration_functions
 from daily_insights_api.core.config import Settings
 from daily_insights_api.core.enums import SystemRole, UserStatus
 from daily_insights_api.modules.data_sources.api import (
@@ -302,11 +304,12 @@ def _symbol_bar(symbol: str, market: str, close: str) -> DailyBar:
 async def test_first_short_refresh_backfills_a_new_symbol_then_returns_to_short_window(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
+    # The stored bar must be recent, or the second refresh widens to heal the gap.
+    bar = _symbol_bar("^NDX", "us_equity", "100.0").model_copy(
+        update={"trade_date": _taipei_today() - timedelta(days=1)}
+    )
     adapter = cast(
-        YfinanceAdapter,
-        _RecordingAdapter(
-            {"^NDX": _result("^NDX", "us_equity", (_symbol_bar("^NDX", "us_equity", "100.0"),))}
-        ),
+        YfinanceAdapter, _RecordingAdapter({"^NDX": _result("^NDX", "us_equity", (bar,))})
     )
 
     async with session_factory.begin() as database:
@@ -323,6 +326,60 @@ async def test_first_short_refresh_backfills_a_new_symbol_then_returns_to_short_
         ("^NDX", INITIAL_SERIES_BACKFILL_PERIOD),
         ("^NDX", AUTOMATIC_SHORT_REFRESH_PERIOD),
     ]
+
+
+async def test_short_refresh_widens_to_cover_a_gap_after_an_outage(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # The newest stored bar is three weeks old: the worker or Yahoo was down,
+    # so a week-wide window would leave the hole in place for good.
+    stale = _symbol_bar("^NDX", "us_equity", "100.0").model_copy(
+        update={"trade_date": _taipei_today() - timedelta(days=21)}
+    )
+    adapter = cast(
+        YfinanceAdapter, _RecordingAdapter({"^NDX": _result("^NDX", "us_equity", (stale,))})
+    )
+    async with session_factory.begin() as database:
+        await _store(database, [stale])
+
+    async with session_factory.begin() as database:
+        await refresh_index_daily_bars(
+            database, adapter=adapter, symbols=["^NDX"], period=AUTOMATIC_SHORT_REFRESH_PERIOD
+        )
+
+    assert cast(_RecordingAdapter, adapter).periods == [("^NDX", "1mo")]
+
+
+async def test_worker_window_predicate_bootstraps_when_served_bars_are_missing(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The scheduled path must notice index_daily_bars being behind the ledger.
+
+    Re-pointing a symbol's provider deletes its index_daily_bars rows while the
+    orchestration ledger keeps two years, so the ledger alone would say "7d" and
+    the served table would never be refilled.
+    """
+    today = _taipei_today()
+    # Ledger: ^HSI settled yesterday. Served table: nothing.
+    await _running_attempt(session_factory, settled=today - timedelta(days=1))
+
+    async def predicate() -> dict[str, date]:
+        return await orchestration_functions._latest_yahoo_bar_dates(
+            session_factory,
+            provider_key="yahoo_finance",
+            dataset_key="hk_index_daily_bars",
+            symbols=["^HSI"],
+        )
+
+    assert await predicate() == {}
+
+    # Served table three weeks behind the ledger: the older date wins.
+    stale = _symbol_bar("^HSI", "hk_equity", "200.0").model_copy(
+        update={"trade_date": today - timedelta(days=21)}
+    )
+    async with session_factory.begin() as database:
+        await _store(database, [stale])
+    assert await predicate() == {"^HSI": today - timedelta(days=21)}
 
 
 async def test_a_failing_symbol_does_not_roll_back_the_others(

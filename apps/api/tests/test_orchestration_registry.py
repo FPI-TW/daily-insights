@@ -269,10 +269,19 @@ def test_manual_hk_refresh_runs_the_hong_kong_index_and_heatmap_functions() -> N
         "hsi_sector_heatmap",
     ]
     assert "hk_equity_refresh" in MANUAL_MARKET_JOB_KEYS
+    # The heatmap is dated by the newest ^HSI bar, so it runs after the bars.
+    heatmap = job.functions[1]
+    assert (heatmap.depends_on, heatmap.dependency_policy) == (("hk_index_daily_bars",), "terminal")
     # The daily routine captures the heatmap through its own provider job so the
-    # TradingView lock never serialises behind Yahoo.
+    # TradingView lock never serialises behind Yahoo; a job dependency still
+    # orders it after the Yahoo bars it is dated by.
     assert "tradingview_daily_update" in DAILY_ROUTINE.job_keys
     assert JOB_BY_KEY["tradingview_daily_update"].automatic_key == "tradingview"
+    assert any(
+        (item.upstream_job_key, item.downstream_job_key, item.policy)
+        == ("yahoo_finance_daily_update", "tradingview_daily_update", "terminal")
+        for item in DAILY_ROUTINE.dependencies
+    )
 
 
 def test_manual_news_market_jobs_publish_after_their_refresh() -> None:

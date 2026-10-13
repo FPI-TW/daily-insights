@@ -258,7 +258,8 @@ class StoredHeatmapImages:
     changed: int
     # Object keys whose rows were removed: sectors that disappeared from the day
     # plus editions older than the retention window. The caller deletes them
-    # from R2 after the transaction commits so a rollback never orphans a row.
+    # from R2 before the transaction commits, so a failed delete rolls the rows
+    # back and the next run retries instead of leaving an orphaned object.
     removed_object_keys: tuple[str, ...]
 
 

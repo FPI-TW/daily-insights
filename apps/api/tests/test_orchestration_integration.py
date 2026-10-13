@@ -2361,8 +2361,8 @@ async def test_yahoo_refresh_fetches_concurrently_and_bootstraps_only_new_symbol
     in_flight = 0
     peak_in_flight = 0
 
-    async def stored(*_: object, **__: object) -> set[str]:
-        return {"^HSI"}
+    async def latest_dates(*_: object, **__: object) -> dict[str, date]:
+        return {"^HSI": date(2026, 10, 9)}
 
     async def store(*_: object, **__: object) -> int:
         return 1
@@ -2412,7 +2412,7 @@ async def test_yahoo_refresh_fetches_concurrently_and_bootstraps_only_new_symbol
                 ),
             )
 
-    monkeypatch.setattr(orchestration_functions, "_stored_yahoo_symbols", stored)
+    monkeypatch.setattr(orchestration_functions, "_latest_yahoo_bar_dates", latest_dates)
     monkeypatch.setattr(orchestration_functions, "store_market_bars", store)
     monkeypatch.setattr(orchestration_functions, "store_index_daily_bars", store)
     monkeypatch.setattr(orchestration_functions, "fence_is_current", current)
@@ -2513,7 +2513,7 @@ async def test_daily_routine_is_idempotent_and_worker_persists_attempts(
     async with sessions() as database:
         assert await database.scalar(select(func.count()).select_from(RoutineRun)) == 1
         assert await database.scalar(select(func.count()).select_from(JobRun)) == 9
-        assert await database.scalar(select(func.count()).select_from(JobDependency)) == 8
+        assert await database.scalar(select(func.count()).select_from(JobDependency)) == 9
 
     claimed = await claim_ready_function(engine, sessions, owner="integration-worker")
     assert claimed is not None
