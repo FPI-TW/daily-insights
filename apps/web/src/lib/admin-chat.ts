@@ -5,7 +5,16 @@ import {
 } from "@tanstack/react-start/server"
 import { z } from "zod"
 
+const tokenUsageSchema = z.object({
+  input_tokens: z.number().int().nonnegative().nullable(),
+  output_tokens: z.number().int().nonnegative().nullable(),
+  total_tokens: z.number().int().nonnegative().nullable(),
+  completeness: z.enum(["complete", "partial", "unavailable"]),
+})
+export type TokenUsage = z.infer<typeof tokenUsageSchema>
+
 const conversationSchema = z.object({
+  usage: tokenUsageSchema,
   id: z.uuid(),
   organization_id: z.uuid(),
   user_id: z.uuid(),
@@ -31,6 +40,7 @@ export type AdminConversationSearch = z.infer<
   typeof adminConversationSearchSchema
 >
 export const detailSchema = z.object({
+  usage: tokenUsageSchema,
   id: z.uuid(),
   organization_id: z.uuid(),
   user_id: z.uuid(),

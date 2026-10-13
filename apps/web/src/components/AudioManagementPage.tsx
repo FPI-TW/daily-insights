@@ -46,7 +46,7 @@ type ReplacementConfirmation = Readonly<{
 const maxPodcastFileBytes = 256 * 1024 * 1024
 
 function podcastFileMimeType(file: File): string | null {
-  const extension = file.name.split(".").pop()?.toLowerCase()
+  const extension = /\.(mp3|mp4)$/i.exec(file.name)?.[1]?.toLowerCase()
   if (
     extension === "mp3" &&
     ["audio/mpeg", "audio/mp3", ""].includes(file.type)
@@ -176,9 +176,10 @@ export function AudioManagementPage({
                 className="m-0 border-b border-line pb-2 text-base font-extrabold text-sea-ink-soft"
                 id={`audio-month-${group.month}`}
               >
-                {formatEpisodeMonth(group.month, locale)}
+                {formatEpisodeMonth(group.month, locale)} ·{" "}
+                {t("audioEpisodeCount", { count: group.episodes.length })}
               </h3>
-              <div className="grid gap-3">
+              <div className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {group.episodes.map(episode => (
                   <EpisodeManager
                     key={episode.id}
@@ -213,6 +214,9 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
   const uploadTargets = useRef<
     Partial<Record<Locale, PodcastDirectUploadTarget>>
   >({})
+  const [slotErrors, setSlotErrors] = useState<Partial<Record<Locale, string>>>(
+    {}
+  )
   const [files, setFiles] = useState<PodcastFiles>({
     "zh-hant": null,
     "zh-hans": null,
@@ -260,13 +264,16 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
       setError(t("podcastUploadAtLeastOne"))
       return
     }
-    for (const { file } of selected) {
+    for (const { locale, file } of selected) {
       if (file.size === 0 || file.size > maxPodcastFileBytes) {
         setError(t("podcastUploadTooLarge"))
         return
       }
       if (!podcastFileMimeType(file)) {
-        setError(t("podcastUploadInvalidType"))
+        setSlotErrors(current => ({
+          ...current,
+          [locale]: t("podcastUploadInvalidType"),
+        }))
         return
       }
     }
@@ -517,7 +524,16 @@ function PodcastUploadForm({ locale }: { locale: Locale }) {
               locale={locale}
               file={files[locale]}
               disabled={pending}
+              error={slotErrors[locale]}
               onChange={file => {
+                if (file && !podcastFileMimeType(file)) {
+                  setSlotErrors(current => ({
+                    ...current,
+                    [locale]: t("podcastUploadInvalidType"),
+                  }))
+                  return
+                }
+                setSlotErrors(current => ({ ...current, [locale]: undefined }))
                 clearReplacementConfirmation()
                 setFiles(current => ({ ...current, [locale]: file }))
                 delete uploadTargets.current[locale]
@@ -710,11 +726,13 @@ function PodcastFileSlot({
   locale,
   file,
   disabled = false,
+  error,
   onChange,
 }: {
   locale: Locale
   file: File | null
   disabled?: boolean
+  error: string | undefined
   onChange: (file: File | null) => void
 }) {
   const { t } = useTranslation()
@@ -730,52 +748,69 @@ function PodcastFileSlot({
   }
 
   return (
-    <div
-      className={
-        dragging
-          ? "relative min-h-32 rounded-lg border-2 border-dashed border-lagoon bg-lagoon/10 text-center"
-          : "relative min-h-32 rounded-lg border-2 border-dashed border-line bg-link-hover text-center transition-colors hover:border-lagoon"
-      }
-      onDragEnter={event => {
-        event.preventDefault()
-        if (!disabled) setDragging(true)
-      }}
-      onDragOver={event => event.preventDefault()}
-      onDragLeave={() => setDragging(false)}
-      onDrop={receiveDrop}
-    >
-      <input
-        className="sr-only"
-        id={inputId}
-        type="file"
-        accept=".mp3,.mp4,audio/mpeg,audio/mp4,video/mp4"
-        disabled={disabled}
-        onChange={event => onChange(event.target.files?.item(0) ?? null)}
-      />
-      <label
+    <div className="grid gap-2">
+      <div
         className={
-          disabled
-            ? "absolute inset-0 grid place-items-center gap-2 p-4 text-sm font-bold text-sea-ink"
-            : "absolute inset-0 grid cursor-pointer place-items-center gap-2 p-4 text-sm font-bold text-sea-ink"
+          dragging
+            ? "relative min-h-32 rounded-lg border-2 border-dashed border-lagoon bg-lagoon/10 text-center"
+            : "relative min-h-32 rounded-lg border-2 border-dashed border-line bg-link-hover text-center transition-colors hover:border-lagoon"
         }
-        htmlFor={inputId}
+        onDragEnter={event => {
+          event.preventDefault()
+          if (!disabled) setDragging(true)
+        }}
+        onDragOver={event => event.preventDefault()}
+        onDragLeave={() => setDragging(false)}
+        onDrop={receiveDrop}
       >
-        <strong className="text-xs tracking-[0.08em] text-kicker uppercase">
-          {locale}
-        </strong>
-        <span className="max-w-full overflow-hidden text-ellipsis">
-          {file ? file.name : t("podcastUploadSlotPrompt")}
-        </span>
-      </label>
-      {file && (
-        <button
-          className="absolute right-2 bottom-2 z-10 px-2 py-1 text-xs"
-          type="button"
+        <input
+          className="sr-only"
+          id={inputId}
+          type="file"
+          accept=".mp3,.mp4,audio/mpeg,audio/mp4,video/mp4"
           disabled={disabled}
-          onClick={() => onChange(null)}
+          onChange={event => {
+            const selected = event.target.files?.item(0)
+            event.target.value = ""
+            if (selected) onChange(selected)
+          }}
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? `${inputId}-error` : undefined}
+        />
+        <label
+          className={
+            disabled
+              ? "absolute inset-0 grid place-items-center gap-2 p-4 text-sm font-bold text-sea-ink"
+              : "absolute inset-0 grid cursor-pointer place-items-center gap-2 p-4 text-sm font-bold text-sea-ink"
+          }
+          htmlFor={inputId}
         >
-          {t("podcastUploadRemove")}
-        </button>
+          <strong className="text-xs tracking-[0.08em] text-kicker uppercase">
+            {locale}
+          </strong>
+          <span className="max-w-full overflow-hidden text-ellipsis">
+            {file ? file.name : t("podcastUploadSlotPrompt")}
+          </span>
+        </label>
+        {file && (
+          <button
+            className="absolute right-2 bottom-2 z-10 px-2 py-1 text-xs"
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(null)}
+          >
+            {t("podcastUploadRemove")}
+          </button>
+        )}
+      </div>
+      {error && (
+        <p
+          id={`${inputId}-error`}
+          className="m-0 text-sm text-destructive"
+          role="alert"
+        >
+          {error}
+        </p>
       )}
     </div>
   )
@@ -870,9 +905,9 @@ function EpisodeManager({
   }
 
   return (
-    <article className="surface-panel grid w-fit max-w-full grid-cols-[minmax(0,1fr)_auto] gap-3 border-l-[3px] border-l-transparent p-4 max-[42rem]:w-full max-[42rem]:grid-cols-1">
-      <header className="flex items-start justify-between gap-4">
-        <div>
+    <article className="surface-panel flex min-w-0 flex-col gap-3 border-l-2 border-l-transparent p-4">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <time
             className="text-xs font-extrabold tracking-[0.06em] text-kicker"
             dateTime={episode.trading_date}
@@ -900,7 +935,7 @@ function EpisodeManager({
         {t("podcastAudioCount", { count: available.size })} ·{" "}
         {t(`podcastMetadataSource_${episode.metadata_source}`)}
       </p>
-      <p className="m-0 text-base font-bold text-sea-ink">
+      <p className="m-0 text-base font-bold wrap-anywhere text-sea-ink">
         {episode.metadata.find(item => item.locale === locale)?.title ??
           episode.metadata[0]?.title}
       </p>
@@ -931,61 +966,70 @@ function EpisodeManager({
               locale={locale}
             />
           ))}
-      {canPublish && (
-        <div className="flex flex-wrap justify-end gap-3 max-[42rem]:justify-start">
-          <button
-            className="primary-action"
-            data-action="publication"
-            type="button"
-            disabled={pending || frozen}
-            onClick={() => void changePublication()}
-          >
-            {episode.status === "draft"
-              ? t("podcastPublish")
-              : t("podcastUnpublish")}
-          </button>
-          <button
-            className="rounded-lg border border-market-down/40 px-4 py-2 text-sm font-bold text-market-down disabled:cursor-not-allowed disabled:opacity-50"
-            data-action="removal"
-            type="button"
-            disabled={pending || episode.status === "published"}
-            title={
-              episode.status === "published"
+      <footer className="mt-auto grid gap-3 border-t border-line pt-4">
+        {canPublish && (
+          <div className="grid gap-2">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                className="primary-action"
+                data-action="publication"
+                type="button"
+                disabled={pending || frozen}
+                onClick={() => void changePublication()}
+              >
+                {episode.status === "draft"
+                  ? t("podcastPublish")
+                  : t("podcastUnpublish")}
+              </button>
+              <button
+                className="rounded-lg border border-market-down/40 px-4 py-2 text-sm font-bold text-market-down disabled:cursor-not-allowed disabled:opacity-50"
+                data-action="removal"
+                type="button"
+                disabled={pending || episode.status === "published"}
+                title={
+                  episode.status === "published"
+                    ? t("podcastRemoveUnpublishFirst")
+                    : undefined
+                }
+                onClick={() => void removeEpisode()}
+              >
+                {episode.deletion
+                  ? t("podcastRemovalRetry")
+                  : t("podcastRemove")}
+              </button>
+            </div>
+            <p
+              className="m-0 min-h-10 text-sm leading-5 text-sea-ink-soft"
+              aria-live="polite"
+            >
+              {episode.status === "published"
                 ? t("podcastRemoveUnpublishFirst")
-                : undefined
-            }
-            onClick={() => void removeEpisode()}
-          >
-            {episode.deletion ? t("podcastRemovalRetry") : t("podcastRemove")}
-          </button>
-          {episode.status === "published" && (
-            <p className="m-0 text-sm text-sea-ink-soft">
-              {t("podcastRemoveUnpublishFirst")}
+                : null}
             </p>
-          )}
-        </div>
-      )}
-      {frozen && (
-        <p
-          className="col-span-full m-0 text-sm font-bold text-market-caution"
-          role="status"
-          aria-live="polite"
-        >
-          {removing
-            ? t("podcastRemoving")
-            : t("podcastRemovalProgress", {
-                cleared:
-                  (episode.deletion?.cleared_objects ?? 0) +
-                  (episode.deletion?.retained_objects ?? 0),
-                total: episode.deletion?.total_objects ?? 0,
-              })}
-        </p>
-      )}
-      {error && (
-        <p className="m-0 text-sm font-bold text-red-700" role="alert">
-          {error}
-        </p>
-      )}
+          </div>
+        )}
+        {frozen && (
+          <p
+            className="col-span-full m-0 text-sm font-bold text-market-caution"
+            role="status"
+            aria-live="polite"
+          >
+            {removing
+              ? t("podcastRemoving")
+              : t("podcastRemovalProgress", {
+                  cleared:
+                    (episode.deletion?.cleared_objects ?? 0) +
+                    (episode.deletion?.retained_objects ?? 0),
+                  total: episode.deletion?.total_objects ?? 0,
+                })}
+          </p>
+        )}
+        {error && (
+          <p className="m-0 text-sm font-bold text-red-700" role="alert">
+            {error}
+          </p>
+        )}
+      </footer>
     </article>
   )
 }

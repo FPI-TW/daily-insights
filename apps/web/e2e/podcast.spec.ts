@@ -435,39 +435,55 @@ test.describe("Podcast administration", () => {
       'section[aria-labelledby^="audio-month-"] > h3'
     )
     await expect(monthHeadings).toHaveText([
-      "July 2026",
-      "June 2026",
-      "May 2026",
+      "July 2026 · 3 episodes",
+      "June 2026 · 1 episode",
+      "May 2026 · 1 episode",
     ])
     await expect(page.locator("article time")).toHaveText([
       "2026-07-26",
+      "2026-07-25",
       "2026-07-24",
       "2026-06-30",
       "2026-05-02",
     ])
 
-    const desktopLayout = await page.locator("article").evaluateAll(cards =>
-      cards.map(card => {
-        const bounds = card.getBoundingClientRect()
-        return { left: bounds.left, width: bounds.width }
+    for (const [width, columns] of [
+      [390, 1],
+      [768, 2],
+      [1280, 3],
+      [1440, 3],
+    ]) {
+      await page.setViewportSize({ width: width!, height: 1000 })
+      const cards = page.locator(
+        'section[aria-labelledby="audio-month-2026-07"] article'
+      )
+      const lefts = await cards.evaluateAll(elements =>
+        elements.map(element =>
+          Math.round(element.getBoundingClientRect().left)
+        )
+      )
+      expect(new Set(lefts).size).toBe(columns)
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth
+        )
+      ).toBe(true)
+      const bottoms = await cards
+        .locator('[data-action="publication"]')
+        .evaluateAll(elements =>
+          elements
+            .slice(
+              0,
+              window.innerWidth >= 1280 ? 3 : window.innerWidth >= 768 ? 2 : 1
+            )
+            .map(element => Math.round(element.getBoundingClientRect().bottom))
+        )
+      expect(new Set(bottoms).size).toBe(1)
+      await page.evaluate(() => window.scrollTo(0, 0))
+      await page.screenshot({
+        path: `/tmp/admin-ux-grid-${width}.png`,
+        fullPage: true,
       })
-    )
-    expect(new Set(desktopLayout.map(card => card.left)).size).toBe(1)
-    const listWidth = await page
-      .locator("#audio-list-title")
-      .locator("..")
-      .evaluate(element => element.getBoundingClientRect().width)
-    expect(desktopLayout[0]?.width).toBeLessThan(listWidth)
-
-    await page.setViewportSize({ width: 390, height: 844 })
-    const mobileWidths = await page.locator("article").evaluateAll(cards =>
-      cards.map(card => ({
-        card: card.getBoundingClientRect().width,
-        parent: card.parentElement?.getBoundingClientRect().width ?? 0,
-      }))
-    )
-    for (const widths of mobileWidths) {
-      expect(Math.abs(widths.card - widths.parent)).toBeLessThan(1)
     }
   })
 })

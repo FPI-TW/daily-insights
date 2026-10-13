@@ -1,3 +1,4 @@
+import { TokenUsageDetails } from "#/components/TokenUsage"
 import { createFileRoute, redirect } from "@tanstack/react-router"
 import { ErrorScreen, LoadingScreen } from "#/components/StateScreen"
 import { type AdminConversation, getAdminConversation } from "#/lib/admin-chat"
@@ -39,6 +40,13 @@ export function ConversationDetail({
       >
         {t("conversationTitle")}
       </h1>
+      <section
+        className="mb-5 rounded-lg border border-line bg-surface p-4"
+        aria-label={t("tokenSummary")}
+      >
+        <h2 className="mt-0 text-lg font-bold">{t("tokenSummary")}</h2>
+        <TokenUsageDetails usage={conversation.usage} />
+      </section>
       <div className="space-y-3">
         {conversation.messages.map(message => (
           <article
@@ -109,13 +117,31 @@ export function ConversationDetail({
                     )
                   </dd>
                 </div>
-                <div>
+                <div className="sm:col-span-2">
                   <dt className="font-bold text-sea-ink-soft">
                     {t("generationUsage")}
                   </dt>
-                  <dd className="m-0 text-sea-ink">
-                    {generation.input_tokens ?? "—"} /{" "}
-                    {generation.output_tokens ?? "—"}
+                  <dd className="m-0">
+                    <TokenUsageDetails
+                      usage={{
+                        input_tokens: generation.input_tokens,
+                        output_tokens: generation.output_tokens,
+                        total_tokens:
+                          generation.input_tokens === null &&
+                          generation.output_tokens === null
+                            ? null
+                            : (generation.input_tokens ?? 0) +
+                              (generation.output_tokens ?? 0),
+                        completeness:
+                          generation.input_tokens === null &&
+                          generation.output_tokens === null
+                            ? "unavailable"
+                            : generation.input_tokens === null ||
+                                generation.output_tokens === null
+                              ? "partial"
+                              : "complete",
+                      }}
+                    />
                   </dd>
                 </div>
                 <div>

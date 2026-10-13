@@ -85,3 +85,17 @@ make test-db
 - 本階段沒有操作正式 bucket。實際搬移仍需核准的 source key、trading date
   與 locale inventory，並依 Podcast runbook 執行 dry-run、verified cutover
   與人工清理。
+
+## 後台對話 token 用量（2026-10-08）
+
+對話列表顯示累計 token，詳情顯示輸入、輸出、合計與逐次生成明細。列表與詳情 API
+新增共用 `usage` 物件：`input_tokens`、`output_tokens`、`total_tokens` 為可空整數，
+`completeness` 為 `complete`、`partial` 或 `unavailable`。
+
+統計直接使用已儲存的供應商回傳用量，包含失敗／中斷生成中已取得的數值。部分缺漏
+顯示「已知用量」與說明，全部缺漏顯示「未提供」，實際的 0 仍顯示 0。不估算、不回填
+歷史缺漏資料，也不換算費用。每次生成只計算一次，缺漏的單側用量保持 null。
+
+列表批次彙總當頁對話的訊息數與用量，不對每筆對話額外查詢；篩選與 cursor 分頁
+沿用原介面。整合測試驗證列表／詳情一致、分頁、錯誤生成用量及全缺漏紀錄；前端
+測試確認 0 與未提供的呈現不同。

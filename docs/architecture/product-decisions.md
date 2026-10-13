@@ -139,14 +139,16 @@ is retained only as historical investigation evidence.
   after complete size/MIME/checksum reconciliation, the application never
   automatically deletes source objects, and internal staff manually remove
   old-path copies only after verified cutover.
-- The privileged browser upload endpoint accepts one to three files per
-  request, with at most one file for each supported locale. It writes to the
-  stable canonical key
-  `podcasts/{trading-date}/audio/{locale}/podcast.{mp3|mp4}`. Confirmed
-  replacement with the same extension overwrites that locale's same stable key.
-  A replacement that changes between MP3 and MP4 writes the new
-  stable-extension key before deleting the replaced old-format key. Both paths
-  increment the logical version.
+- The privileged browser upload endpoint accepts one to three files per request,
+  with at most one file per locale. Browser PUT writes an immutable temporary key
+  `podcasts/direct/{expires}/{trading-date}/{locale}/{asset-uuid}.{mp3|mp4}`.
+  New v2 completion validates the full stream and conditionally creates
+  `podcasts/YYYY/MM/DD/{locale}/podcast_{logical-version}.{mp3|mp4}`; month/day
+  are padded and the version matches the date/locale variant. Registration commits
+  before staging cleanup. Replacements increment the version and preserve archived
+  objects. Existing uploads and v1 signed tickets keep their original paths.
+  Final collisions are reusable only when unreferenced and size/MIME/full SHA match;
+  incompatible or referenced objects return 409 and remain untouched.
 - Podcast metadata supports all three locales and audio may vary by locale.
   Publishing requires at least one active locale; no particular locale is
   mandatory. Playback first selects an exact requested-locale match and then
@@ -158,7 +160,7 @@ is retained only as historical investigation evidence.
   show/series, season, episode number, or scheduled publication in the pilot.
 - A duplicate `trading_date + locale` media operation warns before logical
   replacement and requires the expected current version. Confirmed replacement
-  follows the stable-key rules above, updates checksum and object metadata,
+  follows the versioned-key rules above, updates checksum and object metadata,
   increments the logical version, and is audited.
 - nginx replaces the previous gateway and is the single public application/API
   ingress.

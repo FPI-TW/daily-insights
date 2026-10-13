@@ -1,7 +1,7 @@
 """Shared date/object locks and durable upload-generation fences.
 
 Lock order: date, episode/batch rows, object advisory lock, asset row.
-Cleanup uses only object locks, so it never waits for a date/episode lock.
+Direct-upload cleanup also takes the date lock before any object lock.
 """
 
 import hashlib
