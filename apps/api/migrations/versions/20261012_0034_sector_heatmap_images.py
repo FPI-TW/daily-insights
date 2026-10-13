@@ -1,7 +1,7 @@
 """Ledger for captured sector heatmap PNGs stored in R2.
 
-Revision ID: 20261012_0033
-Revises: 20261007_0032
+Revision ID: 20261012_0034
+Revises: 20261008_0033
 """
 
 from collections.abc import Sequence
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "20261012_0033"
-down_revision: str | None = "20261007_0032"
+revision: str = "20261012_0034"
+down_revision: str | None = "20261008_0033"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
