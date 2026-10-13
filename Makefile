@@ -94,7 +94,7 @@ test: ## 執行 Web 與 API 測試
 capture-hsi-heatmap: ## 在 worker 映像內擷取 TradingView HSI 熱力圖到 output/heatmap/hsi（可傳 OUT，除錯用）
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
 	mkdir -p $(or $(OUT),output/heatmap/hsi)
-	docker compose run --rm --build -e HOME=/tmp \
+	docker compose run --rm --build -e HOME=/tmp --user $$(id -u):$$(id -g) \
 		-v $$(cd $(or $(OUT),output/heatmap/hsi) && pwd):/output orchestration-worker \
 		python -m daily_insights_api.modules.data_sources.tradingview --out /output
 
