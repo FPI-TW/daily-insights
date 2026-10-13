@@ -154,6 +154,14 @@ class Settings(BaseSettings):
             ):
                 raise ValueError("deployment secrets must not use placeholders")
             self._validate_production_external_services()
+        # The workers reach R2 too: the media worker for podcast audio, the
+        # orchestration worker for the TradingView heatmap when that is on.
+        # Validate at startup rather than on the first upload hours later.
+        if self.environment in {"staging", "production"} and (
+            self.runtime_role == "media-worker"
+            or (self.runtime_role == "orchestration-worker" and self.tradingview_enabled)
+        ):
+            self._validate_r2_configuration()
         return self
 
     def _validate_production_external_services(self) -> None:
@@ -222,6 +230,9 @@ class Settings(BaseSettings):
                 or is_placeholder_value(self.chat_model_api_key.get_secret_value())
             ):
                 raise ValueError("chat_model_api_key is required and cannot be a placeholder")
+        self._validate_r2_configuration()
+
+    def _validate_r2_configuration(self) -> None:
         required_r2_values = {
             "r2_endpoint_url": self.r2_endpoint_url,
             "r2_bucket_name": self.r2_bucket_name,

@@ -36,10 +36,13 @@ def test_production_accepts_complete_external_configuration() -> None:
 
 
 def test_orchestration_worker_does_not_require_api_or_r2_secrets() -> None:
+    # Without the heatmap the worker never touches R2. Pinned explicitly, since
+    # the local env file the settings read may switch the capture on.
     settings = Settings.model_validate(
         {
             "environment": "production",
             "runtime_role": "orchestration-worker",
+            "tradingview_enabled": False,
             "database_url": "postgresql+psycopg://worker:secret@example.invalid/app",
             "session_secret": None,
             "password_pepper": None,
@@ -73,6 +76,39 @@ def test_orchestration_worker_keeps_r2_credentials_for_heatmap_uploads() -> None
     assert settings.r2_access_key_id is not None
     assert settings.r2_access_key_id.get_secret_value() == "r2-access-key"
     assert settings.session_secret is None
+
+
+@pytest.mark.parametrize(
+    ("role", "overrides"),
+    [
+        # The heatmap worker uploads to R2, so a missing or placeholder value
+        # must fail at startup instead of on the first capture.
+        ("orchestration-worker", {"tradingview_enabled": True, "r2_bucket_name": None}),
+        (
+            "orchestration-worker",
+            {"tradingview_enabled": True, "r2_access_key_id": SecretStr("CHANGE_ME")},
+        ),
+        (
+            "orchestration-worker",
+            {"tradingview_enabled": True, "r2_endpoint_url": "http://account.r2.invalid"},
+        ),
+        ("media-worker", {"r2_secret_access_key": None}),
+    ],
+)
+def test_workers_validate_r2_when_they_upload(role: str, overrides: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        Settings.model_validate(
+            {
+                "environment": "production",
+                "runtime_role": role,
+                "database_url": "postgresql+psycopg://worker:secret@example.invalid/app",
+                "r2_endpoint_url": "https://account.r2.cloudflarestorage.com",
+                "r2_bucket_name": "daily-insights-production",
+                "r2_access_key_id": SecretStr("r2-access-key"),
+                "r2_secret_access_key": SecretStr("r2-secret-key"),
+                **overrides,
+            }
+        )
 
 
 def test_macro_scheduler_requires_only_a_production_database_url() -> None:
