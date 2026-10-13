@@ -94,7 +94,9 @@ FUNCTIONS = (
     FunctionDefinition("institutional_stock_flows", "twse", 4),
     FunctionDefinition("institutional_market_flows", "twse", 4),
     FunctionDefinition("treasury_yield_curve", "us_treasury", 4),
-    FunctionDefinition("sofr_daily_rates", "new_york_fed", 4),
+    # SOFR is published one business day late, after the Taipei morning run: a
+    # US three-day weekend leaves the newest stored rate five days old.
+    FunctionDefinition("sofr_daily_rates", "new_york_fed", 7),
     FunctionDefinition(
         "news_global_refresh",
         "internal_services",

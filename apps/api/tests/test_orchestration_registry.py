@@ -80,6 +80,23 @@ def test_registry_has_expected_provider_function_job_relationships() -> None:
     assert len(registry_digest()) == 64
 
 
+@pytest.mark.parametrize(
+    ("edition_date", "latest_sofr_date"),
+    [
+        # Columbus Day 2026-10-12: Friday's rate is not published until Tuesday
+        # morning New York time, after the Taipei run for the Tuesday edition.
+        (date(2026, 10, 13), date(2026, 10, 8)),
+        (date(2026, 10, 14), date(2026, 10, 9)),
+    ],
+)
+def test_sofr_freshness_covers_holiday_publication_lag(
+    edition_date: date, latest_sofr_date: date
+) -> None:
+    freshness_days = FUNCTION_BY_KEY["sofr_daily_rates"].freshness_days
+
+    assert (edition_date - latest_sofr_date).days <= freshness_days
+
+
 def test_dispatcher_production_settings_require_only_database_orchestration_scope() -> None:
     settings = DispatcherSettings(
         environment="production",
