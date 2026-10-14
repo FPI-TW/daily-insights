@@ -128,7 +128,9 @@ describe("VixHistoryChart", () => {
     document.documentElement.style.setProperty("--market-caution", "#c98a2b")
     document.documentElement.style.setProperty("--destructive", "#d6453f")
 
-    await renderLocalized(<VixHistoryChart history={history} locale="en" />)
+    await renderLocalized(
+      <VixHistoryChart symbol="^VIX" history={history} locale="en" />
+    )
 
     const chart = screen.getByTestId("vix-chart")
     expect(chart).toHaveTextContent("18.1")
@@ -162,18 +164,50 @@ describe("VixHistoryChart", () => {
   })
 
   it("has accessible loading, unavailable, and empty states", async () => {
-    await renderLocalized(<VixHistoryLoading />)
+    await renderLocalized(<VixHistoryLoading symbol="^VIX" />)
     expect(screen.getByRole("status")).toHaveAccessibleName()
 
     cleanup()
-    await renderLocalized(<VixHistoryChart history={null} locale="en" />)
+    await renderLocalized(
+      <VixHistoryChart symbol="^VIX" history={null} locale="en" />
+    )
     expect(screen.getByRole("status")).toHaveTextContent("unavailable")
 
     cleanup()
     await renderLocalized(
-      <VixHistoryChart history={{ ...history, bars: [] }} locale="en" />
+      <VixHistoryChart
+        symbol="^VIX"
+        history={{ ...history, bars: [] }}
+        locale="en"
+      />
     )
     expect(screen.getByRole("status")).toHaveTextContent("no VIX daily bars")
+  })
+
+  it("names the Hong Kong volatility index in every state", async () => {
+    const hsil = { ...history, symbol: "^HSIL" as const }
+    await renderLocalized(
+      <VixHistoryChart symbol="^HSIL" history={hsil} locale="en" />
+    )
+    expect(
+      screen.getByRole("heading", { name: "HSI VIX volatility trend" })
+    ).toBeVisible()
+    expect(screen.getByText("Latest HSI VIX:")).toBeVisible()
+
+    cleanup()
+    await renderLocalized(
+      <VixHistoryChart symbol="^HSIL" history={null} locale="zh-hant" />,
+      "zh-hant"
+    )
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "目前無法載入 港股 VIX 資料"
+    )
+
+    cleanup()
+    await renderLocalized(<VixHistoryLoading symbol="^HSIL" />)
+    expect(screen.getByRole("status")).toHaveAccessibleName(
+      "Loading the HSI VIX volatility trend."
+    )
   })
 
   it.each([
@@ -182,7 +216,7 @@ describe("VixHistoryChart", () => {
     ["en", "VIX volatility trend", "not official classifications"],
   ] as const)("renders %s copy", async (locale, title, reference) => {
     await renderLocalized(
-      <VixHistoryChart history={history} locale={locale} />,
+      <VixHistoryChart symbol="^VIX" history={history} locale={locale} />,
       locale
     )
 

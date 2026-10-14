@@ -16,7 +16,7 @@ import { ReportInformation } from "#/components/MarketInformation"
 import { MarketQuerySection } from "#/components/MarketQuerySection"
 import { marketQueries, useMarketQuery } from "#/lib/market-queries"
 import { isNewsMarketCode } from "#/lib/provisional-reports"
-import { twoYearTaipeiRange } from "#/lib/indices"
+import { twoYearTaipeiRange, type VolatilitySymbol } from "#/lib/indices"
 import { institutionalFlowRange } from "#/lib/institutional-flows"
 import { useChatPageContext } from "#/components/PageContextChat"
 import {
@@ -58,7 +58,7 @@ type PageBlocks = {
   macro?: true
   chart?: "index" | "taiwan"
   performance?: true
-  vix?: true
+  volatility?: VolatilitySymbol
   hkEquity?: true
   institutional?: true
 }
@@ -66,8 +66,8 @@ const PAGE_BLOCKS = {
   global_macro_bonds: { macro: true },
   forex: {},
   crypto: {},
-  us_equity: { chart: "index", performance: true, vix: true },
-  hk_equity: { hkEquity: true },
+  us_equity: { chart: "index", performance: true, volatility: "^VIX" },
+  hk_equity: { hkEquity: true, chart: "index", volatility: "^HSIL" },
   cn_equity: {},
   tw_equity: { chart: "taiwan", institutional: true },
   tw_index_derivatives: {},
@@ -136,15 +136,18 @@ function ReportPage() {
     locale,
     ready && isChart
   )
+  // A page without a volatility block never enables these, so the fallback
+  // symbol only keeps the query key well-formed.
+  const volatility = blocks.volatility ?? "^VIX"
   const vix = useMarketQuery(
-    queries.vix(range),
+    queries.vix(volatility, range),
     locale,
-    ready && blocks.vix === true
+    ready && blocks.volatility !== undefined
   )
   const vixAverages = useMarketQuery(
-    queries.vixAverages(range),
+    queries.vixAverages(volatility, range),
     locale,
-    ready && blocks.vix === true
+    ready && blocks.volatility !== undefined
   )
   const flows = useMarketQuery(
     queries.flows(institutionalFlowRange(range.end)),
@@ -300,10 +303,14 @@ function ReportPage() {
           </MarketQuerySection>
         </>
       ) : null}
-      {blocks.vix ? (
-        <MarketQuerySection query={vix} loading={<VixHistoryLoading />}>
+      {blocks.volatility ? (
+        <MarketQuerySection
+          query={vix}
+          loading={<VixHistoryLoading symbol={volatility} />}
+        >
           {data => (
             <VixHistoryChart
+              symbol={volatility}
               history={
                 data ? { ...data, indicators: vixAverages.data ?? null } : null
               }
@@ -312,7 +319,7 @@ function ReportPage() {
           )}
         </MarketQuerySection>
       ) : null}
-      {blocks.vix ? (
+      {blocks.volatility ? (
         <MarketQuerySection query={vixAverages} loading={null}>
           {() => null}
         </MarketQuerySection>

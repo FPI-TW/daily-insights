@@ -4,16 +4,21 @@ import { useTranslation } from "react-i18next"
 import type { Locale } from "@daily-insights/api-client"
 import { useChartColors } from "#/lib/chart"
 import { formatIsoDate, formatNumber, numberLocales } from "#/lib/format"
-import type { VixHistory } from "#/lib/indices"
+import type { VixHistory, VolatilitySymbol } from "#/lib/indices"
 
-export function VixHistoryLoading() {
+const volatilityNameKeys: Record<VolatilitySymbol, string> = {
+  "^VIX": "volatilityNameVix",
+  "^HSIL": "volatilityNameHsil",
+}
+
+export function VixHistoryLoading({ symbol }: { symbol: VolatilitySymbol }) {
   const { t } = useTranslation()
   return (
     <section
       className="surface-panel mt-6 animate-pulse p-5"
       role="status"
       aria-live="polite"
-      aria-label={t("vixChartLoading")}
+      aria-label={t("vixChartLoading", { name: t(volatilityNameKeys[symbol]) })}
     >
       <div className="h-5 w-52 rounded bg-line" />
       <div className="mt-5 h-84 rounded-lg bg-line sm:h-96" />
@@ -21,7 +26,13 @@ export function VixHistoryLoading() {
   )
 }
 
-function VixState({ message }: { message: string }) {
+function VixState({
+  symbol,
+  message,
+}: {
+  symbol: VolatilitySymbol
+  message: string
+}) {
   const { t } = useTranslation()
   return (
     <section
@@ -29,27 +40,34 @@ function VixState({ message }: { message: string }) {
       role="status"
       aria-live="polite"
     >
-      <h2 className="m-0 text-base font-extrabold">{t("vixChartTitle")}</h2>
+      <h2 className="m-0 text-base font-extrabold">
+        {t("vixChartTitle", { name: t(volatilityNameKeys[symbol]) })}
+      </h2>
       <p className="mt-3 mb-0 text-sm text-sea-ink-soft">{message}</p>
     </section>
   )
 }
 
 export function VixHistoryChart({
+  symbol,
   history,
   locale,
 }: {
+  symbol: VolatilitySymbol
   history: VixHistory | null
   locale: Locale
 }) {
   const { t } = useTranslation()
   const colors = useChartColors()
+  const name = t(volatilityNameKeys[symbol])
 
   if (history === null) {
-    return <VixState message={t("vixChartUnavailable")} />
+    return (
+      <VixState symbol={symbol} message={t("vixChartUnavailable", { name })} />
+    )
   }
   if (history.bars.length === 0) {
-    return <VixState message={t("vixChartEmpty")} />
+    return <VixState symbol={symbol} message={t("vixChartEmpty", { name })} />
   }
 
   const latest = history.bars.at(-1)!
@@ -107,7 +125,7 @@ export function VixHistoryChart({
       <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 id="vix-history-title" className="m-0 text-base font-extrabold">
-            {t("vixChartTitle")}
+            {t("vixChartTitle", { name })}
           </h2>
           <p className="mt-1 mb-0 text-xs text-sea-ink-soft">
             {t("vixChartRange", {
@@ -126,7 +144,7 @@ export function VixHistoryChart({
             <div
               className="h-full w-full animate-pulse rounded-lg bg-link-hover"
               role="status"
-              aria-label={t("vixChartLoading")}
+              aria-label={t("vixChartLoading", { name })}
             />
           }
         >
@@ -136,7 +154,7 @@ export function VixHistoryChart({
               animation: false,
               aria: {
                 enabled: true,
-                description: t("vixChartAccessibleSummary"),
+                description: t("vixChartAccessibleSummary", { name }),
               },
               title: [
                 {
@@ -465,7 +483,7 @@ export function VixHistoryChart({
       </div>
       <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs text-sea-ink-soft">
         <div className="flex gap-1">
-          <dt>{t("vixChartLatestClose")}</dt>
+          <dt>{t("vixChartLatestClose", { name })}</dt>
           <dd className="m-0 font-mono font-semibold text-sea-ink tabular-nums">
             {formatNumber(latest.close, "index", locale)}
           </dd>
@@ -473,7 +491,7 @@ export function VixHistoryChart({
       </dl>
       <div className="sr-only">
         <table>
-          <caption>{t("vixChartAccessibleSummary")}</caption>
+          <caption>{t("vixChartAccessibleSummary", { name })}</caption>
           <thead>
             <tr>
               <th>{t("vixChartDate")}</th>

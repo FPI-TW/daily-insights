@@ -62,7 +62,9 @@ vi.mock("#/components/TaiwanIndexHistoryChart", () => ({
   TaiwanIndexHistoryLoading: () => null,
 }))
 vi.mock("#/components/VixHistoryChart", () => ({
-  VixHistoryChart: () => null,
+  VixHistoryChart: ({ symbol }: { symbol: string }) => (
+    <section>Volatility {symbol}</section>
+  ),
   VixHistoryLoading: () => null,
 }))
 vi.mock("#/components/TaiwanInstitutionalFlows", () => ({
@@ -207,10 +209,15 @@ describe("market desktop grid cells", () => {
     expect(within(reportCell).getByText("AAPL")).toBeVisible()
     expect(Array.from(grid.children)).toEqual([historyCell, reportCell])
   })
-  it("shows HK index cards without a not-launched notice", () => {
+  it("shows HK index cards, index and volatility charts without a not-launched notice", () => {
     state.marketCode = "hk_equity"
     query("markets").data = [{ code: "us_equity" }, { code: "hk_equity" }]
     query("report").data = { kind: "not-launched", marketCode: "hk_equity" }
+    query("history").data = {
+      ...query("history").data!,
+      marketCode: "hk_equity",
+    }
+    query("vix").data = { symbol: "^HSIL", bars: [] }
     query("latestIndices").data = [
       {
         symbol: "^HSI",
@@ -254,7 +261,8 @@ describe("market desktop grid cells", () => {
     ).toHaveAttribute("src", "https://signed.test/overview.png")
     expect(screen.getAllByRole("region")).toHaveLength(4)
     expect(screen.queryByText("Report not launched yet")).toBeNull()
-    expect(screen.queryByText("Index history")).toBeNull()
+    expect(screen.getByText("Index history")).toBeVisible()
+    expect(screen.getByText("Volatility ^HSIL")).toBeVisible()
   })
   it("keeps TW stocks beside retained flows while either column refreshes or fails", () => {
     state.marketCode = "tw_equity"

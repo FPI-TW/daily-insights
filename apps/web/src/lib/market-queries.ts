@@ -22,7 +22,7 @@ import {
   indexChartSymbolsForMarket,
   indexHistoryOutcomes,
   indexMovingAverageOutcomes,
-  VIX_SYMBOL,
+  type VolatilitySymbol,
 } from "./indices"
 import { macroDashboardSchema } from "./macro-dashboard"
 import { isNewsMarketCode } from "./provisional-reports"
@@ -259,27 +259,30 @@ export function marketQueries(scope: MarketScope, locale: Locale) {
         state: { data?: Parameters<typeof heatmapRefetchInterval>[0] }
       }) => heatmapRefetchInterval(query.state.data),
     }),
-    vix: (range: { start: string; end: string }) =>
+    vix: (symbol: VolatilitySymbol, range: { start: string; end: string }) =>
       query(
         "vix",
-        [range],
+        [symbol, range],
         async transport => ({
-          symbol: VIX_SYMBOL,
+          symbol,
           ...range,
           bars: await createMarketClient(transport).indexDailyBars(
-            VIX_SYMBOL,
+            symbol,
             range
           ),
           indicators: null,
         }),
         10_000
       ),
-    vixAverages: (range: { start: string; end: string }) =>
+    vixAverages: (
+      symbol: VolatilitySymbol,
+      range: { start: string; end: string }
+    ) =>
       query(
         "vix-averages",
-        [range],
+        [symbol, range],
         transport =>
-          createMarketClient(transport).indexMovingAverages(VIX_SYMBOL, range),
+          createMarketClient(transport).indexMovingAverages(symbol, range),
         10_000
       ),
     flows: (range: { start: string; end: string }) =>

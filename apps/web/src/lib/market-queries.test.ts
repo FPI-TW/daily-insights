@@ -77,7 +77,9 @@ describe("market browser queries", () => {
     )
     vi.stubGlobal("fetch", fetch)
     const signal = new AbortController().signal
-    const chart = marketQueries(scope, "en").vix(range).queryFn({ signal })
+    const chart = marketQueries(scope, "en")
+      .vix("^VIX", range)
+      .queryFn({ signal })
     const macro = marketQueries(scope, "en").macro().queryFn({ signal })
     const chartRejected = expect(chart).rejects.toHaveProperty(
       "name",
@@ -160,6 +162,9 @@ describe("market browser queries", () => {
     )
     expect(en.history("tw_equity", range).queryKey).not.toEqual(
       en.history("tw_equity", { ...range, end: "2026-10-04" }).queryKey
+    )
+    expect(en.vix("^VIX", range).queryKey).not.toEqual(
+      en.vix("^HSIL", range).queryKey
     )
     expect(marketQueryKey(scope, "reports")).not.toEqual(
       marketQueryKey({ ...scope, id: "user-b" }, "reports")
