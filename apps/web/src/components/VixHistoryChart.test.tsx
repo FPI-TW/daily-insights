@@ -208,7 +208,7 @@ describe("VixHistoryChart", () => {
       "zh-hant"
     )
     expect(screen.getByRole("status")).toHaveTextContent(
-      "目前無法載入 港股 VIX 資料"
+      "目前無法載入港股 VIX資料"
     )
 
     cleanup()
@@ -219,8 +219,8 @@ describe("VixHistoryChart", () => {
   })
 
   it.each([
-    ["zh-hant", "VIX 走勢", "非官方分級"],
-    ["zh-hans", "VIX 走势", "并非官方分级"],
+    ["zh-hant", "VIX走勢", "非官方分級"],
+    ["zh-hans", "VIX走势", "并非官方分级"],
     ["en", "VIX trend", "not official classifications"],
   ] as const)("renders %s copy", async (locale, title, reference) => {
     await renderLocalized(
