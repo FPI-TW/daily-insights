@@ -347,3 +347,12 @@ ECharts 6 的矩陣會將 1px 邊框對齊至正向半像素；右側貼齊 canv
 卡片與產業熱力圖之間顯示同一張表，列為 `indexChartSymbolsForMarket("hk_equity")`
 （恆生指數、國企指數），波動率指數 `^HSIL` 既不列出也不算缺漏。標題鍵為
 `indexTableTitle_<marketCode>`，載入／不可用／無資料文案以 `{{title}}` 插值。
+
+## 港股乖離率（2026-10-14）
+
+台股頁的 20／60／120MA 乖離率面板抽成 `IndexBiasPanel`，台股圖與跨市場的
+`IndexHistoryChart` 共用：乖離率仍以 `biasSeries` 用 API 的 sma-close-v1 均線計算，
+窗長（近一年／近 1.5 年）與刻度化（窗內位置 0–100）邏輯不變。`IndexHistoryChart`
+以 `bias` prop 決定是否在走勢圖下方顯示該面板，面板跟隨下拉選到的指數並以
+`biasTitleIndex` 命名（例如「恆生指數乖離率」）；`PAGE_BLOCKS` 以 `bias: true`
+宣告，目前只有港股頁開啟，美股頁不變。

@@ -61,7 +61,9 @@ vi.mock("#/lib/market-queries", () => ({
 }))
 vi.mock("#/components/PageContextChat", () => ({ useChatPageContext: vi.fn() }))
 vi.mock("#/components/IndexHistoryChart", () => ({
-  IndexHistoryChart: () => <section>Index history</section>,
+  IndexHistoryChart: ({ bias }: { bias?: boolean }) => (
+    <section>Index history{bias ? " with bias" : ""}</section>
+  ),
   IndexHistoryLoading: () => null,
 }))
 vi.mock("#/components/TaiwanIndexHistoryChart", () => ({
@@ -190,6 +192,7 @@ describe("market desktop grid cells", () => {
     expect(performance).toHaveClass("flex-1")
     expect(performance).not.toHaveClass("h-full")
     expect(within(performance).getByText("6,000.00")).toBeVisible()
+    expect(screen.getByText("Index history")).toBeVisible()
     expect(reportCell).toHaveClass("min-w-0")
     expect(within(reportCell).getByText("Source caveat")).toBeVisible()
     expect(within(reportCell).getByText("Some sections missing")).toBeVisible()
@@ -305,7 +308,7 @@ describe("market desktop grid cells", () => {
     ).toBeTruthy()
     expect(screen.getAllByRole("region")).toHaveLength(5)
     expect(screen.queryByText("Report not launched yet")).toBeNull()
-    expect(screen.getByText("Index history")).toBeVisible()
+    expect(screen.getByText("Index history with bias")).toBeVisible()
     expect(screen.getByText("Volatility ^HSIL")).toBeVisible()
     expect(
       state.requested

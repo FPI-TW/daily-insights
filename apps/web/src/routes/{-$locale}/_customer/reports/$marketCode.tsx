@@ -62,6 +62,7 @@ import {
 type PageBlocks = {
   macro?: true
   chart?: "index" | "taiwan"
+  bias?: true
   performance?: readonly string[]
   volatility?: VolatilitySymbol
   hkEquity?: true
@@ -76,7 +77,12 @@ const PAGE_BLOCKS = {
     performance: ["^GSPC", "^NDX", "^DJI", "^SOX", "^RUT"],
     volatility: "^VIX",
   },
-  hk_equity: { hkEquity: true, chart: "index", volatility: "^HSIL" },
+  hk_equity: {
+    hkEquity: true,
+    chart: "index",
+    bias: true,
+    volatility: "^HSIL",
+  },
   cn_equity: {},
   tw_equity: { chart: "taiwan", institutional: true },
   tw_index_derivatives: {},
@@ -314,6 +320,7 @@ function ReportPage() {
                   locale={locale}
                   movingAverages={averages.data ?? null}
                   movingAveragesPending={averages.isPending}
+                  bias={blocks.bias === true}
                 />
               )
             }
