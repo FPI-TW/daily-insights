@@ -89,8 +89,14 @@ export function formatChange(
   }
 }
 
+/** True when `value` prints as zero at `digits` decimals, so callers can
+ * drop the sign and the up/down colour together. */
+export function roundsToZero(value: number, digits = 2) {
+  return Math.abs(value) < 0.5 * 10 ** -digits
+}
+
 /** Signed percentage with a fixed number of decimals; null is an em dash and
- * values that would round to zero drop their sign. */
+ * values that round to zero drop their sign. */
 export function signedPercent(
   value: number | null,
   locale: Locale,
@@ -101,7 +107,7 @@ export function signedPercent(
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
     signDisplay: "exceptZero",
-  }).format(Math.abs(value) < 0.005 ? 0 : value)
+  }).format(roundsToZero(value, digits) ? 0 : value)
   return `${text}%`
 }
 

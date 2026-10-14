@@ -1,10 +1,10 @@
 import { ClientOnly } from "@tanstack/react-router"
 import ReactECharts from "echarts-for-react"
-import { useMemo, useState } from "react"
+import { memo, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { IndexMovingAverages, Locale } from "@daily-insights/api-client"
 import { useChartColors, zoomEventSchema } from "#/lib/chart"
-import { signedPercent } from "#/lib/format"
+import { roundsToZero, signedPercent } from "#/lib/format"
 import {
   biasSeries,
   indexWindowStart,
@@ -13,10 +13,10 @@ import {
   type IndexHistorySeries,
 } from "#/lib/indices"
 import {
-  ChartSkeleton,
   DashboardChoices,
   DashboardPanel,
-  Unavailable,
+  IndexChartSkeleton,
+  IndexChartUnavailable,
 } from "./DashboardPrimitives"
 
 function BiasValue({
@@ -28,14 +28,15 @@ function BiasValue({
 }) {
   return (
     <span
-      className={`font-mono text-xs font-bold tabular-nums ${value === null || Math.abs(value) < 0.005 ? "text-sea-ink-soft" : value > 0 ? "text-market-up" : "text-market-down"}`}
+      className={`font-mono text-xs font-bold tabular-nums ${value === null || roundsToZero(value) ? "text-sea-ink-soft" : value > 0 ? "text-market-up" : "text-market-down"}`}
     >
       {signedPercent(value, locale)}
     </span>
   )
 }
-/** 20/60/120MA bias for one index; shared by the Taiwan and index charts. */
-export function IndexBiasPanel({
+/** 20/60/120MA bias for one index; shared by the Taiwan and index charts.
+ * Memoised so the parent chart's zoom state does not rebuild this chart. */
+export const IndexBiasPanel = memo(function IndexBiasPanel({
   title,
   selected,
   averages,
@@ -98,9 +99,9 @@ export function IndexBiasPanel({
         {t("biasSub", { window: t(`window_${months}`) })}
       </p>
       {pending ? (
-        <ChartSkeleton />
+        <IndexChartSkeleton />
       ) : !ready ? (
-        <Unavailable />
+        <IndexChartUnavailable />
       ) : (
         <>
           <div className="mt-3.5 flex flex-wrap items-baseline justify-between gap-2">
@@ -172,7 +173,7 @@ export function IndexBiasPanel({
             })}
           </div>
           <div className="mt-4.5" role="img" aria-label={title}>
-            <ClientOnly fallback={<ChartSkeleton />}>
+            <ClientOnly fallback={<IndexChartSkeleton />}>
               <ReactECharts
                 notMerge
                 style={{ height: 330 }}
@@ -282,4 +283,4 @@ export function IndexBiasPanel({
       )}
     </DashboardPanel>
   )
-}
+})

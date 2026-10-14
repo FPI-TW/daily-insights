@@ -342,11 +342,13 @@ ECharts 6 的矩陣會將 1px 邊框對齊至正向半像素；右側貼齊 canv
 ## 港股指數表現表格（2026-10-14）
 
 美股的「五大指數表現」表格改為跨市場的 `IndexPerformanceTable`：收盤價與日／月／年
-漲跌的計算不變，列的順序與標題由呼叫端決定。美股頁以 `PAGE_BLOCKS.performance`
-宣告五檔的固定順序（非 catalog 的字母序），仍放在與晨報並排的左欄；港股頁同樣以
-`performance` 宣告，但表格改在指數卡片下方，列為 `indexChartSymbolsForMarket("hk_equity")`
+漲跌的計算不變，列的順序、標題與位置由 `PAGE_BLOCKS.performance` 宣告
+（`titleKey`、`symbols`、`placement`）。美股頁宣告五檔的固定順序（非 catalog 的字母序），
+`placement: "beside"` 放在與晨報並排的左欄；港股頁 `placement: "stacked"`，表格在指數
+卡片下方，列為 `indexChartSymbolsForMarket("hk_equity")`
 （恆生指數、國企指數），波動率指數 `^HSIL` 既不列出也不算缺漏。標題鍵為
-`indexTableTitle_<marketCode>`，載入／不可用／無資料文案以 `{{title}}` 插值。
+`indexTableTitle_<marketCode>`，由 `titleKey` 明確傳入，載入／不可用／無資料文案以
+`{{title}}` 插值。宣告 `performance` 的頁面即使沒有 `chart` 也會啟用 `history` query。
 
 ## 港股產業熱力圖位置（2026-10-14）
 

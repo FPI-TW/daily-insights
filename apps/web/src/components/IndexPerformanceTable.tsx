@@ -1,5 +1,5 @@
 import { ResponsiveTable } from "./ResponsiveTable"
-import type { Locale, MarketCode } from "@daily-insights/api-client"
+import type { Locale } from "@daily-insights/api-client"
 import { useTranslation } from "react-i18next"
 import { directionClass, formatChange, formatNumber } from "#/lib/format"
 import {
@@ -48,12 +48,12 @@ export function indexPerformanceRows(
 }
 
 export function IndexPerformanceTableLoading({
-  marketCode,
+  titleKey,
 }: {
-  marketCode: MarketCode
+  titleKey: string
 }) {
   const { t } = useTranslation()
-  const title = t(`indexTableTitle_${marketCode}`)
+  const title = t(titleKey)
   return (
     <section
       className="surface-panel animate-pulse p-5"
@@ -68,20 +68,21 @@ export function IndexPerformanceTableLoading({
 }
 
 /** `symbols` is the row order; a tracked symbol left out (such as a
- * volatility index) is neither listed nor counted as missing. */
+ * volatility index) is neither listed nor counted as missing. `titleKey`
+ * names the translated heading. */
 export function IndexPerformanceTable({
   history,
   locale,
-  marketCode,
+  titleKey,
   symbols,
 }: {
   history: MarketIndexHistory | null
   locale: Locale
-  marketCode: MarketCode
+  titleKey: string
   symbols: readonly string[]
 }) {
   const { t } = useTranslation()
-  const title = t(`indexTableTitle_${marketCode}`)
+  const title = t(titleKey)
   if (history === null) {
     return (
       <section className="surface-panel p-5" role="status" aria-live="polite">

@@ -13,10 +13,10 @@ import {
   type MarketIndexHistory,
 } from "#/lib/indices"
 import {
-  ChartSkeleton,
   DashboardPanel,
   DashboardSection,
-  Unavailable,
+  IndexChartSkeleton,
+  IndexChartUnavailable,
 } from "./DashboardPrimitives"
 import { IndexBiasPanel } from "./IndexBiasPanel"
 
@@ -195,10 +195,10 @@ function CandlesPanel({
         </p>
       ) : null}
       {missing === bars.length ? (
-        <Unavailable />
+        <IndexChartUnavailable />
       ) : (
         <div className="mt-3" role="img" aria-label={title}>
-          <ClientOnly fallback={<ChartSkeleton candles />}>
+          <ClientOnly fallback={<IndexChartSkeleton candles />}>
             <ReactECharts
               notMerge
               style={{ height: 700 }}

@@ -63,7 +63,13 @@ type PageBlocks = {
   macro?: true
   chart?: "index" | "taiwan"
   bias?: true
-  performance?: readonly string[]
+  // "beside": its own column next to the morning report; "stacked": under
+  // the market's own cards in the single column.
+  performance?: {
+    titleKey: string
+    symbols: readonly string[]
+    placement: "beside" | "stacked"
+  }
   volatility?: VolatilitySymbol
   hkEquity?: true
   institutional?: true
@@ -74,13 +80,21 @@ const PAGE_BLOCKS = {
   crypto: {},
   us_equity: {
     chart: "index",
-    performance: ["^GSPC", "^NDX", "^DJI", "^SOX", "^RUT"],
+    performance: {
+      titleKey: "indexTableTitle_us_equity",
+      symbols: ["^GSPC", "^NDX", "^DJI", "^SOX", "^RUT"],
+      placement: "beside",
+    },
     volatility: "^VIX",
   },
   hk_equity: {
     hkEquity: true,
     chart: "index",
-    performance: indexChartSymbolsForMarket("hk_equity"),
+    performance: {
+      titleKey: "indexTableTitle_hk_equity",
+      symbols: indexChartSymbolsForMarket("hk_equity"),
+      placement: "stacked",
+    },
     bias: true,
     volatility: "^HSIL",
   },
@@ -129,7 +143,7 @@ function ReportPage() {
   const [range] = useState(() => twoYearTaipeiRange())
   const blocks: PageBlocks = PAGE_BLOCKS[marketCode]
   const isChart = blocks.chart !== undefined
-  const performanceSymbols = blocks.performance
+  const performance = blocks.performance
   const hasOwnContent = Object.keys(blocks).length > 0
   const report = useMarketQuery(queries.report(marketCode), locale, reportReady)
   const news = useMarketQuery(
@@ -146,7 +160,7 @@ function ReportPage() {
   const history = useMarketQuery(
     queries.history(marketCode, range),
     locale,
-    ready && isChart
+    ready && (isChart || performance !== undefined)
   )
   const averages = useMarketQuery(
     queries.averages(marketCode, range),
@@ -191,24 +205,22 @@ function ReportPage() {
   const viewpoint = viewpoints.data?.find(
     item => item.market_code === marketCode
   )
-  const performanceTable = performanceSymbols ? (
+  const performanceTable = performance ? (
     <MarketQuerySection
       query={history}
-      loading={<IndexPerformanceTableLoading marketCode={marketCode} />}
+      loading={<IndexPerformanceTableLoading titleKey={performance.titleKey} />}
     >
       {data => (
         <IndexPerformanceTable
           history={data ?? null}
           locale={locale}
-          marketCode={marketCode}
-          symbols={performanceSymbols}
+          titleKey={performance.titleKey}
+          symbols={performance.symbols}
         />
       )}
     </MarketQuerySection>
   ) : null
-  // The US table takes its own column beside the morning report; the Hong
-  // Kong table stacks under the index cards instead.
-  const sideBySide = performanceTable !== null && !blocks.hkEquity
+  const sideBySide = performance?.placement === "beside"
   return (
     <>
       {isNewsMarketCode(marketCode) ? (
@@ -251,7 +263,7 @@ function ReportPage() {
                 {data => <HkIndexCards bars={data ?? null} locale={locale} />}
               </MarketQuerySection>
             ) : null}
-            {blocks.hkEquity ? (
+            {performance?.placement === "stacked" ? (
               <div className="mt-4 min-w-0">{performanceTable}</div>
             ) : null}
             <MarketQuerySection

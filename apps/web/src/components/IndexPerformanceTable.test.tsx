@@ -134,7 +134,7 @@ describe("IndexPerformanceTable", () => {
     await renderLocalized(
       <IndexPerformanceTable
         locale="en"
-        marketCode="us_equity"
+        titleKey="indexTableTitle_us_equity"
         symbols={usSymbols}
         history={{
           ...history,
@@ -165,7 +165,7 @@ describe("IndexPerformanceTable", () => {
       await renderLocalized(
         <IndexPerformanceTable
           locale={locale}
-          marketCode="us_equity"
+          titleKey="indexTableTitle_us_equity"
           symbols={usSymbols}
           history={history}
         />,
@@ -179,7 +179,7 @@ describe("IndexPerformanceTable", () => {
     await renderLocalized(
       <IndexPerformanceTable
         locale="zh-hant"
-        marketCode="us_equity"
+        titleKey="indexTableTitle_us_equity"
         symbols={usSymbols}
         history={history}
       />,
@@ -191,7 +191,7 @@ describe("IndexPerformanceTable", () => {
     await renderLocalized(
       <IndexPerformanceTable
         locale="en"
-        marketCode="us_equity"
+        titleKey="indexTableTitle_us_equity"
         symbols={usSymbols}
         history={history}
       />,
@@ -204,7 +204,7 @@ describe("IndexPerformanceTable", () => {
 
   it("renders loading and unavailable states without failing the report", async () => {
     await renderLocalized(
-      <IndexPerformanceTableLoading marketCode="us_equity" />
+      <IndexPerformanceTableLoading titleKey="indexTableTitle_us_equity" />
     )
     expect(screen.getByRole("status")).toHaveAccessibleName(
       "Loading US five-index performance."
@@ -213,7 +213,7 @@ describe("IndexPerformanceTable", () => {
     await renderLocalized(
       <IndexPerformanceTable
         locale="en"
-        marketCode="us_equity"
+        titleKey="indexTableTitle_us_equity"
         symbols={usSymbols}
         history={null}
       />
@@ -238,7 +238,7 @@ describe("IndexPerformanceTable", () => {
     await renderLocalized(
       <IndexPerformanceTable
         locale="en"
-        marketCode="hk_equity"
+        titleKey="indexTableTitle_hk_equity"
         symbols={["^HSI", "^HSCE"]}
         history={{
           marketCode: "hk_equity",

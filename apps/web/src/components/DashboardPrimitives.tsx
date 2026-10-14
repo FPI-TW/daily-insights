@@ -70,7 +70,8 @@ export function DashboardChoices<T extends string | number>({
   )
 }
 
-export function ChartSkeleton({ candles = false }: { candles?: boolean }) {
+/** Loading placeholder for the index charts (candles or stats + line). */
+export function IndexChartSkeleton({ candles = false }: { candles?: boolean }) {
   const { t } = useTranslation()
   return (
     <div
@@ -99,7 +100,7 @@ export function ChartSkeleton({ candles = false }: { candles?: boolean }) {
     </div>
   )
 }
-export function Unavailable() {
+export function IndexChartUnavailable() {
   const { t } = useTranslation()
   return (
     <p
