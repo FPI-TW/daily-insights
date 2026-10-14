@@ -158,7 +158,7 @@ describe("VixHistoryChart", () => {
     ).toHaveTextContent("32.70")
     expect(
       screen.getByRole("caption", {
-        name: "VIX daily closing values, MACD, KD, and reference risk bands",
+        name: "VIX daily closing values, MACD and KD",
       })
     ).toBeInTheDocument()
   })
@@ -193,6 +193,13 @@ describe("VixHistoryChart", () => {
       screen.getByRole("heading", { name: "HSI VIX volatility trend" })
     ).toBeVisible()
     expect(screen.getByText("Latest HSI VIX:")).toBeVisible()
+    // No published bands for HSI VIX: no thresholds, zones or disclaimer.
+    const chart = screen.getByTestId("vix-chart")
+    expect(chart).not.toHaveTextContent('"yAxis":30')
+    expect(chart).not.toHaveTextContent("markArea")
+    expect(chart).toHaveTextContent('"min":16,"max":35')
+    expect(chart).not.toHaveTextContent("Calm")
+    expect(screen.queryByText(/not official classifications/)).toBeNull()
 
     cleanup()
     await renderLocalized(

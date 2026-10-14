@@ -6,9 +6,16 @@ import { useChartColors } from "#/lib/chart"
 import { formatIsoDate, formatNumber, numberLocales } from "#/lib/format"
 import type { VixHistory, VolatilitySymbol } from "#/lib/indices"
 
-const volatilityNameKeys: Record<VolatilitySymbol, string> = {
-  "^VIX": "volatilityNameVix",
-  "^HSIL": "volatilityNameHsil",
+type VolatilityBands = { elevated: number; high: number }
+const volatilityProfiles: Record<
+  VolatilitySymbol,
+  { nameKey: string; bands: VolatilityBands | null }
+> = {
+  "^VIX": { nameKey: "volatilityNameVix", bands: { elevated: 20, high: 30 } },
+  // ponytail: HSI VIX has no published reference bands and its two-year
+  // median already sits above VIX's elevated line, so draw none rather than
+  // borrow VIX's calibration.
+  "^HSIL": { nameKey: "volatilityNameHsil", bands: null },
 }
 
 export function VixHistoryLoading({ symbol }: { symbol: VolatilitySymbol }) {
@@ -18,7 +25,9 @@ export function VixHistoryLoading({ symbol }: { symbol: VolatilitySymbol }) {
       className="surface-panel mt-6 animate-pulse p-5"
       role="status"
       aria-live="polite"
-      aria-label={t("vixChartLoading", { name: t(volatilityNameKeys[symbol]) })}
+      aria-label={t("vixChartLoading", {
+        name: t(volatilityProfiles[symbol].nameKey),
+      })}
     >
       <div className="h-5 w-52 rounded bg-line" />
       <div className="mt-5 h-84 rounded-lg bg-line sm:h-96" />
@@ -41,7 +50,7 @@ function VixState({
       aria-live="polite"
     >
       <h2 className="m-0 text-base font-extrabold">
-        {t("vixChartTitle", { name: t(volatilityNameKeys[symbol]) })}
+        {t("vixChartTitle", { name: t(volatilityProfiles[symbol].nameKey) })}
       </h2>
       <p className="mt-3 mb-0 text-sm text-sea-ink-soft">{message}</p>
     </section>
@@ -59,7 +68,7 @@ export function VixHistoryChart({
 }) {
   const { t } = useTranslation()
   const colors = useChartColors()
-  const name = t(volatilityNameKeys[symbol])
+  const name = t(volatilityProfiles[symbol].nameKey)
 
   if (history === null) {
     return (
@@ -75,8 +84,18 @@ export function VixHistoryChart({
   const values = history.bars.map(bar => Number(bar.close))
   const minimum = Math.min(...values)
   const maximum = Math.max(...values)
-  const chartMinimum = Math.max(0, Math.min(15, Math.floor(minimum - 2)))
-  const chartMaximum = Math.max(35, Math.ceil(maximum + 2))
+  const bands = volatilityProfiles[symbol].bands
+  // With bands, keep the calm zone below `elevated` and the high zone above
+  // `high` on screen even in quiet years; without them, follow the data.
+  const chartMinimum = Math.max(
+    0,
+    bands
+      ? Math.min(bands.elevated - 5, Math.floor(minimum - 2))
+      : Math.floor(minimum - 2)
+  )
+  const chartMaximum = bands
+    ? Math.max(bands.high + 5, Math.ceil(maximum + 2))
+    : Math.ceil(maximum + 2)
   const closeLabel = t("vixChartClose")
   const macdLabel = t("indexChartMacd")
   const signalLabel = t("indexChartMacdSignal")
@@ -134,9 +153,11 @@ export function VixHistoryChart({
             })}
           </p>
         </div>
-        <p className="m-0 text-xs font-semibold text-sea-ink-soft">
-          {t("vixChartBandsAreReference")}
-        </p>
+        {bands ? (
+          <p className="m-0 text-xs font-semibold text-sea-ink-soft">
+            {t("vixChartBandsAreReference", bands)}
+          </p>
+        ) : null}
       </div>
       <div className="h-144 min-w-0 w-full overflow-hidden border-y border-line py-2 sm:h-160">
         <ClientOnly
@@ -365,55 +386,65 @@ export function VixHistoryChart({
                   showSymbol: false,
                   lineStyle: { width: 3 },
                   areaStyle: { color: "transparent" },
-                  markLine: {
-                    silent: true,
-                    symbol: "none",
-                    label: { color: colors.text },
-                    lineStyle: { color: colors.text, type: "dashed" },
-                    data: [
-                      { name: t("vixChartThresholdElevated"), yAxis: 20 },
-                      { name: t("vixChartThresholdHigh"), yAxis: 30 },
-                    ],
-                  },
-                  markArea: {
-                    silent: true,
-                    label: { color: colors.text, fontSize: 11 },
-                    data: [
-                      [
-                        {
-                          name: t("vixChartBandCalm"),
-                          yAxis: chartMinimum,
-                          itemStyle: {
-                            color: colors.vixRisk.calm,
-                            opacity: 0.08,
-                          },
+                  ...(bands
+                    ? {
+                        markLine: {
+                          silent: true,
+                          symbol: "none",
+                          label: { color: colors.text },
+                          lineStyle: { color: colors.text, type: "dashed" },
+                          data: [
+                            {
+                              name: t("vixChartThresholdElevated", bands),
+                              yAxis: bands.elevated,
+                            },
+                            {
+                              name: t("vixChartThresholdHigh", bands),
+                              yAxis: bands.high,
+                            },
+                          ],
                         },
-                        { yAxis: 20 },
-                      ],
-                      [
-                        {
-                          name: t("vixChartBandElevated"),
-                          yAxis: 20,
-                          itemStyle: {
-                            color: colors.vixRisk.elevated,
-                            opacity: 0.1,
-                          },
+                        markArea: {
+                          silent: true,
+                          label: { color: colors.text, fontSize: 11 },
+                          data: [
+                            [
+                              {
+                                name: t("vixChartBandCalm", bands),
+                                yAxis: chartMinimum,
+                                itemStyle: {
+                                  color: colors.vixRisk.calm,
+                                  opacity: 0.08,
+                                },
+                              },
+                              { yAxis: bands.elevated },
+                            ],
+                            [
+                              {
+                                name: t("vixChartBandElevated", bands),
+                                yAxis: bands.elevated,
+                                itemStyle: {
+                                  color: colors.vixRisk.elevated,
+                                  opacity: 0.1,
+                                },
+                              },
+                              { yAxis: bands.high },
+                            ],
+                            [
+                              {
+                                name: t("vixChartBandHigh", bands),
+                                yAxis: bands.high,
+                                itemStyle: {
+                                  color: colors.vixRisk.high,
+                                  opacity: 0.08,
+                                },
+                              },
+                              { yAxis: chartMaximum },
+                            ],
+                          ],
                         },
-                        { yAxis: 30 },
-                      ],
-                      [
-                        {
-                          name: t("vixChartBandHigh"),
-                          yAxis: 30,
-                          itemStyle: {
-                            color: colors.vixRisk.high,
-                            opacity: 0.08,
-                          },
-                        },
-                        { yAxis: chartMaximum },
-                      ],
-                    ],
-                  },
+                      }
+                    : {}),
                 },
                 {
                   name: histogramLabel,
