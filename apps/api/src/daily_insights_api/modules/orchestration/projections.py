@@ -360,11 +360,7 @@ async def freeze_projection_inputs(
             job.edition_date,
             cutoff,
             datasets=_projection_datasets(job),
-            preserved_datasets=frozenset(
-                str(outcome["function_key"])
-                for outcome in function_outcomes
-                if outcome["status"] in {"partial", "unavailable", "failed", "cancelled"}
-            ),
+            preserved_datasets=_preserved_datasets(job, function_outcomes),
         )
         payload = [
             {
@@ -554,6 +550,19 @@ async def _latest_eligible_observations(
                 )
             )
     return tuple(result)
+
+
+def _preserved_datasets(job: JobRun, function_outcomes: list[dict[str, Any]]) -> frozenset[str]:
+    # The dashboard charts stored history, so a source that has published nothing
+    # new (weekends, US holidays) keeps showing its latest value instead of
+    # dropping the whole series once it ages past the freshness window.
+    if job.job_key == "macro_dashboard_publish":
+        return MACRO_DATASETS
+    return frozenset(
+        str(outcome["function_key"])
+        for outcome in function_outcomes
+        if outcome["status"] in {"partial", "unavailable", "failed", "cancelled"}
+    )
 
 
 def _projection_datasets(job: JobRun) -> frozenset[str]:
