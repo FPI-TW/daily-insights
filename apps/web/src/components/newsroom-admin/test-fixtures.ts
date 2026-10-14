@@ -149,6 +149,7 @@ export function source(
     url: "https://reuters.example/feed",
     hostname: "reuters.example",
     link_pattern: null,
+    title_exclude_pattern: null,
     markets: ["global", "us_equity"],
     language_filter: ["en"],
     full_text_in_feed: false,

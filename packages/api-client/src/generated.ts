@@ -2920,6 +2920,8 @@ export interface components {
       next_poll_at: string | null
       /** Poll Interval Minutes */
       poll_interval_minutes: number
+      /** Title Exclude Pattern */
+      title_exclude_pattern: string | null
       /** Trust Tier */
       trust_tier: number
       /** Url */
@@ -2968,6 +2970,8 @@ export interface components {
        * @default 30
        */
       poll_interval_minutes: number
+      /** Title Exclude Pattern */
+      title_exclude_pattern?: string | null
       /**
        * Trust Tier
        * @default 2
@@ -3021,6 +3025,8 @@ export interface components {
       name?: string | null
       /** Poll Interval Minutes */
       poll_interval_minutes?: number | null
+      /** Title Exclude Pattern */
+      title_exclude_pattern?: string | null
       /** Trust Tier */
       trust_tier?: number | null
       /** Url */

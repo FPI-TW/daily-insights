@@ -945,6 +945,7 @@ const resources: Resource = {
       newsroomAdminSourceInterval: "輪詢間隔（分鐘）",
       newsroomAdminSourceLanguages: "語言篩選（逗號分隔）",
       newsroomAdminSourcePattern: "連結規則（正規表示式）",
+      newsroomAdminSourceTitleExclude: "排除標題（正規表示式，符合者不收稿）",
       newsroomAdminSourceFullText: "Feed 內含全文",
       newsroomAdminSourceEnabled: "啟用輪詢",
       newsroomAdminSourceSettings: "信任／權重／間隔",
@@ -969,6 +970,7 @@ const resources: Resource = {
       newsroomAdminSourceErrorWeight: "權重須介於 0.5 與 2.0。",
       newsroomAdminSourceErrorInterval: "間隔須為 5 到 1440 分鐘的整數。",
       newsroomAdminSourceErrorPattern: "連結規則不是有效的正規表示式。",
+      newsroomAdminSourceErrorTitleExclude: "排除標題不是有效的正規表示式。",
       newsroomAdminSourceErrorLanguages: "語言代碼須為 2 到 10 個字元。",
       // Newsroom reader (workstream ⑤)
       newsroomEyebrow: "每日精選",
@@ -1927,6 +1929,7 @@ const resources: Resource = {
       newsroomAdminSourceInterval: "轮询间隔（分钟）",
       newsroomAdminSourceLanguages: "语言筛选（逗号分隔）",
       newsroomAdminSourcePattern: "链接规则（正则表达式）",
+      newsroomAdminSourceTitleExclude: "排除标题（正则表达式，符合者不收稿）",
       newsroomAdminSourceFullText: "Feed 内含全文",
       newsroomAdminSourceEnabled: "启用轮询",
       newsroomAdminSourceSettings: "信任／权重／间隔",
@@ -1951,6 +1954,7 @@ const resources: Resource = {
       newsroomAdminSourceErrorWeight: "权重须介于 0.5 与 2.0。",
       newsroomAdminSourceErrorInterval: "间隔须为 5 到 1440 分钟的整数。",
       newsroomAdminSourceErrorPattern: "链接规则不是有效的正则表达式。",
+      newsroomAdminSourceErrorTitleExclude: "排除标题不是有效的正则表达式。",
       newsroomAdminSourceErrorLanguages: "语言代码须为 2 到 10 个字符。",
       // Newsroom reader (workstream ⑤)
       newsroomEyebrow: "每日精选",
@@ -2959,6 +2963,8 @@ const resources: Resource = {
       newsroomAdminSourceInterval: "Poll interval (minutes)",
       newsroomAdminSourceLanguages: "Language filter (comma separated)",
       newsroomAdminSourcePattern: "Link pattern (regular expression)",
+      newsroomAdminSourceTitleExclude:
+        "Excluded titles (regular expression; matches are never collected)",
       newsroomAdminSourceFullText: "Feed carries the full text",
       newsroomAdminSourceEnabled: "Polling enabled",
       newsroomAdminSourceSettings: "Trust / weight / interval",
@@ -2987,6 +2993,8 @@ const resources: Resource = {
         "Interval must be a whole number from 5 to 1440 minutes.",
       newsroomAdminSourceErrorPattern:
         "The link pattern is not a valid regular expression.",
+      newsroomAdminSourceErrorTitleExclude:
+        "The excluded-title pattern is not a valid regular expression.",
       newsroomAdminSourceErrorLanguages:
         "Language codes must be 2 to 10 characters.",
       // Newsroom reader (workstream ⑤)

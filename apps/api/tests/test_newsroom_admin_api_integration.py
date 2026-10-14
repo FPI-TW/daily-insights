@@ -410,15 +410,26 @@ async def test_update_source_passes_only_the_changed_fields(
 
     response = await client.patch(
         f"{BASE}/sources/{source.id}",
-        json={"enabled": False, "markets": ["tw_equity"], "link_pattern": None},
+        json={
+            "enabled": False,
+            "markets": ["tw_equity"],
+            "link_pattern": None,
+            "title_exclude_pattern": "^盤中速報",
+        },
     )
 
     assert response.status_code == 200, response.text
     assert response.json()["enabled"] is False
     assert response.json()["health"] == "disabled"
     assert response.json()["link_pattern"] is None
+    assert response.json()["title_exclude_pattern"] == "^盤中速報"
     [call] = calls.of("update_source")
-    assert call["changes"] == {"enabled": False, "markets": ("tw_equity",), "link_pattern": None}
+    assert call["changes"] == {
+        "enabled": False,
+        "markets": ("tw_equity",),
+        "link_pattern": None,
+        "title_exclude_pattern": "^盤中速報",
+    }
 
     cleared = await client.patch(f"{BASE}/sources/{source.id}", json={"name": None})
     assert cleared.status_code == 422

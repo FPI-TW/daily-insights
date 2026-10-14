@@ -23,6 +23,7 @@ from pydantic import (
     Field,
     StringConstraints,
     ValidationError,
+    ValidationInfo,
     field_validator,
 )
 from sqlalchemy import and_, case, distinct, func, select, update
@@ -99,6 +100,7 @@ class NewsroomAdminSource(BaseModel):
     url: str | None
     hostname: str
     link_pattern: str | None
+    title_exclude_pattern: str | None
     markets: list[MarketCode]
     language_filter: list[str] | None
     full_text_in_feed: bool
@@ -303,13 +305,13 @@ def _unique(values: Sequence[Any], name: str) -> None:
         raise ValueError(f"{name} must be unique")
 
 
-def _check_link_pattern(value: str | None) -> str | None:
+def _check_pattern(value: str | None, info: ValidationInfo) -> str | None:
     if value is None:
         return None
     try:
         re.compile(value)
     except re.error as error:
-        raise ValueError(f"link_pattern is not a valid regular expression: {error}") from None
+        raise ValueError(f"{info.field_name} is not a valid regular expression: {error}") from None
     return value
 
 
@@ -355,6 +357,7 @@ class NewsroomAdminSourceCreate(_Request):
     poll_interval_minutes: int = Field(default=30, ge=5, le=1440)
     enabled: bool = True
     link_pattern: LinkPattern | None = None
+    title_exclude_pattern: LinkPattern | None = None
     language_filter: list[LanguageCode] | None = Field(default=None, max_length=10)
     full_text_in_feed: bool = False
 
@@ -373,7 +376,7 @@ class NewsroomAdminSourceCreate(_Request):
 
     _url = field_validator("url")(_check_url)
     _hostname = field_validator("hostname")(_check_hostname)
-    _link_pattern = field_validator("link_pattern")(_check_link_pattern)
+    _patterns = field_validator("link_pattern", "title_exclude_pattern")(_check_pattern)
     _languages = field_validator("language_filter")(_check_languages)
 
 
@@ -391,6 +394,7 @@ class NewsroomAdminSourceUpdate(_Request):
     poll_interval_minutes: int | None = Field(default=None, ge=5, le=1440)
     enabled: bool | None = None
     link_pattern: LinkPattern | None = None
+    title_exclude_pattern: LinkPattern | None = None
     language_filter: list[LanguageCode] | None = Field(default=None, max_length=10)
     full_text_in_feed: bool | None = None
 
@@ -410,7 +414,7 @@ class NewsroomAdminSourceUpdate(_Request):
 
     _url = field_validator("url")(_check_url)
     _hostname = field_validator("hostname")(_check_hostname)
-    _link_pattern = field_validator("link_pattern")(_check_link_pattern)
+    _patterns = field_validator("link_pattern", "title_exclude_pattern")(_check_pattern)
     _languages = field_validator("language_filter")(_check_languages)
 
 
@@ -562,6 +566,7 @@ def _source_response(
         url=source.url,
         hostname=source.hostname,
         link_pattern=source.link_pattern,
+        title_exclude_pattern=source.title_exclude_pattern,
         markets=[market for market in source.markets if market in MARKET_CODES],
         language_filter=source.language_filter,
         full_text_in_feed=source.full_text_in_feed,
@@ -848,6 +853,7 @@ async def create_source(
         poll_interval_minutes=payload.poll_interval_minutes,
         enabled=payload.enabled,
         link_pattern=payload.link_pattern,
+        title_exclude_pattern=payload.title_exclude_pattern,
         language_filter=tuple(payload.language_filter)
         if payload.language_filter is not None
         else None,

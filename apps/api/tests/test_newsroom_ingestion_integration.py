@@ -256,6 +256,22 @@ async def test_poll_skips_known_urls_same_edition_titles_and_stale_items(
     ]
 
 
+async def test_poll_never_stores_titles_the_source_excludes(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    await add_source(newsroom_database, title_exclude_pattern=r"^\s*盤中速報|買超個股$")
+    feed = rss(
+        ("盤中速報 - 冠西電股價拉至漲停", "flash", NOW - timedelta(hours=1)),
+        ("外資近3日買超個股", "screen", NOW - timedelta(hours=1)),
+        ("鴻海 9 月營收創新高", "revenue", NOW - timedelta(hours=1)),
+    )
+
+    [outcome] = await poll(newsroom_database, serving(feed))
+
+    assert (outcome.status, outcome.inserted) == ("ok", 1)
+    assert [row.title for row in await articles(newsroom_database)] == ["鴻海 9 月營收創新高"]
+
+
 async def test_edition_window_turns_over_at_eight_taipei(
     newsroom_database: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -713,6 +729,13 @@ async def test_create_and_update_source_write_the_edit_log(
             await sources_service.update_source(
                 database, source_id, {"options": {}}, user_id=user_id
             )
+        with pytest.raises(SourceValidationError, match="title_exclude_pattern is not a valid"):
+            await sources_service.update_source(
+                database, source_id, {"title_exclude_pattern": "("}, user_id=user_id
+            )
+        await sources_service.update_source(
+            database, source_id, {"title_exclude_pattern": r"^盤中速報"}, user_id=user_id
+        )
         await database.commit()
     async with newsroom_database() as database:
         with pytest.raises(LookupError):
@@ -723,7 +746,8 @@ async def test_create_and_update_source_write_the_edit_log(
     source = await source_row(newsroom_database, source_id)
     assert (source.enabled, source.weight, source.next_poll_at) == (True, 1.5, None)
     log = await edit_log(newsroom_database)
-    assert [entry.action for entry in log] == ["create_source", "update_source", "update_source"]
+    assert source.title_exclude_pattern == r"^盤中速報"
+    assert [entry.action for entry in log] == ["create_source"] + ["update_source"] * 3
     assert all(entry.user_id == user_id and entry.entity_id == source_id for entry in log)
     assert log[1].before == {"enabled": True, "weight": 1.0}
     assert log[1].after == {"enabled": False, "weight": 1.5}

@@ -118,6 +118,7 @@ class SourceConfig:
     url: str
     hostname: str
     link_pattern: str | None = None
+    title_exclude_pattern: str | None = None
     language_filter: frozenset[str] | None = None
     full_text_in_feed: bool = False
     options: Mapping[str, Any] = field(default_factory=dict)
@@ -130,6 +131,7 @@ class SourceConfig:
             url=row.url or "",
             hostname=normalize_hostname(row.hostname),
             link_pattern=row.link_pattern,
+            title_exclude_pattern=row.title_exclude_pattern,
             language_filter=frozenset(row.language_filter) if row.language_filter else None,
             full_text_in_feed=row.full_text_in_feed,
             options=dict(row.options or {}),
@@ -465,6 +467,11 @@ def entry_language(entry: FeedEntry) -> str | None:
     elif entry.body:
         sample = f"{sample} {entry.body[:500]}"
     return detected_language(sample)
+
+
+def keeps_title(title: str, exclude_pattern: str | None) -> bool:
+    """False for a title the source's ``title_exclude_pattern`` matches anywhere."""
+    return not exclude_pattern or re.search(exclude_pattern, title) is None
 
 
 def keeps_language(language: str | None, kept: frozenset[str] | None) -> bool:

@@ -37,6 +37,7 @@ export const newsroomSourceSchema = z.object({
   url: z.string().nullable(),
   hostname: z.string(),
   link_pattern: z.string().nullable(),
+  title_exclude_pattern: z.string().nullable(),
   markets: z.array(marketSchema),
   language_filter: z.array(z.string()).nullable(),
   full_text_in_feed: z.boolean(),
@@ -624,6 +625,12 @@ export const sourceFormSchema = z.object({
     .refine(value => value === "" || isRegex(value), {
       message: "newsroomAdminSourceErrorPattern",
     }),
+  title_exclude_pattern: z
+    .string()
+    .max(500, "newsroomAdminSourceErrorTitleExclude")
+    .refine(value => value === "" || isRegex(value), {
+      message: "newsroomAdminSourceErrorTitleExclude",
+    }),
   language_filter: z
     .string()
     .refine(
@@ -653,6 +660,7 @@ export function sourceFormDefaults(
     poll_interval_minutes: source?.poll_interval_minutes ?? 30,
     enabled: source?.enabled ?? true,
     link_pattern: source?.link_pattern ?? "",
+    title_exclude_pattern: source?.title_exclude_pattern ?? "",
     language_filter: source?.language_filter?.join(", ") ?? "",
     full_text_in_feed: source?.full_text_in_feed ?? false,
   }
@@ -672,6 +680,7 @@ function sourcePayload(values: SourceFormValues) {
     poll_interval_minutes: values.poll_interval_minutes,
     enabled: values.enabled,
     link_pattern: values.link_pattern || null,
+    title_exclude_pattern: values.title_exclude_pattern || null,
     language_filter: languages.length > 0 ? languages : null,
     full_text_in_feed: values.full_text_in_feed,
   } satisfies NewsroomSourceCreate

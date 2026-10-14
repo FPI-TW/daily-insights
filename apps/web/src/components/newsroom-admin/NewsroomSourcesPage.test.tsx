@@ -197,6 +197,9 @@ describe("NewsroomSourcesPage", () => {
     fireEvent.change(within(dialog).getByLabelText(/Language filter/), {
       target: { value: "EN, ja" },
     })
+    fireEvent.change(within(dialog).getByLabelText(/Excluded titles/), {
+      target: { value: "^Market wrap" },
+    })
     fireEvent.click(within(dialog).getByRole("button", { name: "Save" }))
     await waitFor(() =>
       expect(client.createSource).toHaveBeenCalledWith(
@@ -212,6 +215,7 @@ describe("NewsroomSourcesPage", () => {
           poll_interval_minutes: 30,
           enabled: true,
           link_pattern: null,
+          title_exclude_pattern: "^Market wrap",
           language_filter: ["en", "ja"],
           full_text_in_feed: false,
         },

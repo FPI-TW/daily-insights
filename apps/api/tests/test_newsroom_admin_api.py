@@ -148,6 +148,17 @@ async def test_writes_require_a_valid_csrf_token(
                 "name": "x",
                 "kind": "rss",
                 "hostname": "a.example",
+                "title_exclude_pattern": "(",
+            },
+        ),
+        (
+            "POST",
+            "/api/admin/newsroom/sources",
+            {
+                "key": "ok",
+                "name": "x",
+                "kind": "rss",
+                "hostname": "a.example",
                 "markets": ["global", "global"],
             },
         ),

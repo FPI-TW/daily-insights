@@ -4316,6 +4316,17 @@
             "title": "Poll Interval Minutes",
             "type": "integer"
           },
+          "title_exclude_pattern": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title Exclude Pattern"
+          },
           "trust_tier": {
             "title": "Trust Tier",
             "type": "integer"
@@ -4344,6 +4355,7 @@
           "url",
           "hostname",
           "link_pattern",
+          "title_exclude_pattern",
           "markets",
           "language_filter",
           "full_text_in_feed",
@@ -4452,6 +4464,19 @@
             "minimum": 5.0,
             "title": "Poll Interval Minutes",
             "type": "integer"
+          },
+          "title_exclude_pattern": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title Exclude Pattern"
           },
           "trust_tier": {
             "default": 2,
@@ -4642,6 +4667,19 @@
               }
             ],
             "title": "Poll Interval Minutes"
+          },
+          "title_exclude_pattern": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title Exclude Pattern"
           },
           "trust_tier": {
             "anyOf": [

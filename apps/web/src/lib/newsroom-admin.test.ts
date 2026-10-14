@@ -72,9 +72,14 @@ describe("newsroom admin helpers", () => {
       sourceChanges(current, {
         ...sourceFormDefaults(current),
         link_pattern: "/markets/",
+        title_exclude_pattern: "^盤中速報",
         language_filter: "",
       })
-    ).toEqual({ link_pattern: "/markets/", language_filter: null })
+    ).toEqual({
+      link_pattern: "/markets/",
+      title_exclude_pattern: "^盤中速報",
+      language_filter: null,
+    })
     const manual = source({ kind: "manual" })
     expect(
       sourceChanges(manual, { ...sourceFormDefaults(manual), name: "Manual" })

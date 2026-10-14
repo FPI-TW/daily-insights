@@ -18,6 +18,7 @@ from daily_insights_api.modules.newsroom.ingestion.feeds import (
     build_request,
     entry_language,
     keeps_language,
+    keeps_title,
     normalize_article_url,
     normalize_manual_url,
     parse_feed,
@@ -368,6 +369,15 @@ def test_cache_buster_changes_per_request() -> None:
     urls = {build_request(listing, settings())[0] for _ in range(5)}
 
     assert len(urls) > 1 and all("&r=" in url for url in urls)
+
+
+def test_title_exclude_pattern_matches_anywhere_in_the_title() -> None:
+    pattern = r"^\s*(?:盤中速報|營收速報)|近\s*\d+\s*日[買賣]超個股"
+    assert not keeps_title("盤中速報 - 冠西電(2466)股價拉至漲停", pattern)
+    assert not keeps_title("外資近3日買超個股", pattern)
+    assert keeps_title("鴻海 9 月營收創新高", pattern)
+    assert keeps_title("盤中速報", None)
+    assert keeps_title("盤中速報", "")
 
 
 def test_language_filter_drops_only_confident_foreign_languages() -> None:

@@ -71,6 +71,7 @@ class SourceInput:
     poll_interval_minutes: int = 30
     enabled: bool = True
     link_pattern: str | None = None
+    title_exclude_pattern: str | None = None
     language_filter: tuple[str, ...] | None = None
     full_text_in_feed: bool = False
 
@@ -128,15 +129,15 @@ def _validate_field(name: str, value: Any) -> Any:
         if not isinstance(value, bool):
             raise SourceValidationError(f"{name} must be a boolean")
         return value
-    if name == "link_pattern":
+    if name in {"link_pattern", "title_exclude_pattern"}:
         if value is None or value == "":
             return None
         if not isinstance(value, str) or len(value) > 500:
-            raise SourceValidationError("link_pattern must be a regular expression")
+            raise SourceValidationError(f"{name} must be a regular expression")
         try:
             re.compile(value)
         except re.error as error:
-            raise SourceValidationError("link_pattern is not a valid regular expression") from error
+            raise SourceValidationError(f"{name} is not a valid regular expression") from error
         return value
     if name == "language_filter":
         if value is None:

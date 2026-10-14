@@ -98,6 +98,9 @@ class NewsroomSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     hostname: Mapped[str] = mapped_column(String(255), nullable=False)
     # Optional regex an article link must match to count as this publisher's story.
     link_pattern: Mapped[str | None] = mapped_column(String(500))
+    # Optional regex; a feed entry whose title matches it is never stored
+    # (machine-written price flashes and screens, for example).
+    title_exclude_pattern: Mapped[str | None] = mapped_column(String(500))
     markets: Mapped[list[str]] = mapped_column(ARRAY(String(20)), nullable=False, default=list)
     language_filter: Mapped[list[str] | None] = mapped_column(ARRAY(String(10)))
     full_text_in_feed: Mapped[bool] = mapped_column(

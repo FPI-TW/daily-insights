@@ -34,6 +34,7 @@ from daily_insights_api.modules.newsroom.ingestion.feeds import (
     build_request,
     entry_language,
     keeps_language,
+    keeps_title,
     parse_feed,
     url_hash,
 )
@@ -177,12 +178,14 @@ async def store_entries(
 
     Dedupe: ``url_hash`` is unique (``ON CONFLICT DO NOTHING``), and an entry
     whose title exactly matches an article already in the same edition window
-    is skipped. Insert-time queue state follows spec §5.1.
+    is skipped. An entry whose title matches the source's
+    ``title_exclude_pattern`` is never stored. Insert-time queue state follows
+    spec §5.1.
     """
     config = SourceConfig.from_row(source)
     by_hash: dict[str, FeedEntry] = {}
     for entry in entries:
-        if _fresh(entry, now):
+        if _fresh(entry, now) and keeps_title(entry.title, config.title_exclude_pattern):
             by_hash.setdefault(url_hash(entry.url), entry)
     if not by_hash:
         return 0

@@ -274,6 +274,19 @@ export function SourceFormDialog({
               </label>
             )}
           </form.Field>
+          <form.Field name="title_exclude_pattern">
+            {field => (
+              <label className="col-span-2 max-[42rem]:col-span-1">
+                {t("newsroomAdminSourceTitleExclude")}
+                <input
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={event => field.handleChange(event.target.value)}
+                />
+                <FieldErrors errors={field.state.meta.errors} />
+              </label>
+            )}
+          </form.Field>
           <form.Field name="full_text_in_feed">
             {field => (
               <label className="flex items-center gap-2 font-normal">
