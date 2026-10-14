@@ -112,7 +112,7 @@ class Settings(BaseSettings):
     newsroom_llm_timeout_seconds: float = Field(default=90, gt=0, le=300)
     newsroom_embedding_base_url: str = "https://api.openai.com/v1"
     newsroom_embedding_api_key: SecretStr | None = None
-    newsroom_embedding_model: str = "text-embedding-3-small"
+    newsroom_embedding_model: str = "text-embedding-3-large"
     newsroom_embedding_timeout_seconds: float = Field(default=30, gt=0, le=120)
     newsroom_slack_webhook_url: SecretStr | None = None
     newsroom_admin_base_url: str = "http://localhost:3000"

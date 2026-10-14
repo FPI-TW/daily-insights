@@ -54,6 +54,13 @@ class EventNew(_Strict):
     new: ShortText
 
 
+class EmbeddingTranslation(_Strict):
+    """A non-Chinese headline and summary in Traditional Chinese, used only for embedding."""
+
+    title: ShortText
+    summary: Annotated[str, StringConstraints(strip_whitespace=True, max_length=2_000)] = ""
+
+
 class TriageResult(_Strict):
     """Discrete judgements only; ``scoring.py`` turns them into market scores.
 

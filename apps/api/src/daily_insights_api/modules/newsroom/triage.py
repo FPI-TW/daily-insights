@@ -7,6 +7,8 @@ is serialised per window by ``clustering.lock_window``.
 """
 
 import hashlib
+import logging
+import re
 import uuid
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
@@ -20,7 +22,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.modules.newsroom import clock, clustering, queue, scoring
 from daily_insights_api.modules.newsroom.clustering import CandidateEvent
-from daily_insights_api.modules.newsroom.contracts import EventMatch, EventNew, TriageResult
+from daily_insights_api.modules.newsroom.contracts import (
+    EmbeddingTranslation,
+    EventMatch,
+    EventNew,
+    TriageResult,
+)
 from daily_insights_api.modules.newsroom.ingestion.allowlist import MANUAL_KIND
 from daily_insights_api.modules.newsroom.models import (
     NewsroomArticle,
@@ -29,8 +36,15 @@ from daily_insights_api.modules.newsroom.models import (
     NewsroomSource,
 )
 from daily_insights_api.modules.newsroom.providers import CallAudit
-from daily_insights_api.modules.newsroom.queue import Claim, RetryableStageError, StageHandler
+from daily_insights_api.modules.newsroom.queue import (
+    Claim,
+    FatalStageError,
+    RetryableStageError,
+    StageHandler,
+)
 from daily_insights_api.modules.newsroom.worker import Registration, Runtime, StageBinding
+
+logger = logging.getLogger(__name__)
 
 EMBED_INPUT_MAX_CHARS = 2_000
 SUMMARY_MAX_CHARS = 1_000
@@ -38,6 +52,12 @@ BODY_EXCERPT_CHARS = 1_500
 EMBED_CONCURRENCY = 2
 TRIAGE_CONCURRENCY = 4
 TRIAGE_PROMPT_BASE_VERSION = "triage-v2"
+EMBED_TRANSLATE_PROMPT_BASE_VERSION = "embed-translate-v1"
+# A headline with any CJK character is embedded as written; others are first
+# translated to Traditional Chinese. Comparing 2026-10-03..14 offline, English
+# reports found their Chinese event in the top 10 candidates 97% of the time this
+# way (with text-embedding-3-large) against 86% embedded in English (3-small).
+_CJK = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")
 SCHEMA_INVALID = "triage_schema_invalid"
 # Feeds that update once a day hand over yesterday's stories hours late. An
 # article published this long before its window opened may join an event of the
@@ -55,16 +75,30 @@ class TriagePrompt:
     version: str
 
 
-@cache
-def load_triage_prompt() -> TriagePrompt:
+def _versioned_prompt(name: str, base_version: str) -> TriagePrompt:
     text = (
         files("daily_insights_api.modules.newsroom")
-        .joinpath("prompts", "triage.txt")
+        .joinpath("prompts", f"{name}.txt")
         .read_text(encoding="utf-8")
         .strip()
     )
     digest = hashlib.sha256(text.encode()).hexdigest()
-    return TriagePrompt(text=text, version=f"{TRIAGE_PROMPT_BASE_VERSION}:{digest[:12]}")
+    return TriagePrompt(text=text, version=f"{base_version}:{digest[:12]}")
+
+
+@cache
+def load_triage_prompt() -> TriagePrompt:
+    return _versioned_prompt("triage", TRIAGE_PROMPT_BASE_VERSION)
+
+
+@cache
+def load_embed_translate_prompt() -> TriagePrompt:
+    return _versioned_prompt("embed_translate", EMBED_TRANSLATE_PROMPT_BASE_VERSION)
+
+
+def needs_translation(title: str) -> bool:
+    """A headline without any CJK character is translated before it is embedded."""
+    return _CJK.search(title) is None
 
 
 def _squash(text: str | None) -> str:
@@ -195,6 +229,43 @@ async def assign_event(
     return event.id
 
 
+async def translated_embedding_input(
+    runtime: Runtime,
+    database: AsyncSession,
+    *,
+    article_id: uuid.UUID,
+    title: str,
+    feed_summary: str | None,
+    last_attempt: bool,
+) -> str:
+    """The Traditional Chinese embedding input for a non-Chinese article.
+
+    A failed translation is retried with the stage; on its last attempt, or on
+    a fatal provider error, the article is embedded as written rather than never
+    reaching triage.
+    """
+    prompt = load_embed_translate_prompt()
+    try:
+        result = await runtime.llm.complete(
+            database,
+            model=runtime.settings.newsroom_translate_model,
+            system=prompt.text,
+            payload={"title": _squash(title), "summary": _squash(feed_summary)[:SUMMARY_MAX_CHARS]},
+            result_type=EmbeddingTranslation,
+            audit=CallAudit(stage="embed", subject_id=article_id, prompt_version=prompt.version),
+        )
+    except (RetryableStageError, FatalStageError) as error:
+        if isinstance(error, RetryableStageError) and not last_attempt:
+            raise
+        database.add_all(error.audit_rows)
+        logger.warning(
+            "newsroom.embed_translation_skipped",
+            extra={"article_id": str(article_id), "error_code": error.code},
+        )
+        return embedding_input(title, feed_summary)
+    return embedding_input(result.title, result.summary) or embedding_input(title, feed_summary)
+
+
 def _embed_handler(runtime: Runtime) -> StageHandler:
     async def handle(database: AsyncSession, claim_: Claim) -> dict[str, Any]:
         title, feed_summary = (
@@ -207,11 +278,21 @@ def _embed_handler(runtime: Runtime) -> StageHandler:
         text = embedding_input(title, feed_summary)
         if not text:
             return {"embed_status": "failed", "embed_error_code": "embed_input_empty"}
+        if needs_translation(title):
+            text = await translated_embedding_input(
+                runtime,
+                database,
+                article_id=claim_.row_id,
+                title=title,
+                feed_summary=feed_summary,
+                last_attempt=claim_.attempt >= queue.EMBED.max_attempts,
+            )
         vectors = await runtime.embedder.embed(
             database, [text], audit=CallAudit(stage="embed", subject_id=claim_.row_id)
         )
         return {
             "embedding": vectors[0],
+            "embedding_text": text,
             "triage_status": "pending",
             "triage_attempts": 0,
             "triage_next_attempt_at": None,

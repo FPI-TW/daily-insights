@@ -4,7 +4,7 @@ export pnpm_config_verify_deps_before_run := false
 
 .PHONY: help init dev dev-detached dev-web dev-api stop restart logs ps \
 	migrate bootstrap-admin format format-check lint type-check test test-db \
-	generate-morning-reports assemble-newsroom newsroom-quality \
+	generate-morning-reports assemble-newsroom newsroom-quality newsroom-reembed \
 	backfill-index-daily-bars \
 	check-index-catalog check-nginx check-production-deployment \
 	check build
@@ -75,6 +75,10 @@ assemble-newsroom: ## 本地單次組出三市場重點新聞草稿（需啟用 
 newsroom-quality: ## 印出重點新聞品質指標（唯讀，可傳 START、END，預設最近 7 個版次）
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
 	docker compose run --rm --build newsroom-worker python -m daily_insights_api.scripts.run_newsroom_quality $(if $(START),--start $(START),) $(if $(END),--end $(END),)
+
+newsroom-reembed: ## 以目前的 embedding 模型與翻譯重算文章向量（預設收稿中的版次，可傳 START、END）
+	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
+	docker compose run --rm --build newsroom-worker python -m daily_insights_api.scripts.run_newsroom_reembed $(if $(START),--start $(START),) $(if $(END),--end $(END),)
 
 backfill-index-daily-bars: ## 一次性把指數日 K 灌進資料庫（可傳 PERIOD，預設 2y）
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }

@@ -59,6 +59,27 @@ def test_prompt_is_versioned_by_its_content() -> None:
         assert story_type in prompt.text
 
 
+def test_translation_prompt_is_versioned_and_asks_for_json() -> None:
+    prompt = triage.load_embed_translate_prompt()
+    assert prompt.version.startswith("embed-translate-v1:")
+    for needle in ("JSON", "title", "summary", "繁體中文"):
+        assert needle in prompt.text
+
+
+@pytest.mark.parametrize(
+    ("title", "translate"),
+    [
+        ("TSMC September sales hit another record", True),
+        ("Fed holds rates 5.25%", True),
+        ("台積電9月營收創新高", False),
+        ("盤中速報 - Onto Innovation Inc.(ONTO-US)大跌5.02%", False),
+        ("フォートリア、臨床薬理部門を買収", False),
+    ],
+)
+def test_only_headlines_without_cjk_are_translated(title: str, translate: bool) -> None:
+    assert triage.needs_translation(title) is translate
+
+
 def test_embedding_input_joins_title_and_summary_and_truncates() -> None:
     assert triage.embedding_input("  Fed   holds ", "Rates\n unchanged ") == (
         "Fed holds\nRates unchanged"

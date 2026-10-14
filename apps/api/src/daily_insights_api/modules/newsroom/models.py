@@ -266,6 +266,9 @@ class NewsroomArticle(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     fetch_next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     fetch_error_code: Mapped[str | None] = mapped_column(String(100))
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
+    # The exact text embedded: title and feed summary, translated to Traditional
+    # Chinese for a non-Chinese headline, so re-embedding needs no new translation.
+    embedding_text: Mapped[str | None] = mapped_column(Text)
     embed_status: Mapped[str] = mapped_column(
         String(10), nullable=False, default="idle", server_default="idle"
     )

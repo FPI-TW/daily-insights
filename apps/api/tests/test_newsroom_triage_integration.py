@@ -17,8 +17,8 @@ from daily_insights_api import models as registered_models  # noqa: F401
 from daily_insights_api.core.config import Settings
 from daily_insights_api.core.models import Base
 from daily_insights_api.modules.identity.models import User
-from daily_insights_api.modules.newsroom import clock, clustering, events_service, triage
-from daily_insights_api.modules.newsroom.contracts import EventNew
+from daily_insights_api.modules.newsroom import clock, clustering, events_service, queue, triage
+from daily_insights_api.modules.newsroom.contracts import EmbeddingTranslation, EventNew
 from daily_insights_api.modules.newsroom.events_service import EventServiceError
 from daily_insights_api.modules.newsroom.models import (
     EMBEDDING_DIMENSIONS,
@@ -32,7 +32,13 @@ from daily_insights_api.modules.newsroom.models import (
 )
 from daily_insights_api.modules.newsroom.notifier import LogNotifier
 from daily_insights_api.modules.newsroom.providers import CallAudit
-from daily_insights_api.modules.newsroom.queue import claim, run_claimed
+from daily_insights_api.modules.newsroom.queue import (
+    FatalStageError,
+    RetryableStageError,
+    claim,
+    run_claimed,
+)
+from daily_insights_api.modules.newsroom.reembed import reembed_articles
 from daily_insights_api.modules.newsroom.worker import Runtime, StageBinding
 
 pytestmark = pytest.mark.integration
@@ -63,11 +69,18 @@ class FakeEmbedder:
         return [vector(self.angles[text.split("\n")[0]]) for text in texts]
 
 
+def _translated(payload: dict[str, Any]) -> dict[str, Any]:
+    return {"title": f"譯 {payload['title']}", "summary": payload["summary"]}
+
+
 @dataclass
 class FakeJsonModel:
     reply: Reply
     payloads: list[dict[str, Any]] = field(default_factory=list)
     barrier: asyncio.Barrier | None = None
+    # Answers the embed stage's translation of non-Chinese headlines.
+    translate: Reply = _translated
+    translations: list[dict[str, Any]] = field(default_factory=list)
 
     async def complete(
         self,
@@ -79,6 +92,31 @@ class FakeJsonModel:
         result_type: type[ResultT],
         audit: CallAudit,
     ) -> ResultT:
+        if result_type is EmbeddingTranslation:
+            assert system == triage.load_embed_translate_prompt().text
+            self.translations.append(payload)
+            answer = self.translate(payload)
+            if isinstance(answer, RetryableStageError | FatalStageError):
+                answer.audit_rows.append(
+                    NewsroomLlmCall(
+                        stage=audit.stage,
+                        subject_id=audit.subject_id,
+                        model=model,
+                        latency_ms=1,
+                        error_code=answer.code,
+                    )
+                )
+                raise answer
+            database.add(
+                NewsroomLlmCall(
+                    stage=audit.stage,
+                    subject_id=audit.subject_id,
+                    model=model,
+                    prompt_version=audit.prompt_version,
+                    latency_ms=1,
+                )
+            )
+            return result_type.model_validate(answer)
         assert system == triage.load_triage_prompt().text
         self.payloads.append(payload)
         if self.barrier is not None:
@@ -131,7 +169,10 @@ def _runtime(
     embedder: FakeEmbedder | None = None,
 ) -> Runtime:
     return Runtime(
-        settings=Settings(newsroom_triage_model="triage-test-model"),
+        settings=Settings(
+            newsroom_triage_model="triage-test-model",
+            newsroom_translate_model="translate-test-model",
+        ),
         session_factory=session_factory,
         llm=llm or FakeJsonModel(lambda payload: relevant({"new": "unused"})),
         embedder=embedder or FakeEmbedder({}),
@@ -258,13 +299,19 @@ async def test_embed_writes_vector_and_hands_off_to_triage(
         feed_summary="  The Fed kept rates\nunchanged. ",
         embed_status="pending",
     )
-    embedder = FakeEmbedder({"Fed holds rates": 10})
-    runtime = _runtime(newsroom_database, embedder=embedder)
+    embedder = FakeEmbedder({"譯 Fed holds rates": 10})
+    llm = FakeJsonModel(lambda payload: relevant({"new": "unused"}))
+    runtime = _runtime(newsroom_database, llm=llm, embedder=embedder)
 
     assert await _run(runtime, "embed") == ["done"]
 
+    # A non-Chinese headline is embedded in Traditional Chinese.
+    assert llm.translations == [
+        {"title": "Fed holds rates", "summary": "The Fed kept rates unchanged."}
+    ]
     row = await _get(newsroom_database, NewsroomArticle, article_id)
-    assert embedder.texts == ["Fed holds rates\nThe Fed kept rates unchanged."]
+    assert embedder.texts == ["譯 Fed holds rates\nThe Fed kept rates unchanged."]
+    assert row.embedding_text == embedder.texts[0]
     assert row.embed_status == "done"
     assert list(row.embedding) == pytest.approx(vector(10))
     assert (row.triage_status, row.triage_attempts, row.triage_next_attempt_at) == (
@@ -273,8 +320,101 @@ async def test_embed_writes_vector_and_hands_off_to_triage(
         None,
     )
     async with newsroom_database() as database:
-        audit = (await database.scalars(select(NewsroomLlmCall))).one()
-    assert (audit.stage, audit.subject_id) == ("embed", article_id)
+        audits = (await database.scalars(select(NewsroomLlmCall))).all()
+    assert sorted((audit.stage, audit.model) for audit in audits) == [
+        ("embed", "e"),
+        ("embed", "translate-test-model"),
+    ]
+    assert all(audit.subject_id == article_id for audit in audits)
+    assert any((audit.prompt_version or "").startswith("embed-translate-v1:") for audit in audits)
+
+
+async def test_chinese_headline_is_embedded_without_translation(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id = await _source(newsroom_database)
+    article_id = await _article(
+        newsroom_database, source_id, "台積電9月營收創新高", embed_status="pending"
+    )
+    embedder = FakeEmbedder({"台積電9月營收創新高": 10})
+    llm = FakeJsonModel(lambda payload: relevant({"new": "unused"}))
+
+    assert await _run(_runtime(newsroom_database, llm=llm, embedder=embedder), "embed") == ["done"]
+
+    assert llm.translations == []
+    row = await _get(newsroom_database, NewsroomArticle, article_id)
+    assert row.embedding_text == "台積電9月營收創新高"
+
+
+async def test_failed_translation_retries_then_embeds_the_original(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id = await _source(newsroom_database)
+    article_id = await _article(newsroom_database, source_id, "Oil jumps", embed_status="pending")
+    embedder = FakeEmbedder({"Oil jumps": 10})
+    llm = FakeJsonModel(
+        lambda payload: relevant({"new": "unused"}),
+        translate=lambda payload: RetryableStageError("embed_provider_timeout"),
+    )
+    runtime = _runtime(newsroom_database, llm=llm, embedder=embedder)
+
+    assert await _run(runtime, "embed") == ["pending"]
+    assert embedder.texts == []
+
+    # On the stage's last attempt the article is embedded as written.
+    async with newsroom_database() as database:
+        await database.execute(
+            update(NewsroomArticle)
+            .where(NewsroomArticle.id == article_id)
+            .values(embed_attempts=queue.EMBED.max_attempts - 1, embed_next_attempt_at=None)
+        )
+        await database.commit()
+    assert await _run(runtime, "embed") == ["done"]
+
+    row = await _get(newsroom_database, NewsroomArticle, article_id)
+    assert (row.embed_status, row.embedding_text) == ("done", "Oil jumps")
+    async with newsroom_database() as database:
+        failed = (
+            await database.scalars(
+                select(NewsroomLlmCall).where(NewsroomLlmCall.error_code.is_not(None))
+            )
+        ).all()
+    assert [audit.error_code for audit in failed] == ["embed_provider_timeout"] * 2
+
+
+async def test_reembed_replaces_vectors_of_the_chosen_editions_only(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id = await _source(newsroom_database)
+    english = await _article(newsroom_database, source_id, "Fed holds rates", angle=0)
+    chinese = await _article(newsroom_database, source_id, "央行升息", angle=0)
+    earlier = await _article(
+        newsroom_database,
+        source_id,
+        "Older story",
+        angle=0,
+        edition_date=WINDOW - timedelta(days=1),
+    )
+    unembedded = await _article(newsroom_database, source_id, "Not yet embedded")
+    embedder = FakeEmbedder({"譯 Fed holds rates": 30, "央行升息": 60})
+    llm = FakeJsonModel(lambda payload: relevant({"new": "unused"}))
+
+    report = await reembed_articles(
+        _runtime(newsroom_database, llm=llm, embedder=embedder), WINDOW, WINDOW
+    )
+
+    assert report.as_dict() == {"articles": 2, "translated": 1}
+    assert [payload["title"] for payload in llm.translations] == ["Fed holds rates"]
+    rows = {
+        article_id: await _get(newsroom_database, NewsroomArticle, article_id)
+        for article_id in (english, chinese, earlier, unembedded)
+    }
+    assert list(rows[english].embedding) == pytest.approx(vector(30))
+    assert rows[english].embedding_text == "譯 Fed holds rates"
+    assert list(rows[chinese].embedding) == pytest.approx(vector(60))
+    assert list(rows[earlier].embedding) == pytest.approx(vector(0))
+    assert rows[earlier].embedding_text is None
+    assert rows[unembedded].embedding is None
 
 
 async def test_embed_with_empty_input_fails_without_a_call(
