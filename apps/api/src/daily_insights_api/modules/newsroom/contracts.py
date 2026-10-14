@@ -86,6 +86,19 @@ class DuplicateGroups(_Strict):
     groups: list[list[str]] = Field(default_factory=list)
 
 
+class PublishedMatch(_Strict):
+    """A candidate that reports an event an earlier edition already carried."""
+
+    event_id: str
+    published_id: str
+    # Whether the candidate adds facts the earlier edition did not have.
+    new_facts: bool
+
+
+class PublishedMatches(_Strict):
+    matches: list[PublishedMatch] = Field(default_factory=list)
+
+
 class RelatedSymbol(_Strict):
     symbol: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
     kind: Literal["index", "equity", "fx", "commodity", "rate", "crypto"]

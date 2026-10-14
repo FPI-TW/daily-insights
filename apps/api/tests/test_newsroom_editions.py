@@ -16,6 +16,8 @@ from daily_insights_api.modules.newsroom.assembly import (
     apply_quota,
     event_score,
     fallback_selection,
+    key_figures,
+    same_story_titles,
     validate_duplicate_groups,
     validate_ratings,
 )
@@ -67,7 +69,7 @@ def test_quota_five_and_four_stars_combine_without_fillers() -> None:
     assert _stars(apply_quota(rated)) == [5, 5, 4, 4, 4, 4, 4]
 
 
-def test_quota_fills_with_low_stars_only_below_five() -> None:
+def test_quota_fills_with_three_stars_only_below_five() -> None:
     rated = [
         _rated(5, 10.0),
         _rated(4, 20.0),
@@ -77,13 +79,12 @@ def test_quota_fills_with_low_stars_only_below_five() -> None:
         _rated(1, 90.0),
     ]
     selection = apply_quota(rated)
-    # Two high-star events, so three fillers: stars first, then score.
+    # Two high-star events leave three slots; only the two 3-star events fill them.
     assert [(item.stars, item.score) for item in selection] == [
         (5, 10.0),
         (4, 20.0),
         (3, 50.0),
         (3, 5.0),
-        (2, 80.0),
     ]
 
 
@@ -93,15 +94,15 @@ def test_quota_exactly_five_high_stars_takes_no_fillers() -> None:
 
 
 def test_quota_fills_at_most_five_when_nothing_scores_high() -> None:
-    rated = [_rated(stars, float(score)) for stars in (1, 2, 3) for score in range(4)]
+    rated = [_rated(stars, float(score)) for stars in (1, 2, 3) for score in range(7)]
     selection = apply_quota(rated)
-    assert len(selection) == 5
-    assert _stars(selection) == [3, 3, 3, 3, 2]
+    assert _stars(selection) == [3] * 5
+    assert [item.score for item in selection] == [6.0, 5.0, 4.0, 3.0, 2.0]
 
 
-def test_quota_uses_all_fillers_when_fewer_than_needed() -> None:
-    rated = [_rated(4, 1.0), _rated(1, 2.0)]
-    assert _stars(apply_quota(rated)) == [4, 1]
+def test_quota_never_fills_with_one_or_two_stars() -> None:
+    assert _stars(apply_quota([_rated(4, 1.0), _rated(2, 9.0), _rated(1, 2.0)])) == [4]
+    assert apply_quota([_rated(2, 9.0), _rated(1, 2.0)]) == []
 
 
 def test_quota_handles_empty_input() -> None:
@@ -132,6 +133,12 @@ def test_quota_breaks_exact_ties_deterministically() -> None:
     assert len(apply_quota(rated)) == 5
 
 
+def test_quota_breaks_ties_by_candidate_position() -> None:
+    first, second = uuid.UUID(int=2), uuid.UUID(int=1)
+    rated = [Rated(second, 4, 70.0, position=1), Rated(first, 4, 70.0, position=0)]
+    assert [item.event_id for item in apply_quota(rated)] == [first, second]
+
+
 # --- Scoring ------------------------------------------------------------------------
 
 
@@ -160,6 +167,11 @@ def test_event_score_single_source_has_no_bonus() -> None:
 def test_fallback_takes_top_five_by_score() -> None:
     scores = [(uuid.uuid4(), float(score)) for score in range(8)]
     assert [score for _, score in fallback_selection(scores)] == [7.0, 6.0, 5.0, 4.0, 3.0]
+
+
+def test_fallback_keeps_the_given_order_on_equal_scores() -> None:
+    scores = [(uuid.UUID(int=index), 50.0) for index in (9, 3, 7)]
+    assert fallback_selection(scores) == scores
 
 
 # --- Editor contract ------------------------------------------------------------------
@@ -233,7 +245,7 @@ def test_zh_hant_digest_is_stable_and_content_sensitive() -> None:
     assert digest != zh_hant_digest("標題改", "摘要", whys)
 
 
-@pytest.mark.parametrize("name", ["editor", "analysis", "why", "translate"])
+@pytest.mark.parametrize("name", ["editor", "dedupe", "repeat", "analysis", "why", "translate"])
 def test_prompts_ship_with_the_package(name: str) -> None:
     assert len(load_prompt(name)) > 100
 
@@ -278,6 +290,20 @@ async def test_newsroom_assemble_waits_for_the_window_to_close() -> None:
     assert outcome.status == "unavailable"
     assert outcome.error_code == "newsroom_window_open"
     assert outcome.retryable
+
+
+def test_key_figures_are_amounts_and_rates_not_dates() -> None:
+    assert key_figures("外資12日賣超521億 砍台塑3.68萬張") == {"521", "3.68"}
+    assert key_figures("台積電9月營收5,118億元 第3季1.49兆元") == {"5118", "1.49"}
+    assert key_figures("2026年10月15日法說會 Q3") == set()
+
+
+def test_titles_below_the_bar_match_only_on_a_shared_figure() -> None:
+    assert same_story_titles(0.85, "博通執行長談AI瓶頸", "博通談資本限制")
+    assert same_story_titles(0.78, "外資賣超521億 加碼金控", "外資賣超521億 台塑遭砍")
+    # A preview and its result differ in the figure.
+    assert not same_story_titles(0.77, "中國9月出口預估年增25.5%", "中國9月出口年增36.3%")
+    assert not same_story_titles(0.74, "外資賣超521億", "外資賣超521億")
 
 
 def test_duplicate_groups_keep_known_ids_once_and_drop_singletons() -> None:

@@ -28,11 +28,13 @@ from daily_insights_api.modules.newsroom.contracts import (
     AnalysisResult,
     DuplicateGroups,
     EditorResult,
+    PublishedMatches,
     TranslationResult,
     WhyResult,
 )
 from daily_insights_api.modules.newsroom.models import (
     NewsroomArticle,
+    NewsroomDedupeDecision,
     NewsroomEdition,
     NewsroomEditionItem,
     NewsroomEditLog,
@@ -94,9 +96,11 @@ class FakeLlm:
         audit: CallAudit,
     ) -> Any:
         assert system
-        if result_type is DuplicateGroups and result_type not in self.responders:
-            # Tests that do not exercise the duplicate merge see no duplicates.
-            return DuplicateGroups()
+        if result_type in (DuplicateGroups, PublishedMatches) and (
+            result_type not in self.responders
+        ):
+            # Tests that do not exercise the duplicate screens see no duplicates.
+            return result_type()
         self.calls.append((audit.stage, payload))
         response = self.responders[result_type](payload)
         if isinstance(response, Exception):
@@ -203,7 +207,10 @@ async def _event(
     body: bool = True,
     relevant: bool = True,
     edition_date: date = EDITION_DATE,
+    story_types: Sequence[str | None] = (),
+    seen_minutes: int = 0,
 ) -> uuid.UUID:
+    """One article per source; ``story_types`` lines up with ``sources`` (default untyped)."""
     async with session_factory() as database:
         event = NewsroomEvent(edition_date=edition_date, working_title=title)
         database.add(event)
@@ -217,6 +224,9 @@ async def _event(
                     url_hash=uuid.uuid4().hex * 2,
                     title=f"{title} report {index}",
                     edition_date=edition_date,
+                    first_seen_at=datetime(2026, 9, 29, 1, tzinfo=UTC)
+                    + timedelta(minutes=seen_minutes),
+                    story_type=story_types[index] if index < len(story_types) else None,
                     body=f"{title} 全文 {index}" if body and index == 0 else None,
                     body_status="ok" if body and index == 0 else "unavailable",
                     fetch_status="done",
@@ -319,7 +329,13 @@ async def test_assembly_selects_by_quota_and_queues_analysis(
     irrelevant = await _event(
         newsroom_database, "irrelevant", sources=[cna], scores={"global": 99}, relevant=False
     )
-    llm = FakeLlm({EditorResult: _stars_by_title({"global-0": 5, "global-7": 5, "global-3": 4})})
+    llm = FakeLlm(
+        {
+            EditorResult: _stars_by_title(
+                {"global-0": 5, "global-7": 5, "global-3": 4, "global-5": 3, "global-6": 2}
+            )
+        }
+    )
     runtime = _runtime(newsroom_database, llm)
 
     report = await assembly.assemble_editions(runtime, EDITION_DATE, sleep=_no_sleep)
@@ -338,15 +354,15 @@ async def test_assembly_selects_by_quota_and_queues_analysis(
             event.id: event.working_title
             for event in (await database.scalars(select(NewsroomEvent))).all()
         }
-    # Two 5-star and one 4-star leave room for two 1-star fillers by score.
+    # Two 5-star and one 4-star leave room for two fillers, but only 3-star
+    # events fill: the edition runs short rather than carry 1-2 star events.
     assert [(event_titles[item.event_id], item.stars) for item in items] == [
         ("global-0", 5),
         ("global-7", 5),
         ("global-3", 4),
-        ("global-6", 1),
-        ("global-5", 1),
+        ("global-5", 3),
     ]
-    assert [item.rank for item in items] == [1, 2, 3, 4, 5]
+    assert [item.rank for item in items] == [1, 2, 3, 4]
     # Weighted score 50 x 1.5 plus one extra source.
     assert items[0].editor_score == 80.0
     assert all(item.why_status == "pending" and item.origin == "model" for item in items)
@@ -403,7 +419,7 @@ async def test_assembly_rebuild_keeps_admin_actions_and_skips_published(
     published_before = await _items(newsroom_database, editions["us_equity"].id)
 
     # Second pass: the editor now prefers f over c, d and e.
-    llm.responders[EditorResult] = _stars_by_title({"a": 5, "b": 5, "f": 4})
+    llm.responders[EditorResult] = _stars_by_title({"a": 5, "b": 5, "f": 4, "c": 3, "d": 3})
     report = await assembly.assemble_editions(runtime, EDITION_DATE, sleep=_no_sleep)
 
     assert {market.market: market.action for market in report.markets} == {
@@ -418,7 +434,7 @@ async def test_assembly_rebuild_keeps_admin_actions_and_skips_published(
     assert by_event[events["b"]].id == removed.id
     assert by_event[extra].id == manual_id
     assert by_event[extra].origin == "manual"
-    # Model picks first (a, b at 5 stars, f at 4, then 1-star fillers c and d),
+    # Model picks first (a, b at 5 stars, f at 4, then 3-star fillers c and d),
     # then manual items, then removed ones; e is no longer picked and is dropped.
     assert [item.event_id for item in second] == [
         events["a"],
@@ -1180,3 +1196,269 @@ async def test_assembly_merges_duplicate_candidates_before_rating(
     }
     assert "payrolls-b" not in editor_titles
     assert "已合併 1 個重複事件" in _notices(runtime).sent[0].lines
+    # Both proposals are on record, including the one the threshold blocked.
+    async with newsroom_database() as database:
+        decisions = (await database.scalars(select(NewsroomDedupeDecision))).all()
+    assert {
+        (row.event_title, row.matched_title, row.outcome, round(row.title_similarity or 0, 2))
+        for row in decisions
+    } == {
+        ("payrolls-b", "payrolls-a", "merged", 1.0),
+        ("preview", "payrolls-a", "below_threshold", 0.6),
+    }
+    assert all(
+        (row.scope, row.edition_date, row.matched_event_id, row.threshold)
+        == ("window", EDITION_DATE, covered, assembly.DEDUPE_TITLE_SIMILARITY)
+        for row in decisions
+    )
+
+
+async def test_price_action_reports_neither_qualify_nor_score(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    reuters = await _source(newsroom_database, "reuters")
+    cna = await _source(newsroom_database, "cna")
+    udn = await _source(newsroom_database, "udn")
+    await _event(
+        newsroom_database,
+        "台股大漲創新高",
+        sources=[reuters, cna, udn],
+        scores={"tw_equity": 40},
+        story_types=["price_action"] * 3,
+    )
+    # One report of the decision itself, two of the market's reaction to it.
+    decision = await _event(
+        newsroom_database,
+        "央行升息半碼",
+        sources=[reuters, cna, udn],
+        scores={"tw_equity": 90},
+        story_types=["official", "price_action", "price_action"],
+    )
+    llm = FakeLlm({EditorResult: _stars_by_title({}, default=4)})
+    runtime = _runtime(newsroom_database, llm)
+
+    await assembly.assemble_editions(runtime, EDITION_DATE, sleep=_no_sleep)
+
+    [(_, payload)] = [call for call in llm.calls if call[1]["market"] == "tw_equity"]
+    assert payload["events"] == [
+        {
+            "event_id": str(decision),
+            "working_title": "央行升息半碼",
+            "report_count": 1,
+            "source_count": 1,
+            "headlines": [{"title": "央行升息半碼 report 0", "source": "Reuters"}],
+        }
+    ]
+    editions = await _editions(newsroom_database)
+    [item] = await _items(newsroom_database, editions["tw_equity"].id)
+    # Scored on the decision alone: no bonus for the two reaction pieces.
+    assert (item.event_id, item.editor_score) == (decision, 90.0)
+
+
+async def test_equal_scores_rank_by_corroboration_then_age(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    wire = await _source(newsroom_database, "wire", trust_tier=3)
+    cna = await _source(newsroom_database, "cna")
+    udn = await _source(newsroom_database, "udn")
+    # All four score 60 ("broad" by its second source's bonus). The tie goes to
+    # the story with more sources, then the more trusted one, then the earlier.
+    await _event(newsroom_database, "late", sources=[cna], scores={"global": 60}, seen_minutes=9)
+    await _event(newsroom_database, "early", sources=[udn], scores={"global": 60}, seen_minutes=1)
+    await _event(
+        newsroom_database, "trusted", sources=[wire], scores={"global": 60}, seen_minutes=5
+    )
+    await _event(newsroom_database, "broad", sources=[cna, udn], scores={"global": 55})
+    llm = FakeLlm({EditorResult: _stars_by_title({}, default=3)})
+
+    await assembly.assemble_editions(
+        _runtime(newsroom_database, llm), EDITION_DATE, sleep=_no_sleep
+    )
+
+    [(_, payload)] = [call for call in llm.calls if call[1]["market"] == "global"]
+    assert [event["working_title"] for event in payload["events"]] == [
+        "broad",
+        "trusted",
+        "early",
+        "late",
+    ]
+    editions = await _editions(newsroom_database)
+    async with newsroom_database() as database:
+        event_titles = {
+            event.id: event.working_title
+            for event in (await database.scalars(select(NewsroomEvent))).all()
+        }
+    # Equal stars and score keep the candidate order instead of the event id's.
+    assert [
+        event_titles[item.event_id]
+        for item in await _items(newsroom_database, editions["global"].id)
+    ] == ["broad", "trusted", "early", "late"]
+
+
+async def _published_yesterday(
+    session_factory: async_sessionmaker[AsyncSession],
+    source_id: uuid.UUID,
+    title: str,
+    *,
+    days_ago: int = 1,
+    hidden: bool = False,
+) -> uuid.UUID:
+    """An event a previous edition published, with its reader-facing headline."""
+    published_on = EDITION_DATE - timedelta(days=days_ago)
+    event_id = await _event(
+        session_factory,
+        title,
+        sources=[source_id],
+        scores={"global": 80},
+        edition_date=published_on,
+    )
+    moment = datetime(2026, 9, 29, 1, tzinfo=UTC)
+    async with session_factory() as database:
+        await database.execute(
+            update(NewsroomEvent)
+            .where(NewsroomEvent.id == event_id)
+            .values(headline_zh_hant=f"{title} 上架標題", summary_zh_hant=f"{title} 摘要")
+        )
+        edition = await database.scalar(
+            select(NewsroomEdition).where(
+                NewsroomEdition.edition_date == published_on,
+                NewsroomEdition.market_code == "global",
+            )
+        )
+        if edition is None:
+            edition = NewsroomEdition(
+                edition_date=published_on,
+                market_code="global",
+                status="published",
+                published_at=moment,
+                auto_publish_at=clock.auto_publish_at(published_on),
+                late_fill_deadline=clock.late_fill_deadline(published_on),
+            )
+            database.add(edition)
+            await database.flush()
+        placed = len(
+            (
+                await database.scalars(
+                    select(NewsroomEditionItem.id).where(
+                        NewsroomEditionItem.edition_id == edition.id
+                    )
+                )
+            ).all()
+        )
+        database.add(
+            NewsroomEditionItem(
+                edition_id=edition.id,
+                event_id=event_id,
+                rank=placed + 1,
+                stars=5,
+                hidden_at=moment if hidden else None,
+            )
+        )
+        await database.commit()
+    return event_id
+
+
+async def test_assembly_drops_repeats_of_published_stories_and_flags_follow_ups(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    cna = await _source(newsroom_database, "cna")
+    revenue = await _published_yesterday(newsroom_database, cna, "revenue")
+    talks = await _published_yesterday(newsroom_database, cna, "talks", days_ago=2)
+    # Out of reach: older than the lookback, and one readers never saw.
+    await _published_yesterday(newsroom_database, cna, "ancient", days_ago=3)
+    await _published_yesterday(newsroom_database, cna, "hidden", hidden=True)
+    repeat = await _event(newsroom_database, "revenue-again", sources=[cna], scores={"global": 95})
+    loose = await _event(newsroom_database, "revenue-outlook", sources=[cna], scores={"global": 90})
+    follow_up = await _event(newsroom_database, "talks-deal", sources=[cna], scores={"global": 85})
+    fresh = await _event(newsroom_database, "fresh", sources=[cna], scores={"global": 80})
+
+    def matches(payload: dict[str, Any]) -> dict[str, Any]:
+        assert {item["id"] for item in payload["published"]} == {str(revenue), str(talks)}
+        assert payload["published"][0] == {
+            "id": str(revenue),
+            "edition_date": "2026-09-29",
+            "headline": "revenue 上架標題",
+            "summary": "revenue 摘要",
+        }
+        ids = {event["working_title"]: event["event_id"] for event in payload["candidates"]}
+        assert set(ids) == {"revenue-again", "revenue-outlook", "talks-deal", "fresh"}
+        return {
+            "matches": [
+                {
+                    "event_id": ids["revenue-again"],
+                    "published_id": str(revenue),
+                    "new_facts": False,
+                },
+                # The model sees nothing new, but the titles differ: not dropped by code.
+                {
+                    "event_id": ids["revenue-outlook"],
+                    "published_id": str(revenue),
+                    "new_facts": False,
+                },
+                {"event_id": ids["talks-deal"], "published_id": str(talks), "new_facts": True},
+                # A second match for one candidate and unknown ids are ignored.
+                {"event_id": ids["talks-deal"], "published_id": str(revenue), "new_facts": False},
+                {"event_id": "unknown", "published_id": str(revenue), "new_facts": False},
+                {"event_id": ids["fresh"], "published_id": "unknown", "new_facts": False},
+            ]
+        }
+
+    llm = FakeLlm({PublishedMatches: matches, EditorResult: _stars_by_title({}, default=4)})
+    embedder = TitleEmbedder(
+        {"revenue-outlook": [0.6, 0.8], "revenue": [1.0, 0.0], "talks": [0.0, 1.0]}
+    )
+    runtime = _runtime(newsroom_database, llm, embedder)
+
+    report = await assembly.assemble_editions(runtime, EDITION_DATE, sleep=_no_sleep)
+
+    assert report.excluded_repeats == 1
+    [(_, payload)] = [call for call in llm.calls if call[1].get("market") == "global"]
+    events = {event["working_title"]: event for event in payload["events"]}
+    assert set(events) == {"revenue-outlook", "talks-deal", "fresh"}
+    assert events["talks-deal"]["earlier_coverage"] == {
+        "edition_date": "2026-09-28",
+        "headline": "talks 上架標題",
+    }
+    assert events["revenue-outlook"]["earlier_coverage"]["headline"] == "revenue 上架標題"
+    assert "earlier_coverage" not in events["fresh"]
+    editions = await _editions(newsroom_database)
+    assert {item.event_id for item in await _items(newsroom_database, editions["global"].id)} == {
+        loose,
+        follow_up,
+        fresh,
+    }
+    # The repeat stays an open event: an admin can still add it by hand.
+    assert (await _get(newsroom_database, NewsroomEvent, repeat)).status == "open"
+    async with newsroom_database() as database:
+        decisions = (await database.scalars(select(NewsroomDedupeDecision))).all()
+    assert {
+        (row.event_title, row.matched_title, row.new_facts, row.outcome) for row in decisions
+    } == {
+        ("revenue-again", "revenue", False, "excluded"),
+        ("revenue-outlook", "revenue", False, "follow_up"),
+        ("talks-deal", "talks", True, "follow_up"),
+    }
+    assert all(row.scope == "published" for row in decisions)
+    assert "已排除 1 個前版已上架且無新事實的事件" in _notices(runtime).sent[0].lines
+
+
+async def test_repeat_screen_failure_never_blocks_assembly(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    cna = await _source(newsroom_database, "cna")
+    await _published_yesterday(newsroom_database, cna, "revenue")
+    await _event(newsroom_database, "revenue-again", sources=[cna], scores={"global": 95})
+    llm = FakeLlm(
+        {
+            PublishedMatches: lambda payload: RetryableStageError("editor_provider_timeout"),
+            EditorResult: _stars_by_title({}, default=4),
+        }
+    )
+
+    report = await assembly.assemble_editions(
+        _runtime(newsroom_database, llm), EDITION_DATE, sleep=_no_sleep
+    )
+
+    assert report.excluded_repeats == 0
+    editions = await _editions(newsroom_database)
+    assert len(await _items(newsroom_database, editions["global"].id)) == 1

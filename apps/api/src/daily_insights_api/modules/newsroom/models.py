@@ -70,6 +70,8 @@ SELECTION_MODES = ("pending", "editor", "fallback", "legacy")
 ITEM_ORIGINS = ("model", "manual", "legacy")
 LLM_STAGES = ("embed", "triage", "editor", "analysis", "why", "translate")
 EDIT_ENTITY_TYPES = ("source", "article", "event", "edition", "item")
+DEDUPE_SCOPES = ("window", "published")
+DEDUPE_OUTCOMES = ("merged", "below_threshold", "merge_failed", "excluded", "follow_up")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -409,6 +411,40 @@ class NewsroomEditLog(UUIDPrimaryKeyMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class NewsroomDedupeDecision(UUIDPrimaryKeyMixin, Base):
+    """One duplicate the model proposed at assembly, and what the code did with it.
+
+    ``window`` rows pair a candidate event with the event of the same window it
+    would merge into; ``published`` rows pair it with an event an earlier edition
+    already carried. Titles are copied because events merge and get retitled.
+    Append-only: an assembly re-run adds new rows.
+    """
+
+    __tablename__ = "newsroom_dedupe_decisions"
+    __table_args__ = (
+        CheckConstraint(_in("scope", DEDUPE_SCOPES), name="scope_valid"),
+        CheckConstraint(_in("outcome", DEDUPE_OUTCOMES), name="outcome_valid"),
+        Index("ix_newsroom_dedupe_decisions_edition", "edition_date", "created_at"),
+    )
+    edition_date: Mapped[date] = mapped_column(Date, nullable=False)
+    scope: Mapped[str] = mapped_column(String(10), nullable=False)
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    event_title: Mapped[str] = mapped_column(String(500), nullable=False)
+    matched_event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    matched_title: Mapped[str] = mapped_column(String(500), nullable=False)
+    # Cosine similarity of the two working titles; NULL when it was not needed.
+    title_similarity: Mapped[float | None] = mapped_column(Float)
+    threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    # Whether both titles carry the same amount or rate, which lowers the bar.
+    shared_figure: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    # ``published`` scope only: whether the model saw facts the earlier edition lacked.
+    new_facts: Mapped[bool | None] = mapped_column(Boolean)
+    outcome: Mapped[str] = mapped_column(String(20), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
