@@ -12,10 +12,12 @@ from pydantic import SecretStr
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.newsroom.ingestion.feeds import (
     GUARDIAN_MAPPING,
+    FeedEntry,
     JsonListMapping,
     MissingCredentialError,
     SourceConfig,
     build_request,
+    detected_language,
     entry_language,
     keeps_language,
     keeps_title,
@@ -369,6 +371,38 @@ def test_cache_buster_changes_per_request() -> None:
     urls = {build_request(listing, settings())[0] for _ in range(5)}
 
     assert len(urls) > 1 and all("&r=" in url for url in urls)
+
+
+@pytest.mark.parametrize(
+    ("text", "language"),
+    [
+        # langdetect called these Korean, Vietnamese and Estonian.
+        ("鴻海單月營收首度破兆 9月衝1.16兆創台灣企業紀錄", "zh-tw"),
+        ("台股開盤重挫逾500點", "zh-tw"),
+        ("盤中速報 - Onto Innovation Inc.(ONTO-US)大跌5.02% 報260美元", "zh-tw"),
+        # Characters shared with Simplified (台, 占) do not make a Taiwan headline zh-cn.
+        ("矽格、台星科 看旺明年", "zh-tw"),
+        ("安・卡森獲諾貝爾文學獎", "zh-tw"),
+        ("特朗普对加拿大50%飞机关税威胁 源于朋友买私人飞机的经历", "zh-cn"),
+        ("フォートリア、臨床薬理部門およびバイオアナリシスラボ事業を買収", "ja"),
+        ("Fed holds rates steady as inflation cools, citing the labour market", "en"),
+        ("2330 +3.5%", None),
+    ],
+)
+def test_chinese_is_recognised_by_script_before_asking_langdetect(
+    text: str, language: str | None
+) -> None:
+    assert detected_language(text) == language
+
+
+def test_a_chinese_headline_settles_the_language_whatever_the_summary_says() -> None:
+    entry = FeedEntry(
+        url="https://example.com/a",
+        title="黃仁勳女婿曝光 兩年升副總",
+        published_at=None,
+        summary='<img src="https://cdn.example.com/photos/2026/10/large-header-image.jpg" alt="">',
+    )
+    assert entry_language(entry) == "zh-tw"
 
 
 def test_title_exclude_pattern_matches_anywhere_in_the_title() -> None:

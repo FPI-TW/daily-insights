@@ -15,10 +15,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from functools import cache
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 from zoneinfo import ZoneInfo
 
+import opencc
 from defusedxml import ElementTree
 from langdetect import DetectorFactory, LangDetectException, detect
 
@@ -35,6 +37,13 @@ MAX_TITLE_CHARS = 1_000
 
 # langdetect is non-deterministic unless seeded.
 DetectorFactory.seed = 0
+# langdetect reads short Chinese headlines as Korean, Vietnamese and others, so
+# text whose letters are this much Han (and free of kana and hangul) is Chinese
+# without asking it. Tickers and company names keep the share well below one.
+HAN_LETTER_SHARE = 0.2
+_HAN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+# Hiragana, katakana letters and hangul; the katakana middle dot is common in Chinese names.
+_KANA_OR_HANGUL = re.compile(r"[\u3041-\u3096\u30a1-\u30fa\u1100-\u11ff\uac00-\ud7af]")
 _SITEMAP_NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
 _NEWS_NS = "{http://www.google.com/schemas/sitemap-news/0.9}"
 _RDF_ABOUT = "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}about"
@@ -453,7 +462,39 @@ def build_request(source: SourceConfig, settings: Settings) -> tuple[str, dict[s
     return (_with_query(source.url, extra) if extra else source.url), headers
 
 
+@cache
+def _script_converter(config: str) -> opencc.OpenCC:
+    return opencc.OpenCC(config)
+
+
+def _changed(text: str, config: str) -> int:
+    converted = _script_converter(config).convert(text)
+    return sum(1 for before, after in zip(text, converted, strict=False) if before != after)
+
+
+def _chinese_variant(text: str) -> str:
+    """``zh-cn`` only for text with Simplified forms and no Traditional-only character.
+
+    Characters Taiwan writes the same way as the mainland (台, 占, 里, 面) also
+    count as Simplified to OpenCC, so one of them alone decides nothing.
+    """
+    if _changed(text, "t2s") == 0 and _changed(text, "s2t") >= 2:
+        return "zh-cn"
+    return "zh-tw"
+
+
+def _chinese(text: str) -> str | None:
+    letters = sum(1 for character in text if character.isalpha())
+    han = len(_HAN.findall(text))
+    if letters and han / letters >= HAN_LETTER_SHARE and not _KANA_OR_HANGUL.search(text):
+        return _chinese_variant(text)
+    return None
+
+
 def detected_language(text: str) -> str | None:
+    chinese = _chinese(text)
+    if chinese is not None:
+        return chinese
     try:
         return str(detect(text))[:10]
     except LangDetectException:
@@ -461,6 +502,10 @@ def detected_language(text: str) -> str | None:
 
 
 def entry_language(entry: FeedEntry) -> str | None:
+    # A Chinese headline settles it, whatever markup or English the summary carries.
+    chinese = _chinese(entry.title)
+    if chinese is not None:
+        return chinese
     sample = entry.title
     if entry.summary:
         sample = f"{sample} {entry.summary[:300]}"
