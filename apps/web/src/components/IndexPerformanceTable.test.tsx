@@ -244,7 +244,7 @@ describe("IndexPerformanceTable", () => {
           marketCode: "hk_equity",
           start: "2024-10-09",
           end: "2026-10-12",
-          failedSymbols: [],
+          failedSymbols: ["^HSIL"],
           series: [
             {
               symbol: "^HSI",

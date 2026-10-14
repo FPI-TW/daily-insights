@@ -93,12 +93,15 @@ export function IndexPerformanceTable({
     )
   }
   const rows = indexPerformanceRows(history, symbols)
+  const failedSymbols = history.failedSymbols.filter(symbol =>
+    symbols.includes(symbol)
+  )
   if (rows.every(row => row.close === null)) {
     return (
       <section className="surface-panel p-5" role="status" aria-live="polite">
         <h2 className="m-0 text-base font-extrabold">{title}</h2>
         <p className="mt-3 mb-0 text-sm text-sea-ink-soft">
-          {history.failedSymbols.length > 0
+          {failedSymbols.length > 0
             ? t("indexTableUnavailable", { title })
             : t("indexTableEmpty", { title })}
         </p>
@@ -113,13 +116,13 @@ export function IndexPerformanceTable({
       <h2 id="index-table-title" className="m-0 text-base font-extrabold">
         {title}
       </h2>
-      {history.failedSymbols.length > 0 ? (
+      {failedSymbols.length > 0 ? (
         <p
           className="mt-3 mb-0 rounded-md border border-market-caution/40 bg-market-caution/10 p-3 text-sm text-sea-ink-soft"
           role="status"
         >
           {t("indexTablePartial", {
-            symbols: history.failedSymbols.join(", "),
+            symbols: failedSymbols.join(", "),
           })}
         </p>
       ) : null}

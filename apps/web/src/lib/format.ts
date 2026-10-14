@@ -89,6 +89,22 @@ export function formatChange(
   }
 }
 
+/** Signed percentage with a fixed number of decimals; null is an em dash and
+ * values that would round to zero drop their sign. */
+export function signedPercent(
+  value: number | null,
+  locale: Locale,
+  digits = 2
+) {
+  if (value === null) return "—"
+  const text = new Intl.NumberFormat(numberLocales[locale], {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+    signDisplay: "exceptZero",
+  }).format(Math.abs(value) < 0.005 ? 0 : value)
+  return `${text}%`
+}
+
 /** Direction of pre-formatted text (test fixtures and translated values). */
 export function literalDirection(text: string): Direction {
   if (text.startsWith("+")) return "up"

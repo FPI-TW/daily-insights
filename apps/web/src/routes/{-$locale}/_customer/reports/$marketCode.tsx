@@ -80,6 +80,7 @@ const PAGE_BLOCKS = {
   hk_equity: {
     hkEquity: true,
     chart: "index",
+    performance: indexChartSymbolsForMarket("hk_equity"),
     bias: true,
     volatility: "^HSIL",
   },
@@ -190,6 +191,24 @@ function ReportPage() {
   const viewpoint = viewpoints.data?.find(
     item => item.market_code === marketCode
   )
+  const performanceTable = performanceSymbols ? (
+    <MarketQuerySection
+      query={history}
+      loading={<IndexPerformanceTableLoading marketCode={marketCode} />}
+    >
+      {data => (
+        <IndexPerformanceTable
+          history={data ?? null}
+          locale={locale}
+          marketCode={marketCode}
+          symbols={performanceSymbols}
+        />
+      )}
+    </MarketQuerySection>
+  ) : null
+  // The US table takes its own column beside the morning report; the Hong
+  // Kong table stacks under the index cards instead.
+  const sideBySide = performanceTable !== null && !blocks.hkEquity
   return (
     <>
       {isNewsMarketCode(marketCode) ? (
@@ -217,27 +236,11 @@ function ReportPage() {
       ) : (
         <div
           className={
-            performanceSymbols ? "grid min-w-0 gap-4 xl:grid-cols-2" : "min-w-0"
+            sideBySide ? "grid min-w-0 gap-4 xl:grid-cols-2" : "min-w-0"
           }
         >
-          {performanceSymbols ? (
-            <div className="flex min-w-0 flex-col">
-              <MarketQuerySection
-                query={history}
-                loading={
-                  <IndexPerformanceTableLoading marketCode={marketCode} />
-                }
-              >
-                {data => (
-                  <IndexPerformanceTable
-                    history={data ?? null}
-                    locale={locale}
-                    marketCode={marketCode}
-                    symbols={performanceSymbols}
-                  />
-                )}
-              </MarketQuerySection>
-            </div>
+          {sideBySide ? (
+            <div className="flex min-w-0 flex-col">{performanceTable}</div>
           ) : null}
           <div className="min-w-0">
             {blocks.hkEquity ? (
@@ -249,23 +252,7 @@ function ReportPage() {
               </MarketQuerySection>
             ) : null}
             {blocks.hkEquity ? (
-              <div className="mt-4 min-w-0">
-                <MarketQuerySection
-                  query={history}
-                  loading={
-                    <IndexPerformanceTableLoading marketCode={marketCode} />
-                  }
-                >
-                  {data => (
-                    <IndexPerformanceTable
-                      history={data ?? null}
-                      locale={locale}
-                      marketCode={marketCode}
-                      symbols={indexChartSymbolsForMarket(marketCode)}
-                    />
-                  )}
-                </MarketQuerySection>
-              </div>
+              <div className="mt-4 min-w-0">{performanceTable}</div>
             ) : null}
             <MarketQuerySection
               query={report}

@@ -2,64 +2,23 @@ import { ClientOnly } from "@tanstack/react-router"
 import ReactECharts from "echarts-for-react"
 import { useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { z } from "zod"
 import type { IndexMovingAverages, Locale } from "@daily-insights/api-client"
-import { useChartColors } from "#/lib/chart"
-import { numberLocales } from "#/lib/format"
+import { useChartColors, zoomEventSchema } from "#/lib/chart"
+import { signedPercent } from "#/lib/format"
 import {
   biasSeries,
-  indexDisplayName,
   indexWindowStart,
   scaleBias,
   visibleBiasPoints,
   type IndexHistorySeries,
 } from "#/lib/indices"
-import { DashboardChoices, DashboardPanel } from "./DashboardPrimitives"
+import {
+  ChartSkeleton,
+  DashboardChoices,
+  DashboardPanel,
+  Unavailable,
+} from "./DashboardPrimitives"
 
-export function ChartSkeleton({ candles = false }: { candles?: boolean }) {
-  const { t } = useTranslation()
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      aria-label={t("indexChartLoading")}
-      className="mt-4 animate-pulse motion-reduce:animate-none"
-    >
-      {candles ? (
-        <>
-          <div className="h-78 rounded bg-line/60" />
-          <div className="mt-2.5 h-21 rounded bg-line/60" />
-        </>
-      ) : (
-        <>
-          <div className="grid grid-cols-3 gap-px bg-line">
-            {[0, 1, 2].map(i => (
-              <div key={i} className="h-28 bg-surface px-4 py-3.5">
-                <div className="h-full rounded bg-line/60" />
-              </div>
-            ))}
-          </div>
-          <div className="mt-4.5 h-65 rounded bg-line/60" />
-        </>
-      )}
-    </div>
-  )
-}
-export function Unavailable() {
-  const { t } = useTranslation()
-  return (
-    <p
-      role="status"
-      className="flex min-h-48 items-center justify-center text-sm text-sea-ink-soft"
-    >
-      {t("indexChartUnavailable")}
-    </p>
-  )
-}
-export function signed(value: number | null, locale: Locale, digits = 2) {
-  if (value === null) return "—"
-  return `${new Intl.NumberFormat(numberLocales[locale], { minimumFractionDigits: digits, maximumFractionDigits: digits, signDisplay: "exceptZero" }).format(Math.abs(value) < 0.005 ? 0 : value)}%`
-}
 function BiasValue({
   value,
   locale,
@@ -71,25 +30,19 @@ function BiasValue({
     <span
       className={`font-mono text-xs font-bold tabular-nums ${value === null || Math.abs(value) < 0.005 ? "text-sea-ink-soft" : value > 0 ? "text-market-up" : "text-market-down"}`}
     >
-      {signed(value, locale)}
+      {signedPercent(value, locale)}
     </span>
   )
 }
-const zoomRangeSchema = z.object({
-  start: z.number().min(0).max(100),
-  end: z.number().min(0).max(100),
-})
-export const zoomEventSchema = z.union([
-  zoomRangeSchema,
-  z.object({ batch: z.array(zoomRangeSchema).min(1) }),
-])
 /** 20/60/120MA bias for one index; shared by the Taiwan and index charts. */
 export function IndexBiasPanel({
+  title,
   selected,
   averages,
   pending,
   locale,
 }: {
+  title: string
   selected: IndexHistorySeries
   averages: IndexMovingAverages | undefined
   pending: boolean
@@ -121,12 +74,6 @@ export function IndexBiasPanel({
   const ready = lines.some(line =>
     line.points.some(point => point.value !== null)
   )
-  const title =
-    selected.symbol === "^TWII"
-      ? t("biasTitle")
-      : t("biasTitleIndex", {
-          index: indexDisplayName(selected.symbol, t),
-        })
   return (
     <DashboardPanel
       title={title}
@@ -194,7 +141,7 @@ export function IndexBiasPanel({
                     aria-valuetext={
                       scaled.value === null
                         ? t("indexChartUnavailable")
-                        : signed(scaled.current, locale)
+                        : signedPercent(scaled.current, locale)
                     }
                   >
                     {scaled.value !== null ? (
@@ -217,8 +164,8 @@ export function IndexBiasPanel({
                     ) : null}
                   </div>
                   <div className="mt-1.5 flex justify-between gap-2 font-mono text-[10px] text-sea-ink-soft tabular-nums">
-                    <span>{signed(scaled.min, locale, 1)}</span>
-                    <span>{signed(scaled.max, locale, 1)}</span>
+                    <span>{signedPercent(scaled.min, locale, 1)}</span>
+                    <span>{signedPercent(scaled.max, locale, 1)}</span>
                   </div>
                 </div>
               )
@@ -251,7 +198,7 @@ export function IndexBiasPanel({
                     appendToBody: true,
                     renderMode: "richText",
                     valueFormatter: (value: number | null) =>
-                      signed(value, locale),
+                      signedPercent(value, locale),
                   },
                   legend: {
                     bottom: 36,
@@ -286,7 +233,8 @@ export function IndexBiasPanel({
                       color: colors.text,
                       fontFamily: "monospace",
                       fontSize: 11,
-                      formatter: (value: number) => signed(value, locale, 1),
+                      formatter: (value: number) =>
+                        signedPercent(value, locale, 1),
                     },
                     splitLine: {
                       lineStyle: { color: colors.gridSoft, type: "dashed" },

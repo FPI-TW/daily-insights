@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { z } from "zod"
 import type { Locale } from "@daily-insights/api-client"
-import { useChartColors } from "#/lib/chart"
+import { useChartColors, zoomEventSchema } from "#/lib/chart"
 import { formatIsoDate, formatNumber, numberLocales } from "#/lib/format"
 import {
   indexDisplayName,
@@ -37,14 +37,6 @@ function symbolLabel(
   return key ? `${t(key)} (${symbol})` : symbol
 }
 
-const zoomRangeSchema = z.object({
-  start: z.number().min(0).max(100),
-  end: z.number().min(0).max(100),
-})
-const zoomEventSchema = z.union([
-  zoomRangeSchema,
-  z.object({ batch: z.array(zoomRangeSchema).min(1) }),
-])
 const tooltipSchema = z.array(
   z.object({
     axisValue: z.union([z.string(), z.number()]),
@@ -701,6 +693,9 @@ export function IndexHistoryChart({
         <div className="mt-4 min-w-0">
           <IndexBiasPanel
             key={selected.symbol}
+            title={t("biasTitleIndex", {
+              index: indexDisplayName(selected.symbol, t),
+            })}
             selected={selected}
             averages={selectedMovingAverages}
             pending={indicatorsPending}

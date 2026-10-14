@@ -4,22 +4,21 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { z } from "zod"
 import type { IndexMovingAverages, Locale } from "@daily-insights/api-client"
-import { useChartColors } from "#/lib/chart"
-import { formatNumber, numberLocales } from "#/lib/format"
+import { useChartColors, zoomEventSchema } from "#/lib/chart"
+import { formatNumber, numberLocales, signedPercent } from "#/lib/format"
 import {
   indexDisplayName,
   type IndexHistorySeries,
   type IndexMovingAverageMap,
   type MarketIndexHistory,
 } from "#/lib/indices"
-import { DashboardPanel, DashboardSection } from "./DashboardPrimitives"
 import {
   ChartSkeleton,
-  IndexBiasPanel,
+  DashboardPanel,
+  DashboardSection,
   Unavailable,
-  signed,
-  zoomEventSchema,
-} from "./IndexBiasPanel"
+} from "./DashboardPrimitives"
+import { IndexBiasPanel } from "./IndexBiasPanel"
 
 export function TaiwanIndexHistoryLoading() {
   const { t } = useTranslation()
@@ -171,7 +170,7 @@ function CandlesPanel({
             <span>
               {change === null
                 ? "—"
-                : signed(Math.abs(change), locale).replace("+", "")}
+                : signedPercent(Math.abs(change), locale).replace("+", "")}
             </span>
           </span>
           <span>{activityLabel}</span>
@@ -720,6 +719,13 @@ export function TaiwanIndexHistoryChart({
           />
           <IndexBiasPanel
             key={selected.symbol}
+            title={
+              selected.symbol === "^TWII"
+                ? t("biasTitle")
+                : t("biasTitleIndex", {
+                    index: indexDisplayName(selected.symbol, t),
+                  })
+            }
             selected={selected}
             averages={averages}
             pending={pending}
