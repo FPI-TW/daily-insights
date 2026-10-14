@@ -224,6 +224,24 @@ describe("market desktop grid cells", () => {
     query("history").data = {
       ...query("history").data!,
       marketCode: "hk_equity",
+      series: [
+        {
+          symbol: "^HSI",
+          bars: [
+            {
+              symbol: "^HSI",
+              market_code: "hk_equity",
+              trade_date: "2026-10-09",
+              close: "24211.35",
+              open: null,
+              high: null,
+              low: null,
+              volume: null,
+              trade_value: null,
+            },
+          ],
+        },
+      ],
     }
     query("vix").data = { symbol: "^HSIL", bars: [] }
     query("latestIndices").data = [
@@ -267,7 +285,25 @@ describe("market desktop grid cells", () => {
         name: "Hang Seng constituents sector heatmap overview",
       })
     ).toHaveAttribute("src", "https://signed.test/overview.png")
-    expect(screen.getAllByRole("region")).toHaveLength(4)
+    const performance = screen.getByRole("region", {
+      name: "Hong Kong index performance",
+    })
+    expect(
+      within(performance).getByRole("rowheader", { name: "Hang Seng Index" })
+    ).toBeVisible()
+    expect(
+      within(performance).queryByText("HSI Volatility Index")
+    ).not.toBeInTheDocument()
+    // Cards, then the performance table, then the heatmap, in one column.
+    expect(
+      hsi.compareDocumentPosition(performance) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      performance.compareDocumentPosition(heatmap) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(screen.getAllByRole("region")).toHaveLength(5)
     expect(screen.queryByText("Report not launched yet")).toBeNull()
     expect(screen.getByText("Index history")).toBeVisible()
     expect(screen.getByText("Volatility ^HSIL")).toBeVisible()

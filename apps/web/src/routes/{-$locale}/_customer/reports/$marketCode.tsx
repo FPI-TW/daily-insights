@@ -17,7 +17,11 @@ import { ReportInformation } from "#/components/MarketInformation"
 import { MarketQuerySection } from "#/components/MarketQuerySection"
 import { marketQueries, useMarketQuery } from "#/lib/market-queries"
 import { isNewsMarketCode } from "#/lib/provisional-reports"
-import { twoYearTaipeiRange, type VolatilitySymbol } from "#/lib/indices"
+import {
+  indexChartSymbolsForMarket,
+  twoYearTaipeiRange,
+  type VolatilitySymbol,
+} from "#/lib/indices"
 import { institutionalFlowRange } from "#/lib/institutional-flows"
 import { useChatPageContext } from "#/components/PageContextChat"
 import {
@@ -40,9 +44,9 @@ import {
   HkSectorHeatmapLoading,
 } from "#/components/HkSectorHeatmap"
 import {
-  UsIndexPerformanceTable,
-  UsIndexPerformanceTableLoading,
-} from "#/components/UsIndexPerformanceTable"
+  IndexPerformanceTable,
+  IndexPerformanceTableLoading,
+} from "#/components/IndexPerformanceTable"
 import {
   VixHistoryChart,
   VixHistoryLoading,
@@ -58,7 +62,7 @@ import {
 type PageBlocks = {
   macro?: true
   chart?: "index" | "taiwan"
-  performance?: true
+  performance?: readonly string[]
   volatility?: VolatilitySymbol
   hkEquity?: true
   institutional?: true
@@ -67,7 +71,11 @@ const PAGE_BLOCKS = {
   global_macro_bonds: { macro: true },
   forex: {},
   crypto: {},
-  us_equity: { chart: "index", performance: true, volatility: "^VIX" },
+  us_equity: {
+    chart: "index",
+    performance: ["^GSPC", "^NDX", "^DJI", "^SOX", "^RUT"],
+    volatility: "^VIX",
+  },
   hk_equity: { hkEquity: true, chart: "index", volatility: "^HSIL" },
   cn_equity: {},
   tw_equity: { chart: "taiwan", institutional: true },
@@ -114,6 +122,7 @@ function ReportPage() {
   const [range] = useState(() => twoYearTaipeiRange())
   const blocks: PageBlocks = PAGE_BLOCKS[marketCode]
   const isChart = blocks.chart !== undefined
+  const performanceSymbols = blocks.performance
   const hasOwnContent = Object.keys(blocks).length > 0
   const report = useMarketQuery(queries.report(marketCode), locale, reportReady)
   const news = useMarketQuery(
@@ -202,19 +211,23 @@ function ReportPage() {
       ) : (
         <div
           className={
-            blocks.performance ? "grid min-w-0 gap-4 xl:grid-cols-2" : "min-w-0"
+            performanceSymbols ? "grid min-w-0 gap-4 xl:grid-cols-2" : "min-w-0"
           }
         >
-          {blocks.performance ? (
+          {performanceSymbols ? (
             <div className="flex min-w-0 flex-col">
               <MarketQuerySection
                 query={history}
-                loading={<UsIndexPerformanceTableLoading />}
+                loading={
+                  <IndexPerformanceTableLoading marketCode={marketCode} />
+                }
               >
                 {data => (
-                  <UsIndexPerformanceTable
+                  <IndexPerformanceTable
                     history={data ?? null}
                     locale={locale}
+                    marketCode={marketCode}
+                    symbols={performanceSymbols}
                   />
                 )}
               </MarketQuerySection>
@@ -227,6 +240,23 @@ function ReportPage() {
                 loading={<HkIndexCardsLoading />}
               >
                 {data => <HkIndexCards bars={data ?? null} locale={locale} />}
+              </MarketQuerySection>
+            ) : null}
+            {blocks.hkEquity ? (
+              <MarketQuerySection
+                query={history}
+                loading={
+                  <IndexPerformanceTableLoading marketCode={marketCode} />
+                }
+              >
+                {data => (
+                  <IndexPerformanceTable
+                    history={data ?? null}
+                    locale={locale}
+                    marketCode={marketCode}
+                    symbols={indexChartSymbolsForMarket(marketCode)}
+                  />
+                )}
               </MarketQuerySection>
             ) : null}
             {blocks.hkEquity ? (

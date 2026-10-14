@@ -1,5 +1,5 @@
 import { ResponsiveTable } from "./ResponsiveTable"
-import type { Locale } from "@daily-insights/api-client"
+import type { Locale, MarketCode } from "@daily-insights/api-client"
 import { useTranslation } from "react-i18next"
 import { directionClass, formatChange, formatNumber } from "#/lib/format"
 import {
@@ -8,25 +8,24 @@ import {
   type MarketIndexHistory,
 } from "#/lib/indices"
 
-const usIndexSymbols = ["^GSPC", "^NDX", "^DJI", "^SOX", "^RUT"] as const
-
 type Performance = {
   close: string | null
   daily: number | null
   monthly: number | null
   ytd: number | null
-  symbol: (typeof usIndexSymbols)[number]
+  symbol: string
 }
 
 /** Bars are settled closes. Monthly/YTD baselines are the last settled closes
  * strictly before the latest bar's calendar month/year, respectively. */
-export function usIndexPerformanceRows(
-  history: MarketIndexHistory
+export function indexPerformanceRows(
+  history: MarketIndexHistory,
+  symbols: readonly string[]
 ): Performance[] {
   const bySymbol = new Map(
     history.series.map(series => [series.symbol, series.bars])
   )
-  return usIndexSymbols.map<Performance>(symbol => {
+  return symbols.map<Performance>(symbol => {
     const bars = [...(bySymbol.get(symbol) ?? [])].sort((a, b) =>
       a.trade_date.localeCompare(b.trade_date)
     )
@@ -48,14 +47,19 @@ export function usIndexPerformanceRows(
   })
 }
 
-export function UsIndexPerformanceTableLoading() {
+export function IndexPerformanceTableLoading({
+  marketCode,
+}: {
+  marketCode: MarketCode
+}) {
   const { t } = useTranslation()
+  const title = t(`indexTableTitle_${marketCode}`)
   return (
     <section
       className="surface-panel animate-pulse p-5"
       role="status"
       aria-live="polite"
-      aria-label={t("usIndexTableLoading")}
+      aria-label={t("indexTableLoading", { title })}
     >
       <div className="h-5 w-48 rounded bg-line" />
       <div className="mt-5 h-52 rounded bg-line" />
@@ -63,37 +67,40 @@ export function UsIndexPerformanceTableLoading() {
   )
 }
 
-export function UsIndexPerformanceTable({
+/** `symbols` is the row order; a tracked symbol left out (such as a
+ * volatility index) is neither listed nor counted as missing. */
+export function IndexPerformanceTable({
   history,
   locale,
+  marketCode,
+  symbols,
 }: {
   history: MarketIndexHistory | null
   locale: Locale
+  marketCode: MarketCode
+  symbols: readonly string[]
 }) {
   const { t } = useTranslation()
+  const title = t(`indexTableTitle_${marketCode}`)
   if (history === null) {
     return (
       <section className="surface-panel p-5" role="status" aria-live="polite">
-        <h2 className="m-0 text-base font-extrabold">
-          {t("usIndexTableTitle")}
-        </h2>
+        <h2 className="m-0 text-base font-extrabold">{title}</h2>
         <p className="mt-3 mb-0 text-sm text-sea-ink-soft">
-          {t("usIndexTableUnavailable")}
+          {t("indexTableUnavailable", { title })}
         </p>
       </section>
     )
   }
-  const rows = usIndexPerformanceRows(history)
+  const rows = indexPerformanceRows(history, symbols)
   if (rows.every(row => row.close === null)) {
     return (
       <section className="surface-panel p-5" role="status" aria-live="polite">
-        <h2 className="m-0 text-base font-extrabold">
-          {t("usIndexTableTitle")}
-        </h2>
+        <h2 className="m-0 text-base font-extrabold">{title}</h2>
         <p className="mt-3 mb-0 text-sm text-sea-ink-soft">
           {history.failedSymbols.length > 0
-            ? t("usIndexTableUnavailable")
-            : t("usIndexTableEmpty")}
+            ? t("indexTableUnavailable", { title })
+            : t("indexTableEmpty", { title })}
         </p>
       </section>
     )
@@ -101,17 +108,17 @@ export function UsIndexPerformanceTable({
   return (
     <section
       className="surface-panel min-w-0 flex-1 p-5"
-      aria-labelledby="us-index-table-title"
+      aria-labelledby="index-table-title"
     >
-      <h2 id="us-index-table-title" className="m-0 text-base font-extrabold">
-        {t("usIndexTableTitle")}
+      <h2 id="index-table-title" className="m-0 text-base font-extrabold">
+        {title}
       </h2>
       {history.failedSymbols.length > 0 ? (
         <p
           className="mt-3 mb-0 rounded-md border border-market-caution/40 bg-market-caution/10 p-3 text-sm text-sea-ink-soft"
           role="status"
         >
-          {t("usIndexTablePartial", {
+          {t("indexTablePartial", {
             symbols: history.failedSymbols.join(", "),
           })}
         </p>
@@ -121,19 +128,19 @@ export function UsIndexPerformanceTable({
           <thead className="border-y border-line bg-link-hover text-xs font-bold text-sea-ink-soft">
             <tr>
               <th scope="col" className="px-4 py-1.5 text-left @lg:w-[36%]!">
-                {t("usIndexTableIndex")}
+                {t("indexTableIndex")}
               </th>
               <th scope="col" className="px-4 py-1.5 text-right @lg:w-[20%]">
-                {t("usIndexTableClose")}
+                {t("indexTableClose")}
               </th>
               <th scope="col" className="px-4 py-1.5 text-right">
-                {t("usIndexTableDaily")}
+                {t("indexTableDaily")}
               </th>
               <th scope="col" className="px-4 py-1.5 text-right">
-                {t("usIndexTableMonthly")}
+                {t("indexTableMonthly")}
               </th>
               <th scope="col" className="px-4 py-1.5 text-right">
-                {t("usIndexTableYearly")}
+                {t("indexTableYearly")}
               </th>
             </tr>
           </thead>
@@ -157,7 +164,7 @@ export function UsIndexPerformanceTable({
                     ) : null}
                   </th>
                   <td
-                    data-label={t("usIndexTableClose")}
+                    data-label={t("indexTableClose")}
                     className="px-4 py-1 text-right font-mono tabular-nums text-sea-ink"
                   >
                     <span className="whitespace-nowrap">
@@ -173,9 +180,9 @@ export function UsIndexPerformanceTable({
                         key={column}
                         data-label={t(
                           [
-                            "usIndexTableDaily",
-                            "usIndexTableMonthly",
-                            "usIndexTableYearly",
+                            "indexTableDaily",
+                            "indexTableMonthly",
+                            "indexTableYearly",
                           ][column]!
                         )}
                         className={`whitespace-nowrap px-4 py-1 text-right font-mono tabular-nums ${directionClass(change.direction)}`}

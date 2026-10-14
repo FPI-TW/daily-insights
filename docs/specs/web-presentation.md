@@ -338,3 +338,12 @@ ECharts 6 的矩陣會將 1px 邊框對齊至正向半像素；右側貼齊 canv
 
 波動率查詢只在宣告 `volatility` 的頁面掛載（`VolatilityBlock` 子元件），
 其他市場頁不建立任何 vix query observer。
+
+## 港股指數表現表格（2026-10-14）
+
+美股的「五大指數表現」表格改為跨市場的 `IndexPerformanceTable`：收盤價與日／月／年
+漲跌的計算不變，列的順序與標題由呼叫端決定。美股頁以 `PAGE_BLOCKS.performance`
+宣告五檔的固定順序（非 catalog 的字母序），仍放在與晨報並排的左欄；港股頁在指數
+卡片與產業熱力圖之間顯示同一張表，列為 `indexChartSymbolsForMarket("hk_equity")`
+（恆生指數、國企指數），波動率指數 `^HSIL` 既不列出也不算缺漏。標題鍵為
+`indexTableTitle_<marketCode>`，載入／不可用／無資料文案以 `{{title}}` 插值。
