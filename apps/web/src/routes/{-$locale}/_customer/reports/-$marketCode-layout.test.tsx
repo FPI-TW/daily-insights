@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
     }
   >(),
   navigate: vi.fn(),
+  requested: [] as [string, ...unknown[]][],
 }))
 vi.mock("@tanstack/react-router", async importOriginal => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
@@ -47,7 +48,13 @@ vi.mock("#/lib/market-queries", () => ({
         "stocks",
         "latestIndices",
         "hkSectorHeatmap",
-      ].map(key => [key, () => ({ queryKey: [key] })])
+      ].map(key => [
+        key,
+        (...args: unknown[]) => {
+          state.requested.push([key, ...args])
+          return { queryKey: [key] }
+        },
+      ])
     ),
   useMarketQuery: ({ queryKey }: { queryKey: [string] }) =>
     state.results.get(queryKey[0]),
@@ -113,6 +120,7 @@ function cellContaining(text: string) {
 beforeEach(() => {
   state.marketCode = "us_equity"
   state.results.clear()
+  state.requested.length = 0
   for (const key of [
     "markets",
     "report",
@@ -263,6 +271,19 @@ describe("market desktop grid cells", () => {
     expect(screen.queryByText("Report not launched yet")).toBeNull()
     expect(screen.getByText("Index history")).toBeVisible()
     expect(screen.getByText("Volatility ^HSIL")).toBeVisible()
+    expect(
+      state.requested
+        .filter(([key]) => key === "vix")
+        .map(([, symbol]) => symbol)
+    ).toEqual(["^HSIL"])
+  })
+  it("never builds volatility queries for a market without that block", () => {
+    state.marketCode = "tw_equity"
+    query("markets").data = [{ code: "us_equity" }, { code: "tw_equity" }]
+    render(page())
+    expect(
+      state.requested.some(([key]) => key === "vix" || key === "vixAverages")
+    ).toBe(false)
   })
   it("keeps TW stocks beside retained flows while either column refreshes or fails", () => {
     state.marketCode = "tw_equity"

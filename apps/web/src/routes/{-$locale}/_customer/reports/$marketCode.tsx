@@ -2,6 +2,7 @@ import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router"
 import {
   marketCodeSchema,
   launchMarketCodeSchema,
+  type Locale,
   type MarketCode,
 } from "@daily-insights/api-client"
 import { useEffect, useRef, useState } from "react"
@@ -135,19 +136,6 @@ function ReportPage() {
     queries.averages(marketCode, range),
     locale,
     ready && isChart
-  )
-  // A page without a volatility block never enables these, so the fallback
-  // symbol only keeps the query key well-formed.
-  const volatility = blocks.volatility ?? "^VIX"
-  const vix = useMarketQuery(
-    queries.vix(volatility, range),
-    locale,
-    ready && blocks.volatility !== undefined
-  )
-  const vixAverages = useMarketQuery(
-    queries.vixAverages(volatility, range),
-    locale,
-    ready && blocks.volatility !== undefined
   )
   const flows = useMarketQuery(
     queries.flows(institutionalFlowRange(range.end)),
@@ -304,25 +292,13 @@ function ReportPage() {
         </>
       ) : null}
       {blocks.volatility ? (
-        <MarketQuerySection
-          query={vix}
-          loading={<VixHistoryLoading symbol={volatility} />}
-        >
-          {data => (
-            <VixHistoryChart
-              symbol={volatility}
-              history={
-                data ? { ...data, indicators: vixAverages.data ?? null } : null
-              }
-              locale={locale}
-            />
-          )}
-        </MarketQuerySection>
-      ) : null}
-      {blocks.volatility ? (
-        <MarketQuerySection query={vixAverages} loading={null}>
-          {() => null}
-        </MarketQuerySection>
+        <VolatilityBlock
+          symbol={blocks.volatility}
+          range={range}
+          queries={queries}
+          locale={locale}
+          ready={ready}
+        />
       ) : null}
       {blocks.institutional ? (
         <div className="mt-6 min-w-0">
@@ -356,6 +332,50 @@ function ReportPage() {
           </DashboardSection>
         </div>
       ) : null}
+    </>
+  )
+}
+
+// Mounted only on pages that declare a volatility index, so other markets
+// never register its queries.
+function VolatilityBlock({
+  symbol,
+  range,
+  queries,
+  locale,
+  ready,
+}: {
+  symbol: VolatilitySymbol
+  range: { start: string; end: string }
+  queries: ReturnType<typeof marketQueries>
+  locale: Locale
+  ready: boolean
+}) {
+  const vix = useMarketQuery(queries.vix(symbol, range), locale, ready)
+  const vixAverages = useMarketQuery(
+    queries.vixAverages(symbol, range),
+    locale,
+    ready
+  )
+  return (
+    <>
+      <MarketQuerySection
+        query={vix}
+        loading={<VixHistoryLoading symbol={symbol} />}
+      >
+        {data => (
+          <VixHistoryChart
+            symbol={symbol}
+            history={
+              data ? { ...data, indicators: vixAverages.data ?? null } : null
+            }
+            locale={locale}
+          />
+        )}
+      </MarketQuerySection>
+      <MarketQuerySection query={vixAverages} loading={null}>
+        {() => null}
+      </MarketQuerySection>
     </>
   )
 }
