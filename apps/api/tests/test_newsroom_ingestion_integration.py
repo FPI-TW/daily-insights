@@ -519,6 +519,24 @@ async def test_fetch_stores_a_good_body(
     assert row.body_fetched_at == NOW and row.body_quality_reason is None
 
 
+async def test_fetch_never_stores_a_paywalled_page_however_long_its_teaser(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    article_id = await add_article(newsroom_database, await add_source(newsroom_database))
+    paywalled = ARTICLE_HTML.replace(
+        "</head>",
+        '<script type="application/ld+json">'
+        '{"@type": "NewsArticle", "isAccessibleForFree": false}</script></head>',
+    )
+    assert paywalled != ARTICLE_HTML
+
+    assert await run_fetch(newsroom_database, page(paywalled)) == "done"
+
+    row = await article_row(newsroom_database, article_id)
+    assert (row.fetch_status, row.body_status, row.body) == ("done", "unavailable", None)
+    assert row.body_quality_reason == "paywalled"
+
+
 async def test_fetch_rejects_chrome_and_marks_robots_unavailable_as_done(
     newsroom_database: async_sessionmaker[AsyncSession],
 ) -> None:

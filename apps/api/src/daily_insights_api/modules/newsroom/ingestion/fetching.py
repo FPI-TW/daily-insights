@@ -2,7 +2,7 @@
 
 Outcomes (spec §6.1, D18):
 
-- ``ok`` — the body passed ``quality.assess``.
+- ``ok`` — the page is not marked paywalled and its body passed ``quality.assess``.
 - ``rejected`` — a page was read but the text is not the article.
 - ``unavailable`` — robots.txt forbids it, the page is paywalled or access is
   denied, it is not HTML, too large, gone, or redirects off the allowlist.
@@ -206,6 +206,15 @@ def make_fetch_handler(settings: Settings, deps: IngestionDeps) -> StageHandler:
             values["title"] = title
         if article.published_at is None and page.published_at is not None:
             values["published_at"] = page.published_at
+        # A paywalled page shows a teaser and site chrome; long enough to pass
+        # ``assess``, it would otherwise be analysed as if it were the article.
+        if page.paywalled:
+            return {
+                **values,
+                "body": None,
+                "body_status": "unavailable",
+                "body_quality_reason": "paywalled",
+            }
         verdict = assess(title, page.text)
         if verdict.ok:
             return {
@@ -214,13 +223,6 @@ def make_fetch_handler(settings: Settings, deps: IngestionDeps) -> StageHandler:
                 "body_status": "ok",
                 "body_source": "fetch",
                 "body_quality_reason": None,
-            }
-        if page.paywalled:
-            return {
-                **values,
-                "body": None,
-                "body_status": "unavailable",
-                "body_quality_reason": "paywalled",
             }
         return {
             **values,
