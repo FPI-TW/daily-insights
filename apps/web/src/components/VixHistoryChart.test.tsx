@@ -186,8 +186,9 @@ describe("VixHistoryChart", () => {
 
   it("names the Hong Kong volatility index in every state", async () => {
     const hsil = { ...history, symbol: "^HSIL" as const }
+    // Loaded data names itself; the prop only covers the empty states.
     await renderLocalized(
-      <VixHistoryChart symbol="^HSIL" history={hsil} locale="en" />
+      <VixHistoryChart symbol="^VIX" history={hsil} locale="en" />
     )
     expect(
       screen.getByRole("heading", { name: "HSI Volatility Index trend" })

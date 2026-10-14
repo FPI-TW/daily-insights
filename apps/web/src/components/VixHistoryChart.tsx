@@ -67,15 +67,17 @@ function VixState({
 }
 
 export function VixHistoryChart({
-  symbol,
+  symbol: fallbackSymbol,
   history,
   locale,
 }: {
+  /** Names the chart while there is no history; loaded data names itself. */
   symbol: VolatilitySymbol
   history: VixHistory | null
   locale: Locale
 }) {
   const { t } = useTranslation()
+  const symbol = history?.symbol ?? fallbackSymbol
   const colors = useChartColors()
   const name = volatilityName(symbol, t)
 
