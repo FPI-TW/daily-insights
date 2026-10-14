@@ -129,7 +129,7 @@ Conditional-required Variables：
 - Variables `DAILY_INSIGHTS_NEWSROOM_TRIAGE_MODEL`、`DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL`、
   `DAILY_INSIGHTS_NEWSROOM_ANALYSIS_MODEL`、`DAILY_INSIGHTS_NEWSROOM_TRANSLATE_MODEL`
   （皆為 `deepseek-chat`）與 `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_MODEL`
-  （`text-embedding-3-small`，向量必須是 1536 維）；
+  （`text-embedding-3-large`，向量必須是 1536 維）；
 - Secret `DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL`：Slack incoming webhook，有設定時
   必須以 `https://hooks.slack.com/` 開頭；未設定時通知只寫入 worker log；
 - Variables `DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES`、`DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES`

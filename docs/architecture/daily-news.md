@@ -80,15 +80,17 @@ flowchart TB
 
 完整欄位以 `apps/api/src/daily_insights_api/modules/newsroom/models.py` 為準。
 
-| 資料表                   | 內容                                                                                                                      |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| `newsroom_sources`       | 來源設定（格式、網址、網域、涵蓋市場、信任等級 1–3、權重 0.5–2.0、輪詢間隔 5–1440 分鐘、啟用）與健康狀態欄位              |
-| `newsroom_articles`      | 每個發布者 URL 一列（`url_hash` 唯一）；全文、`fetch`／`embed`／`triage` 三組佇列欄位、`embedding vector(1536)`、初篩結果 |
-| `newsroom_events`        | 單一版次窗內的事件；共用的三語標題與摘要、相關標的；`analysis` 與 `en` 兩組佇列欄位、`en_source_digest`                   |
-| `newsroom_editions`      | 每個 `(edition_date, market_code)` 唯一的一版；`draft`／`published`、`selection_mode`、發布時間與發布者                   |
-| `newsroom_edition_items` | 某事件在某市場版的項目；排序、星等、粗分快照、`origin`、三語「為何重要」與 `why` 佇列欄位、移除／隱藏／放棄時間           |
-| `newsroom_edit_log`      | 每個管理員動作的 append-only 紀錄（`before`／`after` JSONB）                                                              |
-| `newsroom_llm_calls`     | 每次 LLM／embedding 呼叫的稽核：stage、model、prompt 版本、token、延遲、request id、錯誤碼；不存 prompt 與正文            |
+| 資料表                      | 內容                                                                                                                                                  |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `newsroom_sources`          | 來源設定（格式、網址、網域、連結規則、排除標題規則、涵蓋市場、信任等級 1–3、權重 0.5–2.0、輪詢間隔 5–1440 分鐘、啟用、刪除時間）與健康狀態欄位        |
+| `newsroom_articles`         | 每個發布者 URL 一列（`url_hash` 唯一）；全文、`fetch`／`embed`／`triage` 三組佇列欄位、`embedding vector(1536)`、初篩結果（稿件類型、判斷原值、粗分） |
+| `newsroom_events`           | 單一版次窗內的事件；共用的三語標題與摘要、相關標的；`analysis` 與 `en` 兩組佇列欄位、`en_source_digest`                                               |
+| `newsroom_editions`         | 每個 `(edition_date, market_code)` 唯一的一版；`draft`／`published`、`selection_mode`、發布時間與發布者                                               |
+| `newsroom_edition_items`    | 某事件在某市場版的項目；排序、星等、粗分快照、`origin`、三語「為何重要」與 `why` 佇列欄位、移除／隱藏／放棄時間                                       |
+| `newsroom_edit_log`         | 每個管理員動作的 append-only 紀錄（`before`／`after` JSONB）                                                                                          |
+| `newsroom_llm_calls`        | 每次 LLM／embedding 呼叫的稽核：stage、model、prompt 版本、token、延遲、request id、錯誤碼；不存 prompt 與正文                                        |
+| `newsroom_dedupe_decisions` | 組稿時模型提議的每組重複事件（同窗合併、前版比對）與程式的處理結果，append-only                                                                       |
+| `newsroom_editor_ratings`   | 組稿時精選對每個候選的星等、名次、粗分與是否入選，append-only                                                                                         |
 
 `selection_mode` 為 `pending`、`editor`（精選成功）、`fallback`（精選失敗改用粗分）或
 `legacy`（舊管線搬移）。項目 `origin` 為 `model`、`manual`（管理員加入）或 `legacy`。
@@ -141,10 +143,13 @@ flowchart TB
 ### 來源與收稿
 
 - 來源存放於 `newsroom_sources`，初始資料由 seed migration 從舊 feed 註冊表匯入；
-  之後在後台「新聞來源管理」新增、修改、停用。支援格式：`rss`、`rdf`、`atom`、
+  之後在後台「新聞來源管理」新增、修改、停用、刪除。支援格式：`rss`、`rdf`、`atom`、
   `rss_full`、`news_sitemap`、`json_list`、`guardian_api`，以及承接管理員池外 URL 的
   固定 `manual` 來源。非執行中的歷史來源見
   [非執行中的新聞來源](inactive-news-sources.md)。
+- 刪除來源是軟刪除：設定 `deleted_at` 並強制停用（資料庫限制已刪除的來源不得啟用），
+  後台清單不再顯示、也不能再編輯或啟用；已收的文章保留，繼續支撐過去的事件與已發布
+  版次的來源列表。代號仍被佔用，不能用同一個 `key` 再建立。`manual` 來源不可刪除。
 - worker 每分鐘領取 `enabled ∧ next_poll_at <= now()` 的來源（每批最多 32 個、同時
   4 個），以租約推遲 `next_poll_at` 10 分鐘避免重複輪詢；每個來源獨立成敗。
 - Feed 請求經 SSRF-safe client：只連公開 HTTPS 位址、遵守 robots.txt、不跟隨 feed
@@ -152,7 +157,15 @@ flowchart TB
 - 需要憑證的來源（Guardian API key、SEC 聯絡信箱）在設定缺漏時略過，`last_error_code`
   記為 `guardian_api_key_missing`／`sec_contact_email_missing`，不計入連續失敗。
 - 去重：`url_hash`（SHA-256）唯一；同一版次窗內標題完全相同者略過；發布時間早於
-  24 小時的 feed 項目不收；設定 `language_filter` 的來源丟棄其他語言。
+  24 小時的 feed 項目不收；設定 `language_filter` 的來源丟棄其他語言；標題符合來源
+  `title_exclude_pattern`（正規表示式，`re.search`）的項目不收，用來擋機器速報、盤前
+  掃描等例行稿，不花抓取、embedding 與初篩成本。
+- 語言欄位：標題（或標題＋摘要）中漢字佔字母 20% 以上且沒有假名、諺文者直接判為
+  中文，再以 OpenCC 區分繁簡（只有簡體字形且沒有任何繁體專用字才是 `zh-cn`）；
+  其他文字才交給 `langdetect`。`langdetect` 會把短的中文標題判成韓文、越南文等。
+- 只收新聞媒體：官方發布（央行、統計機關、SEC 申報）與企業公關稿不收。2026-10-14
+  依收稿觀察調整的來源（移除非新聞來源、停用、權重、端點、連結與排除標題規則）記錄在
+  migration `20261014_0040`；後台之後的修改以資料庫為準。
 - 健康：成功時重置 `consecutive_failures`；失敗時累計並記錄 `last_error_code`。
   連續失敗且距離最後成功（或建立時間）超過 6 小時的來源發出一次 `source_unhealthy`
   通知，恢復成功後重置。
@@ -173,11 +186,29 @@ flowchart TB
 ### Embedding、初篩與事件分群
 
 - `embed`：以標題＋feed 摘要（不等全文）呼叫 OpenAI-compatible embedding API，
-  預設 `text-embedding-3-small`、1536 維，存入 `pgvector`。成功即排入初篩。
+  預設 `text-embedding-3-large`、1536 維（API 的 `dimensions`），存入 `pgvector`。成功即
+  排入初篩。標題沒有任何中日韓文字的文章，先以 `NEWSROOM_TRANSLATE_MODEL` 把標題與摘要
+  翻成台灣用語的繁體中文再 embed，讓英文報導能找到同一事件的中文報導；實際送出的文字
+  存在 `embedding_text`。翻譯失敗隨 `embed` 階段重試，最後一次仍失敗（或遇到不可重試的
+  錯誤）時改用原文 embed，不讓文章卡住。2026-10-14 離線比較：英文文章在前 10 個候選事件
+  中找到對應中文事件的比例，3-small 為 86%，3-large 為 94%，加上翻譯為 97%。
+- 換 embedding 模型或翻譯方式後，不同模型的向量不能互相比較：部署後立刻執行
+  `make newsroom-reembed`（預設重算收稿中版次的所有文章向量，可傳 `START`、`END`），
+  事件歸屬與已發布版次不受影響。品質指標的跨日重複判定也用文章向量，跨越切換日的比較
+  需要把前 2 天一起重算。
 - `triage`：DeepSeek JSON mode、temperature 0。輸入標題、來源、摘要或全文前段，以及
-  同一版次窗內 kNN 最相近的 5 個事件（附 `working_title` 與 2 則代表標題）。輸出
-  `relevant`、`topic`、三市場 0–100 粗分，以及歸屬既有事件或開新事件。不相關文章
-  不歸屬事件。
+  同一版次窗內 kNN 最相近的 10 個事件（附 `working_title` 與 2 則代表標題）。模型只回答
+  離散判斷：`story_type`（official、data、catalyst、price_action、preview、opinion、
+  press_release、other）、`new_facts`、`impact`（1–5）、各市場 `directness`（0–4）、
+  `topic`，以及歸屬既有事件或開新事件。
+- 三市場 0–100 粗分由 `scoring.py` 計算：`impact` 基準分（40／54／68／82／96）乘上
+  `directness` 係數（0／0.35／0.7／0.85／1），沒有新事實扣 15，再依稿件類型封頂
+  （盤勢 40、預告 55、評論 60、公關稿 45）。任一市場達 40 分為 `relevant`；
+  `directness` 只有 1 的市場一定低於 40。判斷原值存在 `triage_signals`，可不重新呼叫
+  模型就重新校準公式。不相關文章不歸屬事件。
+- 發布時間早於收稿窗起點 2 小時以上的文章（隔天才補進 feed 的舊稿）只能併入既有事件，
+  不得開新事件；找不到可併入的事件時不參與選稿（`triage_signals.stale = true`）。
+  管理員手動加入的池外文章不受此限。
 - 事件寫入以每個版次日期的 advisory lock 序列化；決定開新事件時在鎖內再做一次 kNN，
   與模型呼叫期間新開事件相似度 ≥ 0.88 者改歸屬該事件，避免同一事件被重複開啟。
 - 事件可在後台合併（被合併者 `status = merged`、指向目標）或拆分（被拆出的文章
@@ -191,25 +222,49 @@ function，不與其他 provider 共用鎖。流程冪等：
 
 1. 等待窗內 `embed`／`triage` 仍為 `pending` 的文章，最多到 08:10；剩餘數量寫入
    `ignored_pending_triage`。
-2. 每市場計算事件粗分：`max(文章市場分數 × 來源權重)`，每多一個不同來源 +5，
-   最多 +20。
+2. 每市場計算事件粗分：`max(文章市場分數 × 來源權重)`，每多一家不同媒體 +5，
+   最多 +20。同一媒體的多個頻道（以來源名稱判斷，例如經濟日報的兩個 feed）只算一家；
+   稿件類型上限（評論 60、預告 55、公關稿 45）在乘上來源權重之後才套用。盤勢稿（`story_type = price_action`）不計分也不計來源數：只有盤勢稿的
+   事件不入選（晨報已有行情區塊），同時有原始新聞的事件只以原始新聞計分。
 3. 只有含至少一篇 `body_status = ok` 文章、且該市場分數大於 0 的事件可入選；取粗分
-   前 30 名。
-4. 精選（每市場一次 LLM 呼叫，`DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL`）：輸入事件、
-   最多 5 則報導標題與來源、報導家數，輸出每個事件 1–5 星。失敗會在組稿內重試至多
-   3 次；仍失敗或遇到不可重試錯誤時改用 `fallback`：依粗分取前 5 名、星等留空，並
-   發出 `selection_fallback` 通知。
-5. 由程式套配額：5 星全收；4 星最多 5 則；5＋4 星不足 5 則時才以 1–3 星補到 5 則。
-6. 建立或重建 `draft` 版次與項目，並把入選事件排入分析。重建時保留管理員加入的
+   前 40 名。同分時依序比較不同媒體數、報導篇數、最高信任等級、最早出現時間。
+4. 合併重複候選：一次 LLM 呼叫找出被拆成多個事件的同一則新聞；同組事件的工作標題
+   embedding 相似度 ≥ 0.85，或 ≥ 0.75 且兩個標題有相同的關鍵數字（金額或比率，不含
+   日期）時才合併。
+5. 前版比對（D14 修正）：一次 LLM 呼叫把候選與前 2 天已發布、仍可見的項目比對，並
+   判斷有無新事實。同一事件、沒有新事實、且標題符合上一步的相似度規則者排除；其他
+   配對留在候選，送精選時附上前版的日期與上架標題（`earlier_coverage`）。
+6. 精選（每市場一次 LLM 呼叫，`DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL`）：輸入事件、
+   最多 5 則報導標題與來源、報導家數、前版上架資訊，輸出每個事件 1–5 星。盤勢稿與
+   只重述前版的事件最多 2 星。失敗會在組稿內重試至多 3 次；仍失敗或遇到不可重試錯誤
+   時改用 `fallback`：依粗分取前 5 名、星等留空，並發出 `selection_fallback` 通知。
+7. 由程式套配額：5 星全收；4 星最多 5 則；5＋4 星不足 5 則時只以 3 星補到 5 則，
+   1–2 星不補，當天可少於 5 則。
+8. 建立或重建 `draft` 版次與項目，並把入選事件排入分析。重建時保留管理員加入的
    項目與已移除的項目；已發布的版次不重建。
-7. 有任何市場完成組稿時發出一次 `draft_ready` 通知（各市場則數、5 星事件標題、
-   未初篩數量、後台連結）。
+9. 有任何市場完成組稿時發出一次 `draft_ready` 通知（各市場則數、5 星事件標題、
+   未初篩數量、合併與排除的重複事件數、後台連結）。
+
+第 4、5 步的每一組提議（兩個標題、相似度、門檻、是否有相同關鍵數字、結果）都寫入
+`newsroom_dedupe_decisions`，被門檻擋下的也一樣。兩步都是盡力而為：模型呼叫失敗只記錄
+警告，組稿照常進行。第 6 步精選成功時，每個候選的名次、粗分、星等、是否入選、是否為
+前版後續都寫入 `newsroom_editor_ratings`，沒入選的也一樣，用來追查好新聞為何落選。
 
 旗標關閉時 function 回傳 `no_change`；在 08:00 前手動觸發時回傳可重試的
 `newsroom_window_open`。其他失敗由統一 orchestration 依一般 function 規則每 30 分鐘
 重試至 10:00 soft deadline。需要對特定日期重新組稿時，使用
 `make assemble-newsroom [EDITION_DATE=YYYY-MM-DD]`，它在 newsroom-worker 容器中執行
 `python -m daily_insights_api.scripts.run_newsroom_assemble`（同樣要求旗標開啟且收稿窗已關閉）。
+
+### 品質指標
+
+`make newsroom-quality [START=YYYY-MM-DD] [END=YYYY-MM-DD]`（預設最近 7 個版次）執行
+`run_newsroom_quality`，唯讀、不呼叫模型，印出：每日收稿、相關、早於收稿窗的舊稿、
+事件與上架數；換稿率（管理員移除與手動加入 ÷ 模型選入）與改字率；各星等的移除率；
+同版與跨日（前 2 天）重複上架，判定為兩事件文章 embedding 相似度 ≥ 0.88，並列出配對
+供人工確認；組稿重複篩選的提議與結果；各星等的候選數與入選數，以及 4 星以上卻未入選
+的候選；以及供人工核對事實的抽樣。每次調整管線前後各跑
+一次同長度的區間比較。
 
 ### 深度分析與「為何重要」
 
@@ -272,16 +327,16 @@ function，不與其他 provider 共用鎖。流程冪等：
 `/api/admin/newsroom`，只呼叫 newsroom 的 service 函式與佇列狀態變更，不直接呼叫 LLM；
 每個動作都寫入 `newsroom_edit_log`。
 
-| 功能     | 說明                                                                                                   |
-| -------- | ------------------------------------------------------------------------------------------------------ |
-| 版次總覽 | 依日期檢視三個市場版的狀態、自動發布倒數、未初篩與初篩失敗數、`fallback` 警示                          |
-| 核准     | 「核准此市場」或「核准全部草稿」，立即發布                                                             |
-| 項目編修 | 改標題／摘要、改「為何重要」、移除／還原（草稿）、隱藏／取消隱藏（已發布）、上下排序                   |
-| 候選事件 | 依粗分列出尚未入選的事件，可「加入此版」；新加入的項目自動排入分析或單一市場「為何重要」               |
-| 事件     | 原文對照（含全文狀態與初篩狀態）、合併其他事件、拆分選取的文章、重新分析                               |
-| 全文     | 對「缺全文」或抓不到全文的文章「貼上全文」                                                             |
-| 池外文章 | 「手動加入池外文章」：輸入公開 HTTPS 網址，歸入正在審核的版次日期，走完整的抓取 → embedding → 初篩     |
-| 來源管理 | 新增、編輯、啟用／停用來源，調整信任等級、權重、輪詢間隔；檢視最後輪詢、最後成功、連續失敗與最後錯誤碼 |
+| 功能     | 說明                                                                                                         |
+| -------- | ------------------------------------------------------------------------------------------------------------ |
+| 版次總覽 | 依日期檢視三個市場版的狀態、自動發布倒數、未初篩與初篩失敗數、`fallback` 警示                                |
+| 核准     | 「核准此市場」或「核准全部草稿」，立即發布                                                                   |
+| 項目編修 | 改標題／摘要、改「為何重要」、移除／還原（草稿）、隱藏／取消隱藏（已發布）、上下排序                         |
+| 候選事件 | 依粗分列出尚未入選的事件，可「加入此版」；新加入的項目自動排入分析或單一市場「為何重要」                     |
+| 事件     | 原文對照（含全文狀態與初篩狀態）、合併其他事件、拆分選取的文章、重新分析                                     |
+| 全文     | 對「缺全文」或抓不到全文的文章「貼上全文」                                                                   |
+| 池外文章 | 「手動加入池外文章」：輸入公開 HTTPS 網址，歸入正在審核的版次日期，走完整的抓取 → embedding → 初篩           |
+| 來源管理 | 新增、編輯、啟用／停用、刪除來源，調整信任等級、權重、輪詢間隔；檢視最後輪詢、最後成功、連續失敗與最後錯誤碼 |
 
 狀態標示：「分析中」、「分析失敗」、「缺全文」、「撰寫『為何重要』中」、「『為何重要』失敗」、
 「12:00 未完成已放棄」。
@@ -306,21 +361,21 @@ function，不與其他 provider 共用鎖。流程冪等：
 
 所有設定以 `DAILY_INSIGHTS_` 為前綴，定義於 `core/config.py`。
 
-| 變數                                                                           | 預設                           | 使用者                                     | 用途                                                       |
-| ------------------------------------------------------------------------------ | ------------------------------ | ------------------------------------------ | ---------------------------------------------------------- |
-| `NEWSROOM_ENABLED`                                                             | `false`                        | newsroom-worker、orchestration-worker、api | 啟用常駐管線與 08:00 組稿；api 用於 orchestration 目錄狀態 |
-| `NEWSROOM_LLM_BASE_URL`、`NEWSROOM_LLM_API_KEY`                                | `https://api.deepseek.com`     | newsroom-worker、orchestration-worker      | DeepSeek（OpenAI-compatible）                              |
-| `NEWSROOM_TRIAGE_MODEL`、`NEWSROOM_ANALYSIS_MODEL`、`NEWSROOM_TRANSLATE_MODEL` | `deepseek-chat`                | newsroom-worker                            | 初篩、分析與為何重要、英文翻譯的 model                     |
-| `NEWSROOM_EDITOR_MODEL`                                                        | `deepseek-chat`                | orchestration-worker                       | 08:00 精選的 model                                         |
-| `NEWSROOM_LLM_TIMEOUT_SECONDS`                                                 | `90`                           | 同 LLM                                     | 單次 LLM 呼叫 timeout                                      |
-| `NEWSROOM_EMBEDDING_BASE_URL`、`NEWSROOM_EMBEDDING_API_KEY`                    | `https://api.openai.com/v1`    | newsroom-worker                            | OpenAI-compatible embedding                                |
-| `NEWSROOM_EMBEDDING_MODEL`、`NEWSROOM_EMBEDDING_TIMEOUT_SECONDS`               | `text-embedding-3-small`、`30` | newsroom-worker                            | embedding model 與 timeout（向量固定 1536 維）             |
-| `NEWSROOM_SLACK_WEBHOOK_URL`                                                   | 未設定                         | newsroom-worker、orchestration-worker      | Slack 通知；必須是 `https://hooks.slack.com/` 網址         |
-| `NEWSROOM_ADMIN_BASE_URL`                                                      | `http://localhost:3000`        | newsroom-worker、orchestration-worker      | 通知中的後台連結 origin                                    |
-| `NEWSROOM_WORKER_POLL_SECONDS`、`NEWSROOM_FETCH_CONCURRENCY`                   | `2`、`4`                       | newsroom-worker                            | 空佇列輪詢間隔（也是停用時的心跳間隔）與全文抓取並行數     |
-| `NEWS_EXTRA_HOSTNAMES`、`NEWS_BLOCKED_HOSTNAMES`                               | 空                             | newsroom-worker（blocked 也用於 api）      | 全文白名單增補與封鎖；封鎖也停止輪詢並拒絕池外 URL         |
-| `NEWS_FETCH_TIMEOUT_SECONDS`、`NEWS_DISCOVERY_TIMEOUT_SECONDS`                 | `25`、`30`                     | newsroom-worker                            | 全文頁面與 feed 讀取 timeout                               |
-| `GUARDIAN_API_KEY`、`SEC_CONTACT_EMAIL`                                        | 未設定                         | newsroom-worker                            | 需要憑證的來源；未設定時略過該來源                         |
+| 變數                                                                           | 預設                           | 使用者                                     | 用途                                                                      |
+| ------------------------------------------------------------------------------ | ------------------------------ | ------------------------------------------ | ------------------------------------------------------------------------- |
+| `NEWSROOM_ENABLED`                                                             | `false`                        | newsroom-worker、orchestration-worker、api | 啟用常駐管線與 08:00 組稿；api 用於 orchestration 目錄狀態                |
+| `NEWSROOM_LLM_BASE_URL`、`NEWSROOM_LLM_API_KEY`                                | `https://api.deepseek.com`     | newsroom-worker、orchestration-worker      | DeepSeek（OpenAI-compatible）                                             |
+| `NEWSROOM_TRIAGE_MODEL`、`NEWSROOM_ANALYSIS_MODEL`、`NEWSROOM_TRANSLATE_MODEL` | `deepseek-chat`                | newsroom-worker                            | 初篩、分析與為何重要、英文翻譯（含 embed 前把非中文標題譯成繁中）的 model |
+| `NEWSROOM_EDITOR_MODEL`                                                        | `deepseek-chat`                | orchestration-worker                       | 08:00 精選的 model                                                        |
+| `NEWSROOM_LLM_TIMEOUT_SECONDS`                                                 | `90`                           | 同 LLM                                     | 單次 LLM 呼叫 timeout                                                     |
+| `NEWSROOM_EMBEDDING_BASE_URL`、`NEWSROOM_EMBEDDING_API_KEY`                    | `https://api.openai.com/v1`    | newsroom-worker                            | OpenAI-compatible embedding                                               |
+| `NEWSROOM_EMBEDDING_MODEL`、`NEWSROOM_EMBEDDING_TIMEOUT_SECONDS`               | `text-embedding-3-large`、`30` | newsroom-worker                            | embedding model 與 timeout（向量固定 1536 維）                            |
+| `NEWSROOM_SLACK_WEBHOOK_URL`                                                   | 未設定                         | newsroom-worker、orchestration-worker      | Slack 通知；必須是 `https://hooks.slack.com/` 網址                        |
+| `NEWSROOM_ADMIN_BASE_URL`                                                      | `http://localhost:3000`        | newsroom-worker、orchestration-worker      | 通知中的後台連結 origin                                                   |
+| `NEWSROOM_WORKER_POLL_SECONDS`、`NEWSROOM_FETCH_CONCURRENCY`                   | `2`、`4`                       | newsroom-worker                            | 空佇列輪詢間隔（也是停用時的心跳間隔）與全文抓取並行數                    |
+| `NEWS_EXTRA_HOSTNAMES`、`NEWS_BLOCKED_HOSTNAMES`                               | 空                             | newsroom-worker（blocked 也用於 api）      | 全文白名單增補與封鎖；封鎖也停止輪詢並拒絕池外 URL                        |
+| `NEWS_FETCH_TIMEOUT_SECONDS`、`NEWS_DISCOVERY_TIMEOUT_SECONDS`                 | `25`、`30`                     | newsroom-worker                            | 全文頁面與 feed 讀取 timeout                                              |
+| `GUARDIAN_API_KEY`、`SEC_CONTACT_EMAIL`                                        | 未設定                         | newsroom-worker                            | 需要憑證的來源；未設定時略過該來源                                        |
 
 `newsroom-worker` 在 `NEWSROOM_ENABLED=true` 時於啟動驗證設定：LLM 與 embedding 的
 base URL 必須是 absolute HTTPS，API key 不得空白或為 placeholder，Slack webhook 若有
