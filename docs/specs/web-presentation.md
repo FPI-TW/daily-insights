@@ -344,9 +344,14 @@ ECharts 6 的矩陣會將 1px 邊框對齊至正向半像素；右側貼齊 canv
 美股的「五大指數表現」表格改為跨市場的 `IndexPerformanceTable`：收盤價與日／月／年
 漲跌的計算不變，列的順序與標題由呼叫端決定。美股頁以 `PAGE_BLOCKS.performance`
 宣告五檔的固定順序（非 catalog 的字母序），仍放在與晨報並排的左欄；港股頁在指數
-卡片與產業熱力圖之間顯示同一張表，列為 `indexChartSymbolsForMarket("hk_equity")`
+卡片下方顯示同一張表，列為 `indexChartSymbolsForMarket("hk_equity")`
 （恆生指數、國企指數），波動率指數 `^HSIL` 既不列出也不算缺漏。標題鍵為
 `indexTableTitle_<marketCode>`，載入／不可用／無資料文案以 `{{title}}` 插值。
+
+## 港股產業熱力圖位置（2026-10-14）
+
+產業熱力圖移出左右欄位，改為港股頁最後一個區塊：指數走勢圖與波動率圖之後、
+頁面最下方。query 仍只在 `hkEquity` 頁掛載。
 
 ## 港股乖離率（2026-10-14）
 

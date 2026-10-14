@@ -267,16 +267,6 @@ function ReportPage() {
                 </MarketQuerySection>
               </div>
             ) : null}
-            {blocks.hkEquity ? (
-              <MarketQuerySection
-                query={hkHeatmap}
-                loading={<HkSectorHeatmapLoading />}
-              >
-                {data => (
-                  <HkSectorHeatmap heatmap={data ?? null} locale={locale} />
-                )}
-              </MarketQuerySection>
-            ) : null}
             <MarketQuerySection
               query={report}
               loading={<ReportLoadingScreen />}
@@ -370,6 +360,14 @@ function ReportPage() {
             </div>
           </DashboardSection>
         </div>
+      ) : null}
+      {blocks.hkEquity ? (
+        <MarketQuerySection
+          query={hkHeatmap}
+          loading={<HkSectorHeatmapLoading />}
+        >
+          {data => <HkSectorHeatmap heatmap={data ?? null} locale={locale} />}
+        </MarketQuerySection>
       ) : null}
     </>
   )

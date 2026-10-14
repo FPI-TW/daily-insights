@@ -297,19 +297,21 @@ describe("market desktop grid cells", () => {
     expect(
       within(performance).queryByText("HSI Volatility Index")
     ).not.toBeInTheDocument()
-    // Cards, then the performance table, then the heatmap, in one column.
+    // Cards, then the performance table, in one column; the heatmap closes
+    // the page after the volatility chart.
     expect(
       hsi.compareDocumentPosition(performance) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-    expect(
-      performance.compareDocumentPosition(heatmap) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
     expect(screen.getAllByRole("region")).toHaveLength(5)
     expect(screen.queryByText("Report not launched yet")).toBeNull()
     expect(screen.getByText("Index history with bias")).toBeVisible()
-    expect(screen.getByText("Volatility ^HSIL")).toBeVisible()
+    const volatility = screen.getByText("Volatility ^HSIL")
+    expect(volatility).toBeVisible()
+    expect(
+      volatility.compareDocumentPosition(heatmap) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
     expect(
       state.requested
         .filter(([key]) => key === "vix")
