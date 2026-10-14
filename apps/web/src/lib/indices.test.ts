@@ -3,6 +3,8 @@ import {
   indexHistoryOutcomes,
   indexChartSymbolsForMarket,
   indexMovingAverageOutcomes,
+  percentageChange,
+  pointChange,
   trackedSymbolsForMarket,
   twoYearTaipeiRange,
 } from "./indices"
@@ -82,6 +84,11 @@ describe("trackedSymbolsForMarket", () => {
       "^VIX",
     ])
     expect(trackedSymbolsForMarket("tw_equity")).toEqual(["^TWII"])
+    expect(trackedSymbolsForMarket("hk_equity")).toEqual([
+      "^HSI",
+      "^HSCE",
+      "^HSIL",
+    ])
   })
 
   it("fans out without requiring an organization-backed market list", () => {
@@ -151,6 +158,19 @@ describe("indexMovingAverageOutcomes", () => {
         ]
       )
     ).toEqual({ "^TWII": response })
+  })
+})
+
+describe("index changes", () => {
+  it("derives point and percent moves and stays null for missing, non-numeric or zero baselines", () => {
+    expect(pointChange("24211.35", "23785.79")).toBeCloseTo(425.56)
+    expect(percentageChange("110", "100")).toBeCloseTo(10)
+    expect(percentageChange(95, "100")).toBeCloseTo(-5)
+    expect(pointChange("100", null)).toBeNull()
+    expect(percentageChange(undefined, "100")).toBeNull()
+    expect(percentageChange("abc", "100")).toBeNull()
+    expect(pointChange("100", "0")).toBe(100)
+    expect(percentageChange("100", "0")).toBeNull()
   })
 })
 

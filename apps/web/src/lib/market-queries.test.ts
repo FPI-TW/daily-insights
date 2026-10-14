@@ -6,6 +6,7 @@ import {
   marketQueryKey,
   marketQueryPolicy,
   marketTransport,
+  heatmapRefetchInterval,
 } from "./market-queries"
 import { clearMarketQueries } from "./useSessionExpiry"
 
@@ -120,6 +121,32 @@ describe("market browser queries", () => {
       options.queryFn({ signal: new AbortController().signal })
     ).rejects.toHaveProperty("status", 401)
   })
+  it("caches the latest index bars for every market under one key", async () => {
+    const latest = (symbol: string, market_code: string) => ({
+      ...bar,
+      symbol,
+      market_code,
+      previous_close: "100",
+    })
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        json([latest("^DJI", "us_equity"), latest("^HSI", "hk_equity")])
+      )
+    vi.stubGlobal("fetch", fetch)
+    const options = marketQueries(scope, "en").latestIndices()
+    const result = await options.queryFn({
+      signal: new AbortController().signal,
+    })
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/markets/indices",
+      expect.anything()
+    )
+    expect(result.map(item => item.symbol)).toEqual(["^DJI", "^HSI"])
+    expect(options.queryKey).toEqual(
+      marketQueries(scope, "zh-hant").latestIndices().queryKey
+    )
+  })
   it("isolates user, organization, locale and range; shares viewpoints across locales", () => {
     const en = marketQueries(scope, "en")
     expect(en.reports().queryKey).not.toEqual(
@@ -165,6 +192,44 @@ describe("market browser queries", () => {
     expect(client.getQueryData(["unrelated"])).toBe("keep")
     client.clear()
     vi.restoreAllMocks()
+  })
+  it("refetches the heatmap before its signed URLs expire", () => {
+    const image = (expires_in_seconds: number) => ({ expires_in_seconds })
+    expect(heatmapRefetchInterval(null)).toBe(false)
+    expect(heatmapRefetchInterval({ images: [] })).toBe(false)
+    // 80% of the shortest TTL, so the open-full-size link never goes stale.
+    expect(heatmapRefetchInterval({ images: [image(900), image(600)] })).toBe(
+      480_000
+    )
+    expect(
+      marketQueries(scope, "en").hkSectorHeatmap().refetchInterval
+    ).toEqual(expect.any(Function))
+  })
+  it("treats only the coded 404 as 'no heatmap yet'", async () => {
+    const options = marketQueries(scope, "en")
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          json({ detail: { code: "sector_heatmap_not_captured" } }, 404)
+        )
+    )
+    await expect(
+      options
+        .hkSectorHeatmap()
+        .queryFn({ signal: new AbortController().signal })
+    ).resolves.toBeNull()
+    // A market the organization cannot see must not look like an empty ledger.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(json({ detail: "index not found" }, 404))
+    )
+    await expect(
+      options
+        .hkSectorHeatmap()
+        .queryFn({ signal: new AbortController().signal })
+    ).rejects.toMatchObject({ status: 404 })
   })
   it("validates report_not_generated discrimination and internal-user 403 preview", async () => {
     const options = marketQueries(scope, "en")

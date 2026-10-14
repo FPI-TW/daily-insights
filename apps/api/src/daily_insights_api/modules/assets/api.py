@@ -14,6 +14,7 @@ from daily_insights_api.modules.assets.object_store import (
     ObjectRef,
     ObjectStore,
 )
+from daily_insights_api.modules.assets.r2.store import R2ObjectStore
 
 Locale = Literal["zh-hant", "zh-hans", "en"]
 MigrationStatus = Literal["planned", "verified", "cutover", "failed"]
@@ -237,6 +238,7 @@ __all__ = [
     "MigratedObject",
     "ObjectRef",
     "ObjectStore",
+    "R2ObjectStore",
     "SignedAsset",
     "canonical_podcast_audio_key",
     "canonical_podcast_upload_key",

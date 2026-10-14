@@ -48,24 +48,44 @@ class _WriteSessionFactory:
         return None
 
 
+TODAY = date(2026, 10, 13)
+
+
 @pytest.mark.parametrize(
-    ("period", "has_stored_bars", "expected"),
+    ("period", "latest_bar_date", "expected"),
     [
-        (AUTOMATIC_SHORT_REFRESH_PERIOD, False, INITIAL_SERIES_BACKFILL_PERIOD),
-        (AUTOMATIC_SHORT_REFRESH_PERIOD, True, AUTOMATIC_SHORT_REFRESH_PERIOD),
-        # Only the incremental period bootstraps a missing series; every other
-        # window is an explicit request and passes through untouched.
-        ("2y", False, "2y"),
-        ("5y", False, "5y"),
-        ("max", False, "max"),
+        (AUTOMATIC_SHORT_REFRESH_PERIOD, None, INITIAL_SERIES_BACKFILL_PERIOD),
+        # Yesterday, a long weekend, and exactly a week all stay in the short window.
+        (AUTOMATIC_SHORT_REFRESH_PERIOD, date(2026, 10, 12), AUTOMATIC_SHORT_REFRESH_PERIOD),
+        (AUTOMATIC_SHORT_REFRESH_PERIOD, date(2026, 10, 9), AUTOMATIC_SHORT_REFRESH_PERIOD),
+        (AUTOMATIC_SHORT_REFRESH_PERIOD, date(2026, 10, 6), AUTOMATIC_SHORT_REFRESH_PERIOD),
+        # A gap the short window cannot heal widens to the smallest covering period.
+        (AUTOMATIC_SHORT_REFRESH_PERIOD, date(2026, 10, 5), "1mo"),
+        (AUTOMATIC_SHORT_REFRESH_PERIOD, date(2026, 9, 15), "1mo"),
+        (AUTOMATIC_SHORT_REFRESH_PERIOD, date(2026, 9, 14), "3mo"),
+        (AUTOMATIC_SHORT_REFRESH_PERIOD, date(2026, 7, 21), "3mo"),
+        (AUTOMATIC_SHORT_REFRESH_PERIOD, date(2026, 7, 20), "6mo"),
+        (AUTOMATIC_SHORT_REFRESH_PERIOD, date(2026, 4, 28), "6mo"),
+        (AUTOMATIC_SHORT_REFRESH_PERIOD, date(2026, 4, 27), "1y"),
+        (AUTOMATIC_SHORT_REFRESH_PERIOD, date(2025, 10, 28), "1y"),
+        (AUTOMATIC_SHORT_REFRESH_PERIOD, date(2025, 10, 27), INITIAL_SERIES_BACKFILL_PERIOD),
+        # Only the incremental period bootstraps a missing series or widens for
+        # a gap; every other window is an explicit request and passes through.
+        ("2y", None, "2y"),
+        ("5y", None, "5y"),
+        ("max", None, "max"),
+        ("1d", date(2026, 1, 1), "1d"),
     ],
 )
 def test_select_index_refresh_period(
     period: str,
-    has_stored_bars: bool,
+    latest_bar_date: date | None,
     expected: str,
 ) -> None:
-    assert select_index_refresh_period(period=period, has_stored_bars=has_stored_bars) == expected
+    assert (
+        select_index_refresh_period(period=period, latest_bar_date=latest_bar_date, today=TODAY)
+        == expected
+    )
 
 
 @pytest.mark.parametrize(

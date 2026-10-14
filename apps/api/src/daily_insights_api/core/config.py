@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     twse_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     twse_request_interval_seconds: float = Field(default=6.0, ge=0, le=60)
     twse_retry_attempts: int = Field(default=3, ge=1, le=5)
+    # TradingView's heatmap is screenshotted with a headless browser; it is
+    # opt-in because the worker image needs Chromium and R2 credentials.
+    tradingview_enabled: bool = False
+    tradingview_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    tradingview_heatmap_retention_days: int = Field(default=90, ge=1, le=365)
     orchestration_enabled: bool = False
     orchestration_activation_date: date | None = None
     orchestration_worker_concurrency: int = Field(default=6, ge=1, le=20)
@@ -120,14 +125,7 @@ class Settings(BaseSettings):
             if self.environment not in {"development", "test"}:
                 raise ValueError("database_url is required outside development and test")
             self.database_url = LOCAL_DATABASE_URL
-        if self.runtime_role == "orchestration-worker":
-            self.session_secret = None
-            self.password_pepper = None
-            self.r2_endpoint_url = None
-            self.r2_bucket_name = None
-            self.r2_access_key_id = None
-            self.r2_secret_access_key = None
-        elif self.runtime_role == "media-worker":
+        if self.runtime_role in {"orchestration-worker", "media-worker"}:
             self.session_secret = None
             self.password_pepper = None
         if self.session_secret is None and self.runtime_role == "api":
@@ -156,6 +154,14 @@ class Settings(BaseSettings):
             ):
                 raise ValueError("deployment secrets must not use placeholders")
             self._validate_production_external_services()
+        # The workers reach R2 too: the media worker for podcast audio, the
+        # orchestration worker for the TradingView heatmap when that is on.
+        # Validate at startup rather than on the first upload hours later.
+        if self.environment in {"staging", "production"} and (
+            self.runtime_role == "media-worker"
+            or (self.runtime_role == "orchestration-worker" and self.tradingview_enabled)
+        ):
+            self._validate_r2_configuration()
         return self
 
     def _validate_production_external_services(self) -> None:
@@ -224,8 +230,9 @@ class Settings(BaseSettings):
                 or is_placeholder_value(self.chat_model_api_key.get_secret_value())
             ):
                 raise ValueError("chat_model_api_key is required and cannot be a placeholder")
-        if self.runtime_role not in {"api", "media-worker"}:
-            return
+        self._validate_r2_configuration()
+
+    def _validate_r2_configuration(self) -> None:
         required_r2_values = {
             "r2_endpoint_url": self.r2_endpoint_url,
             "r2_bucket_name": self.r2_bucket_name,

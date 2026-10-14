@@ -2,6 +2,7 @@ import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router"
 import {
   marketCodeSchema,
   launchMarketCodeSchema,
+  type MarketCode,
 } from "@daily-insights/api-client"
 import { useEffect, useRef, useState } from "react"
 import { DailyNews, DailyNewsLoading } from "#/components/DailyNews"
@@ -32,6 +33,11 @@ import {
   StocksPanel,
 } from "#/components/TaiwanInstitutionalFlows"
 import { DashboardSection } from "#/components/DashboardPrimitives"
+import { HkIndexCards, HkIndexCardsLoading } from "#/components/HkIndexCards"
+import {
+  HkSectorHeatmap,
+  HkSectorHeatmapLoading,
+} from "#/components/HkSectorHeatmap"
 import {
   UsIndexPerformanceTable,
   UsIndexPerformanceTableLoading,
@@ -44,6 +50,28 @@ import {
   MacroDashboard,
   MacroDashboardLoading,
 } from "#/components/MacroDashboard"
+
+// What each market page renders besides its morning report. Keyed on every
+// market code, so adding one is a type error until this says what it shows,
+// and a market with any block of its own hides the "not launched" notice.
+type PageBlocks = {
+  macro?: true
+  chart?: "index" | "taiwan"
+  performance?: true
+  vix?: true
+  hkEquity?: true
+  institutional?: true
+}
+const PAGE_BLOCKS = {
+  global_macro_bonds: { macro: true },
+  forex: {},
+  crypto: {},
+  us_equity: { chart: "index", performance: true, vix: true },
+  hk_equity: { hkEquity: true },
+  cn_equity: {},
+  tw_equity: { chart: "taiwan", institutional: true },
+  tw_index_derivatives: {},
+} satisfies Record<MarketCode, PageBlocks>
 
 export const Route = createFileRoute(
   "/{-$locale}/_customer/reports/$marketCode"
@@ -83,7 +111,9 @@ function ReportPage() {
     if (marketCode !== "forex") redirected.current = false
   }, [locale, marketCode, mergedForex, navigate])
   const [range] = useState(() => twoYearTaipeiRange())
-  const isChart = marketCode === "us_equity" || marketCode === "tw_equity"
+  const blocks: PageBlocks = PAGE_BLOCKS[marketCode]
+  const isChart = blocks.chart !== undefined
+  const hasOwnContent = Object.keys(blocks).length > 0
   const report = useMarketQuery(queries.report(marketCode), locale, reportReady)
   const news = useMarketQuery(
     queries.news(marketCode),
@@ -94,7 +124,7 @@ function ReportPage() {
   const macro = useMarketQuery(
     queries.macro(),
     locale,
-    ready && marketCode === "global_macro_bonds"
+    ready && blocks.macro === true
   )
   const history = useMarketQuery(
     queries.history(marketCode, range),
@@ -109,22 +139,32 @@ function ReportPage() {
   const vix = useMarketQuery(
     queries.vix(range),
     locale,
-    ready && marketCode === "us_equity"
+    ready && blocks.vix === true
   )
   const vixAverages = useMarketQuery(
     queries.vixAverages(range),
     locale,
-    ready && marketCode === "us_equity"
+    ready && blocks.vix === true
   )
   const flows = useMarketQuery(
     queries.flows(institutionalFlowRange(range.end)),
     locale,
-    ready && marketCode === "tw_equity"
+    ready && blocks.institutional === true
   )
   const stocks = useMarketQuery(
     queries.stocks(range.end),
     locale,
-    ready && marketCode === "tw_equity"
+    ready && blocks.institutional === true
+  )
+  const hkIndices = useMarketQuery(
+    queries.latestIndices(),
+    locale,
+    ready && blocks.hkEquity === true
+  )
+  const hkHeatmap = useMarketQuery(
+    queries.hkSectorHeatmap(),
+    locale,
+    ready && blocks.hkEquity === true
   )
   useChatPageContext(
     report.data?.kind === "report" && report.data.report.publicationId
@@ -164,19 +204,17 @@ function ReportPage() {
       >
         {() => (viewpoint ? <MarketViewpoint viewpoint={viewpoint} /> : null)}
       </MarketQuerySection>
-      {marketCode === "global_macro_bonds" ? (
+      {blocks.macro ? (
         <MarketQuerySection query={macro} loading={<MacroDashboardLoading />}>
           {data => <MacroDashboard data={data ?? null} locale={locale} />}
         </MarketQuerySection>
       ) : (
         <div
           className={
-            marketCode === "us_equity"
-              ? "grid min-w-0 gap-4 xl:grid-cols-2"
-              : "min-w-0"
+            blocks.performance ? "grid min-w-0 gap-4 xl:grid-cols-2" : "min-w-0"
           }
         >
-          {marketCode === "us_equity" ? (
+          {blocks.performance ? (
             <div className="flex min-w-0 flex-col">
               <MarketQuerySection
                 query={history}
@@ -192,13 +230,35 @@ function ReportPage() {
             </div>
           ) : null}
           <div className="min-w-0">
+            {blocks.hkEquity ? (
+              <MarketQuerySection
+                query={hkIndices}
+                loading={<HkIndexCardsLoading />}
+              >
+                {data => <HkIndexCards bars={data ?? null} locale={locale} />}
+              </MarketQuerySection>
+            ) : null}
+            {blocks.hkEquity ? (
+              <MarketQuerySection
+                query={hkHeatmap}
+                loading={<HkSectorHeatmapLoading />}
+              >
+                {data => (
+                  <HkSectorHeatmap heatmap={data ?? null} locale={locale} />
+                )}
+              </MarketQuerySection>
+            ) : null}
             <MarketQuerySection
               query={report}
               loading={<ReportLoadingScreen />}
             >
               {data =>
                 data && data.kind !== "not-found" ? (
-                  <ReportInformation locale={locale} report={data} />
+                  <ReportInformation
+                    locale={locale}
+                    report={data}
+                    hideNotLaunched={hasOwnContent}
+                  />
                 ) : null
               }
             </MarketQuerySection>
@@ -210,7 +270,7 @@ function ReportPage() {
           <MarketQuerySection
             query={history}
             loading={
-              marketCode === "tw_equity" ? (
+              blocks.chart === "taiwan" ? (
                 <TaiwanIndexHistoryLoading />
               ) : (
                 <IndexHistoryLoading />
@@ -218,7 +278,7 @@ function ReportPage() {
             }
           >
             {data =>
-              marketCode === "tw_equity" ? (
+              blocks.chart === "taiwan" ? (
                 <TaiwanIndexHistoryChart
                   history={data ?? null}
                   locale={locale}
@@ -240,7 +300,7 @@ function ReportPage() {
           </MarketQuerySection>
         </>
       ) : null}
-      {marketCode === "us_equity" ? (
+      {blocks.vix ? (
         <MarketQuerySection query={vix} loading={<VixHistoryLoading />}>
           {data => (
             <VixHistoryChart
@@ -252,12 +312,12 @@ function ReportPage() {
           )}
         </MarketQuerySection>
       ) : null}
-      {marketCode === "us_equity" ? (
+      {blocks.vix ? (
         <MarketQuerySection query={vixAverages} loading={null}>
           {() => null}
         </MarketQuerySection>
       ) : null}
-      {marketCode === "tw_equity" ? (
+      {blocks.institutional ? (
         <div className="mt-6 min-w-0">
           <DashboardSection>
             <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,560px),1fr))] items-start gap-6">

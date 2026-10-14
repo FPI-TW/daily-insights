@@ -76,6 +76,11 @@ if [ "$twse_flag_services" -ne 2 ]; then
   echo "expected DAILY_INSIGHTS_TWSE_ENABLED on api and orchestration-worker; found $twse_flag_services" >&2
   exit 1
 fi
+tradingview_flag_services=$(grep -c 'DAILY_INSIGHTS_TRADINGVIEW_ENABLED: ${DAILY_INSIGHTS_TRADINGVIEW_ENABLED:-false}' "$compose_file")
+if [ "$tradingview_flag_services" -ne 2 ]; then
+  echo "expected DAILY_INSIGHTS_TRADINGVIEW_ENABLED on api and orchestration-worker; found $tradingview_flag_services" >&2
+  exit 1
+fi
 grep -Fq 'daily_insights_api.scripts.run_orchestration_worker' "$compose_file"
 grep -Fq 'daily_insights_api.scripts.run_orchestration_dispatcher' "$compose_file"
 grep -Fq '/tmp/orchestration-worker-heartbeat' "$compose_file"
@@ -271,6 +276,7 @@ export DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS=90
 export DAILY_INSIGHTS_TWELVE_DATA_BASE_URL=
 export DAILY_INSIGHTS_TWELVE_DATA_API_KEY=
 export DAILY_INSIGHTS_DAILY_NEWS_ENABLED=false
+export DAILY_INSIGHTS_TRADINGVIEW_ENABLED=false
 export DAILY_INSIGHTS_NEWS_MODEL_API_KEY=
 export DAILY_INSIGHTS_ORCHESTRATION_ENABLED=true
 export DAILY_INSIGHTS_CUTOVER_TAIPEI_NOW=2026-09-16T10:00:00+0800

@@ -1,8 +1,10 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, PlainSerializer, WithJsonSchema
+
+from daily_insights_api.modules.data_sources.api import HeatmapImageKind
 
 # A stored zero comes back from Numeric(20,10) as Decimal("0E-10"), and Pydantic
 # would put that exponent form on the wire. It fails the pattern this schema
@@ -160,3 +162,21 @@ class InstitutionalStocksResponse(BaseModel):
     contract_hash: str
     endpoint: str
     rows: list[InstitutionalStockFlowResponse]
+
+
+class SectorHeatmapImageResponse(BaseModel):
+    kind: HeatmapImageKind
+    slug: str
+    name: str
+    width: int
+    height: int
+    url: str
+    expires_in_seconds: int
+
+
+class SectorHeatmapResponse(BaseModel):
+    data_source: str
+    edition_date: date
+    captured_at: datetime
+    # Ordered for display: the overview, then the legend.
+    images: list[SectorHeatmapImageResponse]

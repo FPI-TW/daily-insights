@@ -1,6 +1,6 @@
 """Keep the Yahoo half of index_daily_bars current.
 
-Eight symbols in one batched call. ^TWII is not among them: TWSE supplies it,
+Every Yahoo-supplied index in one batched call. ^TWII is not among them: TWSE supplies it,
 and everything TWSE supplies is refreshed by the TWSE run, which holds the one
 client whose request interval keeps the exchange from being asked twice as
 often as either caller believes.
