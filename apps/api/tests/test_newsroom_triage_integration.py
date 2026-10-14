@@ -97,9 +97,11 @@ class FakeJsonModel:
 
 def relevant(event: dict[str, str]) -> dict[str, Any]:
     return {
-        "relevant": True,
         "topic": "policy",
-        "market_scores": {"global": 90, "tw_equity": 40, "us_equity": 75},
+        "story_type": "official",
+        "new_facts": True,
+        "impact": 4,
+        "directness": {"global": 4, "tw_equity": 2, "us_equity": 3},
         "event": event,
     }
 
@@ -336,8 +338,14 @@ async def test_first_article_opens_a_new_event(
     assert payload["article"]["body_excerpt"] == "b" * triage.BODY_EXCERPT_CHARS
     row = await _get(newsroom_database, NewsroomArticle, article_id)
     assert row.triage_status == "done"
-    assert (row.relevant, row.topic) == (True, "policy")
-    assert row.market_scores == {"global": 90, "tw_equity": 40, "us_equity": 75}
+    assert (row.relevant, row.topic, row.story_type) == (True, "policy", "official")
+    assert row.market_scores == {"global": 82, "tw_equity": 57, "us_equity": 70}
+    assert row.triage_signals == {
+        "impact": 4,
+        "new_facts": True,
+        "directness": {"global": 4, "tw_equity": 2, "us_equity": 3},
+        "stale": False,
+    }
     assert row.triaged_at is not None
     event = await _get(newsroom_database, NewsroomEvent, row.event_id)
     assert (event.working_title, event.created_by, event.status, event.edition_date) == (
@@ -436,9 +444,11 @@ async def test_irrelevant_article_is_scored_but_not_clustered(
     article_id = await _queued_for_triage(newsroom_database, source_id, "Celebrity wedding", 0)
     llm = FakeJsonModel(
         lambda payload: {
-            "relevant": False,
             "topic": "companies",
-            "market_scores": {"global": 0, "tw_equity": 3, "us_equity": 0},
+            "story_type": "other",
+            "new_facts": False,
+            "impact": 4,
+            "directness": {"global": 0, "tw_equity": 1, "us_equity": 0},
             "event": {"new": "should be ignored"},
         }
     )
@@ -447,8 +457,85 @@ async def test_irrelevant_article_is_scored_but_not_clustered(
 
     row = await _get(newsroom_database, NewsroomArticle, article_id)
     assert (row.triage_status, row.relevant, row.event_id) == ("done", False, None)
-    assert row.market_scores == {"global": 0, "tw_equity": 3, "us_equity": 0}
+    assert row.market_scores == {"global": 0, "tw_equity": 14, "us_equity": 0}
     assert await _count(newsroom_database, NewsroomEvent) == 0
+
+
+async def test_price_action_is_capped_by_code_whatever_the_model_judged(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id = await _source(newsroom_database)
+    article_id = await _queued_for_triage(newsroom_database, source_id, "台股開盤重挫逾 500 點", 0)
+    llm = FakeJsonModel(
+        lambda payload: relevant({"new": "台股開盤重挫逾 500 點"}) | {"story_type": "price_action"}
+    )
+
+    assert await _run(_runtime(newsroom_database, llm=llm), "triage") == ["done"]
+
+    row = await _get(newsroom_database, NewsroomArticle, article_id)
+    assert row.story_type == "price_action"
+    assert row.market_scores == {"global": 40, "tw_equity": 40, "us_equity": 40}
+    # Still clustered, so later reports of the same move join it instead of opening more.
+    assert (row.relevant, row.event_id is not None) == (True, True)
+
+
+# The window of ``WINDOW`` opens 2026-09-30 08:00 Taipei (00:00 UTC).
+PUBLISHED_LONG_BEFORE = datetime(2026, 9, 29, 12, tzinfo=UTC)
+
+
+async def test_article_published_before_the_window_cannot_open_an_event(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id = await _source(newsroom_database)
+    article_id = await _queued_for_triage(
+        newsroom_database, source_id, "Yesterday's revenue", 0, published_at=PUBLISHED_LONG_BEFORE
+    )
+    llm = FakeJsonModel(lambda payload: relevant({"new": "鴻海 9 月營收"}))
+
+    assert await _run(_runtime(newsroom_database, llm=llm), "triage") == ["done"]
+
+    row = await _get(newsroom_database, NewsroomArticle, article_id)
+    assert (row.triage_status, row.relevant, row.event_id) == ("done", True, None)
+    assert row.triage_signals is not None and row.triage_signals["stale"] is True
+    assert await _count(newsroom_database, NewsroomEvent) == 0
+
+
+async def test_article_published_before_the_window_still_joins_an_event(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id = await _source(newsroom_database)
+    existing = await _event(newsroom_database, "鴻海 9 月營收")
+    await _article(newsroom_database, source_id, "Revenue", angle=0, event_id=existing)
+    article_id = await _queued_for_triage(
+        newsroom_database, source_id, "Revenue again", 1, published_at=PUBLISHED_LONG_BEFORE
+    )
+    llm = FakeJsonModel(lambda payload: relevant({"match": payload["candidate_events"][0]["id"]}))
+
+    assert await _run(_runtime(newsroom_database, llm=llm), "triage") == ["done"]
+
+    assert (await _get(newsroom_database, NewsroomArticle, article_id)).event_id == existing
+
+
+async def test_manual_article_opens_an_event_however_old_it_is(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    async with newsroom_database() as database:
+        manual = NewsroomSource(
+            key="manual", name="Manual", kind="manual", hostname="manual", markets=["global"]
+        )
+        database.add(manual)
+        await database.commit()
+        manual_id = manual.id
+    article_id = await _queued_for_triage(
+        newsroom_database, manual_id, "Admin pick", 0, published_at=PUBLISHED_LONG_BEFORE
+    )
+    llm = FakeJsonModel(lambda payload: relevant({"new": "管理員加入的舊文"}))
+
+    assert await _run(_runtime(newsroom_database, llm=llm), "triage") == ["done"]
+
+    row = await _get(newsroom_database, NewsroomArticle, article_id)
+    assert row.event_id is not None
+    assert row.triage_signals is not None and row.triage_signals["stale"] is False
 
 
 async def test_match_outside_the_candidates_is_retried_and_audited(
@@ -569,6 +656,7 @@ async def test_new_event_choice_joins_only_an_event_opened_during_the_call(
             choice=EventNew(new="Fed again"),
             known_event_ids={existing},
         )
+        assert kept_apart is not None
         far = await triage.assign_event(
             database,
             article_id=article_id,

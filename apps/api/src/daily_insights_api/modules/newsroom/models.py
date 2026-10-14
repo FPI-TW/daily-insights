@@ -37,6 +37,16 @@ BODY_MAX_CHARS = 40_000
 
 MARKET_CODES = ("global", "tw_equity", "us_equity")
 TOPICS = ("markets", "economy", "companies", "policy", "technology", "commodities")
+STORY_TYPES = (
+    "official",
+    "data",
+    "catalyst",
+    "price_action",
+    "preview",
+    "opinion",
+    "press_release",
+    "other",
+)
 SOURCE_KINDS = (
     "rss",
     "rdf",
@@ -210,6 +220,9 @@ class NewsroomArticle(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             f"body IS NULL OR char_length(body) <= {BODY_MAX_CHARS}", name="body_length"
         ),
         CheckConstraint(f"topic IS NULL OR {_in('topic', TOPICS)}", name="topic_valid"),
+        CheckConstraint(
+            f"story_type IS NULL OR {_in('story_type', STORY_TYPES)}", name="story_type_valid"
+        ),
         *_queue_columns_check("fetch", QUEUE_STATUSES),
         *_queue_columns_check("embed", QUEUE_STATUSES),
         *_queue_columns_check("triage", QUEUE_STATUSES),
@@ -269,7 +282,13 @@ class NewsroomArticle(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     triage_error_code: Mapped[str | None] = mapped_column(String(100))
     relevant: Mapped[bool | None] = mapped_column(Boolean)
     topic: Mapped[str | None] = mapped_column(String(20))
-    # {"global": 0-100, "tw_equity": 0-100, "us_equity": 0-100}
+    # What kind of piece triage judged it to be; NULL for articles triaged before
+    # the field existed. ``scoring.py`` caps and filters by it.
+    story_type: Mapped[str | None] = mapped_column(String(20))
+    # Triage's raw judgements behind ``market_scores``:
+    # {"impact": 1-5, "new_facts": bool, "directness": {market: 0-4}, "stale": bool}
+    triage_signals: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # {"global": 0-100, "tw_equity": 0-100, "us_equity": 0-100}, computed by scoring.py
     market_scores: Mapped[dict[str, int]] = mapped_column(
         JSONB, nullable=False, default=dict, server_default="{}"
     )

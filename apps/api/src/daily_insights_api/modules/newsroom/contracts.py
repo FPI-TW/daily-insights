@@ -10,7 +10,18 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 MarketCode = Literal["global", "tw_equity", "us_equity"]
 Topic = Literal["markets", "economy", "companies", "policy", "technology", "commodities"]
-Score = Annotated[int, Field(ge=0, le=100)]
+StoryType = Literal[
+    "official",
+    "data",
+    "catalyst",
+    "price_action",
+    "preview",
+    "opinion",
+    "press_release",
+    "other",
+]
+Impact = Annotated[int, Field(ge=1, le=5)]
+Directness = Annotated[int, Field(ge=0, le=4)]
 Stars = Annotated[int, Field(ge=1, le=5)]
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 LongText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)]
@@ -20,10 +31,12 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class MarketScores(_Strict):
-    global_: Score = Field(alias="global")
-    tw_equity: Score
-    us_equity: Score
+class MarketDirectness(_Strict):
+    """How directly the story bears on each market edition (0 unrelated, 4 its own subject)."""
+
+    global_: Directness = Field(alias="global")
+    tw_equity: Directness
+    us_equity: Directness
 
     def as_dict(self) -> dict[str, int]:
         return {"global": self.global_, "tw_equity": self.tw_equity, "us_equity": self.us_equity}
@@ -42,10 +55,19 @@ class EventNew(_Strict):
 
 
 class TriageResult(_Strict):
-    relevant: bool
+    """Discrete judgements only; ``scoring.py`` turns them into market scores.
+
+    The model no longer writes a 0-100 score or ``relevant``: asked for one
+    number it bunched on two values and ignored the caps for price-action and
+    opinion pieces, so both are now computed from these fields.
+    """
+
     topic: Topic
-    market_scores: MarketScores
-    # Required when relevant; ignored (and may be null) otherwise.
+    story_type: StoryType
+    new_facts: bool
+    impact: Impact
+    directness: MarketDirectness
+    # Required when the computed scores make the article relevant; ignored otherwise.
     event: EventMatch | EventNew | None = None
 
 

@@ -1,22 +1,35 @@
 import uuid
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from daily_insights_api.core.config import Settings
-from daily_insights_api.modules.newsroom import queue, triage
+from daily_insights_api.modules.newsroom import queue, scoring, triage
 from daily_insights_api.modules.newsroom.clustering import CandidateEvent
 from daily_insights_api.modules.newsroom.contracts import EventNew, TriageResult
 from daily_insights_api.modules.newsroom.notifier import LogNotifier
 from daily_insights_api.modules.newsroom.queue import RetryableStageError
 from daily_insights_api.modules.newsroom.worker import Runtime
 
-SCORES = {"global": 80, "tw_equity": 20, "us_equity": 60}
 
-
-def _result(relevant: bool, event: object) -> TriageResult:
+def _result(
+    event: object,
+    *,
+    story_type: str = "official",
+    impact: int = 3,
+    new_facts: bool = True,
+    directness: tuple[int, int, int] = (4, 1, 3),
+) -> TriageResult:
     return TriageResult.model_validate(
-        {"relevant": relevant, "topic": "policy", "market_scores": SCORES, "event": event}
+        {
+            "topic": "policy",
+            "story_type": story_type,
+            "new_facts": new_facts,
+            "impact": impact,
+            "directness": dict(zip(("global", "tw_equity", "us_equity"), directness, strict=True)),
+            "event": event,
+        }
     )
 
 
@@ -26,11 +39,24 @@ def _candidate(title: str = "Fed holds rates") -> CandidateEvent:
 
 def test_prompt_is_versioned_by_its_content() -> None:
     prompt = triage.load_triage_prompt()
-    assert prompt.version.startswith("triage-v1:")
-    assert len(prompt.version) == len("triage-v1:") + 12
+    assert prompt.version.startswith("triage-v2:")
+    assert len(prompt.version) == len("triage-v2:") + 12
     # JSON mode providers require the word in the prompt; the keys must match the contract.
-    for needle in ("JSON", "market_scores", "global", "tw_equity", "us_equity", "match", "new"):
+    for needle in (
+        "JSON",
+        "story_type",
+        "new_facts",
+        "impact",
+        "directness",
+        "global",
+        "tw_equity",
+        "us_equity",
+        "match",
+        "new",
+    ):
         assert needle in prompt.text
+    for story_type in scoring.STORY_TYPE_CAP:
+        assert story_type in prompt.text
 
 
 def test_embedding_input_joins_title_and_summary_and_truncates() -> None:
@@ -71,18 +97,77 @@ def test_payload_carries_candidates_and_body_only_when_given() -> None:
     assert with_body["candidate_events"] == []
 
 
+def test_scores_follow_impact_and_directness() -> None:
+    assert scoring.market_scores(_result(None, impact=5, directness=(4, 3, 2))) == {
+        "global": 96,
+        "tw_equity": 82,
+        "us_equity": 67,
+    }
+    assert scoring.market_scores(_result(None, impact=1, directness=(4, 0, 1))) == {
+        "global": 40,
+        "tw_equity": 0,
+        "us_equity": 14,
+    }
+
+
+def test_a_weak_link_alone_never_makes_an_article_relevant() -> None:
+    for impact in (1, 2, 3, 4, 5):
+        scores = scoring.market_scores(_result(None, impact=impact, directness=(1, 1, 0)))
+        assert not scoring.is_relevant(scores)
+    assert scoring.is_relevant(scoring.market_scores(_result(None, impact=1, directness=(4, 0, 0))))
+
+
+def test_no_new_facts_lowers_every_market() -> None:
+    fresh = scoring.market_scores(_result(None, impact=3, directness=(4, 3, 0)))
+    rehash = scoring.market_scores(_result(None, impact=3, directness=(4, 3, 0), new_facts=False))
+    assert rehash == {
+        "global": fresh["global"] - 15,
+        "tw_equity": fresh["tw_equity"] - 15,
+        "us_equity": 0,
+    }
+
+
+@pytest.mark.parametrize(
+    ("story_type", "cap"),
+    [("price_action", 40), ("preview", 55), ("opinion", 60), ("press_release", 45)],
+)
+def test_story_type_caps_are_applied_by_code(story_type: str, cap: int) -> None:
+    scores = scoring.market_scores(_result(None, story_type=story_type, impact=5))
+    assert scores["global"] == cap
+    assert max(scores.values()) == cap
+
+
+def test_triage_signals_keep_the_raw_judgements() -> None:
+    assert scoring.triage_signals(_result(None, impact=2, new_facts=False)) == {
+        "impact": 2,
+        "new_facts": False,
+        "directness": {"global": 4, "tw_equity": 1, "us_equity": 3},
+    }
+
+
+def test_published_before_window_allows_two_hours_of_slack() -> None:
+    edition = date(2026, 10, 8)
+    # The window opens 2026-10-07 08:00 Taipei, 00:00 UTC.
+    assert not triage.published_before_window(None, edition)
+    assert not triage.published_before_window(datetime(2026, 10, 6, 22, 0, tzinfo=UTC), edition)
+    assert triage.published_before_window(datetime(2026, 10, 6, 21, 59, tzinfo=UTC), edition)
+    assert not triage.published_before_window(datetime(2026, 10, 7, 9, 0, tzinfo=UTC), edition)
+
+
 def test_irrelevant_article_never_joins_an_event() -> None:
     candidate = _candidate()
-    assert triage.resolve_event_choice(_result(False, {"new": "x"}), [candidate]) is None
-    assert triage.resolve_event_choice(_result(False, None), [candidate]) is None
+    assert triage.resolve_event_choice(_result({"new": "x"}), [candidate], relevant=False) is None
+    assert triage.resolve_event_choice(_result(None), [candidate], relevant=False) is None
 
 
 def test_event_choice_accepts_new_or_an_offered_candidate() -> None:
     candidate = _candidate()
-    created = triage.resolve_event_choice(_result(True, {"new": "央行按兵不動"}), [candidate])
+    created = triage.resolve_event_choice(
+        _result({"new": "央行按兵不動"}), [candidate], relevant=True
+    )
     assert created == EventNew(new="央行按兵不動")
     matched = triage.resolve_event_choice(
-        _result(True, {"match": f" {str(candidate.id).upper()} "}), [candidate]
+        _result({"match": f" {str(candidate.id).upper()} "}), [candidate], relevant=True
     )
     assert matched == candidate.id
 
@@ -91,7 +176,7 @@ def test_event_choice_accepts_new_or_an_offered_candidate() -> None:
 def test_unknown_match_or_missing_event_is_a_schema_error(event: object) -> None:
     candidate = _candidate()
     with pytest.raises(RetryableStageError) as raised:
-        triage.resolve_event_choice(_result(True, event), [candidate])
+        triage.resolve_event_choice(_result(event), [candidate], relevant=True)
     assert raised.value.code == "triage_schema_invalid"
 
 

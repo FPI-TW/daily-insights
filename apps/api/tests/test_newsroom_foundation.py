@@ -31,24 +31,29 @@ def test_backoff_doubles_caps_and_respects_retry_after() -> None:
 
 
 def test_triage_result_accepts_match_or_new_event() -> None:
-    scores = {"global": 80, "tw_equity": 10, "us_equity": 40}
-    matched = TriageResult.model_validate(
-        {
-            "relevant": True,
-            "topic": "economy",
-            "market_scores": scores,
-            "event": {"match": "e1"},
-        }
-    )
-    assert matched.market_scores.as_dict() == scores
-    created = TriageResult.model_validate(
-        {"relevant": True, "topic": "economy", "market_scores": scores, "event": {"new": "Fed"}}
-    )
+    directness = {"global": 4, "tw_equity": 0, "us_equity": 2}
+    judged = {
+        "topic": "economy",
+        "story_type": "data",
+        "new_facts": True,
+        "impact": 5,
+        "directness": directness,
+    }
+    matched = TriageResult.model_validate({**judged, "event": {"match": "e1"}})
+    assert matched.directness.as_dict() == directness
+    created = TriageResult.model_validate({**judged, "event": {"new": "Fed"}})
     assert created.event is not None
-    with pytest.raises(ValidationError):
-        TriageResult.model_validate(
-            {"relevant": True, "topic": "economy", "market_scores": {**scores, "global": 101}}
-        )
+    for invalid in (
+        {"impact": 6},
+        {"impact": 0},
+        {"story_type": "rumour"},
+        {"directness": {**directness, "global": 5}},
+        # The score and the relevance flag are computed, never accepted from the model.
+        {"relevant": True},
+        {"market_scores": {"global": 80, "tw_equity": 10, "us_equity": 40}},
+    ):
+        with pytest.raises(ValidationError):
+            TriageResult.model_validate({**judged, **invalid})
 
 
 def test_analysis_result_requires_a_market_why() -> None:

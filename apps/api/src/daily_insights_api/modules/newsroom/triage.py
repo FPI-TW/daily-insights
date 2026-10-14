@@ -10,7 +10,7 @@ import hashlib
 import uuid
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from functools import cache
 from importlib.resources import files
 from typing import Any
@@ -18,9 +18,10 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from daily_insights_api.modules.newsroom import clustering, queue
+from daily_insights_api.modules.newsroom import clock, clustering, queue, scoring
 from daily_insights_api.modules.newsroom.clustering import CandidateEvent
 from daily_insights_api.modules.newsroom.contracts import EventMatch, EventNew, TriageResult
+from daily_insights_api.modules.newsroom.ingestion.allowlist import MANUAL_KIND
 from daily_insights_api.modules.newsroom.models import (
     NewsroomArticle,
     NewsroomEvent,
@@ -36,8 +37,12 @@ SUMMARY_MAX_CHARS = 1_000
 BODY_EXCERPT_CHARS = 1_500
 EMBED_CONCURRENCY = 2
 TRIAGE_CONCURRENCY = 4
-TRIAGE_PROMPT_BASE_VERSION = "triage-v1"
+TRIAGE_PROMPT_BASE_VERSION = "triage-v2"
 SCHEMA_INVALID = "triage_schema_invalid"
+# Feeds that update once a day hand over yesterday's stories hours late. An
+# article published this long before its window opened may join an event of the
+# window but never opens one, so old news is not selected again as a new story.
+STALE_BEFORE_WINDOW = timedelta(hours=2)
 
 # Triage waits until the body fetch has a verdict (spec §5.1); a failed fetch
 # triages on title and summary alone.
@@ -101,15 +106,22 @@ def triage_payload(
     }
 
 
+def published_before_window(published_at: datetime | None, edition_date: date) -> bool:
+    """Whether the publisher dated the article well before its edition window opened."""
+    if published_at is None:
+        return False
+    return published_at < clock.window(edition_date)[0] - STALE_BEFORE_WINDOW
+
+
 def resolve_event_choice(
-    result: TriageResult, candidates: Sequence[CandidateEvent]
+    result: TriageResult, candidates: Sequence[CandidateEvent], *, relevant: bool
 ) -> uuid.UUID | EventNew | None:
     """The candidate the model matched, a new event to open, or None when irrelevant.
 
     A relevant article without an event, or a match outside the offered
     candidates, is a schema violation and retried like any invalid output.
     """
-    if not result.relevant:
+    if not relevant:
         return None
     if isinstance(result.event, EventNew):
         return result.event
@@ -139,7 +151,8 @@ async def assign_event(
     embedding: Sequence[float],
     choice: uuid.UUID | EventNew,
     known_event_ids: Collection[uuid.UUID],
-) -> uuid.UUID:
+    may_open: bool = True,
+) -> uuid.UUID | None:
     """Write-side of event assignment, serialised per window.
 
     A matched event that was merged meanwhile resolves to its merge target. A new
@@ -148,6 +161,9 @@ async def assign_event(
     joined instead of duplicated. ``known_event_ids`` (the window's open events
     before the call, plus the candidates offered) are skipped: the model already
     judged those, and the re-check only guards against concurrency.
+
+    With ``may_open`` false the article joins an event or stays out of the
+    window's events (``None``): it never opens one.
     """
     await clustering.lock_window(database, edition_date)
     if isinstance(choice, uuid.UUID):
@@ -166,6 +182,8 @@ async def assign_event(
     )
     if nearest and nearest[0].similarity >= clustering.SAME_EVENT_SIMILARITY:
         return nearest[0].id
+    if not may_open:
+        return None
     event = NewsroomEvent(
         edition_date=edition_date,
         working_title=choice.new,
@@ -213,8 +231,10 @@ def _triage_handler(runtime: Runtime) -> StageHandler:
                     NewsroomArticle.body_status,
                     func.left(NewsroomArticle.body, BODY_EXCERPT_CHARS).label("body_excerpt"),
                     NewsroomArticle.edition_date,
+                    NewsroomArticle.published_at,
                     NewsroomArticle.embedding,
                     NewsroomSource.name.label("source_name"),
+                    NewsroomSource.kind.label("source_kind"),
                     NewsroomSource.trust_tier,
                 )
                 .join(NewsroomSource, NewsroomSource.id == NewsroomArticle.source_id)
@@ -251,11 +271,18 @@ def _triage_handler(runtime: Runtime) -> StageHandler:
                 stage="triage", subject_id=claim_.row_id, prompt_version=prompt.version
             ),
         )
+        scores = scoring.market_scores(result)
+        relevant = scoring.is_relevant(scores)
         try:
-            choice = resolve_event_choice(result, candidates)
+            choice = resolve_event_choice(result, candidates, relevant=relevant)
         except RetryableStageError as error:
             _keep_call_audit(database, error, claim_.row_id)
             raise
+        # An admin files a manual URL under the edition they are reviewing, so
+        # its publication date never holds it back.
+        stale = article.source_kind != MANUAL_KIND and published_before_window(
+            article.published_at, article.edition_date
+        )
         event_id = (
             None
             if choice is None
@@ -266,12 +293,15 @@ def _triage_handler(runtime: Runtime) -> StageHandler:
                 embedding=embedding,
                 choice=choice,
                 known_event_ids=known_event_ids | {candidate.id for candidate in candidates},
+                may_open=not stale,
             )
         )
         return {
-            "relevant": result.relevant,
+            "relevant": relevant,
             "topic": result.topic,
-            "market_scores": result.market_scores.as_dict(),
+            "story_type": result.story_type,
+            "triage_signals": scoring.triage_signals(result) | {"stale": stale},
+            "market_scores": scores,
             "event_id": event_id,
             "triaged_at": datetime.now(UTC),
         }
