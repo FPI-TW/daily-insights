@@ -243,21 +243,23 @@ function ReportPage() {
               </MarketQuerySection>
             ) : null}
             {blocks.hkEquity ? (
-              <MarketQuerySection
-                query={history}
-                loading={
-                  <IndexPerformanceTableLoading marketCode={marketCode} />
-                }
-              >
-                {data => (
-                  <IndexPerformanceTable
-                    history={data ?? null}
-                    locale={locale}
-                    marketCode={marketCode}
-                    symbols={indexChartSymbolsForMarket(marketCode)}
-                  />
-                )}
-              </MarketQuerySection>
+              <div className="mt-4 min-w-0">
+                <MarketQuerySection
+                  query={history}
+                  loading={
+                    <IndexPerformanceTableLoading marketCode={marketCode} />
+                  }
+                >
+                  {data => (
+                    <IndexPerformanceTable
+                      history={data ?? null}
+                      locale={locale}
+                      marketCode={marketCode}
+                      symbols={indexChartSymbolsForMarket(marketCode)}
+                    />
+                  )}
+                </MarketQuerySection>
+              </div>
             ) : null}
             {blocks.hkEquity ? (
               <MarketQuerySection
