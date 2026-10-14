@@ -276,8 +276,8 @@ markets、reports、news、analyst viewpoints 或指數／法人／宏觀資料�
 
 Hydration 完成後，各區塊使用 TanStack Query 與 `createBrowserTransport` 直接存取
 同源 `/api`，沿用 Nitro／nginx proxy；API clients 與宏觀 schema 驗證回應。
-市場清單與今日分析師觀點可跨頁共用，新聞、報告、宏觀、指數收盤、均線、VIX、
-法人資金與個股清單各自完成即可顯示。VIX 收盤與其技術指標也獨立請求；均線失敗
+市場清單與今日分析師觀點可跨頁共用，新聞、報告、宏觀、指數收盤、均線、波動率指數、
+法人資金與個股清單各自完成即可顯示。波動率指數收盤與其技術指標也獨立請求；均線失敗
 不阻擋價格圖，台灣法人與個股不等待指數歷史。保留新聞、分析師觀點、市場資訊、
 技術圖、法人資料的內容順序，以及美股指數表與大型股同列的版面。
 美股指數表／報告與台股法人／個股各自保有固定 grid 欄位，報告 caveat、背景刷新
@@ -322,3 +322,19 @@ ECharts 6 的矩陣會將 1px 邊框對齊至正向半像素；右側貼齊 canv
 描邊會落在畫布外而遭裁切。內距讓四邊完整呈現，保留內部分隔線與原有資料配置。
 瀏覽器回歸測試直接檢查實際 canvas 四邊像素，涵蓋桌面、手機、DPR 1/2、
 縮放視窗及明暗主題切換。
+
+## 港股指數走勢與波動率圖（2026-10-14）
+
+指數走勢圖與波動率圖不再是美股頁專屬。市場頁的 `PAGE_BLOCKS` 以 `chart` 宣告
+指數走勢圖，以 `volatility` 宣告該市場的波動率指數 symbol：美股為 `^VIX`，
+港股為 `^HSIL`。走勢圖的 symbol 來自追蹤指數 catalog，排除所有波動率指數
+（`volatilitySymbols`），因此港股下拉只有恆生指數與國企指數。
+
+波動率圖、其查詢與文案都以 symbol 為參數：`vix` 與 `vixAverages` 的 query key
+為 `[..., "vix" | "vix-averages", symbol, range]`，顯示名稱經 `indexDisplayName`
+取自 `indexNameKey`，與指數卡片一致。風險參考區間依 symbol 設定：`^VIX` 保留
+20／30 的門檻線與三色區間，`^HSIL` 沒有公開的參考分級、兩年中位數已高於 20，
+因此不畫區間，y 軸純依資料，無障礙摘要也不提及區間。
+
+波動率查詢只在宣告 `volatility` 的頁面掛載（`VolatilityBlock` 子元件），
+其他市場頁不建立任何 vix query observer。

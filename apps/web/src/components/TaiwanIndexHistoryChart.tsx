@@ -8,7 +8,7 @@ import { useChartColors } from "#/lib/chart"
 import { formatNumber, numberLocales } from "#/lib/format"
 import {
   biasSeries,
-  indexNameKey,
+  indexDisplayName,
   indexWindowStart,
   scaleBias,
   visibleBiasPoints,
@@ -163,7 +163,7 @@ function BiasPanel({
     selected.symbol === "^TWII"
       ? t("biasTitle")
       : t("biasTitleIndex", {
-          index: t(indexNameKey(selected.symbol) ?? selected.symbol),
+          index: indexDisplayName(selected.symbol, t),
         })
   return (
     <DashboardPanel
@@ -397,7 +397,7 @@ function CandlesPanel({
   const missing = bars.filter(
     bar => bar.open === null || bar.high === null || bar.low === null
   ).length
-  const name = t(indexNameKey(selected.symbol) ?? selected.symbol)
+  const name = indexDisplayName(selected.symbol, t)
   const isTaiex = selected.symbol === "^TWII"
   const title = isTaiex ? t("kTitle") : t("kTitleIndex", { index: name })
   const activityLabel = t("volumeLabel")
@@ -1013,7 +1013,7 @@ export function TaiwanIndexHistoryChart({
             >
               {history.series.map(item => (
                 <option key={item.symbol} value={item.symbol}>
-                  {t(indexNameKey(item.symbol) ?? item.symbol)}
+                  {indexDisplayName(item.symbol, t)}
                 </option>
               ))}
             </select>

@@ -7,6 +7,7 @@ import type { Locale } from "@daily-insights/api-client"
 import { useChartColors } from "#/lib/chart"
 import { formatIsoDate, formatNumber, numberLocales } from "#/lib/format"
 import {
+  indexDisplayName,
   indexNameKey,
   type IndexMovingAverageMap,
   type MarketIndexHistory,
@@ -33,14 +34,6 @@ function symbolLabel(
 ) {
   const key = indexNameKey(symbol)
   return key ? `${t(key)} (${symbol})` : symbol
-}
-
-function indexOptionLabel(
-  symbol: string,
-  t: ReturnType<typeof useTranslation>["t"]
-) {
-  const key = indexNameKey(symbol)
-  return key ? t(key) : symbol
 }
 
 const zoomRangeSchema = z.object({
@@ -217,7 +210,7 @@ export function IndexHistoryChart({
             >
               {history.series.map(item => (
                 <option key={item.symbol} value={item.symbol}>
-                  {indexOptionLabel(item.symbol, t)}
+                  {indexDisplayName(item.symbol, t)}
                 </option>
               ))}
             </select>

@@ -158,7 +158,7 @@ describe("VixHistoryChart", () => {
     ).toHaveTextContent("32.70")
     expect(
       screen.getByRole("caption", {
-        name: "VIX daily closing values, MACD and KD",
+        name: "VIX daily closing values, MACD, KD, and reference risk bands",
       })
     ).toBeInTheDocument()
   })
@@ -185,10 +185,22 @@ describe("VixHistoryChart", () => {
   })
 
   it("names the Hong Kong volatility index in every state", async () => {
-    const hsil = { ...history, symbol: "^HSIL" as const }
-    // Loaded data names itself; the prop only covers the empty states.
+    const hsil: VixHistory = {
+      ...history,
+      symbol: "^HSIL",
+      bars: history.bars.map(bar => ({
+        ...bar,
+        symbol: "^HSIL",
+        market_code: "hk_equity",
+      })),
+      indicators: history.indicators && {
+        ...history.indicators,
+        symbol: "^HSIL",
+        market_code: "hk_equity",
+      },
+    }
     await renderLocalized(
-      <VixHistoryChart symbol="^VIX" history={hsil} locale="en" />
+      <VixHistoryChart symbol="^HSIL" history={hsil} locale="en" />
     )
     expect(
       screen.getByRole("heading", { name: "HSI Volatility Index trend" })
@@ -196,9 +208,16 @@ describe("VixHistoryChart", () => {
     expect(screen.getByText("Latest HSI Volatility Index:")).toBeVisible()
     // No published bands for HSI VIX: no thresholds, zones or disclaimer.
     const chart = screen.getByTestId("vix-chart")
-    expect(chart).not.toHaveTextContent('"yAxis":30')
+    // The only markLine left is the KD panel's 20/80 guide.
+    expect(chart.textContent?.match(/markLine/g)).toHaveLength(1)
     expect(chart).not.toHaveTextContent("markArea")
+    expect(chart).not.toHaveTextContent("threshold")
     expect(chart).toHaveTextContent('"min":16,"max":35')
+    expect(
+      screen.getByRole("caption", {
+        name: "HSI Volatility Index daily closing values, MACD and KD",
+      })
+    ).toBeInTheDocument()
     expect(chart).not.toHaveTextContent("Calm")
     expect(screen.queryByText(/not official classifications/)).toBeNull()
 
@@ -208,7 +227,7 @@ describe("VixHistoryChart", () => {
       "zh-hant"
     )
     expect(screen.getByRole("status")).toHaveTextContent(
-      "目前無法載入港股 VIX資料"
+      "港股 VIX 資料目前無法載入"
     )
 
     cleanup()
@@ -219,8 +238,8 @@ describe("VixHistoryChart", () => {
   })
 
   it.each([
-    ["zh-hant", "VIX走勢", "非官方分級"],
-    ["zh-hans", "VIX走势", "并非官方分级"],
+    ["zh-hant", "VIX 走勢", "非官方分級"],
+    ["zh-hans", "VIX 走势", "并非官方分级"],
     ["en", "VIX trend", "not official classifications"],
   ] as const)("renders %s copy", async (locale, title, reference) => {
     await renderLocalized(

@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next"
 import {
   trackedIndexCatalog,
   type IndexDailyBar,
@@ -119,6 +120,12 @@ export function indexNameKey(symbol: string) {
       "^TWII": "indexNameTwii",
     } satisfies Record<string, string>
   )[symbol]
+}
+
+/** Localized index name; symbols outside `indexNameKey` show as themselves. */
+export function indexDisplayName(symbol: string, t: TFunction) {
+  const key = indexNameKey(symbol)
+  return key ? t(key) : symbol
 }
 
 function finiteNumber(raw: string | number | null | undefined) {

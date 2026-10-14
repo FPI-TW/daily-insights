@@ -5,7 +5,7 @@ import type { Locale } from "@daily-insights/api-client"
 import { useChartColors } from "#/lib/chart"
 import { formatIsoDate, formatNumber, numberLocales } from "#/lib/format"
 import {
-  indexNameKey,
+  indexDisplayName,
   type VixHistory,
   type VolatilitySymbol,
 } from "#/lib/indices"
@@ -21,14 +21,6 @@ const volatilityBands: Record<
   "^HSIL": null,
 }
 
-function volatilityName(
-  symbol: VolatilitySymbol,
-  t: ReturnType<typeof useTranslation>["t"]
-) {
-  const key = indexNameKey(symbol)
-  return key ? t(key) : symbol
-}
-
 export function VixHistoryLoading({ symbol }: { symbol: VolatilitySymbol }) {
   const { t } = useTranslation()
   return (
@@ -36,7 +28,7 @@ export function VixHistoryLoading({ symbol }: { symbol: VolatilitySymbol }) {
       className="surface-panel mt-6 animate-pulse p-5"
       role="status"
       aria-live="polite"
-      aria-label={t("vixChartLoading", { name: volatilityName(symbol, t) })}
+      aria-label={t("vixChartLoading", { name: indexDisplayName(symbol, t) })}
     >
       <div className="h-5 w-52 rounded bg-line" />
       <div className="mt-5 h-84 rounded-lg bg-line sm:h-96" />
@@ -44,13 +36,7 @@ export function VixHistoryLoading({ symbol }: { symbol: VolatilitySymbol }) {
   )
 }
 
-function VixState({
-  symbol,
-  message,
-}: {
-  symbol: VolatilitySymbol
-  message: string
-}) {
+function VixState({ name, message }: { name: string; message: string }) {
   const { t } = useTranslation()
   return (
     <section
@@ -59,7 +45,7 @@ function VixState({
       aria-live="polite"
     >
       <h2 className="m-0 text-base font-extrabold">
-        {t("vixChartTitle", { name: volatilityName(symbol, t) })}
+        {t("vixChartTitle", { name })}
       </h2>
       <p className="mt-3 mb-0 text-sm text-sea-ink-soft">{message}</p>
     </section>
@@ -67,27 +53,23 @@ function VixState({
 }
 
 export function VixHistoryChart({
-  symbol: fallbackSymbol,
+  symbol,
   history,
   locale,
 }: {
-  /** Names the chart while there is no history; loaded data names itself. */
   symbol: VolatilitySymbol
   history: VixHistory | null
   locale: Locale
 }) {
   const { t } = useTranslation()
-  const symbol = history?.symbol ?? fallbackSymbol
   const colors = useChartColors()
-  const name = volatilityName(symbol, t)
+  const name = indexDisplayName(symbol, t)
 
   if (history === null) {
-    return (
-      <VixState symbol={symbol} message={t("vixChartUnavailable", { name })} />
-    )
+    return <VixState name={name} message={t("vixChartUnavailable", { name })} />
   }
   if (history.bars.length === 0) {
-    return <VixState symbol={symbol} message={t("vixChartEmpty", { name })} />
+    return <VixState name={name} message={t("vixChartEmpty", { name })} />
   }
 
   const latest = history.bars.at(-1)!
@@ -96,6 +78,10 @@ export function VixHistoryChart({
   const minimum = Math.min(...values)
   const maximum = Math.max(...values)
   const bands = volatilityBands[symbol]
+  const summary = t(
+    bands ? "vixChartAccessibleSummary" : "vixChartAccessibleSummaryNoBands",
+    { name }
+  )
   // With bands, keep the calm zone below `elevated` and the high zone above
   // `high` on screen even in quiet years; without them, follow the data.
   const chartMinimum = Math.max(
@@ -186,7 +172,7 @@ export function VixHistoryChart({
               animation: false,
               aria: {
                 enabled: true,
-                description: t("vixChartAccessibleSummary", { name }),
+                description: summary,
               },
               title: [
                 {
@@ -533,7 +519,7 @@ export function VixHistoryChart({
       </dl>
       <div className="sr-only">
         <table>
-          <caption>{t("vixChartAccessibleSummary", { name })}</caption>
+          <caption>{summary}</caption>
           <thead>
             <tr>
               <th>{t("vixChartDate")}</th>
