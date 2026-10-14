@@ -34,6 +34,7 @@ from daily_insights_api.modules.newsroom.models import (
     NewsroomDedupeDecision,
     NewsroomEdition,
     NewsroomEditionItem,
+    NewsroomEditorRating,
     NewsroomEvent,
     NewsroomSource,
 )
@@ -1061,6 +1062,23 @@ async def _assemble_market(
             ignored_pending_triage=ignored,
             now=now(),
         )
+        if edition is not None and ratings:
+            picked = {pick.event_id for pick in picks}
+            database.add_all(
+                NewsroomEditorRating(
+                    edition_date=edition_date,
+                    market_code=market,
+                    event_id=candidate.event_id,
+                    event_title=candidate.working_title[:500],
+                    position=position,
+                    score=candidate.score,
+                    stars=ratings[str(candidate.event_id)],
+                    picked=candidate.event_id in picked,
+                    follow_up=candidate.event_id in repeats.follow_ups,
+                    prompt_version=EDITOR_PROMPT_VERSION,
+                )
+                for position, candidate in enumerate(candidates, start=1)
+            )
         await database.commit()
     if edition is None:
         return MarketReport(market, "skipped_published")

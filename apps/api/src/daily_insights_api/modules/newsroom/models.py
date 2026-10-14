@@ -450,6 +450,38 @@ class NewsroomDedupeDecision(UUIDPrimaryKeyMixin, Base):
     )
 
 
+class NewsroomEditorRating(UUIDPrimaryKeyMixin, Base):
+    """Every candidate the editor rated at assembly, picked or not.
+
+    Edition items keep the stars of picked events only; these rows also keep the
+    candidates that lost, so a strong story left out can be traced to its stars
+    (or to the quota). Append-only: an assembly re-run adds new rows.
+    """
+
+    __tablename__ = "newsroom_editor_ratings"
+    __table_args__ = (
+        CheckConstraint(_in("market_code", MARKET_CODES), name="market_code_valid"),
+        CheckConstraint("stars BETWEEN 1 AND 5", name="stars_range"),
+        CheckConstraint("position > 0", name="position_positive"),
+        Index("ix_newsroom_editor_ratings_edition", "edition_date", "market_code", "created_at"),
+    )
+    edition_date: Mapped[date] = mapped_column(Date, nullable=False)
+    market_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    event_title: Mapped[str] = mapped_column(String(500), nullable=False)
+    # 1-based place in the ranked candidate list the editor saw.
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    stars: Mapped[int] = mapped_column(Integer, nullable=False)
+    picked: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    # Shown to the editor as a follow-up of an earlier edition's item.
+    follow_up: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class NewsroomLlmCall(UUIDPrimaryKeyMixin, Base):
     """Audit row per model or embedding call; prompts and bodies are never stored."""
 

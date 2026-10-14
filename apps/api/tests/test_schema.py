@@ -39,6 +39,7 @@ EXPECTED_TABLES = {
     "model_configurations",
     "newsroom_articles",
     "newsroom_dedupe_decisions",
+    "newsroom_editor_ratings",
     "newsroom_edit_log",
     "newsroom_edition_items",
     "newsroom_editions",

@@ -38,6 +38,7 @@ from daily_insights_api.modules.newsroom.models import (
     NewsroomEdition,
     NewsroomEditionItem,
     NewsroomEditLog,
+    NewsroomEditorRating,
     NewsroomEvent,
     NewsroomLlmCall,
     NewsroomSource,
@@ -381,6 +382,31 @@ async def test_assembly_selects_by_quota_and_queues_analysis(
     assert [notice.kind for notice in notices] == ["draft_ready"]
     assert notices[0].link == "https://admin.test/admin/newsroom?date=2026-09-30"
     assert "5 星 global: global-0" in notices[0].lines
+    # Every rated candidate keeps its stars, picked or not.
+    async with newsroom_database() as database:
+        ratings = (
+            await database.scalars(
+                select(NewsroomEditorRating)
+                .where(NewsroomEditorRating.market_code == "global")
+                .order_by(NewsroomEditorRating.position)
+            )
+        ).all()
+    assert [(row.event_title, row.stars, row.picked) for row in ratings] == [
+        ("global-0", 5, True),
+        ("global-7", 5, True),
+        ("global-6", 2, False),
+        ("global-5", 3, True),
+        ("global-4", 1, False),
+        ("global-3", 4, True),
+        ("global-2", 1, False),
+        ("global-1", 1, False),
+    ]
+    assert [row.position for row in ratings] == list(range(1, 9))
+    assert ratings[0].score == 80.0
+    assert all(
+        row.prompt_version == assembly.EDITOR_PROMPT_VERSION and not row.follow_up
+        for row in ratings
+    )
 
 
 async def test_assembly_rebuild_keeps_admin_actions_and_skips_published(
