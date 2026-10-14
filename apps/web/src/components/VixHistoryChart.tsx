@@ -4,18 +4,29 @@ import { useTranslation } from "react-i18next"
 import type { Locale } from "@daily-insights/api-client"
 import { useChartColors } from "#/lib/chart"
 import { formatIsoDate, formatNumber, numberLocales } from "#/lib/format"
-import type { VixHistory, VolatilitySymbol } from "#/lib/indices"
+import {
+  indexNameKey,
+  type VixHistory,
+  type VolatilitySymbol,
+} from "#/lib/indices"
 
-type VolatilityBands = { elevated: number; high: number }
-const volatilityProfiles: Record<
+// Reference bands per volatility index. HSI VIX has no published bands and
+// its two-year median already sits above VIX's elevated line, so it draws
+// none rather than borrow VIX's calibration.
+const volatilityBands: Record<
   VolatilitySymbol,
-  { nameKey: string; bands: VolatilityBands | null }
+  { elevated: number; high: number } | null
 > = {
-  "^VIX": { nameKey: "volatilityNameVix", bands: { elevated: 20, high: 30 } },
-  // ponytail: HSI VIX has no published reference bands and its two-year
-  // median already sits above VIX's elevated line, so draw none rather than
-  // borrow VIX's calibration.
-  "^HSIL": { nameKey: "volatilityNameHsil", bands: null },
+  "^VIX": { elevated: 20, high: 30 },
+  "^HSIL": null,
+}
+
+function volatilityName(
+  symbol: VolatilitySymbol,
+  t: ReturnType<typeof useTranslation>["t"]
+) {
+  const key = indexNameKey(symbol)
+  return key ? t(key) : symbol
 }
 
 export function VixHistoryLoading({ symbol }: { symbol: VolatilitySymbol }) {
@@ -25,9 +36,7 @@ export function VixHistoryLoading({ symbol }: { symbol: VolatilitySymbol }) {
       className="surface-panel mt-6 animate-pulse p-5"
       role="status"
       aria-live="polite"
-      aria-label={t("vixChartLoading", {
-        name: t(volatilityProfiles[symbol].nameKey),
-      })}
+      aria-label={t("vixChartLoading", { name: volatilityName(symbol, t) })}
     >
       <div className="h-5 w-52 rounded bg-line" />
       <div className="mt-5 h-84 rounded-lg bg-line sm:h-96" />
@@ -50,7 +59,7 @@ function VixState({
       aria-live="polite"
     >
       <h2 className="m-0 text-base font-extrabold">
-        {t("vixChartTitle", { name: t(volatilityProfiles[symbol].nameKey) })}
+        {t("vixChartTitle", { name: volatilityName(symbol, t) })}
       </h2>
       <p className="mt-3 mb-0 text-sm text-sea-ink-soft">{message}</p>
     </section>
@@ -68,7 +77,7 @@ export function VixHistoryChart({
 }) {
   const { t } = useTranslation()
   const colors = useChartColors()
-  const name = t(volatilityProfiles[symbol].nameKey)
+  const name = volatilityName(symbol, t)
 
   if (history === null) {
     return (
@@ -84,7 +93,7 @@ export function VixHistoryChart({
   const values = history.bars.map(bar => Number(bar.close))
   const minimum = Math.min(...values)
   const maximum = Math.max(...values)
-  const bands = volatilityProfiles[symbol].bands
+  const bands = volatilityBands[symbol]
   // With bands, keep the calm zone below `elevated` and the high zone above
   // `high` on screen even in quiet years; without them, follow the data.
   const chartMinimum = Math.max(

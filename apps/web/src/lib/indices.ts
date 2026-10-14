@@ -112,6 +112,7 @@ export function indexNameKey(symbol: string) {
       "^NDX": "indexNameNdx",
       "^RUT": "indexNameRut",
       "^SOX": "indexNameSox",
+      "^VIX": "indexNameVix",
       "^HSI": "indexNameHsi",
       "^HSCE": "indexNameHsce",
       "^HSIL": "indexNameHsil",

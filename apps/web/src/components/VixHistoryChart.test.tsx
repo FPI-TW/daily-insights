@@ -190,9 +190,9 @@ describe("VixHistoryChart", () => {
       <VixHistoryChart symbol="^HSIL" history={hsil} locale="en" />
     )
     expect(
-      screen.getByRole("heading", { name: "HSI VIX volatility trend" })
+      screen.getByRole("heading", { name: "HSI Volatility Index trend" })
     ).toBeVisible()
-    expect(screen.getByText("Latest HSI VIX:")).toBeVisible()
+    expect(screen.getByText("Latest HSI Volatility Index:")).toBeVisible()
     // No published bands for HSI VIX: no thresholds, zones or disclaimer.
     const chart = screen.getByTestId("vix-chart")
     expect(chart).not.toHaveTextContent('"yAxis":30')
@@ -213,14 +213,14 @@ describe("VixHistoryChart", () => {
     cleanup()
     await renderLocalized(<VixHistoryLoading symbol="^HSIL" />)
     expect(screen.getByRole("status")).toHaveAccessibleName(
-      "Loading the HSI VIX volatility trend."
+      "Loading the HSI Volatility Index trend."
     )
   })
 
   it.each([
-    ["zh-hant", "VIX 波動率走勢", "非官方分級"],
-    ["zh-hans", "VIX 波动率走势", "并非官方分级"],
-    ["en", "VIX volatility trend", "not official classifications"],
+    ["zh-hant", "VIX 走勢", "非官方分級"],
+    ["zh-hans", "VIX 走势", "并非官方分级"],
+    ["en", "VIX trend", "not official classifications"],
   ] as const)("renders %s copy", async (locale, title, reference) => {
     await renderLocalized(
       <VixHistoryChart symbol="^VIX" history={history} locale={locale} />,
