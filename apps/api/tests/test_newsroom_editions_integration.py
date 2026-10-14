@@ -182,11 +182,12 @@ async def _source(
     *,
     weight: float = 1.0,
     trust_tier: int = 2,
+    name: str | None = None,
 ) -> uuid.UUID:
     async with session_factory() as database:
         source = NewsroomSource(
             key=key,
-            name=key.title(),
+            name=name or key.title(),
             kind="rss",
             hostname=f"{key}.example.com",
             markets=["global"],
@@ -1253,6 +1254,31 @@ async def test_price_action_reports_neither_qualify_nor_score(
     [item] = await _items(newsroom_database, editions["tw_equity"].id)
     # Scored on the decision alone: no bonus for the two reaction pieces.
     assert (item.event_id, item.editor_score) == (decision, 90.0)
+
+
+async def test_feeds_of_one_outlet_count_as_one_source(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    udn_a = await _source(newsroom_database, "udn-money-5590", name="經濟日報")
+    udn_b = await _source(newsroom_database, "udn-money-5591", name="經濟日報")
+    cna = await _source(newsroom_database, "cna")
+    await _event(newsroom_database, "one-outlet", sources=[udn_a, udn_b], scores={"global": 60})
+    await _event(newsroom_database, "two-outlets", sources=[udn_a, cna], scores={"global": 60})
+    llm = FakeLlm({EditorResult: _stars_by_title({}, default=3)})
+
+    await assembly.assemble_editions(
+        _runtime(newsroom_database, llm), EDITION_DATE, sleep=_no_sleep
+    )
+
+    [(_, payload)] = [call for call in llm.calls if call[1]["market"] == "global"]
+    counts = {event["working_title"]: event["source_count"] for event in payload["events"]}
+    assert counts == {"two-outlets": 2, "one-outlet": 1}
+    editions = await _editions(newsroom_database)
+    scores = sorted(
+        item.editor_score or 0.0 for item in await _items(newsroom_database, editions["global"].id)
+    )
+    # Only the second outlet earns the +5 bonus.
+    assert scores == [60.0, 65.0]
 
 
 async def test_equal_scores_rank_by_corroboration_then_age(

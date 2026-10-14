@@ -40,7 +40,7 @@ from daily_insights_api.modules.newsroom.models import (
 from daily_insights_api.modules.newsroom.notifier import Notice
 from daily_insights_api.modules.newsroom.providers import CallAudit
 from daily_insights_api.modules.newsroom.queue import FatalStageError, RetryableStageError
-from daily_insights_api.modules.newsroom.scoring import UNSELECTABLE_STORY_TYPES
+from daily_insights_api.modules.newsroom.scoring import STORY_TYPE_CAP, UNSELECTABLE_STORY_TYPES
 from daily_insights_api.modules.newsroom.translation import contract_error, load_prompt
 from daily_insights_api.modules.newsroom.worker import Runtime
 
@@ -90,18 +90,22 @@ Sleep = Callable[[float], Awaitable[None]]
 class ArticleSignal:
     """What one relevant article contributes to its event's score in one market."""
 
-    source_id: uuid.UUID
+    # The publisher (source name): one outlet's several feeds count as one source.
+    outlet: str
     market_score: float
     weight: float
+    # The story type's ceiling, applied after the source weight so a weighted
+    # source cannot lift an opinion or preview piece past it.
+    cap: float = math.inf
 
 
 def event_score(signals: Sequence[ArticleSignal]) -> float:
-    """``max(score * source weight)`` plus 5 per extra distinct source, capped at +20."""
+    """``max(min(score * source weight, cap))`` plus 5 per extra outlet, capped at +20."""
     if not signals:
         return 0.0
-    best = max(signal.market_score * signal.weight for signal in signals)
-    extra_sources = len({signal.source_id for signal in signals}) - 1
-    return best + min(extra_sources * MULTI_SOURCE_BONUS, MULTI_SOURCE_BONUS_CAP)
+    best = max(min(signal.market_score * signal.weight, signal.cap) for signal in signals)
+    extra_outlets = len({signal.outlet for signal in signals}) - 1
+    return best + min(extra_outlets * MULTI_SOURCE_BONUS, MULTI_SOURCE_BONUS_CAP)
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,7 +258,12 @@ def _market_score(value: Any) -> float:
 
 def _signals(rows: Sequence[_ArticleRow], market: str) -> list[ArticleSignal]:
     return [
-        ArticleSignal(row.source_id, _market_score(row.market_scores.get(market)), row.weight)
+        ArticleSignal(
+            row.source_name,
+            _market_score(row.market_scores.get(market)),
+            row.weight,
+            STORY_TYPE_CAP.get(row.story_type or "", math.inf),
+        )
         for row in rows
     ]
 
@@ -316,7 +325,7 @@ def rank_candidates(
                     (row.title, row.source_name) for row in best_first[:HEADLINES_PER_EVENT]
                 ),
                 article_count=len(selectable),
-                source_count=len({row.source_id for row in selectable}),
+                source_count=len({row.source_name for row in selectable}),
                 trust_tier=max(row.trust_tier for row in selectable),
                 first_seen_at=min(row.first_seen_at for row in selectable),
             )

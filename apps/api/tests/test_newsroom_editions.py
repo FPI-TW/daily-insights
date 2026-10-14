@@ -143,7 +143,7 @@ def test_quota_breaks_ties_by_candidate_position() -> None:
 
 
 def test_event_score_uses_best_weighted_article_plus_source_bonus() -> None:
-    source_a, source_b, source_c = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    source_a, source_b, source_c = "Reuters", "CNA", "UDN"
     signals = [
         ArticleSignal(source_a, 60, 1.5),
         ArticleSignal(source_a, 80, 1.0),
@@ -154,14 +154,21 @@ def test_event_score_uses_best_weighted_article_plus_source_bonus() -> None:
 
 
 def test_event_score_caps_multi_source_bonus_at_twenty() -> None:
-    signals = [ArticleSignal(uuid.uuid4(), 50, 1.0) for _ in range(9)]
+    signals = [ArticleSignal(f"outlet-{index}", 50, 1.0) for index in range(9)]
     assert event_score(signals) == 70.0
 
 
 def test_event_score_single_source_has_no_bonus() -> None:
-    source = uuid.uuid4()
+    source = "Reuters"
     assert event_score([ArticleSignal(source, 40, 1.0), ArticleSignal(source, 30, 1.0)]) == 40.0
     assert event_score([]) == 0.0
+
+
+def test_story_type_cap_holds_after_the_source_weight() -> None:
+    # An opinion piece at its 60 ceiling stays at 60 from a 1.2-weighted source.
+    assert event_score([ArticleSignal("CNA", 60, 1.2, cap=60)]) == 60.0
+    assert event_score([ArticleSignal("CNA", 40, 1.2, cap=60)]) == 48.0
+    assert event_score([ArticleSignal("CNA", 82, 1.2)]) == pytest.approx(98.4)
 
 
 def test_fallback_takes_top_five_by_score() -> None:

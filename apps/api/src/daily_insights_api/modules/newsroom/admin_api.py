@@ -666,9 +666,11 @@ async def _event_views(
                 select(
                     NewsroomArticle.event_id,
                     func.count(),
-                    func.count(distinct(NewsroomArticle.source_id)),
+                    # One outlet's several feeds count once, as in assembly.
+                    func.count(distinct(NewsroomSource.name)),
                     func.count().filter(NewsroomArticle.body_status == "ok"),
                 )
+                .join(NewsroomSource, NewsroomSource.id == NewsroomArticle.source_id)
                 .where(NewsroomArticle.event_id.in_(ids))
                 .group_by(NewsroomArticle.event_id)
             )
