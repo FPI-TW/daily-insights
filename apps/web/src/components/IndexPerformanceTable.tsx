@@ -1,5 +1,5 @@
 import { ResponsiveTable } from "./ResponsiveTable"
-import type { Locale } from "@daily-insights/api-client"
+import type { Locale, MarketCode } from "@daily-insights/api-client"
 import { useTranslation } from "react-i18next"
 import { directionClass, formatChange, formatNumber } from "#/lib/format"
 import {
@@ -50,13 +50,13 @@ export function indexPerformanceRows(
 export function IndexPerformanceTableLoading({
   titleKey,
 }: {
-  titleKey: string
+  titleKey: `indexTableTitle_${MarketCode}`
 }) {
   const { t } = useTranslation()
   const title = t(titleKey)
   return (
     <section
-      className="surface-panel animate-pulse p-5"
+      className="surface-panel min-w-0 flex-1 animate-pulse p-5"
       role="status"
       aria-live="polite"
       aria-label={t("indexTableLoading", { title })}
@@ -67,9 +67,9 @@ export function IndexPerformanceTableLoading({
   )
 }
 
-/** `symbols` is the row order; a tracked symbol left out (such as a
- * volatility index) is neither listed nor counted as missing. `titleKey`
- * names the translated heading. */
+/** `symbols` is the row order. The history query only fetches
+ * `indexChartSymbolsForMarket`, so a volatility index such as `^HSIL` never
+ * reaches `series` or `failedSymbols`. `titleKey` names the heading. */
 export function IndexPerformanceTable({
   history,
   locale,
@@ -78,7 +78,7 @@ export function IndexPerformanceTable({
 }: {
   history: MarketIndexHistory | null
   locale: Locale
-  titleKey: string
+  titleKey: `indexTableTitle_${MarketCode}`
   symbols: readonly string[]
 }) {
   const { t } = useTranslation()
@@ -94,15 +94,12 @@ export function IndexPerformanceTable({
     )
   }
   const rows = indexPerformanceRows(history, symbols)
-  const failedSymbols = history.failedSymbols.filter(symbol =>
-    symbols.includes(symbol)
-  )
   if (rows.every(row => row.close === null)) {
     return (
       <section className="surface-panel p-5" role="status" aria-live="polite">
         <h2 className="m-0 text-base font-extrabold">{title}</h2>
         <p className="mt-3 mb-0 text-sm text-sea-ink-soft">
-          {failedSymbols.length > 0
+          {history.failedSymbols.length > 0
             ? t("indexTableUnavailable", { title })
             : t("indexTableEmpty", { title })}
         </p>
@@ -117,13 +114,13 @@ export function IndexPerformanceTable({
       <h2 id="index-table-title" className="m-0 text-base font-extrabold">
         {title}
       </h2>
-      {failedSymbols.length > 0 ? (
+      {history.failedSymbols.length > 0 ? (
         <p
           className="mt-3 mb-0 rounded-md border border-market-caution/40 bg-market-caution/10 p-3 text-sm text-sea-ink-soft"
           role="status"
         >
           {t("indexTablePartial", {
-            symbols: failedSymbols.join(", "),
+            symbols: history.failedSymbols.join(", "),
           })}
         </p>
       ) : null}

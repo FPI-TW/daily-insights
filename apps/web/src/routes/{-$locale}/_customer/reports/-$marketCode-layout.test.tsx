@@ -178,7 +178,7 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe("market desktop grid cells", () => {
-  it("contains US partial-report notices and retained-data refresh/errors in their original columns", () => {
+  it("announces the shared history query once at the chart and keeps report notices in their column", () => {
     const view = render(page())
     const performance = screen.getByRole("region", {
       name: "US five-index performance",
@@ -201,8 +201,19 @@ describe("market desktop grid cells", () => {
     query("history").isFetching = true
     query("report").isFetching = true
     view.rerender(page())
-    expect(within(historyCell).getByRole("status")).toBeVisible()
+    // The table and the chart share the history query; only the chart's
+    // section announces it, so the status never shows up twice.
+    const chart = screen.getByText("Index history")
     expect(within(reportCell).getByRole("status")).toBeVisible()
+    expect(within(historyCell).queryByRole("status")).toBeNull()
+    const historyAnnouncements = screen
+      .getAllByText("Loading market morning reports.")
+      .filter(el => !reportCell.contains(el))
+    expect(historyAnnouncements).toHaveLength(1)
+    expect(
+      chart.compareDocumentPosition(historyAnnouncements[0]!) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
     expect(Array.from(grid.children)).toEqual([historyCell, reportCell])
 
     query("history").isFetching = false
@@ -210,9 +221,10 @@ describe("market desktop grid cells", () => {
     query("report").isFetching = false
     query("report").error = new Error("offline")
     view.rerender(page())
+    expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(2)
     expect(
-      within(historyCell).getByRole("button", { name: "Retry" })
-    ).toBeVisible()
+      within(historyCell).queryByRole("button", { name: "Retry" })
+    ).toBeNull()
     expect(
       within(reportCell).getByRole("button", { name: "Retry" })
     ).toBeVisible()

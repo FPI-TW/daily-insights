@@ -187,12 +187,12 @@ export function IndexHistoryChart({
     ])
   )
   return (
-    <>
-      <section
-        className="rounded-2xl border border-line bg-surface mt-6 min-w-0 p-5"
-        aria-labelledby="index-history-title"
-        aria-busy={indicatorsPending}
-      >
+    <section
+      className="mt-6 min-w-0"
+      aria-labelledby="index-history-title"
+      aria-busy={indicatorsPending}
+    >
+      <div className="rounded-2xl border border-line bg-surface p-5">
         <div className="mb-4">
           <h2 id="index-history-title" className="m-0 text-base font-extrabold">
             {t("indexChartTitle")}
@@ -688,7 +688,7 @@ export function IndexHistoryChart({
             </tbody>
           </table>
         </div>
-      </section>
+      </div>
       {bias ? (
         <div className="mt-4 min-w-0">
           <IndexBiasPanel
@@ -703,6 +703,6 @@ export function IndexHistoryChart({
           />
         </div>
       ) : null}
-    </>
+    </section>
   )
 }

@@ -68,6 +68,20 @@ export const IndexBiasPanel = memo(function IndexBiasPanel({
     [all, start]
   )
   const dates = lines[0]!.points.map(point => point.date)
+  // Stable so echarts-for-react does not dispose and recreate the chart on
+  // every render; `zoom` only drives the meters and the label density.
+  const onEvents = useMemo(
+    () => ({
+      datazoom: (event: unknown) => {
+        const parsed = zoomEventSchema.safeParse(event)
+        if (!parsed.success) return
+        const range =
+          "batch" in parsed.data ? parsed.data.batch[0]! : parsed.data
+        if (range.start <= range.end) setZoom(range)
+      },
+    }),
+    []
+  )
   const palette = [colors.indexSeries[0], colors.series[2], colors.series[1]]
   const visible = lines.map(line =>
     visibleBiasPoints(line.points, zoom.start, zoom.end)
@@ -175,19 +189,8 @@ export const IndexBiasPanel = memo(function IndexBiasPanel({
           <div className="mt-4.5" role="img" aria-label={title}>
             <ClientOnly fallback={<IndexChartSkeleton />}>
               <ReactECharts
-                notMerge
                 style={{ height: 330 }}
-                onEvents={{
-                  datazoom: (event: unknown) => {
-                    const parsed = zoomEventSchema.safeParse(event)
-                    if (!parsed.success) return
-                    const range =
-                      "batch" in parsed.data
-                        ? parsed.data.batch[0]!
-                        : parsed.data
-                    if (range.start <= range.end) setZoom(range)
-                  },
-                }}
+                onEvents={onEvents}
                 option={{
                   animation: false,
                   color: palette,
@@ -241,11 +244,12 @@ export const IndexBiasPanel = memo(function IndexBiasPanel({
                       lineStyle: { color: colors.gridSoft, type: "dashed" },
                     },
                   },
+                  // Merged, not replaced, so ECharts keeps its own zoom
+                  // position between option updates.
                   dataZoom: [
-                    { type: "inside", ...zoom },
+                    { type: "inside" },
                     {
                       type: "slider",
-                      ...zoom,
                       height: 18,
                       bottom: 0,
                       borderColor: colors.grid,

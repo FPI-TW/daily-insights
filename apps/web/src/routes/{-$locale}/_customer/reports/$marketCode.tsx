@@ -59,21 +59,30 @@ import {
 // What each market page renders besides its morning report. Keyed on every
 // market code, so adding one is a type error until this says what it shows,
 // and a market with any block of its own hides the "not launched" notice.
-type PageBlocks = {
-  macro?: true
-  chart?: "index" | "taiwan"
-  bias?: true
-  // "beside": its own column next to the morning report; "stacked": under
-  // the market's own cards in the single column.
-  performance?: {
-    titleKey: string
-    symbols: readonly string[]
-    placement: "beside" | "stacked"
-  }
+// The index-history query feeds the chart, the performance table and the
+// bias panel, so the last two only exist alongside a chart; a macro page
+// shows the dashboard instead of any market block.
+type ChartBlocks =
+  | { chart?: undefined; performance?: undefined; bias?: undefined }
+  | {
+      chart: "index" | "taiwan"
+      bias?: true
+      // "beside": its own column next to the morning report; "stacked":
+      // under the market's own cards in the single column.
+      performance?: {
+        titleKey: `indexTableTitle_${MarketCode}`
+        symbols: readonly string[]
+        placement: "beside" | "stacked"
+      }
+    }
+type MarketBlocks = ChartBlocks & {
   volatility?: VolatilitySymbol
   hkEquity?: true
   institutional?: true
 }
+type PageBlocks =
+  | ({ macro: true } & { [K in keyof MarketBlocks]?: undefined })
+  | ({ macro?: undefined } & MarketBlocks)
 const PAGE_BLOCKS = {
   global_macro_bonds: { macro: true },
   forex: {},
@@ -160,7 +169,7 @@ function ReportPage() {
   const history = useMarketQuery(
     queries.history(marketCode, range),
     locale,
-    ready && (isChart || performance !== undefined)
+    ready && isChart
   )
   const averages = useMarketQuery(
     queries.averages(marketCode, range),
@@ -205,20 +214,19 @@ function ReportPage() {
   const viewpoint = viewpoints.data?.find(
     item => item.market_code === marketCode
   )
+  // The chart's MarketQuerySection already announces this query's refetch
+  // and error once, so the table only picks between skeleton and data.
   const performanceTable = performance ? (
-    <MarketQuerySection
-      query={history}
-      loading={<IndexPerformanceTableLoading titleKey={performance.titleKey} />}
-    >
-      {data => (
-        <IndexPerformanceTable
-          history={data ?? null}
-          locale={locale}
-          titleKey={performance.titleKey}
-          symbols={performance.symbols}
-        />
-      )}
-    </MarketQuerySection>
+    history.data === undefined && history.isPending ? (
+      <IndexPerformanceTableLoading titleKey={performance.titleKey} />
+    ) : (
+      <IndexPerformanceTable
+        history={history.data ?? null}
+        locale={locale}
+        titleKey={performance.titleKey}
+        symbols={performance.symbols}
+      />
+    )
   ) : null
   const sideBySide = performance?.placement === "beside"
   return (
@@ -361,12 +369,14 @@ function ReportPage() {
         </div>
       ) : null}
       {blocks.hkEquity ? (
-        <MarketQuerySection
-          query={hkHeatmap}
-          loading={<HkSectorHeatmapLoading />}
-        >
-          {data => <HkSectorHeatmap heatmap={data ?? null} locale={locale} />}
-        </MarketQuerySection>
+        <div className="mt-6 min-w-0">
+          <MarketQuerySection
+            query={hkHeatmap}
+            loading={<HkSectorHeatmapLoading />}
+          >
+            {data => <HkSectorHeatmap heatmap={data ?? null} locale={locale} />}
+          </MarketQuerySection>
+        </div>
       ) : null}
     </>
   )

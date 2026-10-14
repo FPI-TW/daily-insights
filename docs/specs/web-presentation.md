@@ -346,14 +346,18 @@ ECharts 6 的矩陣會將 1px 邊框對齊至正向半像素；右側貼齊 canv
 （`titleKey`、`symbols`、`placement`）。美股頁宣告五檔的固定順序（非 catalog 的字母序），
 `placement: "beside"` 放在與晨報並排的左欄；港股頁 `placement: "stacked"`，表格在指數
 卡片下方，列為 `indexChartSymbolsForMarket("hk_equity")`
-（恆生指數、國企指數），波動率指數 `^HSIL` 既不列出也不算缺漏。標題鍵為
+（恆生指數、國企指數）。`history` query 只抓 `indexChartSymbolsForMarket` 的 symbol，
+波動率指數 `^HSIL` 不會出現在 `series` 或 `failedSymbols`，表格不另外過濾。標題鍵為
 `indexTableTitle_<marketCode>`，由 `titleKey` 明確傳入，載入／不可用／無資料文案以
-`{{title}}` 插值。宣告 `performance` 的頁面即使沒有 `chart` 也會啟用 `history` query。
+`{{title}}` 插值，型別限定為 `indexTableTitle_<MarketCode>`。`performance` 與 `bias`
+在型別上只能與 `chart` 同時宣告，且 `macro` 頁不能宣告任何市場區塊；表格不另外包
+`MarketQuerySection`，`history` 的重新整理公告與錯誤由走勢圖那一層只出現一次。
+乖離率面板與走勢圖同在 `aria-labelledby="index-history-title"` 的 section 內。
 
 ## 港股產業熱力圖位置（2026-10-14）
 
 產業熱力圖移出左右欄位，改為港股頁最後一個區塊：指數走勢圖與波動率圖之後、
-頁面最下方，外距與其他頁面級區塊一致（`mt-6`）。query 仍只在 `hkEquity` 頁掛載。
+頁面最下方，由頁面 wrapper 給 `mt-6`。query 仍只在 `hkEquity` 頁掛載。
 
 ## 港股乖離率（2026-10-14）
 
