@@ -87,6 +87,7 @@ class NewsroomSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint(
             "markets <@ ARRAY['global','tw_equity','us_equity']::varchar[]", name="markets_valid"
         ),
+        CheckConstraint("deleted_at IS NULL OR NOT enabled", name="deleted_disabled"),
         UniqueConstraint("key", name="uq_newsroom_sources_key"),
         Index("ix_newsroom_sources_due", "enabled", "next_poll_at"),
     )
@@ -125,6 +126,9 @@ class NewsroomSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Set when the unhealthy notification fired; cleared on the next success so
     # an outage notifies once.
     unhealthy_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Soft delete from the admin console: the source leaves the list and is never
+    # polled again, while its articles keep backing past events and editions.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class NewsroomEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):

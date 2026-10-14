@@ -17,6 +17,7 @@ const client = vi.hoisted(() => ({
   listSources: vi.fn(),
   createSource: vi.fn(),
   updateSource: vi.fn(),
+  deleteSource: vi.fn(),
 }))
 
 vi.mock("#/lib/newsroom-admin", async importOriginal => ({
@@ -58,6 +59,7 @@ beforeEach(() => {
   client.listSources.mockResolvedValue({ sources: [source(), failing] })
   client.createSource.mockImplementation(async input => source(input))
   client.updateSource.mockImplementation(async (_, changes) => source(changes))
+  client.deleteSource.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -99,6 +101,73 @@ describe("NewsroomSourcesPage", () => {
         "csrf"
       )
     )
+  })
+
+  it("deletes a source only after confirming", async () => {
+    renderPage()
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Delete Reuters" })
+    )
+    const dialog = screen.getByRole("alertdialog")
+    expect(
+      within(dialog).getByText("Delete source Reuters?")
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(/The key “reuters” stays reserved/)
+    ).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole("button", { name: "Dismiss" }))
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+    expect(client.deleteSource).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Reuters" }))
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Delete source",
+      })
+    )
+    await waitFor(() =>
+      expect(client.deleteSource).toHaveBeenCalledWith(source().id, "csrf")
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+    )
+    expect(client.listSources).toHaveBeenCalledTimes(2)
+  })
+
+  it("marks the manual source as system, with no disable or delete", async () => {
+    client.listSources.mockResolvedValue({
+      sources: [
+        source(),
+        source({
+          id: "50000000-0000-4000-8000-0000000000a3",
+          key: "manual",
+          name: "Manual",
+          kind: "manual",
+          health: "pending",
+          last_success_at: null,
+        }),
+      ],
+    })
+    renderPage()
+    expect(
+      await screen.findByRole("button", { name: "Edit Manual" })
+    ).toBeVisible()
+    const row = screen.getByText("Manual").closest("tr")!
+    expect(within(row).getByText("System")).toBeVisible()
+    expect(within(row).getByText(/never polled/)).toBeVisible()
+    expect(
+      within(row).queryByText("Awaiting first poll")
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Delete Manual" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Disable Manual" })
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Delete Reuters" })).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: "Disable Reuters" })
+    ).toBeVisible()
   })
 
   it("validates and creates a source", async () => {

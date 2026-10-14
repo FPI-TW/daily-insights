@@ -8441,7 +8441,7 @@
     },
     "/api/admin/newsroom/sources": {
       "get": {
-        "description": "Every source with its polling health and 7-day article count (D3).",
+        "description": "Every source not deleted, with its polling health and 7-day article count (D3).\n\nEnabled feeds lead; the fixed ``manual`` source always comes last.",
         "operationId": "list_sources_api_admin_newsroom_sources_get",
         "responses": {
           "200": {
@@ -8518,6 +8518,61 @@
       }
     },
     "/api/admin/newsroom/sources/{source_id}": {
+      "delete": {
+        "description": "Remove a source from the console and stop polling it; its articles stay (D3).",
+        "operationId": "delete_source_api_admin_newsroom_sources__source_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Source not found or already deleted."
+          },
+          "409": {
+            "description": "The manual source cannot be deleted."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Source",
+        "tags": ["newsroom management"]
+      },
       "patch": {
         "description": "Edit settings or enable/disable a source (D3); omitted fields are unchanged.",
         "operationId": "update_source_api_admin_newsroom_sources__source_id__patch",

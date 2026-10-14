@@ -13,7 +13,8 @@ import httpx
 import pytest
 import pytest_asyncio
 from pydantic import SecretStr
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from daily_insights_api import models as registered_models  # noqa: F401
@@ -744,6 +745,61 @@ async def test_manual_source_only_accepts_presentation_fields(
         await sources_service.update_source(database, manual, {"trust_tier": 3}, user_id=user_id)
         await database.commit()
     assert (await source_row(newsroom_database, manual)).trust_tier == 3
+
+
+async def test_delete_source_keeps_its_articles_and_writes_the_edit_log(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user_id = await add_user(newsroom_database)
+    source_id = await add_source(newsroom_database, key="doomed")
+    article_id = await add_article(newsroom_database, source_id)
+    manual = await add_source(
+        newsroom_database, key="manual", kind="manual", url=None, hostname="manual.invalid"
+    )
+
+    async with newsroom_database() as database:
+        await sources_service.delete_source(database, source_id, user_id=user_id)
+        await database.commit()
+
+    source = await source_row(newsroom_database, source_id)
+    assert source.enabled is False and source.deleted_at is not None
+    async with newsroom_database() as database:
+        assert await database.get(NewsroomArticle, article_id) is not None
+        with pytest.raises(LookupError):
+            await sources_service.delete_source(database, source_id, user_id=user_id)
+        with pytest.raises(LookupError):
+            await sources_service.update_source(
+                database, source_id, {"enabled": True}, user_id=user_id
+            )
+        with pytest.raises(LookupError):
+            await sources_service.delete_source(database, uuid.uuid4(), user_id=user_id)
+        with pytest.raises(SourceValidationError, match="manual source"):
+            await sources_service.delete_source(database, manual, user_id=user_id)
+        with pytest.raises(SourceConflictError):
+            await sources_service.create_source(
+                database,
+                SourceInput(
+                    key="doomed",
+                    name="Again",
+                    kind="rss",
+                    url="https://feeds.example.com/again.xml",
+                    hostname="again.example.com",
+                    markets=("global",),
+                ),
+                user_id=user_id,
+            )
+    async with newsroom_database() as database:
+        # A deleted source can never be switched back on, even bypassing the service.
+        with pytest.raises(IntegrityError, match="deleted_disabled"):
+            await database.execute(
+                update(NewsroomSource).where(NewsroomSource.id == source_id).values(enabled=True)
+            )
+
+    [entry] = await edit_log(newsroom_database)
+    assert (entry.action, entry.entity_id, entry.user_id) == ("delete_source", source_id, user_id)
+    assert entry.before == {"key": "doomed", "name": source.name, "enabled": True}
+    assert entry.after is not None and entry.after["enabled"] is False
+    assert datetime.fromisoformat(entry.after["deleted_at"]) == source.deleted_at
 
 
 @pytest.fixture

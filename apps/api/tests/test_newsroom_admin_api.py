@@ -31,6 +31,7 @@ READS = [
 WRITES: list[tuple[str, str, dict[str, Any] | None]] = [
     ("POST", "/api/admin/newsroom/sources", {}),
     ("PATCH", f"/api/admin/newsroom/sources/{SOME_ID}", {}),
+    ("DELETE", f"/api/admin/newsroom/sources/{SOME_ID}", None),
     ("POST", f"/api/admin/newsroom/editions/{SOME_ID}/publish", None),
     ("POST", "/api/admin/newsroom/editions/publish", {"edition_date": "2026-10-01"}),
     ("POST", f"/api/admin/newsroom/editions/{SOME_ID}/items", {"event_id": SOME_ID}),

@@ -803,11 +803,20 @@ async def _open_event(database: AsyncSession, event_id: uuid.UUID) -> NewsroomEv
 
 @router.get("/sources", response_model=NewsroomAdminSourceList)
 async def list_sources(_: AdminRead, database: Database) -> NewsroomAdminSourceList:
-    """Every source with its polling health and 7-day article count (D3)."""
+    """Every source not deleted, with its polling health and 7-day article count (D3).
+
+    Enabled feeds lead; the fixed ``manual`` source always comes last.
+    """
     now = _now()
     sources = (
         await database.scalars(
-            select(NewsroomSource).order_by(NewsroomSource.enabled.desc(), NewsroomSource.name)
+            select(NewsroomSource)
+            .where(NewsroomSource.deleted_at.is_(None))
+            .order_by(
+                case((NewsroomSource.kind == "manual", 1), else_=0),
+                NewsroomSource.enabled.desc(),
+                NewsroomSource.name,
+            )
         )
     ).all()
     counts = await _articles_since(database, now - timedelta(days=7))
@@ -868,7 +877,7 @@ async def update_source(
 ) -> NewsroomAdminSource:
     """Edit settings or enable/disable a source (D3); omitted fields are unchanged."""
     source = await database.get(NewsroomSource, source_id)
-    if source is None:
+    if source is None or source.deleted_at is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "newsroom source not found")
     changes: dict[str, object] = payload.model_dump(exclude_unset=True)
     cleared = sorted(
@@ -893,6 +902,26 @@ async def update_source(
         await sources_service.update_source(database, source_id, changes, user_id=actor.user.id)
     await database.commit()
     return await _source_view(database, source_id)
+
+
+@router.delete(
+    "/sources/{source_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_404_NOT_FOUND: {"description": "Source not found or already deleted."},
+        status.HTTP_409_CONFLICT: {"description": "The manual source cannot be deleted."},
+    },
+)
+async def delete_source(source_id: uuid.UUID, actor: AdminWrite, database: Database) -> None:
+    """Remove a source from the console and stop polling it; its articles stay (D3)."""
+    source = await database.get(NewsroomSource, source_id)
+    if source is None or source.deleted_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "newsroom source not found")
+    if source.kind == "manual":
+        raise HTTPException(status.HTTP_409_CONFLICT, "the manual source cannot be deleted")
+    with _service_errors(value_error_status=status.HTTP_409_CONFLICT):
+        await sources_service.delete_source(database, source_id, user_id=actor.user.id)
+    await database.commit()
 
 
 # --- Editions ---------------------------------------------------------------

@@ -111,6 +111,22 @@ describe("newsroom admin client", () => {
     expect(JSON.parse(String(init?.body))).toEqual({ item_ids: ["b", "a"] })
   })
 
+  it("deletes a source with a bodiless DELETE", async () => {
+    const transport = vi.fn(
+      async (_path: string, _init?: RequestInit) =>
+        new Response(null, { status: 204 })
+    )
+    const client = createNewsroomAdminClient(transport)
+
+    await client.deleteSource("source/1", "token")
+
+    const [path, init] = transport.mock.calls[0]!
+    expect(path).toBe("/api/admin/newsroom/sources/source%2F1")
+    expect(init?.method).toBe("DELETE")
+    expect(new Headers(init?.headers).get("X-CSRF-Token")).toBe("token")
+    expect(init?.body).toBeUndefined()
+  })
+
   it("surfaces the API detail and rejects invalid payloads", async () => {
     const conflict = createNewsroomAdminClient(async () =>
       Response.json({ detail: "edition is already published" }, { status: 409 })

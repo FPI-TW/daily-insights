@@ -35,6 +35,8 @@ pytestmark = pytest.mark.integration
 BEFORE_IMPORT = "20261001_0033"
 IMPORT = "20261001_0034"
 DROP_LEGACY = "20261001_0035"
+# The ORM models follow the newest schema, so rows are read back at head.
+HEAD = "head"
 LEGACY_TABLES = ("news_editions", "news_items", "news_presentations", "news_candidates")
 GENERATED_AT = datetime(2026, 9, 29, 0, 5, tzinfo=UTC)
 
@@ -312,6 +314,7 @@ async def _sessions(url: str) -> tuple[Any, async_sessionmaker[AsyncSession]]:
 async def test_legacy_editions_become_readable_newsroom_editions(database_url: str) -> None:
     seeded = _seed_legacy(database_url)
     _alembic(database_url, "upgrade", IMPORT)
+    _alembic(database_url, "upgrade", HEAD)
     engine, sessions = await _sessions(database_url)
     try:
         async with sessions() as database:
@@ -489,6 +492,7 @@ async def test_legacy_tables_are_dropped_once_their_history_moved(database_url: 
         "finished_job": "succeeded",
         "finished_function": "succeeded",
     }
+    _alembic(database_url, "upgrade", HEAD)
     engine, sessions = await _sessions(database_url)
     try:
         async with sessions() as database:

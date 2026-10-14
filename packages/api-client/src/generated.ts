@@ -448,7 +448,9 @@ export interface paths {
     }
     /**
      * List Sources
-     * @description Every source with its polling health and 7-day article count (D3).
+     * @description Every source not deleted, with its polling health and 7-day article count (D3).
+     *
+     *     Enabled feeds lead; the fixed ``manual`` source always comes last.
      */
     get: operations["list_sources_api_admin_newsroom_sources_get"]
     put?: never
@@ -470,7 +472,11 @@ export interface paths {
     get?: never
     put?: never
     post?: never
-    delete?: never
+    /**
+     * Delete Source
+     * @description Remove a source from the console and stop polling it; its articles stay (D3).
+     */
+    delete: operations["delete_source_api_admin_newsroom_sources__source_id__delete"]
     options?: never
     head?: never
     /**
@@ -5024,6 +5030,51 @@ export interface operations {
         }
       }
       /** @description Source key already exists. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  delete_source_api_admin_newsroom_sources__source_id__delete: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        source_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Source not found or already deleted. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description The manual source cannot be deleted. */
       409: {
         headers: {
           [name: string]: unknown

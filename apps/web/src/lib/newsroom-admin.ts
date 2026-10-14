@@ -334,6 +334,11 @@ export function createNewsroomAdminClient(transport: ApiTransport) {
         newsroomSourceSchema
       )
     },
+    async deleteSource(sourceId: string, csrfToken: string) {
+      await expectEmpty(
+        await send(`/sources/${id(sourceId)}`, "DELETE", csrfToken)
+      )
+    },
     async publishEdition(editionId: string, csrfToken: string) {
       await expectEmpty(
         await send(`/editions/${id(editionId)}/publish`, "POST", csrfToken)

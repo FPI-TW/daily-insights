@@ -20,6 +20,7 @@ import {
   type SourceFormValues,
 } from "#/lib/newsroom-admin"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
+import { ConfirmDialog } from "./ConfirmDialog"
 import { SourceFormDialog } from "./SourceFormDialog"
 import { StatusBadge, type StatusTone } from "./StatusBadge"
 import { useNewsroomAction } from "./useNewsroomAction"
@@ -47,6 +48,7 @@ export function NewsroomSourcesPage({
   const { t } = useTranslation()
   const redirectExpired = useSessionExpiryRedirect(locale, "admin")
   const [editing, setEditing] = useState<Editing>(null)
+  const [deleting, setDeleting] = useState<NewsroomSource | null>(null)
   const sources = useQuery({
     queryKey: newsroomAdminKeys.sources(),
     queryFn: () => browserNewsroomAdminClient().listSources(),
@@ -78,6 +80,13 @@ export function NewsroomSourcesPage({
       client.updateSource(source.id, { enabled: !source.enabled }, csrf),
     invalidates: () => [newsroomAdminKeys.sources()],
   })
+  const remove = useNewsroomAction({
+    locale,
+    run: (client, source: NewsroomSource, csrf) =>
+      client.deleteSource(source.id, csrf),
+    invalidates: () => [newsroomAdminKeys.sources()],
+    onSuccess: () => setDeleting(null),
+  })
 
   // Narrow screens show each cell with its column name (ResponsiveTable).
   const columnLabels: Record<string, string> = {
@@ -94,8 +103,15 @@ export function NewsroomSourcesPage({
       column.accessor("name", {
         header: () => t("newsroomAdminSourceName"),
         cell: info => (
-          <span className="grid gap-0.5">
-            <span className="font-extrabold">{info.getValue()}</span>
+          <span className="grid justify-items-start gap-0.5">
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="font-extrabold">{info.getValue()}</span>
+              {info.row.original.kind === "manual" ? (
+                <StatusBadge tone="neutral">
+                  {t("newsroomAdminSourceSystem")}
+                </StatusBadge>
+              ) : null}
+            </span>
             <span className="text-xs text-sea-ink-soft">
               {info.row.original.key} · {info.row.original.hostname}
             </span>
@@ -129,7 +145,14 @@ export function NewsroomSourcesPage({
       ),
       column.accessor("health", {
         header: () => t("newsroomAdminSourceHealth"),
-        cell: info => <SourceHealth source={info.row.original} />,
+        cell: info =>
+          info.row.original.kind === "manual" ? (
+            <span className="text-xs text-sea-ink-soft">
+              {t("newsroomAdminSourceManualNote")}
+            </span>
+          ) : (
+            <SourceHealth source={info.row.original} />
+          ),
       }),
       column.accessor("articles_7d", {
         header: () => t("newsroomAdminSourceArticles"),
@@ -154,28 +177,46 @@ export function NewsroomSourcesPage({
               >
                 {t("newsroomAdminSourceEdit")}
               </button>
-              <button
-                type="button"
-                className="px-3 py-1.5 text-sm"
-                disabled={toggle.isPending}
-                aria-label={t(
-                  source.enabled
-                    ? "newsroomAdminSourceDisableLabel"
-                    : "newsroomAdminSourceEnableLabel",
-                  { name: source.name }
-                )}
-                onClick={() => void toggle.run(source)}
-              >
-                {source.enabled
-                  ? t("newsroomAdminSourceDisable")
-                  : t("newsroomAdminSourceEnable")}
-              </button>
+              {/* The manual source is never polled and cannot be switched off or deleted. */}
+              {source.kind === "manual" ? null : (
+                <>
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 text-sm"
+                    disabled={toggle.isPending}
+                    aria-label={t(
+                      source.enabled
+                        ? "newsroomAdminSourceDisableLabel"
+                        : "newsroomAdminSourceEnableLabel",
+                      { name: source.name }
+                    )}
+                    onClick={() => void toggle.run(source)}
+                  >
+                    {source.enabled
+                      ? t("newsroomAdminSourceDisable")
+                      : t("newsroomAdminSourceEnable")}
+                  </button>
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 text-sm text-destructive"
+                    aria-label={t("newsroomAdminSourceDeleteLabel", {
+                      name: source.name,
+                    })}
+                    onClick={() => {
+                      remove.reset()
+                      setDeleting(source)
+                    }}
+                  >
+                    {t("newsroomAdminSourceDelete")}
+                  </button>
+                </>
+              )}
             </span>
           )
         },
       }),
     ],
-    [save, t, toggle]
+    [remove, save, t, toggle]
   )
   const table = useReactTable({
     data: sources.data?.sources ?? [],
@@ -306,6 +347,18 @@ export function NewsroomSourcesPage({
           error={save.error}
           onClose={() => setEditing(null)}
           onSubmit={values => save.run({ source: editing.source, values })}
+        />
+      ) : null}
+
+      {deleting ? (
+        <ConfirmDialog
+          title={t("newsroomAdminSourceDeleteTitle", { name: deleting.name })}
+          message={t("newsroomAdminSourceDeleteMessage", { key: deleting.key })}
+          confirmLabel={t("newsroomAdminSourceDeleteConfirm")}
+          pending={remove.isPending}
+          error={remove.error}
+          onClose={() => setDeleting(null)}
+          onConfirm={() => void remove.run(deleting)}
         />
       ) : null}
     </main>

@@ -922,6 +922,15 @@ const resources: Resource = {
       newsroomAdminSourceDisable: "停用",
       newsroomAdminSourceEnableLabel: "啟用 {{name}}",
       newsroomAdminSourceDisableLabel: "停用 {{name}}",
+      newsroomAdminSourceDelete: "刪除",
+      newsroomAdminSourceDeleteLabel: "刪除 {{name}}",
+      newsroomAdminSourceDeleteTitle: "刪除來源：{{name}}？",
+      newsroomAdminSourceDeleteMessage:
+        "刪除後這個來源會從清單移除並停止輪詢，無法在後台復原。已收進來的文章、事件與已發布版次的來源列表都會保留。代號「{{key}}」會被保留，之後不能用同一個代號新增來源。",
+      newsroomAdminSourceDeleteConfirm: "刪除來源",
+      newsroomAdminSourceSystem: "系統",
+      newsroomAdminSourceManualNote:
+        "承接後台手動加入的池外文章，不輪詢、不可停用或刪除。",
       newsroomAdminSourceName: "名稱",
       newsroomAdminSourceKey: "代號（小寫英數與 -、_）",
       newsroomAdminSourceKind: "格式",
@@ -1895,6 +1904,15 @@ const resources: Resource = {
       newsroomAdminSourceDisable: "停用",
       newsroomAdminSourceEnableLabel: "启用 {{name}}",
       newsroomAdminSourceDisableLabel: "停用 {{name}}",
+      newsroomAdminSourceDelete: "删除",
+      newsroomAdminSourceDeleteLabel: "删除 {{name}}",
+      newsroomAdminSourceDeleteTitle: "删除来源：{{name}}？",
+      newsroomAdminSourceDeleteMessage:
+        "删除后这个来源会从列表移除并停止轮询，无法在后台恢复。已收进来的文章、事件与已发布版次的来源列表都会保留。代号「{{key}}」会被保留，之后不能用同一个代号新增来源。",
+      newsroomAdminSourceDeleteConfirm: "删除来源",
+      newsroomAdminSourceSystem: "系统",
+      newsroomAdminSourceManualNote:
+        "承接后台手动加入的池外文章，不轮询、不可停用或删除。",
       newsroomAdminSourceName: "名称",
       newsroomAdminSourceKey: "代号（小写英数与 -、_）",
       newsroomAdminSourceKind: "格式",
@@ -2918,6 +2936,15 @@ const resources: Resource = {
       newsroomAdminSourceDisable: "Disable",
       newsroomAdminSourceEnableLabel: "Enable {{name}}",
       newsroomAdminSourceDisableLabel: "Disable {{name}}",
+      newsroomAdminSourceDelete: "Delete",
+      newsroomAdminSourceDeleteLabel: "Delete {{name}}",
+      newsroomAdminSourceDeleteTitle: "Delete source {{name}}?",
+      newsroomAdminSourceDeleteMessage:
+        "The source leaves this list and is never polled again; this cannot be undone from the console. Its articles, events and the source lists of published editions are kept. The key “{{key}}” stays reserved and cannot be reused for a new source.",
+      newsroomAdminSourceDeleteConfirm: "Delete source",
+      newsroomAdminSourceSystem: "System",
+      newsroomAdminSourceManualNote:
+        "Holds articles added by hand from the console; never polled and cannot be disabled or deleted.",
       newsroomAdminSourceName: "Name",
       newsroomAdminSourceKey: "Key (lowercase letters, digits, - and _)",
       newsroomAdminSourceKind: "Format",

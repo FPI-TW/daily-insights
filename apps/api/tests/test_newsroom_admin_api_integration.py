@@ -161,6 +161,15 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> Calls:
         for name, value in changes.items():
             setattr(source, name, list(value) if isinstance(value, tuple) else value)
 
+    async def delete_source(
+        database: AsyncSession, source_id: uuid.UUID, *, user_id: uuid.UUID
+    ) -> None:
+        recorded.record("delete_source", source_id=source_id, user_id=user_id)
+        source = await database.get(NewsroomSource, source_id)
+        assert source is not None
+        source.enabled = False
+        source.deleted_at = datetime.now(UTC)
+
     def recorder(name: str, result: Any = None) -> Any:
         async def fake(database: AsyncSession, *args: Any, **kwargs: Any) -> Any:
             del database
@@ -171,6 +180,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> Calls:
 
     monkeypatch.setattr(sources_service, "create_source", create_source)
     monkeypatch.setattr(sources_service, "update_source", update_source)
+    monkeypatch.setattr(sources_service, "delete_source", delete_source)
     monkeypatch.setattr(
         sources_service, "submit_manual_url", recorder("submit_manual_url", new_article_id)
     )
@@ -314,6 +324,7 @@ async def test_sources_report_health_and_recent_article_counts(
         last_error_code="http_503",
     )
     await _source(database, "unhealthy", consecutive_failures=5, last_success_at=None)
+    await _source(database, "manual", kind="manual", name="A manual")
     await _source(database, "fresh")
     await _source(database, "off", enabled=False)
     await _article(database, healthy, None)
@@ -329,11 +340,12 @@ async def test_sources_report_health_and_recent_article_counts(
         "unhealthy": "unhealthy",
         "fresh": "pending",
         "off": "disabled",
+        "manual": "pending",
     }
     assert sources["healthy"]["articles_7d"] == 1
     assert sources["degraded"]["last_error_code"] == "http_503"
-    # Enabled sources lead.
-    assert list(sources)[-1] == "off"
+    # Enabled feeds lead; the manual source comes last whatever its name.
+    assert list(sources)[-2:] == ["off", "manual"]
 
 
 async def test_create_source_goes_through_the_ingestion_service(
@@ -426,6 +438,41 @@ async def test_manual_source_kind_cannot_change(
 
     assert response.status_code == 409
     assert calls.of("update_source") == []
+
+
+async def test_delete_source_hides_it_from_the_console(
+    database: async_sessionmaker[AsyncSession], client: AsyncClient, calls: Calls, admin: User
+) -> None:
+    doomed = await _source(database, "doomed")
+    await _source(database, "kept")
+    await _article(database, doomed, None)
+
+    response = await client.delete(f"{BASE}/sources/{doomed.id}")
+
+    assert response.status_code == 204, response.text
+    [call] = calls.of("delete_source")
+    assert call == {"source_id": doomed.id, "user_id": admin.id}
+    listed = await client.get(f"{BASE}/sources")
+    assert [source["key"] for source in listed.json()["sources"]] == ["kept"]
+    again = await client.delete(f"{BASE}/sources/{doomed.id}")
+    assert again.status_code == 404
+    edit = await client.patch(f"{BASE}/sources/{doomed.id}", json={"enabled": True})
+    assert edit.status_code == 404
+    missing = await client.delete(f"{BASE}/sources/{uuid.uuid4()}")
+    assert missing.status_code == 404
+    assert len(calls.of("delete_source")) == 1
+    assert calls.of("update_source") == []
+
+
+async def test_manual_source_cannot_be_deleted(
+    database: async_sessionmaker[AsyncSession], client: AsyncClient, calls: Calls
+) -> None:
+    manual = await _source(database, "manual", kind="manual")
+
+    response = await client.delete(f"{BASE}/sources/{manual.id}")
+
+    assert response.status_code == 409
+    assert calls.of("delete_source") == []
 
 
 # --- Editions -----------------------------------------------------------------

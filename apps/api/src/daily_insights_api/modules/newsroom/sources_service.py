@@ -208,7 +208,7 @@ async def update_source(
     if unknown:
         raise SourceValidationError(f"unknown source fields: {sorted(unknown)}")
     source = await database.get(NewsroomSource, source_id, with_for_update=True)
-    if source is None:
+    if source is None or source.deleted_at is not None:
         raise LookupError("source not found")
     if source.kind == MANUAL_KIND and set(changes) - {"name", "trust_tier", "weight", "markets"}:
         raise SourceValidationError("the manual source only accepts name, tier, weight, markets")
@@ -234,6 +234,36 @@ async def update_source(
         user_id=user_id,
         before=before,
         after=_snapshot(source, changed),
+    )
+    await database.flush()
+
+
+async def delete_source(
+    database: AsyncSession, source_id: uuid.UUID, *, user_id: uuid.UUID
+) -> None:
+    """Soft-delete a feed source: hide it from the console and stop polling it for good.
+
+    The row stays because its articles keep backing past events and published
+    editions (articles reference sources with ``ON DELETE RESTRICT``); its key
+    therefore stays taken. The fixed ``manual`` source cannot be deleted.
+    """
+    source = await database.get(NewsroomSource, source_id, with_for_update=True)
+    if source is None or source.deleted_at is not None:
+        raise LookupError("source not found")
+    if source.kind == MANUAL_KIND:
+        raise SourceValidationError("the manual source cannot be deleted")
+    before = {"key": source.key, "name": source.name, "enabled": source.enabled}
+    deleted_at = datetime.now(UTC)
+    source.enabled = False
+    source.deleted_at = deleted_at
+    editlog.record_edit(
+        database,
+        entity_type="source",
+        entity_id=source.id,
+        action="delete_source",
+        user_id=user_id,
+        before=before,
+        after={"enabled": False, "deleted_at": deleted_at.isoformat()},
     )
     await database.flush()
 
