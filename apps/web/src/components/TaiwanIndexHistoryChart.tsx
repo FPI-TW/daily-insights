@@ -4,8 +4,13 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { z } from "zod"
 import type { IndexMovingAverages, Locale } from "@daily-insights/api-client"
-import { useChartColors, zoomEventSchema } from "#/lib/chart"
-import { formatNumber, numberLocales, signedPercent } from "#/lib/format"
+import { useChartColors } from "#/lib/chart"
+import {
+  formatNumber,
+  numberLocales,
+  roundsToZero,
+  signedPercent,
+} from "#/lib/format"
 import {
   indexDisplayName,
   type IndexHistorySeries,
@@ -66,7 +71,6 @@ function CandlesPanel({
 }) {
   const { t } = useTranslation()
   const colors = useChartColors()
-  const [zoom, setZoom] = useState({ start: 0, end: 100 })
   const bars = selected.bars
   const latest = bars.at(-1)!
   const previous = bars.at(-2)
@@ -162,9 +166,9 @@ function CandlesPanel({
             {formatNumber(latest.close, null, locale)}
           </strong>
           <span
-            className={`inline-flex items-baseline gap-2 whitespace-nowrap font-mono font-bold ${change === null || Math.abs(change) < 0.005 ? "text-sea-ink-soft" : change > 0 ? "text-market-up" : "text-market-down"}`}
+            className={`inline-flex items-baseline gap-2 whitespace-nowrap font-mono font-bold ${change === null || roundsToZero(change) ? "text-sea-ink-soft" : change > 0 ? "text-market-up" : "text-market-down"}`}
           >
-            {change !== null && Math.abs(change) >= 0.005 ? (
+            {change !== null && !roundsToZero(change) ? (
               <span>{change > 0 ? "▲" : "▼"}</span>
             ) : null}
             <span>
@@ -200,17 +204,10 @@ function CandlesPanel({
         <div className="mt-3" role="img" aria-label={title}>
           <ClientOnly fallback={<IndexChartSkeleton candles />}>
             <ReactECharts
-              notMerge
+              // Merged updates keep the ECharts zoom where the user left it;
+              // series are replaced so a bar set with fewer SMAs drops the rest.
+              replaceMerge={["series"]}
               style={{ height: 700 }}
-              onEvents={{
-                datazoom: (event: unknown) => {
-                  const parsed = zoomEventSchema.safeParse(event)
-                  if (!parsed.success) return
-                  const range =
-                    "batch" in parsed.data ? parsed.data.batch[0]! : parsed.data
-                  if (range.start <= range.end) setZoom(range)
-                },
-              }}
               option={{
                 animation: false,
                 textStyle: { fontFamily: colors.font },
@@ -487,11 +484,10 @@ function CandlesPanel({
                   },
                 ],
                 dataZoom: [
-                  { type: "inside", xAxisIndex: [0, 1, 2, 3], ...zoom },
+                  { type: "inside", xAxisIndex: [0, 1, 2, 3] },
                   {
                     type: "slider",
                     xAxisIndex: [0, 1, 2, 3],
-                    ...zoom,
                     height: 26,
                     bottom: 4,
                     borderColor: colors.grid,

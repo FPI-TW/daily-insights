@@ -434,7 +434,7 @@ describe("IndexHistoryChart", () => {
       '"selected":{"SMA 20":true,"SMA 240":false}'
     )
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
-      '"type":"slider","xAxisIndex":[0,1,2,3],"start":0,"end":100,"height":26'
+      '"type":"slider","xAxisIndex":[0,1,2,3],"height":26'
     )
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
       '"name":"MACD","type":"line"'
@@ -445,9 +445,9 @@ describe("IndexHistoryChart", () => {
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
       '"name":"RSI 14","type":"line"'
     )
-    fireEvent.click(screen.getByTestId("index-chart"))
+    // ECharts owns the zoom: the option never feeds a position back in.
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
-      '"type":"inside","xAxisIndex":[0,1,2,3],"start":25,"end":75'
+      '"type":"inside","xAxisIndex":[0,1,2,3]},{"type":"slider"'
     )
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
       '"color":["#2563eb","#d97706"'

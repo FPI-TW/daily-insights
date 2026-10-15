@@ -1,5 +1,5 @@
 import { ResponsiveTable } from "./ResponsiveTable"
-import type { Locale, MarketCode } from "@daily-insights/api-client"
+import type { Locale } from "@daily-insights/api-client"
 import { useTranslation } from "react-i18next"
 import { directionClass, formatChange, formatNumber } from "#/lib/format"
 import {
@@ -47,10 +47,15 @@ export function indexPerformanceRows(
   })
 }
 
+// Only the markets that have a translated heading; the i18n resources are
+// untyped, so a wider template type would let a missing key render raw.
+export type IndexTableTitleKey =
+  "indexTableTitle_us_equity" | "indexTableTitle_hk_equity"
+
 export function IndexPerformanceTableLoading({
   titleKey,
 }: {
-  titleKey: `indexTableTitle_${MarketCode}`
+  titleKey: IndexTableTitleKey
 }) {
   const { t } = useTranslation()
   const title = t(titleKey)
@@ -78,7 +83,7 @@ export function IndexPerformanceTable({
 }: {
   history: MarketIndexHistory | null
   locale: Locale
-  titleKey: `indexTableTitle_${MarketCode}`
+  titleKey: IndexTableTitleKey
   symbols: readonly string[]
 }) {
   const { t } = useTranslation()

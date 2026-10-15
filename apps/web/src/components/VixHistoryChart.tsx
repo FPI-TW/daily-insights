@@ -63,7 +63,9 @@ export function VixHistoryChart({
 }) {
   const { t } = useTranslation()
   const colors = useChartColors()
-  const name = indexDisplayName(symbol, t)
+  // The prop only names the chart before anything loads; afterwards the
+  // loaded history says which index its bars belong to.
+  const name = indexDisplayName(history?.symbol ?? symbol, t)
 
   if (history === null) {
     return <VixState name={name} message={t("vixChartUnavailable", { name })} />
@@ -77,7 +79,7 @@ export function VixHistoryChart({
   const values = history.bars.map(bar => Number(bar.close))
   const minimum = Math.min(...values)
   const maximum = Math.max(...values)
-  const bands = volatilityBands[symbol]
+  const bands = volatilityBands[history.symbol]
   const summary = t(
     bands ? "vixChartAccessibleSummary" : "vixChartAccessibleSummaryNoBands",
     { name }

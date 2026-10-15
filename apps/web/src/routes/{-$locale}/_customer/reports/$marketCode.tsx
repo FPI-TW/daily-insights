@@ -46,6 +46,7 @@ import {
 import {
   IndexPerformanceTable,
   IndexPerformanceTableLoading,
+  type IndexTableTitleKey,
 } from "#/components/IndexPerformanceTable"
 import {
   VixHistoryChart,
@@ -70,7 +71,7 @@ type ChartBlocks =
       // "beside": its own column next to the morning report; "stacked":
       // under the market's own cards in the single column.
       performance?: {
-        titleKey: `indexTableTitle_${MarketCode}`
+        titleKey: IndexTableTitleKey
         symbols: readonly string[]
         placement: "beside" | "stacked"
       }

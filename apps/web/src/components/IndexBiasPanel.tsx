@@ -1,6 +1,6 @@
 import { ClientOnly } from "@tanstack/react-router"
 import ReactECharts from "echarts-for-react"
-import { memo, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { IndexMovingAverages, Locale } from "@daily-insights/api-client"
 import { useChartColors, zoomEventSchema } from "#/lib/chart"
@@ -34,9 +34,8 @@ function BiasValue({
     </span>
   )
 }
-/** 20/60/120MA bias for one index; shared by the Taiwan and index charts.
- * Memoised so the parent chart's zoom state does not rebuild this chart. */
-export const IndexBiasPanel = memo(function IndexBiasPanel({
+/** 20/60/120MA bias for one index; shared by the Taiwan and index charts. */
+export function IndexBiasPanel({
   title,
   selected,
   averages,
@@ -68,7 +67,7 @@ export const IndexBiasPanel = memo(function IndexBiasPanel({
     [all, start]
   )
   const dates = lines[0]!.points.map(point => point.date)
-  // Stable so echarts-for-react does not dispose and recreate the chart on
+  // Stable so echarts-for-react does not unbind and rebind the listeners on
   // every render; `zoom` only drives the meters and the label density.
   const onEvents = useMemo(
     () => ({
@@ -189,6 +188,9 @@ export const IndexBiasPanel = memo(function IndexBiasPanel({
           <div className="mt-4.5" role="img" aria-label={title}>
             <ClientOnly fallback={<IndexChartSkeleton />}>
               <ReactECharts
+                // Remount on a window change so the ECharts slider resets
+                // together with `zoom`; merged updates keep it otherwise.
+                key={months}
                 style={{ height: 330 }}
                 onEvents={onEvents}
                 option={{
@@ -287,4 +289,4 @@ export const IndexBiasPanel = memo(function IndexBiasPanel({
       )}
     </DashboardPanel>
   )
-})
+}

@@ -190,11 +190,12 @@ describe("TaiwanIndexHistoryChart", () => {
       within(candles()).queryByText("Last 2 years · daily OHLC")
     ).toBeNull()
     expect(within(candles()).queryByText("Visible date range")).toBeNull()
-    fireEvent.click(
-      within(candles()).getByRole("button", {
+    // The candle chart leaves its zoom to ECharts and listens to nothing.
+    expect(
+      within(candles()).queryByRole("button", {
         name: "Zoom Taiwan Weighted Index",
       })
-    )
+    ).toBeNull()
     expect(within(candles()).queryByText("2025-02-01 – 2026-01-01")).toBeNull()
     expect(within(candles()).getByTestId("index-chart")).toHaveTextContent(
       '"height":26'

@@ -4,8 +4,14 @@ import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { z } from "zod"
 import type { Locale } from "@daily-insights/api-client"
-import { useChartColors, zoomEventSchema } from "#/lib/chart"
-import { formatIsoDate, formatNumber, numberLocales } from "#/lib/format"
+import { useChartColors } from "#/lib/chart"
+import {
+  formatIsoDate,
+  formatNumber,
+  numberLocales,
+  roundsToZero,
+  signedPercent,
+} from "#/lib/format"
 import {
   indexDisplayName,
   indexNameKey,
@@ -66,7 +72,6 @@ export function IndexHistoryChart({
   const [selectedSymbol, setSelectedSymbol] = useState(
     history?.series[0]?.symbol ?? ""
   )
-  const [zoom, setZoom] = useState({ start: 0, end: 100 })
   useEffect(() => {
     if (!history?.series.some(item => item.symbol === selectedSymbol)) {
       setSelectedSymbol(history?.series[0]?.symbol ?? "")
@@ -221,21 +226,15 @@ export function IndexHistoryChart({
                 {formatNumber(latest.close, null, locale)}
               </strong>
               <span
-                className={`inline-flex items-baseline gap-2 whitespace-nowrap font-mono font-bold ${change === null || Math.abs(change) < 0.005 ? "text-sea-ink-soft" : change > 0 ? "text-market-up" : "text-market-down"}`}
+                className={`inline-flex items-baseline gap-2 whitespace-nowrap font-mono font-bold ${change === null || roundsToZero(change) ? "text-sea-ink-soft" : change > 0 ? "text-market-up" : "text-market-down"}`}
               >
-                {change !== null && Math.abs(change) >= 0.005 ? (
+                {change !== null && !roundsToZero(change) ? (
                   <span>{change > 0 ? "▲" : "▼"}</span>
                 ) : null}
                 <span>
                   {change === null
                     ? "—"
-                    : `${new Intl.NumberFormat(numberLocales[locale], {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                        signDisplay: "never",
-                      }).format(
-                        Math.abs(change) < 0.005 ? 0 : Math.abs(change)
-                      )}%`}
+                    : signedPercent(Math.abs(change), locale).replace("+", "")}
                 </span>
               </span>
               <span>{activityLabel}</span>
@@ -266,17 +265,10 @@ export function IndexHistoryChart({
             }
           >
             <ReactECharts
-              notMerge
+              // Merged updates keep the ECharts zoom where the user left it;
+              // series are replaced so a symbol with fewer SMAs drops the rest.
+              replaceMerge={["series"]}
               style={{ height: "100%", width: "100%" }}
-              onEvents={{
-                datazoom: (event: unknown) => {
-                  const parsed = zoomEventSchema.safeParse(event)
-                  if (!parsed.success) return
-                  const range =
-                    "batch" in parsed.data ? parsed.data.batch[0]! : parsed.data
-                  if (range.start <= range.end) setZoom(range)
-                },
-              }}
               option={{
                 animation: false,
                 aria: {
@@ -533,15 +525,10 @@ export function IndexHistoryChart({
                   },
                 ],
                 dataZoom: [
-                  {
-                    type: "inside",
-                    xAxisIndex: [0, 1, 2, 3],
-                    ...zoom,
-                  },
+                  { type: "inside", xAxisIndex: [0, 1, 2, 3] },
                   {
                     type: "slider",
                     xAxisIndex: [0, 1, 2, 3],
-                    ...zoom,
                     height: 26,
                     bottom: 4,
                     borderColor: colors.grid,
