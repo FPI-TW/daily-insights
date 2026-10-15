@@ -4,16 +4,31 @@ import { useTranslation } from "react-i18next"
 import type { Locale } from "@daily-insights/api-client"
 import { useChartColors } from "#/lib/chart"
 import { formatIsoDate, formatNumber, numberLocales } from "#/lib/format"
-import type { VixHistory } from "#/lib/indices"
+import {
+  indexDisplayName,
+  type VixHistory,
+  type VolatilitySymbol,
+} from "#/lib/indices"
 
-export function VixHistoryLoading() {
+// Reference bands per volatility index. HSI VIX has no published bands and
+// its two-year median already sits above VIX's elevated line, so it draws
+// none rather than borrow VIX's calibration.
+const volatilityBands: Record<
+  VolatilitySymbol,
+  { elevated: number; high: number } | null
+> = {
+  "^VIX": { elevated: 20, high: 30 },
+  "^HSIL": null,
+}
+
+export function VixHistoryLoading({ symbol }: { symbol: VolatilitySymbol }) {
   const { t } = useTranslation()
   return (
     <section
       className="surface-panel mt-6 animate-pulse p-5"
       role="status"
       aria-live="polite"
-      aria-label={t("vixChartLoading")}
+      aria-label={t("vixChartLoading", { name: indexDisplayName(symbol, t) })}
     >
       <div className="h-5 w-52 rounded bg-line" />
       <div className="mt-5 h-84 rounded-lg bg-line sm:h-96" />
@@ -21,7 +36,7 @@ export function VixHistoryLoading() {
   )
 }
 
-function VixState({ message }: { message: string }) {
+function VixState({ name, message }: { name: string; message: string }) {
   const { t } = useTranslation()
   return (
     <section
@@ -29,27 +44,34 @@ function VixState({ message }: { message: string }) {
       role="status"
       aria-live="polite"
     >
-      <h2 className="m-0 text-base font-extrabold">{t("vixChartTitle")}</h2>
+      <h2 className="m-0 text-base font-extrabold">
+        {t("vixChartTitle", { name })}
+      </h2>
       <p className="mt-3 mb-0 text-sm text-sea-ink-soft">{message}</p>
     </section>
   )
 }
 
 export function VixHistoryChart({
+  symbol,
   history,
   locale,
 }: {
+  symbol: VolatilitySymbol
   history: VixHistory | null
   locale: Locale
 }) {
   const { t } = useTranslation()
   const colors = useChartColors()
+  // The prop only names the chart before anything loads; afterwards the
+  // loaded history says which index its bars belong to.
+  const name = indexDisplayName(history?.symbol ?? symbol, t)
 
   if (history === null) {
-    return <VixState message={t("vixChartUnavailable")} />
+    return <VixState name={name} message={t("vixChartUnavailable", { name })} />
   }
   if (history.bars.length === 0) {
-    return <VixState message={t("vixChartEmpty")} />
+    return <VixState name={name} message={t("vixChartEmpty", { name })} />
   }
 
   const latest = history.bars.at(-1)!
@@ -57,8 +79,22 @@ export function VixHistoryChart({
   const values = history.bars.map(bar => Number(bar.close))
   const minimum = Math.min(...values)
   const maximum = Math.max(...values)
-  const chartMinimum = Math.max(0, Math.min(15, Math.floor(minimum - 2)))
-  const chartMaximum = Math.max(35, Math.ceil(maximum + 2))
+  const bands = volatilityBands[history.symbol]
+  const summary = t(
+    bands ? "vixChartAccessibleSummary" : "vixChartAccessibleSummaryNoBands",
+    { name }
+  )
+  // With bands, keep the calm zone below `elevated` and the high zone above
+  // `high` on screen even in quiet years; without them, follow the data.
+  const chartMinimum = Math.max(
+    0,
+    bands
+      ? Math.min(bands.elevated - 5, Math.floor(minimum - 2))
+      : Math.floor(minimum - 2)
+  )
+  const chartMaximum = bands
+    ? Math.max(bands.high + 5, Math.ceil(maximum + 2))
+    : Math.ceil(maximum + 2)
   const closeLabel = t("vixChartClose")
   const macdLabel = t("indexChartMacd")
   const signalLabel = t("indexChartMacdSignal")
@@ -107,7 +143,7 @@ export function VixHistoryChart({
       <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 id="vix-history-title" className="m-0 text-base font-extrabold">
-            {t("vixChartTitle")}
+            {t("vixChartTitle", { name })}
           </h2>
           <p className="mt-1 mb-0 text-xs text-sea-ink-soft">
             {t("vixChartRange", {
@@ -116,9 +152,11 @@ export function VixHistoryChart({
             })}
           </p>
         </div>
-        <p className="m-0 text-xs font-semibold text-sea-ink-soft">
-          {t("vixChartBandsAreReference")}
-        </p>
+        {bands ? (
+          <p className="m-0 text-xs font-semibold text-sea-ink-soft">
+            {t("vixChartBandsAreReference", bands)}
+          </p>
+        ) : null}
       </div>
       <div className="h-144 min-w-0 w-full overflow-hidden border-y border-line py-2 sm:h-160">
         <ClientOnly
@@ -126,7 +164,7 @@ export function VixHistoryChart({
             <div
               className="h-full w-full animate-pulse rounded-lg bg-link-hover"
               role="status"
-              aria-label={t("vixChartLoading")}
+              aria-label={t("vixChartLoading", { name })}
             />
           }
         >
@@ -136,7 +174,7 @@ export function VixHistoryChart({
               animation: false,
               aria: {
                 enabled: true,
-                description: t("vixChartAccessibleSummary"),
+                description: summary,
               },
               title: [
                 {
@@ -347,55 +385,65 @@ export function VixHistoryChart({
                   showSymbol: false,
                   lineStyle: { width: 3 },
                   areaStyle: { color: "transparent" },
-                  markLine: {
-                    silent: true,
-                    symbol: "none",
-                    label: { color: colors.text },
-                    lineStyle: { color: colors.text, type: "dashed" },
-                    data: [
-                      { name: t("vixChartThresholdElevated"), yAxis: 20 },
-                      { name: t("vixChartThresholdHigh"), yAxis: 30 },
-                    ],
-                  },
-                  markArea: {
-                    silent: true,
-                    label: { color: colors.text, fontSize: 11 },
-                    data: [
-                      [
-                        {
-                          name: t("vixChartBandCalm"),
-                          yAxis: chartMinimum,
-                          itemStyle: {
-                            color: colors.vixRisk.calm,
-                            opacity: 0.08,
-                          },
+                  ...(bands
+                    ? {
+                        markLine: {
+                          silent: true,
+                          symbol: "none",
+                          label: { color: colors.text },
+                          lineStyle: { color: colors.text, type: "dashed" },
+                          data: [
+                            {
+                              name: t("vixChartThresholdElevated", bands),
+                              yAxis: bands.elevated,
+                            },
+                            {
+                              name: t("vixChartThresholdHigh", bands),
+                              yAxis: bands.high,
+                            },
+                          ],
                         },
-                        { yAxis: 20 },
-                      ],
-                      [
-                        {
-                          name: t("vixChartBandElevated"),
-                          yAxis: 20,
-                          itemStyle: {
-                            color: colors.vixRisk.elevated,
-                            opacity: 0.1,
-                          },
+                        markArea: {
+                          silent: true,
+                          label: { color: colors.text, fontSize: 11 },
+                          data: [
+                            [
+                              {
+                                name: t("vixChartBandCalm", bands),
+                                yAxis: chartMinimum,
+                                itemStyle: {
+                                  color: colors.vixRisk.calm,
+                                  opacity: 0.08,
+                                },
+                              },
+                              { yAxis: bands.elevated },
+                            ],
+                            [
+                              {
+                                name: t("vixChartBandElevated", bands),
+                                yAxis: bands.elevated,
+                                itemStyle: {
+                                  color: colors.vixRisk.elevated,
+                                  opacity: 0.1,
+                                },
+                              },
+                              { yAxis: bands.high },
+                            ],
+                            [
+                              {
+                                name: t("vixChartBandHigh", bands),
+                                yAxis: bands.high,
+                                itemStyle: {
+                                  color: colors.vixRisk.high,
+                                  opacity: 0.08,
+                                },
+                              },
+                              { yAxis: chartMaximum },
+                            ],
+                          ],
                         },
-                        { yAxis: 30 },
-                      ],
-                      [
-                        {
-                          name: t("vixChartBandHigh"),
-                          yAxis: 30,
-                          itemStyle: {
-                            color: colors.vixRisk.high,
-                            opacity: 0.08,
-                          },
-                        },
-                        { yAxis: chartMaximum },
-                      ],
-                    ],
-                  },
+                      }
+                    : {}),
                 },
                 {
                   name: histogramLabel,
@@ -465,7 +513,7 @@ export function VixHistoryChart({
       </div>
       <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs text-sea-ink-soft">
         <div className="flex gap-1">
-          <dt>{t("vixChartLatestClose")}</dt>
+          <dt>{t("vixChartLatestClose", { name })}</dt>
           <dd className="m-0 font-mono font-semibold text-sea-ink tabular-nums">
             {formatNumber(latest.close, "index", locale)}
           </dd>
@@ -473,7 +521,7 @@ export function VixHistoryChart({
       </dl>
       <div className="sr-only">
         <table>
-          <caption>{t("vixChartAccessibleSummary")}</caption>
+          <caption>{summary}</caption>
           <thead>
             <tr>
               <th>{t("vixChartDate")}</th>

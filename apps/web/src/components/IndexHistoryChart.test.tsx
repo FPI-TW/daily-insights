@@ -8,7 +8,7 @@ import {
 import { I18nextProvider } from "react-i18next"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createI18n } from "#/lib/i18n"
-import type { MarketIndexHistory } from "#/lib/indices"
+import type { IndexMovingAverageMap, MarketIndexHistory } from "#/lib/indices"
 import { IndexHistoryChart, IndexHistoryLoading } from "./IndexHistoryChart"
 
 vi.mock("@tanstack/react-router", () => ({
@@ -221,6 +221,115 @@ describe("IndexHistoryChart", () => {
     )
   })
 
+  it("shows the selected index's bias panel only when asked", async () => {
+    const bar = (trade_date: string, close: string) => ({
+      symbol: "^HSI",
+      market_code: "hk_equity" as const,
+      trade_date,
+      open: null,
+      high: null,
+      low: null,
+      close,
+      volume: null,
+      trade_value: null,
+    })
+    const hk: MarketIndexHistory = {
+      marketCode: "hk_equity",
+      start: "2024-10-09",
+      end: "2026-10-12",
+      failedSymbols: [],
+      series: [
+        {
+          symbol: "^HSI",
+          bars: [bar("2026-10-09", "24000"), bar("2026-10-12", "24240")],
+        },
+      ],
+    }
+    const averages: IndexMovingAverageMap = {
+      "^HSI": {
+        symbol: "^HSI",
+        market_code: "hk_equity",
+        method: "sma",
+        price_field: "close",
+        formula_version: "sma-close-v1",
+        as_of: "2026-10-12",
+        series: [
+          {
+            period: 20,
+            points: [
+              { trade_date: "2026-10-09", value: "24000" },
+              { trade_date: "2026-10-12", value: "24000" },
+            ],
+          },
+          { period: 60, points: [] },
+          { period: 120, points: [] },
+          { period: 240, points: [] },
+        ],
+        rsi: {
+          period: 14,
+          method: "wilder",
+          formula_version: "rsi-wilder-close-v1",
+          points: [],
+        },
+        macd: {
+          fast_period: 12,
+          slow_period: 26,
+          signal_period: 9,
+          method: "ema",
+          formula_version: "macd-ema-close-v1",
+          points: [],
+        },
+        kd: {
+          lookback_period: 9,
+          k_smoothing_period: 3,
+          d_smoothing_period: 3,
+          method: "smoothed-rsv",
+          formula_version: "stochastic-kd-9-3-3-v1",
+          points: [],
+        },
+      },
+    }
+    await renderLocalized(
+      <IndexHistoryChart
+        history={hk}
+        locale="en"
+        movingAverages={averages}
+        bias
+      />
+    )
+    const chart = screen.getByRole("heading", { name: "Index performance" })
+    const biasHeading = screen.getByRole("heading", {
+      name: "Hang Seng Index bias",
+    })
+    expect(
+      chart.compareDocumentPosition(biasHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    // Latest close sits 1% above its 20MA, the top of the visible window.
+    await waitFor(() =>
+      expect(screen.getByRole("meter", { name: "20MA bias" })).toHaveAttribute(
+        "aria-valuenow",
+        "100"
+      )
+    )
+    expect(screen.getByRole("meter", { name: "20MA bias" })).toHaveAttribute(
+      "aria-valuetext",
+      "+1.00%"
+    )
+    expect(
+      screen.getByRole("meter", { name: "120MA bias" })
+    ).not.toHaveAttribute("aria-valuenow")
+
+    cleanup()
+    await renderLocalized(
+      <IndexHistoryChart history={hk} locale="en" movingAverages={averages} />
+    )
+    expect(screen.queryByRole("meter")).toBeNull()
+    expect(
+      screen.queryByRole("heading", { name: "Hang Seng Index bias" })
+    ).toBeNull()
+  })
+
   it("adds aligned available SMA lines without treating absent averages as a bar failure", async () => {
     document.documentElement.style.setProperty("--chart-index-close", "#2563eb")
     document.documentElement.style.setProperty(
@@ -325,7 +434,7 @@ describe("IndexHistoryChart", () => {
       '"selected":{"SMA 20":true,"SMA 240":false}'
     )
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
-      '"type":"slider","xAxisIndex":[0,1,2,3],"start":0,"end":100,"height":26'
+      '"type":"slider","xAxisIndex":[0,1,2,3],"height":26'
     )
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
       '"name":"MACD","type":"line"'
@@ -336,9 +445,9 @@ describe("IndexHistoryChart", () => {
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
       '"name":"RSI 14","type":"line"'
     )
-    fireEvent.click(screen.getByTestId("index-chart"))
+    // ECharts owns the zoom: the option never feeds a position back in.
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
-      '"type":"inside","xAxisIndex":[0,1,2,3],"start":25,"end":75'
+      '"type":"inside","xAxisIndex":[0,1,2,3]},{"type":"slider"'
     )
     expect(screen.getByTestId("index-chart")).toHaveTextContent(
       '"color":["#2563eb","#d97706"'
