@@ -1,5 +1,5 @@
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -10,13 +10,17 @@ from daily_insights_api.modules.newsroom.analysis import (
     symbol_catalog,
 )
 from daily_insights_api.modules.newsroom.assembly import (
+    STORY_GROUP_LIMIT,
     ArticleSignal,
+    Candidate,
     EditorContractError,
     Rated,
+    _editor_payload,
     apply_quota,
     event_score,
     fallback_selection,
     key_figures,
+    same_story,
     same_story_titles,
     validate_duplicate_groups,
     validate_ratings,
@@ -139,6 +143,42 @@ def test_quota_breaks_ties_by_candidate_position() -> None:
     assert [item.event_id for item in apply_quota(rated)] == [first, second]
 
 
+def test_quota_keeps_two_events_per_story_group() -> None:
+    # One earnings call split into five events, all rated high (2026-10-16 tw_equity).
+    call = [_rated(5, 135.0), _rated(5, 118.0), _rated(4, 106.0), _rated(4, 97.0), _rated(4, 92.0)]
+    other = [_rated(4, 80.0), _rated(3, 100.0), _rated(3, 90.0)]
+    groups = {item.event_id: 0 for item in call}
+    selection = apply_quota(call + other, groups)
+    assert [(item.stars, item.score) for item in selection] == [
+        (5, 135.0),
+        (5, 118.0),
+        (4, 80.0),
+        (3, 100.0),
+        (3, 90.0),
+    ]
+    assert sum(item.event_id in groups for item in selection) == STORY_GROUP_LIMIT
+
+
+def test_quota_story_limit_skips_group_members_before_counting_four_stars() -> None:
+    grouped = [_rated(4, 99.0 - index) for index in range(4)]
+    loose = [_rated(4, 50.0 - index) for index in range(4)]
+    groups = {item.event_id: 7 for item in grouped}
+    selection = apply_quota(grouped + loose, groups)
+    assert [item.score for item in selection] == [99.0, 98.0, 50.0, 49.0, 48.0]
+
+
+def test_fallback_keeps_two_events_per_story_group() -> None:
+    scores = [(uuid.UUID(int=index), float(100 - index)) for index in range(8)]
+    groups = {scores[0][0]: 0, scores[1][0]: 0, scores[2][0]: 0, scores[3][0]: 1}
+    assert [score for _, score in fallback_selection(scores, groups)] == [
+        100.0,
+        99.0,
+        97.0,
+        96.0,
+        95.0,
+    ]
+
+
 # --- Scoring ------------------------------------------------------------------------
 
 
@@ -182,6 +222,30 @@ def test_fallback_keeps_the_given_order_on_equal_scores() -> None:
 
 
 # --- Editor contract ------------------------------------------------------------------
+
+
+def _candidate(name: str) -> Candidate:
+    return Candidate(
+        event_id=uuid.uuid5(uuid.NAMESPACE_URL, name),
+        working_title=name,
+        score=50.0,
+        headlines=((name, "CNA"),),
+        article_count=1,
+        source_count=1,
+        trust_tier=1,
+        first_seen_at=datetime(2026, 10, 16, tzinfo=UTC),
+    )
+
+
+def test_editor_payload_labels_story_groups_present_in_the_market() -> None:
+    a, b, c, d, e = (_candidate(name) for name in "abcde")
+    # Group 3 has only one candidate in this market, so it carries no label.
+    groups = {c.event_id: 5, a.event_id: 5, b.event_id: 3, e.event_id: 9, d.event_id: 9}
+    payload = _editor_payload("tw_equity", [a, b, c, d], {}, groups)
+    assert [event.get("story_group") for event in payload["events"]] == ["g1", None, "g1", None]
+    assert _editor_payload("tw_equity", [d, e, a, c], {}, groups)["events"][0]["story_group"] == (
+        "g1"
+    )
 
 
 def _result(*pairs: tuple[str, int]) -> EditorResult:
@@ -311,6 +375,16 @@ def test_titles_below_the_bar_match_only_on_a_shared_figure() -> None:
     # A preview and its result differ in the figure.
     assert not same_story_titles(0.77, "中國9月出口預估年增25.5%", "中國9月出口年增36.3%")
     assert not same_story_titles(0.74, "外資賣超521億", "外資賣超521億")
+
+
+def test_close_articles_make_one_story_even_when_titles_differ() -> None:
+    title, other = "台積電法說會調升全年營收成長", "台積電第3季EPS創高"
+    assert same_story(0.69, 0.921, title, other)
+    assert same_story(0.69, 0.88, title, other)
+    assert not same_story(0.69, 0.873, title, other)
+    assert not same_story(0.69, None, title, other)
+    # The title rule alone still merges.
+    assert same_story(0.95, None, title, other)
 
 
 def test_duplicate_groups_keep_known_ids_once_and_drop_singletons() -> None:

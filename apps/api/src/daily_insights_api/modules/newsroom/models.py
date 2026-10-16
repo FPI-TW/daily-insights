@@ -443,6 +443,9 @@ class NewsroomDedupeDecision(UUIDPrimaryKeyMixin, Base):
     matched_title: Mapped[str] = mapped_column(String(500), nullable=False)
     # Cosine similarity of the two working titles; NULL when it was not needed.
     title_similarity: Mapped[float | None] = mapped_column(Float)
+    # ``window`` scope: cosine similarity of the two events' mean article
+    # embeddings; NULL when either has no embedded article.
+    article_similarity: Mapped[float | None] = mapped_column(Float)
     threshold: Mapped[float] = mapped_column(Float, nullable=False)
     # Whether both titles carry the same amount or rate, which lowers the bar.
     shared_figure: Mapped[bool] = mapped_column(Boolean, nullable=False)

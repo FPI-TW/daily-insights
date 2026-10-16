@@ -13,11 +13,13 @@ import logging
 import math
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Collection, Sequence
+from collections import Counter
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +31,7 @@ from daily_insights_api.modules.newsroom.contracts import (
     PublishedMatches,
 )
 from daily_insights_api.modules.newsroom.models import (
+    EMBEDDING_DIMENSIONS,
     MARKET_CODES,
     NewsroomArticle,
     NewsroomDedupeDecision,
@@ -47,7 +50,7 @@ from daily_insights_api.modules.newsroom.worker import Runtime
 
 logger = logging.getLogger(__name__)
 
-EDITOR_PROMPT_VERSION = "newsroom.editor.v2"
+EDITOR_PROMPT_VERSION = "newsroom.editor.v3"
 DEDUPE_PROMPT_VERSION = "newsroom.dedupe.v2"
 REPEAT_PROMPT_VERSION = "newsroom.repeat.v1"
 DEDUPE_HEADLINES = 3
@@ -61,6 +64,13 @@ PUBLISHED_LOOKBACK_DAYS = 2
 # carry different figures, so in that band the titles must share a key figure.
 DEDUPE_TITLE_SIMILARITY = 0.85
 DEDUPE_FIGURE_SIMILARITY = 0.75
+# One story told from several angles (an earnings call's revenue, guidance and
+# capex pieces) has titles too different for the bars above, but its events'
+# mean article embeddings stay close. Replaying 135 proposals of 2026-10-03..16:
+# the angles of one earnings release scored 0.90-0.94; the nearest false pair,
+# a "market awaits the call" preview against the results, 0.873; other stories
+# of the same company or theme 0.85 and below.
+DEDUPE_ARTICLE_SIMILARITY = 0.88
 # An amount or rate in a title: two or more digits, or a decimal. A number
 # followed by a date unit (year, month, day, quarter, week) is not one.
 _KEY_FIGURE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)(?![\d.])(?!\s*[年月日季週周])")
@@ -75,6 +85,12 @@ FIVE_STAR_UNLIMITED = 5
 FOUR_STAR_LIMIT = 5
 FILL_TARGET = 5
 FILLER_STARS = 3
+# Picks per story group: events the duplicate screen grouped but did not merge.
+# On 2026-10-16 it grouped 18 TSMC earnings-call events whose titles differ too
+# much to merge (similarity 0.26-0.74), and five of them filled the tw_equity
+# edition. The model also over-groups related stories (a preview with its
+# result, another TSMC fab), so a group keeps two picks rather than one.
+STORY_GROUP_LIMIT = 2
 FALLBACK_LIMIT = 5
 EDITOR_ATTEMPTS = 3
 EDITOR_RETRY_DELAY = timedelta(seconds=5)
@@ -122,15 +138,37 @@ def _quota_order(rated: Rated) -> tuple[int, float, int, str]:
     return (-rated.stars, -rated.score, rated.position, str(rated.event_id))
 
 
-def apply_quota(rated: Sequence[Rated]) -> list[Rated]:
+StoryGroups = Mapping[uuid.UUID, int]
+
+
+def _within_story_limit[T](
+    ordered: Sequence[T], event_id: Callable[[T], uuid.UUID], story_groups: StoryGroups
+) -> list[T]:
+    """``ordered`` without the picks past ``STORY_GROUP_LIMIT`` of any story group."""
+    taken: Counter[int] = Counter()
+    kept: list[T] = []
+    for item in ordered:
+        group = story_groups.get(event_id(item))
+        if group is not None:
+            if taken[group] >= STORY_GROUP_LIMIT:
+                continue
+            taken[group] += 1
+        kept.append(item)
+    return kept
+
+
+def apply_quota(rated: Sequence[Rated], story_groups: StoryGroups | None = None) -> list[Rated]:
     """D8 quotas, applied by code rather than the model.
 
     Every 5-star event is kept; at most five 4-star events; only when 5 + 4
     stars total fewer than five do 3-star events fill up to five items. 1-2
     star events never fill, so a thin day publishes fewer than five. Ordered by
-    stars, then score, descending.
+    stars, then score, descending. Each story group keeps its best
+    ``STORY_GROUP_LIMIT`` events before the quotas apply.
     """
-    ordered = sorted(rated, key=_quota_order)
+    ordered = _within_story_limit(
+        sorted(rated, key=_quota_order), lambda item: item.event_id, story_groups or {}
+    )
     five = [item for item in ordered if item.stars == 5]
     four = [item for item in ordered if item.stars == 4][:FOUR_STAR_LIMIT]
     chosen = five + four
@@ -140,9 +178,15 @@ def apply_quota(rated: Sequence[Rated]) -> list[Rated]:
     return sorted(chosen, key=_quota_order)
 
 
-def fallback_selection(scores: Sequence[tuple[uuid.UUID, float]]) -> list[tuple[uuid.UUID, float]]:
-    """Editor unavailable: the top five events by score (D5), ties in the given order."""
-    return sorted(scores, key=lambda pair: -pair[1])[:FALLBACK_LIMIT]
+def fallback_selection(
+    scores: Sequence[tuple[uuid.UUID, float]], story_groups: StoryGroups | None = None
+) -> list[tuple[uuid.UUID, float]]:
+    """Editor unavailable: the top five events by score (D5), ties in the given order.
+
+    Story groups are limited as in ``apply_quota``.
+    """
+    ordered = sorted(scores, key=lambda pair: -pair[1])
+    return _within_story_limit(ordered, lambda pair: pair[0], story_groups or {})[:FALLBACK_LIMIT]
 
 
 class EditorContractError(RetryableStageError):
@@ -409,6 +453,45 @@ def same_story_titles(similarity: float, title: str, other: str) -> bool:
     return similarity >= DEDUPE_FIGURE_SIMILARITY and bool(key_figures(title) & key_figures(other))
 
 
+async def article_similarities(
+    database: AsyncSession, target: uuid.UUID, others: Collection[uuid.UUID]
+) -> dict[uuid.UUID, float]:
+    """Cosine similarity of each of ``others``' mean article embedding to ``target``'s.
+
+    Events without an embedded article are left out.
+    """
+    centroids = (
+        select(
+            NewsroomArticle.event_id.label("event_id"),
+            func.avg(NewsroomArticle.embedding, type_=Vector(EMBEDDING_DIMENSIONS)).label(
+                "centroid"
+            ),
+        )
+        .where(
+            NewsroomArticle.event_id.in_([target, *others]),
+            NewsroomArticle.embedding.is_not(None),
+        )
+        .group_by(NewsroomArticle.event_id)
+        .cte("centroids")
+    )
+    base, other = centroids.alias("base"), centroids.alias("other")
+    rows = await database.execute(
+        select(other.c.event_id, 1 - other.c.centroid.cosine_distance(base.c.centroid))
+        .select_from(base.join(other, other.c.event_id != base.c.event_id))
+        .where(base.c.event_id == target)
+    )
+    return {event_id: float(similarity) for event_id, similarity in rows}
+
+
+def same_story(
+    title_similarity: float, article_similarity: float | None, title: str, other: str
+) -> bool:
+    """Whether two events the model grouped are one story: titles or articles match."""
+    return same_story_titles(title_similarity, title, other) or (
+        article_similarity is not None and article_similarity >= DEDUPE_ARTICLE_SIMILARITY
+    )
+
+
 def _decision(
     edition_date: date,
     scope: str,
@@ -418,6 +501,7 @@ def _decision(
     similarity: float | None,
     outcome: str,
     new_facts: bool | None = None,
+    article_similarity: float | None = None,
 ) -> NewsroomDedupeDecision:
     return NewsroomDedupeDecision(
         edition_date=edition_date,
@@ -427,6 +511,7 @@ def _decision(
         matched_event_id=matched[0],
         matched_title=matched[1][:500],
         title_similarity=similarity,
+        article_similarity=article_similarity,
         threshold=DEDUPE_TITLE_SIMILARITY,
         shared_figure=bool(key_figures(event[1]) & key_figures(matched[1])),
         new_facts=new_facts,
@@ -444,24 +529,38 @@ async def _settle_failed_call(
     logger.warning(event, extra={"error_code": error.code})
 
 
+@dataclass(frozen=True, slots=True)
+class DuplicateScreen:
+    """What the duplicate screen did: events merged away, and the groups left open.
+
+    ``story_groups`` maps each still-open event of a group with two or more of
+    them to the group's index; selection limits the picks per group.
+    """
+
+    merged: int = 0
+    story_groups: dict[uuid.UUID, int] = field(default_factory=dict)
+
+
 async def merge_duplicate_candidates(
     runtime: Runtime,
     edition_date: date,
     titles: dict[uuid.UUID, str],
     articles: dict[uuid.UUID, list[_ArticleRow]],
-) -> int:
-    """Merge candidates that triage split from one story; returns events merged away.
+) -> DuplicateScreen:
+    """Merge candidates that triage split from one story.
 
     Per-article triage sometimes opens several events for one big story (similar
     "market awaits X" events crowd the real one out of its nearest candidates),
     which spends quota slots on repeats. One model call over every market's
     candidates proposes groups; an event joins its group's best-covered event
-    only when their working titles also match (``same_story_titles``). Every proposed
-    pair is recorded with its similarity, merged or not.
+    only when their working titles or their articles also match (``same_story``).
+    Every proposed pair is recorded with both similarities, merged or not. The events of a group
+    that stay open (one story told from several angles, or related stories the
+    model over-grouped) are returned as a story group.
     """
     union = _candidate_union(titles, articles)
     if len(union) < 2:
-        return 0
+        return DuplicateScreen()
     event_ids = list(union)
     async with runtime.session_factory() as database:
         try:
@@ -491,9 +590,10 @@ async def merge_duplicate_candidates(
             )
         except (RetryableStageError, FatalStageError) as error:
             await _settle_failed_call(database, error, "newsroom.dedupe_failed")
-            return 0
+            return DuplicateScreen()
         merged = 0
-        for group in groups:
+        story_groups: dict[uuid.UUID, int] = {}
+        for index, group in enumerate(groups):
             ids = [uuid.UUID(event_id) for event_id in group]
             target = max(ids, key=lambda event_id: (len(articles[event_id]), union[event_id].score))
             similarity = {
@@ -501,10 +601,11 @@ async def merge_duplicate_candidates(
                 for event_id in ids
                 if event_id != target
             }
+            closeness = await article_similarities(database, target, list(similarity))
             sources = [
                 event_id
                 for event_id, value in similarity.items()
-                if same_story_titles(value, titles[event_id], titles[target])
+                if same_story(value, closeness.get(event_id), titles[event_id], titles[target])
             ]
             outcome = "merged"
             if sources:
@@ -521,6 +622,11 @@ async def merge_duplicate_candidates(
                     outcome = "merge_failed"
                 else:
                     merged += len(sources)
+            remaining = [
+                event_id for event_id in ids if outcome != "merged" or event_id not in sources
+            ]
+            if len(remaining) >= 2:
+                story_groups.update(dict.fromkeys(remaining, index))
             database.add_all(
                 _decision(
                     edition_date,
@@ -528,12 +634,13 @@ async def merge_duplicate_candidates(
                     event=(event_id, titles[event_id]),
                     matched=(target, titles[target]),
                     similarity=value,
+                    article_similarity=closeness.get(event_id),
                     outcome=outcome if event_id in sources else "below_threshold",
                 )
                 for event_id, value in similarity.items()
             )
         await database.commit()
-    return merged
+    return DuplicateScreen(merged, story_groups)
 
 
 # --- Stories an earlier edition already carried (D14) -------------------------------
@@ -730,11 +837,34 @@ async def screen_published_repeats(
 # --- Editor pass -----------------------------------------------------------------
 
 
+def _story_labels(
+    candidates: Sequence[Candidate], story_groups: StoryGroups
+) -> dict[uuid.UUID, str]:
+    """``g1``, ``g2``... for the story groups with two or more of ``candidates``."""
+    members = Counter(
+        story_groups[candidate.event_id]
+        for candidate in candidates
+        if candidate.event_id in story_groups
+    )
+    labels: dict[int, str] = {}
+    for candidate in candidates:
+        group = story_groups.get(candidate.event_id)
+        if group is not None and members[group] >= 2 and group not in labels:
+            labels[group] = f"g{len(labels) + 1}"
+    return {
+        candidate.event_id: labels[story_groups[candidate.event_id]]
+        for candidate in candidates
+        if story_groups.get(candidate.event_id) in labels
+    }
+
+
 def _editor_payload(
     market: str,
     candidates: Sequence[Candidate],
     follow_ups: dict[uuid.UUID, PublishedEvent],
+    story_groups: StoryGroups,
 ) -> dict[str, Any]:
+    labels = _story_labels(candidates, story_groups)
     events: list[dict[str, Any]] = []
     for candidate in candidates:
         event: dict[str, Any] = {
@@ -746,6 +876,8 @@ def _editor_payload(
                 {"title": title, "source": source} for title, source in candidate.headlines
             ],
         }
+        if candidate.event_id in labels:
+            event["story_group"] = labels[candidate.event_id]
         earlier = follow_ups.get(candidate.event_id)
         if earlier is not None:
             event["earlier_coverage"] = {
@@ -761,6 +893,7 @@ async def _rate(
     market: str,
     candidates: Sequence[Candidate],
     follow_ups: dict[uuid.UUID, PublishedEvent],
+    story_groups: StoryGroups,
     *,
     sleep: Sleep,
     retry_delay: timedelta,
@@ -774,7 +907,7 @@ async def _rate(
                     database,
                     model=runtime.settings.newsroom_editor_model,
                     system=load_prompt("editor"),
-                    payload=_editor_payload(market, candidates, follow_ups),
+                    payload=_editor_payload(market, candidates, follow_ups, story_groups),
                     result_type=EditorResult,
                     audit=CallAudit("editor", None, EDITOR_PROMPT_VERSION),
                 )
@@ -1005,6 +1138,7 @@ async def _assemble_market(
     titles: dict[uuid.UUID, str],
     articles: dict[uuid.UUID, list[_ArticleRow]],
     repeats: RepeatScreen,
+    story_groups: StoryGroups,
     *,
     ignored: int,
     now: Callable[[], datetime],
@@ -1025,7 +1159,13 @@ async def _assemble_market(
     by_id = {candidate.event_id: candidate for candidate in candidates}
     ratings = (
         await _rate(
-            runtime, market, candidates, repeats.follow_ups, sleep=sleep, retry_delay=retry_delay
+            runtime,
+            market,
+            candidates,
+            repeats.follow_ups,
+            story_groups,
+            sleep=sleep,
+            retry_delay=retry_delay,
         )
         if candidates
         else {}
@@ -1035,7 +1175,7 @@ async def _assemble_market(
         picks = [
             Pick(event_id, None, score)
             for event_id, score in fallback_selection(
-                [(candidate.event_id, candidate.score) for candidate in candidates]
+                [(candidate.event_id, candidate.score) for candidate in candidates], story_groups
             )
         ]
     else:
@@ -1051,7 +1191,8 @@ async def _assemble_market(
                         position,
                     )
                     for position, candidate in enumerate(candidates)
-                ]
+                ],
+                story_groups,
             )
         ]
     async with runtime.session_factory() as database:
@@ -1120,7 +1261,8 @@ async def assemble_editions(
         )
     async with runtime.session_factory() as database:
         titles, articles = await _load_event_articles(database, edition_date)
-    merged = await merge_duplicate_candidates(runtime, edition_date, titles, articles)
+    duplicates = await merge_duplicate_candidates(runtime, edition_date, titles, articles)
+    merged = duplicates.merged
     if merged:
         async with runtime.session_factory() as database:
             titles, articles = await _load_event_articles(database, edition_date)
@@ -1137,6 +1279,7 @@ async def assemble_editions(
                 titles,
                 articles,
                 repeats,
+                duplicates.story_groups,
                 ignored=ignored,
                 now=clock_now,
                 sleep=sleep,

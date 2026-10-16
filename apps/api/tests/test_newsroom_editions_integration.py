@@ -33,6 +33,7 @@ from daily_insights_api.modules.newsroom.contracts import (
     WhyResult,
 )
 from daily_insights_api.modules.newsroom.models import (
+    EMBEDDING_DIMENSIONS,
     NewsroomArticle,
     NewsroomDedupeDecision,
     NewsroomEdition,
@@ -1238,6 +1239,143 @@ async def test_assembly_merges_duplicate_candidates_before_rating(
         == ("window", EDITION_DATE, covered, assembly.DEDUPE_TITLE_SIMILARITY)
         for row in decisions
     )
+
+
+async def test_story_groups_the_screen_cannot_merge_are_limited_at_selection(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    cna = await _source(newsroom_database, "cna")
+    angles = ["tsmc-eps", "tsmc-guidance", "tsmc-capex", "tsmc-texas"]
+    ids = {
+        title: await _event(
+            newsroom_database, title, sources=[cna], scores={"tw_equity": 90 - index}
+        )
+        for index, title in enumerate(angles)
+    }
+    ids["memory"] = await _event(
+        newsroom_database, "memory", sources=[cna], scores={"tw_equity": 50}
+    )
+
+    def groups(payload: dict[str, Any]) -> dict[str, Any]:
+        return {"groups": [[str(ids[title]) for title in angles]]}
+
+    rate = _stars_by_title(dict.fromkeys(angles, 5), default=3)
+
+    def stars(payload: dict[str, Any]) -> Any:
+        labels = {event["working_title"]: event.get("story_group") for event in payload["events"]}
+        assert labels == {**dict.fromkeys(angles, "g1"), "memory": None}
+        return rate(payload)
+
+    llm = FakeLlm({DuplicateGroups: groups, EditorResult: stars})
+    # The angles' working titles are far apart, so none is merged.
+    embedder = TitleEmbedder(
+        {
+            "tsmc-eps": [1.0, 0.0],
+            "tsmc-guidance": [0.6, 0.8],
+            "tsmc-capex": [0.5, 0.866],
+            "tsmc-texas": [0.0, 1.0],
+            "memory": [-1.0, 0.0],
+        }
+    )
+    runtime = _runtime(newsroom_database, llm, embedder)
+
+    report = await assembly.assemble_editions(runtime, EDITION_DATE, sleep=_no_sleep)
+
+    assert report.merged_duplicates == 0
+    editions = await _editions(newsroom_database)
+    items = await _items(newsroom_database, editions["tw_equity"].id)
+    # Two of the group, then the 3-star filler; the other angles are rated but not picked.
+    assert [item.event_id for item in items] == [
+        ids["tsmc-eps"],
+        ids["tsmc-guidance"],
+        ids["memory"],
+    ]
+    async with newsroom_database() as database:
+        ratings = (
+            await database.scalars(
+                select(NewsroomEditorRating).where(NewsroomEditorRating.market_code == "tw_equity")
+            )
+        ).all()
+    assert {(row.event_title, row.stars, row.picked) for row in ratings} == {
+        ("tsmc-eps", 5, True),
+        ("tsmc-guidance", 5, True),
+        ("tsmc-capex", 5, False),
+        ("tsmc-texas", 5, False),
+        ("memory", 3, True),
+    }
+
+
+async def _embed_articles(
+    session_factory: async_sessionmaker[AsyncSession], event_id: uuid.UUID, direction: list[float]
+) -> None:
+    """Give every article of the event the same embedding, padded to full size."""
+    vector = direction + [0.0] * (EMBEDDING_DIMENSIONS - len(direction))
+    async with session_factory() as database:
+        await database.execute(
+            update(NewsroomArticle)
+            .where(NewsroomArticle.event_id == event_id)
+            .values(embedding=vector)
+        )
+        await database.commit()
+
+
+async def test_assembly_merges_angles_of_one_story_whose_articles_are_close(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    reuters = await _source(newsroom_database, "reuters")
+    cna = await _source(newsroom_database, "cna")
+    scores = {"tw_equity": 90}
+    results = await _event(newsroom_database, "tsmc-results", sources=[reuters, cna], scores=scores)
+    guidance = await _event(newsroom_database, "tsmc-guidance", sources=[cna], scores=scores)
+    preview = await _event(newsroom_database, "tsmc-preview", sources=[cna], scores=scores)
+    texas = await _event(newsroom_database, "tsmc-texas", sources=[cna], scores={"tw_equity": 80})
+    await _embed_articles(newsroom_database, results, [1.0, 0.0])
+    await _embed_articles(newsroom_database, guidance, [0.95, 0.312])
+    await _embed_articles(newsroom_database, preview, [0.87, 0.493])
+    # tsmc-texas has no embedded article, so only its title could match.
+    events = {"tsmc-results": results, "tsmc-guidance": guidance, "tsmc-preview": preview}
+    events["tsmc-texas"] = texas
+
+    def groups(payload: dict[str, Any]) -> dict[str, Any]:
+        return {"groups": [[str(event_id) for event_id in events.values()]]}
+
+    llm = FakeLlm({DuplicateGroups: groups, EditorResult: _stars_by_title({}, default=4)})
+    # Every working title is far from the others.
+    embedder = TitleEmbedder(
+        {
+            "tsmc-results": [1.0, 0.0],
+            "tsmc-guidance": [0.0, 1.0],
+            "tsmc-preview": [-1.0, 0.0],
+            "tsmc-texas": [0.0, -1.0],
+        }
+    )
+    runtime = _runtime(newsroom_database, llm, embedder)
+
+    report = await assembly.assemble_editions(runtime, EDITION_DATE, sleep=_no_sleep)
+
+    assert report.merged_duplicates == 1
+    merged = await _get(newsroom_database, NewsroomEvent, guidance)
+    assert (merged.status, merged.merged_into_id) == ("merged", results)
+    for event_id in (preview, texas):
+        assert (await _get(newsroom_database, NewsroomEvent, event_id)).status == "open"
+    async with newsroom_database() as database:
+        decisions = (await database.scalars(select(NewsroomDedupeDecision))).all()
+    assert {
+        (
+            row.event_title,
+            row.outcome,
+            None if row.article_similarity is None else round(row.article_similarity, 2),
+        )
+        for row in decisions
+    } == {
+        ("tsmc-guidance", "merged", 0.95),
+        ("tsmc-preview", "below_threshold", 0.87),
+        ("tsmc-texas", "below_threshold", None),
+    }
+    # The two left open stay a story group: with the target, at most two are picked.
+    editions = await _editions(newsroom_database)
+    items = await _items(newsroom_database, editions["tw_equity"].id)
+    assert [item.event_id for item in items] == [results, preview]
 
 
 async def test_price_action_reports_neither_qualify_nor_score(
