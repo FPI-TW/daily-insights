@@ -1,6 +1,6 @@
 # 非執行中的新聞來源
 
-2026-09-14 整理。此目錄不供程式載入，不擴充文章白名單。重新啟用前須驗證端點、robots、正文擷取、市場政策與測試。
+2026-09-14 整理。此目錄不供程式載入，不擴充文章白名單。重新啟用前須驗證端點、正文擷取、市場政策與測試。robots.txt 預設已略過（`DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS=true`）。
 
 ## 尚未上線市場
 
@@ -56,3 +56,7 @@ GlobeNewswire Company Announcement（subjectcode 9）退出執行清單，以縮
 | -------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | `storm`（風傳媒）                                              | sitemap 每天只更新一次，文章平均晚 14.7 小時進來，重複上架前一天的新聞 |
 | `gvm`（遠見）、`cityam`（City A.M.）、`thestreet`（TheStreet） | 合計 850 篇只貢獻 10 個上架事件；遠見延遲中位數 9.2 小時               |
+
+## 2026-10-15 補上的 robots 受阻媒體端點
+
+`20261015_0043`／`20261015_0044` 在略過 robots.txt 後，為 MarketWatch、Yahoo Finance、Seeking Alpha、Motley Fool、MoneyDJ 寫入可用發現端點，並校正 TechNews。細節見 `docs/research/robots-blocked-sources-recovery.md`。

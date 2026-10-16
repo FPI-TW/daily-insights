@@ -254,16 +254,16 @@ WHERE kind <> 'manual'
 ORDER BY consecutive_failures DESC, last_success_at NULLS FIRST;
 ```
 
-| `last_error_code`                                                                 | 意義與處置                                                                                                                                        |
-| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `timeout`、`unreachable`、`dns_failed`、`http_429`、`http_5xx`（例如 `http_503`） | 暫時性故障，下次輪詢自動再試；長時間持續才需處理                                                                                                  |
-| `http_401`、`http_403`、`http_404`、`http_410`                                    | 發布者封鎖或 feed 已移除；改用新的 feed 網址或停用                                                                                                |
-| `robots_disallowed`、`robots_unavailable`                                         | robots.txt 禁止或無法取得；不得繞過，改用其他 feed 或停用                                                                                         |
-| `redirected`                                                                      | feed 會轉址；把網址改成轉址後的最終網址                                                                                                           |
-| `unsafe_destination`                                                              | 網址解析到非公開位址或不符合 HTTPS 規則；確認網址                                                                                                 |
-| `too_large`、`parse_error`                                                        | 回應過大或格式與 `kind` 不符；確認格式與網址                                                                                                      |
-| `guardian_api_key_missing`、`sec_contact_email_missing`                           | 需要憑證的來源未設定；設定 `DAILY_INSIGHTS_GUARDIAN_API_KEY` 或 `DAILY_INSIGHTS_SEC_CONTACT_EMAIL` 並重新部署，或停用來源。這類略過不計入連續失敗 |
-| `host_blocked`                                                                    | 網域列在 `DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES`；移除封鎖或停用來源                                                                              |
+| `last_error_code`                                                                 | 意義與處置                                                                                                                                                         |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `timeout`、`unreachable`、`dns_failed`、`http_429`、`http_5xx`（例如 `http_503`） | 暫時性故障，下次輪詢自動再試；長時間持續才需處理                                                                                                                   |
+| `http_401`、`http_403`、`http_404`、`http_410`                                    | 發布者封鎖或 feed 已移除；改用新的 feed 網址或停用                                                                                                                 |
+| `robots_disallowed`、`robots_unavailable`                                         | robots.txt 禁止或無法取得（僅在 `DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS=false` 時會出現）；預設已略過 robots，若仍看到此碼代表部署尚未帶上新設定，或改用其他 feed／停用 |
+| `redirected`                                                                      | feed 會轉址；把網址改成轉址後的最終網址                                                                                                                            |
+| `unsafe_destination`                                                              | 網址解析到非公開位址或不符合 HTTPS 規則；確認網址                                                                                                                  |
+| `too_large`、`parse_error`                                                        | 回應過大或格式與 `kind` 不符；確認格式與網址                                                                                                                       |
+| `guardian_api_key_missing`、`sec_contact_email_missing`                           | 需要憑證的來源未設定；設定 `DAILY_INSIGHTS_GUARDIAN_API_KEY` 或 `DAILY_INSIGHTS_SEC_CONTACT_EMAIL` 並重新部署，或停用來源。這類略過不計入連續失敗                  |
+| `host_blocked`                                                                    | 網域列在 `DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES`；移除封鎖或停用來源                                                                                               |
 
 - 停用來源在後台按「停用」即可，不需部署；已收到的文章不受影響。
 - 緊急封鎖某網域（例如發布者要求停止抓取）使用 `DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES`：
@@ -299,20 +299,21 @@ ORDER BY consecutive_failures DESC, last_success_at NULLS FIRST;
 
 被放棄的項目不會再自動上架。先修正原因，在後台對該事件「重新分析」（或以 SQL 重新
 排入 `analysis`）；分析成功時會一併重寫該事件所有未移除項目（包含已放棄者）的
-「為何重要」。確認 `analysis_status = 'ready'` 且項目 `why_status = 'ready'` 後清除放棄
-標記，該則即對讀者可見，英文翻譯由每分鐘的 stale sweep 自動排入（限發布後 2 天內的
-版次）：
+「為何重要」。確認 `analysis_status = 'ready'` 後清除放棄標記，該則即對讀者可見
+（「為何重要」只在後台顯示，不必等它完成），英文翻譯由每分鐘的 stale sweep 自動排入
+（限發布後 2 天內的版次）：
 
 ```sql
-UPDATE newsroom_edition_items
+UPDATE newsroom_edition_items i
 SET abandoned_at = NULL
-WHERE id = '<item uuid>' AND why_status = 'ready';
+FROM newsroom_events e
+WHERE i.id = '<item uuid>' AND e.id = i.event_id AND e.analysis_status = 'ready';
 ```
 
 ### 發布後的修正
 
-- 改字（標題、摘要、「為何重要」）立即生效，簡中同步更新，英文自動重新翻譯；翻譯完成前
-  英文頁暫不顯示該則。
+- 改字（標題、摘要、「為何重要」）立即生效，簡中同步更新，英文自動重新翻譯。改標題或
+  摘要時，翻譯完成前英文頁暫不顯示該則；只改「為何重要」不影響讀者端。
 - 不應再出現的項目使用「隱藏」；隱藏只影響該市場版。
 - 相關標的只能保留站內有儀表板的標的，對不上的修改會被拒絕。
 

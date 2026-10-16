@@ -133,7 +133,7 @@ flowchart TB
 | 全文 → 初篩              | triage 的領取條件               | 只領取 `fetch_status IN ('done','failed')` 的文章；全文失敗者以標題與摘要初篩                                    |
 | 組稿 → 分析              | `newsroom_assemble`             | 入選事件若為 `idle`／`failed`／`needs_body` 則 `analysis_status = pending`；項目 `why_status = pending`          |
 | 分析 → 為何重要          | analysis handler                | 同時寫入事件所有未移除項目的「為何重要」並設 `why_status = ready`                                                |
-| 發布／修改 → 英文        | publishing 與每分鐘 stale sweep | 可見內容的繁中 digest 改變時 `en_status = pending`                                                               |
+| 發布／修改 → 英文        | publishing 與每分鐘 stale sweep | 繁中標題／摘要的 digest 改變，或有項目的英文「為何重要」未備妥時 `en_status = pending`                           |
 | 貼上全文 → 分析          | `set_manual_body`               | 所屬事件若為 `needs_body`，改回 `analysis_status = pending`                                                      |
 | 合併／拆分 → 分析        | `events_service`                | 受影響且在版次中的事件 `analysis_status = pending`                                                               |
 | 重新分析                 | 後台「重新分析」                | 事件 `analysis_status = pending`，其所有未移除、未隱藏、未放棄項目 `why_status = pending`                        |
@@ -152,8 +152,9 @@ flowchart TB
   版次的來源列表。代號仍被佔用，不能用同一個 `key` 再建立。`manual` 來源不可刪除。
 - worker 每分鐘領取 `enabled ∧ next_poll_at <= now()` 的來源（每批最多 32 個、同時
   4 個），以租約推遲 `next_poll_at` 10 分鐘避免重複輪詢；每個來源獨立成敗。
-- Feed 請求經 SSRF-safe client：只連公開 HTTPS 位址、遵守 robots.txt、不跟隨 feed
-  轉址、限制回應大小。Guardian 等主機有最小請求間隔。
+- Feed 請求經 SSRF-safe client：只連公開 HTTPS 位址、不跟隨 feed 轉址、限制回應
+  大小。robots.txt 預設略過（`DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS=true`）。Guardian
+  等主機有最小請求間隔。
 - 需要憑證的來源（Guardian API key、SEC 聯絡信箱）在設定缺漏時略過，`last_error_code`
   記為 `guardian_api_key_missing`／`sec_contact_email_missing`，不計入連續失敗。
 - 去重：`url_hash`（SHA-256）唯一；同一版次窗內標題完全相同者略過；發布時間早於
@@ -174,13 +175,28 @@ flowchart TB
 
 - `fetch` stage 讀取原文頁面：只允許來源網域白名單（啟用來源的 `hostname` 加上
   `DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES`，扣除 `DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES`），
-  最多 3 次轉址且每次重新驗證、頁面上限 1.5 MB、只接受 HTML、遵守 robots.txt。
-  管理員送出的池外 URL 允許其本身網域，但仍受 blocked hosts 限制。
+  最多 3 次轉址且每次重新驗證、頁面上限 1.5 MB、只接受 HTML。robots.txt 預設略過
+  （`DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS=true`）。管理員送出的池外 URL 允許其本身網域，
+  但仍受 blocked hosts 限制。
 - 品質檢查依序：少於 200 字（`too_short`）、導覽字詞比例超過 10%
   （`navigation_heavy`）、與標題相關性過低（`unrelated_to_title`）。不合格為
-  `rejected`；付費牆、存取被拒、404／410、非 HTML、過大或 robots 禁止為
-  `unavailable`。這些都是最終答案（`fetch_status = done`），只有逾時、連線錯誤、
-  429、5xx 會重試。
+  `rejected`；付費牆、存取被拒、404／410、非 HTML、過大，或在未略過 robots 時被
+  robots 禁止，為 `unavailable`。這些都是最終答案（`fetch_status = done`），只有
+  逾時、連線錯誤、429、5xx 會重試。Cloudflare 標示 `cf-mitigated: challenge` 的回應記為
+  `unavailable`（`bot_challenge`），不再當成 5xx 重試。
+- 瀏覽器補抓（2026-10-14 起）：純 HTTP 讀取遇到 403、Cloudflare challenge，或讀到的
+  文字未通過品質檢查時，同一個 `fetch` 嘗試內再用 CloakBrowser（`cloakbrowser`
+  service，經 CDP 連線）讀一次。robots 禁止、401／402／451、404／410、付費牆、
+  非 HTML、過大、轉址出白名單都是最終答案，不會交給瀏覽器。瀏覽器的主頁面每一次
+  導覽（含每一跳轉址與 challenge 重新載入）都要通過同樣的白名單檢查，以及與純 HTTP
+  相同的 robots.txt 規則（預設略過），轉址在瀏覽器跟隨前就以 CDP `Fetch` 攔下判斷；
+  不下載圖片、影音與字型；頁面同樣受
+  1.5 MB 上限、HTML 與付費牆標記限制。瀏覽器沒有更好的結果（連不上、逾時、仍被拒、
+  非 2xx）時沿用純 HTTP 的結果，不重試、不卡住佇列。瀏覽器讀到的正文記為 `body_source = browser`
+  （migration `20261014_0043`），後台全文狀態標示「瀏覽器補抓」。每次最多
+  `NEWSROOM_BROWSER_CONCURRENCY` 個頁面、每頁 `NEWSROOM_BROWSER_TIMEOUT_SECONDS`。
+  2026-10-14 本機測試：DataDome（TheStreet）與 Reuters 的封鎖依 IP 判斷，瀏覽器也拿到
+  403／401。
 - 正文上限 40,000 字元，只用於初篩摘錄與分析，不回傳給讀者。
 
 ### Embedding、初篩與事件分群
@@ -230,22 +246,26 @@ function，不與其他 provider 共用鎖。流程冪等：
    前 40 名。同分時依序比較不同媒體數、報導篇數、最高信任等級、最早出現時間。
 4. 合併重複候選：一次 LLM 呼叫找出被拆成多個事件的同一則新聞；同組事件的工作標題
    embedding 相似度 ≥ 0.85，或 ≥ 0.75 且兩個標題有相同的關鍵數字（金額或比率，不含
-   日期）時才合併。
+   日期）時合併；兩事件文章 embedding 平均值的相似度 ≥ 0.88 時也合併（同一場財報或
+   法說會的營收、財測等切角，標題差異大但文章內容接近）。同組中沒有合併、仍各自開啟
+   的事件留作「同組事件」，供第 6、7 步使用。
 5. 前版比對（D14 修正）：一次 LLM 呼叫把候選與前 2 天已發布、仍可見的項目比對，並
    判斷有無新事實。同一事件、沒有新事實、且標題符合上一步的相似度規則者排除；其他
    配對留在候選，送精選時附上前版的日期與上架標題（`earlier_coverage`）。
 6. 精選（每市場一次 LLM 呼叫，`DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL`）：輸入事件、
-   最多 5 則報導標題與來源、報導家數、前版上架資訊，輸出每個事件 1–5 星。盤勢稿與
-   只重述前版的事件最多 2 星。失敗會在組稿內重試至多 3 次；仍失敗或遇到不可重試錯誤
+   最多 5 則報導標題與來源、報導家數、前版上架資訊，以及同組事件的 `story_group`
+   標記，輸出每個事件 1–5 星。盤勢稿與只重述前版的事件最多 2 星；同組中只補充核心
+   事件細節者，星等低於同組最完整的一則。失敗會在組稿內重試至多 3 次；仍失敗或遇到不可重試錯誤
    時改用 `fallback`：依粗分取前 5 名、星等留空，並發出 `selection_fallback` 通知。
-7. 由程式套配額：5 星全收；4 星最多 5 則；5＋4 星不足 5 則時只以 3 星補到 5 則，
-   1–2 星不補，當天可少於 5 則。
+7. 由程式套配額：同組事件依星等、粗分只保留前 2 則，其餘不入選（`fallback` 也一樣）；
+   接著 5 星全收；4 星最多 5 則；5＋4 星不足 5 則時只以 3 星補到 5 則，1–2 星不補，
+   當天可少於 5 則。
 8. 建立或重建 `draft` 版次與項目，並把入選事件排入分析。重建時保留管理員加入的
    項目與已移除的項目；已發布的版次不重建。
 9. 有任何市場完成組稿時發出一次 `draft_ready` 通知（各市場則數、5 星事件標題、
    未初篩數量、合併與排除的重複事件數、後台連結）。
 
-第 4、5 步的每一組提議（兩個標題、相似度、門檻、是否有相同關鍵數字、結果）都寫入
+第 4、5 步的每一組提議（兩個標題、標題相似度、第 4 步的文章相似度、門檻、是否有相同關鍵數字、結果）都寫入
 `newsroom_dedupe_decisions`，被門檻擋下的也一樣。兩步都是盡力而為：模型呼叫失敗只記錄
 警告，組稿照常進行。第 6 步精選成功時，每個候選的名次、粗分、星等、是否入選、是否為
 前版後續都寫入 `newsroom_editor_ratings`，沒入選的也一樣，用來追查好新聞為何落選。
@@ -283,13 +303,16 @@ function，不與其他 provider 共用鎖。流程冪等：
 
 - 管理員可核准單一市場或當日全部草稿，立即發布並寫入編輯紀錄。
 - `newsroom-worker` 每分鐘把 `draft ∧ now() >= auto_publish_at` 的版次自動發布。
-- 發布後，項目完成分析與「為何重要」即對讀者可見；`now() >= late_fill_deadline` 時
-  仍未完成的項目設 `abandoned_at`，並以 `late_fill_abandoned` 通知列出標題。每個版次
-  的放棄處理只執行一次（`late_fill_closed_at`）。
+- 發布後，項目的事件分析完成即對讀者可見；`now() >= late_fill_deadline` 時分析仍未完成
+  的項目設 `abandoned_at`，並以 `late_fill_abandoned` 通知列出標題。每個版次的放棄處理
+  只執行一次（`late_fill_closed_at`）。「為何重要」只在後台顯示，不影響可見與放棄
+  （2026-10-16 起）。
 - 讀者可見條件：版次 `published` ∧ 未移除 ∧ 未隱藏 ∧ 未放棄 ∧ 事件
-  `analysis_status = ready` ∧ 項目 `why_status = ready`，且該語系的標題與摘要存在。
-  英文另需事件 `en_status = ready`、`en_source_digest` 等於目前繁中內容的 digest，以及
-  項目英文「為何重要」已備妥。
+  `analysis_status = ready`，且該語系的標題與摘要存在。英文另需 `en_source_digest`
+  等於目前繁中標題與摘要的 digest；重新翻譯期間（`en_status = pending`）只要 digest
+  仍相符，原英文照常顯示。
+- 英文「為何重要」供後台使用：繁中「為何重要」重寫時項目 `why_en_status` 設回
+  `idle`，由翻譯階段重譯，不影響讀者端英文。
 
 ### 多語系
 
@@ -315,10 +338,11 @@ function，不與其他 provider 共用鎖。流程冪等：
 - 需登入且已更換初始密碼。`global` 版所有會員皆可讀；`tw_equity`、`us_equity` 依組織
   的市場可見性政策開放，內部角色可預覽全部市場。相關標的只在讀者可開啟該儀表板時
   提供連結。
-- 每則顯示標題、事實摘要、「為何重要」、相關標的與來源列表。`/reports` 首頁顯示全球版，
+- 每則顯示標題、事實摘要、相關標的與來源列表。「為何重要」只在後台審核主控台顯示，公開 API
+  不回傳（2026-10-16 起），但項目仍須「為何重要」完成才對讀者可見。`/reports` 首頁顯示全球版，
   各市場報告頁顯示對應市場版；載入沿用 `Promise.allSettled` 容錯，不影響報告本身。
   非今日版次明確標示日期。
-- 舊管線搬移的項目沒有「為何重要」，讀者端照常顯示其標題、摘要與來源。
+- 舊管線搬移的項目沒有「為何重要」，同樣可對讀者顯示。
 
 ## 後台審核主控台
 
@@ -375,11 +399,15 @@ function，不與其他 provider 共用鎖。流程冪等：
 | `NEWSROOM_WORKER_POLL_SECONDS`、`NEWSROOM_FETCH_CONCURRENCY`                   | `2`、`4`                       | newsroom-worker                            | 空佇列輪詢間隔（也是停用時的心跳間隔）與全文抓取並行數                    |
 | `NEWS_EXTRA_HOSTNAMES`、`NEWS_BLOCKED_HOSTNAMES`                               | 空                             | newsroom-worker（blocked 也用於 api）      | 全文白名單增補與封鎖；封鎖也停止輪詢並拒絕池外 URL                        |
 | `NEWS_FETCH_TIMEOUT_SECONDS`、`NEWS_DISCOVERY_TIMEOUT_SECONDS`                 | `25`、`30`                     | newsroom-worker                            | 全文頁面與 feed 讀取 timeout                                              |
+| `NEWSROOM_BROWSER_CDP_URL`                                                     | 未設定                         | newsroom-worker                            | CloakBrowser 的 CDP 端點；未設定時不做瀏覽器補抓                          |
+| `NEWSROOM_BROWSER_CONCURRENCY`、`NEWSROOM_BROWSER_TIMEOUT_SECONDS`             | `2`、`45`                      | newsroom-worker                            | 瀏覽器補抓同時開啟的頁面數與每頁時間上限                                  |
 | `GUARDIAN_API_KEY`、`SEC_CONTACT_EMAIL`                                        | 未設定                         | newsroom-worker                            | 需要憑證的來源；未設定時略過該來源                                        |
 
 `newsroom-worker` 在 `NEWSROOM_ENABLED=true` 時於啟動驗證設定：LLM 與 embedding 的
 base URL 必須是 absolute HTTPS，API key 不得空白或為 placeholder，Slack webhook 若有
 設定必須是 `hooks.slack.com`。驗證失敗即拒絕啟動。
+Compose 把 `NEWSROOM_BROWSER_CDP_URL` 設為 `http://cloakbrowser:9222`；若有設定，必須是不含帳密的
+HTTP(S) URL。
 
 ## 部署
 
@@ -393,7 +421,20 @@ base URL 必須是 absolute HTTPS，API key 不得空白或為 placeholder，Sla
   [EC2 首次部署](../runbooks/ec2-first-deploy.md#2-github-production-environment)。
 - `deploy.sh` 在 migration 前停止並確認 `newsroom-worker` 已停，migration 後依序啟動並
   確認 `orchestration-worker`、`podcast-media-worker`、`newsroom-worker` 健康，最後才啟動
-  dispatcher。
+  dispatcher。`browser-egress` 與 `cloakbrowser` 不碰資料庫，在 `newsroom-worker` 之前
+  啟動。
+- 瀏覽器補抓的網路隔離：`cloakbrowser`（`cloakhq/cloakbrowser` 映像，以 digest 固定，
+  內含免費的 Chromium 146，`CLOAKBROWSER_AUTO_UPDATE=false`）只接在 `internal: true` 的
+  `browser` 網路上，沒有直接對外的路由。Chrome 以 `--proxy-server` 指向
+  `browser-egress`，並以 `--proxy-bypass-list=<-loopback>` 讓 loopback 也走 proxy。
+  `browser-egress` 以 API 映像執行 `run_browser_egress_proxy`，只接受
+  `CONNECT <主機名稱>:443`，解析結果必須全部是公開位址，並連到它驗證過的位址；IP
+  literal、其他 port、純 HTTP、內網與 metadata 位址一律拒絕。頁面的子資源來自 CDN
+  與 challenge 服務，所以 proxy 不套用文章白名單，白名單由 worker 在主頁面導覽時檢查。
+  只有 `cloakbrowser`、`browser-egress` 與 `newsroom-worker` 能加入 `browser` 網路，
+  `validate-compose-model.py` 會檢查。Chrome 在容器內不使用自身 sandbox，所以這層
+  網路隔離就是安全邊界。映像約 2.6 GB，執行時約 400 MB 記憶體（正式環境
+  `mem_limit: 1g`）。
 
 ## 舊版次資料搬移
 
@@ -421,8 +462,10 @@ base URL 必須是 absolute HTTPS，API key 不得空白或為 placeholder，Sla
 
 ## 安全與限制
 
-- 所有對外 HTTP 都經 SSRF-safe client：只連公開位址、逐跳驗證轉址、遵守 robots.txt、
-  限制大小與 timeout；不得為了收錄來源放寬這些限制。
+- 所有對外 HTTP 都經 SSRF-safe client：只連公開位址、逐跳驗證轉址、限制大小與
+  timeout；不得為了收錄來源放寬 SSRF 或大小限制。robots.txt 預設略過
+  （`DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS`）。瀏覽器補抓也遵守同樣的白名單、robots.txt
+  規則、付費牆與大小限制，對外連線只經 `browser-egress`（只連公開 HTTPS 位址）。
 - LLM 與 embedding 呼叫的稽核不保存 prompt 與正文；正文 30 天後清除。
 - 精選、分析、翻譯都依賴同一個 DeepSeek 帳號；帳號額度或權限問題會以 `stage_fatal`
   或 `selection_fallback` 通知呈現，修復後需要人工重新排入 `failed` 的資料列。

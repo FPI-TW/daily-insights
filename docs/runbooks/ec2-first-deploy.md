@@ -239,7 +239,9 @@ Workflow 在 SSH process 中執行：
 11. 使用 API image 執行 `alembic upgrade head`；首次切換會把
     `data_management_runs` 搬入 `legacy_data_management_runs`；
 12. 依序以 `--force-recreate --no-deps` 單獨啟動 `orchestration-worker`、
-    `podcast-media-worker` 與 `newsroom-worker`，每個都等待 health check 通過；
+    `podcast-media-worker`、`browser-egress` 與 `cloakbrowser`（不碰資料庫，只供
+    `newsroom-worker` 補抓全文）、`newsroom-worker`，三個 worker 都等待 health check
+    通過；`cloakbrowser` 映像約 2.6 GB，首次 `pull` 需要對應的磁碟空間與時間；
 13. 所有 worker healthy 後才 convergence API、Web 與 `orchestration-dispatcher`，且不
     再次重建 nginx；
 14. 等待所有 container health，並從 nginx container 內分別主動驗證 API

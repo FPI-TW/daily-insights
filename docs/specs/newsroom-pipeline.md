@@ -43,28 +43,28 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 
 ## 2. 已確認的產品決策（不可更動）
 
-| #   | 決策                                                                                                                                                                   |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1  | 審核模型：AI 產草稿 → 管理員可在 09:00 前改字／換稿／排序／核准；09:00 未核准自動發布；發布後仍可編修或隱藏。                                                          |
-| D2  | 時程（Asia/Taipei）：08:00 組稿，09:00 自動發布，12:00 停止自動補上。                                                                                                  |
-| D3  | 來源存資料庫並在後台管理（新增、停用、信任等級、權重、輪詢頻率、健康狀態）。                                                                                           |
-| D4  | 全天持續收稿；全文存 Postgres，30 天後清除正文只留 metadata。全文永不提供給讀者。                                                                                      |
-| D5  | 逐篇初篩（收稿時）＋ 08:00 精選（每市場一次 LLM 打最終星等）；精選失敗退回粗分排序並標示 `fallback`。                                                                  |
-| D6  | 上架內容：標題、事實摘要（2–3 句，綜合多來源、只寫事實）、各市場「為何重要」（1–2 句）、相關標的（連到站內儀表板）、來源列表。**不做多空／情緒判斷。**                 |
-| D7  | 多語系：繁中由 LLM 產出且是唯一可編輯的語言；簡中由 OpenCC `tw2sp` 同步轉換；英文於發布時（及發布後繁中被修改時）由 LLM 非同步翻譯，未完成時英文頁不顯示該則。         |
-| D8  | 配額（每市場，由**程式**執行）：5 星全收；4 星最多 5 則；5＋4 星總數不足 5 則時只用 3 星補位，1–2 星不補，當天可少於 5 則（2026-10-14 修正）。                         |
-| D9  | 同一事件可出現在多個市場版：標題、事實摘要、來源、相關標的共用；「為何重要」依市場各一段。                                                                             |
-| D10 | 事件分群：embedding 找本版次窗內最相近的 5 個事件 → 放入初篩呼叫由 LLM 判斷歸屬或開新事件。後台可合併／拆分事件。                                                      |
-| D11 | embedding 使用 OpenAI-compatible API（預設 `text-embedding-3-large`，1536 維；2026-10-14 由 3-small 改，非中文標題先翻成繁中再 embed），向量存 `pgvector`。            |
-| D12 | 四個 LLM 階段（初篩、精選、深度分析、英文翻譯）全部使用 DeepSeek，但每階段 model 可獨立設定。                                                                          |
-| D13 | 新聞管線由獨立常駐的 news worker 以「資料列即佇列」方式運作（`next_attempt_at` + `FOR UPDATE SKIP LOCKED`），不使用 checkpoint 表。                                    |
-| D14 | 跨日事件一律視為新事件：事件只存在於單一版次窗內。隱藏只對當版有效。已上架的事件，後續版次只有出現新事實才能再上架，組稿時與前 2 天已發布項目比對（2026-10-14 修正）。 |
-| D15 | 09:00 只發布已完成項目；未完成者完成後自動補上，12:00 仍未完成則放棄並通知。                                                                                           |
-| D16 | 當天沒有可用版次時，讀者端顯示最近一版並**明確標示日期**。                                                                                                             |
-| D17 | 通知：Slack incoming webhook，經 `Notifier` 介面。                                                                                                                     |
-| D18 | 抓不到全文的文章仍可參與初篩與分群；事件中至少一篇全文才可自動分析上架，否則後台標示「缺全文」，可手動貼上內文。                                                       |
-| D19 | 第一版審核頁功能：改字、移除／加入項目、排序、合併／拆分事件、貼上全文、單一事件重新分析、手動輸入池外 URL。（附指示重跑、手動星等延後。）                             |
-| D20 | 上線：本機驗證後一次切換；舊版次歷史資料搬移到新表；舊管線與舊表在切換階段移除。                                                                                       |
+| #   | 決策                                                                                                                                                                                                       |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | 審核模型：AI 產草稿 → 管理員可在 09:00 前改字／換稿／排序／核准；09:00 未核准自動發布；發布後仍可編修或隱藏。                                                                                              |
+| D2  | 時程（Asia/Taipei）：08:00 組稿，09:00 自動發布，12:00 停止自動補上。                                                                                                                                      |
+| D3  | 來源存資料庫並在後台管理（新增、停用、信任等級、權重、輪詢頻率、健康狀態）。                                                                                                                               |
+| D4  | 全天持續收稿；全文存 Postgres，30 天後清除正文只留 metadata。全文永不提供給讀者。                                                                                                                          |
+| D5  | 逐篇初篩（收稿時）＋ 08:00 精選（每市場一次 LLM 打最終星等）；精選失敗退回粗分排序並標示 `fallback`。                                                                                                      |
+| D6  | 上架內容：標題、事實摘要（2–3 句，綜合多來源、只寫事實）、各市場「為何重要」（1–2 句）、相關標的（連到站內儀表板）、來源列表。**不做多空／情緒判斷。**                                                     |
+| D7  | 多語系：繁中由 LLM 產出且是唯一可編輯的語言；簡中由 OpenCC `tw2sp` 同步轉換；英文於發布時（及發布後繁中被修改時）由 LLM 非同步翻譯，未完成時英文頁不顯示該則。                                             |
+| D8  | 配額（每市場，由**程式**執行）：5 星全收；4 星最多 5 則；5＋4 星總數不足 5 則時只用 3 星補位，1–2 星不補，當天可少於 5 則（2026-10-14 修正）。去重分組但未合併的同組事件最多入選 2 則（2026-10-16 修正）。 |
+| D9  | 同一事件可出現在多個市場版：標題、事實摘要、來源、相關標的共用；「為何重要」依市場各一段。                                                                                                                 |
+| D10 | 事件分群：embedding 找本版次窗內最相近的 5 個事件 → 放入初篩呼叫由 LLM 判斷歸屬或開新事件。後台可合併／拆分事件。                                                                                          |
+| D11 | embedding 使用 OpenAI-compatible API（預設 `text-embedding-3-large`，1536 維；2026-10-14 由 3-small 改，非中文標題先翻成繁中再 embed），向量存 `pgvector`。                                                |
+| D12 | 四個 LLM 階段（初篩、精選、深度分析、英文翻譯）全部使用 DeepSeek，但每階段 model 可獨立設定。                                                                                                              |
+| D13 | 新聞管線由獨立常駐的 news worker 以「資料列即佇列」方式運作（`next_attempt_at` + `FOR UPDATE SKIP LOCKED`），不使用 checkpoint 表。                                                                        |
+| D14 | 跨日事件一律視為新事件：事件只存在於單一版次窗內。隱藏只對當版有效。已上架的事件，後續版次只有出現新事實才能再上架，組稿時與前 2 天已發布項目比對（2026-10-14 修正）。                                     |
+| D15 | 09:00 只發布已完成項目；未完成者完成後自動補上，12:00 仍未完成則放棄並通知。                                                                                                                               |
+| D16 | 當天沒有可用版次時，讀者端顯示最近一版並**明確標示日期**。                                                                                                                                                 |
+| D17 | 通知：Slack incoming webhook，經 `Notifier` 介面。                                                                                                                                                         |
+| D18 | 抓不到全文的文章仍可參與初篩與分群；事件中至少一篇全文才可自動分析上架，否則後台標示「缺全文」，可手動貼上內文。                                                                                           |
+| D19 | 第一版審核頁功能：改字、移除／加入項目、排序、合併／拆分事件、貼上全文、單一事件重新分析、手動輸入池外 URL。（附指示重跑、手動星等延後。）                                                                 |
+| D20 | 上線：本機驗證後一次切換；舊版次歷史資料搬移到新表；舊管線與舊表在切換階段移除。                                                                                                                           |
 
 ## 3. 時間與版次窗
 
@@ -126,8 +126,8 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
   `origin`（`model`／`manual`）。
 - 各市場「為何重要」：`why_zh_hant`、`why_zh_hans`、`why_en`、`why_status`（`pending`／`ready`／`failed`）＋ 佇列欄位、`why_en_status`。
 - `removed_at`（草稿階段移除）、`hidden_at`／`hidden_by_user_id`（發布後隱藏）、`abandoned_at`（12:00 仍未完成）。
-- 讀者可見條件：edition `published` ∧ 未 removed ∧ 未 hidden ∧ 未 abandoned ∧ 事件 `analysis_status = ready` ∧ `why_status = ready`；
-  英文另需事件 `en_status = ready` 且 `en_source_digest` 為最新 ∧ `why_en` 已備妥。
+- 讀者可見條件：edition `published` ∧ 未 removed ∧ 未 hidden ∧ 未 abandoned ∧ 事件 `analysis_status = ready`；
+  英文另需 `en_source_digest` 等於目前繁中標題與摘要的 digest。「為何重要」只在後台顯示，不影響可見（2026-10-16 修正）。
 
 ### 4.6 `newsroom_edit_log`
 
@@ -171,9 +171,10 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 ### 6.1 收稿（工作樹 ①）
 
 - worker 每分鐘找出 `enabled ∧ next_poll_at <= now()` 的來源輪詢；每來源獨立失敗，不互相影響。
-- 解析沿用舊 `feeds.py` 的格式支援與 SSRF-safe client（`extraction.py`），可搬移重構到 `newsroom/` 下，不得放寬 SSRF、robots.txt、大小上限。
+- 解析沿用舊 `feeds.py` 的格式支援與 SSRF-safe client（`extraction.py`），可搬移重構到 `newsroom/` 下，不得放寬 SSRF 與大小上限。robots.txt 預設略過（`DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS=true`）；設為 `false` 可恢復檢查。`html_list` 以 `options.href_contains` 從 HTML 列表頁抓文章錨點（MoneyDJ 等無 RSS 來源）。
 - 去重：`url_hash` 唯一；同窗內標題完全相同者略過。不再做標題字詞重疊去重（交給事件分群）。
 - 全文：`full_text_in_feed` 來源直接取 feed 內容；其他抓取原文。品質檢查（長度下限、導覽字詞比例、與標題相關性）不合格 → `rejected`。
+- 瀏覽器補抓（2026-10-14 新增）：純 HTTP 遇到 403／Cloudflare challenge，或文字未通過品質檢查時，以 CloakBrowser 再讀一次；主頁面每次導覽（含轉址）同樣受白名單與 robots.txt 限制，付費牆與大小上限不變；瀏覽器的對外連線只經只連公開 HTTPS 位址的 `browser-egress` proxy。瀏覽器沒有更好的結果時沿用純 HTTP 的結果。
 - 健康：連續失敗累計；某來源連續失敗且距離 `last_success_at` 超過 6 小時 → Slack 通知一次（恢復後重置）。
 - 每日 03:00 清除 30 天前文章的 `body`（`body_status = purged`）。
 - 後台來源管理 API 的 service 層（新增、修改、停用、健康查詢）。
@@ -203,11 +204,11 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
    稿件類型上限在乘上來源權重之後套用。
    盤勢稿不計分、不計來源數。
 3. 只有 `relevant` 且含至少一篇 `body_status = ok` 文章、且有非盤勢稿的事件可入選；取粗分前 40 名（同分依來源數、篇數、
-   信任等級、最早出現時間）。合併被拆開的同一則新聞，並排除前 2 天已發布且沒有新事實的事件（D14）；其餘與前版相關者
+   信任等級、最早出現時間）。合併被拆開的同一則新聞（模型分組，且標題相近或兩事件文章 embedding 平均值相似度 ≥ 0.88），並排除前 2 天已發布且沒有新事實的事件（D14）；其餘與前版相關者
    附上前版標題送精選。
-4. 精選呼叫（每市場一次）：輸入事件 id、working title、最多 5 則報導標題與來源、報導家數；輸出每個事件的 `stars`（1–5）。
+4. 精選呼叫（每市場一次）：輸入事件 id、working title、最多 5 則報導標題與來源、報導家數，以及去重分組但未合併者的 `story_group`；輸出每個事件的 `stars`（1–5）。
    評分準則沿用並改寫 `news/prompts/selection_criteria.txt` 的精神（市場相關性、可信度、重要性）。
-5. 套 D8 配額（程式）。精選失敗（重試耗盡）→ `selection_mode = fallback`：依粗分取前 5 名、`stars = null`，Slack 通知。
+5. 套 D8 配額（程式）。精選失敗（重試耗盡）→ `selection_mode = fallback`：依粗分取前 5 名（同組上限照樣適用）、`stars = null`，Slack 通知。
 6. 建立 `draft` 版次與項目，事件 `analysis_status = pending`、項目 `why_status = pending`。
 7. 全部市場組稿完成後 Slack 通知「草稿完成」（各市場則數、5 星事件標題、後台連結）。
 
@@ -223,8 +224,8 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 
 - 管理員核准單一市場或全部 → 立即 `published`。
 - worker 每分鐘檢查 `draft ∧ now() >= auto_publish_at` → 自動發布（`published_by_user_id = null`）。
-- 發布後，項目完成即可見（D15）；`now() >= late_fill_deadline` 時仍未 ready 的項目設 `abandoned_at` 並 Slack 通知。
-- 發布時把可見項目的事件 `en_status` 設為 `pending`；之後繁中被修改（digest 改變）則再設為 `pending`。英文翻譯包含事件標題、摘要與各項目的 `why`。
+- 發布後，項目的事件分析完成即可見（D15）；`now() >= late_fill_deadline` 時分析仍未 ready 的項目設 `abandoned_at` 並 Slack 通知。
+- 發布時把可見項目的事件 `en_status` 設為 `pending`；之後繁中標題或摘要被修改（digest 改變），或繁中 `why` 重寫（項目 `why_en_status` 設回 `idle`）則再設為 `pending`。英文翻譯包含事件標題、摘要與已完成的 `why`（供後台）。
 
 ### 6.4 後台（工作樹 ④）
 
@@ -236,8 +237,8 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 
 ### 6.5 讀者端（工作樹 ⑤）
 
-- 公開 API：依市場與語系回傳最近一個 `published` 且有可見項目的版次（`edition_date <= 今天`），回應含 `edition_date` 與 `is_today`。
-- 前端：每則顯示標題、事實摘要、「為何重要」、相關標的（連到站內儀表板）、來源列表；非今日版次顯示明確的日期提示。
+- 公開 API：依市場與語系回傳最近一個 `published` 且有可見項目的版次（`edition_date <= 今天`），回應含 `edition_date` 與 `is_today`。項目不含「為何重要」，它只在後台顯示（2026-10-16 修正）。
+- 前端：每則顯示標題、事實摘要、相關標的（連到站內儀表板）、來源列表；非今日版次顯示明確的日期提示。
 - 沿用首頁 `Promise.allSettled` 的容錯；遵守 loading／skeleton 規則與 i18n。
 
 ## 7. 設定（環境變數，前綴 `DAILY_INSIGHTS_`）
@@ -250,6 +251,7 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 | `NEWSROOM_EMBEDDING_BASE_URL`、`NEWSROOM_EMBEDDING_API_KEY`、`NEWSROOM_EMBEDDING_MODEL`                 | embedding（預設 `text-embedding-3-large`）   |
 | `NEWSROOM_SLACK_WEBHOOK_URL`                                                                            | 通知；未設定時只寫 log                       |
 | `NEWSROOM_ADMIN_BASE_URL`                                                                               | Slack 訊息中的後台連結                       |
+| `NEWSROOM_BROWSER_CDP_URL`、`NEWSROOM_BROWSER_CONCURRENCY`、`NEWSROOM_BROWSER_TIMEOUT_SECONDS`          | 瀏覽器補抓（未設定 CDP URL 時停用）          |
 
 ## 8. 工作樹分工與檔案所有權
 
