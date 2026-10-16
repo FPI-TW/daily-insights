@@ -285,17 +285,20 @@ function NewsCard({ item, locale }: { item: NewsroomItem; locale: Locale }) {
   const { t } = useTranslation()
   return (
     <>
-      {item.stars !== null ? (
-        <p
-          className="m-0 text-right text-xs text-market-caution"
-          aria-label={t("newsroomStars", { count: item.stars })}
-        >
-          {"★".repeat(item.stars)}
-        </p>
-      ) : null}
-      <h3 className="mt-1 mb-2 text-lg leading-6 font-extrabold text-sea-ink">
-        {item.headline}
-      </h3>
+      {/* The stars share the headline's first line instead of a row of their own. */}
+      <div className="mb-2 flex items-start gap-3">
+        <h3 className="m-0 min-w-0 flex-1 text-lg leading-6 font-extrabold wrap-anywhere text-sea-ink">
+          {item.headline}
+        </h3>
+        {item.stars !== null ? (
+          <p
+            className="m-0 shrink-0 text-xs leading-6 whitespace-nowrap text-market-caution"
+            aria-label={t("newsroomStars", { count: item.stars })}
+          >
+            {"★".repeat(item.stars)}
+          </p>
+        ) : null}
+      </div>
       {/* "Why it matters" is shown in the admin console only. */}
       <p className="m-0 text-sm leading-6 text-sea-ink-soft">{item.summary}</p>
       {item.related_symbols.length > 0 ? (
