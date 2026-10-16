@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api.core.config import Settings
+from daily_insights_api.modules.newsroom.browser import PageRenderer, build_renderer
 from daily_insights_api.modules.newsroom.notifier import Notice, Notifier, build_notifier
 from daily_insights_api.modules.newsroom.providers import (
     Embedder,
@@ -57,6 +58,8 @@ class Runtime:
     llm: JsonModel
     embedder: Embedder
     notifier: Notifier
+    # Fallback article reader for the fetch stage; None when no browser is configured.
+    renderer: PageRenderer | None = None
 
     @classmethod
     def build(
@@ -72,10 +75,17 @@ class Runtime:
             if settings.newsroom_embedding_api_key is not None
             else _UnconfiguredModel("newsroom_embedding_configuration_missing")
         )
-        return cls(settings, session_factory, llm, embedder, build_notifier(settings))
+        return cls(
+            settings,
+            session_factory,
+            llm,
+            embedder,
+            build_notifier(settings),
+            build_renderer(settings),
+        )
 
     async def aclose(self) -> None:
-        for client in (self.llm, self.embedder, self.notifier):
+        for client in (self.llm, self.embedder, self.notifier, self.renderer):
             closer = getattr(client, "aclose", None)
             if closer is not None:
                 await closer()

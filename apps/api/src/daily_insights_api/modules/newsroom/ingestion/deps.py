@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 import httpx
 
+from daily_insights_api.modules.newsroom.browser import PageRenderer
 from daily_insights_api.modules.newsroom.ingestion.safe_http import Resolver, safe_client
 
 ClientFactory = Callable[[frozenset[str], float], httpx.AsyncClient]
@@ -22,3 +23,6 @@ class IngestionDeps:
     # DNS for the public-address pre-check; None uses the system resolver.
     resolver: Resolver | None = None
     clock: Callable[[], datetime] = field(default=_utcnow)
+    # Reads a page in CloakBrowser when the plain read was refused or came back
+    # without the article; None keeps the plain HTTP outcome.
+    renderer: PageRenderer | None = None

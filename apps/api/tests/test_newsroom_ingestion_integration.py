@@ -22,6 +22,11 @@ from daily_insights_api.core.config import Settings, get_settings
 from daily_insights_api.core.models import Base
 from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.newsroom import clock, queue, sources_service
+from daily_insights_api.modules.newsroom.browser import (
+    NavigationGuard,
+    PageRenderer,
+    RenderedPage,
+)
 from daily_insights_api.modules.newsroom.ingestion import safe_http
 from daily_insights_api.modules.newsroom.ingestion.deps import IngestionDeps
 from daily_insights_api.modules.newsroom.ingestion.feeds import url_hash
@@ -90,13 +95,18 @@ class Clock:
         return self.now
 
 
-def deps(handler: Handler, now: Clock | None = None) -> IngestionDeps:
+def deps(
+    handler: Handler, now: Clock | None = None, renderer: PageRenderer | None = None
+) -> IngestionDeps:
     def client_factory(allowed: frozenset[str], timeout: float) -> httpx.AsyncClient:
         del allowed, timeout
         return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
     return IngestionDeps(
-        client_factory=client_factory, resolver=public_resolver, clock=now or Clock(NOW)
+        client_factory=client_factory,
+        resolver=public_resolver,
+        clock=now or Clock(NOW),
+        renderer=renderer,
     )
 
 
@@ -483,11 +493,14 @@ async def add_article(
 
 
 async def run_fetch(
-    session_factory: async_sessionmaker[AsyncSession], handler: Handler, **overrides: Any
+    session_factory: async_sessionmaker[AsyncSession],
+    handler: Handler,
+    renderer: PageRenderer | None = None,
+    **overrides: Any,
 ) -> str:
     async with session_factory() as database:
         [claimed] = await claim(database, queue.FETCH)
-    stage = make_fetch_handler(settings(**overrides), deps(handler))
+    stage = make_fetch_handler(settings(**overrides), deps(handler, renderer=renderer))
     return await run_claimed(session_factory, claimed, stage)
 
 
@@ -517,6 +530,34 @@ async def test_fetch_stores_a_good_body(
     assert (row.fetch_status, row.body_status, row.body_source) == ("done", "ok", "fetch")
     assert row.body is not None and row.body.startswith("The Federal Reserve")
     assert row.body_fetched_at == NOW and row.body_quality_reason is None
+
+
+class StaticRenderer:
+    """Answers every page with the same HTML, as if the browser got past the wall."""
+
+    def __init__(self, html: str) -> None:
+        self.html = html
+
+    async def render(self, url: str, guard: NavigationGuard) -> RenderedPage:
+        assert await guard(url) is None
+        return RenderedPage(url, 200, "text/html", self.html)
+
+    async def aclose(self) -> None:
+        return None
+
+
+async def test_fetch_marks_a_body_read_through_the_browser(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    article_id = await add_article(newsroom_database, await add_source(newsroom_database))
+
+    assert await run_fetch(newsroom_database, page(status=403), StaticRenderer(ARTICLE_HTML)) == (
+        "done"
+    )
+
+    row = await article_row(newsroom_database, article_id)
+    assert (row.body_status, row.body_source, row.body_quality_reason) == ("ok", "browser", None)
+    assert row.body is not None and row.body.startswith("The Federal Reserve")
 
 
 async def test_fetch_never_stores_a_paywalled_page_however_long_its_teaser(

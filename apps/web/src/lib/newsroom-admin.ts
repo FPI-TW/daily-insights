@@ -199,7 +199,7 @@ const articleSchema = z.object({
   first_seen_at: timestamp,
   language: z.string().nullable(),
   body_status: bodyStatusSchema,
-  body_source: z.enum(["feed", "fetch", "manual"]).nullable(),
+  body_source: z.enum(["feed", "fetch", "browser", "manual"]).nullable(),
   body_quality_reason: z.string().nullable(),
   body_fetched_at: timestamp.nullable(),
   body_length: z.number().int(),

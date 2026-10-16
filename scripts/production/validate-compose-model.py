@@ -16,6 +16,8 @@ SERVICES = (
     "podcast-media-worker",
     "orchestration-dispatcher",
     "newsroom-worker",
+    "browser-egress",
+    "cloakbrowser",
 )
 API_ENVIRONMENT_KEYS = {
     "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY",
@@ -80,13 +82,67 @@ NEWSROOM_WORKER_KEYS = {
     "DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY",
     "DAILY_INSIGHTS_NEWSROOM_EMBEDDING_MODEL",
     "DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES",
+    "DAILY_INSIGHTS_NEWSROOM_BROWSER_CDP_URL",
     *NEWSROOM_INGESTION_KEYS,
+}
+BROWSER_CDP_URL = "http://cloakbrowser:9222"
+CLOAKBROWSER_PROXY_ARGS = {
+    "--proxy-server=http://browser-egress:3128",
+    "--proxy-bypass-list=<-loopback>",
 }
 
 
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise SystemExit(message)
+
+
+def service_networks(service: dict[str, Any]) -> set[str]:
+    return set(service.get("networks") or {})
+
+
+def validate_browser_isolation(model: dict[str, Any]) -> None:
+    """CloakBrowser may reach the internet only through browser-egress."""
+    services = model["services"]
+    require(
+        model.get("networks", {}).get("browser", {}).get("internal") is True,
+        "the browser network must be internal so CloakBrowser has no direct route out",
+    )
+    cloakbrowser = services["cloakbrowser"]
+    require(
+        service_networks(cloakbrowser) == {"browser"},
+        "cloakbrowser must sit only on the internal browser network",
+    )
+    command = [str(item) for item in cloakbrowser.get("command") or []]
+    require(
+        command[:1] == ["cloakserve"] and CLOAKBROWSER_PROXY_ARGS.issubset(command),
+        "cloakbrowser must send every request, loopback included, through browser-egress",
+    )
+    require(
+        not any(key.startswith("DAILY_INSIGHTS_") for key in cloakbrowser.get("environment", {})),
+        "cloakbrowser must not receive application settings",
+    )
+    egress = services["browser-egress"]
+    require(
+        egress.get("command")
+        == ["python", "-m", "daily_insights_api.scripts.run_browser_egress_proxy"],
+        "browser-egress must run the public-HTTPS-only egress proxy",
+    )
+    require(
+        not egress.get("environment"),
+        "browser-egress must not receive application settings",
+    )
+    require(
+        service_networks(egress) == {"app", "browser"},
+        "browser-egress must bridge only the app and browser networks",
+    )
+    on_browser = {
+        name for name, service in services.items() if "browser" in service_networks(service)
+    }
+    require(
+        on_browser == {"cloakbrowser", "browser-egress", "newsroom-worker"},
+        "only cloakbrowser, browser-egress and newsroom-worker may join the browser network",
+    )
 
 
 def main() -> None:
@@ -185,6 +241,11 @@ def main() -> None:
         == ["python", "-m", "daily_insights_api.scripts.run_newsroom_worker"],
         "newsroom-worker must run the newsroom worker entry point",
     )
+    require(
+        newsroom_environment.get("DAILY_INSIGHTS_NEWSROOM_BROWSER_CDP_URL") == BROWSER_CDP_URL,
+        "newsroom-worker must reach CloakBrowser through the internal browser network",
+    )
+    validate_browser_isolation(model)
     for name in SERVICES:
         environment = services[name].get("environment", {})
         require(
@@ -257,7 +318,9 @@ def main() -> None:
             == "production",
             f"{name} environment must be production",
         )
-        require(not services[name].get("ports"), f"{name} must not publish a host port")
+    for name in SERVICES:
+        if name != "nginx":
+            require(not services[name].get("ports"), f"{name} must not publish a host port")
     web_environment = services["web"].get("environment", {})
     require(web_environment.get("APP_ENV") == "production", "Web environment must be production")
     require(

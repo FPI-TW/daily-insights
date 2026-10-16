@@ -176,9 +176,10 @@ def validate_https_url(url: str, allowed: frozenset[str] | None) -> str:
 
 async def assert_public_hostname(
     hostname: str, allowed: frozenset[str] | None, resolver: Resolver | None = None
-) -> None:
+) -> list[str]:
     """The host is allowlisted (unless ``allowed`` is None) and resolves only to public IPs.
 
+    Returns the validated addresses, so a caller can connect to them directly.
     Resolution failures are ``OSError`` (transient); a private answer is unsafe.
     """
     normalized = normalize_hostname(hostname)
@@ -193,6 +194,7 @@ async def assert_public_hostname(
     addresses = await (resolver or resolve_addresses)(normalized, 443)
     if not addresses or any(not ipaddress.ip_address(address).is_global for address in addresses):
         raise UnsafeDestinationError("source host does not resolve solely to public IPs")
+    return addresses
 
 
 class RobotsUnavailableError(ValueError):

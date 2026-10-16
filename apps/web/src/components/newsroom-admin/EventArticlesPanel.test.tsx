@@ -139,6 +139,16 @@ describe("EventArticlesPanel", () => {
     ).toBeVisible()
   })
 
+  it("marks a body read through the browser", async () => {
+    client.eventDetail.mockResolvedValue({
+      event: subject,
+      articles: [article({ body_source: "browser" })],
+      placements: [],
+    })
+    renderPanel()
+    expect(await screen.findByText("Full text · via browser")).toBeVisible()
+  })
+
   it("splits only a strict subset of the articles", async () => {
     renderPanel()
     const split = await screen.findByRole("button", {

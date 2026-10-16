@@ -9,9 +9,16 @@ Outcomes (spec §6.1, D18):
   This is a final answer, so the stage completes (``fetch_status = done``).
 - Only transient network failures (timeouts, DNS, connection errors, 429 and
   5xx) raise ``RetryableStageError`` and go back on the queue.
+
+When a CloakBrowser renderer is configured, a page refused as a bot (403 or a
+Cloudflare challenge) or one whose text is not the article is read once more in
+the browser under the same allowlist, robots.txt and size rules. The browser
+either yields a usable page or the plain HTTP outcome stands; it never turns a
+robots refusal, a paywall or a missing page into a body.
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -21,6 +28,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.config import Settings
+from daily_insights_api.modules.newsroom.browser import PageRenderer, RenderFailedError
 from daily_insights_api.modules.newsroom.ingestion.allowlist import (
     MANUAL_KIND,
     article_allowlist,
@@ -53,17 +61,22 @@ GONE_STATUS = frozenset({404, 410})
 
 
 class ArticleUnavailableError(Exception):
-    """A final "cannot read this article" answer; retrying will not change it."""
+    """A final "cannot read this article" answer; retrying will not change it.
 
-    def __init__(self, reason: str) -> None:
+    ``refused_as_bot`` marks answers a real browser may get past.
+    """
+
+    def __init__(self, reason: str, *, refused_as_bot: bool = False) -> None:
         super().__init__(reason)
         self.reason = reason
+        self.refused_as_bot = refused_as_bot
 
 
 @dataclass(frozen=True, slots=True)
 class FetchedPage:
     url: str
     page: ExtractedPage
+    via_browser: bool = False
 
 
 def _retry_after(response: httpx.Response) -> timedelta | None:
@@ -112,6 +125,12 @@ async def _fetch_page(
                 except UnsafeDestinationError as error:
                     raise ArticleUnavailableError("redirect_not_allowed") from error
                 continue
+            # Cloudflare marks its interstitial (403 or 503) so it is not mistaken
+            # for an outage; retrying over plain HTTP would only meet it again.
+            if response.headers.get("cf-mitigated", "").strip().lower() == "challenge":
+                raise ArticleUnavailableError("bot_challenge", refused_as_bot=True)
+            if response.status_code == 403:
+                raise ArticleUnavailableError("access_denied", refused_as_bot=True)
             if response.status_code in ACCESS_DENIED_STATUS:
                 raise ArticleUnavailableError("access_denied")
             if response.status_code in GONE_STATUS:
@@ -151,6 +170,89 @@ async def fetch_page(
         raise RetryableStageError("fetch_unreachable") from error
 
 
+async def render_page(
+    client: httpx.AsyncClient,
+    renderer: PageRenderer,
+    url: str,
+    allowed: frozenset[str],
+    *,
+    resolver: Resolver | None = None,
+) -> FetchedPage | None:
+    """Read ``url`` in the browser; None when it produced no usable page.
+
+    Every main-frame navigation, redirects and challenge reloads included, must
+    be an allowlisted HTTPS URL that robots.txt lets the bot read.
+    """
+    verdicts: dict[str, str | None] = {}
+
+    async def guard(target: str) -> str | None:
+        if target not in verdicts:
+            verdicts[target] = await _navigation_refusal(client, target, allowed, resolver)
+        return verdicts[target]
+
+    try:
+        rendered = await renderer.render(url, guard)
+    except RenderFailedError as error:
+        logger.info("newsroom.fetch_browser_failed", extra={"url": url, "reason": error.reason})
+        return None
+    content_type = rendered.content_type.split(";", 1)[0].strip().lower()
+    if not 200 <= rendered.status < 300 or content_type not in HTML_TYPES:
+        logger.info(
+            "newsroom.fetch_browser_failed",
+            extra={"url": url, "reason": f"browser_http_{rendered.status}"},
+        )
+        return None
+    if len(rendered.html.encode()) > MAX_PAGE_BYTES:
+        logger.info("newsroom.fetch_browser_failed", extra={"url": url, "reason": "too_large"})
+        return None
+    return FetchedPage(rendered.url, extract_page(rendered.html), via_browser=True)
+
+
+async def _navigation_refusal(
+    client: httpx.AsyncClient,
+    url: str,
+    allowed: frozenset[str],
+    resolver: Resolver | None,
+) -> str | None:
+    try:
+        validate_https_url(url, allowed)
+        if not await robots_allowed(client, url, allowed, resolver=resolver):
+            return "robots_disallowed"
+    except UnsafeDestinationError:
+        return "host_not_allowed"
+    except RobotsUnavailableError:
+        return "robots_unavailable"
+    except (httpx.HTTPError, OSError):
+        return "robots_unreachable"
+    return None
+
+
+async def read_article(
+    client: httpx.AsyncClient,
+    url: str,
+    allowed: frozenset[str],
+    title_of: Callable[[ExtractedPage], str],
+    *,
+    resolver: Resolver | None = None,
+    renderer: PageRenderer | None = None,
+) -> FetchedPage:
+    """``fetch_page``, then the browser when the plain read met a bot wall or no article."""
+    try:
+        fetched = await fetch_page(client, url, allowed, resolver=resolver)
+    except ArticleUnavailableError as error:
+        if renderer is None or not error.refused_as_bot:
+            raise
+        rendered = await render_page(client, renderer, url, allowed, resolver=resolver)
+        if rendered is None:
+            raise
+        return rendered
+    page = fetched.page
+    if renderer is None or page.paywalled or assess(title_of(page), page.text).ok:
+        return fetched
+    rendered = await render_page(client, renderer, url, allowed, resolver=resolver)
+    return rendered or fetched
+
+
 def fetch_allowlist(
     allowed: frozenset[str], source_kind: str, article_url: str, settings: Settings
 ) -> frozenset[str]:
@@ -185,9 +287,22 @@ def make_fetch_handler(settings: Settings, deps: IngestionDeps) -> StageHandler:
         if is_manual and article.embed_status == "idle":
             # Manual URLs embed after the fetch so the title comes from the page.
             values["embed_status"] = "pending"
+
+        def title_of(page: ExtractedPage) -> str:
+            if is_manual and article.title == article.url and page.title:
+                return page.title
+            return article.title
+
         try:
             async with deps.client_factory(allowed, settings.news_fetch_timeout_seconds) as client:
-                fetched = await fetch_page(client, article.url, allowed, resolver=deps.resolver)
+                fetched = await read_article(
+                    client,
+                    article.url,
+                    allowed,
+                    title_of,
+                    resolver=deps.resolver,
+                    renderer=deps.renderer,
+                )
         except ArticleUnavailableError as error:
             logger.info(
                 "newsroom.fetch_unavailable",
@@ -200,9 +315,8 @@ def make_fetch_handler(settings: Settings, deps: IngestionDeps) -> StageHandler:
                 "body_quality_reason": error.reason[:100],
             }
         page = fetched.page
-        title = article.title
-        if is_manual and article.title == article.url and page.title:
-            title = page.title
+        title = title_of(page)
+        if title != article.title:
             values["title"] = title
         if article.published_at is None and page.published_at is not None:
             values["published_at"] = page.published_at
@@ -221,7 +335,7 @@ def make_fetch_handler(settings: Settings, deps: IngestionDeps) -> StageHandler:
                 **values,
                 "body": page.text,
                 "body_status": "ok",
-                "body_source": "fetch",
+                "body_source": "browser" if fetched.via_browser else "fetch",
                 "body_quality_reason": None,
             }
         return {

@@ -286,7 +286,9 @@ function BodyStatus({ article }: { article: NewsroomArticle }) {
       {t(`newsroomAdminBody_${article.body_status}`)}
       {article.body_source === "manual"
         ? ` · ${t("newsroomAdminBodyManual")}`
-        : ""}
+        : article.body_source === "browser"
+          ? ` · ${t("newsroomAdminBodyBrowser")}`
+          : ""}
     </StatusBadge>
   )
 }

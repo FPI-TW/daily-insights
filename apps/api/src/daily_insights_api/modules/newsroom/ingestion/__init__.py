@@ -27,7 +27,7 @@ def fetch_concurrency(runtime: Runtime) -> int:
 
 def register(runtime: Runtime, deps: IngestionDeps | None = None) -> Registration:
     """Stage bindings (``queue.FETCH``) and periodic tasks (source polling, 03:00 purge)."""
-    resolved = deps or IngestionDeps()
+    resolved = deps or IngestionDeps(renderer=runtime.renderer)
     throttle = HostThrottle()
 
     async def poll() -> None:

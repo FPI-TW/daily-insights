@@ -194,6 +194,9 @@ services:
       DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS:-30}
       DAILY_INSIGHTS_GUARDIAN_API_KEY: ${DAILY_INSIGHTS_GUARDIAN_API_KEY:-}
       DAILY_INSIGHTS_SEC_CONTACT_EMAIL: ${DAILY_INSIGHTS_SEC_CONTACT_EMAIL:-}
+      # Article pages refused as a bot, or without the article text, are read
+      # again in CloakBrowser; the plain HTTP outcome stands if it is down.
+      DAILY_INSIGHTS_NEWSROOM_BROWSER_CDP_URL: http://cloakbrowser:9222
     command: ["python", "-m", "daily_insights_api.scripts.run_newsroom_worker"]
     healthcheck:
       test:
@@ -217,6 +220,78 @@ services:
       - no-new-privileges:true
     networks:
       - app
+      - browser
+
+  # CloakBrowser (Chromium) for the newsroom fetch fallback. It is only on the
+  # internal browser network: its one way out is browser-egress, which tunnels
+  # to public HTTPS addresses only. Chrome runs without its own sandbox, so this
+  # isolation is the boundary.
+  cloakbrowser:
+    image: docker.io/cloakhq/cloakbrowser@sha256:c8ba6bdddb2bd49c94b1707903b11c04f7fab7815f262acd9c72c1e627e13cb4
+    container_name: daily-insights-cloakbrowser
+    restart: unless-stopped
+    environment:
+      CLOAKBROWSER_AUTO_UPDATE: "false"
+      XDG_CONFIG_HOME: /tmp/.config
+      XDG_CACHE_HOME: /tmp/.cache
+    command:
+      [
+        "cloakserve",
+        "--proxy-server=http://browser-egress:3128",
+        "--proxy-bypass-list=<-loopback>",
+      ]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9222/', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    stop_grace_period: 20s
+    mem_limit: 1g
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - browser
+
+  browser-egress:
+    image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}
+    container_name: daily-insights-browser-egress
+    restart: unless-stopped
+    command: ["python", "-m", "daily_insights_api.scripts.run_browser_egress_proxy"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import socket; socket.create_connection(('127.0.0.1', 3128), timeout=3).close()",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    stop_grace_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - app
+      - browser
 
   orchestration-dispatcher:
     image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}
@@ -345,6 +420,9 @@ networks:
     ipam:
       config:
         - subnet: 172.30.0.0/24
+  # No route out: CloakBrowser reaches the internet only through browser-egress.
+  browser:
+    internal: true
 
 volumes:
   podcast-media-spool:

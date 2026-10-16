@@ -58,7 +58,7 @@ SOURCE_KINDS = (
     "manual",
 )
 BODY_STATUSES = ("pending", "ok", "unavailable", "rejected", "purged")
-BODY_SOURCES = ("feed", "fetch", "manual")
+BODY_SOURCES = ("feed", "fetch", "browser", "manual")
 QUEUE_STATUSES = ("idle", "pending", "done", "failed")
 ANALYSIS_STATUSES = ("idle", "pending", "ready", "failed", "needs_body")
 TRANSLATION_STATUSES = ("idle", "pending", "ready", "failed")

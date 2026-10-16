@@ -2436,7 +2436,7 @@ export interface components {
       /** Body Quality Reason */
       body_quality_reason: string | null
       /** Body Source */
-      body_source: ("feed" | "fetch" | "manual") | null
+      body_source: ("feed" | "fetch" | "browser" | "manual") | null
       /**
        * Body Status
        * @enum {string}

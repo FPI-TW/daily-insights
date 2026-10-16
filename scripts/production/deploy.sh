@@ -288,6 +288,11 @@ fi
 if ! wait_for_healthy_container daily-insights-podcast-media-worker; then
   diagnose_cutover_failure "podcast-media-worker did not become healthy"
 fi
+# CloakBrowser and its egress proxy hold no state and never touch the schema;
+# the newsroom worker reads article pages through them as a fallback.
+if ! compose up -d --no-build --force-recreate --no-deps browser-egress cloakbrowser; then
+  diagnose_cutover_failure "browser-egress or cloakbrowser failed to start"
+fi
 # The newsroom worker idles with heartbeats while DAILY_INSIGHTS_NEWSROOM_ENABLED
 # is false, so it is started and verified on every release.
 if ! compose up -d --no-build --force-recreate --no-deps newsroom-worker; then
@@ -297,7 +302,7 @@ if ! wait_for_healthy_container daily-insights-newsroom-worker; then
   diagnose_cutover_failure "newsroom-worker did not become healthy"
 fi
 
-if ! compose up -d --no-build --remove-orphans api web orchestration-dispatcher podcast-media-worker newsroom-worker; then
+if ! compose up -d --no-build --remove-orphans api web orchestration-dispatcher podcast-media-worker newsroom-worker browser-egress cloakbrowser; then
   diagnose_cutover_failure "final service convergence failed after the replacement worker started"
 fi
 

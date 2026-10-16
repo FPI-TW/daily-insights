@@ -39,7 +39,7 @@ if grep -q 'postgres:' "$compose_file"; then
   exit 1
 fi
 
-production_services="api web nginx orchestration-worker podcast-media-worker orchestration-dispatcher newsroom-worker"
+production_services="api web nginx orchestration-worker podcast-media-worker orchestration-dispatcher newsroom-worker browser-egress cloakbrowser"
 for service in $production_services; do
   grep -q "^  ${service}:" "$compose_file"
   grep -q "container_name: daily-insights-${service}" "$compose_file"
@@ -410,6 +410,7 @@ grep -q 'compose .* up -d --no-build --force-recreate --no-deps orchestration-wo
 grep -q 'inspect --format {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} daily-insights-orchestration-worker' "$temporary_dir/deployment.log"
 grep -q 'compose .* up -d --no-build --force-recreate --no-deps podcast-media-worker' "$temporary_dir/deployment.log"
 grep -q 'inspect --format {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} daily-insights-podcast-media-worker' "$temporary_dir/deployment.log"
+grep -q 'compose .* up -d --no-build --force-recreate --no-deps browser-egress cloakbrowser' "$temporary_dir/deployment.log"
 grep -q 'compose .* up -d --no-build --force-recreate --no-deps newsroom-worker' "$temporary_dir/deployment.log"
 grep -q 'inspect --format {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} daily-insights-newsroom-worker' "$temporary_dir/deployment.log"
 grep -q 'compose .* up -d --no-build --remove-orphans api web orchestration-dispatcher podcast-media-worker newsroom-worker' "$temporary_dir/deployment.log"

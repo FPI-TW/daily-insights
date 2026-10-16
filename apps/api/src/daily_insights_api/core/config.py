@@ -118,6 +118,12 @@ class Settings(BaseSettings):
     newsroom_admin_base_url: str = "http://localhost:3000"
     newsroom_worker_poll_seconds: float = Field(default=2.0, ge=0.1, le=60)
     newsroom_fetch_concurrency: int = Field(default=4, ge=1, le=20)
+    # CloakBrowser's CDP endpoint (the ``cloakbrowser`` Compose service). When set,
+    # an article page that refused the plain HTTP read as a bot, or whose text
+    # was not the article, is read again in the browser. Unset disables it.
+    newsroom_browser_cdp_url: str | None = None
+    newsroom_browser_concurrency: int = Field(default=2, ge=1, le=8)
+    newsroom_browser_timeout_seconds: float = Field(default=45, gt=0, le=180)
     report_freshness_max_age_days: int = Field(default=3, ge=1, le=30)
     r2_endpoint_url: str | None = None
     r2_bucket_name: str | None = None
@@ -183,6 +189,15 @@ class Settings(BaseSettings):
                 not item or "/" in item or ":" in item or "." not in item for item in hostnames
             ):
                 raise ValueError(f"{setting} must contain exact hostnames")
+        if self.newsroom_browser_cdp_url:
+            browser = urlparse(self.newsroom_browser_cdp_url)
+            if (
+                browser.scheme not in {"http", "https"}
+                or not browser.hostname
+                or browser.username
+                or browser.password
+            ):
+                raise ValueError("newsroom_browser_cdp_url must be an HTTP URL without credentials")
         if self.guardian_api_key is not None and is_placeholder_value(
             self.guardian_api_key.get_secret_value()
         ):

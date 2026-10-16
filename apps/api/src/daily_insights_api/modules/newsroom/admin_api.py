@@ -72,7 +72,7 @@ SourceKind = Literal["rss", "rdf", "atom", "rss_full", "news_sitemap", "json_lis
 SourceHealth = Literal["disabled", "pending", "healthy", "degraded", "unhealthy"]
 # Mirrors of the CHECK constraints in models.py, so the client gets enums.
 BodyStatus = Literal["pending", "ok", "unavailable", "rejected", "purged"]
-BodySource = Literal["feed", "fetch", "manual"]
+BodySource = Literal["feed", "fetch", "browser", "manual"]
 QueueStatus = Literal["idle", "pending", "done", "failed"]
 AnalysisStatus = Literal["idle", "pending", "ready", "failed", "needs_body"]
 TranslationStatus = Literal["idle", "pending", "ready", "failed"]

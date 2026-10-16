@@ -3042,7 +3042,7 @@
           "body_source": {
             "anyOf": [
               {
-                "enum": ["feed", "fetch", "manual"],
+                "enum": ["feed", "fetch", "browser", "manual"],
                 "type": "string"
               },
               {
