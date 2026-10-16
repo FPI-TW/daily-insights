@@ -1006,7 +1006,6 @@ const resources: Resource = {
       newsroomLoadFailed: "重點新聞暫時無法載入，報告內容不受影響。",
       newsroomEmpty: "目前尚無可顯示的重點新聞，請稍後再試。",
       newsroomEarlierEdition: "今日新聞準備中，以下為 {{date}} 內容",
-      newsroomWhyItMatters: "為何重要",
       newsroomRelatedSymbols: "相關標的",
       newsroomSources_other: "來源（{{count}}）",
       newsroomStars_other: "重要性 {{count}} 星",
@@ -2014,7 +2013,6 @@ const resources: Resource = {
       newsroomLoadFailed: "重点新闻暂时无法加载，报告内容不受影响。",
       newsroomEmpty: "目前尚无可显示的重点新闻，请稍后再试。",
       newsroomEarlierEdition: "今日新闻准备中，以下为 {{date}} 内容",
-      newsroomWhyItMatters: "为何重要",
       newsroomRelatedSymbols: "相关标的",
       newsroomSources_other: "来源（{{count}}）",
       newsroomStars_other: "重要性 {{count}} 星",
@@ -3082,7 +3080,6 @@ const resources: Resource = {
       newsroomEmpty: "No key news is available yet. Please check back later.",
       newsroomEarlierEdition:
         "Today’s news is being prepared. Showing {{date}}.",
-      newsroomWhyItMatters: "Why it matters",
       newsroomRelatedSymbols: "Related markets",
       newsroomSources_one: "{{count}} source",
       newsroomSources_other: "{{count}} sources",

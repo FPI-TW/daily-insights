@@ -925,6 +925,19 @@ async def test_translation_covers_visible_items_and_detects_stale_digest(
     hidden = await _get(newsroom_database, NewsroomEditionItem, item_ids["tw_equity"])
     assert hidden.why_en == "EN tw_equity 的滑鼠理由"
 
+    # A rewritten "why" is translated again; the digest readers rely on stays.
+    signed = (await _get(newsroom_database, NewsroomEvent, event_id)).en_source_digest
+    async with newsroom_database() as database:
+        await publishing.apply_why_edit(database, item_ids["global"], "改寫的理由", user_id=user_id)
+        await database.commit()
+    rewritten = await _get(newsroom_database, NewsroomEditionItem, item_ids["global"])
+    assert rewritten.why_en_status == "idle"
+    assert (await _get(newsroom_database, NewsroomEvent, event_id)).en_status == "pending"
+    assert await _run_stage(runtime, translate) == ["done"]
+    rewritten = await _get(newsroom_database, NewsroomEditionItem, item_ids["global"])
+    assert (rewritten.why_en, rewritten.why_en_status) == ("EN 改寫的理由", "ready")
+    assert (await _get(newsroom_database, NewsroomEvent, event_id)).en_source_digest == signed
+
     async with newsroom_database() as database:
         await publishing.apply_event_edit(
             database,
@@ -1003,6 +1016,14 @@ async def test_late_fill_close_abandons_unready_items_once_and_notifies(
         newsroom_database, markets=("global",), published=True
     )
     await _run_stage(runtime, _binding(analysis.register(runtime).stages, queue.ANALYSIS))
+    # Its "why" is still being written; readers never see one, so it is kept.
+    async with newsroom_database() as database:
+        await database.execute(
+            update(NewsroomEditionItem)
+            .where(NewsroomEditionItem.id == ready_items["global"])
+            .values(why_status="pending", why_zh_hant=None, why_zh_hans=None)
+        )
+        await database.commit()
     source = await _source(newsroom_database, "late")
     late_event = await _event(newsroom_database, "Late story", sources=[source], scores={})
     edition = (await _editions(newsroom_database))["global"]

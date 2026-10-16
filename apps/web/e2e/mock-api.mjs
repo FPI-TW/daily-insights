@@ -36,17 +36,14 @@ const newsroomText = {
   "zh-hant": {
     headline: "市場消化最新經濟數據",
     summary: "投資人在開盤前評估新公布的數據。",
-    why: "利率預期變化牽動股市評價。",
   },
   "zh-hans": {
     headline: "市场消化最新经济数据",
     summary: "投资人在开盘前评估新公布的数据。",
-    why: "利率预期变化牵动股市评价。",
   },
   en: {
     headline: "Markets respond to the latest economic signals",
     summary: "Investors assessed new data before the opening bell.",
-    why: "Shifting rate expectations move equity valuations.",
   },
 }
 
@@ -70,7 +67,6 @@ function newsroomEdition(market, locale) {
         stars: 4,
         headline: text.headline,
         summary: text.summary,
-        why: text.why,
         related_symbols: [
           {
             symbol,

@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.modules.newsroom import editlog, queue
@@ -234,6 +234,7 @@ async def apply_why_edit(
     item.why_status = "ready"
     item.why_next_attempt_at = None
     item.why_error_code = None
+    item.why_en_status = "idle"
     await database.flush()
     editlog.record_edit(
         database,
@@ -296,7 +297,9 @@ async def auto_publish_due(database: AsyncSession, *, now: datetime | None = Non
 async def close_late_fill(
     database: AsyncSession, *, now: datetime | None = None
 ) -> list[tuple[NewsroomEdition, list[str]]]:
-    """Abandon items still not ready at the 12:00 deadline (D15).
+    """Abandon items whose analysis is still not ready at the 12:00 deadline (D15).
+
+    A missing "why it matters" no longer holds an item back: readers do not see it.
 
     Returns each closed edition with the titles of the items it abandoned.
     """
@@ -322,10 +325,7 @@ async def close_late_fill(
                 .where(
                     NewsroomEditionItem.edition_id == edition.id,
                     live_item_condition(),
-                    or_(
-                        NewsroomEvent.analysis_status != "ready",
-                        NewsroomEditionItem.why_status != "ready",
-                    ),
+                    NewsroomEvent.analysis_status != "ready",
                 )
                 .order_by(NewsroomEditionItem.rank)
             )

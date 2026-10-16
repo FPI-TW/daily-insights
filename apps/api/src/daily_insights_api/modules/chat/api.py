@@ -502,7 +502,7 @@ async def _page_snapshot(
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "news context unavailable")
             news = [
                 {"headline": headline, "summary": summary}
-                for headline, summary, _ in await visible_item_texts(
+                for headline, summary in await visible_item_texts(
                     database, edition.id, payload.locale
                 )
             ]

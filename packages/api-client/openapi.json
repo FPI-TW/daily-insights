@@ -4906,17 +4906,6 @@
           "summary": {
             "title": "Summary",
             "type": "string"
-          },
-          "why": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Why"
           }
         },
         "required": [
@@ -4926,7 +4915,6 @@
           "stars",
           "headline",
           "summary",
-          "why",
           "related_symbols",
           "sources"
         ],

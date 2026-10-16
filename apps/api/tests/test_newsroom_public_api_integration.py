@@ -228,7 +228,9 @@ async def test_returns_todays_visible_items_with_sources_and_symbols(
     first = response.items[0]
     assert first.id == item.id
     assert first.event_id == event.id
-    assert (first.summary, first.why, first.stars) == ("Fed 繁摘要", "Fed global 為何重要", 4)
+    assert (first.summary, first.stars) == ("Fed 繁摘要", 4)
+    # "Why it matters" stays in the admin console.
+    assert "why" not in first.model_dump()
     assert response.items[1].stars is None
     assert [(source.name, source.url) for source in first.sources] == [
         ("Wire", "https://wire.example/b"),
@@ -270,18 +272,8 @@ async def test_returns_todays_visible_items_with_sources_and_symbols(
         ({}, {"abandoned_at": PUBLISHED_AT}),
         ({"analysis_status": "pending"}, {}),
         ({"analysis_status": "needs_body"}, {}),
-        ({}, {"why_status": "pending"}),
-        ({}, {"why_status": "failed"}),
     ],
-    ids=[
-        "removed",
-        "hidden",
-        "abandoned",
-        "analysis-pending",
-        "analysis-needs-body",
-        "why-pending",
-        "why-failed",
-    ],
+    ids=["removed", "hidden", "abandoned", "analysis-pending", "analysis-needs-body"],
 )
 async def test_hidden_items_fall_back_to_the_latest_visible_edition(
     newsroom_database: async_sessionmaker[AsyncSession],
@@ -303,6 +295,30 @@ async def test_hidden_items_fall_back_to_the_latest_visible_edition(
     assert response.edition_date == YESTERDAY
     assert response.is_today is False
     assert [item.headline for item in response.items] == ["Yesterday 繁"]
+
+
+@pytest.mark.parametrize("why_status", ["pending", "failed"])
+async def test_items_do_not_wait_for_their_why(
+    newsroom_database: async_sessionmaker[AsyncSession], why_status: str
+) -> None:
+    # "Why it matters" is admin-only, so an item shows while it is still written.
+    async with newsroom_database() as database:
+        newsroom = _Newsroom(database)
+        event = await newsroom.event(TODAY, "Today")
+        await newsroom.item(
+            TODAY, event, why_status=why_status, why_zh_hant=None, why_zh_hans=None, why_en=None
+        )
+        await newsroom.sign_english(event)
+        await database.commit()
+
+        locales: tuple[public_api.Locale, ...] = ("zh-hant", "zh-hans", "en")
+        responses = {locale: await _latest(database, locale=locale) for locale in locales}
+
+    assert {locale: [item.headline for item in r.items] for locale, r in responses.items()} == {
+        "zh-hant": ["Today 繁"],
+        "zh-hans": ["Today 简"],
+        "en": ["Today en"],
+    }
 
 
 async def test_only_visible_items_of_the_chosen_edition_are_listed(
@@ -375,9 +391,7 @@ async def test_simplified_chinese_reads_the_converted_text(
 
         response = await _latest(database, locale="zh-hans")
 
-    assert [(item.headline, item.summary, item.why) for item in response.items] == [
-        ("Fed 简", "Fed 简摘要", "Fed global 为何重要")
-    ]
+    assert [(item.headline, item.summary) for item in response.items] == [("Fed 简", "Fed 简摘要")]
 
 
 async def test_english_needs_a_fresh_translation(
@@ -392,6 +406,7 @@ async def test_english_needs_a_fresh_translation(
         await newsroom.item(TODAY, fresh, market="tw_equity", rank=1)
         await newsroom.sign_english(fresh)
 
+        # A re-translation in progress keeps English that still matches the zh-hant.
         pending = await newsroom.event(TODAY, "Pending", en_status="pending")
         await newsroom.item(TODAY, pending, rank=2)
         await newsroom.sign_english(pending)
@@ -401,6 +416,7 @@ async def test_english_needs_a_fresh_translation(
         await newsroom.sign_english(stale)
         stale.summary_zh_hant = "編輯改過的摘要"
 
+        # An English "why" still being translated holds nothing back.
         why_pending = await newsroom.event(TODAY, "WhyPending")
         await newsroom.item(TODAY, why_pending, rank=4, why_en_status="pending")
         await newsroom.sign_english(why_pending)
@@ -408,6 +424,7 @@ async def test_english_needs_a_fresh_translation(
         unsigned = await newsroom.event(TODAY, "Unsigned")
         await newsroom.item(TODAY, unsigned, rank=5)
 
+        # Nor does a rewritten "why": readers never see it.
         stale_why = await newsroom.event(TODAY, "StaleWhy")
         stale_item = await newsroom.item(TODAY, stale_why, rank=6)
         await newsroom.sign_english(stale_why)
@@ -417,12 +434,16 @@ async def test_english_needs_a_fresh_translation(
         english = await _latest(database, locale="en")
         chinese = await _latest(database, locale="zh-hant")
 
-    assert [item.headline for item in english.items] == ["Fresh en"]
-    assert english.items[0].why == "Fresh global why"
+    assert [item.headline for item in english.items] == [
+        "Fresh en",
+        "Pending en",
+        "WhyPending en",
+        "StaleWhy en",
+    ]
     assert len(chinese.items) == 6
 
 
-async def test_english_turns_stale_when_another_market_changes_its_why(
+async def test_english_turns_stale_only_when_the_headline_or_summary_changes(
     newsroom_database: async_sessionmaker[AsyncSession],
 ) -> None:
     async with newsroom_database() as database:
@@ -434,13 +455,13 @@ async def test_english_turns_stale_when_another_market_changes_its_why(
         await database.commit()
         assert (await _latest(database, locale="en")).items
 
+        # Another market's "why" (or hiding its item) leaves the English current.
         taiwan.why_zh_hant = "台股版改寫"
-        await database.commit()
-        assert (await _latest(database, locale="en")).items == []
-
-        # Hiding the Taiwan item removes its "why" from the digest instead.
-        taiwan.why_zh_hant = f"{event.working_title} tw_equity 為何重要"
         taiwan.hidden_at = PUBLISHED_AT
+        await database.commit()
+        assert (await _latest(database, locale="en")).items
+
+        event.summary_zh_hant = "編輯改過的摘要"
         await database.commit()
         assert (await _latest(database, locale="en")).items == []
 
@@ -466,7 +487,7 @@ async def test_english_falls_back_past_editions_whose_translation_is_stale(
     assert [item.headline for item in response.items] == ["Day9 en"]
 
 
-async def test_legacy_items_show_without_why(
+async def test_items_show_without_a_why(
     newsroom_database: async_sessionmaker[AsyncSession],
 ) -> None:
     async with newsroom_database() as database:
@@ -485,7 +506,7 @@ async def test_legacy_items_show_without_why(
         article = await newsroom.article(legacy, manual, "https://www.reuters.com/markets/a")
         article.body_status = "purged"
         await newsroom.sign_english(legacy)
-        # A pipeline item still needs its "why" to be shown.
+        # A pipeline item without one shows too: readers never see a "why".
         unexplained = await newsroom.event(TODAY, "Unexplained")
         await newsroom.item(
             TODAY, unexplained, rank=2, why_zh_hant=None, why_zh_hans=None, why_en=None
@@ -497,12 +518,11 @@ async def test_legacy_items_show_without_why(
         responses = {locale: await _latest(database, locale=locale) for locale in locales}
 
     assert {
-        locale: [(item.headline, item.why) for item in response.items]
-        for locale, response in responses.items()
+        locale: [item.headline for item in response.items] for locale, response in responses.items()
     } == {
-        "zh-hant": [("Legacy 繁", None)],
-        "zh-hans": [("Legacy 简", None)],
-        "en": [("Legacy en", None)],
+        "zh-hant": ["Legacy 繁", "Unexplained 繁"],
+        "zh-hans": ["Legacy 简", "Unexplained 简"],
+        "en": ["Legacy en", "Unexplained en"],
     }
     assert [(source.name, source.url) for source in responses["en"].items[0].sources] == [
         ("www.reuters.com", "https://www.reuters.com/markets/a")

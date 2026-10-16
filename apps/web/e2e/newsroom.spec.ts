@@ -7,9 +7,7 @@ test.beforeEach(async ({ context, request }) => {
   await authenticateAs(context, "org_member")
 })
 
-test("home page shows today's key news with why it matters and sources", async ({
-  page,
-}) => {
+test("home page shows today's key news with its sources", async ({ page }) => {
   await openHydrated(page, "/en/reports", "#daily-news-title")
 
   const news = page.locator("section", {
@@ -21,12 +19,8 @@ test("home page shows today's key news with why it matters and sources", async (
       name: "Markets respond to the latest economic signals",
     })
   ).toBeVisible()
-  await expect(
-    story.getByRole("heading", { name: "Why it matters" })
-  ).toBeVisible()
-  await expect(
-    story.getByText("Shifting rate expectations move equity valuations.")
-  ).toBeVisible()
+  // "Why it matters" is shown in the admin console only.
+  await expect(story.getByText("Why it matters")).toHaveCount(0)
   // Today's edition carries no date notice.
   await expect(news.getByText(/being prepared/)).toHaveCount(0)
 

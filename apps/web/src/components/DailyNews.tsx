@@ -296,16 +296,8 @@ function NewsCard({ item, locale }: { item: NewsroomItem; locale: Locale }) {
       <h3 className="mt-1 mb-2 text-lg leading-6 font-extrabold text-sea-ink">
         {item.headline}
       </h3>
+      {/* "Why it matters" is shown in the admin console only. */}
       <p className="m-0 text-sm leading-6 text-sea-ink-soft">{item.summary}</p>
-      {item.why ? (
-        // Stories migrated from the legacy pipeline have no "why".
-        <div className="mt-4 rounded-[10px] border border-line-soft bg-lagoon-tint px-4 py-3">
-          <h4 className="m-0 text-xs font-extrabold tracking-[0.08em] text-lagoon-deep uppercase">
-            {t("newsroomWhyItMatters")}
-          </h4>
-          <p className="mt-1 mb-0 text-sm leading-6 text-sea-ink">{item.why}</p>
-        </div>
-      ) : null}
       {item.related_symbols.length > 0 ? (
         <RelatedSymbols symbols={item.related_symbols} locale={locale} />
       ) : null}

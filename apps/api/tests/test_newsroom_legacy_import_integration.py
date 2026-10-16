@@ -340,9 +340,9 @@ async def test_legacy_editions_become_readable_newsroom_editions(database_url: s
             zh_hant = await latest_edition(database, "global", "zh-hant", today=date(2026, 10, 1))
             assert zh_hant.edition_date == date(2026, 9, 29)
             assert zh_hant.is_today is False
-            assert [(item.rank, item.stars, item.headline, item.why) for item in zh_hant.items] == [
-                (1, 5, "A 臺灣標題", None),
-                (2, 3, "B 臺灣發佈頭條", None),
+            assert [(item.rank, item.stars, item.headline) for item in zh_hant.items] == [
+                (1, 5, "A 臺灣標題"),
+                (2, 3, "B 臺灣發佈頭條"),
             ]
             assert [source.url for source in zh_hant.items[0].sources] == ["https://example.com/a"]
 
@@ -360,7 +360,7 @@ async def test_legacy_editions_become_readable_newsroom_editions(database_url: s
             # The chat page context reads the same visible items.
             assert english.edition_id is not None
             assert await visible_item_texts(database, english.edition_id, "en") == [
-                ("A English headline", "A English summary.", None)
+                ("A English headline", "A English summary.")
             ]
 
             events = (

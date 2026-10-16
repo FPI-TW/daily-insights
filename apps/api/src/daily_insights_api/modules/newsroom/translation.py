@@ -4,16 +4,18 @@ Owner: editions worktree.
 
 zh-hant is the only editable language. zh-hans is derived synchronously with
 OpenCC ``tw2sp`` wherever zh-hant is written; English is produced by the
-``queue.TRANSLATE`` stage. ``en_source_digest`` records which zh-hant text the
-English came from, so a changed headline, summary or visible "why" makes the
-English stale (spec §4.3, §4.5).
+``queue.TRANSLATE`` stage. ``en_source_digest`` records which zh-hant headline
+and summary the English came from, so changing either makes the English stale
+for readers (spec §4.3, §4.5). "Why it matters" is shown in the admin console
+only: rewriting one resets its ``why_en_status``, and the English "why" is
+translated again without hiding the reader-facing English.
 """
 
 import hashlib
 import json
 import logging
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from functools import cache
 from importlib.resources import files
@@ -84,17 +86,13 @@ def contract_error(database: AsyncSession, code: str) -> RetryableStageError:
     return error
 
 
-def zh_hant_digest(
-    headline: str | None, summary: str | None, whys: Mapping[str, str | None]
-) -> str:
-    """SHA-256 of the zh-hant text an English translation is made from.
+def zh_hant_digest(headline: str | None, summary: str | None) -> str:
+    """SHA-256 of the zh-hant headline and summary an English translation is made from.
 
-    ``whys`` maps edition item id (string) to that item's ``why_zh_hant`` for
-    every reader-visible item of the event (see ``visible_items_query``). The
-    reader API recomputes this to decide whether the English is current.
+    The reader API recomputes this to decide whether the English is current.
     """
     payload = json.dumps(
-        {"headline": headline, "summary": summary, "whys": dict(whys)},
+        {"headline": headline, "summary": summary},
         sort_keys=True,
         ensure_ascii=False,
         separators=(",", ":"),
@@ -119,7 +117,6 @@ def visible_items_query(event_id: uuid.UUID) -> Select[tuple[NewsroomEditionItem
         .where(
             NewsroomEditionItem.event_id == event_id,
             NewsroomEdition.status == "published",
-            NewsroomEditionItem.why_status == "ready",
             live_item_condition(),
         )
         .order_by(NewsroomEditionItem.id)
@@ -133,29 +130,35 @@ async def _visible_items(
 
 
 async def current_zh_hant_digest(database: AsyncSession, event_id: uuid.UUID) -> str:
-    """``zh_hant_digest`` of the event's current zh-hant text and visible items."""
+    """``zh_hant_digest`` of the event's current zh-hant headline and summary."""
     event = await database.get(NewsroomEvent, event_id)
     if event is None:
         raise LookupError("newsroom event not found")
-    items = await _visible_items(database, event_id)
-    return zh_hant_digest(
-        event.headline_zh_hant,
-        event.summary_zh_hant,
-        {str(item.id): item.why_zh_hant for item in items},
-    )
+    return zh_hant_digest(event.headline_zh_hant, event.summary_zh_hant)
+
+
+def _ready_whys(items: Sequence[NewsroomEditionItem]) -> dict[str, str]:
+    """The finished zh-hant "why" of each item that has one, by item id (string).
+
+    Migrated legacy items and items still writing theirs have none to translate.
+    """
+    return {
+        str(item.id): item.why_zh_hant
+        for item in items
+        if item.why_status == "ready" and item.why_zh_hant
+    }
 
 
 def _english_is_current(
     event: NewsroomEvent, items: Sequence[NewsroomEditionItem], digest: str
 ) -> bool:
+    whys = _ready_whys(items)
     return (
         event.en_source_digest == digest
         and event.headline_en is not None
         and event.summary_en is not None
-        # An item without a zh-hant "why" (migrated legacy items) needs no English one.
         and all(
-            item.why_en_status == "ready" and (item.why_en or not item.why_zh_hant)
-            for item in items
+            item.why_en_status == "ready" and item.why_en for item in items if str(item.id) in whys
         )
     )
 
@@ -173,11 +176,7 @@ async def mark_english_stale(database: AsyncSession, event_id: uuid.UUID) -> boo
     items = await _visible_items(database, event_id)
     if not items:
         return False
-    digest = zh_hant_digest(
-        event.headline_zh_hant,
-        event.summary_zh_hant,
-        {str(item.id): item.why_zh_hant for item in items},
-    )
+    digest = zh_hant_digest(event.headline_zh_hant, event.summary_zh_hant)
     if event.en_status == "ready" and _english_is_current(event, items, digest):
         return False
     await queue.enqueue(database, queue.TRANSLATE, [event_id])
@@ -217,7 +216,7 @@ async def sweep_stale_english(database: AsyncSession, *, now: datetime | None = 
 async def translate_event(
     runtime: Runtime, database: AsyncSession, claim_: Claim
 ) -> dict[str, Any]:
-    """``queue.TRANSLATE`` handler: English headline, summary and visible "why"s."""
+    """``queue.TRANSLATE`` handler: English headline, summary and finished "why"s."""
     event = await database.get(NewsroomEvent, claim_.row_id)
     if event is None:
         raise RetryableStageError("translate_event_missing")
@@ -225,8 +224,8 @@ async def translate_event(
         # Nothing final to translate yet; analysis re-queues English once ready.
         return {"en_status": "idle"}
     items = await _visible_items(database, event.id)
-    whys = {str(item.id): item.why_zh_hant for item in items}
-    digest = zh_hant_digest(event.headline_zh_hant, event.summary_zh_hant, whys)
+    whys = _ready_whys(items)
+    digest = zh_hant_digest(event.headline_zh_hant, event.summary_zh_hant)
     if _english_is_current(event, items, digest):
         return {}
     result = await runtime.llm.complete(
@@ -236,23 +235,18 @@ async def translate_event(
         payload={
             "headline": event.headline_zh_hant,
             "summary": event.summary_zh_hant,
-            "why": {key: value for key, value in whys.items() if value},
+            "why": whys,
         },
         result_type=TranslationResult,
         audit=CallAudit("translate", event.id, TRANSLATE_PROMPT_VERSION),
     )
-    expected = {key for key, value in whys.items() if value}
-    if set(result.why) != expected:
+    if set(result.why) != whys.keys():
         raise contract_error(database, "translate_schema_invalid")
-    for item in items:
-        translated = result.why.get(str(item.id))
+    for item_id, translated in result.why.items():
         await database.execute(
             update(NewsroomEditionItem)
-            .where(NewsroomEditionItem.id == item.id)
-            .values(
-                why_en=translated,
-                why_en_status="ready" if translated or not item.why_zh_hant else "idle",
-            )
+            .where(NewsroomEditionItem.id == uuid.UUID(item_id))
+            .values(why_en=translated, why_en_status="ready")
         )
     return {
         "headline_en": result.headline,

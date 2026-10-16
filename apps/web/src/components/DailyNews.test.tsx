@@ -46,7 +46,6 @@ function story(index: number, overrides: Partial<NewsroomItem> = {}) {
     stars: 4,
     headline: `Story ${index}`,
     summary: `Summary ${index}.`,
-    why: `Why ${index} matters.`,
     related_symbols: [],
     sources: [],
     ...overrides,
@@ -100,16 +99,12 @@ describe("DailyNews", () => {
     expect(skeleton).toHaveClass("mb-6")
   })
 
-  it("shows the headline, facts, why it matters and the importance", () => {
+  it("shows the headline, facts and the importance", () => {
     const { panel } = renderNews(edition([story(1), story(2, { stars: null })]))
     const [first, second] = panel.getAllByRole("article")
     const card = within(first!)
     expect(card.getByRole("heading", { name: "Story 1" })).toBeInTheDocument()
     expect(card.getByText("Summary 1.")).toBeInTheDocument()
-    expect(
-      card.getByRole("heading", { name: "Why it matters" })
-    ).toBeInTheDocument()
-    expect(card.getByText("Why 1 matters.")).toBeInTheDocument()
     expect(card.getByLabelText("Importance 4 stars")).toHaveTextContent("★★★★")
     expect(
       within(second!).queryByLabelText(/Importance/)
@@ -183,14 +178,6 @@ describe("DailyNews", () => {
       expect(symbols.getByText("2330.TW")).toBeInTheDocument()
     }
   )
-
-  it("shows a legacy story without the why-it-matters section", () => {
-    const { panel } = renderNews(edition([story(1, { why: null })]))
-    expect(panel.getByRole("heading", { name: "Story 1" })).toBeInTheDocument()
-    expect(
-      panel.queryByRole("heading", { name: "Why it matters" })
-    ).not.toBeInTheDocument()
-  })
 
   it("keeps the sources collapsed until the reader expands them", () => {
     const { panel } = renderNews(

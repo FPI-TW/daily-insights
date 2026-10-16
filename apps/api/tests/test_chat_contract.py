@@ -471,7 +471,7 @@ async def test_news_snapshot_enforces_market_policy_before_reading_content(
     database = AsyncMock(spec=AsyncSession)
     database.scalars.return_value = _ScalarRows([publication])
     database.get.return_value = edition
-    item_texts = AsyncMock(return_value=[("Headline", "Summary", "Why")])
+    item_texts = AsyncMock(return_value=[("Headline", "Summary")])
     monkeypatch.setattr(
         chat_api, "visible_report_market_codes", AsyncMock(return_value=frozenset({"us_equity"}))
     )

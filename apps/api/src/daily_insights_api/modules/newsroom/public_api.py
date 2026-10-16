@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
-from sqlalchemy import ColumnElement, and_, or_, select
+from sqlalchemy import ColumnElement, and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.enums import SystemRole
@@ -77,8 +77,7 @@ class NewsroomItemResponse(BaseModel):
     stars: int | None
     headline: str
     summary: str
-    # Null only for items migrated from the legacy pipeline, which had none.
-    why: str | None
+    # "Why it matters" is written for the admin console only and is not sent here.
     related_symbols: list[NewsroomRelatedSymbol]
     sources: list[NewsroomSourceLink]
 
@@ -102,7 +101,6 @@ def _live_items_filter() -> ColumnElement[bool]:
         NewsroomEditionItem.removed_at.is_(None),
         NewsroomEditionItem.hidden_at.is_(None),
         NewsroomEditionItem.abandoned_at.is_(None),
-        NewsroomEditionItem.why_status == "ready",
     )
 
 
@@ -110,40 +108,28 @@ def _visible_items_filter(locale: Locale) -> ColumnElement[bool]:
     """Spec §4.5 visibility, minus the English digest check done in Python.
 
     Expects ``NewsroomEditionItem`` joined to its edition and event. The
-    localized text must also be present: an item cannot be shown without it.
-    Items migrated from the legacy pipeline never had a "why" and show none.
+    localized headline and summary must be present: an item cannot be shown
+    without them. "Why it matters" is admin-only, so it holds nothing back; an
+    English re-translation for a changed "why" keeps the current English shown.
     """
-    headline, summary, why = _localized_columns(locale)
+    headline, summary = _localized_columns(locale)
     conditions = [
         _live_items_filter(),
         NewsroomEvent.analysis_status == "ready",
         headline.is_not(None),
         summary.is_not(None),
-        or_(why.is_not(None), NewsroomEditionItem.origin == "legacy"),
     ]
     if locale == "en":
-        conditions += [
-            NewsroomEvent.en_status == "ready",
-            NewsroomEvent.en_source_digest.is_not(None),
-            NewsroomEditionItem.why_en_status == "ready",
-        ]
+        conditions.append(NewsroomEvent.en_source_digest.is_not(None))
     return and_(*conditions)
 
 
-def _localized_columns(locale: Locale) -> tuple[Any, Any, Any]:
+def _localized_columns(locale: Locale) -> tuple[Any, Any]:
     if locale == "zh-hans":
-        return (
-            NewsroomEvent.headline_zh_hans,
-            NewsroomEvent.summary_zh_hans,
-            NewsroomEditionItem.why_zh_hans,
-        )
+        return NewsroomEvent.headline_zh_hans, NewsroomEvent.summary_zh_hans
     if locale == "en":
-        return NewsroomEvent.headline_en, NewsroomEvent.summary_en, NewsroomEditionItem.why_en
-    return (
-        NewsroomEvent.headline_zh_hant,
-        NewsroomEvent.summary_zh_hant,
-        NewsroomEditionItem.why_zh_hant,
-    )
+        return NewsroomEvent.headline_en, NewsroomEvent.summary_en
+    return NewsroomEvent.headline_zh_hant, NewsroomEvent.summary_zh_hant
 
 
 async def _visible_rows(
@@ -293,7 +279,7 @@ async def _edition_response(
     sources = await _sources(database, [event.id for _, event in rows])
     items = []
     for item, event in rows:
-        headline, summary, why = _localized_text(item, event, locale)
+        headline, summary = _localized_text(event, locale)
         items.append(
             NewsroomItemResponse(
                 id=item.id,
@@ -302,7 +288,6 @@ async def _edition_response(
                 stars=item.stars,
                 headline=headline,
                 summary=summary,
-                why=why,
                 related_symbols=_related_symbols(event.related_symbols, linkable_markets),
                 sources=sources[event.id],
             )
@@ -318,33 +303,29 @@ async def _edition_response(
     )
 
 
-def _localized_text(
-    item: NewsroomEditionItem, event: NewsroomEvent, locale: Locale
-) -> tuple[str, str, str | None]:
+def _localized_text(event: NewsroomEvent, locale: Locale) -> tuple[str, str]:
     if locale == "zh-hans":
-        texts = (event.headline_zh_hans, event.summary_zh_hans, item.why_zh_hans)
+        headline, summary = event.headline_zh_hans, event.summary_zh_hans
     elif locale == "en":
-        texts = (event.headline_en, event.summary_en, item.why_en)
+        headline, summary = event.headline_en, event.summary_en
     else:
-        texts = (event.headline_zh_hant, event.summary_zh_hant, item.why_zh_hant)
-    headline, summary, why = texts
-    # The visibility filter already required the localized text (a "why" only
-    # outside legacy items).
+        headline, summary = event.headline_zh_hant, event.summary_zh_hant
+    # The visibility filter already required the localized text.
     assert headline is not None and summary is not None
-    return headline, summary, why
+    return headline, summary
 
 
 async def visible_item_texts(
     database: AsyncSession, edition_id: uuid.UUID, locale: Locale
-) -> list[tuple[str, str, str | None]]:
-    """Headline, summary and "why" of an edition's reader-visible items, by rank.
+) -> list[tuple[str, str]]:
+    """Headline and summary of an edition's reader-visible items, by rank.
 
     The same visibility a reader gets (spec §4.5), including the English
     digest check; an unpublished edition has no visible items.
     """
     return [
-        _localized_text(item, event, locale)
-        for item, event in await _visible_rows(database, edition_id, locale)
+        _localized_text(event, locale)
+        for _, event in await _visible_rows(database, edition_id, locale)
     ]
 
 

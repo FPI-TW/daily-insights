@@ -248,6 +248,8 @@ async def analyze_event(runtime: Runtime, database: AsyncSession, claim_: Claim)
                 why_status="ready",
                 why_next_attempt_at=None,
                 why_error_code=None,
+                # A new zh-hant "why" needs its English again.
+                why_en_status="idle",
             )
         )
     return {
@@ -293,7 +295,12 @@ async def write_item_why(runtime: Runtime, database: AsyncSession, claim_: Claim
         result_type=WhyResult,
         audit=CallAudit("why", item.id, WHY_PROMPT_VERSION),
     )
-    return {"why_zh_hant": result.why, "why_zh_hans": to_zh_hans(result.why)}
+    # A new zh-hant "why" needs its English again.
+    return {
+        "why_zh_hant": result.why,
+        "why_zh_hans": to_zh_hans(result.why),
+        "why_en_status": "idle",
+    }
 
 
 def why_claim_filter() -> Any:

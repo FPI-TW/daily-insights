@@ -273,7 +273,6 @@ describe("API client trust boundary", () => {
           stars: null,
           headline: "標題",
           summary: "摘要",
-          why: null,
           related_symbols: [
             { symbol: "^TWII", kind: "index", market_code: "tw_equity" },
             // A dashboard the client does not know degrades to plain text.

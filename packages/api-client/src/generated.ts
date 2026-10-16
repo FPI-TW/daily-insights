@@ -3109,8 +3109,6 @@ export interface components {
       stars: number | null
       /** Summary */
       summary: string
-      /** Why */
-      why: string | null
     }
     /** NewsroomRelatedSymbol */
     NewsroomRelatedSymbol: {

@@ -298,22 +298,30 @@ def test_zh_hans_uses_opencc_taiwan_phrases() -> None:
     assert to_zh_hans("聯準會升息 滑鼠與軟體類股走強") == "联准会升息 鼠标与软件类股走强"
 
 
-def test_english_needs_no_why_for_an_item_without_a_zh_hant_why() -> None:
-    # Items migrated from the legacy pipeline have no "why" in any language.
-    legacy = NewsroomEditionItem(why_zh_hant=None, why_en=None, why_en_status="ready")
+def _item(**values: object) -> NewsroomEditionItem:
+    return NewsroomEditionItem(id=uuid.uuid4(), **values)
+
+
+def test_english_needs_a_why_only_for_items_whose_why_is_finished() -> None:
     event = NewsroomEvent(headline_en="Headline", summary_en="Summary", en_source_digest="d")
-    assert _english_is_current(event, [legacy], "d")
-    untranslated = NewsroomEditionItem(why_zh_hant="為何", why_en=None, why_en_status="ready")
-    assert not _english_is_current(event, [legacy, untranslated], "d")
+    # Legacy items have no "why"; a "why" still being written has nothing to translate.
+    legacy = _item(why_zh_hant=None, why_status="ready", why_en=None, why_en_status="idle")
+    writing = _item(why_zh_hant=None, why_status="pending", why_en=None, why_en_status="idle")
+    assert _english_is_current(event, [legacy, writing], "d")
+    translated = _item(why_zh_hant="為何", why_status="ready", why_en="Why", why_en_status="ready")
+    assert _english_is_current(event, [legacy, translated], "d")
+    # A rewritten "why" resets its English status, which asks for a new translation.
+    rewritten = _item(why_zh_hant="改寫", why_status="ready", why_en="Why", why_en_status="idle")
+    assert not _english_is_current(event, [rewritten], "d")
+    assert not _english_is_current(event, [translated], "other")
 
 
-def test_zh_hant_digest_is_stable_and_content_sensitive() -> None:
-    whys: dict[str, str | None] = {"b": "二", "a": "一"}
-    digest = zh_hant_digest("標題", "摘要", whys)
-    assert digest == zh_hant_digest("標題", "摘要", {"a": "一", "b": "二"})
+def test_zh_hant_digest_covers_the_headline_and_summary() -> None:
+    digest = zh_hant_digest("標題", "摘要")
+    assert digest == zh_hant_digest("標題", "摘要")
     assert len(digest) == 64
-    assert digest != zh_hant_digest("標題", "摘要", {"a": "一"})
-    assert digest != zh_hant_digest("標題改", "摘要", whys)
+    assert digest != zh_hant_digest("標題改", "摘要")
+    assert digest != zh_hant_digest("標題", "摘要改")
 
 
 @pytest.mark.parametrize("name", ["editor", "dedupe", "repeat", "analysis", "why", "translate"])
