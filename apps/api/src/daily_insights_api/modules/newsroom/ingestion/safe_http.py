@@ -3,8 +3,9 @@
 Every request goes through a transport that only connects to allowlisted
 hostnames on port 443, resolves them once, and connects to the validated public
 address itself, so a DNS rebind between check and connect cannot reach a
-private network. Redirects are never followed automatically, every body is
-byte-capped, and robots.txt is honoured before any page is read.
+private network. Redirects are never followed automatically and every body is
+byte-capped. robots.txt is checked unless ``Settings.news_ignore_robots`` is
+true (the callers decide).
 """
 
 import asyncio

@@ -68,7 +68,9 @@ UNHEALTHY_AFTER = timedelta(hours=6)
 # constraint can never trip mid-transaction.
 RANK_SHIFT = 100_000
 
-SourceKind = Literal["rss", "rdf", "atom", "rss_full", "news_sitemap", "json_list", "guardian_api"]
+SourceKind = Literal[
+    "rss", "rdf", "atom", "rss_full", "news_sitemap", "json_list", "html_list", "guardian_api"
+]
 SourceHealth = Literal["disabled", "pending", "healthy", "degraded", "unhealthy"]
 # Mirrors of the CHECK constraints in models.py, so the client gets enums.
 BodyStatus = Literal["pending", "ok", "unavailable", "rejected", "purged"]
@@ -104,6 +106,8 @@ class NewsroomAdminSource(BaseModel):
     markets: list[MarketCode]
     language_filter: list[str] | None
     full_text_in_feed: bool
+    # Adapter knobs (href_contains for html_list, keep_query, host_rewrites, …).
+    options: dict[str, Any] = Field(default_factory=dict)
     trust_tier: int
     weight: float
     poll_interval_minutes: int
@@ -114,6 +118,8 @@ class NewsroomAdminSource(BaseModel):
     consecutive_failures: int
     last_error_code: str | None
     last_error_at: datetime | None
+    # Articles first seen since 00:00 Asia/Taipei today.
+    articles_today: int
     # Articles first seen in the last 7 days.
     articles_7d: int
     health: SourceHealth
@@ -360,6 +366,7 @@ class NewsroomAdminSourceCreate(_Request):
     title_exclude_pattern: LinkPattern | None = None
     language_filter: list[LanguageCode] | None = Field(default=None, max_length=10)
     full_text_in_feed: bool = False
+    options: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("key")
     @classmethod
@@ -373,6 +380,17 @@ class NewsroomAdminSourceCreate(_Request):
     def _markets(cls, value: list[MarketCode]) -> list[MarketCode]:
         _unique(value, "markets")
         return value
+
+    @field_validator("options")
+    @classmethod
+    def _options(cls, value: dict[str, Any], info: ValidationInfo) -> dict[str, Any]:
+        kind = info.data.get("kind")
+        if not isinstance(kind, str):
+            return value
+        try:
+            return sources_service.validate_source_options(kind, value)
+        except sources_service.SourceValidationError as error:
+            raise ValueError(str(error)) from error
 
     _url = field_validator("url")(_check_url)
     _hostname = field_validator("hostname")(_check_hostname)
@@ -397,6 +415,7 @@ class NewsroomAdminSourceUpdate(_Request):
     title_exclude_pattern: LinkPattern | None = None
     language_filter: list[LanguageCode] | None = Field(default=None, max_length=10)
     full_text_in_feed: bool | None = None
+    options: dict[str, Any] | None = None
 
     @field_validator("key")
     @classmethod
@@ -410,6 +429,16 @@ class NewsroomAdminSourceUpdate(_Request):
     def _markets(cls, value: list[MarketCode] | None) -> list[MarketCode] | None:
         if value is not None:
             _unique(value, "markets")
+        return value
+
+    @field_validator("options")
+    @classmethod
+    def _options(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        # Kind-aware checks run in the service once the final kind is known.
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError("options must be a JSON object")
         return value
 
     _url = field_validator("url")(_check_url)
@@ -431,6 +460,7 @@ REQUIRED_SOURCE_FIELDS = frozenset(
         "poll_interval_minutes",
         "enabled",
         "full_text_in_feed",
+        "options",
     }
 )
 
@@ -555,8 +585,15 @@ def _source_health(source: NewsroomSource, now: datetime) -> SourceHealth:
     return "healthy"
 
 
+def _taipei_day_start(now: datetime) -> datetime:
+    """UTC instant of 00:00 Asia/Taipei on the calendar day of ``now``."""
+    local = now.astimezone(clock.TAIPEI)
+    start = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start.astimezone(UTC)
+
+
 def _source_response(
-    source: NewsroomSource, articles_7d: int, now: datetime
+    source: NewsroomSource, articles_today: int, articles_7d: int, now: datetime
 ) -> NewsroomAdminSource:
     return NewsroomAdminSource(
         id=source.id,
@@ -570,6 +607,7 @@ def _source_response(
         markets=[market for market in source.markets if market in MARKET_CODES],
         language_filter=source.language_filter,
         full_text_in_feed=source.full_text_in_feed,
+        options=dict(source.options or {}),
         trust_tier=source.trust_tier,
         weight=source.weight,
         poll_interval_minutes=source.poll_interval_minutes,
@@ -580,6 +618,7 @@ def _source_response(
         consecutive_failures=source.consecutive_failures,
         last_error_code=source.last_error_code,
         last_error_at=source.last_error_at,
+        articles_today=articles_today,
         articles_7d=articles_7d,
         health=_source_health(source, now),
     )
@@ -604,8 +643,9 @@ async def _source_view(database: AsyncSession, source_id: uuid.UUID) -> Newsroom
     if source is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "newsroom source not found")
     now = _now()
-    counts = await _articles_since(database, now - timedelta(days=7), [source_id])
-    return _source_response(source, counts.get(source_id, 0), now)
+    week = await _articles_since(database, now - timedelta(days=7), [source_id])
+    today = await _articles_since(database, _taipei_day_start(now), [source_id])
+    return _source_response(source, today.get(source_id, 0), week.get(source_id, 0), now)
 
 
 async def _key_taken(
@@ -810,8 +850,9 @@ async def _open_event(database: AsyncSession, event_id: uuid.UUID) -> NewsroomEv
 
 @router.get("/sources", response_model=NewsroomAdminSourceList)
 async def list_sources(_: AdminRead, database: Database) -> NewsroomAdminSourceList:
-    """Every source not deleted, with its polling health and 7-day article count (D3).
+    """Every source not deleted, with health plus today and 7-day article counts.
 
+    ``articles_today`` counts ``first_seen_at`` since 00:00 Asia/Taipei.
     Enabled feeds lead; the fixed ``manual`` source always comes last.
     """
     now = _now()
@@ -826,9 +867,13 @@ async def list_sources(_: AdminRead, database: Database) -> NewsroomAdminSourceL
             )
         )
     ).all()
-    counts = await _articles_since(database, now - timedelta(days=7))
+    week = await _articles_since(database, now - timedelta(days=7))
+    today = await _articles_since(database, _taipei_day_start(now))
     return NewsroomAdminSourceList(
-        sources=[_source_response(source, counts.get(source.id, 0), now) for source in sources]
+        sources=[
+            _source_response(source, today.get(source.id, 0), week.get(source.id, 0), now)
+            for source in sources
+        ]
     )
 
 
@@ -860,6 +905,7 @@ async def create_source(
         if payload.language_filter is not None
         else None,
         full_text_in_feed=payload.full_text_in_feed,
+        options=payload.options,
     )
     with _service_errors():
         source_id = await sources_service.create_source(database, data, user_id=actor.user.id)

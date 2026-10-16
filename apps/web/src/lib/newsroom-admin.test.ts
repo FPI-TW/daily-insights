@@ -2,6 +2,7 @@ import { ApiError } from "@daily-insights/api-client"
 import { describe, expect, it, vi } from "vitest"
 import { event, item, source } from "#/components/newsroom-admin/test-fixtures"
 import {
+  buildSourcesReviewMarkdown,
   createNewsroomAdminClient,
   formatTaipeiTime,
   itemAlerts,
@@ -11,6 +12,8 @@ import {
   reviewSearchSchema,
   sourceChanges,
   sourceFormDefaults,
+  sourceMatchesMarkets,
+  sourcesForReview,
   taipeiToday,
 } from "./newsroom-admin"
 
@@ -65,6 +68,28 @@ describe("newsroom admin helpers", () => {
     ).toEqual({ date: "2026-10-01", market: "tw_equity" })
   })
 
+  it("filters sources by any selected market", () => {
+    const reuters = source({ markets: ["global", "us_equity"] })
+    const taiwan = source({
+      id: "50000000-0000-4000-8000-0000000000b1",
+      markets: ["tw_equity"],
+    })
+    expect(sourceMatchesMarkets(reuters, [])).toBe(true)
+    expect(sourceMatchesMarkets(reuters, ["us_equity"])).toBe(true)
+    expect(sourceMatchesMarkets(reuters, ["tw_equity"])).toBe(false)
+    expect(sourceMatchesMarkets(taiwan, ["tw_equity", "us_equity"])).toBe(true)
+  })
+
+  it("builds a markdown export with a JSON dump for AI review", () => {
+    const markdown = buildSourcesReviewMarkdown([source()], {
+      generatedAt: new Date("2026-10-15T12:00:00Z"),
+    })
+    expect(markdown).toContain("# Newsroom sources export")
+    expect(markdown).toContain("`reuters`")
+    expect(markdown).toContain("```json")
+    expect(sourcesForReview([source()])[0]?.key).toBe("reuters")
+  })
+
   it("sends only changed source fields and never the manual kind", () => {
     const current = source()
     expect(sourceChanges(current, sourceFormDefaults(current))).toEqual({})
@@ -74,11 +99,13 @@ describe("newsroom admin helpers", () => {
         link_pattern: "/markets/",
         title_exclude_pattern: "^盤中速報",
         language_filter: "",
+        options_json: '{\n  "keep_query": true\n}',
       })
     ).toEqual({
       link_pattern: "/markets/",
       title_exclude_pattern: "^盤中速報",
       language_filter: null,
+      options: { keep_query: true },
     })
     const manual = source({ kind: "manual" })
     expect(

@@ -4165,6 +4165,10 @@
             "title": "Articles 7D",
             "type": "integer"
           },
+          "articles_today": {
+            "title": "Articles Today",
+            "type": "integer"
+          },
           "consecutive_failures": {
             "title": "Consecutive Failures",
             "type": "integer"
@@ -4205,6 +4209,7 @@
                   "rss_full",
                   "news_sitemap",
                   "json_list",
+                  "html_list",
                   "guardian_api"
                 ],
                 "type": "string"
@@ -4312,6 +4317,11 @@
             ],
             "title": "Next Poll At"
           },
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          },
           "poll_interval_minutes": {
             "title": "Poll Interval Minutes",
             "type": "integer"
@@ -4369,6 +4379,7 @@
           "consecutive_failures",
           "last_error_code",
           "last_error_at",
+          "articles_today",
           "articles_7d",
           "health"
         ],
@@ -4408,6 +4419,7 @@
               "rss_full",
               "news_sitemap",
               "json_list",
+              "html_list",
               "guardian_api"
             ],
             "title": "Kind",
@@ -4457,6 +4469,11 @@
             "minLength": 1,
             "title": "Name",
             "type": "string"
+          },
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
           },
           "poll_interval_minutes": {
             "default": 30,
@@ -4586,6 +4603,7 @@
                   "rss_full",
                   "news_sitemap",
                   "json_list",
+                  "html_list",
                   "guardian_api"
                 ],
                 "type": "string"
@@ -4654,6 +4672,18 @@
               }
             ],
             "title": "Name"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options"
           },
           "poll_interval_minutes": {
             "anyOf": [
@@ -8479,7 +8509,7 @@
     },
     "/api/admin/newsroom/sources": {
       "get": {
-        "description": "Every source not deleted, with its polling health and 7-day article count (D3).\n\nEnabled feeds lead; the fixed ``manual`` source always comes last.",
+        "description": "Every source not deleted, with health plus today and 7-day article counts.\n\n``articles_today`` counts ``first_seen_at`` since 00:00 Asia/Taipei.\nEnabled feeds lead; the fixed ``manual`` source always comes last.",
         "operationId": "list_sources_api_admin_newsroom_sources_get",
         "responses": {
           "200": {

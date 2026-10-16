@@ -326,6 +326,8 @@ def rank_candidates(
                     (row.title, row.source_name) for row in best_first[:HEADLINES_PER_EVENT]
                 ),
                 article_count=len(selectable),
+                # Count outlets by publisher name so CNBC/Guardian/鉅亨 multi-feeds
+                # do not inflate unique-source weight for one house.
                 source_count=len({row.source_name for row in selectable}),
                 trust_tier=max(row.trust_tier for row in selectable),
                 first_seen_at=min(row.first_seen_at for row in selectable),

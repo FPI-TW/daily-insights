@@ -54,6 +54,7 @@ SOURCE_KINDS = (
     "rss_full",
     "news_sitemap",
     "json_list",
+    "html_list",
     "guardian_api",
     "manual",
 )

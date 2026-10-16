@@ -23,6 +23,7 @@ export const newsroomSourceKinds = [
   "rss_full",
   "news_sitemap",
   "json_list",
+  "html_list",
   "guardian_api",
 ] as const
 
@@ -41,6 +42,7 @@ export const newsroomSourceSchema = z.object({
   markets: z.array(marketSchema),
   language_filter: z.array(z.string()).nullable(),
   full_text_in_feed: z.boolean(),
+  options: z.record(z.string(), z.unknown()),
   trust_tier: z.number().int(),
   weight: z.number(),
   poll_interval_minutes: z.number().int(),
@@ -51,6 +53,7 @@ export const newsroomSourceSchema = z.object({
   consecutive_failures: z.number().int(),
   last_error_code: z.string().nullable(),
   last_error_at: timestamp.nullable(),
+  articles_today: z.number().int(),
   articles_7d: z.number().int(),
   health: z.enum(["disabled", "pending", "healthy", "degraded", "unhealthy"]),
 }) satisfies z.ZodType<Schemas["NewsroomAdminSource"]>
@@ -576,72 +579,111 @@ function languageCodes(value: string) {
     .filter(Boolean)
 }
 
+export function formatSourceOptions(options: Record<string, unknown>) {
+  return JSON.stringify(options, null, 2)
+}
+
+export function parseSourceOptions(value: string): Record<string, unknown> {
+  const trimmed = value.trim()
+  if (!trimmed) return {}
+  const parsed: unknown = JSON.parse(trimmed)
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("newsroomAdminSourceErrorOptions")
+  }
+  return parsed as Record<string, unknown>
+}
+
 // Messages are i18n keys; the form translates them for display. Bounds
 // mirror the API's request schema (newsroom/admin_api.py).
-export const sourceFormSchema = z.object({
-  key: z
-    .string()
-    .trim()
-    .max(80, "newsroomAdminSourceErrorKey")
-    .regex(SOURCE_KEY, "newsroomAdminSourceErrorKey"),
-  name: z
-    .string()
-    .trim()
-    .min(1, "newsroomAdminSourceErrorRequired")
-    .max(200, "newsroomAdminSourceErrorRequired"),
-  kind: z.enum(newsroomSourceKinds),
-  url: z
-    .string()
-    .trim()
-    .max(2_000, "newsroomAdminSourceErrorUrl")
-    .refine(value => value === "" || HTTP_URL.test(value), {
-      message: "newsroomAdminSourceErrorUrl",
-    }),
-  hostname: z
-    .string()
-    .trim()
-    .refine(value => HOSTNAME.test(value.toLowerCase()), {
-      message: "newsroomAdminSourceErrorHostname",
-    }),
-  markets: z.array(marketSchema),
-  trust_tier: z
-    .number()
-    .int()
-    .min(1, "newsroomAdminSourceErrorTrust")
-    .max(3, "newsroomAdminSourceErrorTrust"),
-  weight: z
-    .number()
-    .min(0.5, "newsroomAdminSourceErrorWeight")
-    .max(2, "newsroomAdminSourceErrorWeight"),
-  poll_interval_minutes: z
-    .number()
-    .int("newsroomAdminSourceErrorInterval")
-    .min(5, "newsroomAdminSourceErrorInterval")
-    .max(1440, "newsroomAdminSourceErrorInterval"),
-  enabled: z.boolean(),
-  link_pattern: z
-    .string()
-    .max(500, "newsroomAdminSourceErrorPattern")
-    .refine(value => value === "" || isRegex(value), {
-      message: "newsroomAdminSourceErrorPattern",
-    }),
-  title_exclude_pattern: z
-    .string()
-    .max(500, "newsroomAdminSourceErrorTitleExclude")
-    .refine(value => value === "" || isRegex(value), {
-      message: "newsroomAdminSourceErrorTitleExclude",
-    }),
-  language_filter: z
-    .string()
-    .refine(
-      value =>
-        languageCodes(value).every(
-          code => code.length >= 2 && code.length <= 10
-        ),
-      { message: "newsroomAdminSourceErrorLanguages" }
-    ),
-  full_text_in_feed: z.boolean(),
-})
+export const sourceFormSchema = z
+  .object({
+    key: z
+      .string()
+      .trim()
+      .max(80, "newsroomAdminSourceErrorKey")
+      .regex(SOURCE_KEY, "newsroomAdminSourceErrorKey"),
+    name: z
+      .string()
+      .trim()
+      .min(1, "newsroomAdminSourceErrorRequired")
+      .max(200, "newsroomAdminSourceErrorRequired"),
+    kind: z.enum(newsroomSourceKinds),
+    url: z
+      .string()
+      .trim()
+      .max(2_000, "newsroomAdminSourceErrorUrl")
+      .refine(value => value === "" || HTTP_URL.test(value), {
+        message: "newsroomAdminSourceErrorUrl",
+      }),
+    hostname: z
+      .string()
+      .trim()
+      .refine(value => HOSTNAME.test(value.toLowerCase()), {
+        message: "newsroomAdminSourceErrorHostname",
+      }),
+    markets: z.array(marketSchema),
+    trust_tier: z
+      .number()
+      .int()
+      .min(1, "newsroomAdminSourceErrorTrust")
+      .max(3, "newsroomAdminSourceErrorTrust"),
+    weight: z
+      .number()
+      .min(0.5, "newsroomAdminSourceErrorWeight")
+      .max(2, "newsroomAdminSourceErrorWeight"),
+    poll_interval_minutes: z
+      .number()
+      .int("newsroomAdminSourceErrorInterval")
+      .min(5, "newsroomAdminSourceErrorInterval")
+      .max(1440, "newsroomAdminSourceErrorInterval"),
+    enabled: z.boolean(),
+    link_pattern: z
+      .string()
+      .max(500, "newsroomAdminSourceErrorPattern")
+      .refine(value => value === "" || isRegex(value), {
+        message: "newsroomAdminSourceErrorPattern",
+      }),
+    title_exclude_pattern: z
+      .string()
+      .max(500, "newsroomAdminSourceErrorTitleExclude")
+      .refine(value => value === "" || isRegex(value), {
+        message: "newsroomAdminSourceErrorTitleExclude",
+      }),
+    language_filter: z
+      .string()
+      .refine(
+        value =>
+          languageCodes(value).every(
+            code => code.length >= 2 && code.length <= 10
+          ),
+        { message: "newsroomAdminSourceErrorLanguages" }
+      ),
+    full_text_in_feed: z.boolean(),
+    options_json: z.string(),
+  })
+  .superRefine((values, context) => {
+    let options: Record<string, unknown>
+    try {
+      options = parseSourceOptions(values.options_json)
+    } catch {
+      context.addIssue({
+        code: "custom",
+        path: ["options_json"],
+        message: "newsroomAdminSourceErrorOptions",
+      })
+      return
+    }
+    if (values.kind === "html_list") {
+      const needle = options.href_contains
+      if (typeof needle !== "string" || !needle.trim()) {
+        context.addIssue({
+          code: "custom",
+          path: ["options_json"],
+          message: "newsroomAdminSourceErrorHtmlListOptions",
+        })
+      }
+    }
+  })
 export type SourceFormValues = z.input<typeof sourceFormSchema>
 
 export function sourceFormDefaults(
@@ -663,6 +705,7 @@ export function sourceFormDefaults(
     title_exclude_pattern: source?.title_exclude_pattern ?? "",
     language_filter: source?.language_filter?.join(", ") ?? "",
     full_text_in_feed: source?.full_text_in_feed ?? false,
+    options_json: formatSourceOptions(source?.options ?? {}),
   }
 }
 
@@ -683,6 +726,7 @@ function sourcePayload(values: SourceFormValues) {
     title_exclude_pattern: values.title_exclude_pattern || null,
     language_filter: languages.length > 0 ? languages : null,
     full_text_in_feed: values.full_text_in_feed,
+    options: parseSourceOptions(values.options_json),
   } satisfies NewsroomSourceCreate
 }
 
@@ -708,4 +752,128 @@ export function sourceChanges(
   // The fixed manual source keeps its kind; the form cannot show "manual".
   if (source.kind === "manual") delete changes.kind
   return changes as NewsroomSourceUpdate
+}
+
+/** Fields useful when pasting the source list into an AI review prompt. */
+export type SourceReviewExport = {
+  key: string
+  name: string
+  kind: string
+  url: string | null
+  hostname: string
+  markets: readonly string[]
+  trust_tier: number
+  weight: number
+  poll_interval_minutes: number
+  enabled: boolean
+  health: string
+  articles_today: number
+  articles_7d: number
+  link_pattern: string | null
+  title_exclude_pattern: string | null
+  language_filter: string[] | null
+  full_text_in_feed: boolean
+  options: Record<string, unknown>
+  consecutive_failures: number
+  last_error_code: string | null
+  last_success_at: string | null
+  last_polled_at: string | null
+}
+
+export function sourcesForReview(
+  sources: readonly NewsroomSource[]
+): SourceReviewExport[] {
+  return sources.map(source => ({
+    key: source.key,
+    name: source.name,
+    kind: source.kind,
+    url: source.url,
+    hostname: source.hostname,
+    markets: source.markets,
+    trust_tier: source.trust_tier,
+    weight: source.weight,
+    poll_interval_minutes: source.poll_interval_minutes,
+    enabled: source.enabled,
+    health: source.health,
+    articles_today: source.articles_today,
+    articles_7d: source.articles_7d,
+    link_pattern: source.link_pattern,
+    title_exclude_pattern: source.title_exclude_pattern,
+    language_filter: source.language_filter,
+    full_text_in_feed: source.full_text_in_feed,
+    options: source.options,
+    consecutive_failures: source.consecutive_failures,
+    last_error_code: source.last_error_code,
+    last_success_at: source.last_success_at,
+    last_polled_at: source.last_polled_at,
+  }))
+}
+
+/** Markdown + JSON dump for AI source-curation reviews. */
+export function buildSourcesReviewMarkdown(
+  sources: readonly NewsroomSource[],
+  options: { generatedAt?: Date } = {}
+): string {
+  const generatedAt = options.generatedAt ?? new Date()
+  const rows = sourcesForReview(sources)
+  const header = [
+    "# Newsroom sources export",
+    "",
+    `Generated at: ${generatedAt.toISOString()}`,
+    `Count: ${rows.length}`,
+    "",
+    "| enabled | name | key | kind | markets | tier | weight | poll | articles_today | articles_7d | health | url |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+  ]
+  const table = rows.map(row => {
+    const markets = row.markets.join(",") || "—"
+    const url = (row.url ?? "").replace(/\|/g, "\\|")
+    return `| ${row.enabled} | ${row.name} | \`${row.key}\` | ${row.kind} | ${markets} | ${row.trust_tier} | ${row.weight} | ${row.poll_interval_minutes} | ${row.articles_today} | ${row.articles_7d} | ${row.health} | ${url || "—"} |`
+  })
+  return [
+    ...header,
+    ...table,
+    "",
+    "## Full JSON",
+    "",
+    "```json",
+    JSON.stringify(rows, null, 2),
+    "```",
+    "",
+  ].join("\n")
+}
+
+export function sourcesReviewFilename(now = new Date()): string {
+  const stamp = now
+    .toISOString()
+    .slice(0, 19)
+    .replace(/[:T]/g, match => (match === "T" ? "-" : match === ":" ? "" : ""))
+  return `newsroom-sources-${stamp}.md`
+}
+
+/** Trigger a browser download of a UTF-8 text file. */
+export function downloadTextFile(
+  filename: string,
+  content: string,
+  mimeType = "text/markdown;charset=utf-8"
+): void {
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = filename
+  anchor.rel = "noopener"
+  document.body.append(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
+/** Keep sources that cover any selected market (OR). Empty selection = all. */
+export function sourceMatchesMarkets(
+  source: NewsroomSource,
+  markets: readonly NewsroomMarket[]
+): boolean {
+  if (markets.length === 0) return true
+  return markets.some(market => source.markets.includes(market))
 }

@@ -158,7 +158,9 @@ async def fetch_feed(
     allowed = frozenset({source.feed_host, source.hostname})
     async with deps.client_factory(allowed, settings.news_discovery_timeout_seconds) as client:
         await throttle.wait(source.feed_host, source.min_interval_seconds)
-        if not await robots_allowed(client, url, allowed, resolver=deps.resolver):
+        if not settings.news_ignore_robots and not await robots_allowed(
+            client, url, allowed, resolver=deps.resolver
+        ):
             raise RobotsDisallowedError("robots disallow feed")
         async with client.stream("GET", url, headers=headers or None) as response:
             if response.is_redirect:

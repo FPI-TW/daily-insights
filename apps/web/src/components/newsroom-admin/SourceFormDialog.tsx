@@ -287,6 +287,25 @@ export function SourceFormDialog({
               </label>
             )}
           </form.Field>
+          <form.Field name="options_json">
+            {field => (
+              <label className="col-span-2 max-[42rem]:col-span-1">
+                {t("newsroomAdminSourceOptions")}
+                <textarea
+                  className="min-h-28 font-mono text-sm"
+                  spellCheck={false}
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={event => field.handleChange(event.target.value)}
+                  placeholder={t("newsroomAdminSourceOptionsPlaceholder")}
+                />
+                <span className="mt-1 block text-xs font-normal text-muted-foreground">
+                  {t("newsroomAdminSourceOptionsHint")}
+                </span>
+                <FieldErrors errors={field.state.meta.errors} />
+              </label>
+            )}
+          </form.Field>
           <form.Field name="full_text_in_feed">
             {field => (
               <label className="flex items-center gap-2 font-normal">

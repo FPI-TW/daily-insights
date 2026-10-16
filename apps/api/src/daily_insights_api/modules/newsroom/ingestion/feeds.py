@@ -1,4 +1,4 @@
-"""Feed adapters: RSS, RDF, Atom, full-text RSS, Google News sitemaps, JSON lists.
+"""Feed adapters: RSS, RDF, Atom, full-text RSS, Google News sitemaps, JSON and HTML lists.
 
 Moved from ``news/feeds.py``. Parsers are pure: they take the bytes of one feed
 and a ``SourceConfig`` built from a ``newsroom_sources`` row and return entries
@@ -16,6 +16,7 @@ from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from functools import cache
+from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 from zoneinfo import ZoneInfo
@@ -116,10 +117,10 @@ class SourceConfig:
 
     ``options`` carries adapter parameters (seed migration 20261001_0032):
     ``host_rewrites`` ([[from, to], ...]), ``keep_query``, ``naive_time_zone``,
-    ``min_interval_seconds``, ``cache_buster_param``, ``requires_contact_email``
-    and, for ``json_list``, ``mapping``. Credentials are never named by
-    options: ``guardian_api`` always uses ``guardian_api_key`` and only sends it
-    to the Guardian API host.
+    ``min_interval_seconds``, ``cache_buster_param``, ``requires_contact_email``,
+    for ``json_list`` ``mapping``, and for ``html_list`` ``href_contains``.
+    Credentials are never named by options: ``guardian_api`` always uses
+    ``guardian_api_key`` and only sends it to the Guardian API host.
     """
 
     key: str
@@ -414,6 +415,67 @@ def parse_json_list(
     return result
 
 
+class _AnchorCollector(HTMLParser):
+    """Collect ``(href, title)`` pairs; prefers the ``title`` attribute, else link text."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.anchors: list[tuple[str, str]] = []
+        self._href: str | None = None
+        self._title_attr: str | None = None
+        self._parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag != "a" or self._href is not None:
+            return
+        values = {key.lower(): value for key, value in attrs if value is not None}
+        href = values.get("href")
+        if href:
+            self._href = href
+            self._title_attr = values.get("title")
+            self._parts = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag != "a" or self._href is None:
+            return
+        text = " ".join("".join(self._parts).split())
+        title = (self._title_attr or "").strip() or text
+        self.anchors.append((self._href, title))
+        self._href = None
+        self._title_attr = None
+        self._parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._href is not None:
+            self._parts.append(data)
+
+
+def parse_html_list(payload: bytes, source: SourceConfig) -> list[FeedEntry]:
+    """HTML listing page: anchors whose href contains ``options.href_contains``.
+
+    ``href_contains`` is required (matched case-insensitively). Titles prefer the
+    anchor ``title`` attribute, then link text; empty titles are dropped.
+    Dedupes by normalised article URL, first wins.
+    """
+    needle = source.options.get("href_contains")
+    if not isinstance(needle, str) or not needle:
+        raise ValueError("html_list source requires options.href_contains")
+    needle_folded = needle.casefold()
+    collector = _AnchorCollector()
+    collector.feed(payload.decode("utf-8", errors="replace"))
+    result: list[FeedEntry] = []
+    seen: set[str] = set()
+    for href, text in collector.anchors:
+        if needle_folded not in href.casefold():
+            continue
+        url = normalize_article_url(href, source)
+        if url is None or url in seen or not text:
+            continue
+        seen.add(url)
+        result.append(FeedEntry(url, text[:MAX_TITLE_CHARS], None, None, None))
+    return result
+
+
 def parse_feed(source: SourceConfig, payload: bytes) -> list[FeedEntry]:
     if source.kind in XML_KINDS:
         return parse_xml_entries(payload, source)
@@ -423,6 +485,8 @@ def parse_feed(source: SourceConfig, payload: bytes) -> list[FeedEntry]:
         return parse_json_list(
             payload, source, JsonListMapping.from_options(source.options.get("mapping"))
         )
+    if source.kind == "html_list":
+        return parse_html_list(payload, source)
     if source.kind == "guardian_api":
         return parse_json_list(payload, source, GUARDIAN_MAPPING)
     raise ValueError(f"unknown feed kind {source.kind}")

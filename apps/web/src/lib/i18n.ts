@@ -916,6 +916,17 @@ const resources: Resource = {
       newsroomAdminSourcesEmpty: "尚未設定任何來源。",
       newsroomAdminSourceCreate: "新增來源",
       newsroomAdminSourceCreateTitle: "新增來源",
+      newsroomAdminSourceExport: "匯出清單",
+      newsroomAdminSourceStatEnabled: "啟用中",
+      newsroomAdminSourceStatDisabled: "已停用",
+      newsroomAdminSourceStatUnhealthy: "不健康",
+      newsroomAdminSourceStatArticles: "近 7 天文章",
+      newsroomAdminSourceStatToday: "今日文章",
+      newsroomAdminSourceArticlesToday: "今日",
+      newsroomAdminSourceMarketFilter: "依涵蓋市場篩選",
+      newsroomAdminSourceMarketFilterClear: "清除篩選",
+      newsroomAdminSourceFilterCount: "顯示 {{shown}}／{{total}} 筆",
+      newsroomAdminSourceFilterEmpty: "沒有符合目前市場篩選的來源。",
       newsroomAdminSourceEditTitle: "編輯來源：{{name}}",
       newsroomAdminSourceEdit: "編輯",
       newsroomAdminSourceEditLabel: "編輯 {{name}}",
@@ -939,6 +950,9 @@ const resources: Resource = {
       newsroomAdminSourceUrl: "Feed 網址",
       newsroomAdminSourceMarkets: "涵蓋市場",
       newsroomAdminSourceTrust: "信任等級",
+      newsroomAdminSourceWeightShort: "權重",
+      newsroomAdminSourceIntervalShort: "間隔",
+      newsroomAdminSourceIntervalValue: "{{minutes}} 分",
       newsroomAdminSourceTrust_1: "1（低）",
       newsroomAdminSourceTrust_2: "2（中）",
       newsroomAdminSourceTrust_3: "3（高）",
@@ -947,6 +961,11 @@ const resources: Resource = {
       newsroomAdminSourceLanguages: "語言篩選（逗號分隔）",
       newsroomAdminSourcePattern: "連結規則（正規表示式）",
       newsroomAdminSourceTitleExclude: "排除標題（正規表示式，符合者不收稿）",
+      newsroomAdminSourceOptions: "進階選項（JSON）",
+      newsroomAdminSourceOptionsPlaceholder:
+        '{\n  "href_contains": "NewsViewer.aspx",\n  "keep_query": true\n}',
+      newsroomAdminSourceOptionsHint:
+        "html_list 必填 href_contains；其他常用鍵：keep_query、host_rewrites、naive_time_zone。",
       newsroomAdminSourceFullText: "Feed 內含全文",
       newsroomAdminSourceEnabled: "啟用輪詢",
       newsroomAdminSourceSettings: "信任／權重／間隔",
@@ -973,6 +992,10 @@ const resources: Resource = {
       newsroomAdminSourceErrorPattern: "連結規則不是有效的正規表示式。",
       newsroomAdminSourceErrorTitleExclude: "排除標題不是有效的正規表示式。",
       newsroomAdminSourceErrorLanguages: "語言代碼須為 2 到 10 個字元。",
+      newsroomAdminSourceErrorOptions:
+        '進階選項須為 JSON 物件，例如 {"keep_query": true}。',
+      newsroomAdminSourceErrorHtmlListOptions:
+        "html_list 格式須在進階選項提供非空的 href_contains。",
       // Newsroom reader (workstream ⑤)
       newsroomEyebrow: "每日精選",
       newsroomMarketEyebrow: "市場新聞",
@@ -1901,6 +1924,17 @@ const resources: Resource = {
       newsroomAdminSourcesEmpty: "尚未设置任何来源。",
       newsroomAdminSourceCreate: "新增来源",
       newsroomAdminSourceCreateTitle: "新增来源",
+      newsroomAdminSourceExport: "导出清单",
+      newsroomAdminSourceStatEnabled: "启用中",
+      newsroomAdminSourceStatDisabled: "已停用",
+      newsroomAdminSourceStatUnhealthy: "不健康",
+      newsroomAdminSourceStatArticles: "近 7 天文章",
+      newsroomAdminSourceStatToday: "今日文章",
+      newsroomAdminSourceArticlesToday: "今日",
+      newsroomAdminSourceMarketFilter: "按覆盖市场筛选",
+      newsroomAdminSourceMarketFilterClear: "清除筛选",
+      newsroomAdminSourceFilterCount: "显示 {{shown}}／{{total}} 笔",
+      newsroomAdminSourceFilterEmpty: "没有符合当前市场筛选的来源。",
       newsroomAdminSourceEditTitle: "编辑来源：{{name}}",
       newsroomAdminSourceEdit: "编辑",
       newsroomAdminSourceEditLabel: "编辑 {{name}}",
@@ -1924,6 +1958,9 @@ const resources: Resource = {
       newsroomAdminSourceUrl: "Feed 网址",
       newsroomAdminSourceMarkets: "覆盖市场",
       newsroomAdminSourceTrust: "信任等级",
+      newsroomAdminSourceWeightShort: "权重",
+      newsroomAdminSourceIntervalShort: "间隔",
+      newsroomAdminSourceIntervalValue: "{{minutes}} 分",
       newsroomAdminSourceTrust_1: "1（低）",
       newsroomAdminSourceTrust_2: "2（中）",
       newsroomAdminSourceTrust_3: "3（高）",
@@ -1932,6 +1969,11 @@ const resources: Resource = {
       newsroomAdminSourceLanguages: "语言筛选（逗号分隔）",
       newsroomAdminSourcePattern: "链接规则（正则表达式）",
       newsroomAdminSourceTitleExclude: "排除标题（正则表达式，符合者不收稿）",
+      newsroomAdminSourceOptions: "高级选项（JSON）",
+      newsroomAdminSourceOptionsPlaceholder:
+        '{\n  "href_contains": "NewsViewer.aspx",\n  "keep_query": true\n}',
+      newsroomAdminSourceOptionsHint:
+        "html_list 必填 href_contains；其他常用键：keep_query、host_rewrites、naive_time_zone。",
       newsroomAdminSourceFullText: "Feed 内含全文",
       newsroomAdminSourceEnabled: "启用轮询",
       newsroomAdminSourceSettings: "信任／权重／间隔",
@@ -1958,6 +2000,10 @@ const resources: Resource = {
       newsroomAdminSourceErrorPattern: "链接规则不是有效的正则表达式。",
       newsroomAdminSourceErrorTitleExclude: "排除标题不是有效的正则表达式。",
       newsroomAdminSourceErrorLanguages: "语言代码须为 2 到 10 个字符。",
+      newsroomAdminSourceErrorOptions:
+        '高级选项须为 JSON 对象，例如 {"keep_query": true}。',
+      newsroomAdminSourceErrorHtmlListOptions:
+        "html_list 格式须在高级选项提供非空的 href_contains。",
       // Newsroom reader (workstream ⑤)
       newsroomEyebrow: "每日精选",
       newsroomMarketEyebrow: "市场新闻",
@@ -2936,6 +2982,18 @@ const resources: Resource = {
       newsroomAdminSourcesEmpty: "No sources yet.",
       newsroomAdminSourceCreate: "Add source",
       newsroomAdminSourceCreateTitle: "Add source",
+      newsroomAdminSourceExport: "Export list",
+      newsroomAdminSourceStatEnabled: "Enabled",
+      newsroomAdminSourceStatDisabled: "Disabled",
+      newsroomAdminSourceStatUnhealthy: "Unhealthy",
+      newsroomAdminSourceStatArticles: "Articles, 7 days",
+      newsroomAdminSourceStatToday: "Articles today",
+      newsroomAdminSourceArticlesToday: "Today",
+      newsroomAdminSourceMarketFilter: "Filter by market",
+      newsroomAdminSourceMarketFilterClear: "Clear filter",
+      newsroomAdminSourceFilterCount: "Showing {{shown}} of {{total}}",
+      newsroomAdminSourceFilterEmpty:
+        "No sources match the current market filter.",
       newsroomAdminSourceEditTitle: "Edit source: {{name}}",
       newsroomAdminSourceEdit: "Edit",
       newsroomAdminSourceEditLabel: "Edit {{name}}",
@@ -2959,6 +3017,9 @@ const resources: Resource = {
       newsroomAdminSourceUrl: "Feed URL",
       newsroomAdminSourceMarkets: "Markets",
       newsroomAdminSourceTrust: "Trust tier",
+      newsroomAdminSourceWeightShort: "Weight",
+      newsroomAdminSourceIntervalShort: "Interval",
+      newsroomAdminSourceIntervalValue: "{{minutes}} min",
       newsroomAdminSourceTrust_1: "1 (low)",
       newsroomAdminSourceTrust_2: "2 (medium)",
       newsroomAdminSourceTrust_3: "3 (high)",
@@ -2968,6 +3029,11 @@ const resources: Resource = {
       newsroomAdminSourcePattern: "Link pattern (regular expression)",
       newsroomAdminSourceTitleExclude:
         "Excluded titles (regular expression; matches are never collected)",
+      newsroomAdminSourceOptions: "Advanced options (JSON)",
+      newsroomAdminSourceOptionsPlaceholder:
+        '{\n  "href_contains": "NewsViewer.aspx",\n  "keep_query": true\n}',
+      newsroomAdminSourceOptionsHint:
+        "html_list requires href_contains; common keys: keep_query, host_rewrites, naive_time_zone.",
       newsroomAdminSourceFullText: "Feed carries the full text",
       newsroomAdminSourceEnabled: "Polling enabled",
       newsroomAdminSourceSettings: "Trust / weight / interval",
@@ -3000,6 +3066,10 @@ const resources: Resource = {
         "The excluded-title pattern is not a valid regular expression.",
       newsroomAdminSourceErrorLanguages:
         "Language codes must be 2 to 10 characters.",
+      newsroomAdminSourceErrorOptions:
+        'Advanced options must be a JSON object, e.g. {"keep_query": true}.',
+      newsroomAdminSourceErrorHtmlListOptions:
+        "html_list sources need a non-empty href_contains in advanced options.",
       // Newsroom reader (workstream ⑤)
       newsroomEyebrow: "DAILY SELECTION",
       newsroomMarketEyebrow: "MARKET NEWS",

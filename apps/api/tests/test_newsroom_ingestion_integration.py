@@ -585,7 +585,11 @@ async def test_fetch_rejects_chrome_and_marks_robots_unavailable_as_done(
     rejected = await add_article(newsroom_database, source_id)
     await run_fetch(newsroom_database, page("<article>Subscribe to keep reading.</article>"))
     blocked = await add_article(newsroom_database, source_id)
-    await run_fetch(newsroom_database, serving(page(), robots="User-agent: *\nDisallow: /\n"))
+    await run_fetch(
+        newsroom_database,
+        serving(page(), robots="User-agent: *\nDisallow: /\n"),
+        news_ignore_robots=False,
+    )
 
     row = await article_row(newsroom_database, rejected)
     assert (row.fetch_status, row.body_status, row.body_quality_reason) == (
@@ -600,6 +604,25 @@ async def test_fetch_rejects_chrome_and_marks_robots_unavailable_as_done(
         "robots_disallowed",
     )
     assert row.body is None
+
+
+async def test_fetch_skips_robots_when_ignore_flag_is_on(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    article_id = await add_article(newsroom_database, await add_source(newsroom_database))
+
+    assert (
+        await run_fetch(
+            newsroom_database,
+            serving(page(), robots="User-agent: *\nDisallow: /\n"),
+            news_ignore_robots=True,
+        )
+        == "done"
+    )
+
+    row = await article_row(newsroom_database, article_id)
+    assert (row.fetch_status, row.body_status) == ("done", "ok")
+    assert row.body is not None
 
 
 async def test_fetch_retries_transient_failures(
@@ -786,7 +809,12 @@ async def test_create_and_update_source_write_the_edit_log(
         await sources_service.update_source(database, source_id, {"enabled": True}, user_id=user_id)
         with pytest.raises(SourceValidationError, match="unknown source fields"):
             await sources_service.update_source(
-                database, source_id, {"options": {}}, user_id=user_id
+                database, source_id, {"consecutive_failures": 0}, user_id=user_id
+            )
+        # Adapter options are editable, but must be a JSON object.
+        with pytest.raises(SourceValidationError, match="options must be a JSON object"):
+            await sources_service.update_source(
+                database, source_id, {"options": "keep_query"}, user_id=user_id
             )
         with pytest.raises(SourceValidationError, match="title_exclude_pattern is not a valid"):
             await sources_service.update_source(

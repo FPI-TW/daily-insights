@@ -83,6 +83,69 @@ describe("NewsroomSourcesPage", () => {
     expect(within(healthy).getByText("42")).toBeVisible()
   })
 
+  it("filters by market and exports the visible list", async () => {
+    const taiwan = source({
+      id: "50000000-0000-4000-8000-0000000000c1",
+      key: "udn",
+      name: "UDN",
+      markets: ["tw_equity"],
+      articles_7d: 9,
+    })
+    client.listSources.mockResolvedValue({
+      sources: [source(), failing, taiwan],
+    })
+    const click = vi.fn()
+    const createObjectURL = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:export")
+    const revokeObjectURL = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => undefined)
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(click)
+
+    renderPage()
+    await screen.findByText("Reuters")
+    fireEvent.click(screen.getByLabelText("Taiwan equities"))
+    expect(screen.getByText("UDN")).toBeVisible()
+    expect(screen.queryByText("Reuters")).not.toBeInTheDocument()
+    expect(screen.getByText("Showing 1 of 3")).toBeVisible()
+
+    fireEvent.click(screen.getByRole("button", { name: "Export list" }))
+    expect(createObjectURL).toHaveBeenCalled()
+    expect(click).toHaveBeenCalled()
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:export")
+  })
+
+  it("sorts by articles in the last 7 days", async () => {
+    const quiet = source({
+      id: "50000000-0000-4000-8000-0000000000d1",
+      key: "quiet",
+      name: "Quiet Wire",
+      articles_7d: 1,
+    })
+    const busy = source({
+      id: "50000000-0000-4000-8000-0000000000d2",
+      key: "busy",
+      name: "Busy Wire",
+      articles_7d: 99,
+    })
+    client.listSources.mockResolvedValue({ sources: [quiet, busy] })
+    renderPage()
+    await screen.findByText("Quiet Wire")
+    const sortArticles = () =>
+      screen.getByRole("button", { name: /Articles \(7 days\)/ })
+    const leadingName = () => {
+      const row = screen.getAllByRole("row")[1]!
+      return within(row).getByText(/Wire/).textContent
+    }
+    fireEvent.click(sortArticles())
+    const first = leadingName()
+    fireEvent.click(sortArticles())
+    const second = leadingName()
+    expect(first).not.toEqual(second)
+    expect([first, second].sort()).toEqual(["Busy Wire", "Quiet Wire"])
+  })
+
   it("shows an empty state when no source exists", async () => {
     client.listSources.mockResolvedValue({ sources: [] })
     renderPage()
@@ -218,6 +281,7 @@ describe("NewsroomSourcesPage", () => {
           title_exclude_pattern: "^Market wrap",
           language_filter: ["en", "ja"],
           full_text_in_feed: false,
+          options: {},
         },
         "csrf"
       )
@@ -239,6 +303,56 @@ describe("NewsroomSourcesPage", () => {
       expect(client.updateSource).toHaveBeenCalledWith(
         source().id,
         { weight: 2 },
+        "csrf"
+      )
+    )
+  })
+
+  it("requires href_contains when the kind is html_list", async () => {
+    renderPage()
+    await screen.findByText("Reuters")
+    fireEvent.click(screen.getByRole("button", { name: "Add source" }))
+    const dialog = screen.getByRole("dialog")
+    fireEvent.change(within(dialog).getByLabelText("Name"), {
+      target: { value: "MoneyDJ" },
+    })
+    fireEvent.change(within(dialog).getByLabelText(/^Key/), {
+      target: { value: "moneydj-mb00" },
+    })
+    fireEvent.change(within(dialog).getByLabelText("Hostname"), {
+      target: { value: "www.moneydj.com" },
+    })
+    fireEvent.change(within(dialog).getByLabelText("Format"), {
+      target: { value: "html_list" },
+    })
+    fireEvent.change(within(dialog).getByLabelText("Feed URL"), {
+      target: {
+        value: "https://www.moneydj.com/KMDJ/News/NewsRealList.aspx?a=MB00",
+      },
+    })
+    fireEvent.click(within(dialog).getByLabelText("Taiwan equities"))
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }))
+    expect(
+      await within(dialog).findByText(/html_list sources need a non-empty/)
+    ).toBeInTheDocument()
+    expect(client.createSource).not.toHaveBeenCalled()
+
+    fireEvent.change(within(dialog).getByLabelText(/Advanced options/), {
+      target: {
+        value:
+          '{\n  "href_contains": "NewsViewer.aspx",\n  "keep_query": true\n}',
+      },
+    })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }))
+    await waitFor(() =>
+      expect(client.createSource).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "html_list",
+          options: {
+            href_contains: "NewsViewer.aspx",
+            keep_query: true,
+          },
+        }),
         "csrf"
       )
     )

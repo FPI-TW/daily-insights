@@ -26,7 +26,7 @@ function NewsroomSourcesRoute() {
         <Link
           to="/{-$locale}/admin/newsroom"
           params={{ locale }}
-          className="self-center font-bold text-lagoon-deep"
+          className="inline-flex items-center rounded-full border border-line px-4 py-2 text-sm font-bold text-lagoon-deep no-underline"
         >
           {t("newsroomAdminReviewLink")}
         </Link>

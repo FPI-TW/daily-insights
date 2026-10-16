@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     # registry hosts (kill switch).
     news_extra_hostnames: str = ""
     news_blocked_hostnames: str = ""
+    # When true, feed polling and article fetches skip robots.txt checks.
+    # SSRF allowlisting, size caps, and blocked-host kill switches still apply.
+    news_ignore_robots: bool = True
     chat_user_max_pending: int = Field(default=2, gt=0)
     chat_org_max_pending: int = Field(default=8, gt=0)
     chat_user_daily_turns: int = Field(default=100, gt=0)

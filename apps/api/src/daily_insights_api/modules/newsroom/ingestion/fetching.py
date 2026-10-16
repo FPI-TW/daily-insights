@@ -4,15 +4,16 @@ Outcomes (spec §6.1, D18):
 
 - ``ok`` — the page is not marked paywalled and its body passed ``quality.assess``.
 - ``rejected`` — a page was read but the text is not the article.
-- ``unavailable`` — robots.txt forbids it, the page is paywalled or access is
-  denied, it is not HTML, too large, gone, or redirects off the allowlist.
-  This is a final answer, so the stage completes (``fetch_status = done``).
+- ``unavailable`` — robots.txt forbids it (when ``news_ignore_robots`` is false),
+  the page is paywalled or access is denied, it is not HTML, too large, gone, or
+  redirects off the allowlist. This is a final answer, so the stage completes
+  (``fetch_status = done``).
 - Only transient network failures (timeouts, DNS, connection errors, 429 and
   5xx) raise ``RetryableStageError`` and go back on the queue.
 
 When a CloakBrowser renderer is configured, a page refused as a bot (403 or a
 Cloudflare challenge) or one whose text is not the article is read once more in
-the browser under the same allowlist, robots.txt and size rules. The browser
+the browser under the same allowlist, robots.txt (unless ignored) and size rules. The browser
 either yields a usable page or the plain HTTP outcome stands; it never turns a
 robots refusal, a paywall or a missing page into a body.
 """
@@ -101,6 +102,8 @@ async def _fetch_page(
     url: str,
     allowed: frozenset[str],
     resolver: Resolver | None,
+    *,
+    ignore_robots: bool = False,
 ) -> FetchedPage:
     try:
         current = validate_https_url(url, allowed)
@@ -108,7 +111,9 @@ async def _fetch_page(
         raise ArticleUnavailableError("host_not_allowed") from error
     for _ in range(MAX_REDIRECTS + 1):
         await assert_public_hostname(urlparse(current).hostname or "", allowed, resolver)
-        if not await robots_allowed(client, current, allowed, resolver=resolver):
+        if not ignore_robots and not await robots_allowed(
+            client, current, allowed, resolver=resolver
+        ):
             raise ArticleUnavailableError("robots_disallowed")
         async with client.stream(
             "GET",
@@ -150,10 +155,11 @@ async def fetch_page(
     allowed: frozenset[str],
     *,
     resolver: Resolver | None = None,
+    ignore_robots: bool = False,
 ) -> FetchedPage:
     """Read one article page, mapping every failure onto unavailable or retryable."""
     try:
-        return await _fetch_page(client, url, allowed, resolver)
+        return await _fetch_page(client, url, allowed, resolver, ignore_robots=ignore_robots)
     except ArticleUnavailableError:
         raise
     except UnsafeDestinationError as error:
@@ -177,17 +183,21 @@ async def render_page(
     allowed: frozenset[str],
     *,
     resolver: Resolver | None = None,
+    ignore_robots: bool = False,
 ) -> FetchedPage | None:
     """Read ``url`` in the browser; None when it produced no usable page.
 
     Every main-frame navigation, redirects and challenge reloads included, must
-    be an allowlisted HTTPS URL that robots.txt lets the bot read.
+    be an allowlisted HTTPS URL that robots.txt lets the bot read (unless
+    ``ignore_robots``).
     """
     verdicts: dict[str, str | None] = {}
 
     async def guard(target: str) -> str | None:
         if target not in verdicts:
-            verdicts[target] = await _navigation_refusal(client, target, allowed, resolver)
+            verdicts[target] = await _navigation_refusal(
+                client, target, allowed, resolver, ignore_robots
+            )
         return verdicts[target]
 
     try:
@@ -213,10 +223,11 @@ async def _navigation_refusal(
     url: str,
     allowed: frozenset[str],
     resolver: Resolver | None,
+    ignore_robots: bool,
 ) -> str | None:
     try:
         validate_https_url(url, allowed)
-        if not await robots_allowed(client, url, allowed, resolver=resolver):
+        if not ignore_robots and not await robots_allowed(client, url, allowed, resolver=resolver):
             return "robots_disallowed"
     except UnsafeDestinationError:
         return "host_not_allowed"
@@ -235,21 +246,28 @@ async def read_article(
     *,
     resolver: Resolver | None = None,
     renderer: PageRenderer | None = None,
+    ignore_robots: bool = False,
 ) -> FetchedPage:
     """``fetch_page``, then the browser when the plain read met a bot wall or no article."""
     try:
-        fetched = await fetch_page(client, url, allowed, resolver=resolver)
+        fetched = await fetch_page(
+            client, url, allowed, resolver=resolver, ignore_robots=ignore_robots
+        )
     except ArticleUnavailableError as error:
         if renderer is None or not error.refused_as_bot:
             raise
-        rendered = await render_page(client, renderer, url, allowed, resolver=resolver)
+        rendered = await render_page(
+            client, renderer, url, allowed, resolver=resolver, ignore_robots=ignore_robots
+        )
         if rendered is None:
             raise
         return rendered
     page = fetched.page
     if renderer is None or page.paywalled or assess(title_of(page), page.text).ok:
         return fetched
-    rendered = await render_page(client, renderer, url, allowed, resolver=resolver)
+    rendered = await render_page(
+        client, renderer, url, allowed, resolver=resolver, ignore_robots=ignore_robots
+    )
     return rendered or fetched
 
 
@@ -302,6 +320,7 @@ def make_fetch_handler(settings: Settings, deps: IngestionDeps) -> StageHandler:
                     title_of,
                     resolver=deps.resolver,
                     renderer=deps.renderer,
+                    ignore_robots=settings.news_ignore_robots,
                 )
         except ArticleUnavailableError as error:
             logger.info(

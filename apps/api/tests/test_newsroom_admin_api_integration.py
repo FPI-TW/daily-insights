@@ -343,6 +343,7 @@ async def test_sources_report_health_and_recent_article_counts(
         "manual": "pending",
     }
     assert sources["healthy"]["articles_7d"] == 1
+    assert sources["healthy"]["articles_today"] == 1
     assert sources["degraded"]["last_error_code"] == "http_503"
     # Enabled feeds lead; the manual source comes last whatever its name.
     assert list(sources)[-2:] == ["off", "manual"]

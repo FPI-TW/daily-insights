@@ -10,6 +10,7 @@ raises ``SourceConflictError``, and a missing row raises ``LookupError``.
 """
 
 import hashlib
+import json
 import re
 import uuid
 from dataclasses import dataclass, fields
@@ -58,6 +59,9 @@ class SourceConflictError(SourceValidationError):
     """Another source already uses this key."""
 
 
+_MAX_OPTIONS_BYTES = 8_000
+
+
 @dataclass(frozen=True)
 class SourceInput:
     key: str
@@ -74,9 +78,47 @@ class SourceInput:
     title_exclude_pattern: str | None = None
     language_filter: tuple[str, ...] | None = None
     full_text_in_feed: bool = False
+    options: dict[str, Any] | None = None
 
 
 _FIELDS = frozenset(item.name for item in fields(SourceInput))
+
+
+def _json_safe(value: Any, *, path: str = "options") -> Any:
+    """Return a JSON-serialisable copy, or raise ``SourceValidationError``."""
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    if isinstance(value, list):
+        return [_json_safe(item, path=f"{path}[]") for item in value]
+    if isinstance(value, dict):
+        cleaned: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or not key or len(key) > 80:
+                raise SourceValidationError(f"{path} keys must be 1-80 character strings")
+            cleaned[key] = _json_safe(item, path=f"{path}.{key}")
+        return cleaned
+    raise SourceValidationError(f"{path} values must be JSON types")
+
+
+def validate_source_options(kind: str, options: Any) -> dict[str, Any]:
+    """Normalise adapter ``options`` and enforce kind-specific requirements."""
+    if options is None:
+        options = {}
+    if not isinstance(options, dict):
+        raise SourceValidationError("options must be a JSON object")
+    # A dict in gives a dict out.
+    cleaned: dict[str, Any] = _json_safe(options)
+    if len(cleaned) > 50:
+        raise SourceValidationError("options may have at most 50 keys")
+    encoded = json.dumps(cleaned, ensure_ascii=False, separators=(",", ":"))
+    if len(encoded.encode()) > _MAX_OPTIONS_BYTES:
+        raise SourceValidationError("options is too large")
+    if kind == "html_list":
+        needle = cleaned.get("href_contains")
+        if not isinstance(needle, str) or not needle.strip():
+            raise SourceValidationError("html_list sources require options.href_contains")
+        cleaned = {**cleaned, "href_contains": needle.strip()}
+    return cleaned
 
 
 def _validate_field(name: str, value: Any) -> Any:
@@ -148,6 +190,13 @@ def _validate_field(name: str, value: Any) -> Any:
         ):
             raise SourceValidationError("language_filter must list language codes like en, zh-tw")
         return languages
+    if name == "options":
+        # Kind-specific checks run after all fields are known.
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise SourceValidationError("options must be a JSON object")
+        return _json_safe(value)
     raise SourceValidationError(f"unknown source field {name}")
 
 
@@ -178,11 +227,12 @@ async def create_source(
     database: AsyncSession, data: SourceInput, *, user_id: uuid.UUID
 ) -> uuid.UUID:
     values = {name: _validate_field(name, getattr(data, name)) for name in _FIELDS}
+    values["options"] = validate_source_options(values["kind"], values.get("options") or {})
     _check_feed_url(values["url"], values["kind"])
     if await _key_taken(database, values["key"]):
         raise SourceConflictError("a source with this key already exists")
     # next_poll_at stays NULL so the poller picks the new source up right away.
-    source = NewsroomSource(**values, options={})
+    source = NewsroomSource(**values)
     database.add(source)
     await database.flush()
     editlog.record_edit(
@@ -211,11 +261,21 @@ async def update_source(
     source = await database.get(NewsroomSource, source_id, with_for_update=True)
     if source is None or source.deleted_at is not None:
         raise LookupError("source not found")
-    if source.kind == MANUAL_KIND and set(changes) - {"name", "trust_tier", "weight", "markets"}:
+    if source.kind == MANUAL_KIND and set(changes) - {
+        "name",
+        "trust_tier",
+        "weight",
+        "markets",
+    }:
         raise SourceValidationError("the manual source only accepts name, tier, weight, markets")
     values = {name: _validate_field(name, value) for name, value in changes.items()}
+    next_kind = values.get("kind", source.kind)
+    if "options" in values or "kind" in values:
+        values["options"] = validate_source_options(
+            next_kind, values["options"] if "options" in values else (source.options or {})
+        )
     if source.kind != MANUAL_KIND:
-        _check_feed_url(values.get("url", source.url), values.get("kind", source.kind))
+        _check_feed_url(values.get("url", source.url), next_kind)
     if "key" in values and await _key_taken(database, values["key"], other_than=source.id):
         raise SourceConflictError("a source with this key already exists")
     changed = {name for name, value in values.items() if getattr(source, name) != value}
@@ -291,8 +351,9 @@ async def submit_manual_url(
 
     The URL must be public HTTPS (validated, and resolved to public addresses
     only); the host need not be a source host because an admin chose it, but
-    the blocked-hosts kill switch still applies and the fetch stage still
-    honours robots.txt. A URL already stored returns the existing article id.
+    the blocked-hosts kill switch still applies. robots.txt is checked only
+    when ``news_ignore_robots`` is false. A URL already stored returns the
+    existing article id.
     The article's title is the URL until the fetch reads the page title, and
     embedding is queued once the fetch settles.
     """

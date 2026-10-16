@@ -261,6 +261,28 @@ def test_json_list_rejects_missing_mapping_array_or_unknown_keys() -> None:
         parse_feed(source("json_list", options={"mapping": {"evil": 1}}), b"[]")
 
 
+def test_html_list_keeps_matching_anchors_and_prefers_title_attr() -> None:
+    moneydj = source(
+        "html_list",
+        url="https://www.moneydj.com/KMDJ/News/NewsRealList.aspx?a=MB00",
+        hostname="www.moneydj.com",
+        link_pattern=r"(?i)^https://www\.moneydj\.com/kmdj/news/newsviewer\.aspx\?a=[0-9a-f-]+",
+        options={"href_contains": "NewsViewer.aspx", "keep_query": True},
+    )
+
+    entries = parse_feed(moneydj, fixture("html_list_moneydj.html"))
+
+    assert [e.title for e in entries] == ["Fox股東點頭支持收購Roku", "工具機接單回溫"]
+    assert entries[0].url.startswith(
+        "https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=ed676e55-76e4-4564-8a12-edd97dc1fdbd"
+    )
+
+
+def test_html_list_requires_href_contains() -> None:
+    with pytest.raises(ValueError, match="href_contains"):
+        parse_feed(source("html_list"), fixture("html_list_moneydj.html"))
+
+
 @pytest.mark.parametrize(
     ("time_format", "value", "expected"),
     [

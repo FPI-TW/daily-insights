@@ -274,6 +274,30 @@ async def test_robots_client_errors_are_a_refusal_not_permission() -> None:
         await fetch(handler)
 
 
+async def test_ignore_robots_skips_disallow_and_robots_errors() -> None:
+    def disallowed(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, text="User-agent: *\nDisallow: /\n")
+        return html()(request)
+
+    def robots_error(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(403)
+        return html()(request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(disallowed)) as client:
+        fetched = await fetch_page(
+            client, URL, ALLOWED, resolver=public_resolver, ignore_robots=True
+        )
+    assert fetched.page.text
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(robots_error)) as client:
+        fetched = await fetch_page(
+            client, URL, ALLOWED, resolver=public_resolver, ignore_robots=True
+        )
+    assert fetched.page.text
+
+
 async def test_missing_robots_file_allows_fetching() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/robots.txt":

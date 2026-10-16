@@ -448,8 +448,9 @@ export interface paths {
     }
     /**
      * List Sources
-     * @description Every source not deleted, with its polling health and 7-day article count (D3).
+     * @description Every source not deleted, with health plus today and 7-day article counts.
      *
+     *     ``articles_today`` counts ``first_seen_at`` since 00:00 Asia/Taipei.
      *     Enabled feeds lead; the fixed ``manual`` source always comes last.
      */
     get: operations["list_sources_api_admin_newsroom_sources_get"]
@@ -2868,6 +2869,8 @@ export interface components {
     NewsroomAdminSource: {
       /** Articles 7D */
       articles_7d: number
+      /** Articles Today */
+      articles_today: number
       /** Consecutive Failures */
       consecutive_failures: number
       /** Enabled */
@@ -2897,6 +2900,7 @@ export interface components {
             | "rss_full"
             | "news_sitemap"
             | "json_list"
+            | "html_list"
             | "guardian_api"
           )
         | "manual"
@@ -2918,6 +2922,10 @@ export interface components {
       name: string
       /** Next Poll At */
       next_poll_at: string | null
+      /** Options */
+      options?: {
+        [key: string]: unknown
+      }
       /** Poll Interval Minutes */
       poll_interval_minutes: number
       /** Title Exclude Pattern */
@@ -2956,6 +2964,7 @@ export interface components {
         | "rss_full"
         | "news_sitemap"
         | "json_list"
+        | "html_list"
         | "guardian_api"
       /** Language Filter */
       language_filter?: string[] | null
@@ -2965,6 +2974,10 @@ export interface components {
       markets?: ("global" | "tw_equity" | "us_equity")[]
       /** Name */
       name: string
+      /** Options */
+      options?: {
+        [key: string]: unknown
+      }
       /**
        * Poll Interval Minutes
        * @default 30
@@ -3012,6 +3025,7 @@ export interface components {
             | "rss_full"
             | "news_sitemap"
             | "json_list"
+            | "html_list"
             | "guardian_api"
           )
         | null
@@ -3023,6 +3037,10 @@ export interface components {
       markets?: ("global" | "tw_equity" | "us_equity")[] | null
       /** Name */
       name?: string | null
+      /** Options */
+      options?: {
+        [key: string]: unknown
+      } | null
       /** Poll Interval Minutes */
       poll_interval_minutes?: number | null
       /** Title Exclude Pattern */
