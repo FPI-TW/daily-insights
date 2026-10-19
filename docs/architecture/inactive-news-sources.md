@@ -60,3 +60,10 @@ GlobeNewswire Company Announcement（subjectcode 9）退出執行清單，以縮
 ## 2026-10-15 補上的 robots 受阻媒體端點
 
 `20261015_0043`／`20261015_0044` 在略過 robots.txt 後，為 MarketWatch、Yahoo Finance、Seeking Alpha、Motley Fool、MoneyDJ 寫入可用發現端點，並校正 TechNews。細節見 `docs/research/robots-blocked-sources-recovery.md`。
+
+## 2026-10-19 停用的新聞媒體
+
+migration `20261019_0049` 停用 `investing-com-stocks`（Investing.com，列保留，可在後台重新啟用）：
+10-16 至 10-19 收進的 252 篇只讓 9 篇（3.6%）進入上架事件，且這些事件都另有其他媒體報導，
+不少稿件是轉載 Reuters；網站拒絕讀取的比例逐日升高（10-16 為 142 篇中 31 篇、10-17 為 87 篇中
+70 篇、10-19 全部被拒），多數文章拿不到正文。
