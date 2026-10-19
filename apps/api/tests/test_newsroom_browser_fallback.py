@@ -1,4 +1,4 @@
-"""The CloakBrowser fallback of the fetch stage: when it is used, and what it may open."""
+"""The fetch stage reads every page in CloakBrowser: outcomes, fallback, what it may open."""
 
 from collections.abc import Callable
 from typing import Any, cast
@@ -21,17 +21,17 @@ from daily_insights_api.modules.newsroom.ingestion.fetching import (
     ArticleUnavailableError,
     read_article,
 )
+from daily_insights_api.modules.newsroom.queue import RetryableStageError
 
 HOST = "www.example-news.com"
 ALLOWED = frozenset({HOST})
 URL = f"https://{HOST}/markets/fed-holds-rates"
-TITLE = "Fed holds rates steady as inflation cools"
 ARTICLE = (
     "<html><head><title>Fed holds rates steady</title></head><body><article><p>"
     + "The Federal Reserve holds rates steady while inflation cools across the economy. " * 6
     + "</p></article></body></html>"
 )
-SHELL = "<html><body><main><div id='app'>Loading</div></main></body></html>"
+PLAIN = ARTICLE.replace("The Federal Reserve", "The central bank")
 PAYWALL = (
     '<html><head><script type="application/ld+json">{"isAccessibleForFree": false}</script>'
     "</head><body><article>The Federal Reserve holds rates steady.</article></body></html>"
@@ -45,19 +45,30 @@ async def public_resolver(host: str, port: int) -> list[str]:
     return ["93.184.216.34"]
 
 
-def site(page: Handler, robots: str = "User-agent: *\nAllow: /\n") -> Handler:
-    def handler(request: httpx.Request) -> httpx.Response:
+class Site:
+    """robots.txt plus one page, counting how often plain HTTP read the page."""
+
+    def __init__(
+        self,
+        body: str = PLAIN,
+        status: int = 200,
+        robots: str = "User-agent: *\nAllow: /\n",
+        robots_status: int = 200,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.body, self.status, self.headers = body, status, headers or {}
+        self.robots, self.robots_status = robots, robots_status
+        self.page_reads = 0
+        self.robots_reads = 0
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
         if request.url.path == "/robots.txt":
-            return httpx.Response(200, text=robots)
-        return page(request)
-
-    return handler
-
-
-def html(body: str = ARTICLE, status: int = 200, **headers: str) -> Handler:
-    return lambda _: httpx.Response(
-        status, text=body, headers={"content-type": "text/html", **headers}
-    )
+            self.robots_reads += 1
+            return httpx.Response(self.robots_status, text=self.robots)
+        self.page_reads += 1
+        return httpx.Response(
+            self.status, text=self.body, headers={"content-type": "text/html", **self.headers}
+        )
 
 
 def rendered(
@@ -96,110 +107,103 @@ class FakeRenderer:
 
 async def read(handler: Handler, renderer: FakeRenderer | None) -> Any:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        return await read_article(
-            client, URL, ALLOWED, lambda _: TITLE, resolver=public_resolver, renderer=renderer
-        )
+        return await read_article(client, URL, ALLOWED, resolver=public_resolver, renderer=renderer)
 
 
-# --- when the browser is used -------------------------------------------------
+# --- every page goes through the browser ---------------------------------------
 
 
 @pytest.mark.parametrize(
-    "handler",
-    [
-        site(html(status=403)),
-        site(html(status=403, **{"cf-mitigated": "challenge"})),
-        site(html(status=503, **{"cf-mitigated": "challenge"})),
-    ],
+    "site", [Site(), Site(status=403), Site(status=503, headers={"cf-mitigated": "challenge"})]
 )
-async def test_a_bot_refusal_is_read_again_in_the_browser(handler: Handler) -> None:
+async def test_every_page_is_read_in_the_browser(site: Site) -> None:
     renderer = FakeRenderer()
 
-    fetched = await read(handler, renderer)
+    fetched = await read(site, renderer)
 
     assert renderer.calls == [URL]
     assert fetched.via_browser
     assert fetched.page.text.startswith("The Federal Reserve holds rates steady")
-
-
-async def test_a_cloudflare_challenge_is_final_without_a_browser() -> None:
-    with pytest.raises(ArticleUnavailableError) as raised:
-        await read(site(html(status=503, **{"cf-mitigated": "challenge"})), None)
-
-    assert raised.value.reason == "bot_challenge"
-    assert raised.value.refused_as_bot
-
-
-async def test_text_that_is_not_the_article_is_read_again_in_the_browser() -> None:
-    renderer = FakeRenderer()
-
-    fetched = await read(site(html(SHELL)), renderer)
-
-    assert renderer.calls == [URL]
-    assert fetched.via_browser
-
-
-@pytest.mark.parametrize("body", [ARTICLE, PAYWALL])
-async def test_an_article_or_a_paywall_never_reaches_the_browser(body: str) -> None:
-    renderer = FakeRenderer()
-
-    fetched = await read(site(html(body)), renderer)
-
-    assert renderer.calls == []
-    assert not fetched.via_browser
+    assert site.page_reads == 0
 
 
 @pytest.mark.parametrize(
-    ("handler", "reason"),
+    ("result", "reason"),
     [
-        (site(html(), robots="User-agent: *\nDisallow: /markets/\n"), "robots_disallowed"),
-        (site(html(status=401)), "access_denied"),
-        (site(html(status=402)), "access_denied"),
-        (site(html(status=451)), "access_denied"),
-        (site(html(status=404)), "not_found"),
-        (
-            site(lambda _: httpx.Response(302, headers={"location": "https://evil.example/a"})),
-            "redirect_not_allowed",
-        ),
+        (rendered(status=401), "access_denied"),
+        (rendered(status=403), "access_denied"),
+        (rendered(status=451), "access_denied"),
+        (rendered(status=404), "not_found"),
+        (rendered(status=410), "not_found"),
+        (rendered(status=400), "http_400"),
+        (rendered(content_type="application/pdf"), "not_html"),
+        (rendered(body="x" * 1_600_000), "too_large"),
     ],
 )
-async def test_final_answers_never_reach_the_browser(handler: Handler, reason: str) -> None:
-    renderer = FakeRenderer()
+async def test_what_the_browser_got_is_the_final_answer(result: RenderedPage, reason: str) -> None:
+    site = Site(status=403)
 
     with pytest.raises(ArticleUnavailableError) as raised:
-        await read(handler, renderer)
+        await read(site, FakeRenderer(result))
 
     assert raised.value.reason == reason
-    assert renderer.calls == []
+    # Only a refusal earns plain HTTP a try (refused here too); nothing else does.
+    assert site.page_reads == (1 if reason == "access_denied" else 0)
 
 
-@pytest.mark.parametrize(
-    "result",
-    [
-        RenderFailedError("browser_unreachable"),
-        RenderFailedError("browser_timeout"),
-        rendered(status=403),
-        rendered(content_type="application/pdf"),
-        rendered(body="x" * 1_600_000),
-    ],
-)
-async def test_the_plain_outcome_stands_when_the_browser_has_nothing_better(
-    result: RenderedPage | RenderFailedError,
-) -> None:
-    with pytest.raises(ArticleUnavailableError, match="access_denied"):
-        await read(site(html(status=403)), FakeRenderer(result))
+async def test_a_page_refusing_the_browser_gets_one_plain_try() -> None:
+    site = Site()
 
-    fetched = await read(site(html(SHELL)), FakeRenderer(result))
+    fetched = await read(site, FakeRenderer(rendered(status=403)))
 
     assert not fetched.via_browser
-    assert fetched.page.text == "Loading"
+    assert site.page_reads == 1
+    with pytest.raises(ArticleUnavailableError, match="access_denied"):
+        await read(Site(status=404), FakeRenderer(rendered(status=403)))
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+async def test_browser_rate_limits_and_outages_are_retried(status: int) -> None:
+    with pytest.raises(RetryableStageError) as raised:
+        await read(Site(), FakeRenderer(rendered(status=status)))
+
+    assert raised.value.code == f"fetch_http_{status}"
 
 
 async def test_a_browser_page_marked_paywalled_is_reported_as_such() -> None:
-    fetched = await read(site(html(status=403)), FakeRenderer(rendered(PAYWALL)))
+    fetched = await read(Site(), FakeRenderer(rendered(PAYWALL)))
 
     assert fetched.via_browser
     assert fetched.page.paywalled
+
+
+# --- plain HTTP takes over when the browser fails ------------------------------
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "browser_unreachable",
+        "browser_timeout",
+        "browser_error",
+        "browser_navigation_failed",
+        "browser_no_response",
+    ],
+)
+async def test_plain_http_takes_over_when_the_browser_fails(reason: str) -> None:
+    site = Site()
+
+    fetched = await read(site, FakeRenderer(RenderFailedError(reason)))
+
+    assert not fetched.via_browser
+    assert fetched.page.text.startswith("The central bank holds rates steady")
+    assert site.page_reads == 1
+
+
+async def test_without_a_browser_plain_http_answers() -> None:
+    assert not (await read(Site(), None)).via_browser
+    with pytest.raises(ArticleUnavailableError, match="bot_challenge"):
+        await read(Site(status=503, headers={"cf-mitigated": "challenge"}), None)
 
 
 # --- what the browser may open -------------------------------------------------
@@ -218,35 +222,29 @@ async def test_browser_navigations_must_be_allowlisted_and_robots_allowed(
     target: str, reason: str | None
 ) -> None:
     renderer = FakeRenderer(navigations=(target,))
-    handler = site(html(status=403), robots="User-agent: *\nDisallow: /private/\n")
+    site = Site(robots="User-agent: *\nDisallow: /private/\n")
 
     if reason is None:
-        assert (await read(handler, renderer)).via_browser
+        assert (await read(site, renderer)).via_browser
     else:
-        with pytest.raises(ArticleUnavailableError, match="access_denied"):
-            await read(handler, renderer)
+        # A refused navigation is final: plain HTTP must not read it instead.
+        with pytest.raises(ArticleUnavailableError, match=reason):
+            await read(site, renderer)
 
     assert renderer.verdicts[-1] == (target, reason)
+    assert site.page_reads == 0
 
 
-async def test_robots_outages_refuse_the_navigation_and_verdicts_are_cached() -> None:
-    robots_requests = 0
+async def test_a_robots_outage_hands_the_page_to_plain_http_which_retries() -> None:
+    site = Site(robots_status=503)
+    renderer = FakeRenderer()
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal robots_requests
-        if request.url.path == "/robots.txt":
-            robots_requests += 1
-            # The plain read sees the rules; the browser's checks meet an outage.
-            return httpx.Response(200 if robots_requests == 1 else 503, text="")
-        return html(status=403)(request)
-
-    renderer = FakeRenderer(navigations=(URL,))
-
-    with pytest.raises(ArticleUnavailableError, match="access_denied"):
-        await read(handler, renderer)
+    with pytest.raises(RetryableStageError, match="fetch_http_503"):
+        await read(site, renderer)
 
     assert renderer.verdicts == [(URL, "robots_unreachable")]
-    assert robots_requests == 2
+    assert site.robots_reads == 2
+    assert site.page_reads == 0
 
 
 # --- the CDP Fetch gate -------------------------------------------------------

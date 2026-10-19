@@ -56,6 +56,12 @@ SETTLE_TIMEOUT_MS = 5_000
 CHALLENGE_POLL_SECONDS = 1.0
 # Cloudflare's interstitial defines this until it hands over to the real page.
 CHALLENGE_PROBE = "() => typeof window._cf_chl_opt !== 'undefined'"
+# The rendered DOM inlines megabytes of scripts and state (CNBC); none of it is
+# text, so it is removed before the page is serialized. JSON-LD stays: it
+# carries the paywall marker.
+STRIP_NON_TEXT = """() => document.querySelectorAll(
+  'script:not([type="application/ld+json"]), style, noscript, template, svg, iframe, link'
+).forEach((node) => node.remove())"""
 
 
 class RenderFailedError(Exception):
@@ -225,6 +231,7 @@ async def _render(context: BrowserContext, url: str, guard: NavigationGuard) -> 
     if not documents:
         raise RenderFailedError("browser_no_response")
     final = documents[-1]
+    await page.evaluate(STRIP_NON_TEXT)
     html = await page.content()
     content_type = await final.header_value("content-type") or ""
     return RenderedPage(page.url, final.status, content_type, html)

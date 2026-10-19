@@ -174,7 +174,7 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 - 解析沿用舊 `feeds.py` 的格式支援與 SSRF-safe client（`extraction.py`），可搬移重構到 `newsroom/` 下，不得放寬 SSRF 與大小上限。robots.txt 預設略過（`DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS=true`）；設為 `false` 可恢復檢查。`html_list` 以 `options.href_contains` 從 HTML 列表頁抓文章錨點（MoneyDJ 等無 RSS 來源）。
 - 去重：`url_hash` 唯一；同窗內標題完全相同者略過。不再做標題字詞重疊去重（交給事件分群）。
 - 全文：`full_text_in_feed` 來源直接取 feed 內容；其他抓取原文。品質檢查（長度下限、導覽字詞比例、與標題相關性）不合格 → `rejected`。
-- 瀏覽器補抓（2026-10-14 新增）：純 HTTP 遇到 403／Cloudflare challenge，或文字未通過品質檢查時，以 CloakBrowser 再讀一次；主頁面每次導覽（含轉址）同樣受白名單與 robots.txt 限制，付費牆與大小上限不變；瀏覽器的對外連線只經只連公開 HTTPS 位址的 `browser-egress` proxy。瀏覽器沒有更好的結果時沿用純 HTTP 的結果。
+- 瀏覽器讀取（2026-10-14 新增補抓，2026-10-19 改為一律使用）：設定 CloakBrowser 時每篇原文都由瀏覽器讀，狀態對應同樣的結果；主頁面每次導覽（含轉址）同樣受白名單與 robots.txt 規則限制，付費牆與大小上限不變；瀏覽器的對外連線只經只連公開 HTTPS 位址的 `browser-egress` proxy。只有瀏覽器本身失敗時才改用純 HTTP。
 - 健康：連續失敗累計；某來源連續失敗且距離 `last_success_at` 超過 6 小時 → Slack 通知一次（恢復後重置）。
 - 每日 03:00 清除 30 天前文章的 `body`（`body_status = purged`）。
 - 後台來源管理 API 的 service 層（新增、修改、停用、健康查詢）。
@@ -251,7 +251,7 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 | `NEWSROOM_EMBEDDING_BASE_URL`、`NEWSROOM_EMBEDDING_API_KEY`、`NEWSROOM_EMBEDDING_MODEL`                 | embedding（預設 `text-embedding-3-large`）   |
 | `NEWSROOM_SLACK_WEBHOOK_URL`                                                                            | 通知；未設定時只寫 log                       |
 | `NEWSROOM_ADMIN_BASE_URL`                                                                               | Slack 訊息中的後台連結                       |
-| `NEWSROOM_BROWSER_CDP_URL`、`NEWSROOM_BROWSER_CONCURRENCY`、`NEWSROOM_BROWSER_TIMEOUT_SECONDS`          | 瀏覽器補抓（未設定 CDP URL 時停用）          |
+| `NEWSROOM_BROWSER_CDP_URL`、`NEWSROOM_BROWSER_CONCURRENCY`、`NEWSROOM_BROWSER_TIMEOUT_SECONDS`          | 瀏覽器讀取（未設定 CDP URL 時只用純 HTTP）   |
 
 ## 8. 工作樹分工與檔案所有權
 

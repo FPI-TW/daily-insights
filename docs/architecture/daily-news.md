@@ -187,8 +187,9 @@ flowchart TB
   1–4 字的英數）視為選單、標籤列或「延伸閱讀」並移除；含 3 個以上數字的段落是攤平的
   表格，保留。2026-10-19 以 10 天 8,716 篇正文檢查：自由財經每篇約 19% 是選單、鉅亨
   約 3% 是標籤列，其他來源幾乎不受影響。
-  MoneyDJ 即時列表中標示「無內文」的他報標題由來源的標題排除規則略過
-  （migration `20261019_0048`）。
+  瀏覽器序列化頁面前會先移除 script、樣式與 iframe（JSON-LD 保留，用於判斷付費牆），
+  否則 CNBC 這類頁面會超過 1.5 MB 上限。MoneyDJ 即時列表中標示「無內文」的他報標題由來源
+  的標題排除規則略過（migration `20261019_0048`）。
 - 品質檢查依序：少於 200 字（`too_short`）、導覽字詞比例超過 10%，或空格隔開的中文詞
   10 個以上且 90% 以上是 2–4 字的選單長度（`navigation_heavy`；10 天正文的第 99.9
   百分位是 78%）、與標題相關性過低（`unrelated_to_title`）。不合格為 `rejected`；
@@ -196,16 +197,16 @@ flowchart TB
   `unavailable`。這些都是最終答案（`fetch_status = done`），只有逾時、連線錯誤、429、
   5xx 會重試。Cloudflare 標示 `cf-mitigated: challenge` 的回應記為 `unavailable`
   （`bot_challenge`），不再當成 5xx 重試。
-- 瀏覽器補抓（2026-10-14 起）：純 HTTP 讀取遇到 403、Cloudflare challenge，或讀到的
-  文字未通過品質檢查時，同一個 `fetch` 嘗試內再用 CloakBrowser（`cloakbrowser`
-  service，經 CDP 連線）讀一次。robots 禁止、401／402／451、404／410、付費牆、
-  非 HTML、過大、轉址出白名單都是最終答案，不會交給瀏覽器。瀏覽器的主頁面每一次
-  導覽（含每一跳轉址與 challenge 重新載入）都要通過同樣的白名單檢查，以及與純 HTTP
-  相同的 robots.txt 規則（預設略過），轉址在瀏覽器跟隨前就以 CDP `Fetch` 攔下判斷；
-  不下載圖片、影音與字型；頁面同樣受
-  1.5 MB 上限、HTML 與付費牆標記限制。瀏覽器沒有更好的結果（連不上、逾時、仍被拒、
-  非 2xx）時沿用純 HTTP 的結果，不重試、不卡住佇列。瀏覽器讀到的正文記為 `body_source = browser`
-  （migration `20261014_0043`），後台全文狀態標示「瀏覽器補抓」。每次最多
+- 一律用瀏覽器讀（2026-10-19 起）：設定了 `NEWSROOM_BROWSER_CDP_URL` 時，每篇原文都由
+  CloakBrowser（`cloakbrowser` service，經 CDP 連線）讀取，瀏覽器拿到的狀態對應同樣的
+  結果：401／402／403／451 為 `access_denied`、404／410 為 `not_found`、其他 4xx 為
+  `http_<狀態>`、429 與 5xx 重試、非 HTML 與過大為最終答案。主頁面每一次導覽（含每一跳
+  轉址與 challenge 重新載入）都要通過白名單檢查，以及與純 HTTP 相同的 robots.txt 規則
+  （預設略過），轉址在瀏覽器跟隨前就以 CDP `Fetch` 攔下判斷；被拒的導覽是最終答案，不改
+  用純 HTTP。不下載圖片、影音與字型。只有瀏覽器本身失敗（連不上、當掉、逾時、沒有拿到
+  頁面）時才改用純 HTTP 讀同一頁，佇列不會因瀏覽器停擺而卡住。瀏覽器被拒（401／403）時
+  也以純 HTTP 再試一次，同一網站對兩者的反應不一定相同；仍失敗則以瀏覽器的結果為準。
+  瀏覽器讀到的正文記為 `body_source = browser`，純 HTTP 讀到的記為 `fetch`。每次最多
   `NEWSROOM_BROWSER_CONCURRENCY` 個頁面、每頁 `NEWSROOM_BROWSER_TIMEOUT_SECONDS`。
   2026-10-14 本機測試：DataDome（TheStreet）與 Reuters 的封鎖依 IP 判斷，瀏覽器也拿到
   403／401。
@@ -411,8 +412,8 @@ function，不與其他 provider 共用鎖。流程冪等：
 | `NEWSROOM_WORKER_POLL_SECONDS`、`NEWSROOM_FETCH_CONCURRENCY`                   | `2`、`4`                       | newsroom-worker                            | 空佇列輪詢間隔（也是停用時的心跳間隔）與全文抓取並行數                    |
 | `NEWS_EXTRA_HOSTNAMES`、`NEWS_BLOCKED_HOSTNAMES`                               | 空                             | newsroom-worker（blocked 也用於 api）      | 全文白名單增補與封鎖；封鎖也停止輪詢並拒絕池外 URL                        |
 | `NEWS_FETCH_TIMEOUT_SECONDS`、`NEWS_DISCOVERY_TIMEOUT_SECONDS`                 | `25`、`30`                     | newsroom-worker                            | 全文頁面與 feed 讀取 timeout                                              |
-| `NEWSROOM_BROWSER_CDP_URL`                                                     | 未設定                         | newsroom-worker                            | CloakBrowser 的 CDP 端點；未設定時不做瀏覽器補抓                          |
-| `NEWSROOM_BROWSER_CONCURRENCY`、`NEWSROOM_BROWSER_TIMEOUT_SECONDS`             | `2`、`45`                      | newsroom-worker                            | 瀏覽器補抓同時開啟的頁面數與每頁時間上限                                  |
+| `NEWSROOM_BROWSER_CDP_URL`                                                     | 未設定                         | newsroom-worker                            | CloakBrowser 的 CDP 端點；未設定時只用純 HTTP                             |
+| `NEWSROOM_BROWSER_CONCURRENCY`、`NEWSROOM_BROWSER_TIMEOUT_SECONDS`             | `2`、`45`                      | newsroom-worker                            | 瀏覽器同時開啟的頁面數與每頁時間上限                                      |
 | `GUARDIAN_API_KEY`、`SEC_CONTACT_EMAIL`                                        | 未設定                         | newsroom-worker                            | 需要憑證的來源；未設定時略過該來源                                        |
 
 `newsroom-worker` 在 `NEWSROOM_ENABLED=true` 時於啟動驗證設定：LLM 與 embedding 的
