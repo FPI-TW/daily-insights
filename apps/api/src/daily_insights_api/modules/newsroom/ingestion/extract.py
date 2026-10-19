@@ -6,20 +6,83 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from html.parser import HTMLParser
 
+from daily_insights_api.modules.newsroom.ingestion.quality import strip_menu_runs
 from daily_insights_api.modules.newsroom.models import BODY_MAX_CHARS
+
+# <article> text shorter than this share of <main> text is a card, not the story.
+# Rendered pages, 2026-10-19: stories are 0.19-1.0 of <main>, a card was 0.03.
+MIN_ARTICLE_SHARE = 0.1
+# A marked article-body container shorter than this is a teaser or a stub.
+MIN_MARKED_BODY_CHARS = 200
+# Class tokens publishers use for the story container (CNBC ArticleBody-articleBody).
+_BODY_CLASSES = frozenset(
+    {"article-body", "articlebody", "article__body", "article-content", "story-body"}
+)
+
+
+def _marks_body(values: dict[str, str]) -> bool:
+    if values.get("itemprop", "").strip().lower() == "articlebody":
+        return True
+    return any(
+        token in _BODY_CLASSES or token.endswith("-articlebody")
+        for token in values.get("class", "").lower().split()
+    )
+
+
+class _Container:
+    """Tracks one marked element by counting nested tags of the same name."""
+
+    def __init__(self) -> None:
+        self.tag: str | None = None
+        self.depth = 0
+
+    def start(self, tag: str, marked: bool) -> None:
+        if self.depth and tag == self.tag:
+            self.depth += 1
+        elif not self.depth and marked:
+            self.tag, self.depth = tag, 1
+
+    def end(self, tag: str) -> None:
+        if self.depth and tag == self.tag:
+            self.depth -= 1
 
 
 class _ArticleTextExtractor(HTMLParser):
-    """Prefers ``<article>``, then ``<main>``, then the whole page; drops chrome."""
+    """Prefers a marked article body, then ``<article>``, then ``<main>``, then the page.
+
+    A marked body is ``itemprop="articleBody"`` or a common article-body class;
+    ``role="main"`` counts as ``<main>``. Chrome is dropped.
+
+    ``<form>`` itself is kept: ASP.NET sites (MoneyDJ) wrap the whole page,
+    article included, in one. Only its controls are dropped. The ``<title>``
+    is never part of the body, so a page of menus cannot pass the title check
+    by echoing the headline.
+    """
 
     _SKIP = frozenset(
-        {"script", "style", "noscript", "svg", "nav", "header", "footer", "aside", "form"}
+        {
+            "script",
+            "style",
+            "noscript",
+            "svg",
+            "nav",
+            "header",
+            "footer",
+            "aside",
+            "button",
+            "select",
+            "textarea",
+            "label",
+        }
     )
 
     def __init__(self) -> None:
         super().__init__()
         self._skip_depth = self._article_depth = self._main_depth = 0
+        self._body = _Container()
+        self._role_main = _Container()
         self._in_title = self._in_json_ld = False
+        self.body_parts: list[str] = []
         self.article_parts: list[str] = []
         self.main_parts: list[str] = []
         self.fallback_parts: list[str] = []
@@ -51,6 +114,8 @@ class _ArticleTextExtractor(HTMLParser):
             self._article_depth += 1
         if tag == "main":
             self._main_depth += 1
+        self._body.start(tag, _marks_body(values))
+        self._role_main.start(tag, values.get("role", "").strip().lower() == "main")
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "title":
@@ -63,24 +128,39 @@ class _ArticleTextExtractor(HTMLParser):
             self._article_depth -= 1
         if tag == "main" and self._main_depth:
             self._main_depth -= 1
+        self._body.end(tag)
+        self._role_main.end(tag)
 
     def handle_data(self, data: str) -> None:
         if self._in_title:
             self.title_parts.append(data)
+            return
         if self._in_json_ld:
             self.json_ld_parts.append(data)
         if self._skip_depth:
             return
+        if self._body.depth:
+            self.body_parts.append(data)
         if self._article_depth:
             self.article_parts.append(data)
-        if self._main_depth:
+        if self._main_depth or self._role_main.depth:
             self.main_parts.append(data)
         self.fallback_parts.append(data)
 
     def text(self) -> str:
-        return re.sub(
-            r"\s+", " ", " ".join(self.article_parts or self.main_parts or self.fallback_parts)
-        ).strip()
+        body = " ".join(self.body_parts)
+        article, main = " ".join(self.article_parts), " ".join(self.main_parts)
+        # A rendered page can carry a small <article> card (a "related" list)
+        # while the story sits in <main> without one; the card is not the story.
+        if len(" ".join(body.split())) >= MIN_MARKED_BODY_CHARS:
+            chosen = body
+        elif article.strip() and len(article) >= MIN_ARTICLE_SHARE * len(main):
+            chosen = article
+        else:
+            chosen = main if main.strip() else " ".join(self.fallback_parts)
+        # Sites without <nav> markup leave their menus in the text as runs of
+        # short words; those runs are dropped before the body is judged.
+        return strip_menu_runs(re.sub(r"\s+", " ", chosen).strip())
 
 
 def _json_ld_marks_paywall(blobs: list[str]) -> bool:

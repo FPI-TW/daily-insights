@@ -25,7 +25,9 @@ from daily_insights_api.modules.newsroom.ingestion.purge import purge_cutoff
 from daily_insights_api.modules.newsroom.ingestion.quality import (
     MIN_BODY_CHARS,
     assess,
+    menu_word_share,
     navigation_ratio,
+    strip_menu_runs,
     title_overlap,
 )
 from daily_insights_api.modules.newsroom.ingestion.safe_http import (
@@ -398,6 +400,82 @@ def test_quality_title_overlap_handles_chinese_and_short_titles() -> None:
     assert overlap is not None and overlap >= 0.8
     assert title_overlap("Fed", body) is None
     assert assess("Fed", body).ok
+
+
+SITE_MENU = (
+    "自由財經 即時 熱門 政治 財富自由 軍武 社會 生活 健康 國際 "
+    "地方 蒐奇 影音 財經 娛樂 汽車 時尚 體育 3 C"
+)
+STORY = "台積電今日公布第二季財報。營收創新高並上修全年展望。法人預期先進製程需求強勁。"
+
+
+def test_an_article_inside_a_page_wide_form_is_kept() -> None:
+    # ASP.NET pages (MoneyDJ) wrap everything in one <form>.
+    page = extract_page(
+        "<html><head><title>台積電營收創新高 - MoneyDJ理財網</title></head><body>"
+        f'<form id="aspnetForm"><div>{SITE_MENU}</div><article><p>{STORY}</p></article>'
+        "<button>送出</button></form></body></html>"
+    )
+
+    assert page.text == STORY
+    assert page.title == "台積電營收創新高 - MoneyDJ理財網"
+
+
+@pytest.mark.parametrize(
+    "marker",
+    ['itemprop="articleBody"', 'class="ArticleBody-articleBody group"', 'class="article-body"'],
+)
+def test_a_marked_article_body_wins_over_the_rest_of_the_page(marker: str) -> None:
+    story = "The Federal Reserve holds rates steady while inflation cools. " * 5
+    page = extract_page(
+        f"<body><div>Markets Business Tech</div><div role='main'><div {marker}>"
+        f"<div><p>{story}</p></div></div><div>Related: other stories</div></div></body>"
+    )
+
+    assert page.text == story.strip()
+
+
+def test_a_small_article_card_does_not_hide_the_story_in_main() -> None:
+    story = "The Federal Reserve holds rates steady while inflation cools. " * 10
+    page = extract_page(f"<main><article>list 1 of 4 Other story</article><p>{story}</p></main>")
+
+    assert page.text.startswith("list 1 of 4 Other story The Federal Reserve")
+
+
+def test_the_page_title_is_not_part_of_the_body() -> None:
+    page = extract_page(f"<html><head><title>{TITLE}</title></head><body>首頁 新聞</body></html>")
+
+    assert TITLE not in page.text
+
+
+@pytest.mark.parametrize(
+    ("text", "kept"),
+    [
+        (f"{SITE_MENU} {STORY}", STORY),
+        (f"{STORY} 文章標籤 台股 電子股 航運 金融股 更多 延伸閱讀", STORY),
+        # Prose that spaces out Latin words and numbers keeps its particles.
+        (
+            "ABF 缺口直達 2028 年及 MS 上調 欣興 目標價",
+            "ABF 缺口直達 2028 年及 MS 上調 欣興 目標價",
+        ),
+        # A flattened table carries numbers; it is content, not a menu.
+        (
+            "公司名稱 股票代號 投資評等 目標價 台光電 2383 買進 6150 欣興 3037 買進 1010",
+            "公司名稱 股票代號 投資評等 目標價 台光電 2383 買進 6150 欣興 3037 買進 1010",
+        ),
+    ],
+)
+def test_menu_runs_are_dropped_from_extracted_text(text: str, kept: str) -> None:
+    assert strip_menu_runs(text) == kept
+    assert extract_page(f"<p>{text}</p>").text == kept
+
+
+def test_quality_rejects_text_that_reads_like_a_menu() -> None:
+    menu = " ".join(["首頁 首頁 新聞 新聞 台股 台股 美股 美股 選股 選股 基金 基金"] * 8)
+
+    assert menu_word_share(menu) == 1.0
+    assert menu_word_share(STORY * 5) is None
+    assert assess("台股", menu).reason == "navigation_heavy"
 
 
 # --- purge clock --------------------------------------------------------------

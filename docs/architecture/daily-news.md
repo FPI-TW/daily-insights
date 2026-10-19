@@ -178,12 +178,24 @@ flowchart TB
   最多 3 次轉址且每次重新驗證、頁面上限 1.5 MB、只接受 HTML。robots.txt 預設略過
   （`DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS=true`）。管理員送出的池外 URL 允許其本身網域，
   但仍受 blocked hosts 限制。
-- 品質檢查依序：少於 200 字（`too_short`）、導覽字詞比例超過 10%
-  （`navigation_heavy`）、與標題相關性過低（`unrelated_to_title`）。不合格為
-  `rejected`；付費牆、存取被拒、404／410、非 HTML、過大，或在未略過 robots 時被
-  robots 禁止，為 `unavailable`。這些都是最終答案（`fetch_status = done`），只有
-  逾時、連線錯誤、429、5xx 會重試。Cloudflare 標示 `cf-mitigated: challenge` 的回應記為
-  `unavailable`（`bot_challenge`），不再當成 5xx 重試。
+- 擷取：優先取標示為正文的容器（`itemprop="articleBody"`，或 `article-body`、
+  `ArticleBody-articleBody` 這類 class，至少 200 字），其次 `<article>`（字數不到 `<main>` 的
+  10% 時視為側欄卡片，改取 `<main>`），再其次 `<main>` 或 `role="main"`，最後整頁；略過 script、樣式、`<nav>`、
+  `<header>`、`<footer>`、`<aside>` 與表單控制項，但保留 `<form>` 本身（ASP.NET 網站
+  如 MoneyDJ 把整頁包在一個 `<form>` 裡）。頁面 `<title>` 不算正文。沒有 `<nav>` 標記的
+  網站，選單會以一串空格隔開的短詞留在文字裡：連續 6 個以上 2–4 字的中文詞（中間可夾
+  1–4 字的英數）視為選單、標籤列或「延伸閱讀」並移除；含 3 個以上數字的段落是攤平的
+  表格，保留。2026-10-19 以 10 天 8,716 篇正文檢查：自由財經每篇約 19% 是選單、鉅亨
+  約 3% 是標籤列，其他來源幾乎不受影響。
+  MoneyDJ 即時列表中標示「無內文」的他報標題由來源的標題排除規則略過
+  （migration `20261019_0048`）。
+- 品質檢查依序：少於 200 字（`too_short`）、導覽字詞比例超過 10%，或空格隔開的中文詞
+  10 個以上且 90% 以上是 2–4 字的選單長度（`navigation_heavy`；10 天正文的第 99.9
+  百分位是 78%）、與標題相關性過低（`unrelated_to_title`）。不合格為 `rejected`；
+  付費牆、存取被拒、404／410、非 HTML、過大，或在未略過 robots 時被 robots 禁止，為
+  `unavailable`。這些都是最終答案（`fetch_status = done`），只有逾時、連線錯誤、429、
+  5xx 會重試。Cloudflare 標示 `cf-mitigated: challenge` 的回應記為 `unavailable`
+  （`bot_challenge`），不再當成 5xx 重試。
 - 瀏覽器補抓（2026-10-14 起）：純 HTTP 讀取遇到 403、Cloudflare challenge，或讀到的
   文字未通過品質檢查時，同一個 `fetch` 嘗試內再用 CloakBrowser（`cloakbrowser`
   service，經 CDP 連線）讀一次。robots 禁止、401／402／451、404／410、付費牆、
