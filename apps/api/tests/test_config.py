@@ -2,7 +2,6 @@ import pytest
 from pydantic import SecretStr, ValidationError
 
 from daily_insights_api.core.config import (
-    DailyNewsSchedulerSettings,
     MacroDashboardSchedulerSettings,
     Settings,
 )
@@ -69,37 +68,26 @@ def test_macro_scheduler_requires_only_a_production_database_url() -> None:
         MacroDashboardSchedulerSettings(environment="production", database_url=None)
 
 
-def test_daily_news_scheduler_requires_only_database_and_feature_flag() -> None:
-    settings = DailyNewsSchedulerSettings.model_validate(
-        {
-            "environment": "production",
-            "database_url": "postgresql+psycopg://app:secret@example.invalid/app",
-            "daily_news_enabled": True,
-        }
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("news_extra_hostnames", "https://example.com/path", "news_extra_hostnames"),
+        ("news_blocked_hostnames", "example.com,", "news_blocked_hostnames"),
+        ("guardian_api_key", SecretStr("CHANGE_ME_GUARDIAN"), "guardian_api_key"),
+    ],
+)
+def test_newsroom_worker_validates_ingestion_settings(
+    field: str, value: object, message: str
+) -> None:
+    valid = Settings(
+        runtime_role="newsroom-worker",
+        news_extra_hostnames="example.com",
+        news_blocked_hostnames="blocked.example.com",
     )
-    assert settings.daily_news_enabled is True
+    assert valid.news_extra_hostnames == "example.com"
 
-    with pytest.raises(ValidationError, match="database_url is required"):
-        DailyNewsSchedulerSettings(environment="production", database_url=None)
-
-
-def test_daily_news_uses_news_specific_model_key() -> None:
-    settings = Settings.model_validate(
-        production_settings(
-            daily_news_enabled=True,
-            news_model_api_key=SecretStr("news-production-key"),
-        )
-    )
-    assert settings.news_model_api_key is not None
-
-    with pytest.raises(ValidationError, match="news_model_api_key"):
-        Settings.model_validate(
-            production_settings(
-                daily_news_enabled=True,
-                news_model_api_key=None,
-                model_api_key=SecretStr("legacy-key-name"),
-            )
-        )
+    with pytest.raises(ValidationError, match=message):
+        Settings.model_validate({"runtime_role": "newsroom-worker", field: value})
 
 
 @pytest.mark.parametrize(

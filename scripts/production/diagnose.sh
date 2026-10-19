@@ -9,7 +9,10 @@ for container in \
   daily-insights-api \
   daily-insights-web \
   daily-insights-orchestration-worker \
+  daily-insights-newsroom-worker \
   daily-insights-orchestration-dispatcher \
+  daily-insights-browser-egress \
+  daily-insights-cloakbrowser \
   daily-insights-nginx; do
   if ! docker inspect "$container" >/dev/null 2>&1; then
     echo "$container: not created"

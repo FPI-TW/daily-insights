@@ -1,6 +1,6 @@
 # 非執行中的新聞來源
 
-2026-09-14 整理。此目錄不供程式載入，不擴充文章白名單。重新啟用前須驗證端點、robots、正文擷取、市場政策與測試。
+2026-09-14 整理。此目錄不供程式載入，不擴充文章白名單。重新啟用前須驗證端點、正文擷取、市場政策與測試。robots.txt 預設已略過（`DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS=true`）。
 
 ## 尚未上線市場
 
@@ -35,3 +35,35 @@ GlobeNewswire Company Announcement（subjectcode 9）退出執行清單，以縮
 原端點：`https://www.globenewswire.com/RssFeed/subjectcode/9-Company%20Announcement/feedTitle/GlobeNewswire%20-%20Company%20Announcement`
 
 此調整保留既有新聞、候選與稽核紀錄；歷史失敗紀錄不是目前仍在抓取的證據。FinDB 不在本次修改範圍。
+
+## 2026-10-14 移除的非新聞來源
+
+產品只收新聞媒體。migration `20261014_0040` 把下列來源軟刪除（設定 `deleted_at` 並停用，後台不再顯示，已收的文章保留）：
+
+| 來源代號                                                                       | 性質                                  |
+| ------------------------------------------------------------------------------ | ------------------------------------- |
+| `fed-press`（Federal Reserve）、`ecb-press`（European Central Bank）           | 央行新聞稿                            |
+| `sec-8k`（SEC EDGAR）                                                          | 公司申報                              |
+| `prnewswire-financial-services`、`globenewswire-mna`、`globenewswire-earnings` | 企業公關稿；996 篇只貢獻 2 個上架事件 |
+
+同一天評估過的台美官方端點（央行、主計總處、財政部、金管會、證交所、公開資訊觀測站、BLS、BEA、美國財政部）也不收。
+
+## 2026-10-14 停用的新聞媒體
+
+同一個 migration 停用下列價值太低的新聞媒體（列保留，可在後台重新啟用）。
+
+| 來源代號                                                       | 停用原因                                                               |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `storm`（風傳媒）                                              | sitemap 每天只更新一次，文章平均晚 14.7 小時進來，重複上架前一天的新聞 |
+| `gvm`（遠見）、`cityam`（City A.M.）、`thestreet`（TheStreet） | 合計 850 篇只貢獻 10 個上架事件；遠見延遲中位數 9.2 小時               |
+
+## 2026-10-15 補上的 robots 受阻媒體端點
+
+`20261015_0043`／`20261015_0044` 在略過 robots.txt 後，為 MarketWatch、Yahoo Finance、Seeking Alpha、Motley Fool、MoneyDJ 寫入可用發現端點，並校正 TechNews。細節見 `docs/research/robots-blocked-sources-recovery.md`。
+
+## 2026-10-19 停用的新聞媒體
+
+migration `20261019_0049` 停用 `investing-com-stocks`（Investing.com，列保留，可在後台重新啟用）：
+10-16 至 10-19 收進的 252 篇只讓 9 篇（3.6%）進入上架事件，且這些事件都另有其他媒體報導，
+不少稿件是轉載 Reuters；網站拒絕讀取的比例逐日升高（10-16 為 142 篇中 31 篇、10-17 為 87 篇中
+70 篇、10-19 全部被拒），多數文章拿不到正文。

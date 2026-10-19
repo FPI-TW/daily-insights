@@ -5,13 +5,10 @@ from pathlib import Path as FileSystemPath
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
-from zoneinfo import ZoneInfo
 
 import pytest
 from anyio import Path
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from test_news_integration import news_database as news_database
 
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.data_management.models import DataManagementRun
@@ -86,6 +83,9 @@ class _DatabaseWithFlushFailure:
         self.error = error
         self.flush = AsyncMock(side_effect=error)
         self.rollback = AsyncMock()
+        # Advisory locks and conflict probes find nothing active.
+        self.execute = AsyncMock()
+        self.scalar = AsyncMock(return_value=None)
 
     def add(self, _: object) -> None:
         pass
@@ -101,14 +101,14 @@ class _PostgresError(Exception):
 @pytest.mark.asyncio
 async def test_enqueue_only_maps_named_active_run_unique_conflicts_to_409_error() -> None:
     active_error = IntegrityError(
-        "INSERT", {}, _PostgresError("uq_data_management_runs_active_news")
+        "INSERT", {}, _PostgresError("uq_data_management_runs_active_manual_macro_dashboard")
     )
     active_database = _DatabaseWithFlushFailure(active_error)
     with pytest.raises(RunAlreadyActiveError):
         await enqueue_run(
             cast(Any, active_database),
-            operation="news_market",
-            market_code="global",
+            operation="macro_dashboard",
+            market_code=None,
             requester_id=uuid.uuid4(),
             request_id=None,
         )
@@ -119,8 +119,8 @@ async def test_enqueue_only_maps_named_active_run_unique_conflicts_to_409_error(
     with pytest.raises(IntegrityError) as raised:
         await enqueue_run(
             cast(Any, other_database),
-            operation="news_market",
-            market_code="global",
+            operation="macro_dashboard",
+            market_code=None,
             requester_id=uuid.uuid4(),
             request_id=None,
         )
@@ -455,163 +455,6 @@ async def test_the_twse_run_propagates_a_partial_taiex_refresh(
     index = cast(dict[str, object], result["index"])
     assert index["status"] == "partial"
     assert "2026-08" in cast(str, index["error"])
-
-
-@pytest.mark.asyncio
-async def test_news_execution_routes_market_and_all_runs_and_closes_client(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from daily_insights_api.modules.data_management import service
-
-    calls: list[str] = []
-    observed: dict[str, object] = {}
-
-    class Client:
-        def __init__(self, **_: object) -> None:
-            pass
-
-        async def aclose(self) -> None:
-            calls.append("closed")
-
-    async def market(*_: object, **kwargs: object) -> str:
-        calls.append(f"market:{cast(Any, kwargs['spec']).market_code}")
-        return "complete"
-
-    async def progress(*_: object) -> dict[str, object]:
-        return {market: {"state": "completed", "progress": {"published": 1}} for market in observed}
-
-    async def market_with_progress(*args: object, **kwargs: object) -> str:
-        observed[str(cast(Any, kwargs["spec"]).market_code)] = True
-        return await market(*args, **kwargs)
-
-    monkeypatch.setattr(service, "create_news_client", lambda **_: Client())
-    monkeypatch.setattr(service, "run_news_edition", market_with_progress)
-    monkeypatch.setattr(service, "workflow_results", progress)
-    settings = Settings(environment="test", daily_news_enabled=True, news_model_api_key="key")
-    market_status, market_result, market_error = await execute_run(
-        _run("news_market", "tw_equity"), cast(Any, None), settings
-    )
-    # The scheduled row (no requester) generates each market once; an
-    # administrator's rerun regenerates on purpose.
-    all_status, all_result, all_error = await execute_run(
-        _run("news_all"), cast(Any, None), settings
-    )
-    manual = _run("news_all")
-    manual.requested_by_user_id = uuid.uuid4()
-    await execute_run(manual, cast(Any, None), settings)
-    assert (market_status, market_error) == ("succeeded", None)
-    assert (all_status, all_error) == ("succeeded", None)
-    assert market_result["outcomes"] == {"tw_equity": "complete"}
-    assert all_result["outcomes"] == {
-        "global": "complete",
-        "tw_equity": "complete",
-        "us_equity": "complete",
-    }
-    assert calls == [
-        "market:tw_equity",
-        "closed",
-        "market:global",
-        "market:tw_equity",
-        "market:us_equity",
-        "closed",
-        "market:global",
-        "market:tw_equity",
-        "market:us_equity",
-        "closed",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_news_publish_execution_passes_the_payload_and_closes_client(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from daily_insights_api.modules.data_management import service
-
-    calls: list[str] = []
-    seen: dict[str, object] = {}
-
-    class Client:
-        def __init__(self, **_: object) -> None:
-            pass
-
-        async def aclose(self) -> None:
-            calls.append("closed")
-
-    async def publish(
-        session_factory: object, client: object, **kwargs: object
-    ) -> tuple[str, dict[str, object], str | None]:
-        del session_factory, client
-        calls.append("publish")
-        seen.update(kwargs)
-        return "partial", {"published": 1, "failed": 1}, "news_publish_partial"
-
-    monkeypatch.setattr(service, "create_news_client", lambda **_: Client())
-    monkeypatch.setattr(service, "publish_candidates", publish)
-    monkeypatch.setattr(service, "workflow_results", AsyncMock(return_value={}))
-    run = _run("news_publish")
-    run.requested_by_user_id = uuid.uuid4()
-    edition_id, candidate_id = uuid.uuid4(), uuid.uuid4()
-    run.payload = {"edition_id": str(edition_id), "candidate_ids": [str(candidate_id)]}
-    settings = Settings(
-        environment="test",
-        daily_news_enabled=True,
-        news_model_api_key="key",
-        news_fetch_timeout_seconds=7,
-    )
-    status, result, error = await execute_run(run, cast(Any, None), settings)
-    assert (status, error) == ("partial", "news_publish_partial")
-    assert result == {"published": 1, "failed": 1, "news": {}}
-    assert calls == ["publish", "closed"]
-    assert seen["run_id"] == run.id
-    assert seen["edition_id"] == edition_id
-    assert seen["candidate_ids"] == [candidate_id]
-    assert seen["actor_user_id"] == run.requested_by_user_id
-    assert seen["fetch_timeout_seconds"] == 7
-    assert "www.theguardian.com" in cast(frozenset[str], seen["allowed_hostnames"])
-
-    run.payload = {"edition_id": "not-a-uuid", "candidate_ids": []}
-    assert await execute_run(run, cast(Any, None), settings) == (
-        "failed",
-        {},
-        "news_publish_payload_invalid",
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_news_publish_execution_rejects_disabled_or_missing_model_key(
-    news_database: async_sessionmaker[AsyncSession],
-) -> None:
-    for settings in (
-        Settings(environment="test", daily_news_enabled=False, news_model_api_key="key"),
-        Settings(environment="test", daily_news_enabled=True, news_model_api_key=None),
-        Settings(environment="test", daily_news_enabled=True, news_model_api_key="CHANGE_ME_KEY"),
-    ):
-        status, result, error = await execute_run(_run("news_publish"), news_database, settings)
-        assert (status, result, error) == (
-            "failed",
-            {"outcome": "unavailable"},
-            "daily_news_unavailable",
-        )
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_news_execution_rejects_disabled_or_missing_model_key(
-    news_database: async_sessionmaker[AsyncSession],
-) -> None:
-    run = _run("news_all")
-    run.edition_date = datetime.now(ZoneInfo("Asia/Taipei")).date()
-    run.requested_by_user_id = uuid.uuid4()
-    status, result, error = await execute_run(
-        run,
-        news_database,
-        Settings(environment="test", daily_news_enabled=False),
-    )
-    assert (status, error) == ("failed", "news_model_configuration_missing")
-    assert result["outcome"] == "interrupted"
-    assert result["outcomes"] == {}
-    assert set(cast(dict[str, object], result["news"])) == {"global"}
 
 
 @pytest.mark.asyncio

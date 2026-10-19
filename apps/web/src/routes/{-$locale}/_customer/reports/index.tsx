@@ -35,7 +35,7 @@ function ReportsPage() {
   return (
     <>
       <MarketQuerySection query={news} loading={<DailyNewsLoading />}>
-        {data => <DailyNews news={data ?? null} />}
+        {data => <DailyNews edition={data ?? null} />}
       </MarketQuerySection>
       <MarketQuerySection query={reports} loading={null}>
         {() => null}

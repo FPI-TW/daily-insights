@@ -3,7 +3,7 @@ import {
   createBrowserTransport,
   createMarketClient,
   createReportClient,
-  createNewsClient,
+  createNewsroomClient,
   createAnalystViewpointClient,
   launchMarketCodeSchema,
   marketCodeSchema,
@@ -161,13 +161,15 @@ export function marketQueries(scope: MarketScope, locale: Locale) {
           throw error
         }
       }),
-    news: (marketCode?: string) =>
-      query("news", [marketCode ?? "global", locale], transport => {
-        const client = createNewsClient(transport)
-        return marketCode && isNewsMarketCode(marketCode)
-          ? client.latestForMarket(locale, marketCode)
-          : client.latest(locale)
-      }),
+    // The home page shows the global newsroom edition; a market page shows
+    // its own when it has one.
+    news: (marketCode?: string) => {
+      const newsroomMarket =
+        marketCode && isNewsMarketCode(marketCode) ? marketCode : "global"
+      return query("news", [newsroomMarket, locale], transport =>
+        createNewsroomClient(transport).latestEdition(newsroomMarket, locale)
+      )
+    },
     viewpoints: () =>
       query("viewpoints", [], transport =>
         createAnalystViewpointClient(transport).today()

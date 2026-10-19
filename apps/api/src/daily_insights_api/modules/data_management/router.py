@@ -1,4 +1,3 @@
-from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -12,19 +11,15 @@ from daily_insights_api.modules.data_management.schemas import (
     DataManagementRunCreate,
     DataManagementRunList,
     DataManagementRunResponse,
-    NewsResumeRequest,
-    RunOperationGroup,
     run_response,
 )
 from daily_insights_api.modules.data_management.service import (
     RunAlreadyActiveError,
     cancel_run,
     enqueue_run,
-    resume_news_run,
     taipei_today,
 )
 from daily_insights_api.modules.identity.api import AuthContext, require_csrf_roles, require_roles
-from daily_insights_api.modules.news.api import EDITION_ORDER, NewsProgress, NewsWorkflow
 from daily_insights_api.modules.reports.api import ACTIVE_LAUNCH_MANIFEST
 from daily_insights_api.web.dependencies import get_database_session
 
@@ -48,8 +43,6 @@ async def catalog(request: Request, _: AdminRead) -> DataManagementCatalog:
         twse_enabled=settings.twse_enabled,
         markets=[item.market_code for item in ACTIVE_LAUNCH_MANIFEST.markets],
         rerunnable_providers=list(RERUNNABLE_PROVIDERS),
-        daily_news_enabled=settings.daily_news_enabled,
-        news_markets=list(EDITION_ORDER),
         macro_dashboard_enabled=True,
     )
 
@@ -86,8 +79,6 @@ async def create_run(
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "yfinance is unavailable")
         if payload.provider == "twse" and not settings.twse_enabled:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "twse is unavailable")
-    if payload.operation.startswith("news") and not settings.daily_news_enabled:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "daily news is unavailable")
     # The database column remains named market_code for compatibility with
     # historical queue rows; provider reruns store their provider code there.
     operation = payload.operation
@@ -147,19 +138,11 @@ async def list_runs(
     _: AdminRead,
     database: Annotated[AsyncSession, Depends(get_database_session)],
     page: int = Query(default=1, ge=1),
-    operation_group: Annotated[RunOperationGroup | None, Query()] = None,
 ) -> DataManagementRunList:
-    filters = []
-    if operation_group == "news":
-        filters.append(DataManagementRun.operation.in_(("news_all", "news_market", "news_publish")))
-    total = (
-        await database.scalar(select(func.count()).select_from(DataManagementRun).where(*filters))
-        or 0
-    )
+    total = await database.scalar(select(func.count()).select_from(DataManagementRun)) or 0
     runs = (
         await database.scalars(
             select(DataManagementRun)
-            .where(*filters)
             .order_by(DataManagementRun.created_at.desc(), DataManagementRun.id.desc())
             .offset((page - 1) * RUN_PAGE_SIZE)
             .limit(RUN_PAGE_SIZE)
@@ -169,7 +152,6 @@ async def list_runs(
         await database.scalars(
             select(DataManagementRun)
             .where(
-                *filters,
                 or_(
                     DataManagementRun.status.in_(("pending", "running")),
                     and_(
@@ -181,84 +163,13 @@ async def list_runs(
             .order_by(DataManagementRun.created_at.desc(), DataManagementRun.id.desc())
         )
     ).all()
-    current_day_runs: Sequence[DataManagementRun] = ()
-    if operation_group == "news":
-        current_day_runs = (
-            await database.scalars(
-                select(DataManagementRun)
-                .where(*filters, DataManagementRun.edition_date == taipei_today())
-                .order_by(DataManagementRun.created_at.desc(), DataManagementRun.id.desc())
-            )
-        ).all()
     return DataManagementRunList(
-        items=[response(run, news=await _news_progress(database, run)) for run in runs],
+        items=[response(run) for run in runs],
         page=page,
         total=total,
         has_more=page * RUN_PAGE_SIZE < total,
-        active_runs=[
-            response(run, news=await _news_progress(database, run)) for run in active_runs
-        ],
-        current_day_runs=[
-            response(run, news=await _news_progress(database, run)) for run in current_day_runs
-        ],
+        active_runs=[response(run) for run in active_runs],
     )
-
-
-async def _news_progress(
-    database: AsyncSession, run: DataManagementRun
-) -> dict[str, NewsProgress] | None:
-    if not run.operation.startswith("news") or run.status not in {"pending", "running"}:
-        return None
-    workflows = (
-        await database.scalars(select(NewsWorkflow).where(NewsWorkflow.run_id == run.id))
-    ).all()
-    return {
-        row.market_code: NewsProgress(
-            id=str(row.id),
-            state=row.state,
-            stage=row.stage,
-            progress=row.progress,
-            failures=row.failures,
-            attempt=row.attempt,
-            next_retry_at=row.next_retry_at,
-            publication="technical_degradation"
-            if row.failures
-            else "editorial_shortfall"
-            if row.progress.get("published", 0) < 5
-            else "available",
-        )
-        for row in workflows
-    } or None
-
-
-@router.post(
-    "/runs/{run_id}/resume",
-    response_model=DataManagementRunResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def resume_run(
-    run_id: str,
-    payload: NewsResumeRequest,
-    request: Request,
-    actor: AdminWrite,
-    database: Annotated[AsyncSession, Depends(get_database_session)],
-) -> DataManagementRunResponse:
-    import uuid
-
-    try:
-        parsed = uuid.UUID(run_id)
-        run = await resume_news_run(
-            database,
-            run_id=parsed,
-            actor_user_id=actor.user.id,
-            request_id=request.state.request_id,
-            resume_provider=payload.resume_provider,
-        )
-    except ValueError as error:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
-    except RunAlreadyActiveError as error:
-        raise HTTPException(status.HTTP_409_CONFLICT, "news recovery already active") from error
-    return response(run)
 
 
 @router.get("/runs/{run_id}", response_model=DataManagementRunResponse)
@@ -274,4 +185,4 @@ async def get_run(
     run = await database.get(DataManagementRun, parsed)
     if run is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found")
-    return response(run, news=await _news_progress(database, run))
+    return response(run)

@@ -40,10 +40,12 @@ make init
 make dev
 ```
 
-完整 Compose 開發環境會啟動 API、Web、nginx、PostgreSQL，以及統一的
-`orchestration-worker` 與 `orchestration-dispatcher`。本機預設啟用 orchestration；
-worker 使用最小權限的 `orchestration-worker` runtime role，dispatcher 每日台北時間
-08:00 建立 routine。
+完整 Compose 開發環境會啟動 API、Web、nginx、PostgreSQL、`podcast-media-worker`、
+重點新聞的 `newsroom-worker`，以及統一的 `orchestration-worker` 與
+`orchestration-dispatcher`。本機預設啟用 orchestration；worker 使用最小權限的
+`orchestration-worker` runtime role，dispatcher 每日台北時間 08:00 建立 routine。
+`newsroom-worker` 在 `apps/api/.env` 的 `DAILY_INSIGHTS_NEWSROOM_ENABLED` 為 `false`
+（預設）時只維持心跳。
 
 常用指令：
 
@@ -53,7 +55,7 @@ make dev-web       # 僅啟動 TanStack Start，後端位址由 API_INTERNAL_URL
 make dev-api       # 僅啟動 FastAPI
 make migrate       # 升級 API 資料庫 schema
 make generate-morning-reports # 本地以 Twelve Data 單次產生三市場晨報
-make generate-daily-news      # 本地以 DeepSeek 單次產生本日重大新聞
+make assemble-newsroom        # 本地為指定版次日期重新組稿重點新聞草稿
 make test-db       # 以隔離 PostgreSQL 執行完整測試
 make check         # 執行格式、lint、型別、測試與建置
 make stop          # 停止 Compose 開發環境
@@ -84,10 +86,14 @@ make bootstrap-admin EMAIL=admin@example.com NAME="Admin"
 
 指令只會顯示一次隨機臨時密碼；管理員登入後必須立即更改。
 
-本地需要驗證每日重大新聞時，可執行 `make generate-daily-news`；它同樣只允許
-development／test 環境的一次性執行，使用 `apps/api/.env` 中的 DeepSeek credential，
-並只會產生台北時間當日的版本。正式環境以 `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`
-旗標啟用，詳見[每日重大新聞架構與部署](docs/architecture/daily-news.md)。
+重點新聞由常駐的 `newsroom-worker` 持續收稿與分析，並在每日 08:00 由統一 routine
+組稿。本地驗證時，先在 `apps/api/.env` 設定 `DAILY_INSIGHTS_NEWSROOM_ENABLED=true`
+與 `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY`、`DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`，
+讓 worker 收稿與初篩；需要立即產生某日草稿時執行
+`make assemble-newsroom EDITION_DATE=YYYY-MM-DD`（省略時為當日），再到
+`/admin/newsroom` 審核。正式環境同樣以 `DAILY_INSIGHTS_NEWSROOM_ENABLED` 旗標啟用，
+詳見[重點新聞架構與部署](docs/architecture/daily-news.md)與
+[重點新聞維運手冊](docs/runbooks/news-recovery.md)。
 
 目前已完成身份／租戶、結構化報告基礎與 Podcast 先行版的本機實作。正式 R2
 音檔與 browser E2E 驗收狀態請以各階段文件為準；領域出現在文件中不代表已經
@@ -134,7 +140,8 @@ Compose 設定僅用於開發環境，不代表正式環境拓撲。正式部署
 - [Phase 2 資料來源與結構化報告](docs/architecture/phase-2-data-reports.md)
 - [Phase 2B 完整應用架構與驗收](docs/architecture/phase-2b-application-architecture.md)
 - [Podcast 先行版範圍與決策清單](docs/architecture/podcast-pilot.md)
-- [每日重大新聞架構與部署](docs/architecture/daily-news.md)
+- [重點新聞架構與部署](docs/architecture/daily-news.md)
+- [重點新聞維運手冊](docs/runbooks/news-recovery.md)
 - [Web 動畫設計與參數](docs/architecture/web-motion.md)
 - [正式環境維運操作手冊](docs/runbooks/production.md)
 - [專案審查基準（2026-09-02）](docs/reviews/2026-09-02-project-review.md)

@@ -1,0 +1,96 @@
+# US / global newsroom source curation (2026-10-15).
+# Applied by migration 20261015_0045.
+# Note: finance.yahoo.com/news/rssindex returns HTTP 404; GSPC headline RSS used instead.
+
+disabled:
+  - key: motley-fool-news
+    reason: retail SEO / opinion farm, weak catalysts
+  - key: cnbc-economy
+    reason: low yield zombie channel
+  - key: cnbc-finance
+    reason: low yield zombie channel
+  - key: globenewswire-mna
+    reason: PR wire, already soft-deleted
+  - key: globenewswire-earnings
+    reason: PR wire, already soft-deleted
+  - key: prnewswire-financial-services
+    reason: PR wire, already soft-deleted
+
+updated:
+  - key: yahoo-finance-news
+    name: Yahoo Finance
+    kind: rss
+    url: "https://feeds.finance.yahoo.com/rss/2.0/headline?s=%5EGSPC&region=US&lang=en-US"
+    hostname: finance.yahoo.com
+    markets: [global, us_equity]
+    tier: 2
+    weight: 1.0
+    poll_interval_minutes: 15
+    title_exclude_pattern: "(?i)Should You Buy|Retire Millionaire|Penny Stocks?|Stocks? To (?:Watch|Buy|Own)|PR Newswire|Business Wire|GlobeNewswire|Accesswire|EIN Presswire|Size, Share, Growth|Forecast to 20|Market Report \\d{4}"
+    enabled: true
+  - key: fxstreet-news
+    title_exclude_pattern: "(?i)\\b(price forecast|technical analysis|elliott wave|intraday|support and resistance|chart|fibonacci|rsi|macd)\\b"
+  - key: guardian-world-rss
+    title_exclude_pattern: "(?i)\\b(football|premier league|cricket|rugby|celebrity|film|movie|music|tv review|obituary|recipe|Crossword|quiz)\\b"
+  - key: fed-press
+    name: Federal Reserve
+    kind: rss
+    url: "https://www.federalreserve.gov/feeds/press_all.xml"
+    hostname: www.federalreserve.gov
+    markets: [global, us_equity]
+    tier: 3
+    weight: 1.0
+    poll_interval_minutes: 30
+    enabled: true
+  - key: ecb-press
+    name: European Central Bank
+    kind: rss
+    url: "https://www.ecb.europa.eu/rss/press.html"
+    hostname: www.ecb.europa.eu
+    markets: [global]
+    tier: 3
+    weight: 1.0
+    poll_interval_minutes: 30
+    enabled: true
+
+added:
+  - key: cnbc-investing
+    name: CNBC
+    kind: rss
+    url: "https://www.cnbc.com/id/15839069/device/rss/rss.html"
+    hostname: www.cnbc.com
+    markets: [global, us_equity]
+    tier: 2
+    weight: 1.0
+    poll_interval_minutes: 15
+    enabled: true
+  - key: cnbc-tech
+    name: CNBC
+    kind: rss
+    url: "https://www.cnbc.com/id/19854910/device/rss/rss.html"
+    hostname: www.cnbc.com
+    markets: [global, us_equity, tw_equity]
+    tier: 2
+    weight: 1.0
+    poll_interval_minutes: 15
+    enabled: true
+  - key: investing-com-stocks
+    name: Investing.com
+    kind: rss
+    url: "https://www.investing.com/rss/news_25.rss"
+    hostname: www.investing.com
+    markets: [global, us_equity]
+    tier: 2
+    weight: 1.0
+    poll_interval_minutes: 15
+    enabled: true
+  - key: techcrunch-ai
+    name: TechCrunch
+    kind: rss
+    url: "https://techcrunch.com/category/artificial-intelligence/feed/"
+    hostname: techcrunch.com
+    markets: [us_equity, tw_equity]
+    tier: 2
+    weight: 1.0
+    poll_interval_minutes: 30
+    enabled: true

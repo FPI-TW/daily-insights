@@ -4,7 +4,7 @@ name: daily-insights
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: pgvector/pgvector:pg17
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-daily_insights}
@@ -95,6 +95,101 @@ services:
     networks:
       - app
       - data
+
+  newsroom-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: apps/api/.env
+        required: false
+    environment:
+      DAILY_INSIGHTS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-daily_insights}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-daily_insights}
+      DAILY_INSIGHTS_RUNTIME_ROLE: newsroom-worker
+      DAILY_INSIGHTS_NEWSROOM_BROWSER_CDP_URL: http://cloakbrowser:9222
+    # DAILY_INSIGHTS_NEWSROOM_ENABLED comes from apps/api/.env, the same value
+    # the API and orchestration worker read; while false the worker only idles.
+    command: ["python", "-m", "daily_insights_api.scripts.run_newsroom_worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import time; from pathlib import Path; p = Path('/tmp/newsroom-worker-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 90",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - app
+      - data
+      - browser
+
+  # CloakBrowser for the newsroom fetch fallback; only on the internal browser
+  # network, so browser-egress (public HTTPS only) is its one way out.
+  cloakbrowser:
+    image: docker.io/cloakhq/cloakbrowser@sha256:c8ba6bdddb2bd49c94b1707903b11c04f7fab7815f262acd9c72c1e627e13cb4
+    restart: unless-stopped
+    environment:
+      CLOAKBROWSER_AUTO_UPDATE: "false"
+      XDG_CONFIG_HOME: /tmp/.config
+      XDG_CACHE_HOME: /tmp/.cache
+    command:
+      [
+        "cloakserve",
+        "--proxy-server=http://browser-egress:3128",
+        "--proxy-bypass-list=<-loopback>",
+      ]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9222/', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - browser
+
+  browser-egress:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    command:
+      ["python", "-m", "daily_insights_api.scripts.run_browser_egress_proxy"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import socket; socket.create_connection(('127.0.0.1', 3128), timeout=3).close()",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - app
+      - browser
 
   orchestration-worker:
     build:
@@ -231,4 +326,7 @@ networks:
   # egress to development provider endpoints.
   app:
   data:
+    internal: true
+  # CloakBrowser's network; its only way out is browser-egress.
+  browser:
     internal: true

@@ -41,9 +41,6 @@ TERMINAL_FUNCTION_STATUSES = frozenset(
     ("succeeded", "no_change", "partial", "unavailable", "failed", "cancelled")
 )
 TERMINAL_RUN_STATUSES = frozenset(("succeeded", "partial", "failed", "cancelled"))
-NEWS_REFRESH_FUNCTION_KEYS = frozenset(
-    {"news_global_refresh", "news_tw_equity_refresh", "news_us_equity_refresh"}
-)
 
 
 def taipei_today(now: datetime | None = None) -> date:
@@ -329,11 +326,6 @@ async def terminalize_expired_functions(
                     FunctionRun.lease_expires_at <= effective_now,
                 ),
             ),
-            ~and_(
-                FunctionRun.function_key == "news_publish",
-                FunctionRun.status == "pending",
-                FunctionRun.attempt_count == 0,
-            ),
             or_(
                 and_(JobRun.deadline_at.is_not(None), JobRun.deadline_at <= effective_now),
                 FunctionRun.attempt_count >= MAX_ATTEMPTS,
@@ -347,7 +339,7 @@ async def terminalize_expired_functions(
         )
     )
     # Acquire the same JobRun → FunctionRun → FunctionAttempt order used by
-    # claims, completion, and cancellation before touching news siblings.
+    # claims, completion, and cancellation.
     locked_jobs = list(
         await database.scalars(
             select(JobRun)
@@ -356,7 +348,6 @@ async def terminalize_expired_functions(
             .with_for_update(skip_locked=True)
         )
     )
-    manual_job_ids = {job.id for job in locked_jobs if job.trigger != "automatic"}
     expired = list(
         await database.scalars(
             eligible.where(FunctionRun.job_run_id.in_([job.id for job in locked_jobs]))
@@ -390,15 +381,6 @@ async def terminalize_expired_functions(
             .distinct()
         )
     )
-    latest_attempts = {
-        attempt.function_run_id: attempt
-        for attempt in await database.scalars(
-            select(FunctionAttempt)
-            .where(FunctionAttempt.function_run_id.in_(expired_ids))
-            .distinct(FunctionAttempt.function_run_id)
-            .order_by(FunctionAttempt.function_run_id, FunctionAttempt.attempt_number.desc())
-        )
-    }
     for function_run in expired:
         if function_run.status in TERMINAL_FUNCTION_STATUSES:
             continue
@@ -414,52 +396,8 @@ async def terminalize_expired_functions(
             if function_run.attempt_count >= MAX_ATTEMPTS
             else "deadline_reached"
         )
-        latest_attempt = latest_attempts.get(function_run.id)
-        if (
-            function_run.job_run_id in manual_job_ids
-            and function_run.function_key in NEWS_REFRESH_FUNCTION_KEYS
-            and latest_attempt is not None
-            and latest_attempt.status == "failed"
-        ):
-            await fail_pending_news_siblings(
-                database,
-                function_run=function_run,
-                error_code=latest_attempt.error_code,
-                now=effective_now,
-            )
     await database.commit()
     return len(expired)
-
-
-async def fail_pending_news_siblings(
-    database: AsyncSession,
-    *,
-    function_run: FunctionRun,
-    error_code: str | None,
-    now: datetime,
-) -> None:
-    """Stop manual news siblings under their already-locked parent JobRun."""
-    safe_code = error_code or "news_sibling_systemic_failure"
-    await database.execute(
-        update(FunctionRun)
-        .where(
-            FunctionRun.job_run_id == function_run.job_run_id,
-            FunctionRun.id != function_run.id,
-            FunctionRun.function_key.in_(NEWS_REFRESH_FUNCTION_KEYS),
-            FunctionRun.status.in_(("pending", "retry_wait")),
-        )
-        .values(
-            status="failed",
-            completed_at=now,
-            next_attempt_at=None,
-            error=safe_code,
-            result={
-                "outcome": "blocked_by_news_sibling",
-                "upstream_function_key": function_run.function_key,
-                "error_code": safe_code,
-            },
-        )
-    )
 
 
 async def retry_due(function_run: FunctionRun, job_run: JobRun, now: datetime) -> bool:
