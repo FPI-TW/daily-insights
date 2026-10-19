@@ -654,6 +654,9 @@ describe("API client trust boundary", () => {
       captured = init
       return Response.json(
         {
+          member_type: "regular",
+          trial_expires_at: null,
+          trial_expired: false,
           membership_id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
           user_id: "9322a09a-6a02-421b-a966-a5cd5f44056e",
           email: "member@example.com",
@@ -858,5 +861,118 @@ describe("API client trust boundary", () => {
     expect(result.status).toBe("failed")
     expect(result.files).toHaveLength(2)
     expect(result.files.every(file => file.status === "failed")).toBe(true)
+  })
+})
+
+it("signs and completes stateless Podcast uploads with validated responses and CSRF", async () => {
+  const assetId = "2a5e0d3e-5b2c-4d51-8f2e-6f0d3a9c1b22"
+  const calls: { path: string; init?: RequestInit }[] = []
+  const client = createPodcastAdminClient(async (path, init) => {
+    calls.push({ path, ...(init ? { init } : {}) })
+    return Response.json(
+      path.endsWith("/complete")
+        ? {
+            asset_id: assetId,
+            episode_id: "68f17dd0-06d0-4c95-aa5d-f22ccdc6cf09",
+            locale: "en",
+            status: "completed",
+            sha256: "a".repeat(64),
+            duration_seconds: 9,
+          }
+        : {
+            files: [
+              {
+                asset_id: assetId,
+                locale: "en",
+                upload_url: "https://r2.test/upload",
+                upload_token: "signed-ticket",
+                required_headers: {
+                  "Content-Type": "audio/mpeg",
+                  "If-None-Match": "*",
+                  "x-amz-meta-sha256": "a".repeat(64),
+                },
+                expires_at: "2026-10-01T10:00:00Z",
+              },
+            ],
+          }
+    )
+  })
+  const signed = await client.signDirectUploads(
+    {
+      trading_date: "2026-10-01",
+      reason: "initial_upload",
+      files: [
+        {
+          locale: "en",
+          filename: "episode.mp3",
+          size_bytes: 256 * 1024 * 1024,
+          mime_type: "audio/mpeg",
+          sha256: "a".repeat(64),
+        },
+      ],
+    },
+    "csrf-token"
+  )
+  expect(
+    await client.completeDirectUpload(
+      signed.files[0]!.upload_token,
+      "csrf-token"
+    )
+  ).toMatchObject({ status: "completed", asset_id: assetId })
+  expect(calls.map(call => call.path)).toEqual([
+    "/api/admin/podcasts/direct-uploads",
+    "/api/admin/podcasts/direct-uploads/complete",
+  ])
+  for (const call of calls) {
+    expect(call.init?.method).toBe("POST")
+    expect(new Headers(call.init?.headers).get("X-CSRF-Token")).toBe(
+      "csrf-token"
+    )
+  }
+  expect(JSON.parse(calls[1]!.init!.body as string)).toEqual({
+    upload_token: "signed-ticket",
+  })
+  const invalid = createPodcastAdminClient(async () =>
+    Response.json({ files: [{ asset_id: assetId }] })
+  )
+  await expect(
+    invalid.signDirectUploads(
+      {
+        trading_date: "2026-10-01",
+        reason: "initial_upload",
+        files: [
+          {
+            locale: "en",
+            filename: "episode.mp3",
+            size_bytes: 7,
+            mime_type: "audio/mpeg",
+            sha256: "a".repeat(64),
+          },
+        ],
+      },
+      "csrf-token"
+    )
+  ).rejects.toThrow()
+})
+
+describe("Podcast removal client", () => {
+  it("sends a validated DELETE with version and CSRF and accepts empty 204", async () => {
+    const transport = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    await expect(createPodcastAdminClient(transport).remove("episode", { expected_version: 2 }, "csrf")).resolves.toBeUndefined()
+    expect(transport).toHaveBeenCalledWith("/api/admin/podcasts/episode", expect.objectContaining({ method: "DELETE", headers: expect.objectContaining({ "X-CSRF-Token": "csrf" }), body: JSON.stringify({ expected_version: 2 }) }))
+    await expect(createPodcastAdminClient(transport).remove("episode", { expected_version: 0 }, "csrf")).rejects.toThrow()
+    expect(transport).toHaveBeenCalledTimes(1)
+  })
+
+  it("retains the incomplete-removal code for retry and rejects premature success", async () => {
+    const detail = { code: "episode_removal_incomplete", episode_id: "episode" }
+    const client = createPodcastAdminClient(async () => Response.json({ detail }, { status: 503 }))
+    await expect(client.remove("episode", { expected_version: 2 }, "csrf")).rejects.toMatchObject({ status: 503, detail })
+    await expect(createPodcastAdminClient(async () => Response.json({ status: "pending" })).remove("episode", { expected_version: 2 }, "csrf")).rejects.toThrow("Unexpected Podcast removal response")
+  })
+
+  it("exports deletion in generated OpenAPI", () => {
+    expect(openapi.paths["/api/admin/podcasts/{episode_id}"].delete.operationId).toBe("admin_podcasts_remove")
+    expect(openapi.paths["/api/admin/podcasts/{episode_id}"].delete.responses).toHaveProperty("204")
   })
 })

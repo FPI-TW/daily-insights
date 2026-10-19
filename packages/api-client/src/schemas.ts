@@ -587,6 +587,9 @@ export type Organization = z.infer<typeof organizationSchema>
 export const organizationListSchema = z.array(organizationSchema)
 
 export const memberSchema = z.object({
+  member_type: z.enum(["regular", "trial"]),
+  trial_expires_at: z.iso.datetime({ offset: true }).nullable(),
+  trial_expired: z.boolean(),
   membership_id: z.uuid(),
   user_id: z.uuid(),
   email: z.string().min(1),
@@ -612,12 +615,16 @@ export type OrganizationCreateInput = {
 }
 
 export type MemberCreateInput = {
+  member_type?: "regular" | "trial"
+  trial_days?: number
   email: string
   display_name: string
   reason: string
 }
 
 export type MemberUpdateInput = {
+  member_type?: "regular" | "trial"
+  trial_expires_at?: string
   display_name?: string
   status?: "active" | "suspended"
   reason: string
@@ -687,6 +694,18 @@ export type PodcastAudioVariantResponse = z.infer<
   typeof podcastAudioVariantResponseSchema
 >
 
+export const podcastRemovalRequestSchema = z.object({
+  expected_version: z.number().int().positive(),
+})
+export type PodcastRemovalInput = z.infer<typeof podcastRemovalRequestSchema>
+
+export const podcastRemovalProgressSchema = z.object({
+  status: z.literal("pending"),
+  total_objects: z.number().int().nonnegative(),
+  cleared_objects: z.number().int().nonnegative(),
+  retained_objects: z.number().int().nonnegative(),
+})
+
 export const podcastEpisodeAdminSchema = z.object({
   id: z.uuid(),
   trading_date: z.iso.date(),
@@ -694,6 +713,7 @@ export const podcastEpisodeAdminSchema = z.object({
   version: z.number().int().positive(),
   metadata: z.array(podcastMetadataSchema),
   metadata_source: podcastMetadataSourceSchema.default("derived"),
+  deletion: podcastRemovalProgressSchema.nullable().optional(),
   audio_variants: z.array(podcastAudioVariantResponseSchema),
   cover_asset_id: z.uuid().nullable(),
   published_at: z.iso.datetime({ offset: true }).nullable(),
@@ -898,3 +918,28 @@ export const newsroomEditionSchema = z.object({
   items: z.array(newsroomItemSchema),
 })
 export type NewsroomEdition = z.infer<typeof newsroomEditionSchema>
+export const podcastDirectUploadRequestSchema =
+  podcastUploadBatchInitRequestSchema.omit({ idempotency_key: true })
+export const podcastDirectUploadTargetSchema = z.object({
+  asset_id: z.string().uuid(),
+  locale: localeSchema,
+  upload_url: z.url(),
+  upload_token: z.string(),
+  required_headers: z.object({
+    "Content-Type": z.string(),
+    "If-None-Match": z.literal("*"),
+    "x-amz-meta-sha256": z.string().regex(/^[a-f0-9]{64}$/),
+  }),
+  expires_at: z.iso.datetime(),
+})
+export type PodcastDirectUploadTarget = z.infer<
+  typeof podcastDirectUploadTargetSchema
+>
+export const podcastCompletedUploadSchema = z.object({
+  asset_id: z.string().uuid(),
+  episode_id: z.string().uuid(),
+  locale: localeSchema,
+  status: z.literal("completed"),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  duration_seconds: z.number().int().positive().nullable(),
+})

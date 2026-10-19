@@ -13,6 +13,7 @@ def create_session(
     *,
     user: User,
     settings: Settings,
+    trial_expires_at: datetime | None = None,
 ) -> tuple[Session, str, str]:
     assert settings.session_secret is not None
     secret = settings.session_secret.get_secret_value()
@@ -23,7 +24,9 @@ def create_session(
         user_id=user.id,
         token_hash=hash_token(token, secret),
         csrf_token_hash=hash_token(csrf_token, secret),
-        expires_at=now + timedelta(seconds=settings.session_ttl_seconds),
+        expires_at=min(now + timedelta(seconds=settings.session_ttl_seconds), trial_expires_at)
+        if trial_expires_at is not None
+        else now + timedelta(seconds=settings.session_ttl_seconds),
         last_seen_at=now,
     )
     database.add(session)

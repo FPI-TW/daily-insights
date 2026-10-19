@@ -28,13 +28,14 @@ from daily_insights_api.modules.orchestration.models import (
 from daily_insights_api.modules.orchestration.registry import FUNCTION_BY_KEY
 from daily_insights_api.modules.orchestration.service import (
     LEASE_DURATION,
+    MAX_ATTEMPTS,
     RECONCILIATION_BATCH_SIZE,
     SUCCESS_FUNCTION_STATUSES,
     TERMINAL_FUNCTION_STATUSES,
     function_dependencies_ready,
     job_dependencies_ready,
     next_retry_at,
-    terminalize_expired_automatic_functions,
+    terminalize_expired_functions,
 )
 
 AttemptStatus = Literal["succeeded", "no_change", "partial", "unavailable", "failed", "cancelled"]
@@ -129,6 +130,7 @@ async def _ready_candidates(
             .join(JobRun, JobRun.id == FunctionRun.job_run_id)
             .where(
                 JobRun.status.in_(("pending", "running")),
+                FunctionRun.attempt_count < MAX_ATTEMPTS,
                 ~blocked_by_dependency,
                 or_(
                     and_(
@@ -168,7 +170,7 @@ async def claim_ready_function(
 ) -> ClaimedFunction | None:
     effective_now = now or datetime.now(UTC)
     async with session_factory() as deadline_database:
-        await terminalize_expired_automatic_functions(deadline_database, now=effective_now)
+        await terminalize_expired_functions(deadline_database, now=effective_now)
     for function_run_id, provider_key in await _ready_candidates(session_factory, effective_now):
         connection = await engine.connect()
         try:
@@ -272,6 +274,8 @@ def _attempt_scope(function_run: FunctionRun) -> dict[str, Any]:
 
 
 def _claimable(function_run: FunctionRun, job_run: JobRun, now: datetime) -> bool:
+    if function_run.attempt_count >= MAX_ATTEMPTS:
+        return False
     if job_run.status not in {"pending", "running"}:
         return False
     if job_run.deadline_at is not None and now >= job_run.deadline_at:
@@ -378,6 +382,7 @@ async def finish_function(
                 next_retry_at(
                     effective_now,
                     job_run.deadline_at,
+                    attempt_count=function_run.attempt_count,
                 )
                 if outcome.retryable and outcome.status in {"partial", "unavailable", "failed"}
                 else None
@@ -410,7 +415,11 @@ async def finish_function(
                 function_run.missing_scopes = list(outcome.missing_scopes) or None
                 if not preserve_partial_result:
                     function_run.result = stored_result
-                function_run.error = outcome.error_code
+                function_run.error = (
+                    "retry_limit_reached"
+                    if outcome.retryable and function_run.attempt_count >= MAX_ATTEMPTS
+                    else outcome.error_code
+                )
             function_run.lease_owner = None
             function_run.lease_token = None
             function_run.lease_expires_at = None

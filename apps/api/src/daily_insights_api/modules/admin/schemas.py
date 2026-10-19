@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 from daily_insights_api.core.enums import OrganizationStatus, SystemRole, UserStatus
 
@@ -44,18 +44,43 @@ class OrganizationResponse(BaseModel):
 
 
 class MemberCreate(AdminInput):
+    member_type: Literal["regular", "trial"] = "regular"
+    trial_days: int | None = Field(default=None, ge=1, strict=True)
+
+    @model_validator(mode="after")
+    def validate_trial(self) -> Self:
+        if self.member_type == "regular" and self.trial_days is not None:
+            raise ValueError("trial days require a trial membership")
+        return self
+
     email: str = Field(min_length=3, max_length=320)
     display_name: str = Field(min_length=1, max_length=200)
     reason: str = Field(min_length=1, max_length=500)
 
 
 class MemberUpdate(AdminInput):
+    member_type: Literal["regular", "trial"] | None = None
+    trial_expires_at: AwareDatetime | None = None
+
+    @model_validator(mode="after")
+    def validate_trial(self) -> Self:
+        if "member_type" in self.model_fields_set and self.member_type is None:
+            raise ValueError("member type must not be null")
+        if "trial_expires_at" in self.model_fields_set and self.trial_expires_at is None:
+            raise ValueError("trial expiry must not be null; convert to regular instead")
+        if self.member_type == "regular" and self.trial_expires_at is not None:
+            raise ValueError("regular members cannot have a trial expiry")
+        return self
+
     display_name: str | None = Field(default=None, min_length=1, max_length=200)
     status: UserStatus | None = None
     reason: str = Field(min_length=1, max_length=500)
 
 
 class MemberResponse(BaseModel):
+    member_type: Literal["regular", "trial"]
+    trial_expires_at: datetime | None
+    trial_expired: bool
     membership_id: uuid.UUID
     user_id: uuid.UUID
     email: str

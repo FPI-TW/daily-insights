@@ -732,6 +732,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/api/admin/podcasts/direct-uploads": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Sign Direct Upload */
+    post: operations["admin_podcast_direct_upload_sign"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/api/admin/podcasts/direct-uploads/complete": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Complete Direct Upload */
+    post: operations["admin_podcast_direct_upload_complete"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/api/admin/podcasts/upload-batches": {
     parameters: {
       query?: never
@@ -811,7 +845,8 @@ export interface paths {
     /** Admin Update */
     put: operations["admin_podcasts_update"]
     post?: never
-    delete?: never
+    /** Admin Remove */
+    delete: operations["admin_podcasts_remove"]
     options?: never
     head?: never
     patch?: never
@@ -1482,6 +1517,7 @@ export interface components {
        * Format: uuid
        */
       organization_id: string
+      usage: components["schemas"]["TokenUsageSummary"]
       /**
        * User Id
        * Format: uuid
@@ -1513,6 +1549,7 @@ export interface components {
       organization_id: string
       /** Title */
       title: string | null
+      usage: components["schemas"]["TokenUsageSummary"]
       /**
        * User Id
        * Format: uuid
@@ -1601,6 +1638,39 @@ export interface components {
         | components["schemas"]["ReportsIndexContext"]
         | components["schemas"]["ReportDetailContext"]
     }
+    /** CompleteUploadRequest */
+    CompleteUploadRequest: {
+      /** Upload Token */
+      upload_token: string
+    }
+    /** CompletedUpload */
+    CompletedUpload: {
+      /**
+       * Asset Id
+       * Format: uuid
+       */
+      asset_id: string
+      /** Duration Seconds */
+      duration_seconds: number | null
+      /**
+       * Episode Id
+       * Format: uuid
+       */
+      episode_id: string
+      /**
+       * Locale
+       * @enum {string}
+       */
+      locale: "zh-hant" | "zh-hans" | "en"
+      /** Sha256 */
+      sha256: string
+      /**
+       * Status
+       * @default completed
+       * @constant
+       */
+      status: "completed"
+    }
     /** ComponentHealth */
     ComponentHealth: {
       /**
@@ -1613,6 +1683,52 @@ export interface components {
     CsrfTokenResponse: {
       /** Csrf Token */
       csrf_token: string
+    }
+    /** DirectUploadRequest */
+    DirectUploadRequest: {
+      /** Files */
+      files: components["schemas"]["UploadRequest"][]
+      /**
+       * Reason
+       * @enum {string}
+       */
+      reason: "initial_upload" | "update_file" | "other"
+      /**
+       * Trading Date
+       * Format: date
+       */
+      trading_date: string
+    }
+    /** DirectUploadResponse */
+    DirectUploadResponse: {
+      /** Files */
+      files: components["schemas"]["DirectUploadTarget"][]
+    }
+    /** DirectUploadTarget */
+    DirectUploadTarget: {
+      /**
+       * Asset Id
+       * Format: uuid
+       */
+      asset_id: string
+      /**
+       * Expires At
+       * Format: date-time
+       */
+      expires_at: string
+      /**
+       * Locale
+       * @enum {string}
+       */
+      locale: "zh-hant" | "zh-hans" | "en"
+      /** Required Headers */
+      required_headers: {
+        [key: string]: string
+      }
+      /** Upload Token */
+      upload_token: string
+      /** Upload Url */
+      upload_url: string
     }
     /** EconomicEvent */
     EconomicEvent: {
@@ -2336,8 +2452,16 @@ export interface components {
       display_name: string
       /** Email */
       email: string
+      /**
+       * Member Type
+       * @default regular
+       * @enum {string}
+       */
+      member_type: "regular" | "trial"
       /** Reason */
       reason: string
+      /** Trial Days */
+      trial_days?: number | null
     }
     /** MemberResponse */
     MemberResponse: {
@@ -2351,6 +2475,11 @@ export interface components {
        */
       joined_at: string
       /**
+       * Member Type
+       * @enum {string}
+       */
+      member_type: "regular" | "trial"
+      /**
        * Membership Id
        * Format: uuid
        */
@@ -2358,6 +2487,10 @@ export interface components {
       /** Must Change Password */
       must_change_password: boolean
       status: components["schemas"]["UserStatus"]
+      /** Trial Expired */
+      trial_expired: boolean
+      /** Trial Expires At */
+      trial_expires_at: string | null
       /**
        * User Id
        * Format: uuid
@@ -2368,9 +2501,13 @@ export interface components {
     MemberUpdate: {
       /** Display Name */
       display_name?: string | null
+      /** Member Type */
+      member_type?: ("regular" | "trial") | null
       /** Reason */
       reason: string
       status?: components["schemas"]["UserStatus"] | null
+      /** Trial Expires At */
+      trial_expires_at?: string | null
     }
     /**
      * MessageRole
@@ -3320,6 +3457,7 @@ export interface components {
       audio_variants: components["schemas"]["PodcastAudioVariantResponse"][]
       /** Cover Asset Id */
       cover_asset_id: string | null
+      deletion?: components["schemas"]["PodcastRemovalProgress"] | null
       /**
        * Id
        * Format: uuid
@@ -3460,6 +3598,21 @@ export interface components {
       /** Expected Version */
       expected_version: number
     }
+    /** PodcastRemovalProgress */
+    PodcastRemovalProgress: {
+      /** Cleared Objects */
+      cleared_objects: number
+      /** Retained Objects */
+      retained_objects: number
+      /**
+       * Status
+       * @default pending
+       * @constant
+       */
+      status: "pending"
+      /** Total Objects */
+      total_objects: number
+    }
     /** Point */
     Point: {
       /**
@@ -3533,6 +3686,11 @@ export interface components {
        */
       joined_at: string
       /**
+       * Member Type
+       * @enum {string}
+       */
+      member_type: "regular" | "trial"
+      /**
        * Membership Id
        * Format: uuid
        */
@@ -3542,6 +3700,10 @@ export interface components {
       status: components["schemas"]["UserStatus"]
       /** Temporary Password */
       temporary_password: string
+      /** Trial Expired */
+      trial_expired: boolean
+      /** Trial Expires At */
+      trial_expires_at: string | null
       /**
        * User Id
        * Format: uuid
@@ -3866,6 +4028,20 @@ export interface components {
       id: string
       /** Unit Code */
       unit_code?: string | null
+    }
+    /** TokenUsageSummary */
+    TokenUsageSummary: {
+      /**
+       * Completeness
+       * @enum {string}
+       */
+      completeness: "complete" | "partial" | "unavailable"
+      /** Input Tokens */
+      input_tokens: number | null
+      /** Output Tokens */
+      output_tokens: number | null
+      /** Total Tokens */
+      total_tokens: number | null
     }
     /** UploadBatchInitResponse */
     UploadBatchInitResponse: {
@@ -5830,6 +6006,76 @@ export interface operations {
       }
     }
   }
+  admin_podcast_direct_upload_sign: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DirectUploadRequest"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["DirectUploadResponse"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  admin_podcast_direct_upload_complete: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CompleteUploadRequest"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["CompletedUpload"]
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
   admin_podcast_upload_batch_init: {
     parameters: {
       query?: never
@@ -5990,6 +6236,41 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["PodcastEpisodeAdminResponse"]
         }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"]
+        }
+      }
+    }
+  }
+  admin_podcasts_remove: {
+    parameters: {
+      query?: never
+      header?: {
+        "X-CSRF-Token"?: string | null
+      }
+      path: {
+        episode_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PodcastPublicationRequest"]
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
       }
       /** @description Validation Error */
       422: {

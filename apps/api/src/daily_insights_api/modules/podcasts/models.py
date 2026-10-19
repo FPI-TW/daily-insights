@@ -38,6 +38,9 @@ class PodcastEpisode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_podcast_episodes_status_date", "status", "trading_date"),
     )
 
+    deletion_pending: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     trading_date: Mapped[date] = mapped_column(Date, nullable=False, unique=True)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="draft", server_default="draft"
@@ -133,4 +136,49 @@ class PodcastEpisodeAudioVariant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     chapters_source: Mapped[str] = mapped_column(
         String(20), nullable=False, default="none", server_default="none"
+    )
+
+
+class PodcastDateGeneration(Base):
+    """Survives episode removal to fence tickets issued before deletion."""
+
+    __tablename__ = "podcast_date_generations"
+    __table_args__ = (CheckConstraint("generation >= 0", name="generation_nonnegative"),)
+    trading_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+
+class PodcastDeletionJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "podcast_deletion_jobs"
+    __table_args__ = (CheckConstraint("status IN ('pending', 'completed')", name="status_valid"),)
+    # Deliberately no FK: operational tombstone survives the episode.
+    episode_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True)
+    trading_date: Mapped[date] = mapped_column(Date, nullable=False)
+    episode_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    requested_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    requested_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending"
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PodcastDeletionObject(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "podcast_deletion_objects"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'deleted', 'shared')", name="status_valid"),
+        UniqueConstraint("job_id", "asset_id", name="uq_podcast_deletion_object_asset"),
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("podcast_deletion_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    asset_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    bucket: Mapped[str] = mapped_column(String(100), nullable=False)
+    object_key: Mapped[str] = mapped_column(String(1024), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending"
     )

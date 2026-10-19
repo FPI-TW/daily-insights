@@ -28,7 +28,9 @@ from daily_insights_api.modules.orchestration.registry import (
 )
 
 TAIPEI = ZoneInfo("Asia/Taipei")
-RETRY_INTERVAL = timedelta(minutes=30)
+RETRY_INTERVAL = timedelta(minutes=5)
+MAX_RETRIES = 3
+MAX_ATTEMPTS = 1 + MAX_RETRIES
 MANUAL_RETRY_WINDOW = timedelta(hours=1)
 LEASE_DURATION = timedelta(minutes=10)
 ROUTINE_ENQUEUE_LOCK = 5_239_842_371_114_300
@@ -309,31 +311,48 @@ async def function_dependencies_ready(database: AsyncSession, function_run_id: u
     return True
 
 
-async def terminalize_expired_automatic_functions(
+async def terminalize_expired_functions(
     database: AsyncSession, *, now: datetime | None = None
 ) -> int:
     effective_now = now or datetime.now(UTC)
+    eligible = (
+        select(FunctionRun)
+        .join(JobRun, JobRun.id == FunctionRun.job_run_id)
+        .where(
+            or_(
+                FunctionRun.status.in_(("pending", "retry_wait")),
+                and_(
+                    FunctionRun.status == "running",
+                    FunctionRun.lease_expires_at <= effective_now,
+                ),
+            ),
+            or_(
+                and_(JobRun.deadline_at.is_not(None), JobRun.deadline_at <= effective_now),
+                FunctionRun.attempt_count >= MAX_ATTEMPTS,
+            ),
+        )
+        .order_by(FunctionRun.created_at, FunctionRun.id)
+    )
+    candidate_job_ids = list(
+        await database.scalars(
+            eligible.with_only_columns(FunctionRun.job_run_id).limit(RECONCILIATION_BATCH_SIZE)
+        )
+    )
+    # Acquire the same JobRun → FunctionRun → FunctionAttempt order used by
+    # claims, completion, and cancellation.
+    locked_jobs = list(
+        await database.scalars(
+            select(JobRun)
+            .where(JobRun.id.in_(candidate_job_ids))
+            .order_by(JobRun.id)
+            .with_for_update(skip_locked=True)
+        )
+    )
     expired = list(
         await database.scalars(
-            select(FunctionRun)
-            .where(
-                or_(
-                    FunctionRun.status.in_(("pending", "retry_wait")),
-                    and_(
-                        FunctionRun.status == "running",
-                        FunctionRun.lease_expires_at <= effective_now,
-                    ),
-                ),
-                FunctionRun.job_run_id.in_(
-                    select(JobRun.id).where(
-                        JobRun.deadline_at.is_not(None),
-                        JobRun.deadline_at <= effective_now,
-                    )
-                ),
-            )
-            .order_by(FunctionRun.created_at, FunctionRun.id)
+            eligible.where(FunctionRun.job_run_id.in_([job.id for job in locked_jobs]))
             .limit(RECONCILIATION_BATCH_SIZE)
-            .with_for_update(skip_locked=True)
+            .with_for_update(skip_locked=True, of=FunctionRun)
         )
     )
     expired_ids = [function_run.id for function_run in expired]
@@ -349,7 +368,7 @@ async def terminalize_expired_automatic_functions(
                 status="failed",
                 finished_at=effective_now,
                 error_code="lease_expired",
-                error_detail="worker lease expired at the job deadline",
+                error_detail="worker lease expired before terminal reconciliation",
             )
         )
     partial_ids = set(
@@ -363,6 +382,8 @@ async def terminalize_expired_automatic_functions(
         )
     )
     for function_run in expired:
+        if function_run.status in TERMINAL_FUNCTION_STATUSES:
+            continue
         function_run.status = "partial" if function_run.id in partial_ids else "unavailable"
         function_run.completed_at = effective_now
         function_run.next_attempt_at = None
@@ -370,12 +391,18 @@ async def terminalize_expired_automatic_functions(
         function_run.lease_token = None
         function_run.lease_expires_at = None
         function_run.heartbeat_at = effective_now
-        function_run.error = "deadline_reached"
+        function_run.error = (
+            "retry_limit_reached"
+            if function_run.attempt_count >= MAX_ATTEMPTS
+            else "deadline_reached"
+        )
     await database.commit()
     return len(expired)
 
 
 async def retry_due(function_run: FunctionRun, job_run: JobRun, now: datetime) -> bool:
+    if function_run.attempt_count >= MAX_ATTEMPTS:
+        return False
     if function_run.status not in {"pending", "retry_wait"}:
         return False
     if function_run.next_attempt_at is not None and function_run.next_attempt_at > now:
@@ -383,7 +410,11 @@ async def retry_due(function_run: FunctionRun, job_run: JobRun, now: datetime) -
     return job_run.deadline_at is None or now < job_run.deadline_at
 
 
-def next_retry_at(now: datetime, deadline_at: datetime | None) -> datetime | None:
+def next_retry_at(
+    now: datetime, deadline_at: datetime | None, *, attempt_count: int = 0
+) -> datetime | None:
+    if attempt_count >= MAX_ATTEMPTS:
+        return None
     candidate = now + RETRY_INTERVAL
     return candidate if deadline_at is None or candidate < deadline_at else None
 

@@ -262,7 +262,23 @@ test.describe("Podcast administration", () => {
     await expect(warning).toBeHidden()
 
     const uploadRequests = (await getMockApiState(request)).requests.filter(
-      item => item.path === "/api/admin/podcasts/uploads"
+      item => item.path === "/api/admin/podcasts/direct-uploads"
+    )
+    const requests = (await getMockApiState(request)).requests
+    expect(requests.filter(item => item.path === "/__e2e/r2-upload")).toEqual([
+      expect.objectContaining({
+        facts: {
+          size: 9,
+          conditional: "*",
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        },
+      }),
+    ])
+    expect(
+      requests.filter(item => item.path.endsWith("direct-uploads/complete"))
+    ).toHaveLength(1)
+    expect(requests.some(item => item.path.includes("upload-batches"))).toBe(
+      false
     )
     expect(uploadRequests).toHaveLength(2)
     expect(uploadRequests[0]).toMatchObject({
@@ -419,39 +435,55 @@ test.describe("Podcast administration", () => {
       'section[aria-labelledby^="audio-month-"] > h3'
     )
     await expect(monthHeadings).toHaveText([
-      "July 2026",
-      "June 2026",
-      "May 2026",
+      "July 2026 · 3 episodes",
+      "June 2026 · 1 episode",
+      "May 2026 · 1 episode",
     ])
     await expect(page.locator("article time")).toHaveText([
       "2026-07-26",
+      "2026-07-25",
       "2026-07-24",
       "2026-06-30",
       "2026-05-02",
     ])
 
-    const desktopLayout = await page.locator("article").evaluateAll(cards =>
-      cards.map(card => {
-        const bounds = card.getBoundingClientRect()
-        return { left: bounds.left, width: bounds.width }
+    for (const [width, columns] of [
+      [390, 1],
+      [768, 2],
+      [1280, 3],
+      [1440, 3],
+    ]) {
+      await page.setViewportSize({ width: width!, height: 1000 })
+      const cards = page.locator(
+        'section[aria-labelledby="audio-month-2026-07"] article'
+      )
+      const lefts = await cards.evaluateAll(elements =>
+        elements.map(element =>
+          Math.round(element.getBoundingClientRect().left)
+        )
+      )
+      expect(new Set(lefts).size).toBe(columns)
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth
+        )
+      ).toBe(true)
+      const bottoms = await cards
+        .locator('[data-action="publication"]')
+        .evaluateAll(elements =>
+          elements
+            .slice(
+              0,
+              window.innerWidth >= 1280 ? 3 : window.innerWidth >= 768 ? 2 : 1
+            )
+            .map(element => Math.round(element.getBoundingClientRect().bottom))
+        )
+      expect(new Set(bottoms).size).toBe(1)
+      await page.evaluate(() => window.scrollTo(0, 0))
+      await page.screenshot({
+        path: `/tmp/admin-ux-grid-${width}.png`,
+        fullPage: true,
       })
-    )
-    expect(new Set(desktopLayout.map(card => card.left)).size).toBe(1)
-    const listWidth = await page
-      .locator("#audio-list-title")
-      .locator("..")
-      .evaluate(element => element.getBoundingClientRect().width)
-    expect(desktopLayout[0]?.width).toBeLessThan(listWidth)
-
-    await page.setViewportSize({ width: 390, height: 844 })
-    const mobileWidths = await page.locator("article").evaluateAll(cards =>
-      cards.map(card => ({
-        card: card.getBoundingClientRect().width,
-        parent: card.parentElement?.getBoundingClientRect().width ?? 0,
-      }))
-    )
-    for (const widths of mobileWidths) {
-      expect(Math.abs(widths.card - widths.parent)).toBeLessThan(1)
     }
   })
 })
@@ -746,5 +778,115 @@ test.describe("Mounted session expiry", () => {
           item.path === "/api/auth/csrf" && item.facts?.sessionExpired === true
       )
     ).toBe(true)
+  })
+})
+
+test.describe("Whole unpublished Podcast removal", () => {
+  test("published removal is disabled with an unpublish-first hint", async ({
+    page,
+    context,
+  }) => {
+    await authenticateAs(context, "admin")
+    await openHydrated(page, "/en/admin/audio", '[data-action="removal"]')
+    await expect(
+      page.getByRole("button", { name: "Permanently remove" })
+    ).toBeDisabled()
+    await expect(
+      page.getByText("Unpublish this episode before removing it.")
+    ).toBeVisible()
+  })
+
+  test("canceling the irreversible confirmation retains every card", async ({
+    page,
+    context,
+    request,
+  }) => {
+    await resetMockApi(request, { status: "draft" })
+    await authenticateAs(context, "asset_manager")
+    await openHydrated(page, "/en/admin/audio", '[data-action="removal"]')
+    page.once("dialog", async dialog => {
+      expect(dialog.message()).toContain("2026-07-24")
+      expect(dialog.message()).toContain("All languages, historical audio")
+      expect(dialog.message()).toContain("cannot be undone")
+      await dialog.dismiss()
+    })
+    await page.getByRole("button", { name: "Permanently remove" }).click()
+    await expect(page.locator('[data-action="removal"]')).toBeEnabled()
+    expect(
+      (await getMockApiState(request)).requests.filter(
+        item => item.method === "DELETE"
+      )
+    ).toHaveLength(0)
+  })
+
+  for (const role of ["admin", "asset_manager"] as const) {
+    test(`${role} confirms removal and the completed card disappears`, async ({
+      page,
+      context,
+      request,
+    }) => {
+      await resetMockApi(request, { status: "draft" })
+      await authenticateAs(context, role)
+      await openHydrated(page, "/en/admin/audio", '[data-action="removal"]')
+      page.once("dialog", dialog => dialog.accept())
+      await page.getByRole("button", { name: "Permanently remove" }).click()
+      await expect(page.locator('[data-action="removal"]')).toHaveCount(0)
+      const deletion = (await getMockApiState(request)).requests.find(
+        item => item.method === "DELETE"
+      )
+      expect(deletion).toMatchObject({
+        role,
+        path: `/api/admin/podcasts/${episodeId}`,
+        facts: { csrf: "valid", expectedVersion: 2 },
+      })
+    })
+  }
+
+  test("pending removal retains the card, failure shows progress, retry uses refreshed version", async ({
+    page,
+    context,
+    request,
+  }) => {
+    await resetMockApi(request, { status: "draft", removal: "fail_once" })
+    await authenticateAs(context, "admin")
+    await openHydrated(page, "/en/admin/audio", '[data-action="removal"]')
+    let release!: () => void
+    const held = new Promise<void>(resolve => {
+      release = resolve
+    })
+    await page.route(`**/api/admin/podcasts/${episodeId}`, async route => {
+      if (route.request().method() === "DELETE") await held
+      await route.continue()
+    })
+    page.once("dialog", dialog => dialog.accept())
+    await page.getByRole("button", { name: "Permanently remove" }).click()
+    await expect(page.getByText("Removing the entire Podcast…")).toBeVisible()
+    await expect(
+      page.getByRole("button", { name: "Publish", exact: true })
+    ).toBeDisabled()
+    await expect(
+      page.getByRole("button", { name: "Permanently remove" })
+    ).toBeDisabled()
+    release()
+    await expect(
+      page.getByText(
+        "Removal is incomplete and the episode is frozen. Retry to clear the remaining files."
+      )
+    ).toBeVisible()
+    await expect(
+      page.getByText(
+        "Removal incomplete: 1 / 2 files processed. Retry manually to continue."
+      )
+    ).toBeVisible()
+    await expect(
+      page.getByRole("button", { name: "Publish", exact: true })
+    ).toBeDisabled()
+    page.once("dialog", dialog => dialog.accept())
+    await page.getByRole("button", { name: "Retry removal" }).click()
+    await expect(page.locator('[data-action="removal"]')).toHaveCount(0)
+    const attempts = (await getMockApiState(request)).requests.filter(
+      item => item.method === "DELETE"
+    )
+    expect(attempts.map(item => item.facts?.expectedVersion)).toEqual([2, 3])
   })
 })

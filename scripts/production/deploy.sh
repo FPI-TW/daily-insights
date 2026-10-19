@@ -43,7 +43,6 @@ quiesce_schema_boundary_services() {
     daily-insights-api \
     daily-insights-orchestration-dispatcher \
     daily-insights-orchestration-worker \
-    daily-insights-podcast-media-worker \
     daily-insights-newsroom-worker \
     daily-insights-morning-report-scheduler \
     daily-insights-daily-news-scheduler \
@@ -114,8 +113,6 @@ DAILY_INSIGHTS_R2_BUCKET_NAME
 DAILY_INSIGHTS_R2_ACCESS_KEY_ID
 DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY
 DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS
-DAILY_INSIGHTS_R2_MEDIA_WORKER_ACCESS_KEY_ID
-DAILY_INSIGHTS_R2_MEDIA_WORKER_SECRET_ACCESS_KEY
 "
 for name in $required_environment; do
   if [ -z "$(printenv "$name" 2>/dev/null || true)" ]; then
@@ -282,14 +279,8 @@ fi
 if ! wait_for_healthy_container daily-insights-orchestration-worker; then
   diagnose_cutover_failure "orchestration-worker did not become healthy"
 fi
-if ! compose up -d --no-build --force-recreate --no-deps podcast-media-worker; then
-  diagnose_cutover_failure "podcast-media-worker failed to start"
-fi
-if ! wait_for_healthy_container daily-insights-podcast-media-worker; then
-  diagnose_cutover_failure "podcast-media-worker did not become healthy"
-fi
 # CloakBrowser and its egress proxy hold no state and never touch the schema;
-# the newsroom worker reads article pages through them as a fallback.
+# the newsroom worker reads every article page through them.
 if ! compose up -d --no-build --force-recreate --no-deps browser-egress cloakbrowser; then
   diagnose_cutover_failure "browser-egress or cloakbrowser failed to start"
 fi
@@ -302,7 +293,7 @@ if ! wait_for_healthy_container daily-insights-newsroom-worker; then
   diagnose_cutover_failure "newsroom-worker did not become healthy"
 fi
 
-if ! compose up -d --no-build --remove-orphans api web orchestration-dispatcher podcast-media-worker newsroom-worker browser-egress cloakbrowser; then
+if ! compose up -d --no-build --remove-orphans api web orchestration-dispatcher newsroom-worker browser-egress cloakbrowser; then
   diagnose_cutover_failure "final service convergence failed after the replacement worker started"
 fi
 

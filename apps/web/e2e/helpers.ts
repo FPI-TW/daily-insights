@@ -20,6 +20,7 @@ type MockState = {
   passwordChange?: "normal" | "error"
   sessionExpired?: boolean
   podcastEpisodes?: "single" | "grouped"
+  removal?: "normal" | "fail_once"
   reports?: "normal" | "not_generated"
   status?: "draft" | "published"
 }

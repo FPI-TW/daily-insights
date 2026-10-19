@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createI18n } from "#/lib/i18n"
 import { AppShell } from "./AppShell"
 
+vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({}) }))
+
 const router = vi.hoisted(() => ({
   invalidate: vi.fn(),
   navigate: vi.fn(),
@@ -49,6 +51,7 @@ vi.mock("./ActiveIndicator", () => ({
 
 vi.mock("#/lib/useSessionExpiry", () => ({
   useSessionExpiryRedirect: () => vi.fn(),
+  clearMarketQueries: vi.fn(),
 }))
 
 const user: User = {

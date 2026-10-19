@@ -33,7 +33,11 @@ def test_password_hash_is_salted_and_verifiable() -> None:
 def test_generated_temporary_password_satisfies_policy() -> None:
     temporary_password = generate_temporary_password()
 
-    assert len(temporary_password) == 24
+    assert len(temporary_password) == 12
+    assert any(c.islower() for c in temporary_password)
+    assert any(c.isupper() for c in temporary_password)
+    assert any(c.isdigit() for c in temporary_password)
+    assert any(c in "!@#$%^&*-_=+" for c in temporary_password)
     hash_password(temporary_password, "pepper")
 
 

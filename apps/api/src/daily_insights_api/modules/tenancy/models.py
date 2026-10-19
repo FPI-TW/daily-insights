@@ -42,6 +42,11 @@ class Membership(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "memberships"
     __table_args__ = (
         UniqueConstraint("organization_id", "user_id"),
+        CheckConstraint(
+            "(member_type = 'regular' AND trial_expires_at IS NULL) OR "
+            "(member_type = 'trial' AND trial_expires_at IS NOT NULL)",
+            name="membership_trial_valid",
+        ),
         Index(
             "uq_memberships_active_user",
             "user_id",
@@ -59,6 +64,14 @@ class Membership(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    member_type: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="regular", server_default="regular"
+    )
+    trial_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    def trial_expired(self, now: datetime) -> bool:
+        return self.trial_expires_at is not None and self.trial_expires_at <= now
+
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

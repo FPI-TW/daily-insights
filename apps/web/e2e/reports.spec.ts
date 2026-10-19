@@ -352,3 +352,243 @@ for (const [
       .toBe(true)
   })
 }
+
+for (const locale of ["en", "zh-hant", "zh-hans"] as const) {
+  for (const market of ["", "/tw_equity", "/us_equity"] as const) {
+    test(`SSR ${locale} reports${market} renders a shell without market API calls`, async ({
+      browser,
+      request,
+    }) => {
+      const context = await browser.newContext({ javaScriptEnabled: false })
+      await authenticateAs(context, "org_member")
+      const page = await context.newPage()
+      await page.goto(`http://127.0.0.1:3310/${locale}/reports${market}`)
+      await expect(page.getByRole("main")).toBeVisible()
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible()
+      expect(await page.getByRole("status").count()).toBeGreaterThan(0)
+      const state = await getMockApiState(request)
+      expect(
+        state.requests.filter(item =>
+          /^\/api\/(markets|reports|news|analyst-viewpoints)(\/|$)/.test(
+            item.path
+          )
+        )
+      ).toEqual([])
+      await context.close()
+    })
+  }
+}
+
+test("US shell and price charts render before delayed news, report and moving averages", async ({
+  context,
+  page,
+}) => {
+  await authenticateAs(context, "org_member")
+  let release!: () => void
+  const waiting = new Promise<void>(resolve => {
+    release = resolve
+  })
+  await page.route("**/api/**", async route => {
+    const path = new URL(route.request().url()).pathname
+    if (
+      path.startsWith("/api/news/") ||
+      path.endsWith("/latest") ||
+      path.endsWith("/moving-averages")
+    )
+      await waiting
+    await route.continue()
+  })
+  await page.goto("/en/reports/us_equity")
+  await expect(
+    page.getByRole("heading", { name: "US equities", level: 1 })
+  ).toBeVisible()
+  await expect(
+    page.getByRole("heading", { name: "Index performance", exact: true })
+  ).toBeVisible()
+  await expect(
+    page.getByRole("heading", { name: "VIX volatility trend" })
+  ).toBeVisible()
+  await expect(
+    page.getByRole("heading", { name: "Analyst viewpoint", exact: true })
+  ).toBeVisible()
+  await expect(
+    page.getByRole("status", { name: "Loading market news" })
+  ).toBeVisible()
+  release()
+  await expect(
+    page.getByRole("heading", { name: "US equities news", exact: true })
+  ).toBeVisible()
+})
+
+test("Taiwan flows and stocks render while history and reports are pending", async ({
+  context,
+  page,
+}) => {
+  await authenticateAs(context, "org_member")
+  let release!: () => void
+  const waiting = new Promise<void>(resolve => {
+    release = resolve
+  })
+  await page.route("**/api/**", async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.includes("/indices/") || path.includes("/reports/")) await waiting
+    await route.continue()
+  })
+  await page.goto("/en/reports/tw_equity")
+  await expect(
+    page.getByRole("heading", {
+      name: "Daily institutional net buying",
+      exact: true,
+    })
+  ).toBeVisible()
+  await expect(page.getByText("TSMC", { exact: true })).toBeVisible()
+  const flows = page
+    .getByRole("heading", {
+      name: "Daily institutional net buying",
+      exact: true,
+    })
+    .locator("xpath=ancestor::section[1]")
+  await expect(flows.getByText("Latest", { exact: true })).toBeVisible()
+  await expect(flows.locator("strong").first()).toHaveText(
+    /[+−-]?\d+[.,]\d\s*NT\$100M/
+  )
+  await expect(flows.locator("canvas")).toHaveCount(1)
+  await expect(flows.getByRole("status")).toHaveCount(0)
+  release()
+  await expect(
+    page.getByRole("heading", { name: "Taiwan Weighted Index", exact: true })
+  ).toBeVisible()
+})
+
+test("market news failure offers local retry without replacing charts", async ({
+  context,
+  page,
+}) => {
+  await authenticateAs(context, "org_member")
+  let fail = true
+  await page.route("**/api/news/us_equity/latest?*", async route => {
+    if (fail)
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "unavailable" }),
+      })
+    else await route.continue()
+  })
+  await page.goto("/en/reports/us_equity")
+  await expect(
+    page.getByRole("button", { name: "Retry", exact: true })
+  ).toBeVisible()
+  await expect(
+    page.getByRole("heading", { name: "Index performance", exact: true })
+  ).toBeVisible()
+  fail = false
+  await page.getByRole("button", { name: "Retry", exact: true }).click()
+  await expect(
+    page.getByRole("heading", { name: "US equities news", exact: true })
+  ).toBeVisible()
+  await expect(
+    page.getByRole("button", { name: "Retry", exact: true })
+  ).toHaveCount(0)
+})
+
+test("forex confirms merged markets in the browser and never fetches forex content", async ({
+  context,
+  page,
+  request,
+}) => {
+  await authenticateAs(context, "org_member")
+  await page.goto("/en/reports/forex")
+  await expect(page).toHaveURL(/\/en\/reports\/global_macro_bonds$/)
+  const state = await getMockApiState(request)
+  expect(state.requests.some(item => item.path.includes("/forex/"))).toBe(false)
+})
+
+test("report not generated, not launched and invalid markets retain their states", async ({
+  context,
+  page,
+  request,
+}) => {
+  await authenticateAs(context, "org_member")
+  await resetMockApi(request, { reports: "not_generated" })
+  await page.goto("/en/reports/us_equity")
+  await expect(
+    page.getByText("This section has not been generated yet.", { exact: true })
+  ).toBeVisible()
+  await page.goto("/en/reports/hk_equity")
+  await expect(
+    page.getByRole("heading", { name: "Report not launched yet", exact: true })
+  ).toBeVisible()
+  const response = await page.goto("/en/reports/nonexistent")
+  expect(response?.status()).toBe(404)
+})
+
+test("client market 401 redirects to login once without a refetch loop", async ({
+  context,
+  page,
+  request,
+}) => {
+  await authenticateAs(context, "org_member")
+  const counts = new Map<string, number>()
+  let expired = false
+  await page.route("**/api/**", async route => {
+    if (
+      /^\/api\/(markets|reports|news|analyst-viewpoints)/.test(
+        new URL(route.request().url()).pathname
+      )
+    ) {
+      const url = route.request().url()
+      counts.set(url, (counts.get(url) ?? 0) + 1)
+      if (!expired) {
+        expired = true
+        await resetMockApi(request, { sessionExpired: true })
+      }
+      await route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "expired" }),
+      })
+    } else await route.continue()
+  })
+  await page.goto("/en/reports/us_equity")
+  await expect(page).toHaveURL(/\/en\/login$/)
+  await expect(
+    page.getByRole("button", { name: "Sign in", exact: true })
+  ).toBeVisible()
+  // Hydration may replay a cancelled initial request; reaching the login
+  // shell must not turn simultaneous 401s into an ongoing refetch cycle.
+  for (const count of counts.values()) expect(count).toBeLessThanOrEqual(2)
+})
+
+test("hover preloads a market route without browser market API requests", async ({
+  context,
+  page,
+}) => {
+  await authenticateAs(context, "org_member")
+  await page.goto("/en/reports")
+  await expect(
+    page.getByRole("heading", { name: "Analyst viewpoints", exact: true })
+  ).toBeVisible()
+  await expect(
+    page.getByRole("status", { name: "Loading market navigation" })
+  ).toHaveCount(0)
+  await page.clock.install()
+  const requests: string[] = []
+  page.on("request", request => {
+    const path = new URL(request.url()).pathname
+    if (/^\/api\/(markets|reports|news|analyst-viewpoints)(\/|$)/.test(path))
+      requests.push(path)
+  })
+  const link = page
+    .getByRole("navigation", { name: "Market category navigation" })
+    .getByRole("link", { name: "Taiwan equities", exact: true })
+  await link.hover()
+  // Advance Router's intent preload delay and any scheduled preload work.
+  await page.clock.runFor(1_000)
+  expect(requests).toEqual([])
+  await link.click()
+  await expect(
+    page.getByRole("heading", { name: "Taiwan Weighted Index", exact: true })
+  ).toBeVisible()
+  expect(requests.some(path => path.includes("/indices/"))).toBe(true)
+})

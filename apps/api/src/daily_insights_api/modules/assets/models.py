@@ -10,6 +10,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -122,6 +123,10 @@ class AssetMigrationEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
     )
     asset_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # Immutable generation captured when the verified import is first stored.
+    podcast_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     trading_date: Mapped[date] = mapped_column(Date, nullable=False)
     locale: Mapped[str] = mapped_column(String(10), nullable=False)
     source_bucket: Mapped[str] = mapped_column(String(100), nullable=False)

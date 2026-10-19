@@ -126,6 +126,86 @@ describe("PageContextChat", () => {
     expect(request.page_context).toEqual({ kind: "global" })
   })
 
+  it("resets market context while the next report loads and updates current publication and news IDs", async () => {
+    vi.mocked(fetch).mockImplementation(async () =>
+      streamResponse(['event: done\ndata: {"status":"complete"}\n\n'])
+    )
+    function CurrentPage({
+      value,
+    }: {
+      value: Parameters<typeof useChatPageContext>[0]
+    }) {
+      useChatPageContext(value)
+      return <main>Current market page</main>
+    }
+    const i18n = createI18n("en")
+    await i18n.changeLanguage("en")
+    const view = (value: Parameters<typeof useChatPageContext>[0]) => (
+      <I18nextProvider i18n={i18n}>
+        <PageContextChatProvider locale="en" enabled>
+          <CurrentPage value={value} />
+        </PageContextChatProvider>
+      </I18nextProvider>
+    )
+    const { rerender } = render(
+      view({ kind: "report_detail", publication_id: "us-publication" })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "AI Q&A" }))
+    async function send(expected: unknown, call: number) {
+      fireEvent.change(screen.getByLabelText("Enter your question"), {
+        target: { value: "Explain this market" },
+      })
+      fireEvent.submit(
+        screen.getByRole("button", { name: "Send question" }).closest("form")!
+      )
+      await waitFor(() => expect(fetch).toHaveBeenCalledTimes(call))
+      await waitFor(() =>
+        expect(screen.getByLabelText("Enter your question")).not.toBeDisabled()
+      )
+      const request = JSON.parse(
+        String(vi.mocked(fetch).mock.calls[call - 1]?.[1]?.body)
+      )
+      expect(request.page_context).toEqual(expected)
+    }
+    await send({ kind: "report_detail", publication_id: "us-publication" }, 1)
+    rerender(view(null))
+    await send({ kind: "global" }, 2)
+    rerender(
+      view({ kind: "report_detail", publication_id: "next-publication" })
+    )
+    await send({ kind: "report_detail", publication_id: "next-publication" }, 3)
+    rerender(
+      view({
+        kind: "reports_index",
+        publication_ids: ["next-publication"],
+        news_edition_id: null,
+      })
+    )
+    await send(
+      {
+        kind: "reports_index",
+        publication_ids: ["next-publication"],
+        news_edition_id: null,
+      },
+      4
+    )
+    rerender(
+      view({
+        kind: "reports_index",
+        publication_ids: ["next-publication"],
+        news_edition_id: "current-news",
+      })
+    )
+    await send(
+      {
+        kind: "reports_index",
+        publication_ids: ["next-publication"],
+        news_edition_id: "current-news",
+      },
+      5
+    )
+  })
+
   it("reassembles SSE events split across byte and event boundaries", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       streamResponse([

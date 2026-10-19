@@ -3,12 +3,12 @@ import asyncio
 import json
 import uuid
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
 from pydantic import TypeAdapter
-from sqlalchemy import select
+from sqlalchemy import or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.config import Settings, get_settings
@@ -19,6 +19,7 @@ from daily_insights_api.modules.assets.api import (
     AssetMigrationInput,
     AssetMigrationResult,
     MigratedObject,
+    migration_idempotency_key,
 )
 from daily_insights_api.modules.assets.models import (
     Asset,
@@ -33,6 +34,11 @@ from daily_insights_api.modules.assets.service import (
     migrate_podcast_assets,
 )
 from daily_insights_api.modules.identity.models import User
+from daily_insights_api.modules.podcasts.lifecycle import (
+    date_generation,
+    lock_upload_date,
+    lock_upload_object,
+)
 from daily_insights_api.modules.podcasts.models import (
     PodcastEpisode,
     PodcastEpisodeAudioVariant,
@@ -91,7 +97,7 @@ def _entry_identity(entry: AssetMigrationEntry) -> tuple[object, ...]:
     )
 
 
-def _result_entry_identity(entry: MigratedObject) -> tuple[object, ...]:
+def _result_entry_identity(entry: AssetMigrationInput | MigratedObject) -> tuple[object, ...]:
     return (
         entry.asset_id,
         entry.source.bucket,
@@ -103,6 +109,96 @@ def _result_entry_identity(entry: MigratedObject) -> tuple[object, ...]:
     )
 
 
+async def _lock_import_dates(
+    database: AsyncSession, entries: Sequence[AssetMigrationInput | MigratedObject]
+) -> dict[date, PodcastEpisode]:
+    dates = sorted({entry.trading_date for entry in entries})
+    # All date locks precede manifest/episode/object/asset locks, even for a
+    # multi-date inventory presented in the opposite order by another process.
+    for trading_date in dates:
+        await lock_upload_date(database, trading_date)
+    episodes = (
+        await database.scalars(
+            select(PodcastEpisode)
+            .where(PodcastEpisode.trading_date.in_(dates))
+            .order_by(PodcastEpisode.trading_date)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).all()
+    if any(episode.deletion_pending for episode in episodes):
+        raise AssetMigrationError("episode_removal_pending")
+    return {episode.trading_date: episode for episode in episodes}
+
+
+async def _lock_import_objects(
+    database: AsyncSession, entries: Sequence[AssetMigrationInput | MigratedObject]
+) -> None:
+    for asset_id in sorted({entry.asset_id for entry in entries}):
+        await lock_upload_object(database, asset_id)
+
+
+async def _preflight_migration_replay(
+    database: AsyncSession,
+    idempotency_key: str,
+    entries: Sequence[AssetMigrationInput | MigratedObject],
+) -> tuple[AssetMigrationManifest | None, dict[uuid.UUID, AssetMigrationEntry]]:
+    """Validate durable replay fences before copying or updating evidence.
+
+    Callers hold every inventory date lock through storage and persistence.
+    Reusing this check in persistence keeps direct callers subject to the same
+    immutable identity/generation restrictions as the public CLI execution.
+    """
+    manifest = await database.scalar(
+        select(AssetMigrationManifest)
+        .where(AssetMigrationManifest.idempotency_key == idempotency_key)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if manifest is not None and manifest.status == "cutover":
+        raise AssetMigrationError("migration_already_cutover")
+    # Inventory hashes change when an operator takes a subset, mixes in new
+    # entries, or changes a source. Ownership belongs to each persisted entry,
+    # not merely to the aggregate hash. Foreign rows need no row lock: identity
+    # is immutable, while the sorted object locks serialize new owners. Avoid
+    # waiting for another date's manifest rows while holding an object lock.
+    owners = (
+        await database.scalars(
+            select(AssetMigrationEntry).where(
+                or_(
+                    AssetMigrationEntry.asset_id.in_([entry.asset_id for entry in entries]),
+                    tuple_(AssetMigrationEntry.target_bucket, AssetMigrationEntry.target_key).in_(
+                        [(entry.target.bucket, entry.target.key) for entry in entries]
+                    ),
+                )
+            )
+        )
+    ).all()
+    if any(manifest is None or owner.manifest_id != manifest.id for owner in owners):
+        raise AssetMigrationError("migration_entry_owned_by_another_manifest")
+    if manifest is None:
+        return None, {}
+    existing_entries = (
+        await database.scalars(
+            select(AssetMigrationEntry)
+            .where(AssetMigrationEntry.manifest_id == manifest.id)
+            .with_for_update()
+        )
+    ).all()
+    existing_by_asset = {entry.asset_id: entry for entry in existing_entries}
+    if existing_entries and set(existing_by_asset) != {entry.asset_id for entry in entries}:
+        raise AssetMigrationError("stored_manifest_entry_mismatch")
+    for entry in entries:
+        stored = existing_by_asset.get(entry.asset_id)
+        if stored is None:
+            continue
+        if _entry_identity(stored) != _result_entry_identity(entry):
+            raise AssetMigrationError("stored_manifest_entry_mismatch")
+        if stored.podcast_generation != await date_generation(database, entry.trading_date):
+            raise AssetMigrationError("migration_generation_conflict")
+    return manifest, existing_by_asset
+
+
 async def persist_migration_result(
     database: AsyncSession,
     result: AssetMigrationResult,
@@ -112,10 +208,10 @@ async def persist_migration_result(
     if result.dry_run:
         raise AssetMigrationError("dry_run_cannot_be_persisted")
     await _require_active_admin(database, actor_user_id)
-    manifest = await database.scalar(
-        select(AssetMigrationManifest)
-        .where(AssetMigrationManifest.idempotency_key == result.idempotency_key)
-        .with_for_update()
+    await _lock_import_dates(database, result.entries)
+    await _lock_import_objects(database, result.entries)
+    manifest, existing_by_asset = await _preflight_migration_replay(
+        database, result.idempotency_key, result.entries
     )
     if manifest is None:
         manifest = AssetMigrationManifest(
@@ -126,24 +222,12 @@ async def persist_migration_result(
         )
         database.add(manifest)
         await database.flush()
-    elif manifest.status == "cutover":
-        raise AssetMigrationError("migration_already_cutover")
-
-    existing_entries = (
-        await database.scalars(
-            select(AssetMigrationEntry)
-            .where(AssetMigrationEntry.manifest_id == manifest.id)
-            .with_for_update()
-        )
-    ).all()
-    existing_by_asset = {entry.asset_id: entry for entry in existing_entries}
-    if existing_entries and set(existing_by_asset) != {entry.asset_id for entry in result.entries}:
-        raise AssetMigrationError("stored_manifest_entry_mismatch")
-
     for result_entry in result.entries:
         stored = existing_by_asset.get(result_entry.asset_id)
+        generation = await date_generation(database, result_entry.trading_date)
         if stored is None:
             stored = AssetMigrationEntry(
+                podcast_generation=generation,
                 manifest_id=manifest.id,
                 asset_id=result_entry.asset_id,
                 trading_date=result_entry.trading_date,
@@ -155,8 +239,6 @@ async def persist_migration_result(
                 status=result_entry.status,
             )
             database.add(stored)
-        elif _entry_identity(stored) != _result_entry_identity(result_entry):
-            raise AssetMigrationError("stored_manifest_entry_mismatch")
         stored.source_size_bytes = result_entry.size_bytes
         stored.target_size_bytes = result_entry.size_bytes
         stored.source_mime_type = result_entry.mime_type
@@ -196,6 +278,7 @@ async def apply_database_cutover(
     actor_user_id: uuid.UUID,
 ) -> None:
     await _require_active_admin(database, actor_user_id)
+    episodes = await _lock_import_dates(database, migration.entries)
     manifest = await database.scalar(
         select(AssetMigrationManifest)
         .where(AssetMigrationManifest.idempotency_key == migration.idempotency_key)
@@ -214,6 +297,14 @@ async def apply_database_cutover(
     if set(stored_by_asset) != {entry.asset_id for entry in migration.entries}:
         raise AssetMigrationError("stored_manifest_entry_mismatch")
 
+    # Check every generation before creating rows or attaching any Asset.
+    for stored in stored_entries:
+        if stored.podcast_generation != await date_generation(database, stored.trading_date):
+            raise AssetMigrationError("migration_generation_conflict")
+    if any(episode.status != "draft" for episode in episodes.values()):
+        raise AssetMigrationError("legacy_import_requires_draft_episode")
+    await _lock_import_objects(database, migration.entries)
+
     now = datetime.now(UTC)
     for entry in migration.entries:
         stored = stored_by_asset[entry.asset_id]
@@ -230,11 +321,7 @@ async def apply_database_cutover(
         ):
             raise AssetMigrationError("stored_manifest_evidence_mismatch")
 
-        episode = await database.scalar(
-            select(PodcastEpisode)
-            .where(PodcastEpisode.trading_date == entry.trading_date)
-            .with_for_update()
-        )
+        episode = episodes.get(entry.trading_date)
         if episode is None:
             episode = PodcastEpisode(
                 trading_date=entry.trading_date,
@@ -244,8 +331,7 @@ async def apply_database_cutover(
             )
             database.add(episode)
             await database.flush()
-        elif episode.status != "draft":
-            raise AssetMigrationError("legacy_import_requires_draft_episode")
+            episodes[entry.trading_date] = episode
 
         asset = await database.scalar(
             select(Asset).where(Asset.id == entry.asset_id).with_for_update()
@@ -315,11 +401,15 @@ async def run_migration(
     database: AsyncSession | None = None,
     actor_user_id: uuid.UUID | None = None,
 ) -> AssetMigrationResult:
-    result = await migrate_podcast_assets(
-        store,
-        parse_inventory(inventory_path),
-        dry_run=dry_run,
-    )
+    inventory = parse_inventory(inventory_path)
+    if not dry_run:
+        if database is None or actor_user_id is None:
+            raise AssetMigrationError("database_and_actor_required")
+        await _require_active_admin(database, actor_user_id)
+        await _lock_import_dates(database, inventory)
+        await _lock_import_objects(database, inventory)
+        await _preflight_migration_replay(database, migration_idempotency_key(inventory), inventory)
+    result = await migrate_podcast_assets(store, inventory, dry_run=dry_run)
     if not dry_run:
         if database is None or actor_user_id is None:
             raise AssetMigrationError("database_and_actor_required")
@@ -343,6 +433,9 @@ async def run_cutover(
     confirmed: bool,
 ) -> AssetMigrationResult:
     verified = parse_execution_manifest(verified_manifest_path)
+    await _require_active_admin(database, actor_user_id)
+    await _lock_import_dates(database, verified.entries)
+    await _lock_import_objects(database, verified.entries)
     result = await cutover_migration(store, verified, confirmed=confirmed)
     await apply_database_cutover(database, result, actor_user_id=actor_user_id)
     return result

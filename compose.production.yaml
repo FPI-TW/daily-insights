@@ -62,6 +62,8 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
+    volumes:
+      - podcast-upload-spool:/var/spool/podcast-media
     stop_grace_period: 45s
     read_only: true
     tmpfs:
@@ -126,47 +128,6 @@ services:
     networks:
       - app
 
-  podcast-media-worker:
-    image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}
-    container_name: daily-insights-podcast-media-worker
-    restart: unless-stopped
-    environment:
-      DAILY_INSIGHTS_ENVIRONMENT: production
-      DAILY_INSIGHTS_RUNTIME_ROLE: media-worker
-      DAILY_INSIGHTS_DATABASE_URL: ${DAILY_INSIGHTS_DATABASE_URL:?set DAILY_INSIGHTS_DATABASE_URL from GitHub Secrets}
-      DAILY_INSIGHTS_R2_ENDPOINT_URL: ${DAILY_INSIGHTS_R2_ENDPOINT_URL:?set DAILY_INSIGHTS_R2_ENDPOINT_URL}
-      DAILY_INSIGHTS_R2_BUCKET_NAME: ${DAILY_INSIGHTS_R2_BUCKET_NAME:?set DAILY_INSIGHTS_R2_BUCKET_NAME}
-      DAILY_INSIGHTS_R2_ACCESS_KEY_ID: ${DAILY_INSIGHTS_R2_MEDIA_WORKER_ACCESS_KEY_ID:?set worker-scoped R2 access key from GitHub Secrets}
-      DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY: ${DAILY_INSIGHTS_R2_MEDIA_WORKER_SECRET_ACCESS_KEY:?set worker-scoped R2 secret from GitHub Secrets}
-      DAILY_INSIGHTS_PODCAST_MEDIA_POLL_SECONDS: ${DAILY_INSIGHTS_PODCAST_MEDIA_POLL_SECONDS:-2}
-      DAILY_INSIGHTS_PODCAST_UPLOAD_CLEANUP_GRACE_SECONDS: ${DAILY_INSIGHTS_PODCAST_UPLOAD_CLEANUP_GRACE_SECONDS:-86400}
-      DAILY_INSIGHTS_PODCAST_MEDIA_SPOOL_DIR: /var/spool/podcast-media
-    command: ["python", "-m", "daily_insights_api.scripts.run_podcast_media_worker"]
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import time; from pathlib import Path; p = Path('/tmp/podcast-media-worker-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 90",
-        ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    stop_grace_period: 45s
-    read_only: true
-    tmpfs:
-      - /tmp:size=32m,mode=1777
-    volumes:
-      - podcast-media-spool:/var/spool/podcast-media
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    networks:
-      - app
-
   newsroom-worker:
     image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}
     container_name: daily-insights-newsroom-worker
@@ -196,8 +157,8 @@ services:
       DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS:-30}
       DAILY_INSIGHTS_GUARDIAN_API_KEY: ${DAILY_INSIGHTS_GUARDIAN_API_KEY:-}
       DAILY_INSIGHTS_SEC_CONTACT_EMAIL: ${DAILY_INSIGHTS_SEC_CONTACT_EMAIL:-}
-      # Article pages refused as a bot, or without the article text, are read
-      # again in CloakBrowser; the plain HTTP outcome stands if it is down.
+      # Every article page is read in CloakBrowser; plain HTTP takes over while
+      # the browser is down.
       DAILY_INSIGHTS_NEWSROOM_BROWSER_CDP_URL: http://cloakbrowser:9222
     command: ["python", "-m", "daily_insights_api.scripts.run_newsroom_worker"]
     healthcheck:
@@ -427,4 +388,4 @@ networks:
     internal: true
 
 volumes:
-  podcast-media-spool:
+  podcast-upload-spool:

@@ -467,6 +467,9 @@
             "title": "Organization Id",
             "type": "string"
           },
+          "usage": {
+            "$ref": "#/components/schemas/TokenUsageSummary"
+          },
           "user_id": {
             "format": "uuid",
             "title": "User Id",
@@ -474,6 +477,7 @@
           }
         },
         "required": [
+          "usage",
           "id",
           "organization_id",
           "user_id",
@@ -531,6 +535,9 @@
             ],
             "title": "Title"
           },
+          "usage": {
+            "$ref": "#/components/schemas/TokenUsageSummary"
+          },
           "user_id": {
             "format": "uuid",
             "title": "User Id",
@@ -538,6 +545,7 @@
           }
         },
         "required": [
+          "usage",
           "id",
           "organization_id",
           "user_id",
@@ -794,6 +802,68 @@
         "title": "ChatStreamRequest",
         "type": "object"
       },
+      "CompleteUploadRequest": {
+        "properties": {
+          "upload_token": {
+            "maxLength": 8192,
+            "minLength": 1,
+            "title": "Upload Token",
+            "type": "string"
+          }
+        },
+        "required": ["upload_token"],
+        "title": "CompleteUploadRequest",
+        "type": "object"
+      },
+      "CompletedUpload": {
+        "properties": {
+          "asset_id": {
+            "format": "uuid",
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "episode_id": {
+            "format": "uuid",
+            "title": "Episode Id",
+            "type": "string"
+          },
+          "locale": {
+            "enum": ["zh-hant", "zh-hans", "en"],
+            "title": "Locale",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "status": {
+            "const": "completed",
+            "default": "completed",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id",
+          "episode_id",
+          "locale",
+          "sha256",
+          "duration_seconds"
+        ],
+        "title": "CompletedUpload",
+        "type": "object"
+      },
       "ComponentHealth": {
         "properties": {
           "status": {
@@ -815,6 +885,91 @@
         },
         "required": ["csrf_token"],
         "title": "CsrfTokenResponse",
+        "type": "object"
+      },
+      "DirectUploadRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/UploadRequest"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Files",
+            "type": "array"
+          },
+          "reason": {
+            "enum": ["initial_upload", "update_file", "other"],
+            "title": "Reason",
+            "type": "string"
+          },
+          "trading_date": {
+            "format": "date",
+            "title": "Trading Date",
+            "type": "string"
+          }
+        },
+        "required": ["trading_date", "reason", "files"],
+        "title": "DirectUploadRequest",
+        "type": "object"
+      },
+      "DirectUploadResponse": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/DirectUploadTarget"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": ["files"],
+        "title": "DirectUploadResponse",
+        "type": "object"
+      },
+      "DirectUploadTarget": {
+        "properties": {
+          "asset_id": {
+            "format": "uuid",
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "locale": {
+            "enum": ["zh-hant", "zh-hans", "en"],
+            "title": "Locale",
+            "type": "string"
+          },
+          "required_headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Required Headers",
+            "type": "object"
+          },
+          "upload_token": {
+            "title": "Upload Token",
+            "type": "string"
+          },
+          "upload_url": {
+            "title": "Upload Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id",
+          "locale",
+          "upload_url",
+          "upload_token",
+          "required_headers",
+          "expires_at"
+        ],
+        "title": "DirectUploadTarget",
         "type": "object"
       },
       "EconomicEvent": {
@@ -2769,11 +2924,29 @@
             "title": "Email",
             "type": "string"
           },
+          "member_type": {
+            "default": "regular",
+            "enum": ["regular", "trial"],
+            "title": "Member Type",
+            "type": "string"
+          },
           "reason": {
             "maxLength": 500,
             "minLength": 1,
             "title": "Reason",
             "type": "string"
+          },
+          "trial_days": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trial Days"
           }
         },
         "required": ["email", "display_name", "reason"],
@@ -2795,6 +2968,11 @@
             "title": "Joined At",
             "type": "string"
           },
+          "member_type": {
+            "enum": ["regular", "trial"],
+            "title": "Member Type",
+            "type": "string"
+          },
           "membership_id": {
             "format": "uuid",
             "title": "Membership Id",
@@ -2807,6 +2985,22 @@
           "status": {
             "$ref": "#/components/schemas/UserStatus"
           },
+          "trial_expired": {
+            "title": "Trial Expired",
+            "type": "boolean"
+          },
+          "trial_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trial Expires At"
+          },
           "user_id": {
             "format": "uuid",
             "title": "User Id",
@@ -2814,6 +3008,9 @@
           }
         },
         "required": [
+          "member_type",
+          "trial_expires_at",
+          "trial_expired",
           "membership_id",
           "user_id",
           "email",
@@ -2840,6 +3037,18 @@
             ],
             "title": "Display Name"
           },
+          "member_type": {
+            "anyOf": [
+              {
+                "enum": ["regular", "trial"],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Type"
+          },
           "reason": {
             "maxLength": 500,
             "minLength": 1,
@@ -2855,6 +3064,18 @@
                 "type": "null"
               }
             ]
+          },
+          "trial_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trial Expires At"
           }
         },
         "required": ["reason"],
@@ -5429,6 +5650,16 @@
             ],
             "title": "Cover Asset Id"
           },
+          "deletion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PodcastRemovalProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -5752,6 +5983,35 @@
         "title": "PodcastPublicationRequest",
         "type": "object"
       },
+      "PodcastRemovalProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "cleared_objects": {
+            "minimum": 0.0,
+            "title": "Cleared Objects",
+            "type": "integer"
+          },
+          "retained_objects": {
+            "minimum": 0.0,
+            "title": "Retained Objects",
+            "type": "integer"
+          },
+          "status": {
+            "const": "pending",
+            "default": "pending",
+            "title": "Status",
+            "type": "string"
+          },
+          "total_objects": {
+            "minimum": 0.0,
+            "title": "Total Objects",
+            "type": "integer"
+          }
+        },
+        "required": ["total_objects", "cleared_objects", "retained_objects"],
+        "title": "PodcastRemovalProgress",
+        "type": "object"
+      },
       "Point": {
         "properties": {
           "date": {
@@ -5920,6 +6180,11 @@
             "title": "Joined At",
             "type": "string"
           },
+          "member_type": {
+            "enum": ["regular", "trial"],
+            "title": "Member Type",
+            "type": "string"
+          },
           "membership_id": {
             "format": "uuid",
             "title": "Membership Id",
@@ -5936,6 +6201,22 @@
             "title": "Temporary Password",
             "type": "string"
           },
+          "trial_expired": {
+            "title": "Trial Expired",
+            "type": "boolean"
+          },
+          "trial_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trial Expires At"
+          },
           "user_id": {
             "format": "uuid",
             "title": "User Id",
@@ -5943,6 +6224,9 @@
           }
         },
         "required": [
+          "member_type",
+          "trial_expires_at",
+          "trial_expired",
           "membership_id",
           "user_id",
           "email",
@@ -6700,6 +6984,56 @@
         },
         "required": ["id"],
         "title": "TableColumn",
+        "type": "object"
+      },
+      "TokenUsageSummary": {
+        "properties": {
+          "completeness": {
+            "enum": ["complete", "partial", "unavailable"],
+            "title": "Completeness",
+            "type": "string"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "total_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Tokens"
+          }
+        },
+        "required": [
+          "input_tokens",
+          "output_tokens",
+          "total_tokens",
+          "completeness"
+        ],
+        "title": "TokenUsageSummary",
         "type": "object"
       },
       "UploadBatchInitResponse": {
@@ -9766,6 +10100,120 @@
         "tags": ["podcasts"]
       }
     },
+    "/api/admin/podcasts/direct-uploads": {
+      "post": {
+        "operationId": "admin_podcast_direct_upload_sign",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectUploadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectUploadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sign Direct Upload",
+        "tags": ["podcast uploads"]
+      }
+    },
+    "/api/admin/podcasts/direct-uploads/complete": {
+      "post": {
+        "operationId": "admin_podcast_direct_upload_complete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteUploadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompletedUpload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Direct Upload",
+        "tags": ["podcast uploads"]
+      }
+    },
     "/api/admin/podcasts/upload-batches": {
       "post": {
         "operationId": "admin_podcast_upload_batch_init",
@@ -9989,6 +10437,64 @@
       }
     },
     "/api/admin/podcasts/{episode_id}": {
+      "delete": {
+        "operationId": "admin_podcasts_remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "episode_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Episode Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PodcastPublicationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Remove",
+        "tags": ["podcasts"]
+      },
       "put": {
         "operationId": "admin_podcasts_update",
         "parameters": [

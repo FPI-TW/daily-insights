@@ -15,9 +15,9 @@ The repository now includes an offline-verifiable deployment foundation and an
 Cloudflare, RDS, or R2 resources:
 
 - [`compose.production.yaml`](../../compose.production.yaml) runs only externally
-  built images pinned by digest across seven containers: API, Web, nginx, the
-  unified orchestration worker, the Podcast media worker, the newsroom (key
-  news) worker, and the 08:00 Asia/Taipei dispatcher;
+  built images pinned by digest across eight containers: API, Web, nginx, the
+  unified orchestration worker, the newsroom (key news) worker, CloakBrowser and
+  its egress proxy, and the 08:00 Asia/Taipei dispatcher;
   PostgreSQL is deliberately absent because production uses RDS;
 - [`deploy.sh`](../../scripts/production/deploy.sh),
   [`preflight.sh`](../../scripts/production/preflight.sh),
@@ -40,12 +40,13 @@ files.
 ## Recommended topology
 
 - One x86_64 EC2 application instance in a private or tightly restricted subnet
-  runs `api`, `web`, `nginx`, `orchestration-worker`, `podcast-media-worker`,
-  `newsroom-worker`, and `orchestration-dispatcher`. The dispatcher persists one
-  daily RoutineRun; workers claim provider functions and Podcast verification
-  sessions, and the newsroom worker continuously polls news sources and runs
-  the key-news LLM stages (it idles while `DAILY_INSIGHTS_NEWSROOM_ENABLED` is
-  false). Size from
+  runs `api`, `web`, `nginx`, `orchestration-worker`, `newsroom-worker`,
+  `cloakbrowser`, `browser-egress`, and `orchestration-dispatcher`. The
+  dispatcher persists one daily RoutineRun; the worker claims provider
+  functions; the API verifies Podcast uploads synchronously; the newsroom worker
+  continuously polls news sources, reads article pages through CloakBrowser, and
+  runs the key-news LLM stages (it idles while `DAILY_INSIGHTS_NEWSROOM_ENABLED`
+  is false). Size from
   measured upload spool, SSE memory, and CPU, not user count alone.
 - RDS PostgreSQL in private subnets is the durable store. A Single-AZ instance
   is compatible with accepted downtime and lower cost; Multi-AZ is the
@@ -95,14 +96,13 @@ CloudWatch, security-group control, and future scaling are clearer with EC2.
 
 ## Secrets
 
-- Store production database credentials, session/password secrets, FinDB key,
-  API signing R2 credentials, media-worker-only R2 credentials, the newsroom
-  LLM, embedding, and Slack webhook secrets, and the deployment SSH key in the
-  protected GitHub `production` environment. Set
-  `DAILY_INSIGHTS_R2_MEDIA_WORKER_ACCESS_KEY_ID` and
-  `DAILY_INSIGHTS_R2_MEDIA_WORKER_SECRET_ACCESS_KEY` to a separate R2 key scoped
-  to the application bucket and the media worker's `GetObject` and
-  `DeleteObject` needs. The API signer keeps its own R2 credentials.
+- Store database credentials, session/password secrets, FinDB key, API R2
+  credentials, the newsroom LLM, embedding, and Slack webhook secrets, and the
+  deployment SSH key in the protected GitHub `production` environment. Scope the
+  API R2 key to the application bucket with object read/write/delete and listing
+  permissions: signing, verification and orphan cleanup now share the API
+  runtime. Retired media-worker credentials are no longer required by release or
+  Compose.
 - Only `newsroom-worker` receives the embedding key and ingestion settings; the
   orchestration worker receives the newsroom LLM key only for the 08:00 editor
   pass. Neither worker receives session secrets or R2 credentials.
@@ -220,12 +220,12 @@ Compose while retaining immutable deployment inputs.
    container, then recreates only nginx with Docker DNS re-resolution enabled
    while the previous API/Web containers are still available. It then stops
    the API, orchestration dispatcher/worker, every legacy scheduler,
-   `podcast-media-worker`, `newsroom-worker`, and `data-management-worker`,
-   confirms they are stopped, verifies that the legacy management and report
-   queues have no pending/running rows, and runs `alembic upgrade head`. After
-   migration it starts and health-checks `orchestration-worker`,
-   `podcast-media-worker`, and `newsroom-worker`, then converges API, Web, and
-   `orchestration-dispatcher` without recreating nginx again.
+   `newsroom-worker`, and `data-management-worker`, confirms they are stopped,
+   verifies that the legacy management and report queues have no
+   pending/running rows, and runs `alembic upgrade head`. After migration it
+   starts and health-checks `orchestration-worker`, starts `browser-egress` and
+   `cloakbrowser`, starts and health-checks `newsroom-worker`, then converges
+   API, Web, and `orchestration-dispatcher` without recreating nginx again.
    A migrated installation with no RoutineRun is activation-pending, so a
    failed first deployment can be retried before 10:00 with activation set to
    today or the next Taipei date. Once a RoutineRun exists, normal deployments
@@ -272,38 +272,53 @@ as a separate origin only in the development bucket configuration.
 }
 ```
 
-Each batch init file includes the client's 64-character lowercase SHA-256.
-The upload request must send the signed `Content-Type`, `If-None-Match: *`, and
-`x-amz-meta-sha256` headers exactly as returned by batch init. The API verifies
-the SHA metadata at finalize; the worker independently hashes the streamed bytes
-and verifies the metadata again before cutover. Playback signing checks the R2
-HEAD metadata and does not stream the whole audio object when the checksum is
-present. The browser reads the `ETag` response header for transfer diagnostics.
-Keep the R2 bucket private; CORS does not grant object authorization.
+Each signed upload includes the client's 64-character lowercase SHA-256.
+Send `Content-Type`, `If-None-Match: *`, and `x-amz-meta-sha256` exactly as
+returned. The API verifies metadata and hashes the complete streamed object
+before registration. Playback signing checks HEAD without streaming the file.
+Keep the bucket private; CORS does not grant object authorization.
 
 ## Direct-upload production verification
 
-After deploy, confirm `daily-insights-podcast-media-worker` is healthy and its
-logs show its heartbeat without printing environment values. In the production
-browser, upload representative MP3 and MP4 files, including a file near the
-256 MiB limit. Verify the browser preflight has the exact production origin and
-allows `PUT`, `Content-Type`, `If-None-Match`, and `x-amz-meta-sha256`; the PUT must target the
-returned UUID object key and return an exposed `ETag`.
+Before the first release of the synchronous upload flow, complete the
+[manual Podcast cutover](podcast-upload-cutover.md). Retiring the old worker
+and reconciling its sessions are one-time operator tasks, never CI/CD tasks.
 
-Finalize each locale and poll the batch status until each file is completed or
-has an actionable failure. Confirm completed files have a server-computed
-SHA-256, duration/chapters when readable, and appear in private playback. Test a
-replacement with stale and current locale versions, a lost PUT response followed
-by idempotent finalize, and a two-locale batch with one locale failure. A
-completed locale remains active when another locale in the batch fails. Confirm
-the worker key is distinct from the API signer key in the protected GitHub
-environment and has only the required bucket permissions. Transient object-store
-service or network errors stay visible as `processing` while the durable lease
-backs off from 15 seconds; after five attempts the locale becomes `failed`.
-The worker continues with other queued locales during a retry delay.
-Orphan cleanup includes version-conflict sessions after the upload grace period;
-R2 cleanup failures release the cleanup claim and defer another attempt for five
-minutes. An object with an Asset row remains protected.
+Verify the API key can list/read/write/delete the application bucket and the
+API's `podcast-upload-spool` volume is writable by `nobody`. It provides disk
+space beyond the unchanged 64 MiB `/tmp` tmpfs. The per-file hard limit stays
+256 MiB. Verification has a nine-minute application deadline; nginx waits ten
+minutes on `/api/admin/podcasts/direct-uploads/complete`. These origin deadlines
+do not override Cloudflare's [proxy read timeout](https://developers.cloudflare.com/fundamentals/reference/connection-limits/)
+(default 125 seconds). Measure the complete response through the production
+proxy, especially for boundary-size files. A proxy timeout leaves the outcome
+uncertain: retry the original upload receipt to recover a committed result
+instead of deleting or overwriting the object.
+
+In a production browser, upload MP3 and MP4 files, including representative
+files below 20 MB and a boundary-size file. Confirm preflight accepts the exact
+origin, PUT, and signed headers. Signing creates no upload batch/session. The
+complete response marks the locale complete without polling or media worker.
+Verify checksum, readable duration/chapters and private playback. Test replacement
+with stale/current versions, a lost PUT/complete response, refresh after PUT,
+and one failed locale alongside a successful locale. Reload must allow a new
+upload immediately; version conflicts still require explicit replacement.
+
+Confirmed registration failures remove unreferenced objects. Ambiguous commits
+are rechecked before deletion; unavailable DB/storage retains the object for
+retry. Browser PUT uses temporary `podcasts/direct/{expires}/{trading-date}/{locale}/{asset-id}.{ext}`.
+New v2 completions register `podcasts/YYYY/MM/DD/{locale}/podcast_{version}.{mp3|mp4}`
+with padded dates and the locale variant version, then clean staging after commit.
+Existing files and v1 completions retain their paths. Verify replacement preserves
+archived versions and a retry returns the same asset even after staging deletion.
+Every five minutes cleanup scans only exact staging and final grammars under `podcasts/`.
+Staging requires URL expiry and last modification plus the default 24-hour grace;
+final orphans require last modification plus grace. Under the date lock, cleanup
+rechecks modification time and all DB references. Active and archived assets are
+protected; malformed dates, legacy/import and unrelated paths are skipped.
+Final collisions require matching size/MIME/full SHA and no DB references; otherwise
+409 leaves the destination untouched. Unknown commit/write outcomes retain objects.
+Failed deletions and late objects are retried by later sweeps.
 
 7. For routine recovery after this schema-boundary migration, keep every legacy
    scheduler and worker quiesced, apply a forward fix, and rerun `deploy.sh`.

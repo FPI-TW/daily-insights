@@ -1,3 +1,4 @@
+import { TokenUsageTotal } from "#/components/TokenUsage"
 import { formatDateStamp } from "#/lib/format"
 import {
   createFileRoute,
@@ -113,6 +114,7 @@ function ConversationsPage() {
             <tr>
               <th className="p-3">{t("conversationMember")}</th>
               <th className="p-3">{t("conversationMessages")}</th>
+              <th className="p-3">{t("tokenTotal")}</th>
               <th className="p-3">{t("conversationCreated")}</th>
             </tr>
           </thead>
@@ -129,6 +131,9 @@ function ConversationsPage() {
                   </Link>
                 </td>
                 <td className="p-3">{item.message_count}</td>
+                <td className="p-3">
+                  <TokenUsageTotal usage={item.usage} />
+                </td>
                 <td className="p-3">{formatDateStamp(item.created_at)}</td>
               </tr>
             ))}

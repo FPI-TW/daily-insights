@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query"
 import { formatDateStamp } from "#/lib/format"
 import type { Locale, User } from "@daily-insights/api-client"
 import { Link, useLocation, useRouter } from "@tanstack/react-router"
@@ -15,7 +16,10 @@ import {
 import { toast } from "#/lib/motion"
 import { marketCodes } from "#/lib/provisional-reports"
 import { ActiveIndicator } from "./ActiveIndicator"
-import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
+import {
+  clearMarketQueries,
+  useSessionExpiryRedirect,
+} from "#/lib/useSessionExpiry"
 import { LocaleSwitcher } from "./LocaleSwitcher"
 import { ThemeModePicker } from "./ThemeToggle"
 import { LegalStatementDialog } from "./LegalStatementDialog"
@@ -38,6 +42,7 @@ export function AppShell({
 }) {
   const { t } = useTranslation()
   const router = useRouter()
+  const queryClient = useQueryClient()
   const location = useLocation()
   const redirectExpiredSession = useSessionExpiryRedirect(locale, surface)
   const [pending, setPending] = useState(false)
@@ -74,6 +79,7 @@ export function AppShell({
     setSignOutError("")
     try {
       await browserAuthClient().logout(await requireCsrfToken())
+      clearMarketQueries(queryClient)
       rememberCsrfToken(null)
       await router.invalidate()
       await router.navigate({

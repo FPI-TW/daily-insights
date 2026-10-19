@@ -1,9 +1,9 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,6 +54,10 @@ async def _seat_count(database: AsyncSession, organization_id: uuid.UUID) -> int
         .where(
             Membership.organization_id == organization_id,
             Membership.removed_at.is_(None),
+            or_(
+                Membership.trial_expires_at.is_(None),
+                Membership.trial_expires_at > datetime.now(UTC),
+            ),
         )
     )
     return int(count or 0)
@@ -77,6 +81,9 @@ async def _organization_response(
 
 def _member_response(membership: Membership, user: User) -> MemberResponse:
     return MemberResponse(
+        member_type="trial" if membership.member_type == "trial" else "regular",
+        trial_expires_at=membership.trial_expires_at,
+        trial_expired=membership.trial_expired(datetime.now(UTC)),
         membership_id=membership.id,
         user_id=user.id,
         email=user.email,
@@ -85,6 +92,23 @@ def _member_response(membership: Membership, user: User) -> MemberResponse:
         must_change_password=user.must_change_password,
         joined_at=membership.joined_at,
     )
+
+
+def _membership_audit_snapshot(membership: Membership, user: User) -> dict[str, str | None]:
+    return {
+        "user_id": str(user.id),
+        "email": user.email,
+        "status": user.status.value,
+        "member_type": membership.member_type,
+        "trial_expires_at": membership.trial_expires_at.isoformat()
+        if membership.trial_expires_at
+        else None,
+        "joined_at": membership.joined_at.isoformat(),
+        "removed_at": membership.removed_at.isoformat() if membership.removed_at else None,
+        "removed_by_user_id": str(membership.removed_by_user_id)
+        if membership.removed_by_user_id
+        else None,
+    }
 
 
 def _internal_user_response(user: User) -> InternalUserResponse:
@@ -426,6 +450,18 @@ async def create_member(
                 Membership.user_id == user.id,
             )
         )
+        if (
+            membership is not None
+            and membership.member_type == "regular"
+            and payload.member_type == "trial"
+        ):
+            raise HTTPException(status.HTTP_409_CONFLICT, "regular members cannot become trials")
+
+    before = (
+        _membership_audit_snapshot(membership, user)
+        if membership is not None and user is not None
+        else None
+    )
 
     settings: Settings = request.app.state.settings
     assert settings.password_pepper is not None
@@ -459,6 +495,16 @@ async def create_member(
         user.status = UserStatus.ACTIVE
 
     now = datetime.now(UTC)
+    try:
+        trial_expiry = (
+            now + timedelta(days=payload.trial_days or 7)
+            if payload.member_type == "trial"
+            else None
+        )
+    except OverflowError as error:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "trial duration is too large"
+        ) from error
     if membership is None:
         membership = Membership(
             organization_id=organization.id,
@@ -470,6 +516,8 @@ async def create_member(
         membership.joined_at = now
         membership.removed_at = None
         membership.removed_by_user_id = None
+    membership.member_type = payload.member_type
+    membership.trial_expires_at = trial_expiry
     try:
         await database.flush()
     except IntegrityError as error:
@@ -479,11 +527,12 @@ async def create_member(
         database,
         actor_user_id=actor.user.id,
         organization_id=organization.id,
-        action="membership.created",
+        action="membership.restored" if before is not None else "membership.created",
         target_type="membership",
         target_id=str(membership.id),
         reason=payload.reason,
-        after={"user_id": str(user.id), "email": user.email},
+        before=before,
+        after=_membership_audit_snapshot(membership, user),
         request_id=request.state.request_id,
     )
     try:
@@ -536,7 +585,42 @@ async def update_member(
     database: Annotated[AsyncSession, Depends(get_database_session)],
 ) -> MemberResponse:
     membership, user = await _get_active_member(database, organization_id, user_id)
-    before = {"display_name": user.display_name, "status": user.status.value}
+    now = datetime.now(UTC)
+    was_expired = membership.trial_expired(now)
+    before = {
+        "display_name": user.display_name,
+        "status": user.status.value,
+        "member_type": membership.member_type,
+        "trial_expires_at": membership.trial_expires_at.isoformat()
+        if membership.trial_expires_at
+        else None,
+    }
+    if membership.member_type == "regular" and (
+        payload.member_type == "trial" or payload.trial_expires_at is not None
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "regular members cannot become trials"
+        )
+    next_type = payload.member_type or membership.member_type
+    next_expiry = (
+        None if next_type == "regular" else payload.trial_expires_at or membership.trial_expires_at
+    )
+    if was_expired and (next_expiry is None or next_expiry > now):
+        organization = await _get_organization(database, organization_id)
+        if await _seat_count(database, organization_id) >= organization.seat_limit:
+            raise HTTPException(status.HTTP_409_CONFLICT, "organization seat limit reached")
+    trial_changed = (
+        next_type != membership.member_type or next_expiry != membership.trial_expires_at
+    )
+    membership.member_type = next_type
+    membership.trial_expires_at = next_expiry
+    if trial_changed and (was_expired or membership.trial_expired(now)):
+        # Renewal must not revive expired sessions; immediate expiry also revokes them.
+        await database.execute(
+            update(Session)
+            .where(Session.user_id == user.id, Session.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
     if payload.display_name is not None:
         user.display_name = payload.display_name.strip()
     if payload.status is not None:
@@ -560,7 +644,14 @@ async def update_member(
         target_id=str(membership.id),
         reason=payload.reason,
         before=before,
-        after={"display_name": user.display_name, "status": user.status.value},
+        after={
+            "display_name": user.display_name,
+            "status": user.status.value,
+            "member_type": membership.member_type,
+            "trial_expires_at": membership.trial_expires_at.isoformat()
+            if membership.trial_expires_at
+            else None,
+        },
         request_id=request.state.request_id,
     )
     await database.commit()
@@ -584,7 +675,7 @@ async def remove_member(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "reason must not be blank")
     membership, user = await _get_active_member(database, organization_id, user_id)
     now = datetime.now(UTC)
-    before_status = user.status.value
+    before = _membership_audit_snapshot(membership, user)
     membership.removed_at = now
     membership.removed_by_user_id = actor.user.id
     user.status = UserStatus.SUSPENDED
@@ -601,13 +692,8 @@ async def remove_member(
         target_type="membership",
         target_id=str(membership.id),
         reason=reason,
-        before={
-            "user_id": str(user.id),
-            "email": user.email,
-            "status": before_status,
-            "removed_at": None,
-        },
-        after={"status": user.status.value, "removed_at": now.isoformat()},
+        before=before,
+        after=_membership_audit_snapshot(membership, user),
         request_id=request.state.request_id,
     )
     await database.commit()

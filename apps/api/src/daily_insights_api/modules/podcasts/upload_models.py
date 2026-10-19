@@ -47,6 +47,7 @@ class PodcastUploadBatch(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     # An absent episode has conceptual version 1, the version used when its
     # first serialized cutover creates the row.
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     base_episode_version: Mapped[int] = mapped_column(Integer, nullable=False)
     began_published: Mapped[bool] = mapped_column(Boolean, nullable=False)
     applied_count: Mapped[int] = mapped_column(

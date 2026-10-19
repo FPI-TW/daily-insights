@@ -165,11 +165,13 @@ export function ReportShell({
   locale,
   markets = [],
   activeMarket,
+  navigationPending = false,
   children,
 }: {
   locale: Locale
   markets?: ReadonlyArray<NavMarket>
   activeMarket?: MarketCode | undefined
+  navigationPending?: boolean
   children: ReactNode
 }) {
   const { t } = useTranslation()
@@ -185,6 +187,18 @@ export function ReportShell({
         markets={markets}
         activeMarket={activeMarket}
       />
+      {navigationPending ? (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-label={t("marketNavigationLoading")}
+          className="mb-6 flex animate-pulse gap-3"
+        >
+          <span className="h-8 w-24 rounded bg-line" />
+          <span className="h-8 w-24 rounded bg-line" />
+          <span className="h-8 w-24 rounded bg-line" />
+        </div>
+      ) : null}
       {children}
     </main>
   )
@@ -208,6 +222,7 @@ export function AnalystViewpointsLoading() {
     <section
       className="mb-6 animate-pulse rounded-[13px] border border-line bg-surface p-5"
       aria-live="polite"
+      role="status"
       aria-label={t("analystViewpointsLoading")}
     >
       <p className="sr-only">{t("analystViewpointsLoading")}</p>

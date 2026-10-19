@@ -14,11 +14,12 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
     UploadFile,
     status,
 )
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.config import Settings
@@ -46,7 +47,10 @@ from daily_insights_api.modules.podcasts.api import (
     PodcastPublicationRequest,
     PodcastUploadReason,
 )
+from daily_insights_api.modules.podcasts.lifecycle import lock_upload_date, require_mutable
+from daily_insights_api.modules.podcasts.media_worker import OBJECT_STORE_ERRORS
 from daily_insights_api.modules.podcasts.models import PodcastEpisode
+from daily_insights_api.modules.podcasts.removal import remove_episode
 from daily_insights_api.modules.podcasts.service import (
     PodcastAudioUpload,
     PodcastChaptersError,
@@ -291,6 +295,7 @@ async def admin_create(
     actor: AdminWrite,
     database: Database,
 ) -> PodcastEpisodeAdminResponse:
+    await lock_upload_date(database, payload.trading_date)
     episode = PodcastEpisode(
         trading_date=payload.trading_date,
         status="draft",
@@ -518,11 +523,14 @@ async def admin_upload(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "podcast_audio_required"},
         )
+    await lock_upload_date(database, trading_date)
     uploads = tuple([await _prepare_audio_upload(locale, upload) for locale, upload in selected])
     episode = await database.scalar(
         select(PodcastEpisode).where(PodcastEpisode.trading_date == trading_date).with_for_update()
     )
     created = episode is None
+    if episode is not None:
+        require_mutable(episode)
     if episode is None:
         episode = PodcastEpisode(
             trading_date=trading_date,
@@ -647,3 +655,33 @@ async def admin_import_audio(
     )
     await database.commit()
     return await episode_admin_response(database, episode)
+
+
+@router.delete(
+    "/api/admin/podcasts/{episode_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="admin_podcasts_remove",
+)
+async def admin_remove(
+    episode_id: uuid.UUID,
+    payload: PodcastPublicationRequest,
+    request: Request,
+    actor: AssetWrite,
+    database: Database,
+    store: Store,
+) -> Response:
+    try:
+        await remove_episode(
+            database,
+            store,
+            episode_id,
+            payload.expected_version,
+            actor.user.id,
+            request.state.request_id,
+        )
+    except (*OBJECT_STORE_ERRORS, SQLAlchemyError, OSError, TimeoutError, RuntimeError):
+        await database.rollback()
+        raise HTTPException(
+            503, detail={"code": "episode_removal_incomplete", "episode_id": str(episode_id)}
+        ) from None
+    return Response(status_code=204)

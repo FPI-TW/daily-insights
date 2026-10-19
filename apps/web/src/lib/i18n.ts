@@ -6,6 +6,33 @@ import { brandTitles } from "./brand"
 const resources: Resource = {
   "zh-hant": {
     translation: {
+      audioEpisodeCount: "{{count}} 集",
+      tokenTotal: "Token 合計",
+      tokenInput: "輸入 tokens",
+      tokenOutput: "輸出 tokens",
+      tokenUnavailable: "未提供",
+      tokenKnown: "已知用量",
+      tokenSummary: "Token 用量摘要",
+      tokenPartialNotice: "部分生成未回傳完整用量，僅加總已知數值。",
+      memberTypeLabel: "會員類型",
+      memberTypeFilter: "會員分類",
+      memberType_all: "全部",
+      memberType_regular: "一般會員",
+      memberType_trial: "試用會員",
+      trialDays: "試用天數",
+      trialCreationHint:
+        "從建立時起算，每天為 24 小時；到期後停止登入並釋放席次。",
+      trialActive: "試用中",
+      trialExpired: "已到期",
+      trialExpiresAt: "試用到期時間（台北 UTC+8）",
+      trialExpiredHint:
+        "此會員已不占用席次，延長期限或轉一般會員時會重新檢查席次。",
+      trialEditHint: "到期後恢復須重新登入；調整期限不會自動解除停用。",
+      trialConvert: "轉為一般會員",
+      trialConvertConfirmation:
+        "確定轉為一般會員？試用期限將移除；已到期會員須重新登入。",
+      trialSeatConflict: "組織席次已滿，請先釋放席次再恢復試用或轉為一般會員。",
+
       sectionTechnical: "指數技術面",
       biasTitle: "台股乖離率",
       biasSub: "{{window}} · 20/60/120MA 乖離帶",
@@ -336,11 +363,29 @@ const resources: Resource = {
       dataManagementCancel: "取消作業",
       dataManagementActive: "進行中的作業",
       dataManagementLatest: "最近執行結果",
+      dataManagementStatusPending: "待執行",
+      dataManagementStatusRunning: "執行中",
+      dataManagementStatusRetryWait: "等待重試",
+      dataManagementStatusSucceeded: "成功",
+      dataManagementStatusNoChange: "無變更",
+      dataManagementStatusPartial: "部分完成",
+      dataManagementStatusUnavailable: "無法取得",
+      dataManagementStatusFailed: "失敗",
+      dataManagementStatusCancelled: "已取消",
+      dataManagementStatusUnknown: "未知狀態：{{status}}",
+      dataManagementKindPublish: "發布",
+      dataManagementKindRefresh: "更新資料",
+      dataManagementRecentDays: "顯示台北日期今天及前四天的每日更新。",
+      dataManagementMissingLinked: "關聯作業未列於本頁：{{jobs}}",
+      dataManagementSequenceStep: "步驟 {{number}}",
+      dataManagementStartedAt: "開始：{{time}}（台北）",
+      dataManagementCompletedAt: "完成：{{time}}（台北）",
+      dataManagementQueuedAt: "排入：{{time}}（台北）",
       dataManagementRoutines: "每日更新 Routine",
       dataManagementNoRoutines: "尚無每日更新紀錄。",
       dataManagementRoutineSchedule: "排程：{{scheduled}} · 截止：{{deadline}}",
       dataManagementDependsOn: "依賴：{{jobs}}",
-      dataManagementAttempt: "第 {{number}} 次嘗試 · {{status}}",
+      dataManagementAttempt: "第 {{number}} 次嘗試",
       dataManagementPagePrevious: "上一頁",
       dataManagementPageNext: "下一頁",
       dataManagementPageStatus: "第 {{page}} 頁",
@@ -717,6 +762,18 @@ const resources: Resource = {
       podcastSaveMetadata: "儲存內容",
       podcastPublish: "發布",
       podcastUnpublish: "下架",
+      podcastRemove: "永久移除",
+      podcastRemoveUnpublishFirst: "請先下架，再永久移除。",
+      podcastRemoveConfirmation:
+        "永久移除 {{date}} 的整集 Podcast？所有語言、歷史音檔、封面及相關資料都會移除；共用檔案會保留。此操作無法復原。",
+      podcastRemoving: "正在移除整集 Podcast…",
+      podcastRemovalProgress:
+        "移除尚未完成：已處理 {{cleared}} / {{total}} 個檔案。可手動重試。",
+      podcastRemovalRetry: "重試移除",
+      podcastRemovalIncomplete:
+        "移除尚未完成，節目已凍結。請重試以繼續清理剩餘檔案。",
+      podcastRemovalConflict:
+        "節目狀態或版本已變更，已重新載入；請確認後重試。",
       podcastUnpublishConfirmation:
         "確定要下架此日期的 Podcast 嗎？下架後客戶將無法收聽。",
       podcastImportAudio: "登記 R2 音檔",
@@ -742,7 +799,7 @@ const resources: Resource = {
       podcastUploadNewKeyRequired: "無法繼續此上傳嘗試，請再次提交保留的音檔。",
       podcastVerifiedSha256: "已驗證 SHA-256：{{sha256}}",
       podcastUploadInvalidType:
-        "請使用副檔名與 MIME type 相符的 MP3 或 MP4 音檔。",
+        "請選擇 .mp3 或 .mp4 音檔，副檔名須與 MIME type 相符。",
       podcastBatchProgress: "批次上傳進度",
       podcastBatchWaitBeforeNewUpload:
         "目前批次仍有音檔處理中，請等待完成後再開始新的上傳。",
@@ -759,6 +816,7 @@ const resources: Resource = {
       podcastUpload_pending_upload: "等待上傳",
       podcastUpload_uploading: "上傳中",
       podcastUpload_queued: "等待處理",
+      podcastUpload_verifying: "正在驗證音檔並儲存…",
       podcastUpload_processing: "處理中",
       podcastUpload_completed: "完成",
       podcastUpload_failed: "失敗",
@@ -773,6 +831,7 @@ const resources: Resource = {
       podcastBatchReplacementWarning:
         "以下語系已有音檔：{{locales}}。確認後將覆寫檔案。",
       podcastMissingLocales: "缺少語系：{{locales}}",
+      marketNavigationLoading: "正在載入市場導覽。",
       reportNotLaunchedTitle: "報告尚未推出",
       reportNotLaunchedDescription:
         "此市場的正式晨間報告仍在準備中，目前先提供分析師觀點與市場新聞。",
@@ -1016,6 +1075,33 @@ const resources: Resource = {
   },
   "zh-hans": {
     translation: {
+      audioEpisodeCount: "{{count}} 集",
+      tokenTotal: "Token 合计",
+      tokenInput: "输入 tokens",
+      tokenOutput: "输出 tokens",
+      tokenUnavailable: "未提供",
+      tokenKnown: "已知用量",
+      tokenSummary: "Token 用量摘要",
+      tokenPartialNotice: "部分生成未返回完整用量，仅汇总已知数值。",
+      memberTypeLabel: "会员类型",
+      memberTypeFilter: "会员分类",
+      memberType_all: "全部",
+      memberType_regular: "一般会员",
+      memberType_trial: "试用会员",
+      trialDays: "试用天数",
+      trialCreationHint:
+        "从创建时起算，每天为 24 小时；到期后停止登录并释放席位。",
+      trialActive: "试用中",
+      trialExpired: "已到期",
+      trialExpiresAt: "试用到期时间（台北 UTC+8）",
+      trialExpiredHint:
+        "此会员已不占用席位，延长期限或转普通会员时会重新检查席位。",
+      trialEditHint: "到期后恢复须重新登录；调整期限不会自动解除停用。",
+      trialConvert: "转为普通会员",
+      trialConvertConfirmation:
+        "确定转为普通会员？试用期限将移除；已到期会员须重新登录。",
+      trialSeatConflict: "组织席位已满，请先释放席位再恢复试用或转为普通会员。",
+
       sectionTechnical: "指数技术面",
       biasTitle: "台股乖离率",
       biasSub: "{{window}} · 20/60/120MA 乖离带",
@@ -1346,11 +1432,29 @@ const resources: Resource = {
       dataManagementCancel: "取消任务",
       dataManagementActive: "进行中的任务",
       dataManagementLatest: "最近执行结果",
+      dataManagementStatusPending: "待执行",
+      dataManagementStatusRunning: "执行中",
+      dataManagementStatusRetryWait: "等待重试",
+      dataManagementStatusSucceeded: "成功",
+      dataManagementStatusNoChange: "无变更",
+      dataManagementStatusPartial: "部分完成",
+      dataManagementStatusUnavailable: "无法取得",
+      dataManagementStatusFailed: "失败",
+      dataManagementStatusCancelled: "已取消",
+      dataManagementStatusUnknown: "未知状态：{{status}}",
+      dataManagementKindPublish: "发布",
+      dataManagementKindRefresh: "更新数据",
+      dataManagementRecentDays: "显示台北日期今天及前四天的每日更新。",
+      dataManagementMissingLinked: "关联任务未列于本页：{{jobs}}",
+      dataManagementSequenceStep: "步骤 {{number}}",
+      dataManagementStartedAt: "开始：{{time}}（台北）",
+      dataManagementCompletedAt: "完成：{{time}}（台北）",
+      dataManagementQueuedAt: "排入：{{time}}（台北）",
       dataManagementRoutines: "每日更新 Routine",
       dataManagementNoRoutines: "尚无每日更新记录。",
       dataManagementRoutineSchedule: "排程：{{scheduled}} · 截止：{{deadline}}",
       dataManagementDependsOn: "依赖：{{jobs}}",
-      dataManagementAttempt: "第 {{number}} 次尝试 · {{status}}",
+      dataManagementAttempt: "第 {{number}} 次尝试",
       dataManagementPagePrevious: "上一页",
       dataManagementPageNext: "下一页",
       dataManagementPageStatus: "第 {{page}} 页",
@@ -1727,6 +1831,18 @@ const resources: Resource = {
       podcastSaveMetadata: "保存内容",
       podcastPublish: "发布",
       podcastUnpublish: "下架",
+      podcastRemove: "永久移除",
+      podcastRemoveUnpublishFirst: "请先下架，再永久移除。",
+      podcastRemoveConfirmation:
+        "永久移除 {{date}} 的整集 Podcast？所有语言、历史音频、封面及相关资料都会移除；共用文件会保留。此操作无法恢复。",
+      podcastRemoving: "正在移除整集 Podcast…",
+      podcastRemovalProgress:
+        "移除尚未完成：已处理 {{cleared}} / {{total}} 个文件。可手动重试。",
+      podcastRemovalRetry: "重试移除",
+      podcastRemovalIncomplete:
+        "移除尚未完成，节目已冻结。请重试以继续清理剩余文件。",
+      podcastRemovalConflict:
+        "节目状态或版本已变更，已重新加载；请确认后重试。",
       podcastUnpublishConfirmation:
         "确定要下架此日期的 Podcast 吗？下架后客户将无法收听。",
       podcastImportAudio: "登记 R2 音频",
@@ -1751,7 +1867,7 @@ const resources: Resource = {
       podcastUploadNewKeyRequired: "无法继续此次上传，请再次提交保留的音频。",
       podcastVerifiedSha256: "已验证 SHA-256：{{sha256}}",
       podcastUploadInvalidType:
-        "请使用扩展名与 MIME type 相符的 MP3 或 MP4 音频。",
+        "请选择 .mp3 或 .mp4 音频，扩展名须与 MIME type 相符。",
       podcastBatchProgress: "批次上传进度",
       podcastBatchWaitBeforeNewUpload:
         "当前批次仍有音频处理中，请等待完成后再开始新的上传。",
@@ -1768,6 +1884,7 @@ const resources: Resource = {
       podcastUpload_pending_upload: "等待上传",
       podcastUpload_uploading: "上传中",
       podcastUpload_queued: "等待处理",
+      podcastUpload_verifying: "正在验证音频并保存…",
       podcastUpload_processing: "处理中",
       podcastUpload_completed: "完成",
       podcastUpload_failed: "失败",
@@ -1780,6 +1897,7 @@ const resources: Resource = {
       podcastBatchReplacementWarning:
         "以下语言已有音频：{{locales}}。确认后将覆盖文件。",
       podcastMissingLocales: "缺少语言：{{locales}}",
+      marketNavigationLoading: "正在加载市场导航。",
       reportNotLaunchedTitle: "报告尚未推出",
       reportNotLaunchedDescription:
         "该市场的正式晨间报告仍在准备中，目前先提供分析师观点与市场新闻。",
@@ -2023,6 +2141,37 @@ const resources: Resource = {
   },
   en: {
     translation: {
+      audioEpisodeCount_one: "{{count}} episode",
+      audioEpisodeCount_other: "{{count}} episodes",
+      tokenTotal: "Total tokens",
+      tokenInput: "Input tokens",
+      tokenOutput: "Output tokens",
+      tokenUnavailable: "Not reported",
+      tokenKnown: "Known usage",
+      tokenSummary: "Token usage summary",
+      tokenPartialNotice:
+        "Some generations did not report full usage; only known counts are included.",
+      memberTypeLabel: "Member type",
+      memberTypeFilter: "Member category",
+      memberType_all: "All",
+      memberType_regular: "Regular members",
+      memberType_trial: "Trial members",
+      trialDays: "Trial days",
+      trialCreationHint:
+        "Starts at creation, with 24 hours per day. Expiry blocks access and releases the seat.",
+      trialActive: "Trial active",
+      trialExpired: "Trial expired",
+      trialExpiresAt: "Trial expiry (Taipei UTC+8)",
+      trialExpiredHint:
+        "This member no longer occupies a seat. Renewal or conversion requires an available seat.",
+      trialEditHint:
+        "Renewal after expiry requires a new login. Changing the deadline does not reactivate a suspended account.",
+      trialConvert: "Convert to regular",
+      trialConvertConfirmation:
+        "Convert to a regular member? The trial deadline will be removed. Expired members must sign in again.",
+      trialSeatConflict:
+        "No seats available. Free a seat before renewing or converting this member.",
+
       sectionTechnical: "Index technicals",
       biasTitle: "TAIEX bias",
       biasSub: "{{window}} · 20/60/120MA bias bands",
@@ -2366,12 +2515,31 @@ const resources: Resource = {
       dataManagementCancel: "Cancel run",
       dataManagementActive: "Active runs",
       dataManagementLatest: "Latest runs",
+      dataManagementStatusPending: "Pending",
+      dataManagementStatusRunning: "Running",
+      dataManagementStatusRetryWait: "Waiting to retry",
+      dataManagementStatusSucceeded: "Succeeded",
+      dataManagementStatusNoChange: "No change",
+      dataManagementStatusPartial: "Partial",
+      dataManagementStatusUnavailable: "Unavailable",
+      dataManagementStatusFailed: "Failed",
+      dataManagementStatusCancelled: "Cancelled",
+      dataManagementStatusUnknown: "Unknown status: {{status}}",
+      dataManagementKindPublish: "Publish",
+      dataManagementKindRefresh: "Refresh",
+      dataManagementRecentDays:
+        "Daily routines for today and the preceding four days in Taipei.",
+      dataManagementMissingLinked: "Linked jobs outside this page: {{jobs}}",
+      dataManagementSequenceStep: "Step {{number}}",
+      dataManagementStartedAt: "Started: {{time}} (Taipei)",
+      dataManagementCompletedAt: "Completed: {{time}} (Taipei)",
+      dataManagementQueuedAt: "Queued: {{time}} (Taipei)",
       dataManagementRoutines: "Daily update routines",
       dataManagementNoRoutines: "No daily routine has run yet.",
       dataManagementRoutineSchedule:
         "Scheduled: {{scheduled}} · Deadline: {{deadline}}",
       dataManagementDependsOn: "Depends on: {{jobs}}",
-      dataManagementAttempt: "Attempt {{number}} · {{status}}",
+      dataManagementAttempt: "Attempt {{number}}",
       dataManagementPagePrevious: "Previous",
       dataManagementPageNext: "Next",
       dataManagementPageStatus: "Page {{page}}",
@@ -2767,6 +2935,18 @@ const resources: Resource = {
       podcastSaveMetadata: "Save content",
       podcastPublish: "Publish",
       podcastUnpublish: "Unpublish",
+      podcastRemove: "Permanently remove",
+      podcastRemoveUnpublishFirst: "Unpublish this episode before removing it.",
+      podcastRemoveConfirmation:
+        "Permanently remove the entire Podcast for {{date}}? All languages, historical audio, cover, and related data will be removed; shared files will be retained. This cannot be undone.",
+      podcastRemoving: "Removing the entire Podcast…",
+      podcastRemovalProgress:
+        "Removal incomplete: {{cleared}} / {{total}} files processed. Retry manually to continue.",
+      podcastRemovalRetry: "Retry removal",
+      podcastRemovalIncomplete:
+        "Removal is incomplete and the episode is frozen. Retry to clear the remaining files.",
+      podcastRemovalConflict:
+        "The episode state or version changed. The card has been refreshed; review it and retry.",
       podcastUnpublishConfirmation:
         "Unpublish this date's Podcast? Customers will no longer be able to listen to it.",
       podcastImportAudio: "Register R2 audio",
@@ -2794,7 +2974,7 @@ const resources: Resource = {
         "This upload attempt cannot be resumed. Submit the retained files again.",
       podcastVerifiedSha256: "Verified SHA-256: {{sha256}}",
       podcastUploadInvalidType:
-        "Choose an MP3 or MP4 whose extension matches its MIME type.",
+        "Choose a .mp3 or .mp4 audio file whose extension matches its MIME type.",
       podcastBatchProgress: "Upload batch progress",
       podcastBatchWaitBeforeNewUpload:
         "This batch still has files in progress. Wait for them to finish before starting another upload.",
@@ -2811,6 +2991,7 @@ const resources: Resource = {
       podcastUpload_pending_upload: "Waiting to upload",
       podcastUpload_uploading: "Uploading",
       podcastUpload_queued: "Queued",
+      podcastUpload_verifying: "Verifying and saving audio…",
       podcastUpload_processing: "Processing",
       podcastUpload_completed: "Complete",
       podcastUpload_failed: "Failed",
@@ -2826,6 +3007,7 @@ const resources: Resource = {
       podcastBatchReplacementWarning:
         "Audio already exists for: {{locales}}. Confirm to overwrite the files.",
       podcastMissingLocales: "Missing languages: {{locales}}",
+      marketNavigationLoading: "Loading market navigation",
       reportNotLaunchedTitle: "Report not launched yet",
       reportNotLaunchedDescription:
         "The formal morning report for this market is still in preparation; the analyst viewpoint and market news are available now.",

@@ -1,0 +1,590 @@
+"""Stateless signing and synchronous, idempotent Podcast registration."""
+
+import asyncio
+import base64
+import hashlib
+import hmac
+import logging
+import tempfile
+import uuid
+from datetime import UTC, date, datetime, timedelta
+from typing import BinaryIO, Literal
+
+from fastapi import HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from daily_insights_api.core.config import Settings
+from daily_insights_api.core.enums import AssetKind, AssetStatus
+from daily_insights_api.modules.assets.api import Asset, ObjectRef, ObjectStore
+from daily_insights_api.modules.audit.api import record_audit_event
+from daily_insights_api.modules.podcasts.direct_upload import (
+    MAX_PODCAST_AUDIO_BYTES,
+    AssetWrite,
+    Database,
+    Locale,
+    Store,
+    UploadBatchRequest,
+    UploadReason,
+    UploadRequest,
+)
+from daily_insights_api.modules.podcasts.direct_upload import (
+    router as router,
+)
+from daily_insights_api.modules.podcasts.io import finish_io as finish_io
+from daily_insights_api.modules.podcasts.lifecycle import (
+    date_generation,
+    require_generation,
+    require_mutable,
+)
+from daily_insights_api.modules.podcasts.lifecycle import lock_upload_date as _lock_upload_date
+from daily_insights_api.modules.podcasts.lifecycle import lock_upload_object as lock_upload_object
+from daily_insights_api.modules.podcasts.media_worker import OBJECT_STORE_ERRORS
+from daily_insights_api.modules.podcasts.models import PodcastEpisode, PodcastEpisodeAudioVariant
+from daily_insights_api.modules.podcasts.service import (
+    audio_chapters,
+    audio_duration_seconds,
+    serialized_chapters,
+)
+from daily_insights_api.modules.podcasts.storage_paths import final_audio_key
+
+logger = logging.getLogger(__name__)
+UPLOAD_PREFIX = "podcasts/direct/"
+
+
+class DirectUploadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    trading_date: date
+    reason: UploadReason
+    files: tuple[UploadRequest, ...] = Field(min_length=1, max_length=3)
+
+
+class UploadTicket(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    version: Literal[1, 2] = 1
+    actor_id: uuid.UUID
+    asset_id: uuid.UUID
+    trading_date: date
+    reason: UploadReason
+    file: UploadRequest
+    expires: int
+    episode_version: int | None
+    began_published: bool
+    generation: int = Field(default=0, ge=0)
+
+    @property
+    def object_key(self) -> str:
+        extension = "mp3" if self.file.mime_type == "audio/mpeg" else "mp4"
+        return (
+            f"{UPLOAD_PREFIX}{self.expires}/{self.trading_date}/"
+            f"{self.file.locale}/{self.asset_id}.{extension}"
+        )
+
+    @property
+    def registered_key(self) -> str:
+        if self.version == 1:
+            return self.object_key
+        return final_audio_key(
+            self.trading_date,
+            self.file.locale,
+            (self.file.expected_current_version or 0) + 1,
+            self.file.mime_type,
+        )
+
+
+class DirectUploadTarget(BaseModel):
+    asset_id: uuid.UUID
+    locale: Locale
+    upload_url: str
+    upload_token: str
+    required_headers: dict[str, str]
+    expires_at: datetime
+
+
+class DirectUploadResponse(BaseModel):
+    files: list[DirectUploadTarget]
+
+
+class CompleteUploadRequest(BaseModel):
+    upload_token: str = Field(min_length=1, max_length=8192)
+
+
+class CompletedUpload(BaseModel):
+    asset_id: uuid.UUID
+    episode_id: uuid.UUID
+    locale: Locale
+    status: Literal["completed"] = "completed"
+    sha256: str
+    duration_seconds: int | None
+
+
+def _signature(settings: Settings, payload: str) -> str:
+    assert settings.session_secret is not None
+    return hmac.new(
+        settings.session_secret.get_secret_value().encode(),
+        b"podcast-direct-upload-v1:" + payload.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def encode_ticket(ticket: UploadTicket, settings: Settings) -> str:
+    payload = base64.urlsafe_b64encode(ticket.model_dump_json().encode()).decode()
+    return f"{payload}.{_signature(settings, payload)}"
+
+
+def decode_ticket(token: str, settings: Settings) -> UploadTicket:
+    try:
+        payload, signature = token.rsplit(".", 1)
+        if not hmac.compare_digest(signature, _signature(settings, payload)):
+            raise ValueError("signature")
+        return UploadTicket.model_validate_json(
+            base64.b64decode(payload, altchars=b"-_", validate=True)
+        )
+    except (ValueError, ValidationError) as error:
+        raise HTTPException(403, detail={"code": "invalid_upload_token"}) from error
+
+
+async def _completed(database: AsyncSession, ticket: UploadTicket) -> CompletedUpload | None:
+    row = (
+        await database.execute(
+            select(Asset, PodcastEpisodeAudioVariant)
+            .join(PodcastEpisodeAudioVariant, PodcastEpisodeAudioVariant.asset_id == Asset.id)
+            .where(Asset.id == ticket.asset_id)
+            .execution_options(populate_existing=True)
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    asset, variant = row
+    if (
+        asset.object_key != ticket.registered_key
+        or asset.uploaded_by_user_id != ticket.actor_id
+        or asset.sha256 != ticket.file.sha256
+        or asset.size_bytes != ticket.file.size_bytes
+        or asset.mime_type != ticket.file.mime_type
+        or variant.locale != ticket.file.locale
+        or variant.version != (ticket.file.expected_current_version or 0) + 1
+    ):
+        raise HTTPException(409, detail={"code": "upload_identity_conflict"})
+    return CompletedUpload(
+        asset_id=asset.id,
+        episode_id=variant.episode_id,
+        locale=ticket.file.locale,
+        sha256=asset.sha256,
+        duration_seconds=variant.duration_seconds,
+    )
+
+
+async def delete_unreferenced(
+    database: AsyncSession,
+    store: ObjectStore,
+    ref: ObjectRef,
+) -> bool:
+    referenced = await database.scalar(select(Asset.id).where(Asset.object_key == ref.key))
+    if referenced is not None:
+        return False
+    try:
+        await finish_io(store.delete(ref))
+    except OBJECT_STORE_ERRORS:
+        logger.warning("Podcast object deletion deferred to orphan cleanup")
+        return False
+    return True
+
+
+@router.post(
+    "/api/admin/podcasts/direct-uploads",
+    response_model=DirectUploadResponse,
+    operation_id="admin_podcast_direct_upload_sign",
+)
+async def sign_direct_upload(
+    payload: DirectUploadRequest,
+    actor: AssetWrite,
+    database: Database,
+    store: Store,
+    request: Request,
+) -> DirectUploadResponse:
+    settings: Settings = request.app.state.settings
+    if settings.r2_bucket_name is None:
+        raise HTTPException(503, detail={"code": "r2_not_configured"})
+    files = UploadBatchRequest(
+        idempotency_key="stateless-upload-validation", **payload.model_dump()
+    ).validated_files()
+    await _lock_upload_date(database, payload.trading_date)
+    generation = await date_generation(database, payload.trading_date)
+    episode = await database.scalar(
+        select(PodcastEpisode)
+        .where(PodcastEpisode.trading_date == payload.trading_date)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if episode is not None:
+        require_mutable(episode)
+    versions: dict[str, int] = {}
+    if episode is not None:
+        variants = await database.scalars(
+            select(PodcastEpisodeAudioVariant).where(
+                PodcastEpisodeAudioVariant.episode_id == episode.id,
+                PodcastEpisodeAudioVariant.is_active.is_(True),
+            )
+        )
+        versions = {variant.locale: variant.version for variant in variants}
+    replacements = {
+        item.locale: versions[item.locale]
+        for item, _, _ in files
+        if item.locale in versions and not item.confirm_replacement
+    }
+    if replacements:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "replacement_confirmation_required",
+                "current_versions": replacements,
+            },
+        )
+    mismatches = {
+        item.locale: versions.get(item.locale)
+        for item, _, _ in files
+        if item.expected_current_version != versions.get(item.locale)
+        or (item.confirm_replacement and item.locale not in versions)
+    }
+    if mismatches:
+        raise HTTPException(
+            409, detail={"code": "audio_version_conflict", "current_versions": mismatches}
+        )
+    expires = int(datetime.now(UTC).timestamp()) + settings.podcast_upload_presign_ttl_seconds
+    targets = []
+    for item, _, mime in files:
+        ticket = UploadTicket(
+            version=2,
+            actor_id=actor.user.id,
+            asset_id=uuid.uuid4(),
+            trading_date=payload.trading_date,
+            reason=payload.reason,
+            file=item.model_copy(update={"mime_type": mime}),
+            expires=expires,
+            episode_version=episode.version if episode else None,
+            began_published=episode.status == "published" if episode else False,
+            generation=generation,
+        )
+        url = await store.presign_put(
+            ObjectRef(bucket=settings.r2_bucket_name, key=ticket.object_key),
+            mime_type=mime,
+            sha256=item.sha256,
+            expires_in=timedelta(seconds=settings.podcast_upload_presign_ttl_seconds),
+        )
+        targets.append(
+            DirectUploadTarget(
+                asset_id=ticket.asset_id,
+                locale=item.locale,
+                upload_url=url,
+                upload_token=encode_ticket(ticket, settings),
+                required_headers={
+                    "Content-Type": mime,
+                    "If-None-Match": "*",
+                    "x-amz-meta-sha256": item.sha256,
+                },
+                expires_at=datetime.fromtimestamp(expires, UTC),
+            )
+        )
+    return DirectUploadResponse(files=targets)
+
+
+async def verify_audio(
+    store: ObjectStore,
+    ref: ObjectRef,
+    ticket: UploadTicket,
+    *,
+    spool_dir: str | None = None,
+    spool: BinaryIO | None = None,
+) -> tuple[int | None, list[dict[str, object]]]:
+    if spool is None:
+        with tempfile.TemporaryFile(dir=spool_dir) as owned_spool:
+            return await verify_audio(store, ref, ticket, spool=owned_spool)
+    metadata = await store.head(ref)
+    if metadata is None:
+        raise HTTPException(409, detail={"code": "object_not_uploaded"})
+    expected = ticket.file
+    if (
+        metadata.size_bytes != expected.size_bytes
+        or metadata.mime_type.lower() != expected.mime_type
+        or metadata.sha256 != expected.sha256
+    ):
+        raise HTTPException(422, detail={"code": "uploaded_metadata_mismatch"})
+    digest = hashlib.sha256()
+    size = 0
+    # Bound memory independently of the unchanged 256 MiB upload limit.
+    async for chunk in store.read(ref):
+        size += len(chunk)
+        if size > expected.size_bytes or size > MAX_PODCAST_AUDIO_BYTES:
+            raise HTTPException(422, detail={"code": "uploaded_size_mismatch"})
+        digest.update(chunk)
+        spool.write(chunk)
+    if size != expected.size_bytes or digest.hexdigest() != expected.sha256:
+        raise HTTPException(422, detail={"code": "uploaded_sha256_mismatch"})
+    after = await store.head(ref)
+    if after != metadata:
+        raise HTTPException(422, detail={"code": "object_changed_during_verification"})
+    duration = await finish_io(asyncio.to_thread(audio_duration_seconds, spool))
+    chapters = await finish_io(asyncio.to_thread(audio_chapters, spool, expected.mime_type))
+    return duration, serialized_chapters(chapters)
+
+
+async def current_audio(
+    database: AsyncSession,
+    ticket: UploadTicket,
+) -> tuple[PodcastEpisode | None, PodcastEpisodeAudioVariant | None]:
+    await _lock_upload_date(database, ticket.trading_date)
+    await require_generation(database, ticket.trading_date, ticket.generation)
+    episode = await database.scalar(
+        select(PodcastEpisode)
+        .where(PodcastEpisode.trading_date == ticket.trading_date)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    current = None
+    if episode is not None:
+        require_mutable(episode)
+        current = await database.scalar(
+            select(PodcastEpisodeAudioVariant)
+            .where(
+                PodcastEpisodeAudioVariant.episode_id == episode.id,
+                PodcastEpisodeAudioVariant.locale == ticket.file.locale,
+                PodcastEpisodeAudioVariant.is_active.is_(True),
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    version = current.version if current else None
+    if version != ticket.file.expected_current_version:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "audio_version_conflict",
+                "current_versions": {ticket.file.locale: version},
+            },
+        )
+    return episode, current
+
+
+async def register_audio(
+    database: AsyncSession,
+    ticket: UploadTicket,
+    ref: ObjectRef,
+    duration: int | None,
+    chapters: list[dict[str, object]],
+    request_id: str,
+) -> CompletedUpload:
+    episode, current = await current_audio(database, ticket)
+    created = episode is None
+    if episode is None:
+        episode = PodcastEpisode(
+            trading_date=ticket.trading_date,
+            status="draft",
+            version=1,
+            created_by_user_id=ticket.actor_id,
+        )
+        database.add(episode)
+        await database.flush()
+    version = current.version if current else None
+    before = {"status": episode.status, "version": episode.version, "locale_version": version}
+    if current is not None:
+        current.is_active = False
+        current.replaced_at = datetime.now(UTC)
+        old = await database.get(Asset, current.asset_id)
+        if old is not None:
+            old.status = AssetStatus.ARCHIVED
+        await database.flush()
+    asset = Asset(
+        id=ticket.asset_id,
+        bucket=ref.bucket,
+        object_key=ref.key,
+        kind=AssetKind.AUDIO,
+        mime_type=ticket.file.mime_type,
+        size_bytes=ticket.file.size_bytes,
+        sha256=ticket.file.sha256,
+        locale=ticket.file.locale,
+        localized_titles={},
+        status=AssetStatus.ACTIVE,
+        uploaded_by_user_id=ticket.actor_id,
+    )
+    database.add(asset)
+    await database.flush()
+    database.add(
+        PodcastEpisodeAudioVariant(
+            episode_id=episode.id,
+            locale=ticket.file.locale,
+            version=(version or 0) + 1,
+            asset_id=asset.id,
+            is_active=True,
+            activated_by_user_id=ticket.actor_id,
+            duration_seconds=duration,
+            chapters=chapters,
+            chapters_source="file" if chapters else "none",
+        )
+    )
+    # Do not undo an administrator's intervening unpublish/edit. Other locales
+    # may complete independently without a batch-wide version fence.
+    if (
+        episode.status == "draft"
+        and not ticket.began_published
+        and (created or episode.version == ticket.episode_version)
+    ):
+        episode.status = "published"
+        episode.published_at = datetime.now(UTC)
+        episode.published_by_user_id = ticket.actor_id
+    episode.version += 1
+    record_audit_event(
+        database,
+        actor_user_id=ticket.actor_id,
+        action="podcast.audio_direct_upload_cutover",
+        target_type="podcast_episode",
+        target_id=str(episode.id),
+        reason=ticket.reason,
+        before=before,
+        after={
+            "status": episode.status,
+            "version": episode.version,
+            "locale": ticket.file.locale,
+            "variant_version": (version or 0) + 1,
+            "asset_id": str(asset.id),
+            "sha256": asset.sha256,
+            "size_bytes": asset.size_bytes,
+            "duration_seconds": duration,
+        },
+        request_id=request_id,
+    )
+    return CompletedUpload(
+        asset_id=asset.id,
+        episode_id=episode.id,
+        locale=ticket.file.locale,
+        sha256=asset.sha256,
+        duration_seconds=duration,
+    )
+
+
+@router.post(
+    "/api/admin/podcasts/direct-uploads/complete",
+    response_model=CompletedUpload,
+    operation_id="admin_podcast_direct_upload_complete",
+)
+async def complete_direct_upload(
+    payload: CompleteUploadRequest,
+    actor: AssetWrite,
+    database: Database,
+    store: Store,
+    request: Request,
+) -> CompletedUpload:
+    settings: Settings = request.app.state.settings
+    ticket = decode_ticket(payload.upload_token, settings)
+    if ticket.actor_id != actor.user.id:
+        raise HTTPException(403, detail={"code": "upload_owner_mismatch"})
+    if settings.r2_bucket_name is None:
+        raise HTTPException(503, detail={"code": "r2_not_configured"})
+    ref = ObjectRef(bucket=settings.r2_bucket_name, key=ticket.object_key)
+    await _lock_upload_date(database, ticket.trading_date)
+    await require_generation(database, ticket.trading_date, ticket.generation)
+    await lock_upload_object(database, ticket.asset_id)
+    previous = await _completed(database, ticket)
+    if previous is not None:
+        return previous
+    if datetime.now(UTC).timestamp() >= ticket.expires:
+        raise HTTPException(410, detail={"code": "upload_token_expired"})
+    committing = False
+    created_final = False
+    final_ref = ObjectRef(bucket=ref.bucket, key=ticket.registered_key)
+
+    async def compensate() -> CompletedUpload | None:
+        # Rollback releases advisory locks. Reacquire date first before checking
+        # references or deleting this attempt's objects, including archived refs.
+        await _lock_upload_date(database, ticket.trading_date)
+        await lock_upload_object(database, ticket.asset_id)
+        recovered = await _completed(database, ticket)
+        if recovered is not None:
+            if ticket.version == 2:
+                await delete_unreferenced(database, store, ref)
+            await database.commit()
+            return recovered
+        if created_final:
+            await delete_unreferenced(database, store, final_ref)
+        await delete_unreferenced(database, store, ref)
+        await database.commit()
+        return None
+
+    try:
+        await current_audio(database, ticket)
+        with tempfile.TemporaryFile(
+            dir=settings.podcast_media_spool_dir if settings.environment == "production" else None
+        ) as spool:
+            # Conditional final writes use the verified bytes, never a mutable copy source.
+            async with asyncio.timeout(540):
+                duration, chapters = await verify_audio(store, ref, ticket, spool=spool)
+                if ticket.version == 2:
+                    referenced = await database.scalar(
+                        select(Asset.id).where(Asset.object_key == final_ref.key)
+                    )
+                    if referenced is not None:
+                        raise HTTPException(409, detail={"code": "upload_destination_conflict"})
+                    spool.seek(0)
+                    created_final = await finish_io(
+                        store.put_if_absent(
+                            final_ref,
+                            spool,
+                            size_bytes=ticket.file.size_bytes,
+                            mime_type=ticket.file.mime_type,
+                            sha256=ticket.file.sha256,
+                        )
+                    )
+                    if not created_final:
+                        # Unknown preexisting objects must be verified and never compensated.
+                        try:
+                            spool.seek(0)
+                            spool.truncate()
+                            await verify_audio(store, final_ref, ticket, spool=spool)
+                        except HTTPException as error:
+                            raise HTTPException(
+                                409, detail={"code": "upload_destination_conflict"}
+                            ) from error
+        result = await register_audio(
+            database, ticket, final_ref, duration, chapters, request.state.request_id
+        )
+        committing = True
+        await database.commit()
+        if ticket.version == 2:
+            # A failed cleanup cannot turn a committed upload into a failed registration.
+            try:
+                await _lock_upload_date(database, ticket.trading_date)
+                await lock_upload_object(database, ticket.asset_id)
+                await delete_unreferenced(database, store, ref)
+                await database.commit()
+            except SQLAlchemyError:
+                await database.rollback()
+                logger.warning("Podcast staging cleanup deferred")
+        return result
+    except HTTPException as error:
+        await database.rollback()
+        if error.status_code in {422, 409}:
+            try:
+                await compensate()
+            except SQLAlchemyError:
+                await database.rollback()
+                logger.warning("Podcast compensation deferred; database unavailable")
+        raise
+    except SQLAlchemyError:
+        await database.rollback()
+        try:
+            recovered = await compensate()
+            if recovered is not None:
+                return recovered
+        except SQLAlchemyError:
+            await database.rollback()
+            logger.warning("Podcast database outcome unavailable; objects retained for cleanup")
+        raise HTTPException(
+            503, detail={"code": "upload_registration_unavailable", "commit_attempted": committing}
+        ) from None
+    except (*OBJECT_STORE_ERRORS, TimeoutError, OSError):
+        # A cancelled SDK thread may have completed a write. Keep all objects;
+        # retries verify conditional-create collisions and cleanup uses date locks.
+        await database.rollback()
+        raise HTTPException(503, detail={"code": "upload_storage_unavailable"}) from None

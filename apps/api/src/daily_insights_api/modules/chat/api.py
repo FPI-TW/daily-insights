@@ -37,6 +37,7 @@ from daily_insights_api.modules.chat.schemas import (
     ReportDetailContext,
     ReportsIndexContext,
 )
+from daily_insights_api.modules.chat.usage import conversation_usage, generation_usage
 from daily_insights_api.modules.identity.api import AuthContext, User, require_csrf, require_roles
 from daily_insights_api.modules.model_runtime.api import (
     ActiveModelConfigurationRecord as ActiveModelConfiguration,
@@ -1037,17 +1038,22 @@ async def list_conversations(
         )
     ).all()
     has_more, rows = len(rows) > limit, rows[:limit]
+    conversation_ids = [conversation.id for conversation, _ in rows]
+    usage = await conversation_usage(database, conversation_ids)
+    message_rows = (
+        await database.execute(
+            select(Message.conversation_id, func.count(Message.id), func.max(Message.created_at))
+            .where(Message.conversation_id.in_(conversation_ids))
+            .group_by(Message.conversation_id)
+        )
+    ).all()
+    message_stats = {row[0]: (row[1], row[2]) for row in message_rows}
     items = []
     for conversation, email in rows:
-        count, latest = (
-            await database.execute(
-                select(func.count(Message.id), func.max(Message.created_at)).where(
-                    Message.conversation_id == conversation.id
-                )
-            )
-        ).one()
+        count, latest = message_stats.get(conversation.id, (0, None))
         items.append(
             ChatConversationListItem(
+                usage=usage[conversation.id],
                 id=conversation.id,
                 organization_id=conversation.organization_id,
                 user_id=conversation.user_id,
@@ -1106,6 +1112,7 @@ async def conversation_detail(
     )
     await database.commit()
     return ChatConversationDetailResponse(
+        usage=generation_usage(generations),
         id=conversation.id,
         organization_id=conversation.organization_id,
         user_id=conversation.user_id,

@@ -48,6 +48,10 @@ async def get_auth_context(
             Session.expires_at > datetime.now(UTC),
             User.status == UserStatus.ACTIVE,
             or_(
+                Membership.trial_expires_at.is_(None),
+                Membership.trial_expires_at > datetime.now(UTC),
+            ),
+            or_(
                 Membership.organization_id.is_(None),
                 Organization.status == OrganizationStatus.ACTIVE,
             ),

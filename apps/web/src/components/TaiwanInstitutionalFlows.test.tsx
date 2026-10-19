@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { createI18n } from "#/lib/i18n"
 import type { TaiwanInstitutionalData } from "#/lib/institutional-flows"
 import type { MarketIndexHistory } from "#/lib/indices"
-import { TaiwanInstitutionalFlows } from "./TaiwanInstitutionalFlows"
+import { FlowPanel, TaiwanInstitutionalFlows } from "./TaiwanInstitutionalFlows"
 
 let chartOption: Record<string, unknown> | null = null
 vi.mock("@tanstack/react-router", () => ({
@@ -87,6 +87,39 @@ function show(locale: "zh-hant" | "zh-hans" | "en" = "en") {
 }
 
 describe("TaiwanInstitutionalFlows", () => {
+  it("renders successful flows before history and adds only the optional index overlay when history arrives", () => {
+    const i18n = createI18n("en")
+    const page = (value: MarketIndexHistory | null) => (
+      <I18nextProvider i18n={i18n}>
+        <FlowPanel flows={data.flows} history={value} locale="en" />
+      </I18nextProvider>
+    )
+    const view = render(page(null))
+    expect(screen.getByText("Latest", { exact: true })).toBeVisible()
+    expect(screen.getByText("+4.0", { exact: false })).toBeVisible()
+    expect(screen.getByTestId("institutional-chart")).toBeVisible()
+    expect(screen.queryByRole("status")).toBeNull()
+    expect(chartOption?.yAxis).toHaveLength(1)
+    const series = chartOption?.series as Array<{
+      type: string
+      data: Array<number | null>
+    }>
+    expect(series).toHaveLength(2)
+    expect(series[0]?.data).toEqual([3.5, null, 4])
+    expect(series[1]?.data).toEqual([null, -2.5, null])
+    const tooltip = chartOption?.tooltip as {
+      formatter: (params: Array<{ dataIndex: number }>) => string
+    }
+    expect(tooltip.formatter([{ dataIndex: 2 }])).not.toContain("TAIEX")
+
+    view.rerender(page(history))
+    expect(screen.getByText("Latest", { exact: true })).toBeVisible()
+    expect(chartOption?.yAxis).toHaveLength(2)
+    expect(chartOption?.series).toHaveLength(3)
+    expect((chartOption?.series as Array<{ data: number[] }>)[2]?.data).toEqual(
+      [20000, 20100, 20200]
+    )
+  })
   it("renders real rows, top-five rankings and one selected chip per control", () => {
     show()
     expect(

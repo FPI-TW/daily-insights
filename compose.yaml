@@ -61,6 +61,7 @@ services:
       - data
 
   podcast-media-worker:
+    profiles: ["legacy-podcast"]
     build:
       context: .
       dockerfile: apps/api/Dockerfile

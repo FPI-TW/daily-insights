@@ -1,13 +1,17 @@
+import asyncio
 import os
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from functools import partial
 from typing import Any, cast
 
+import httpx
 import pytest
 import pytest_asyncio
 from conftest import remigrate_database
+from pydantic import SecretStr
 from sqlalchemy import event, func, select, text, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import (
@@ -23,10 +27,19 @@ import daily_insights_api.modules.orchestration.projections as orchestration_pro
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.analyst_viewpoints.api import AnalystViewpointSyncError
 from daily_insights_api.modules.analyst_viewpoints.models import AnalystViewpointSyncRun
-from daily_insights_api.modules.data_sources.api import TaiexDailyBar, TaiexDailyBars
+from daily_insights_api.modules.data_sources.api import (
+    DailyBar,
+    TaiexDailyBar,
+    TaiexDailyBars,
+    TwelveDataAdapter,
+    TwelveDataTransport,
+)
+from daily_insights_api.modules.orchestration.facts import store_market_bars
 from daily_insights_api.modules.orchestration.models import (
     FunctionAttempt,
     FunctionRun,
+    InterestRateObservation,
+    InterestRateSeries,
     JobDependency,
     JobRun,
     MarketDailyObservation,
@@ -49,7 +62,7 @@ from daily_insights_api.modules.orchestration.service import (
     RECONCILIATION_BATCH_SIZE,
     cancel_job_run,
     create_daily_routine,
-    terminalize_expired_automatic_functions,
+    terminalize_expired_functions,
 )
 from daily_insights_api.modules.orchestration.worker import (
     AttemptStatus,
@@ -61,12 +74,284 @@ from daily_insights_api.modules.orchestration.worker import (
     execute_claimed,
     reconcile_function_jobs,
 )
-from daily_insights_api.modules.reports.api import TENORS, History, Point
+from daily_insights_api.modules.reports.api import TENORS, Calendar, History, MacroDashboard, Point
 from daily_insights_api.modules.reports.macro_dashboard_models import MacroDashboardSnapshot
 from daily_insights_api.modules.reports.macro_diagnostics import record_failure
 from daily_insights_api.modules.reports.models import ReportPublication
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.mark.parametrize("trigger", ["automatic", "manual"])
+@pytest.mark.parametrize(
+    "function_key,symbol,market,asset_type,history_id",
+    [
+        ("fx_daily_bars", "EUR/USD", "forex", "Physical Currency", "eur_usd"),
+        ("commodity_daily_bars", "XAU/USD", "global_macro_bonds", "Precious Metal", "gold"),
+    ],
+)
+async def test_twelve_duplicate_history_recovers_persisted_gaps_and_dashboard_idempotently(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    trigger: str,
+    function_key: str,
+    symbol: str,
+    market: str,
+    asset_type: str,
+    history_id: str,
+) -> None:
+    engine, sessions = orchestration_database
+    edition = date(2026, 10, 7)
+    now = datetime.now(UTC)
+    seed_token = uuid.uuid4()
+
+    def bar(day: int, close: str) -> DailyBar:
+        return DailyBar(
+            instrument_source_id=symbol,
+            market=market,
+            symbol=symbol,
+            trade_date=date(2026, 10, day),
+            open=Decimal(close),
+            high=Decimal(close) + 1,
+            low=Decimal(close) - 1,
+            close=Decimal(close),
+            volume=None,
+            source="twelve_data",
+        )
+
+    async with sessions.begin() as database:
+        seed_job = JobRun(
+            job_key="twelve_data_daily_update",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=date(2026, 10, 5),
+            status="succeeded",
+        )
+        database.add(seed_job)
+        await database.flush()
+        seed_function = FunctionRun(
+            job_run_id=seed_job.id,
+            function_key=function_key,
+            provider_key="twelve_data",
+            scope={},
+            status="running",
+            lease_token=seed_token,
+        )
+        database.add(seed_function)
+        await database.flush()
+        seed_attempt = FunctionAttempt(
+            function_run_id=seed_function.id,
+            attempt_number=1,
+            provider_key="twelve_data",
+            function_key=function_key,
+            scope={},
+            fence_token=seed_token,
+            status="succeeded",
+        )
+        database.add(seed_attempt)
+        await database.flush()
+        assert (
+            await store_market_bars(
+                database,
+                function_run_id=seed_function.id,
+                fence_token=seed_token,
+                function_attempt_id=seed_attempt.id,
+                provider_key="twelve_data",
+                dataset_key=function_key,
+                symbol=symbol,
+                market=market,
+                unit="USD",
+                contract_version="2026-10-05.v8",
+                bars=(bar(3, "99"), bar(4, "100")),
+            )
+            == 2
+        )
+        seed_function.status = "succeeded"
+
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.url.params["symbol"] == symbol
+        if request.url.path == "/eod":
+            payload: dict[str, Any] = {
+                "symbol": symbol,
+                "exchange": "COMMODITY",
+                "datetime": "2026-10-06",
+                "close": "103",
+            }
+        else:
+            payload = {
+                "meta": {
+                    "symbol": symbol,
+                    "interval": "1day",
+                    "currency_quote": "US Dollar",
+                    "type": asset_type,
+                },
+                "values": [
+                    {
+                        "datetime": item.trade_date.isoformat(),
+                        "open": str(item.open),
+                        "high": str(item.high),
+                        "low": str(item.low),
+                        "close": str(item.close),
+                        "volume": item.volume,
+                    }
+                    for item in (
+                        bar(3, "99"),
+                        bar(4, "100"),
+                        bar(4, "101"),
+                        bar(5, "102"),
+                        bar(6, "103"),
+                        bar(7, "104"),
+                    )
+                ],
+                "status": "ok",
+            }
+        return httpx.Response(200, json=payload, request=request)
+
+    transport = TwelveDataTransport(
+        base_url="https://api.twelvedata.test",
+        api_key=SecretStr("test-only-key"),
+        client=httpx.AsyncClient(
+            base_url="https://api.twelvedata.test", transport=httpx.MockTransport(respond)
+        ),
+    )
+    adapter = TwelveDataAdapter(transport)
+    settings = Settings(environment="test", twelve_data_api_key=SecretStr("test-only-key"))
+    attempt_ids: list[uuid.UUID] = []
+    try:
+        for run_number in (1, 2):
+            async with sessions.begin() as database:
+                job = JobRun(
+                    job_key="twelve_data_daily_update",
+                    kind="function",
+                    trigger=trigger,
+                    automatic_key=f"duplicate-recovery-{run_number}",
+                    registry_version="test",
+                    registry_snapshot={},
+                    edition_date=edition,
+                    status="pending",
+                    deadline_at=now + timedelta(hours=1),
+                )
+                database.add(job)
+                await database.flush()
+                function = FunctionRun(
+                    job_run_id=job.id,
+                    function_key=function_key,
+                    provider_key="twelve_data",
+                    scope={"missing_scopes": [symbol]},
+                    status="pending",
+                )
+                database.add(function)
+                await database.flush()
+                function_id = function.id
+            claimed = await claim_ready_function(engine, sessions, owner="duplicate-recovery")
+            assert claimed is not None and claimed.function_run_id == function_id
+            attempt_ids.append(claimed.attempt_id)
+            await execute_claimed(
+                claimed,
+                sessions,
+                partial(orchestration_functions._run_twelve, settings, sessions, adapter=adapter),
+            )
+            async with sessions() as database:
+                attempt = await database.get(FunctionAttempt, claimed.attempt_id)
+                assert attempt is not None
+                assert attempt.status == ("succeeded" if run_number == 1 else "no_change")
+                assert attempt.record_count == (3 if run_number == 1 else 0)
+                assert attempt.source_as_of == date(2026, 10, 6)
+                assert attempt.error_code is None and attempt.payload_digest is not None
+                assert [metadata["endpoint"] for metadata in attempt.request_metadata] == [
+                    "/eod",
+                    "/time_series",
+                ]
+                assert attempt.request_metadata[-1]["source_as_of"] == "2026-10-06"
+                assert attempt.request_metadata[-1]["record_count"] == 4
+                assert "test-only-key" not in str(attempt.request_metadata)
+        assert [request.url.path for request in requests] == [
+            "/eod",
+            "/time_series",
+            "/eod",
+            "/time_series",
+        ]
+        assert [requests[index].url.params["outputsize"] for index in (1, 3)] == ["16", "12"]
+    finally:
+        await transport.close()
+
+    async with sessions() as database:
+        series = (await database.scalars(select(MarketDailySeries))).one()
+        # This is the immutable initial contract marker; corrections are
+        # represented by new observations and the current request provenance.
+        assert series.contract_version == "2026-10-05.v8"
+        observations = list(
+            await database.scalars(
+                select(MarketDailyObservation).order_by(
+                    MarketDailyObservation.observation_date,
+                    MarketDailyObservation.version,
+                )
+            )
+        )
+        assert [(item.observation_date.day, item.version, item.close) for item in observations] == [
+            (3, 1, Decimal("99")),
+            (4, 1, Decimal("100")),
+            (4, 2, Decimal("101")),
+            (5, 1, Decimal("102")),
+            (6, 1, Decimal("103")),
+        ]
+        assert all(item.function_attempt_id == attempt_ids[0] for item in observations[2:])
+
+    owner, token = "duplicate-dashboard", uuid.uuid4()
+    async with sessions.begin() as database:
+        projection = JobRun(
+            job_key="macro_dashboard_publish",
+            kind="projection",
+            trigger=trigger,
+            automatic_key="duplicate-dashboard",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=edition,
+            status="running",
+            lease_owner=owner,
+            lease_token=token,
+        )
+        database.add(projection)
+        await database.flush()
+        projection_id = projection.id
+    frozen = await freeze_projection_inputs(
+        sessions, job_run_id=projection_id, owner=owner, fence_token=token
+    )
+    result = await publish_macro_dashboard(
+        sessions,
+        job_run_id=projection_id,
+        owner=owner,
+        fence_token=token,
+        frozen=frozen,
+    )
+    assert result["action"] == "published"
+    async with sessions() as database:
+        snapshot = await database.get(MacroDashboardSnapshot, "global_macro_bonds")
+        assert snapshot is not None
+        history = next(item for item in snapshot.payload["histories"] if item["id"] == history_id)
+        assert history["status"] == "ok"
+        assert [Point.model_validate(point) for point in history["points"]] == [
+            Point(date=date(2026, 10, day), value=Decimal(value))
+            for day, value in ((3, "99"), (4, "101"), (5, "102"), (6, "103"))
+        ]
+        assert any(
+            reference["date"] == "2026-10-06"
+            and reference["function_attempt_id"] == str(attempt_ids[0])
+            for reference in snapshot.source_references
+        )
+    assert (
+        await publish_macro_dashboard(
+            sessions,
+            job_run_id=projection_id,
+            owner=owner,
+            fence_token=token,
+            frozen=frozen,
+        )
+    )["action"] == "no_change"
 
 
 def _complete_treasury_coverage(*, through: date) -> dict[tuple[int, int], set[str]]:
@@ -679,8 +964,8 @@ async def test_older_market_report_projection_cannot_create_newer_revision(
                         "function_outcomes": [
                             {
                                 "function_key": "us_mega_cap_daily_bars",
-                                "status": "failed",
-                                "error": suffix,
+                                "status": "no_change",
+                                "provider_key": suffix,
                                 "attempt_ids": [],
                             }
                         ],
@@ -721,8 +1006,12 @@ async def test_older_market_report_projection_cannot_create_newer_revision(
         assert publications[0].projection_job_run_id == newer_job
 
 
-async def test_projection_degrades_fresh_prior_facts_when_current_provider_failed(
+@pytest.mark.parametrize("refresh_status", ["unavailable", "failed", "partial"])
+@pytest.mark.parametrize("age_days", [1, 30])
+async def test_projection_preserves_prior_facts_when_current_provider_failed(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    refresh_status: str,
+    age_days: int,
 ) -> None:
     engine, sessions = orchestration_database
     edition = date(2026, 9, 17)
@@ -742,9 +1031,10 @@ async def test_projection_degrades_fresh_prior_facts_when_current_provider_faile
         projection.lease_owner = owner
         projection.lease_token = fence_token
         projection.lease_expires_at = datetime.now(UTC) + timedelta(minutes=10)
-        current.status = "unavailable"
+        current.status = refresh_status
         current.attempt_count = 1
         current.error = "upstream_unavailable"
+        current.result = {"symbols": ["AAPL"]} if refresh_status == "partial" else None
         failed_attempt = FunctionAttempt(
             function_run_id=current.id,
             attempt_number=1,
@@ -802,7 +1092,18 @@ async def test_projection_degrades_fresh_prior_facts_when_current_provider_faile
             )
             database.add(series)
             await database.flush()
-            for offset, value in ((2, "100"), (1, "101")):
+            if refresh_status == "partial" and symbol == "AAPL":
+                database.add(
+                    MarketDailyObservation(
+                        series_id=series.id,
+                        function_attempt_id=failed_attempt.id,
+                        observation_date=edition,
+                        version=1,
+                        close=Decimal("110"),
+                        value_digest="c" * 64,
+                    )
+                )
+            for offset, value in ((age_days + 1, "100"), (age_days, "101")):
                 database.add(
                     MarketDailyObservation(
                         series_id=series.id,
@@ -810,11 +1111,12 @@ async def test_projection_degrades_fresh_prior_facts_when_current_provider_faile
                         observation_date=edition - timedelta(days=offset),
                         version=1,
                         close=Decimal(value),
-                        value_digest=str(offset) * 64,
+                        value_digest=f"{offset:064x}",
                     )
                 )
         projection_id = projection.id
         failed_attempt_id = failed_attempt.id
+        prior_attempt_id = prior_attempt.id
 
     frozen = await freeze_projection_inputs(
         sessions,
@@ -840,6 +1142,15 @@ async def test_projection_degrades_fresh_prior_facts_when_current_provider_faile
         event.remove(engine.sync_engine, "before_cursor_execute", count_statement)
     assert reloaded == frozen
     assert statement_count <= 5
+    latest_by_symbol = {
+        row.symbol: row for row in sorted(frozen, key=lambda row: row.observation_date)
+    }
+    assert latest_by_symbol["MSFT"].value == Decimal("101")
+    assert latest_by_symbol["MSFT"].function_attempt_id == prior_attempt_id
+    if refresh_status == "partial":
+        assert latest_by_symbol["AAPL"].value == Decimal("110")
+        assert latest_by_symbol["AAPL"].observation_date == edition
+        assert latest_by_symbol["AAPL"].function_attempt_id == failed_attempt_id
     result = await publish_market_reports(
         sessions,
         job_run_id=projection_id,
@@ -848,13 +1159,15 @@ async def test_projection_degrades_fresh_prior_facts_when_current_provider_faile
         frozen=frozen,
     )
 
-    assert result["market_statuses"]["us_equity"] == "unavailable"
+    assert result["market_statuses"]["us_equity"] == "complete"
     assert result["partial"] is True
     async with sessions() as database:
         publication = await database.scalar(
             select(ReportPublication).where(ReportPublication.market_code == "us_equity")
         )
         assert publication is not None
+        assert publication.source_as_of == edition - timedelta(days=age_days)
+        assert publication.content["status"] == "complete"
         linked_attempts = set(
             await database.scalars(
                 select(PublicationFunctionAttempt.function_attempt_id).where(
@@ -862,7 +1175,7 @@ async def test_projection_degrades_fresh_prior_facts_when_current_provider_faile
                 )
             )
         )
-        assert failed_attempt_id in linked_attempts
+        assert {failed_attempt_id, prior_attempt_id} <= linked_attempts
 
 
 async def test_deadline_preserves_partial_result_from_retry_wait(
@@ -895,7 +1208,7 @@ async def test_deadline_preserves_partial_result_from_retry_wait(
         assert job is not None and job.deadline_at is not None
         deadline = job.deadline_at
     async with sessions() as database:
-        assert await terminalize_expired_automatic_functions(database, now=deadline) >= 1
+        assert await terminalize_expired_functions(database, now=deadline) >= 1
     async with sessions() as database:
         function = await database.get(FunctionRun, claimed.function_run_id)
         assert function is not None and function.status == "partial"
@@ -1120,7 +1433,7 @@ async def test_deadline_recovers_expired_running_lease_and_reconciles_job(
         job_id = job.id
 
     async with sessions() as database:
-        assert await terminalize_expired_automatic_functions(database, now=now) == 1
+        assert await terminalize_expired_functions(database, now=now) == 1
     await reconcile_function_jobs(sessions, now=now)
 
     async with sessions() as database:
@@ -1181,10 +1494,7 @@ async def test_deadline_terminalization_processes_a_bounded_batch(
             )
 
     async with sessions() as database:
-        assert (
-            await terminalize_expired_automatic_functions(database, now=now)
-            == RECONCILIATION_BATCH_SIZE
-        )
+        assert await terminalize_expired_functions(database, now=now) == RECONCILIATION_BATCH_SIZE
     async with sessions() as database:
         status_counts: dict[str, int] = {
             status: count
@@ -1197,7 +1507,7 @@ async def test_deadline_terminalization_processes_a_bounded_batch(
         assert status_counts == {"partial": RECONCILIATION_BATCH_SIZE, "pending": 1}
 
     async with sessions() as database:
-        assert await terminalize_expired_automatic_functions(database, now=now) == 1
+        assert await terminalize_expired_functions(database, now=now) == 1
     async with sessions() as database:
         status_counts = {
             status: count
@@ -1452,3 +1762,729 @@ async def test_ready_candidates_selects_oldest_run_per_provider_before_limit(
 
     assert len(candidates) == 2
     assert (yahoo_function_id, "yahoo_finance") in candidates
+
+
+@pytest.mark.parametrize("first_partial", [False, True])
+@pytest.mark.parametrize("trigger", ["automatic", "manual"])
+async def test_function_stops_after_three_retries(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    trigger: str,
+    first_partial: bool,
+) -> None:
+    engine, sessions = orchestration_database
+    now = datetime.now(UTC)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="bounded_refresh",
+            kind="function",
+            trigger=trigger,
+            automatic_key="bounded",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now + timedelta(hours=1),
+            status="pending",
+        )
+        database.add(job)
+        await database.flush()
+        run = FunctionRun(
+            job_run_id=job.id,
+            function_key="commodity_daily_bars",
+            provider_key="twelve_data",
+            scope={},
+            status="pending",
+        )
+        database.add(run)
+        await database.flush()
+        run_id = run.id
+
+    for attempt in range(1, 5):
+        claimed = await claim_ready_function(engine, sessions, owner="bounded", now=now)
+        assert claimed is not None and claimed.function_run_id == run_id
+
+        async def fail(_: ClaimedFunction, attempt_number: int = attempt) -> FunctionOutcome:
+            return FunctionOutcome(
+                status="partial" if attempt_number == 1 and first_partial else "failed",
+                result={"symbols": ["WTI"]} if attempt_number == 1 and first_partial else None,
+                missing_scopes=("BRENT",),
+                error_code="upstream_timeout",
+                retryable=True,
+            )
+
+        await execute_claimed(claimed, sessions, fail)
+        async with sessions.begin() as database:
+            stored = await database.get(FunctionRun, run_id)
+            assert stored is not None and stored.attempt_count == attempt
+            if attempt < 4:
+                assert stored.status == "retry_wait"
+                assert stored.next_attempt_at is not None
+                stored.next_attempt_at = now - timedelta(seconds=1)
+            else:
+                assert stored.status == ("partial" if first_partial else "failed")
+                assert stored.next_attempt_at is None
+                assert stored.completed_at is not None
+                assert stored.error == "retry_limit_reached"
+                if first_partial:
+                    assert stored.result == {"symbols": ["WTI"]}
+    assert await claim_ready_function(engine, sessions, owner="bounded", now=now) is None
+    async with sessions() as database:
+        attempts = list(
+            await database.scalars(
+                select(FunctionAttempt)
+                .where(FunctionAttempt.function_run_id == run_id)
+                .order_by(FunctionAttempt.attempt_number)
+            )
+        )
+        assert [attempt.attempt_number for attempt in attempts] == [1, 2, 3, 4]
+        assert all(attempt.error_code == "upstream_timeout" for attempt in attempts)
+
+
+@pytest.mark.parametrize("status", ["pending", "retry_wait", "running"])
+@pytest.mark.parametrize("trigger", ["automatic", "manual"])
+async def test_exhausted_function_is_reconciled_before_new_claim(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    trigger: str,
+    status: str,
+) -> None:
+    engine, sessions = orchestration_database
+    now = datetime.now(UTC)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="exhausted",
+            kind="function",
+            trigger=trigger,
+            automatic_key="exhausted",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now + timedelta(hours=1),
+            status="running",
+        )
+        database.add(job)
+        await database.flush()
+        run = FunctionRun(
+            job_run_id=job.id,
+            function_key="commodity_daily_bars",
+            provider_key="twelve_data",
+            scope={},
+            status=status,
+            attempt_count=4,
+            lease_expires_at=now - timedelta(seconds=1),
+            lease_token=uuid.uuid4(),
+        )
+        database.add(run)
+        await database.flush()
+        database.add(
+            FunctionAttempt(
+                function_run_id=run.id,
+                attempt_number=4,
+                provider_key=run.provider_key,
+                function_key=run.function_key,
+                scope={},
+                fence_token=run.lease_token,
+                status="running" if status == "running" else "failed",
+            )
+        )
+        run_id = run.id
+    assert await claim_ready_function(engine, sessions, owner="restart", now=now) is None
+    async with sessions() as database:
+        stored_run = await database.get(FunctionRun, run_id)
+        assert stored_run is not None and stored_run.status == "unavailable"
+        assert stored_run.error == "retry_limit_reached"
+        assert stored_run.attempt_count == 4 and stored_run.lease_token is None
+
+
+async def test_exhausted_reconciliation_skips_locked_job_and_preserves_cancellation(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, sessions = orchestration_database
+    now = datetime.now(UTC)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="twelve_data_daily_update",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now + timedelta(hours=1),
+            status="running",
+        )
+        database.add(job)
+        await database.flush()
+        source = FunctionRun(
+            job_run_id=job.id,
+            function_key="fx_daily_bars",
+            provider_key="twelve_data",
+            scope={},
+            status="retry_wait",
+            attempt_count=4,
+        )
+        database.add(source)
+        await database.flush()
+        job_id, source_id = job.id, source.id
+    async with sessions.begin() as cancelling:
+        await cancelling.scalar(select(JobRun).where(JobRun.id == job_id).with_for_update())
+        async with sessions() as reconciling:
+            assert (
+                await asyncio.wait_for(
+                    terminalize_expired_functions(reconciling, now=now), timeout=2
+                )
+                == 0
+            )
+        assert await cancel_job_run(cancelling, job_run_id=job_id) is not None
+    async with sessions() as database:
+        assert await terminalize_expired_functions(database, now=now) == 0
+        cancelled_source = await database.get(FunctionRun, source_id)
+        assert cancelled_source is not None and cancelled_source.status == "cancelled"
+        assert cancelled_source.error == "cancelled_by_admin"
+
+
+@pytest.mark.parametrize("trigger", ["automatic", "manual"])
+async def test_projection_stops_after_three_retries(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    trigger: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, sessions = orchestration_database
+    now = datetime.now(UTC)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="market_reports_publish",
+            kind="projection",
+            trigger=trigger,
+            automatic_key="bounded-projection",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now + timedelta(hours=1),
+            status="pending",
+        )
+        database.add(job)
+        await database.flush()
+        job_id = job.id
+
+    async def fail(*_: object, **__: object) -> tuple[FrozenObservation, ...]:
+        raise ConnectionError("temporary disconnect")
+
+    monkeypatch.setattr(orchestration_projections, "freeze_projection_inputs", fail)
+    for attempt in range(1, 5):
+        claimed = await claim_ready_projection(sessions, owner="bounded-projection")
+        assert claimed is not None
+        await execute_projection(
+            sessions,
+            job_run_id=claimed.job_run_id,
+            owner="bounded-projection",
+            fence_token=claimed.fence_token,
+        )
+        async with sessions.begin() as database:
+            stored = await database.get(JobRun, job_id)
+            assert stored is not None and stored.attempt_count == attempt
+            if attempt < 4:
+                assert stored.status == "pending" and stored.next_attempt_at is not None
+                stored.next_attempt_at = now - timedelta(seconds=1)
+            else:
+                assert stored.status == "failed" and stored.next_attempt_at is None
+                assert stored.error == "retry_limit_reached"
+    assert await claim_ready_projection(sessions, owner="bounded-projection") is None
+
+
+@pytest.mark.parametrize("status", ["pending", "running"])
+@pytest.mark.parametrize("started", [False, True])
+@pytest.mark.parametrize("trigger", ["automatic", "manual"])
+async def test_exhausted_projection_cannot_be_reclaimed(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    trigger: str,
+    status: str,
+    started: bool,
+) -> None:
+    _, sessions = orchestration_database
+    now = datetime.now(UTC)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="market_reports_publish",
+            kind="projection",
+            trigger=trigger,
+            automatic_key="exhausted-projection",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now + timedelta(hours=1),
+            status=status,
+            started_at=now if started else None,
+            attempt_count=4,
+            lease_expires_at=now - timedelta(seconds=1),
+        )
+        database.add(job)
+        await database.flush()
+        job_id = job.id
+    assert await claim_ready_projection(sessions, owner="restart") is None
+    async with sessions() as database:
+        stored_job = await database.get(JobRun, job_id)
+        assert stored_job is not None and stored_job.status == "failed"
+        assert stored_job.error == "retry_limit_reached" and stored_job.attempt_count == 4
+
+
+@pytest.mark.parametrize(
+    "available_symbols", [(), ("AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "AVGO")]
+)
+@pytest.mark.parametrize("prior_age_days", [0, 1])
+async def test_failed_refresh_cannot_replace_available_report_with_missing_blocks(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    available_symbols: tuple[str, ...],
+    prior_age_days: int,
+) -> None:
+    _, sessions = orchestration_database
+    edition = date(2026, 10, 5)
+    owner, token = "preserve-report", uuid.uuid4()
+    symbols = ("AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "AVGO", "TSLA")
+    async with sessions() as database:
+        await create_daily_routine(database, edition_date=edition)
+    async with sessions.begin() as database:
+        projection = await database.scalar(
+            select(JobRun).where(JobRun.job_key == "market_reports_publish")
+        )
+        function = await database.scalar(
+            select(FunctionRun).where(FunctionRun.function_key == "us_mega_cap_daily_bars")
+        )
+        assert projection is not None and function is not None
+        projection.status, projection.lease_owner, projection.lease_token = "running", owner, token
+        projection.payload = {"requested_market_job": "us_equity_refresh"}
+        function.status = "partial" if available_symbols else "failed"
+        function.result = {"symbols": list(available_symbols)}
+        prior_job = JobRun(
+            job_key="prior_market_report",
+            kind="projection",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=edition - timedelta(days=prior_age_days),
+            status="succeeded",
+        )
+        database.add(prior_job)
+        await database.flush()
+        database.add(
+            ProjectionInputFreeze(
+                projection_job_run_id=prior_job.id,
+                registry_version="test",
+                cutoff_at=datetime.now(UTC) - timedelta(hours=1),
+                input_digest="a" * 64,
+                inputs={"observations": [], "function_outcomes": []},
+            )
+        )
+        observations = tuple(
+            FrozenObservation(
+                kind="market",
+                id=uuid.uuid4(),
+                function_attempt_id=uuid.uuid4(),
+                provider_key="twelve_data",
+                dataset_key="us_mega_cap_daily_bars",
+                symbol=symbol,
+                unit="usd",
+                observation_date=edition - timedelta(days=offset + prior_age_days),
+                value=Decimal(100 + offset),
+                open_value=None,
+                value_digest="a" * 64,
+            )
+            for symbol in symbols
+            for offset in (1, 0)
+        )
+        bundle = orchestration_projections._report_bundle("us_equity", observations)
+        previous = ReportPublication(
+            projection_job_run_id=prior_job.id,
+            report_key="daily-market",
+            market_code="us_equity",
+            edition_date=prior_job.edition_date,
+            revision=1,
+            derivation_version="test",
+            content_schema_version=bundle.content.schema_version,
+            input_digest="p" * 64,
+            source_as_of=bundle.content.as_of,
+            content=bundle.content_for_storage(),
+            presentations=bundle.presentations_for_storage(),
+        )
+        database.add(previous)
+        await database.flush()
+        previous_id, previous_content = previous.id, previous.content
+        projection_id = projection.id
+    await freeze_projection_inputs(
+        sessions, job_run_id=projection_id, owner=owner, fence_token=token
+    )
+    result = await publish_market_reports(
+        sessions,
+        job_run_id=projection_id,
+        owner=owner,
+        fence_token=token,
+        frozen=tuple(row for row in observations if row.symbol in available_symbols),
+    )
+    assert result["markets"] == {"us_equity": "preserved"}
+    assert result["partial"] is True
+    async with sessions() as database:
+        publications = list(await database.scalars(select(ReportPublication)))
+        assert len(publications) == 1
+        assert publications[0].id == previous_id
+        assert publications[0].content == previous_content
+
+
+@pytest.mark.parametrize("raw_fallback", [False, True])
+async def test_dashboard_keeps_failed_source_history_while_healthy_source_updates(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    raw_fallback: bool,
+) -> None:
+    _, sessions = orchestration_database
+    edition = date(2026, 10, 5)
+    prior_date = edition - timedelta(days=30)
+    owner, token = "mixed-dashboard", uuid.uuid4()
+    async with sessions() as database:
+        await create_daily_routine(database, edition_date=edition)
+    async with sessions.begin() as database:
+        projection = await database.scalar(
+            select(JobRun).where(JobRun.job_key == "macro_dashboard_publish")
+        )
+        assert projection is not None
+        projection.status, projection.lease_owner, projection.lease_token = "running", owner, token
+        projection_id = projection.id
+        prior_reference: dict[str, Any] = {}
+        for dataset, symbol, observed_date, value, status in (
+            ("commodity_daily_bars", "WTI/USD", prior_date, "70", "unavailable"),
+            ("fx_daily_bars", "USD/JPY", edition, "150", "succeeded"),
+        ):
+            function = await database.scalar(
+                select(FunctionRun).where(FunctionRun.function_key == dataset)
+            )
+            assert function is not None
+            function.status = status
+            attempt = FunctionAttempt(
+                function_run_id=function.id,
+                attempt_number=1,
+                provider_key="twelve_data",
+                function_key=dataset,
+                scope={},
+                fence_token=uuid.uuid4(),
+                status="succeeded",
+            )
+            database.add(attempt)
+            await database.flush()
+            if dataset == "commodity_daily_bars":
+                prior_reference = {
+                    "provider": "twelve_data",
+                    "dataset": dataset,
+                    "symbol": symbol,
+                    "date": prior_date.isoformat(),
+                    "digest": "a" * 64,
+                    "function_attempt_id": str(attempt.id),
+                }
+                if not raw_fallback:
+                    continue
+            series = MarketDailySeries(
+                provider_key="twelve_data",
+                dataset_key=dataset,
+                symbol=symbol,
+                market="global_macro_bonds",
+                unit="usd",
+                contract_version="test",
+            )
+            database.add(series)
+            await database.flush()
+            database.add(
+                MarketDailyObservation(
+                    series_id=series.id,
+                    function_attempt_id=attempt.id,
+                    observation_date=observed_date,
+                    version=1,
+                    close=Decimal(value),
+                    value_digest="a" * 64,
+                )
+            )
+        prior_payload = MacroDashboard(
+            fetched_at=datetime.now(UTC) - timedelta(days=1),
+            histories=[
+                History(
+                    id="wti",
+                    symbol="WTI/USD",
+                    unit="USD/bbl",
+                    source="Twelve Data",
+                    status="ok",
+                    points=[Point(date=prior_date, value=Decimal("70"))],
+                )
+            ],
+            calendar=Calendar(
+                status="disabled", date=prior_date, source="orchestration", events=[]
+            ),
+        ).model_dump(mode="json")
+        database.add(
+            MacroDashboardSnapshot(
+                scope_key="global_macro_bonds",
+                fetched_at=datetime.now(UTC) - timedelta(days=1),
+                edition_date=edition - timedelta(days=1),
+                payload=prior_payload,
+                input_digest="b" * 64,
+                source_references=[prior_reference],
+            )
+        )
+    frozen = await freeze_projection_inputs(
+        sessions, job_run_id=projection_id, owner=owner, fence_token=token
+    )
+    result = await publish_macro_dashboard(
+        sessions,
+        job_run_id=projection_id,
+        owner=owner,
+        fence_token=token,
+        frozen=frozen,
+    )
+    assert result["action"] == "published" and result["partial"] is True
+    assert result["preserved_histories"] == ([] if raw_fallback else ["wti"])
+    async with sessions() as database:
+        snapshot = await database.get(MacroDashboardSnapshot, "global_macro_bonds")
+        assert snapshot is not None
+        histories = {history["id"]: history for history in snapshot.payload["histories"]}
+        assert histories["wti"]["status"] == "ok"
+        assert [Point.model_validate(point) for point in histories["wti"]["points"]] == [
+            Point(date=prior_date, value=Decimal("70"))
+        ]
+        assert [Point.model_validate(point) for point in histories["usd_jpy"]["points"]] == [
+            Point(date=edition, value=Decimal("150"))
+        ]
+        assert prior_reference in snapshot.source_references
+        assert snapshot.projection_job_run_id == projection_id
+    repeated = await publish_macro_dashboard(
+        sessions,
+        job_run_id=projection_id,
+        owner=owner,
+        fence_token=token,
+        frozen=frozen,
+    )
+    assert repeated["action"] == "no_change"
+
+
+async def test_dashboard_keeps_latest_rate_when_source_has_no_new_data(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, sessions = orchestration_database
+    # Columbus Day 2026-10-12: New York Fed has not published past 10-08 when
+    # the Taipei run for the 10-13 edition fetches successfully with no change.
+    edition, latest = date(2026, 10, 13), date(2026, 10, 8)
+    owner, token = "holiday-dashboard", uuid.uuid4()
+    async with sessions() as database:
+        await create_daily_routine(database, edition_date=edition)
+    async with sessions.begin() as database:
+        projection = await database.scalar(
+            select(JobRun).where(JobRun.job_key == "macro_dashboard_publish")
+        )
+        assert projection is not None
+        projection.status, projection.lease_owner, projection.lease_token = "running", owner, token
+        projection_id = projection.id
+        function = await database.scalar(
+            select(FunctionRun).where(FunctionRun.function_key == "sofr_daily_rates")
+        )
+        assert function is not None
+        function.status = "no_change"
+        attempt = FunctionAttempt(
+            function_run_id=function.id,
+            attempt_number=1,
+            provider_key="new_york_fed",
+            function_key="sofr_daily_rates",
+            scope={},
+            fence_token=uuid.uuid4(),
+            status="no_change",
+        )
+        database.add(attempt)
+        series = InterestRateSeries(
+            provider_key="new_york_fed",
+            dataset_key="sofr_daily_rates",
+            symbol="SOFR",
+            market="global_macro_bonds",
+            unit="percent",
+            contract_version="test",
+        )
+        database.add(series)
+        await database.flush()
+        database.add(
+            InterestRateObservation(
+                series_id=series.id,
+                function_attempt_id=attempt.id,
+                observation_date=latest,
+                version=1,
+                value=Decimal("3.87"),
+                value_digest="a" * 64,
+            )
+        )
+    frozen = await freeze_projection_inputs(
+        sessions, job_run_id=projection_id, owner=owner, fence_token=token
+    )
+    result = await publish_macro_dashboard(
+        sessions,
+        job_run_id=projection_id,
+        owner=owner,
+        fence_token=token,
+        frozen=frozen,
+    )
+    assert "sofr" not in result["missing_histories"]
+    async with sessions() as database:
+        snapshot = await database.get(MacroDashboardSnapshot, "global_macro_bonds")
+        assert snapshot is not None
+        sofr = next(item for item in snapshot.payload["histories"] if item["id"] == "sofr")
+        assert sofr["status"] == "ok"
+        assert [Point.model_validate(point) for point in sofr["points"]] == [
+            Point(date=latest, value=Decimal("3.87"))
+        ]
+
+
+async def test_dashboard_all_failed_sources_preserve_existing_snapshot(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, sessions = orchestration_database
+    now = datetime.now(UTC)
+    token = uuid.uuid4()
+    payload = MacroDashboard(
+        fetched_at=now - timedelta(days=1),
+        histories=[
+            History(
+                id="wti",
+                symbol="WTI/USD",
+                unit="USD/bbl",
+                source="Twelve Data",
+                status="ok",
+                points=[Point(date=now.date() - timedelta(days=1), value=Decimal("70"))],
+            )
+        ],
+        calendar=Calendar(
+            status="disabled",
+            date=now.date() - timedelta(days=1),
+            source="orchestration",
+            events=[],
+        ),
+    ).model_dump(mode="json")
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="macro_dashboard_publish",
+            kind="projection",
+            trigger="automatic",
+            automatic_key="all-failed-dashboard",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            status="running",
+            lease_owner="all-failed",
+            lease_token=token,
+        )
+        database.add(job)
+        await database.flush()
+        job_id = job.id
+        database.add(
+            ProjectionInputFreeze(
+                projection_job_run_id=job.id,
+                registry_version="test",
+                cutoff_at=now,
+                input_digest="a" * 64,
+                inputs={
+                    "observations": [],
+                    "function_outcomes": [
+                        {"function_key": "commodity_daily_bars", "status": "failed"}
+                    ],
+                },
+            )
+        )
+        database.add(
+            MacroDashboardSnapshot(
+                scope_key="global_macro_bonds",
+                fetched_at=now - timedelta(days=1),
+                edition_date=now.date() - timedelta(days=1),
+                payload=payload,
+                input_digest="b" * 64,
+                source_references=[],
+            )
+        )
+    result = await publish_macro_dashboard(
+        sessions,
+        job_run_id=job_id,
+        owner="all-failed",
+        fence_token=token,
+        frozen=(),
+    )
+    assert result["action"] == "preserved" and result["partial"] is True
+    async with sessions() as database:
+        snapshot = await database.get(MacroDashboardSnapshot, "global_macro_bonds")
+        assert snapshot is not None and snapshot.payload == payload
+        assert snapshot.input_digest == "b" * 64 and snapshot.projection_job_run_id is None
+
+
+@pytest.mark.parametrize("kind", ["function", "projection"])
+@pytest.mark.parametrize("trigger", ["automatic", "manual"])
+async def test_crashed_workers_consume_durable_retry_budget(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    trigger: str,
+    kind: str,
+) -> None:
+    engine, sessions = orchestration_database
+    now = datetime.now(UTC)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="market_reports_publish" if kind == "projection" else "crashed_refresh",
+            kind=kind,
+            trigger=trigger,
+            automatic_key="crashed-workers",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            deadline_at=now + timedelta(hours=1),
+            status="pending",
+        )
+        database.add(job)
+        await database.flush()
+        job_id = job.id
+        run_id = None
+        if kind == "function":
+            run = FunctionRun(
+                job_run_id=job.id,
+                function_key="commodity_daily_bars",
+                provider_key="twelve_data",
+                scope={},
+                status="pending",
+            )
+            database.add(run)
+            await database.flush()
+            run_id = run.id
+    for attempt in range(1, 5):
+        if kind == "function":
+            claimed_function = await claim_ready_function(
+                engine, sessions, owner=f"crashed-{attempt}"
+            )
+            assert claimed_function is not None
+            # A process crash closes its database connection and provider lock.
+            await claimed_function.connection.invalidate()
+            await claimed_function.connection.close()
+        else:
+            assert await claim_ready_projection(sessions, owner=f"crashed-{attempt}") is not None
+        async with sessions.begin() as database:
+            stored = (
+                await database.get(FunctionRun, run_id)
+                if run_id
+                else await database.get(JobRun, job_id)
+            )
+            assert stored is not None and stored.attempt_count == attempt
+            stored.lease_expires_at = now - timedelta(seconds=1)
+    if kind == "function":
+        assert await claim_ready_function(engine, sessions, owner="fifth-worker") is None
+    else:
+        assert await claim_ready_projection(sessions, owner="fifth-worker") is None
+    async with sessions() as database:
+        exhausted = (
+            await database.get(FunctionRun, run_id)
+            if run_id
+            else await database.get(JobRun, job_id)
+        )
+        assert exhausted is not None and exhausted.attempt_count == 4
+        assert exhausted.status == ("unavailable" if kind == "function" else "failed")
+        assert exhausted.error == "retry_limit_reached"
+        if run_id:
+            attempts = list(
+                await database.scalars(
+                    select(FunctionAttempt).where(FunctionAttempt.function_run_id == run_id)
+                )
+            )
+            assert len(attempts) == 4
+            assert all(
+                attempt.status == "failed" and attempt.error_code == "lease_expired"
+                for attempt in attempts
+            )

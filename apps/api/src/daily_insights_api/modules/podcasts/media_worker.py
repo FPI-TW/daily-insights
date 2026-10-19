@@ -26,6 +26,11 @@ from daily_insights_api.core.config import Settings
 from daily_insights_api.core.enums import AssetKind, AssetStatus
 from daily_insights_api.modules.assets.api import Asset, ObjectRef, ObjectStore
 from daily_insights_api.modules.audit.api import record_audit_event
+from daily_insights_api.modules.podcasts.lifecycle import (
+    date_generation,
+    lock_upload_date,
+    lock_upload_object,
+)
 from daily_insights_api.modules.podcasts.models import PodcastEpisode, PodcastEpisodeAudioVariant
 from daily_insights_api.modules.podcasts.service import (
     audio_chapters,
@@ -259,6 +264,14 @@ class PodcastMediaWorker:
     ) -> str:
         now = datetime.now(UTC)
         async with self._session_factory() as database:
+            trading_date = await database.scalar(
+                select(PodcastUploadBatch.trading_date).where(
+                    PodcastUploadBatch.id == claim.batch_id
+                )
+            )
+            if trading_date is None:
+                return "conflict"
+            await lock_upload_date(database, trading_date)
             batch = await database.scalar(
                 select(PodcastUploadBatch)
                 .where(PodcastUploadBatch.id == claim.batch_id)
@@ -277,7 +290,9 @@ class PodcastMediaWorker:
                 or session.lease_token != claim.lease_token
             ):
                 return "conflict"
-            if batch.status in {"conflict", "expired"}:
+            if batch.status in {"conflict", "expired"} or batch.generation != await date_generation(
+                database, batch.trading_date
+            ):
                 session.status = "conflict"
                 session.error_code = "upload_batch_unavailable"
                 session.lease_token = None
@@ -322,7 +337,7 @@ class PodcastMediaWorker:
                 await database.commit()
                 return "conflict"
             expected_episode_version = batch.base_episode_version + batch.applied_count
-            if episode.version != expected_episode_version:
+            if episode.deletion_pending or episode.version != expected_episode_version:
                 batch.status = "conflict"
                 session.status = "conflict"
                 session.error_code = "episode_version_conflict"
@@ -350,6 +365,7 @@ class PodcastMediaWorker:
                 await database.commit()
                 return "conflict"
 
+            await lock_upload_object(database, session.asset_id)
             asset = Asset(
                 id=session.asset_id,
                 bucket=claim.bucket,
@@ -522,16 +538,22 @@ class PodcastMediaWorker:
             session.lease_until = None
             await database.commit()
             session_id = session.id
+            asset_id = session.asset_id
             ref = ObjectRef(bucket=self._settings.r2_bucket_name or "", key=session.object_key)
 
         try:
-            existing_asset = await self._asset_for_key(ref.key)
-            object_found = await self._store.head(ref)
-            if object_found is not None and existing_asset is None:
-                await self._store.delete(ref)
-                next_check = datetime.now(UTC) + timedelta(minutes=5)
-            else:
-                next_check = datetime.now(UTC) + timedelta(hours=1)
+            async with self._session_factory() as database:
+                await lock_upload_object(database, asset_id)
+                existing_asset = await database.scalar(
+                    select(Asset.id).where(Asset.object_key == ref.key)
+                )
+                object_found = await self._store.head(ref)
+                if object_found is not None and existing_asset is None:
+                    await self._store.delete(ref)
+                    next_check = datetime.now(UTC) + timedelta(minutes=5)
+                else:
+                    next_check = datetime.now(UTC) + timedelta(hours=1)
+                await database.commit()
         except OBJECT_STORE_ERRORS as error:
             async with self._session_factory() as database:
                 await database.execute(

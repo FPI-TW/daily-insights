@@ -47,6 +47,9 @@ from daily_insights_api.modules.orchestration.models import (
     RoutineRun,
 )
 from daily_insights_api.modules.podcasts.models import (
+    PodcastDateGeneration,
+    PodcastDeletionJob,
+    PodcastDeletionObject,
     PodcastEpisode,
     PodcastEpisodeAudioVariant,
     PodcastEpisodeTranslation,
@@ -95,6 +98,9 @@ __all__ = [
     "NewsroomSource",
     "Organization",
     "OrganizationMarketPolicy",
+    "PodcastDateGeneration",
+    "PodcastDeletionJob",
+    "PodcastDeletionObject",
     "PodcastEpisode",
     "PodcastEpisodeAudioVariant",
     "PodcastEpisodeTranslation",

@@ -35,10 +35,14 @@ from daily_insights_api.modules.podcasts.api import (
     PodcastEpisodeSummaryResponse,
     PodcastMetadata,
     PodcastMetadataSet,
+    PodcastRemovalProgress,
     resolve_audio_variant,
     validate_chapters,
 )
+from daily_insights_api.modules.podcasts.lifecycle import lock_upload_date, require_mutable
 from daily_insights_api.modules.podcasts.models import (
+    PodcastDeletionJob,
+    PodcastDeletionObject,
     PodcastEpisode,
     PodcastEpisodeAudioVariant,
     PodcastEpisodeTranslation,
@@ -302,10 +306,18 @@ async def get_episode(
 ) -> PodcastEpisode:
     statement = select(PodcastEpisode).where(PodcastEpisode.id == episode_id)
     if for_update:
-        statement = statement.with_for_update()
+        trading_date = await database.scalar(
+            select(PodcastEpisode.trading_date).where(PodcastEpisode.id == episode_id)
+        )
+        if trading_date is None:
+            raise PodcastNotFoundError
+        await lock_upload_date(database, trading_date)
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     episode = await database.scalar(statement)
     if episode is None:
         raise PodcastNotFoundError
+    if for_update:
+        require_mutable(episode)
     return episode
 
 
@@ -314,6 +326,7 @@ async def replace_metadata(
     episode: PodcastEpisode,
     metadata: PodcastMetadataSet,
 ) -> None:
+    require_mutable(episode)
     existing = {
         item.locale: item
         for item in (
@@ -357,10 +370,25 @@ async def episode_admin_response(
     from daily_insights_api.modules.podcasts.api import PodcastAudioVariantResponse
 
     stored = (await stored_metadata(database, [episode.id])).get(episode.id)
+    deletion = None
+    if episode.deletion_pending:
+        progress = (
+            await database.scalars(
+                select(PodcastDeletionObject)
+                .join(PodcastDeletionJob, PodcastDeletionJob.id == PodcastDeletionObject.job_id)
+                .where(PodcastDeletionJob.episode_id == episode.id)
+            )
+        ).all()
+        deletion = PodcastRemovalProgress(
+            total_objects=len(progress),
+            cleared_objects=sum(item.status == "deleted" for item in progress),
+            retained_objects=sum(item.status == "shared" for item in progress),
+        )
     return PodcastEpisodeAdminResponse(
         id=episode.id,
         trading_date=episode.trading_date,
         status=episode.status,
+        deletion=deletion,
         version=episode.version,
         metadata=tuple(
             metadata_for(stored, episode.trading_date, locale)
@@ -448,6 +476,7 @@ async def published_episode_detail(
 
 
 async def ensure_publishable(database: AsyncSession, episode: PodcastEpisode) -> None:
+    require_mutable(episode)
     audio = await database.scalar(
         select(PodcastEpisodeAudioVariant)
         .join(Asset, Asset.id == PodcastEpisodeAudioVariant.asset_id)
@@ -474,6 +503,7 @@ async def upload_audio_batch(
     confirm_replacement: bool,
     expected_versions: dict[str, int],
 ) -> tuple[PodcastEpisodeAudioVariant, ...]:
+    require_mutable(episode)
     if not 1 <= len(uploads) <= 3:
         raise ValueError("Podcast upload requires one to three files")
     locales = [upload.locale for upload in uploads]
@@ -622,6 +652,7 @@ async def replace_audio_chapters(
     Chapters are navigation aids rather than content, so they may be edited on
     a published episode; the episode version still moves so concurrent
     editors notice each other."""
+    require_mutable(episode)
     variant = await database.scalar(
         select(PodcastEpisodeAudioVariant)
         .where(
@@ -653,6 +684,7 @@ async def import_audio(
     *,
     actor_user_id: uuid.UUID,
 ) -> PodcastEpisodeAudioVariant:
+    require_mutable(episode)
     current = await database.scalar(
         select(PodcastEpisodeAudioVariant)
         .where(

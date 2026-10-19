@@ -85,8 +85,9 @@ OpenAPI、回應或結構化 log。
 - `POST /api/podcasts/{episode_id}/audio-url?locale=zh-hant`
 
 內部 Podcast API 位於 `/api/admin/podcasts`。`admin` 可發布與下架；
-`admin` 與 `asset_manager` 可透過 multipart endpoint 一次上傳 1–3 個語系
-音檔。後端統一寫入
+`admin` 與 `asset_manager` 的 browser workflow 使用同步直傳 v2，一次上傳
+1–3 個語系，正式路徑詳見下方「同步直傳 v2 物件路徑」。保留的 legacy
+multipart endpoint 仍寫入
 `podcasts/{trading-date}/audio/{locale}/podcast.{ext}`，其中 `{ext}` 僅支援
 `mp3` 與 `mp4`。同交易日同語系確認後
 直接覆寫該 object，並同步更新 size、MIME type、SHA-256 與邏輯版本。
@@ -146,3 +147,36 @@ uv run alembic upgrade head --sql
 聊天在資料庫交易內跨 worker 檢查使用者與組織額度，預設每位使用者最多 2 個進行中回覆、每組織 8 個；滾動 24 小時最多分別 100／1000 次生成。失敗與取消仍計入每日額度，完成請求的冪等重播不重複計費或扣額度。設定分別為 `DAILY_INSIGHTS_CHAT_USER_MAX_PENDING`、`DAILY_INSIGHTS_CHAT_ORG_MAX_PENDING`、`DAILY_INSIGHTS_CHAT_USER_DAILY_TURNS`、`DAILY_INSIGHTS_CHAT_ORG_DAILY_TURNS`；超額回覆 429。每次模型輸出預設最多 4096 tokens，可用 `DAILY_INSIGHTS_CHAT_MAX_OUTPUT_TOKENS` 調整。這些是請求與輸出用量上限，並非依供應商價格計算的金額預算。
 
 回覆的總生命週期（包含歷史讀取、模型連線與串流）受聊天 timeout 限制。worker 意外終止所留下的 pending 紀錄，會在下一次額度檢查時回收；回收門檻為允許的最大 timeout 600 秒加 30 秒緩衝，不會重置每日用量。上述設定需由部署環境實際注入 API 程序，未注入時使用安全預設值。
+
+### Podcast 永久移除 API
+
+`DELETE /api/admin/podcasts/{episode_id}` 接受 JSON `{"expected_version": 3}`；需登入的 `admin` 或 `asset_manager` 與有效 `X-CSRF-Token`。僅 `draft` 可移除，包含從未發布的節目。成功且檔案／DB 清理全部完成回傳無 body 的 `204`；版本衝突回傳 `409 episode_version_conflict`，已發布回傳 `409 episode_must_be_unpublished`。
+
+移除開始會遞增版本並凍結節目。儲存或 DB 清理失敗回傳 `503 episode_removal_incomplete`（含 `episode_id`）。`GET /api/admin/podcasts` 的 `deletion` 欄位提供 `status: pending`、`total_objects`、`cleared_objects`、`retained_objects`，卡片繼續顯示。重新載入最新版本後以相同 DELETE 手動重試；凍結期間其他修改回傳 `409 episode_removal_pending`。已刪物件的 missing／NoSuchKey 視為成功，直到所有物件處理完成才刪除節目資料。共用 Asset 與未登記匯入來源保留；稽核與移除進度記錄不隨節目刪除。
+
+上傳 ticket 綁定交易日 generation（舊 ticket 預設 `0`），移除開始遞增 generation；completion 或 legacy worker 的舊 generation 回傳／記錄衝突，防止舊請求在同日重建後重播。完成移除後才接受同日期全新簽署上傳。完成 DELETE 的重播可使用原請求版本或凍結版本，已完成 job 回傳 `204`，不影響同日新節目。
+
+移除完成前會在排序後的物件鎖內重新檢查共用引用；不同日期同時移除共用 Asset 時，由最後一個引用的移除者先清除物件及 Asset。最後階段的儲存／DB 失敗同樣保留 pending 狀態，使用最新版本重試。
+
+`migrate_podcast_assets` CLI 的 copy／verify／cutover 遵守相同日期凍結與物件鎖。已登記 manifest 綁定首次保存的 `podcast_generation`（舊紀錄預設 `0`），移除或同日重建後拒絕舊 manifest 的 `migration_generation_conflict`，不能靠重新保存 rebinding。多日期 inventory 以日期及 asset ID 排序取鎖；copy／verify 持鎖至原有 DB 交易完成，同日期管理操作可能等待匯入。失敗回滾 DB，保留來源與未登記的已複製物件供既有 manifest 復原／人工處理。
+
+CLI 重跑 inventory 時，會在任何 copy／輸出寫入之前核對既有 manifest 的 cutover 狀態、entry identity 與 generation；已完成或過期的 inventory 被拒絕時不會重建已刪物件或改動新錄音。全新 inventory 與同一 generation 的 verified 重試仍可執行。
+
+複製前檢查也跨 manifest 核對每個 target 與 Asset ID 的永久歸屬；subset、重組或混入新項目不能繞過既有紀錄。其他 manifest 已持有的項目回傳 `migration_entry_owned_by_another_manifest`，整份 inventory 在任何複製前被拒絕，同一 manifest 的合法 verified 重試仍保留。
+
+### 同步直傳 v2 物件路徑
+
+新 browser 上傳的 signed PUT 仍指向唯一暫存路徑
+`podcasts/direct/{expires}/{trading_date}/{locale}/{asset_id}.{mp3|mp4}`。
+v2 complete 在交易日鎖與 generation fence 內，先檢查目前語系版本，再驗證
+HEAD、完整 SHA-256、時長與章節，以已驗證 spool 和 `put_if_absent` 建立正式檔
+`podcasts/YYYY/MM/DD/{locale}/podcast_{logical_version}.{mp3|mp4}`（月日補零）。
+正式路徑版本與 variant 一致，登記 commit 後才清暫存；替換保留 archived 檔。
+
+公開 request／response 不變。v1 HMAC 憑證繼續在原路徑完成，既有檔案不搬移；
+播放仍依 Asset object key，legacy service／import 的路徑與 metadata helper 不變。
+重試以 asset ID 及正式 identity 找回已提交結果。正式路徑碰撞僅可重用未引用且
+size／MIME／完整 SHA 相同的檔案，否則 `409 upload_destination_conflict`，不覆寫
+或刪除既有檔案。補償重新取得日期鎖檢查引用，只刪確定由此嘗試建立的正式檔；
+DB 結果不明保留物件。定期清理涵蓋完整有效 grammar 的暫存與正式孤兒，保留
+所有 active／archived 引用和 legacy／import 路徑。

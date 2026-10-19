@@ -572,3 +572,45 @@ async def test_r2_adapter_returns_none_only_for_object_not_found() -> None:
     client.missing = True
     store = R2ObjectStore(cast(S3Client, client))
     assert await store.head(ObjectRef(bucket="private", key="missing.mp3")) is None
+
+
+@pytest.mark.asyncio
+async def test_r2_orphan_listing_follows_all_sdk_pages() -> None:
+    from datetime import UTC, datetime
+
+    from botocore.stub import Stubber
+
+    client = boto3.client(
+        "s3",
+        endpoint_url="https://r2.test",
+        aws_access_key_id="test-key",
+        aws_secret_access_key="test-secret",
+        region_name="auto",
+    )
+    modified = datetime.now(UTC)
+    with Stubber(client) as stub:
+        stub.add_response(
+            "list_objects_v2",
+            {
+                "IsTruncated": True,
+                "NextContinuationToken": "next-page",
+                "Contents": [{"Key": "podcasts/direct/first.mp3", "LastModified": modified}],
+            },
+            {"Bucket": "private", "Prefix": "podcasts/direct/"},
+        )
+        stub.add_response(
+            "list_objects_v2",
+            {
+                "IsTruncated": False,
+                "Contents": [{"Key": "podcasts/direct/second.mp3", "LastModified": modified}],
+            },
+            {"Bucket": "private", "Prefix": "podcasts/direct/", "ContinuationToken": "next-page"},
+        )
+        store = R2ObjectStore(cast(S3Client, client))
+        objects = [item async for item in store.list_objects("private", "podcasts/direct/")]
+        assert [item.ref.key for item in objects] == [
+            "podcasts/direct/first.mp3",
+            "podcasts/direct/second.mp3",
+        ]
+        assert all(item.last_modified == modified for item in objects)
+        stub.assert_no_pending_responses()

@@ -1,34 +1,14 @@
-import {
-  ApiError,
-  createMarketClient,
-  createReportClient,
-  launchMarketCodeSchema,
-  localeSchema,
-  marketCodeSchema,
-  type ReportBlock as ApiReportBlock,
-  type ReportDetail as ApiReportDetail,
-  type ReportSummary as ApiReportSummary,
+import type {
+  ReportBlock as ApiReportBlock,
+  ReportDetail as ApiReportDetail,
+  ReportSummary as ApiReportSummary,
 } from "@daily-insights/api-client"
-import { createServerTransport } from "@daily-insights/api-client/server"
-import { createServerFn } from "@tanstack/react-start"
-import {
-  getRequestHeader,
-  setResponseHeader,
-} from "@tanstack/react-start/server"
-import { z } from "zod"
 import {
   type ProvisionalReport,
   type ReportBlock,
   type ReportValue,
 } from "./provisional-reports"
 
-const detailInputSchema = z.object({
-  marketCode: z.string(),
-  locale: localeSchema,
-})
-const reportNotGeneratedDetailSchema = z.object({
-  code: z.literal("report_not_generated"),
-})
 const literal = (value: string | number): ReportValue => ({
   kind: "literal",
   value,
@@ -63,21 +43,6 @@ const columnLabelKeys: Record<string, string> = {
   instrument: "reportColumnInstrument",
   price: "reportColumnPrice",
   change: "reportColumnChange",
-}
-
-function serverTransport() {
-  const apiUrl = process.env.API_INTERNAL_URL
-  if (!apiUrl) throw new Error("API_INTERNAL_URL is required by the web server")
-  const cookie = getRequestHeader("cookie")
-  const requestId = getRequestHeader("x-request-id")
-  return createServerTransport(apiUrl, {
-    ...(cookie ? { cookie } : {}),
-    ...(requestId ? { requestId } : {}),
-  })
-}
-
-function serverReportClient() {
-  return createReportClient(serverTransport())
 }
 
 function mapBlock(
@@ -144,7 +109,7 @@ function mapBlock(
   }
 }
 
-function summary(report: ApiReportSummary): ProvisionalReport {
+export function mapReportSummary(report: ApiReportSummary): ProvisionalReport {
   return {
     publicationId: report.publication_id,
     marketCode: report.market_code,
@@ -161,7 +126,7 @@ function summary(report: ApiReportSummary): ProvisionalReport {
 
 export function mapReportDetail(report: ApiReportDetail): ProvisionalReport {
   return {
-    ...summary(report),
+    ...mapReportSummary(report),
     caveat: report.content.caveat,
     blocks: report.content.blocks.flatMap(block =>
       blockTitleKeys[block.id] === undefined
@@ -170,55 +135,3 @@ export function mapReportDetail(report: ApiReportDetail): ProvisionalReport {
     ),
   }
 }
-
-export const getReportList = createServerFn({ method: "GET" })
-  .validator(localeSchema)
-  .handler(async ({ data: locale }) => {
-    setResponseHeader("Cache-Control", "no-store")
-    try {
-      return (await serverReportClient().list(locale)).map(summary)
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 403) return []
-      throw error
-    }
-  })
-
-export const getReportDetail = createServerFn({ method: "GET" })
-  .validator(detailInputSchema)
-  .handler(async ({ data }) => {
-    setResponseHeader("Cache-Control", "no-store")
-    const parsed = launchMarketCodeSchema.safeParse(data.marketCode)
-    if (!parsed.success) {
-      // A catalog market without a launched report shows the not-launched
-      // state when the organization may see it; anything else is a 404.
-      const catalog = marketCodeSchema.safeParse(data.marketCode)
-      if (!catalog.success) return { kind: "not-found" as const }
-      try {
-        const visible = await createMarketClient(serverTransport()).list()
-        if (!visible.some(m => m.code === catalog.data && m.is_visible)) {
-          return { kind: "not-found" as const }
-        }
-      } catch (error) {
-        // Internal users (no organization) may preview every market.
-        if (!(error instanceof ApiError && error.status === 403)) throw error
-      }
-      return { kind: "not-launched" as const, marketCode: catalog.data }
-    }
-    const marketCode = parsed.data
-    try {
-      return {
-        kind: "report" as const,
-        report: mapReportDetail(
-          await serverReportClient().latest(marketCode, data.locale)
-        ),
-      }
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 404) {
-        if (reportNotGeneratedDetailSchema.safeParse(error.detail).success) {
-          return { kind: "not-generated" as const, marketCode }
-        }
-        return { kind: "not-found" as const }
-      }
-      throw error
-    }
-  })

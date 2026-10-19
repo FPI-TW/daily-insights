@@ -63,37 +63,21 @@ export function IndexHistoryChart({
   history,
   locale,
   movingAverages = null,
+  movingAveragesPending = false,
 }: {
   history: MarketIndexHistory | null
   locale: Locale
-  movingAverages?: Promise<IndexMovingAverageMap> | null
+  movingAverages?: IndexMovingAverageMap | null
+  movingAveragesPending?: boolean
 }) {
   const { t } = useTranslation()
   const colors = useChartColors()
+  // Price history renders while indicators are still pending.
+  const indicatorsPending = movingAveragesPending
   const [selectedSymbol, setSelectedSymbol] = useState(
     history?.series[0]?.symbol ?? ""
   )
   const [zoom, setZoom] = useState({ start: 0, end: 100 })
-  const [movingAverageState, setMovingAverageState] = useState<{
-    source: Promise<IndexMovingAverageMap> | null
-    values: IndexMovingAverageMap
-  }>({ source: null, values: {} })
-
-  useEffect(() => {
-    let active = true
-    const source = movingAverages
-    if (!source)
-      return () => {
-        active = false
-      }
-    void source.then(values => {
-      if (active) setMovingAverageState({ source, values })
-    })
-    return () => {
-      active = false
-    }
-  }, [movingAverages])
-
   useEffect(() => {
     if (!history?.series.some(item => item.symbol === selectedSymbol)) {
       setSelectedSymbol(history?.series[0]?.symbol ?? "")
@@ -139,10 +123,7 @@ export function IndexHistoryChart({
     ? (Number(latest.close) / Number(previous.close) - 1) * 100
     : null
   const label = symbolLabel(selected.symbol, t)
-  const selectedMovingAverages =
-    movingAverageState.source === movingAverages
-      ? movingAverageState.values[selected.symbol]
-      : undefined
+  const selectedMovingAverages = movingAverages?.[selected.symbol]
   const availableMovingAverages = (selectedMovingAverages?.series ?? [])
     .map(series => ({
       period: series.period,
@@ -220,6 +201,7 @@ export function IndexHistoryChart({
     <section
       className="rounded-2xl border border-line bg-surface mt-6 min-w-0 p-5"
       aria-labelledby="index-history-title"
+      aria-busy={indicatorsPending}
     >
       <div className="mb-4">
         <h2 id="index-history-title" className="m-0 text-base font-extrabold">
@@ -354,8 +336,9 @@ export function IndexHistoryChart({
                 },
               ],
               matrix: {
-                left: 0,
-                right: 0,
+                // Keep the pixel-aligned matrix stroke inside the canvas.
+                left: 1,
+                right: 1,
                 top: 4,
                 bottom: 54,
                 x: { show: false, data: [null] },
