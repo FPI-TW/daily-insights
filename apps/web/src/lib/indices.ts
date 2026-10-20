@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next"
 import {
   trackedIndexCatalog,
   type IndexDailyBar,
@@ -17,10 +18,12 @@ export type MarketIndexHistory = {
   failedSymbols: string[]
 }
 
-export const VIX_SYMBOL = "^VIX" as const
+/** Volatility indices get their own banded chart instead of the index chart. */
+export const volatilitySymbols = ["^VIX", "^HSIL"] as const
+export type VolatilitySymbol = (typeof volatilitySymbols)[number]
 
 export type VixHistory = {
-  symbol: typeof VIX_SYMBOL
+  symbol: VolatilitySymbol
   start: string
   end: string
   bars: IndexDailyBar[]
@@ -28,8 +31,6 @@ export type VixHistory = {
 }
 
 export type IndexMovingAverageMap = Record<string, IndexMovingAverages>
-
-export const chartMarketCodes = ["us_equity", "tw_equity"] as const
 
 export function trackedSymbolsForMarket(marketCode: MarketCode) {
   return trackedIndexCatalog
@@ -39,7 +40,7 @@ export function trackedSymbolsForMarket(marketCode: MarketCode) {
 
 export function indexChartSymbolsForMarket(marketCode: MarketCode) {
   return trackedSymbolsForMarket(marketCode).filter(
-    symbol => symbol !== VIX_SYMBOL
+    symbol => !volatilitySymbols.some(volatility => volatility === symbol)
   )
 }
 
@@ -112,12 +113,19 @@ export function indexNameKey(symbol: string) {
       "^NDX": "indexNameNdx",
       "^RUT": "indexNameRut",
       "^SOX": "indexNameSox",
+      "^VIX": "indexNameVix",
       "^HSI": "indexNameHsi",
       "^HSCE": "indexNameHsce",
       "^HSIL": "indexNameHsil",
       "^TWII": "indexNameTwii",
     } satisfies Record<string, string>
   )[symbol]
+}
+
+/** Localized index name; symbols outside `indexNameKey` show as themselves. */
+export function indexDisplayName(symbol: string, t: TFunction) {
+  const key = indexNameKey(symbol)
+  return key ? t(key) : symbol
 }
 
 function finiteNumber(raw: string | number | null | undefined) {

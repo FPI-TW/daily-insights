@@ -128,7 +128,9 @@ describe("VixHistoryChart", () => {
     document.documentElement.style.setProperty("--market-caution", "#c98a2b")
     document.documentElement.style.setProperty("--destructive", "#d6453f")
 
-    await renderLocalized(<VixHistoryChart history={history} locale="en" />)
+    await renderLocalized(
+      <VixHistoryChart symbol="^VIX" history={history} locale="en" />
+    )
 
     const chart = screen.getByTestId("vix-chart")
     expect(chart).toHaveTextContent("18.1")
@@ -162,27 +164,86 @@ describe("VixHistoryChart", () => {
   })
 
   it("has accessible loading, unavailable, and empty states", async () => {
-    await renderLocalized(<VixHistoryLoading />)
+    await renderLocalized(<VixHistoryLoading symbol="^VIX" />)
     expect(screen.getByRole("status")).toHaveAccessibleName()
 
     cleanup()
-    await renderLocalized(<VixHistoryChart history={null} locale="en" />)
+    await renderLocalized(
+      <VixHistoryChart symbol="^VIX" history={null} locale="en" />
+    )
     expect(screen.getByRole("status")).toHaveTextContent("unavailable")
 
     cleanup()
     await renderLocalized(
-      <VixHistoryChart history={{ ...history, bars: [] }} locale="en" />
+      <VixHistoryChart
+        symbol="^VIX"
+        history={{ ...history, bars: [] }}
+        locale="en"
+      />
     )
     expect(screen.getByRole("status")).toHaveTextContent("no VIX daily bars")
   })
 
+  it("names the Hong Kong volatility index in every state", async () => {
+    const hsil: VixHistory = {
+      ...history,
+      symbol: "^HSIL",
+      bars: history.bars.map(bar => ({
+        ...bar,
+        symbol: "^HSIL",
+        market_code: "hk_equity",
+      })),
+      indicators: history.indicators && {
+        ...history.indicators,
+        symbol: "^HSIL",
+        market_code: "hk_equity",
+      },
+    }
+    await renderLocalized(
+      <VixHistoryChart symbol="^HSIL" history={hsil} locale="en" />
+    )
+    expect(
+      screen.getByRole("heading", { name: "HSI Volatility Index trend" })
+    ).toBeVisible()
+    expect(screen.getByText("Latest HSI Volatility Index:")).toBeVisible()
+    // No published bands for HSI VIX: no thresholds, zones or disclaimer.
+    const chart = screen.getByTestId("vix-chart")
+    // The only markLine left is the KD panel's 20/80 guide.
+    expect(chart.textContent?.match(/markLine/g)).toHaveLength(1)
+    expect(chart).not.toHaveTextContent("markArea")
+    expect(chart).not.toHaveTextContent("threshold")
+    expect(chart).toHaveTextContent('"min":16,"max":35')
+    expect(
+      screen.getByRole("caption", {
+        name: "HSI Volatility Index daily closing values, MACD and KD",
+      })
+    ).toBeInTheDocument()
+    expect(chart).not.toHaveTextContent("Calm")
+    expect(screen.queryByText(/not official classifications/)).toBeNull()
+
+    cleanup()
+    await renderLocalized(
+      <VixHistoryChart symbol="^HSIL" history={null} locale="zh-hant" />,
+      "zh-hant"
+    )
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "港股 VIX 資料目前無法載入"
+    )
+
+    cleanup()
+    await renderLocalized(<VixHistoryLoading symbol="^HSIL" />)
+    expect(screen.getByRole("status")).toHaveAccessibleName(
+      "Loading the HSI Volatility Index trend."
+    )
+  })
+
   it.each([
-    ["zh-hant", "VIX 波動率走勢", "非官方分級"],
-    ["zh-hans", "VIX 波动率走势", "并非官方分级"],
-    ["en", "VIX volatility trend", "not official classifications"],
+    ["zh-hant", "VIX 走勢", "非官方分級"],
+    ["zh-hans", "VIX 走势", "并非官方分级"],
+    ["en", "VIX trend", "not official classifications"],
   ] as const)("renders %s copy", async (locale, title, reference) => {
     await renderLocalized(
-      <VixHistoryChart history={history} locale={locale} />,
+      <VixHistoryChart symbol="^VIX" history={history} locale={locale} />,
       locale
     )
 

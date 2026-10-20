@@ -6,7 +6,7 @@ export function HkSectorHeatmapLoading() {
   const { t } = useTranslation()
   return (
     <section
-      className="surface-panel mt-4 p-5"
+      className="surface-panel p-5"
       role="status"
       aria-live="polite"
       aria-label={t("hkSectorHeatmapLoading")}
@@ -27,11 +27,7 @@ export function HkSectorHeatmap({
   const { t } = useTranslation()
   if (heatmap === null) {
     return (
-      <section
-        className="surface-panel mt-4 p-5"
-        role="status"
-        aria-live="polite"
-      >
+      <section className="surface-panel p-5" role="status" aria-live="polite">
         <p className="m-0 text-sm text-sea-ink-soft">
           {t("hkSectorHeatmapUnavailable")}
         </p>
@@ -42,7 +38,7 @@ export function HkSectorHeatmap({
   const legend = heatmap.images.find(image => image.kind === "legend")
   return (
     <section
-      className="surface-panel mt-4 p-5"
+      className="surface-panel p-5"
       aria-label={t("hkSectorHeatmapTitle")}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">

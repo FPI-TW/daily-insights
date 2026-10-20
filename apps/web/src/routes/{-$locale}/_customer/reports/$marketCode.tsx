@@ -2,6 +2,7 @@ import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router"
 import {
   marketCodeSchema,
   launchMarketCodeSchema,
+  type Locale,
   type MarketCode,
 } from "@daily-insights/api-client"
 import { useEffect, useRef, useState } from "react"
@@ -16,7 +17,11 @@ import { ReportInformation } from "#/components/MarketInformation"
 import { MarketQuerySection } from "#/components/MarketQuerySection"
 import { marketQueries, useMarketQuery } from "#/lib/market-queries"
 import { isNewsMarketCode } from "#/lib/provisional-reports"
-import { twoYearTaipeiRange } from "#/lib/indices"
+import {
+  indexChartSymbolsForMarket,
+  twoYearTaipeiRange,
+  type VolatilitySymbol,
+} from "#/lib/indices"
 import { institutionalFlowRange } from "#/lib/institutional-flows"
 import { useChatPageContext } from "#/components/PageContextChat"
 import {
@@ -39,9 +44,10 @@ import {
   HkSectorHeatmapLoading,
 } from "#/components/HkSectorHeatmap"
 import {
-  UsIndexPerformanceTable,
-  UsIndexPerformanceTableLoading,
-} from "#/components/UsIndexPerformanceTable"
+  IndexPerformanceTable,
+  IndexPerformanceTableLoading,
+  type IndexTableTitleKey,
+} from "#/components/IndexPerformanceTable"
 import {
   VixHistoryChart,
   VixHistoryLoading,
@@ -54,20 +60,54 @@ import {
 // What each market page renders besides its morning report. Keyed on every
 // market code, so adding one is a type error until this says what it shows,
 // and a market with any block of its own hides the "not launched" notice.
-type PageBlocks = {
-  macro?: true
-  chart?: "index" | "taiwan"
-  performance?: true
-  vix?: true
+// The index-history query feeds the chart, the performance table and the
+// bias panel, so the last two only exist alongside a chart; a macro page
+// shows the dashboard instead of any market block.
+type ChartBlocks =
+  | { chart?: undefined; performance?: undefined; bias?: undefined }
+  | {
+      chart: "index" | "taiwan"
+      bias?: true
+      // "beside": its own column next to the morning report; "stacked":
+      // under the market's own cards in the single column.
+      performance?: {
+        titleKey: IndexTableTitleKey
+        symbols: readonly string[]
+        placement: "beside" | "stacked"
+      }
+    }
+type MarketBlocks = ChartBlocks & {
+  volatility?: VolatilitySymbol
   hkEquity?: true
   institutional?: true
 }
+type PageBlocks =
+  | ({ macro: true } & { [K in keyof MarketBlocks]?: undefined })
+  | ({ macro?: undefined } & MarketBlocks)
 const PAGE_BLOCKS = {
   global_macro_bonds: { macro: true },
   forex: {},
   crypto: {},
-  us_equity: { chart: "index", performance: true, vix: true },
-  hk_equity: { hkEquity: true },
+  us_equity: {
+    chart: "index",
+    performance: {
+      titleKey: "indexTableTitle_us_equity",
+      symbols: ["^GSPC", "^NDX", "^DJI", "^SOX", "^RUT"],
+      placement: "beside",
+    },
+    volatility: "^VIX",
+  },
+  hk_equity: {
+    hkEquity: true,
+    chart: "index",
+    performance: {
+      titleKey: "indexTableTitle_hk_equity",
+      symbols: indexChartSymbolsForMarket("hk_equity"),
+      placement: "stacked",
+    },
+    bias: true,
+    volatility: "^HSIL",
+  },
   cn_equity: {},
   tw_equity: { chart: "taiwan", institutional: true },
   tw_index_derivatives: {},
@@ -113,6 +153,7 @@ function ReportPage() {
   const [range] = useState(() => twoYearTaipeiRange())
   const blocks: PageBlocks = PAGE_BLOCKS[marketCode]
   const isChart = blocks.chart !== undefined
+  const performance = blocks.performance
   const hasOwnContent = Object.keys(blocks).length > 0
   const report = useMarketQuery(queries.report(marketCode), locale, reportReady)
   const news = useMarketQuery(
@@ -135,16 +176,6 @@ function ReportPage() {
     queries.averages(marketCode, range),
     locale,
     ready && isChart
-  )
-  const vix = useMarketQuery(
-    queries.vix(range),
-    locale,
-    ready && blocks.vix === true
-  )
-  const vixAverages = useMarketQuery(
-    queries.vixAverages(range),
-    locale,
-    ready && blocks.vix === true
   )
   const flows = useMarketQuery(
     queries.flows(institutionalFlowRange(range.end)),
@@ -184,6 +215,21 @@ function ReportPage() {
   const viewpoint = viewpoints.data?.find(
     item => item.market_code === marketCode
   )
+  // The chart's MarketQuerySection already announces this query's refetch
+  // and error once, so the table only picks between skeleton and data.
+  const performanceTable = performance ? (
+    history.data === undefined && history.isPending ? (
+      <IndexPerformanceTableLoading titleKey={performance.titleKey} />
+    ) : (
+      <IndexPerformanceTable
+        history={history.data ?? null}
+        locale={locale}
+        titleKey={performance.titleKey}
+        symbols={performance.symbols}
+      />
+    )
+  ) : null
+  const sideBySide = performance?.placement === "beside"
   return (
     <>
       {isNewsMarketCode(marketCode) ? (
@@ -211,23 +257,11 @@ function ReportPage() {
       ) : (
         <div
           className={
-            blocks.performance ? "grid min-w-0 gap-4 xl:grid-cols-2" : "min-w-0"
+            sideBySide ? "grid min-w-0 gap-4 xl:grid-cols-2" : "min-w-0"
           }
         >
-          {blocks.performance ? (
-            <div className="flex min-w-0 flex-col">
-              <MarketQuerySection
-                query={history}
-                loading={<UsIndexPerformanceTableLoading />}
-              >
-                {data => (
-                  <UsIndexPerformanceTable
-                    history={data ?? null}
-                    locale={locale}
-                  />
-                )}
-              </MarketQuerySection>
-            </div>
+          {sideBySide ? (
+            <div className="flex min-w-0 flex-col">{performanceTable}</div>
           ) : null}
           <div className="min-w-0">
             {blocks.hkEquity ? (
@@ -238,15 +272,8 @@ function ReportPage() {
                 {data => <HkIndexCards bars={data ?? null} locale={locale} />}
               </MarketQuerySection>
             ) : null}
-            {blocks.hkEquity ? (
-              <MarketQuerySection
-                query={hkHeatmap}
-                loading={<HkSectorHeatmapLoading />}
-              >
-                {data => (
-                  <HkSectorHeatmap heatmap={data ?? null} locale={locale} />
-                )}
-              </MarketQuerySection>
+            {performance?.placement === "stacked" ? (
+              <div className="mt-4 min-w-0">{performanceTable}</div>
             ) : null}
             <MarketQuerySection
               query={report}
@@ -291,6 +318,7 @@ function ReportPage() {
                   locale={locale}
                   movingAverages={averages.data ?? null}
                   movingAveragesPending={averages.isPending}
+                  bias={blocks.bias === true}
                 />
               )
             }
@@ -300,22 +328,14 @@ function ReportPage() {
           </MarketQuerySection>
         </>
       ) : null}
-      {blocks.vix ? (
-        <MarketQuerySection query={vix} loading={<VixHistoryLoading />}>
-          {data => (
-            <VixHistoryChart
-              history={
-                data ? { ...data, indicators: vixAverages.data ?? null } : null
-              }
-              locale={locale}
-            />
-          )}
-        </MarketQuerySection>
-      ) : null}
-      {blocks.vix ? (
-        <MarketQuerySection query={vixAverages} loading={null}>
-          {() => null}
-        </MarketQuerySection>
+      {blocks.volatility ? (
+        <VolatilityBlock
+          symbol={blocks.volatility}
+          range={range}
+          queries={queries}
+          locale={locale}
+          ready={ready}
+        />
       ) : null}
       {blocks.institutional ? (
         <div className="mt-6 min-w-0">
@@ -349,6 +369,60 @@ function ReportPage() {
           </DashboardSection>
         </div>
       ) : null}
+      {blocks.hkEquity ? (
+        <div className="mt-6 min-w-0">
+          <MarketQuerySection
+            query={hkHeatmap}
+            loading={<HkSectorHeatmapLoading />}
+          >
+            {data => <HkSectorHeatmap heatmap={data ?? null} locale={locale} />}
+          </MarketQuerySection>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
+// Mounted only on pages that declare a volatility index, so other markets
+// never register its queries.
+function VolatilityBlock({
+  symbol,
+  range,
+  queries,
+  locale,
+  ready,
+}: {
+  symbol: VolatilitySymbol
+  range: { start: string; end: string }
+  queries: ReturnType<typeof marketQueries>
+  locale: Locale
+  ready: boolean
+}) {
+  const vix = useMarketQuery(queries.vix(symbol, range), locale, ready)
+  const vixAverages = useMarketQuery(
+    queries.vixAverages(symbol, range),
+    locale,
+    ready
+  )
+  return (
+    <>
+      <MarketQuerySection
+        query={vix}
+        loading={<VixHistoryLoading symbol={symbol} />}
+      >
+        {data => (
+          <VixHistoryChart
+            symbol={symbol}
+            history={
+              data ? { ...data, indicators: vixAverages.data ?? null } : null
+            }
+            locale={locale}
+          />
+        )}
+      </MarketQuerySection>
+      <MarketQuerySection query={vixAverages} loading={null}>
+        {() => null}
+      </MarketQuerySection>
     </>
   )
 }

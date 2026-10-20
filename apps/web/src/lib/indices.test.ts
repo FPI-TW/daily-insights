@@ -95,8 +95,9 @@ describe("trackedSymbolsForMarket", () => {
     expect(trackedSymbolsForMarket("us_equity")).toHaveLength(6)
   })
 
-  it("keeps VIX in the contract but out of the general index chart", () => {
+  it("keeps volatility indices in the contract but out of the general index chart", () => {
     expect(indexSymbolSchema.parse("^VIX")).toBe("^VIX")
+    expect(indexSymbolSchema.parse("^HSIL")).toBe("^HSIL")
     expect(indexChartSymbolsForMarket("us_equity")).toEqual([
       "^DJI",
       "^GSPC",
@@ -104,6 +105,7 @@ describe("trackedSymbolsForMarket", () => {
       "^RUT",
       "^SOX",
     ])
+    expect(indexChartSymbolsForMarket("hk_equity")).toEqual(["^HSI", "^HSCE"])
   })
 })
 
