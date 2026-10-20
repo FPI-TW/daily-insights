@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import (
     Result,
@@ -46,6 +47,7 @@ from daily_insights_api.modules.markets.models import (
     InstitutionalStockFlow,
     Market,
     OrganizationMarketPolicy,
+    SectorHeatmapImage,
 )
 from daily_insights_api.modules.markets.schemas import (
     IndexDailyBarResponse,
@@ -79,6 +81,18 @@ INITIAL_SERIES_BACKFILL_PERIOD = "2y"
 # always carries settled days behind whatever the newest row is doing, and
 # absorbs holidays and a missed run without any catch-up logic.
 AUTOMATIC_SHORT_REFRESH_PERIOD = "7d"
+# The week-wide window only heals a gap shorter than a week. After a longer
+# outage (worker down, Yahoo down) the short refresh widens to the smallest
+# Yahoo period that reaches back past the newest stored bar; anything longer
+# than a year gets the two-year bootstrap. The spans sit under the nominal
+# period lengths so a calendar-month "1mo" still covers a 28-day gap.
+GAP_REFRESH_PERIODS = (
+    (AUTOMATIC_SHORT_REFRESH_PERIOD, 7),
+    ("1mo", 28),
+    ("3mo", 84),
+    ("6mo", 168),
+    ("1y", 350),
+)
 YAHOO_REFRESH_LOCK_KEY = 4_741_901_938_764_211_037
 # ^TWII comes from the exchange itself rather than Yahoo. Two TWSE reports hold
 # one bar between them -- MI_5MINS_HIST has open/high/low/close, FMTQIK has the
@@ -124,16 +138,23 @@ class IndexProviderConflictError(ValueError):
     """A symbol already has durable bars owned by another provider."""
 
 
-def select_index_refresh_period(*, period: str, has_stored_bars: bool) -> str:
+def select_index_refresh_period(*, period: str, latest_bar_date: date | None, today: date) -> str:
     """Choose the fetch window without changing explicit long-period requests.
 
-    The automatic/admin short refresh uses ``7d``.  A missing series needs the
-    normal two-year bootstrap for YTD calculations, while every other request
-    remains exactly as requested.
+    The automatic/admin short refresh uses ``7d`` while the newest stored bar is
+    less than a week old, and widens to cover the gap since that bar otherwise.
+    A missing series needs the normal two-year bootstrap for YTD calculations,
+    while every other request remains exactly as requested.
     """
-    if not has_stored_bars and period == AUTOMATIC_SHORT_REFRESH_PERIOD:
+    if period != AUTOMATIC_SHORT_REFRESH_PERIOD:
+        return period
+    if latest_bar_date is None:
         return INITIAL_SERIES_BACKFILL_PERIOD
-    return period
+    gap_days = (today - latest_bar_date).days
+    for candidate, span_days in GAP_REFRESH_PERIODS:
+        if gap_days <= span_days:
+            return candidate
+    return INITIAL_SERIES_BACKFILL_PERIOD
 
 
 async def visible_market_codes(
@@ -212,6 +233,25 @@ def _bar_response(bar: IndexDailyBar) -> IndexDailyBarResponse:
         volume=bar.volume,
         trade_value=bar.trade_value,
     )
+
+
+async def latest_index_bar_dates(database: AsyncSession, symbols: Sequence[str]) -> dict[str, date]:
+    """symbol -> newest bar date in index_daily_bars; absent when it has none.
+
+    Both Yahoo write paths (the scheduled worker and the admin refresh) size
+    their fetch window from this, so re-pointing a symbol's provider, which
+    deletes its rows here, makes the next refresh of either kind bootstrap it.
+    """
+    return {
+        symbol: latest
+        for symbol, latest in (
+            await database.execute(
+                select(IndexDailyBar.symbol, func.max(IndexDailyBar.trade_date))
+                .where(IndexDailyBar.symbol.in_(symbols))
+                .group_by(IndexDailyBar.symbol)
+            )
+        ).tuples()
+    }
 
 
 async def latest_index_bars(
@@ -962,18 +1002,16 @@ async def _refresh_index_daily_bars_unlocked(
     # A newly added tracked symbol has no rows in an existing deployment. A
     # short scheduled refresh alone cannot provide the prior-year close needed
     # for YTD calculations, so give only missing series the normal two-year
-    # bootstrap. This is deliberately one bounded request per symbol: explicit
-    # long-window operator requests remain unchanged and later refreshes return
-    # to their requested short window.
-    stored_symbols = set(
-        (
-            await database.scalars(
-                select(IndexDailyBar.symbol).where(IndexDailyBar.symbol.in_(symbols)).distinct()
-            )
-        ).all()
-    )
+    # bootstrap, and widen the short window for a symbol whose newest bar is
+    # older than the window. This is deliberately one bounded request per
+    # symbol: explicit long-window operator requests remain unchanged and later
+    # refreshes return to their requested short window.
+    latest_dates = await latest_index_bar_dates(database, symbols)
+    today = datetime.now(ZoneInfo("Asia/Taipei")).date()
     fetch_periods = {
-        symbol: select_index_refresh_period(period=period, has_stored_bars=symbol in stored_symbols)
+        symbol: select_index_refresh_period(
+            period=period, latest_bar_date=latest_dates.get(symbol), today=today
+        )
         for symbol in symbols
     }
 
@@ -1146,6 +1184,9 @@ async def store_institutional_stock_flows(
 # The one market these flows are collected for. data_management passes it back
 # in when it stores a run's rows, so it lives with the tables it belongs to.
 INSTITUTIONAL_MARKET_CODE = "tw_equity"
+# The one market the TradingView sector heatmap is captured for; the worker
+# stamps its ledger rows with it and the read endpoint filters by it.
+HEATMAP_MARKET_CODE = "hk_equity"
 # The five stored categories folded into the three the product reports on.
 # foreign_dealer goes with foreign, never with the dealer books; see the note on
 # INVESTOR_TYPES in models.py. TWSE has reported it as 0 on every day observed so
@@ -1265,3 +1306,27 @@ async def institutional_stock_rows(
         )
         for row in rows
     ]
+
+
+async def sector_heatmap_rows(
+    database: AsyncSession, *, market_code: str, edition_date: date | None
+) -> list[SectorHeatmapImage]:
+    """One edition's ledger rows in display order; the newest edition by default."""
+    if edition_date is None:
+        edition_date = await database.scalar(
+            select(func.max(SectorHeatmapImage.edition_date)).where(
+                SectorHeatmapImage.market_code == market_code
+            )
+        )
+        if edition_date is None:
+            return []
+    return list(
+        await database.scalars(
+            select(SectorHeatmapImage)
+            .where(
+                SectorHeatmapImage.market_code == market_code,
+                SectorHeatmapImage.edition_date == edition_date,
+            )
+            .order_by(SectorHeatmapImage.sort_order)
+        )
+    )

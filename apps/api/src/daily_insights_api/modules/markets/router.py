@@ -3,10 +3,12 @@ from datetime import date, datetime, timedelta
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from daily_insights_api.core.config import Settings
 from daily_insights_api.core.enums import SystemRole
+from daily_insights_api.modules.assets.api import ObjectRef, ObjectStore
 from daily_insights_api.modules.data_sources.api import (
     BFI82U_ENDPOINT,
     T86_ENDPOINT,
@@ -16,24 +18,28 @@ from daily_insights_api.modules.data_sources.api import (
 )
 from daily_insights_api.modules.identity.api import AuthContext, require_password_changed
 from daily_insights_api.modules.markets.api import (
+    HEATMAP_MARKET_CODE,
     INSTITUTIONAL_MARKET_CODE,
     IndexDailyBarResponse,
     IndexLatestBarResponse,
     IndexMovingAveragesResponse,
     MarketResponse,
+    SectorHeatmapImageResponse,
+    SectorHeatmapResponse,
     index_daily_bars,
     index_moving_averages,
     institutional_flow_series,
     institutional_stock_rows,
     latest_index_bars,
     market_responses,
+    sector_heatmap_rows,
     visible_market_codes,
 )
 from daily_insights_api.modules.markets.schemas import (
     InstitutionalFlowsResponse,
     InstitutionalStocksResponse,
 )
-from daily_insights_api.web.dependencies import get_database_session
+from daily_insights_api.web.dependencies import get_database_session, get_object_store
 
 router = APIRouter(prefix="/api/markets", tags=["markets"])
 
@@ -231,4 +237,61 @@ async def get_tw_institutional_stocks(
         contract_hash=TWSE_CONTRACT_HASH,
         endpoint=T86_ENDPOINT,
         rows=rows,
+    )
+
+
+@router.get("/hk/sector-heatmap", response_model=SectorHeatmapResponse)
+async def get_hk_sector_heatmap(
+    request: Request,
+    context: Annotated[AuthContext, Depends(require_password_changed)],
+    database: Annotated[AsyncSession, Depends(get_database_session)],
+    object_store: Annotated[ObjectStore, Depends(get_object_store)],
+    requested_date: Annotated[date | None, Query(alias="date")] = None,
+) -> SectorHeatmapResponse:
+    """The stored TradingView heatmap PNGs for one edition, newest by default.
+
+    The bucket is private, so every image comes with a signed URL that lives as
+    long as the podcast audio links do.
+    """
+    await _readable_index_market(database, context, "^HSI")
+    rows = await sector_heatmap_rows(
+        database, market_code=HEATMAP_MARKET_CODE, edition_date=requested_date
+    )
+    if not rows:
+        # Structured like report_not_generated so the web app can tell "nothing
+        # captured yet" from the plain "index not found" a hidden market gets.
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            {
+                "code": "sector_heatmap_not_captured",
+                "message": "no sector heatmap has been captured",
+            },
+        )
+    settings: Settings = request.app.state.settings
+    if settings.r2_bucket_name is None:
+        # The app builds a store from endpoint and keys alone, so a development
+        # box with no bucket reaches here; answer like the podcast endpoints do.
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, detail={"code": "r2_not_configured"}
+        )
+    expires_in = timedelta(seconds=settings.r2_signed_url_ttl_seconds)
+    images = [
+        SectorHeatmapImageResponse(
+            kind=row.kind,
+            slug=row.slug,
+            name=row.name,
+            width=row.width,
+            height=row.height,
+            url=await object_store.presign_get(
+                ObjectRef(settings.r2_bucket_name, row.object_key), expires_in
+            ),
+            expires_in_seconds=int(expires_in.total_seconds()),
+        )
+        for row in rows
+    ]
+    return SectorHeatmapResponse(
+        data_source=rows[0].data_source,
+        edition_date=rows[0].edition_date,
+        captured_at=rows[0].captured_at,
+        images=images,
     )

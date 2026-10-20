@@ -22,7 +22,7 @@ import {
   indexChartSymbolsForMarket,
   indexHistoryOutcomes,
   indexMovingAverageOutcomes,
-  VIX_SYMBOL,
+  type VolatilitySymbol,
 } from "./indices"
 import { macroDashboardSchema } from "./macro-dashboard"
 import { isNewsMarketCode } from "./provisional-reports"
@@ -105,6 +105,18 @@ function preserveAuthFailure(
   }
 }
 const notGenerated = z.object({ code: z.literal("report_not_generated") })
+const heatmapNotCaptured = z.object({
+  code: z.literal("sector_heatmap_not_captured"),
+})
+// The images are signed URLs that expire; refetch before the shortest one
+// does so the full-size link still works on a page left open for an hour.
+export function heatmapRefetchInterval(
+  heatmap: { images: { expires_in_seconds: number }[] } | null | undefined
+): number | false {
+  if (!heatmap || heatmap.images.length === 0) return false
+  const shortest = Math.min(...heatmap.images.map(i => i.expires_in_seconds))
+  return Math.max(1_000, Math.floor(shortest * 0.8) * 1_000)
+}
 export function marketQueries(scope: MarketScope, locale: Locale) {
   const query = <T>(
     resource: string,
@@ -212,27 +224,65 @@ export function marketQueries(scope: MarketScope, locale: Locale) {
         },
         10_000
       ),
-    vix: (range: { start: string; end: string }) =>
+    // One cached list for every market; the API already scopes it to the
+    // viewer's visible markets and each consumer picks its own symbols.
+    latestIndices: () =>
+      query(
+        "latest-indices",
+        [],
+        transport => createMarketClient(transport).latestIndexBars(),
+        10_000
+      ),
+    // The API answers a coded 404 until the first capture lands; that is "no
+    // heatmap yet", not a failure to retry. Any other 404 (a market this
+    // organization cannot see answers "index not found") stays an error.
+    hkSectorHeatmap: () => ({
+      ...query(
+        "hk-sector-heatmap",
+        [],
+        async transport => {
+          try {
+            return await createMarketClient(transport).hkSectorHeatmap()
+          } catch (error) {
+            if (
+              error instanceof ApiError &&
+              error.status === 404 &&
+              heatmapNotCaptured.safeParse(error.detail).success
+            )
+              return null
+            throw error
+          }
+        },
+        10_000
+      ),
+      refetchInterval: (query: {
+        state: { data?: Parameters<typeof heatmapRefetchInterval>[0] }
+      }) => heatmapRefetchInterval(query.state.data),
+    }),
+    vix: (symbol: VolatilitySymbol, range: { start: string; end: string }) =>
       query(
         "vix",
-        [range],
+        [symbol, range],
         async transport => ({
-          symbol: VIX_SYMBOL,
+          symbol,
           ...range,
           bars: await createMarketClient(transport).indexDailyBars(
-            VIX_SYMBOL,
+            symbol,
             range
           ),
           indicators: null,
         }),
         10_000
       ),
-    vixAverages: (range: { start: string; end: string }) =>
+    vixAverages: (
+      symbol: VolatilitySymbol,
+      range: { start: string; end: string }
+    ) =>
       query(
         "vix-averages",
-        [range],
+        [symbol, range],
         transport =>
-          createMarketClient(transport).indexMovingAverages(VIX_SYMBOL, range),
+          createMarketClient(transport).indexMovingAverages(symbol, range),
         10_000
       ),
     flows: (range: { start: string; end: string }) =>

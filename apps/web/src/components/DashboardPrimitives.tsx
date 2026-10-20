@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import { useTranslation } from "react-i18next"
 
 export function DashboardPanel({
   title,
@@ -66,5 +67,47 @@ export function DashboardChoices<T extends string | number>({
         </button>
       ))}
     </div>
+  )
+}
+
+/** Loading placeholder for the index charts (candles or stats + line). */
+export function IndexChartSkeleton({ candles = false }: { candles?: boolean }) {
+  const { t } = useTranslation()
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={t("indexChartLoading")}
+      className="mt-4 animate-pulse motion-reduce:animate-none"
+    >
+      {candles ? (
+        <>
+          <div className="h-78 rounded bg-line/60" />
+          <div className="mt-2.5 h-21 rounded bg-line/60" />
+        </>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-px bg-line">
+            {[0, 1, 2].map(i => (
+              <div key={i} className="h-28 bg-surface px-4 py-3.5">
+                <div className="h-full rounded bg-line/60" />
+              </div>
+            ))}
+          </div>
+          <div className="mt-4.5 h-65 rounded bg-line/60" />
+        </>
+      )}
+    </div>
+  )
+}
+export function IndexChartUnavailable() {
+  const { t } = useTranslation()
+  return (
+    <p
+      role="status"
+      className="flex min-h-48 items-center justify-center text-sm text-sea-ink-soft"
+    >
+      {t("indexChartUnavailable")}
+    </p>
   )
 }

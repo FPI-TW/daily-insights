@@ -47,6 +47,7 @@ import {
   institutionalFlowsSchema,
   institutionalStocksSchema,
   marketListSchema,
+  sectorHeatmapSchema,
   dataManagementCatalogSchema,
   newsAdminEditionsSchema,
   newsAdminItemSchema,
@@ -161,6 +162,15 @@ export function createMarketClient(transport: ApiTransport) {
           `/api/markets/tw/institutional-stocks${search ? `?${search}` : ""}`
         ),
         institutionalStocksSchema
+      )
+    },
+    async hkSectorHeatmap(options: { date?: string } = {}) {
+      const search = options.date
+        ? `?${new URLSearchParams({ date: options.date })}`
+        : ""
+      return parseResponse(
+        await transport(`/api/markets/hk/sector-heatmap${search}`),
+        sectorHeatmapSchema
       )
     },
   }

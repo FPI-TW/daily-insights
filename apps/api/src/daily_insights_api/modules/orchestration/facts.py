@@ -1,14 +1,17 @@
 import hashlib
 import json
 import uuid
-from datetime import date, datetime
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import cast
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from daily_insights_api.modules.data_sources.api import DailyBar
+from daily_insights_api.modules.data_sources.api import DailyBar, HeatmapImage
+from daily_insights_api.modules.markets.api import SectorHeatmapImage
 from daily_insights_api.modules.orchestration.models import (
     FunctionRun,
     InterestRateObservation,
@@ -24,19 +27,26 @@ def fact_digest(values: dict[str, object]) -> str:
 
 
 async def fence_is_current(
-    database: AsyncSession, *, function_run_id: uuid.UUID, fence_token: uuid.UUID
+    database: AsyncSession,
+    *,
+    function_run_id: uuid.UUID,
+    fence_token: uuid.UUID,
+    for_update: bool = True,
 ) -> bool:
-    return bool(
-        await database.scalar(
-            select(FunctionRun.id)
-            .where(
-                FunctionRun.id == function_run_id,
-                FunctionRun.status == "running",
-                FunctionRun.lease_token == fence_token,
-            )
-            .with_for_update()
-        )
+    """Whether this attempt still holds the function run's lease.
+
+    The default locks the function_runs row until the transaction ends, which
+    also blocks the worker's heartbeat UPDATE on that row; pass for_update=False
+    when network I/O follows and another lock serialises the attempts.
+    """
+    query = select(FunctionRun.id).where(
+        FunctionRun.id == function_run_id,
+        FunctionRun.status == "running",
+        FunctionRun.lease_token == fence_token,
     )
+    if for_update:
+        query = query.with_for_update()
+    return bool(await database.scalar(query))
 
 
 async def store_market_bars(
@@ -235,3 +245,90 @@ async def store_interest_rates(
         )
         inserted += 1
     return inserted
+
+
+async def lock_sector_heatmap_rows(
+    database: AsyncSession, *, data_source: str, edition_date: date
+) -> dict[str, SectorHeatmapImage]:
+    """slug -> the edition's ledger rows, locked for the rest of the transaction.
+
+    Read once: the caller compares digests against these to skip unchanged
+    uploads, then hands the same rows to store_sector_heatmap_images.
+    """
+    rows = await database.scalars(
+        select(SectorHeatmapImage)
+        .where(
+            SectorHeatmapImage.data_source == data_source,
+            SectorHeatmapImage.edition_date == edition_date,
+        )
+        .with_for_update()
+    )
+    return {row.slug: row for row in rows}
+
+
+@dataclass(frozen=True, slots=True)
+class StoredHeatmapImages:
+    changed: int
+    # Object keys whose rows were removed: sectors that disappeared from the day
+    # plus editions older than the retention window. The caller deletes them
+    # from R2 before the transaction commits, so a failed delete rolls the rows
+    # back and the next run retries instead of leaving an orphaned object.
+    removed_object_keys: tuple[str, ...]
+
+
+async def store_sector_heatmap_images(
+    database: AsyncSession,
+    *,
+    function_attempt_id: uuid.UUID,
+    data_source: str,
+    market_code: str,
+    edition_date: date,
+    captured_at: datetime,
+    images: Sequence[tuple[HeatmapImage, str]],
+    existing: Mapping[str, SectorHeatmapImage],
+    retention_days: int,
+) -> StoredHeatmapImages:
+    """Upsert one edition's ledger rows.
+
+    `existing` is the edition's rows from lock_sector_heatmap_rows in this
+    same transaction. The caller owns the fence check.
+    """
+    existing = dict(existing)
+    changed = 0
+    for image, object_key in images:
+        row = existing.pop(image.slug, None)
+        if row is None:
+            row = SectorHeatmapImage(
+                data_source=data_source,
+                market_code=market_code,
+                edition_date=edition_date,
+                kind=image.kind,
+                slug=image.slug,
+                sha256="",
+            )
+            database.add(row)
+        if row.sha256 != image.sha256:
+            changed += 1
+        row.name = image.name
+        row.sort_order = image.sort_order
+        row.object_key = object_key
+        row.sha256 = image.sha256
+        row.size_bytes = len(image.png)
+        row.width = image.width
+        row.height = image.height
+        row.captured_at = captured_at
+        row.function_attempt_id = function_attempt_id
+    removed = [row.object_key for row in existing.values()]
+    for row in existing.values():
+        await database.delete(row)
+    expired = await database.scalars(
+        select(SectorHeatmapImage).where(
+            SectorHeatmapImage.data_source == data_source,
+            SectorHeatmapImage.edition_date < edition_date - timedelta(days=retention_days),
+        )
+    )
+    for row in expired:
+        removed.append(row.object_key)
+        await database.delete(row)
+    await database.flush()
+    return StoredHeatmapImages(changed=changed, removed_object_keys=tuple(removed))

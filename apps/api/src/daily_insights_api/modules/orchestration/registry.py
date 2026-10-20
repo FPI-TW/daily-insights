@@ -12,6 +12,7 @@ ProviderKey = Literal[
     "us_treasury",
     "new_york_fed",
     "internal_services",
+    "tradingview",
 ]
 JobKind = Literal["function", "projection"]
 TriggerKind = Literal["automatic", "manual"]
@@ -78,6 +79,7 @@ PROVIDERS = (
     ProviderDefinition("us_treasury", "U.S. Treasury"),
     ProviderDefinition("new_york_fed", "New York Fed"),
     ProviderDefinition("internal_services", "Internal Services"),
+    ProviderDefinition("tradingview", "TradingView"),
 )
 
 FUNCTIONS = (
@@ -120,6 +122,7 @@ FUNCTIONS = (
         resources=("third_party_llm",),
     ),
     FunctionDefinition("analyst_viewpoints_sync", "internal_services", 1),
+    FunctionDefinition("hsi_sector_heatmap", "tradingview", 4),
 )
 
 
@@ -181,6 +184,14 @@ JOBS = (
         ("automatic",),
         _steps("sofr_daily_rates"),
         automatic_key="new_york_fed",
+        deadline_policy="routine",
+    ),
+    JobDefinition(
+        "tradingview_daily_update",
+        "function",
+        ("automatic",),
+        _steps("hsi_sector_heatmap"),
+        automatic_key="tradingview",
         deadline_policy="routine",
     ),
     JobDefinition(
@@ -270,6 +281,12 @@ JOBS = (
         ),
     ),
     JobDefinition(
+        "hk_equity_refresh",
+        "function",
+        ("manual",),
+        _steps("hk_index_daily_bars", "hsi_sector_heatmap"),
+    ),
+    JobDefinition(
         "news_global_refresh_job",
         "function",
         ("manual",),
@@ -319,6 +336,7 @@ DAILY_ROUTINE = RoutineDefinition(
         "us_treasury_daily_update",
         "new_york_fed_daily_update",
         "internal_services_daily_update",
+        "tradingview_daily_update",
         "market_reports_publish",
         "macro_dashboard_publish",
     ),
@@ -348,6 +366,7 @@ MANUAL_MARKET_JOB_KEYS = (
     "global_macro_refresh",
     "us_equity_refresh",
     "tw_equity_refresh",
+    "hk_equity_refresh",
 )
 ADMIN_TRIGGER_JOB_KEYS = (
     *MANUAL_MARKET_JOB_KEYS,

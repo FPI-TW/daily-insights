@@ -2411,6 +2411,7 @@
               "global_macro_refresh",
               "us_equity_refresh",
               "tw_equity_refresh",
+              "hk_equity_refresh",
               "news_daily_update",
               "news_global_refresh_job",
               "news_tw_equity_refresh_job",
@@ -5683,6 +5684,78 @@
           "jobs"
         ],
         "title": "RoutineRunResponse",
+        "type": "object"
+      },
+      "SectorHeatmapImageResponse": {
+        "properties": {
+          "expires_in_seconds": {
+            "title": "Expires In Seconds",
+            "type": "integer"
+          },
+          "height": {
+            "title": "Height",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": ["overview", "legend"],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "width": {
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "slug",
+          "name",
+          "width",
+          "height",
+          "url",
+          "expires_in_seconds"
+        ],
+        "title": "SectorHeatmapImageResponse",
+        "type": "object"
+      },
+      "SectorHeatmapResponse": {
+        "properties": {
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "data_source": {
+            "title": "Data Source",
+            "type": "string"
+          },
+          "edition_date": {
+            "format": "date",
+            "title": "Edition Date",
+            "type": "string"
+          },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/SectorHeatmapImageResponse"
+            },
+            "title": "Images",
+            "type": "array"
+          }
+        },
+        "required": ["data_source", "edition_date", "captured_at", "images"],
+        "title": "SectorHeatmapResponse",
         "type": "object"
       },
       "SeriesBlock": {
@@ -9025,6 +9098,55 @@
           }
         },
         "summary": "List Visible Markets",
+        "tags": ["markets"]
+      }
+    },
+    "/api/markets/hk/sector-heatmap": {
+      "get": {
+        "description": "The stored TradingView heatmap PNGs for one edition, newest by default.\n\nThe bucket is private, so every image comes with a signed URL that lives as\nlong as the podcast audio links do.",
+        "operationId": "get_hk_sector_heatmap_api_markets_hk_sector_heatmap_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SectorHeatmapResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Hk Sector Heatmap",
         "tags": ["markets"]
       }
     },

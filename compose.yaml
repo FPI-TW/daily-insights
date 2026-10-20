@@ -109,6 +109,7 @@ services:
       DAILY_INSIGHTS_RUNTIME_ROLE: orchestration-worker
       DAILY_INSIGHTS_ORCHESTRATION_ENABLED: ${DAILY_INSIGHTS_ORCHESTRATION_ENABLED:-true}
       DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE: ${DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE:-1970-01-01}
+      HOME: /tmp
     command:
       ["python", "-m", "daily_insights_api.scripts.run_orchestration_worker"]
     depends_on:
