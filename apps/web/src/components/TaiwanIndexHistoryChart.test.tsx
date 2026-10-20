@@ -10,6 +10,7 @@ import { I18nextProvider } from "react-i18next"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createI18n } from "#/lib/i18n"
 import type { IndexMovingAverageMap, MarketIndexHistory } from "#/lib/indices"
+import { IndexBiasPanel } from "./IndexBiasPanel"
 import {
   TaiwanIndexHistoryChart,
   TaiwanIndexHistoryLoading,
@@ -131,6 +132,73 @@ function show(ui: React.ReactNode) {
 function candles(name = "Taiwan Weighted Index") {
   return screen.getByRole("heading", { name }).closest("section")!
 }
+
+describe.each([
+  { symbol: "^TWII", marketCode: "tw_equity", title: "TAIEX bias" },
+  { symbol: "^HSI", marketCode: "hk_equity", title: "Hang Seng Index bias" },
+] as const)("IndexBiasPanel ($symbol)", ({ symbol, marketCode, title }) => {
+  it.each(["Last 1 year", "Last 1.5 years"])(
+    "preserves zoomed readings when reselecting %s and resets on a different window",
+    windowLabel => {
+      const windowDates = [
+        "2026-06-01",
+        "2026-07-01",
+        "2026-08-01",
+        "2026-09-04",
+      ]
+      show(
+        <IndexBiasPanel
+          title={title}
+          selected={{
+            symbol,
+            bars: history.series[0]!.bars.map((bar, i) => ({
+              ...bar,
+              symbol,
+              market_code: marketCode,
+              trade_date: windowDates[i]!,
+            })),
+          }}
+          averages={{
+            ...averages["^TWII"]!,
+            symbol,
+            market_code: marketCode,
+            series: [
+              {
+                period: 20,
+                points: windowDates.map(trade_date => ({
+                  trade_date,
+                  value: "100",
+                })),
+              },
+              { period: 60, points: [] },
+              { period: 120, points: [] },
+              { period: 240, points: [] },
+            ],
+          }}
+          pending={false}
+          locale="en"
+        />
+      )
+      const windowButton = screen.getByRole("button", { name: windowLabel })
+      fireEvent.click(windowButton)
+      const meter = screen.getByRole("meter", { name: "20MA bias" })
+      expect(meter).toHaveAttribute("aria-valuetext", "+10.00%")
+
+      fireEvent.click(screen.getByRole("button", { name: `Zoom ${title}` }))
+      expect(meter).toHaveAttribute("aria-valuetext", "0.00%")
+      fireEvent.click(windowButton)
+      expect(meter).toHaveAttribute("aria-valuetext", "0.00%")
+
+      fireEvent.click(
+        screen.getByRole("button", {
+          name:
+            windowLabel === "Last 1 year" ? "Last 1.5 years" : "Last 1 year",
+        })
+      )
+      expect(meter).toHaveAttribute("aria-valuetext", "+10.00%")
+    }
+  )
+})
 
 describe("TaiwanIndexHistoryChart", () => {
   it("updates scaled readings for window chips and ECharts dataZoom without refetching", async () => {
