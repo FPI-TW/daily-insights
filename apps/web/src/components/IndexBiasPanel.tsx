@@ -97,6 +97,7 @@ export function IndexBiasPanel({
             label={t("windowLabel")}
             value={months}
             onChange={value => {
+              if (value === months) return
               setMonths(value)
               setZoom({ start: 0, end: 100 })
             }}
