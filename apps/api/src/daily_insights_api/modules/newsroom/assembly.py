@@ -21,7 +21,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, true
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,7 +65,8 @@ REASON_STAR_GAP = 2
 DEDUPE_PROMPT_VERSION = "newsroom.dedupe.v2"
 REPEAT_PROMPT_VERSION = "newsroom.repeat.v1"
 DEDUPE_HEADLINES = 3
-# Earlier editions a candidate is compared with before it may be selected again (D14).
+# Earlier editions a candidate is compared with before it may be selected again
+# (D14); the default of ``SelectionVariant.repeat_lookback_days``.
 PUBLISHED_LOOKBACK_DAYS = 2
 # The model alone over-groups related stories (same company, same theme); a
 # match also needs near-identical working titles. Measured on real windows:
@@ -764,8 +765,10 @@ class RepeatScreen:
     follow_ups: dict[uuid.UUID, PublishedEvent] = field(default_factory=dict)
 
 
-async def recently_published(database: AsyncSession, edition_date: date) -> list[PublishedEvent]:
-    """Events readers saw in the editions of the previous ``PUBLISHED_LOOKBACK_DAYS`` days."""
+async def recently_published(
+    database: AsyncSession, edition_date: date, *, lookback_days: int = PUBLISHED_LOOKBACK_DAYS
+) -> list[PublishedEvent]:
+    """Events readers saw in the editions of the previous ``lookback_days`` days."""
     rows = (
         await database.execute(
             select(
@@ -780,8 +783,7 @@ async def recently_published(database: AsyncSession, edition_date: date) -> list
             .where(
                 NewsroomEdition.status == "published",
                 NewsroomEdition.edition_date < edition_date,
-                NewsroomEdition.edition_date
-                >= edition_date - timedelta(days=PUBLISHED_LOOKBACK_DAYS),
+                NewsroomEdition.edition_date >= edition_date - timedelta(days=lookback_days),
                 NewsroomEditionItem.removed_at.is_(None),
                 NewsroomEditionItem.hidden_at.is_(None),
                 NewsroomEditionItem.abandoned_at.is_(None),
@@ -797,6 +799,90 @@ async def recently_published(database: AsyncSession, edition_date: date) -> list
             PublishedEvent(event_id, published_on, working_title, headline, summary or ""),
         )
     return list(published.values())
+
+
+async def nearest_published(
+    database: AsyncSession,
+    candidate_ids: Collection[uuid.UUID],
+    published_ids: Collection[uuid.UUID],
+    *,
+    limit: int,
+) -> dict[uuid.UUID, list[uuid.UUID]]:
+    """Each candidate's ``limit`` nearest published events, nearest first.
+
+    Events are compared by their mean article embedding (as ``article_similarities``
+    does); an event without an embedded article is left out on either side.
+    """
+    if not candidate_ids or not published_ids:
+        return {}
+    centroids = (
+        select(
+            NewsroomArticle.event_id.label("event_id"),
+            func.avg(NewsroomArticle.embedding, type_=Vector(EMBEDDING_DIMENSIONS)).label(
+                "centroid"
+            ),
+        )
+        .where(
+            NewsroomArticle.event_id.in_([*candidate_ids, *published_ids]),
+            NewsroomArticle.embedding.is_not(None),
+        )
+        .group_by(NewsroomArticle.event_id)
+        .cte("centroids")
+    )
+    candidate, published = centroids.alias("candidate"), centroids.alias("published")
+    distance = candidate.c.centroid.cosine_distance(published.c.centroid)
+    ranked = (
+        select(
+            candidate.c.event_id.label("candidate_id"),
+            published.c.event_id.label("published_id"),
+            func.row_number()
+            .over(partition_by=candidate.c.event_id, order_by=(distance, published.c.event_id))
+            .label("place"),
+        )
+        .select_from(candidate.join(published, true()))
+        .where(
+            candidate.c.event_id.in_(candidate_ids),
+            published.c.event_id.in_(published_ids),
+        )
+        .subquery()
+    )
+    rows = await database.execute(
+        select(ranked.c.candidate_id, ranked.c.published_id)
+        .where(ranked.c.place <= limit)
+        .order_by(ranked.c.candidate_id, ranked.c.place)
+    )
+    nearest: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for candidate_id, published_id in rows:
+        nearest.setdefault(candidate_id, []).append(published_id)
+    return nearest
+
+
+async def published_for_screen(
+    database: AsyncSession,
+    edition_date: date,
+    candidate_ids: Collection[uuid.UUID],
+    *,
+    variant: SelectionVariant,
+) -> dict[uuid.UUID, PublishedEvent]:
+    """The published events the repeat screen shows the model, by event id.
+
+    Every event of the variant's lookback, or (with ``repeat_nearest_limit``) only
+    those among some candidate's nearest; one published event may be the
+    neighbour of several candidates and is shown once.
+    """
+    published = {
+        item.event_id: item
+        for item in await recently_published(
+            database, edition_date, lookback_days=variant.repeat_lookback_days
+        )
+    }
+    if variant.repeat_nearest_limit is None:
+        return published
+    nearest = await nearest_published(
+        database, candidate_ids, list(published), limit=variant.repeat_nearest_limit
+    )
+    shown = {published_id for neighbours in nearest.values() for published_id in neighbours}
+    return {event_id: item for event_id, item in published.items() if event_id in shown}
 
 
 def validate_published_matches(
@@ -851,16 +937,16 @@ async def screen_published_repeats(
     without new facts whose working title also matches (``same_story_titles``) the
     published event's is excluded; any other match stays a candidate and is
     shown to the editor as a follow-up. Every match is recorded.
+
+    The variant sets how far back the screen looks and whether it shows only
+    each candidate's nearest published stories (``published_for_screen``).
     """
-    union = _candidate_union(
-        titles, articles, variant=get_variant(runtime.settings.newsroom_selection_variant)
-    )
+    variant = get_variant(runtime.settings.newsroom_selection_variant)
+    union = _candidate_union(titles, articles, variant=variant)
     if not union:
         return RepeatScreen()
     async with runtime.session_factory() as database:
-        published = {
-            item.event_id: item for item in await recently_published(database, edition_date)
-        }
+        published = await published_for_screen(database, edition_date, list(union), variant=variant)
         if not published:
             return RepeatScreen()
         try:

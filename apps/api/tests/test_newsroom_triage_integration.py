@@ -39,7 +39,13 @@ from daily_insights_api.modules.newsroom.queue import (
     run_claimed,
 )
 from daily_insights_api.modules.newsroom.reembed import reembed_articles
-from daily_insights_api.modules.newsroom.variants import BASELINE, P0, SelectionVariant
+from daily_insights_api.modules.newsroom.variants import (
+    BASELINE,
+    OLDNEWS,
+    P0,
+    P0B,
+    SelectionVariant,
+)
 from daily_insights_api.modules.newsroom.worker import Runtime, StageBinding
 
 pytestmark = pytest.mark.integration
@@ -491,6 +497,7 @@ async def test_first_article_opens_a_new_event(
         "new_facts": True,
         "directness": {"global": 4, "tw_equity": 2, "us_equity": 3},
         "escalation": 0,
+        "event_date": None,
         "stale": False,
     }
     assert row.triaged_at is not None
@@ -698,6 +705,143 @@ async def test_manual_article_opens_an_event_however_old_it_is(
     row = await _get(newsroom_database, NewsroomArticle, article_id)
     assert row.event_id is not None
     assert row.triage_signals is not None and row.triage_signals["stale"] is False
+
+
+# Under the event-date rule the window of ``WINDOW`` (opening 2026-09-30) holds
+# back event dates of 2026-09-28 and earlier.
+OLD_EVENT_DATE = "2026-09-28"
+
+
+def _dated(event: dict[str, str], event_date: str | None, **extra: Any) -> dict[str, Any]:
+    return relevant(event) | {"event_date": event_date} | extra
+
+
+async def test_old_event_date_cannot_open_an_event_and_has_no_new_facts(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id = await _source(newsroom_database)
+    article_id = await _queued_for_triage(
+        newsroom_database,
+        source_id,
+        "Weekly recap",
+        0,
+        published_at=datetime(2026, 9, 30, 3, 20, tzinfo=UTC),
+    )
+    llm = FakeJsonModel(
+        lambda payload: _dated({"new": "美國就業數據"}, OLD_EVENT_DATE), variant=OLDNEWS
+    )
+
+    assert await _run(_runtime(newsroom_database, llm=llm, variant=OLDNEWS), "triage") == ["done"]
+
+    [payload] = llm.payloads
+    assert payload["article"]["published_at"] == "2026-09-30T11:20:00+08:00"
+    row = await _get(newsroom_database, NewsroomArticle, article_id)
+    assert (row.relevant, row.event_id) == (True, None)
+    # Scored as no new facts: impact 4 is 80 on the p0 scale, less the penalty.
+    assert row.market_scores == {"global": 65, "tw_equity": 41, "us_equity": 53}
+    # The raw answer is kept; the flag says the rule applied.
+    assert row.triage_signals is not None
+    assert row.triage_signals["new_facts"] is True
+    assert row.triage_signals["event_date"] == OLD_EVENT_DATE
+    assert (row.triage_signals["stale"], row.triage_signals["dated_old"]) == (False, True)
+    assert await _count(newsroom_database, NewsroomEvent) == 0
+
+
+async def test_old_event_date_still_joins_an_event(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id = await _source(newsroom_database)
+    existing = await _event(newsroom_database, "美國就業數據")
+    await _article(newsroom_database, source_id, "Jobs", angle=0, event_id=existing)
+    article_id = await _queued_for_triage(newsroom_database, source_id, "Jobs recap", 1)
+    llm = FakeJsonModel(
+        lambda payload: _dated({"match": payload["candidate_events"][0]["id"]}, OLD_EVENT_DATE),
+        variant=OLDNEWS,
+    )
+
+    assert await _run(_runtime(newsroom_database, llm=llm, variant=OLDNEWS), "triage") == ["done"]
+
+    row = await _get(newsroom_database, NewsroomArticle, article_id)
+    assert row.event_id == existing
+    assert row.market_scores["global"] == 65
+
+
+@pytest.mark.parametrize(
+    ("event_date", "story_type"),
+    [
+        # One day before the window opens is within the slack.
+        ("2026-09-29", "data"),
+        # A preview, or an article the model could not date, is never held back.
+        (OLD_EVENT_DATE, "preview"),
+        (None, "data"),
+        ("2026-10-08", "data"),
+    ],
+)
+async def test_event_date_rule_leaves_recent_undated_and_preview_articles_alone(
+    newsroom_database: async_sessionmaker[AsyncSession], event_date: str | None, story_type: str
+) -> None:
+    source_id = await _source(newsroom_database)
+    article_id = await _queued_for_triage(newsroom_database, source_id, "Jobs", 0)
+    llm = FakeJsonModel(
+        lambda payload: _dated({"new": "美國就業數據"}, event_date, story_type=story_type),
+        variant=OLDNEWS,
+    )
+
+    assert await _run(_runtime(newsroom_database, llm=llm, variant=OLDNEWS), "triage") == ["done"]
+
+    row = await _get(newsroom_database, NewsroomArticle, article_id)
+    assert row.event_id is not None
+    assert row.triage_signals is not None and row.triage_signals["dated_old"] is False
+    assert row.triage_signals["new_facts"] is True
+
+
+async def test_event_date_is_ignored_without_the_rule(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id = await _source(newsroom_database)
+    article_id = await _queued_for_triage(
+        newsroom_database,
+        source_id,
+        "Weekly recap",
+        0,
+        published_at=datetime(2026, 9, 30, 3, 20, tzinfo=UTC),
+    )
+    llm = FakeJsonModel(
+        lambda payload: _dated({"new": "美國就業數據"}, OLD_EVENT_DATE), variant=P0B
+    )
+
+    assert await _run(_runtime(newsroom_database, llm=llm, variant=P0B), "triage") == ["done"]
+
+    [payload] = llm.payloads
+    assert "published_at" not in payload["article"]
+    row = await _get(newsroom_database, NewsroomArticle, article_id)
+    assert row.event_id is not None
+    assert row.market_scores == {"global": 80, "tw_equity": 56, "us_equity": 68}
+    assert row.triage_signals is not None and "dated_old" not in row.triage_signals
+    assert row.triage_signals["event_date"] == OLD_EVENT_DATE
+
+
+async def test_manual_article_opens_an_event_whatever_its_event_date(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    async with newsroom_database() as database:
+        manual = NewsroomSource(
+            key="manual", name="Manual", kind="manual", hostname="manual", markets=["global"]
+        )
+        database.add(manual)
+        await database.commit()
+        manual_id = manual.id
+    article_id = await _queued_for_triage(newsroom_database, manual_id, "Admin pick", 0)
+    llm = FakeJsonModel(
+        lambda payload: _dated({"new": "管理員加入的舊文"}, OLD_EVENT_DATE), variant=OLDNEWS
+    )
+
+    assert await _run(_runtime(newsroom_database, llm=llm, variant=OLDNEWS), "triage") == ["done"]
+
+    row = await _get(newsroom_database, NewsroomArticle, article_id)
+    assert row.event_id is not None
+    assert row.market_scores["global"] == 80
+    assert row.triage_signals is not None and row.triage_signals["dated_old"] is False
 
 
 async def test_match_outside_the_candidates_is_retried_and_audited(

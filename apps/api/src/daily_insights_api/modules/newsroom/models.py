@@ -292,7 +292,9 @@ class NewsroomArticle(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # the field existed. ``scoring.py`` caps and filters by it.
     story_type: Mapped[str | None] = mapped_column(String(20))
     # Triage's raw judgements behind ``market_scores``:
-    # {"impact": 1-5, "new_facts": bool, "directness": {market: 0-4}, "stale": bool}
+    # {"impact": 1-5, "new_facts": bool, "directness": {market: 0-4}, "escalation": 0-2,
+    #  "event_date": "YYYY-MM-DD" | null, "stale": bool}, plus "dated_old": bool under
+    # the event-date rule; older rows lack the later keys
     triage_signals: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # {"global": 0-100, "tw_equity": 0-100, "us_equity": 0-100}, computed by scoring.py
     market_scores: Mapped[dict[str, int]] = mapped_column(

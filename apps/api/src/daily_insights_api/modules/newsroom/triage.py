@@ -70,6 +70,11 @@ SCHEMA_INVALID = "triage_schema_invalid"
 # article published this long before its window opened may join an event of the
 # window but never opens one, so old news is not selected again as a new story.
 STALE_BEFORE_WINDOW = timedelta(hours=2)
+# The oldnews variant's guard against recaps and reposts that carry a fresh
+# publication date: an article whose core fact (triage's ``event_date``) is
+# dated more than this before its window opened is held back the same way.
+# A day covers overseas news landing a calendar day late in Taipei.
+EVENT_DATE_GRACE = timedelta(days=1)
 
 # Triage waits until the body fetch has a verdict (spec §5.1); a failed fetch
 # triages on title and summary alone.
@@ -141,12 +146,23 @@ def triage_payload(
     summary: str | None,
     body_excerpt: str | None,
     candidates: Sequence[CandidateEvent],
+    published_at: datetime | None = None,
+    with_published_at: bool = False,
 ) -> dict[str, Any]:
+    """The article and its candidate events as triage sees them.
+
+    ``with_published_at`` (the event-date prompt) adds the publisher's date in
+    Taipei time, so relative dates in the text can be resolved.
+    """
     article: dict[str, Any] = {
         "title": _squash(title),
         "source": {"name": source_name, "trust_tier": trust_tier},
         "summary": _squash(summary)[:SUMMARY_MAX_CHARS],
     }
+    if with_published_at:
+        article["published_at"] = (
+            None if published_at is None else published_at.astimezone(clock.TAIPEI).isoformat()
+        )
     if body_excerpt:
         article["body_excerpt"] = body_excerpt[:BODY_EXCERPT_CHARS].strip()
     return {
@@ -167,6 +183,34 @@ def published_before_window(published_at: datetime | None, edition_date: date) -
     if published_at is None:
         return False
     return published_at < clock.window(edition_date)[0] - STALE_BEFORE_WINDOW
+
+
+def dated_before_window(result: TriageResult, edition_date: date) -> bool:
+    """Whether triage dated the core fact more than ``EVENT_DATE_GRACE`` before the window.
+
+    Edition D's window opens on D-1 (Taipei), so for D = 10-12 an event date of
+    10-09 or earlier is old and 10-10 is not. A preview is about a later date
+    and an unknown date proves nothing, so neither is ever old.
+    """
+    if result.event_date is None or result.story_type == "preview":
+        return False
+    opens_on = clock.window(edition_date)[0].astimezone(clock.TAIPEI).date()
+    return result.event_date < opens_on - EVENT_DATE_GRACE
+
+
+def judged_result(result: TriageResult, *, dated_old: bool) -> TriageResult:
+    """The judgements scores are computed from: an old event date has no new facts.
+
+    Nor is it a clear escalation, whose waiver would cancel the missing new facts.
+    """
+    if not dated_old:
+        return result
+    return result.model_copy(
+        update={
+            "new_facts": False,
+            "escalation": min(result.escalation, scoring.CLEAR_ESCALATION - 1),
+        }
+    )
 
 
 def resolve_event_choice(
@@ -369,24 +413,30 @@ def _triage_handler(runtime: Runtime) -> StageHandler:
                 summary=article.feed_summary,
                 body_excerpt=article.body_excerpt if article.body_status == "ok" else None,
                 candidates=candidates,
+                published_at=article.published_at,
+                with_published_at=variant.event_date_rule,
             ),
             result_type=TriageResult,
             audit=CallAudit(
                 stage="triage", subject_id=claim_.row_id, prompt_version=prompt.version
             ),
         )
-        scores = scoring.market_scores(result, variant=variant)
+        # An admin files a manual URL under the edition they are reviewing, so
+        # neither its publication date nor its event date ever holds it back.
+        manual = article.source_kind == MANUAL_KIND
+        stale = not manual and published_before_window(article.published_at, article.edition_date)
+        dated_old = (
+            variant.event_date_rule
+            and not manual
+            and dated_before_window(result, article.edition_date)
+        )
+        scores = scoring.market_scores(judged_result(result, dated_old=dated_old), variant=variant)
         relevant = scoring.is_relevant(scores)
         try:
             choice = resolve_event_choice(result, candidates, relevant=relevant)
         except RetryableStageError as error:
             _keep_call_audit(database, error, claim_.row_id)
             raise
-        # An admin files a manual URL under the edition they are reviewing, so
-        # its publication date never holds it back.
-        stale = article.source_kind != MANUAL_KIND and published_before_window(
-            article.published_at, article.edition_date
-        )
         event_id = (
             None
             if choice is None
@@ -397,14 +447,17 @@ def _triage_handler(runtime: Runtime) -> StageHandler:
                 embedding=embedding,
                 choice=choice,
                 known_event_ids=known_event_ids | {candidate.id for candidate in candidates},
-                may_open=not stale,
+                may_open=not (stale or dated_old),
             )
         )
+        signals = scoring.triage_signals(result) | {"stale": stale}
+        if variant.event_date_rule:
+            signals["dated_old"] = dated_old
         return {
             "relevant": relevant,
             "topic": result.topic,
             "story_type": result.story_type,
-            "triage_signals": scoring.triage_signals(result) | {"stale": stale},
+            "triage_signals": signals,
             "market_scores": scores,
             "event_id": event_id,
             "triaged_at": datetime.now(UTC),
