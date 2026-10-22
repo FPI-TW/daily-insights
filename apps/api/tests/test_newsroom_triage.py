@@ -10,6 +10,7 @@ from daily_insights_api.modules.newsroom.clustering import CandidateEvent
 from daily_insights_api.modules.newsroom.contracts import EventNew, TriageResult
 from daily_insights_api.modules.newsroom.notifier import LogNotifier
 from daily_insights_api.modules.newsroom.queue import RetryableStageError
+from daily_insights_api.modules.newsroom.variants import BASELINE
 from daily_insights_api.modules.newsroom.worker import Runtime
 
 
@@ -119,12 +120,16 @@ def test_payload_carries_candidates_and_body_only_when_given() -> None:
 
 
 def test_scores_follow_impact_and_directness() -> None:
-    assert scoring.market_scores(_result(None, impact=5, directness=(4, 3, 2))) == {
+    assert scoring.market_scores(
+        _result(None, impact=5, directness=(4, 3, 2)), variant=BASELINE
+    ) == {
         "global": 96,
         "tw_equity": 82,
         "us_equity": 67,
     }
-    assert scoring.market_scores(_result(None, impact=1, directness=(4, 0, 1))) == {
+    assert scoring.market_scores(
+        _result(None, impact=1, directness=(4, 0, 1)), variant=BASELINE
+    ) == {
         "global": 40,
         "tw_equity": 0,
         "us_equity": 14,
@@ -133,14 +138,20 @@ def test_scores_follow_impact_and_directness() -> None:
 
 def test_a_weak_link_alone_never_makes_an_article_relevant() -> None:
     for impact in (1, 2, 3, 4, 5):
-        scores = scoring.market_scores(_result(None, impact=impact, directness=(1, 1, 0)))
+        scores = scoring.market_scores(
+            _result(None, impact=impact, directness=(1, 1, 0)), variant=BASELINE
+        )
         assert not scoring.is_relevant(scores)
-    assert scoring.is_relevant(scoring.market_scores(_result(None, impact=1, directness=(4, 0, 0))))
+    assert scoring.is_relevant(
+        scoring.market_scores(_result(None, impact=1, directness=(4, 0, 0)), variant=BASELINE)
+    )
 
 
 def test_no_new_facts_lowers_every_market() -> None:
-    fresh = scoring.market_scores(_result(None, impact=3, directness=(4, 3, 0)))
-    rehash = scoring.market_scores(_result(None, impact=3, directness=(4, 3, 0), new_facts=False))
+    fresh = scoring.market_scores(_result(None, impact=3, directness=(4, 3, 0)), variant=BASELINE)
+    rehash = scoring.market_scores(
+        _result(None, impact=3, directness=(4, 3, 0), new_facts=False), variant=BASELINE
+    )
     assert rehash == {
         "global": fresh["global"] - 15,
         "tw_equity": fresh["tw_equity"] - 15,
@@ -153,7 +164,7 @@ def test_no_new_facts_lowers_every_market() -> None:
     [("price_action", 40), ("preview", 55), ("opinion", 60), ("press_release", 45)],
 )
 def test_story_type_caps_are_applied_by_code(story_type: str, cap: int) -> None:
-    scores = scoring.market_scores(_result(None, story_type=story_type, impact=5))
+    scores = scoring.market_scores(_result(None, story_type=story_type, impact=5), variant=BASELINE)
     assert scores["global"] == cap
     assert max(scores.values()) == cap
 
@@ -163,6 +174,7 @@ def test_triage_signals_keep_the_raw_judgements() -> None:
         "impact": 2,
         "new_facts": False,
         "directness": {"global": 4, "tw_equity": 1, "us_equity": 3},
+        "escalation": 0,
     }
 
 

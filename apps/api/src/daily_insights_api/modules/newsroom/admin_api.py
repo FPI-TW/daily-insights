@@ -16,7 +16,7 @@ from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -29,6 +29,7 @@ from pydantic import (
 from sqlalchemy import and_, case, distinct, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from daily_insights_api.core.config import Settings
 from daily_insights_api.core.enums import SystemRole
 from daily_insights_api.modules.identity.api import AuthContext, require_csrf_roles, require_roles
 from daily_insights_api.modules.newsroom import (
@@ -50,12 +51,22 @@ from daily_insights_api.modules.newsroom.models import (
     NewsroomEvent,
     NewsroomSource,
 )
+from daily_insights_api.modules.newsroom.variants import SelectionVariant, get_variant
 from daily_insights_api.web.dependencies import get_database_session
 
 router = APIRouter(prefix="/api/admin/newsroom", tags=["newsroom management"])
 AdminRead = Annotated[AuthContext, Depends(require_roles(SystemRole.ADMIN))]
 AdminWrite = Annotated[AuthContext, Depends(require_csrf_roles(SystemRole.ADMIN))]
 Database = Annotated[AsyncSession, Depends(get_database_session)]
+
+
+def _selection_variant(request: Request) -> SelectionVariant:
+    settings: Settings = request.app.state.settings
+    return get_variant(settings.newsroom_selection_variant)
+
+
+# The variant assembly builds editions with, so the console scores as assembly does.
+Variant = Annotated[SelectionVariant, Depends(_selection_variant)]
 
 # Candidate list length per market; the editor pass itself only sees 30.
 CANDIDATE_LIMIT = 50
@@ -1077,7 +1088,11 @@ async def edition_day(
 
 @router.get("/editions/{edition_date}/{market_code}", response_model=NewsroomAdminEditionDetail)
 async def edition_detail(
-    edition_date: date, market_code: MarketCode, _: AdminRead, database: Database
+    edition_date: date,
+    market_code: MarketCode,
+    _: AdminRead,
+    database: Database,
+    variant: Variant,
 ) -> NewsroomAdminEditionDetail:
     """One market's items in rank order plus the events that could be added."""
     edition = await _edition_for(database, edition_date, market_code)
@@ -1095,7 +1110,7 @@ async def edition_detail(
     # Same scoring as 08:00 assembly, over every relevant open event of the
     # window (full text or not), minus the ones this edition already holds.
     placed = {item.event_id for item in items}
-    scores = await assembly.event_scores(database, edition_date, market_code)
+    scores = await assembly.event_scores(database, edition_date, market_code, variant=variant)
     candidate_scores = sorted(
         ((event_id, score) for event_id, score in scores.items() if event_id not in placed),
         key=lambda pair: (-pair[1], str(pair[0])),

@@ -479,11 +479,13 @@ async def test_first_article_opens_a_new_event(
     row = await _get(newsroom_database, NewsroomArticle, article_id)
     assert row.triage_status == "done"
     assert (row.relevant, row.topic, row.story_type) == (True, "policy", "official")
-    assert row.market_scores == {"global": 82, "tw_equity": 57, "us_equity": 70}
+    # Impact 4 is 80 on the default (p0) scale, scaled by each market's directness.
+    assert row.market_scores == {"global": 80, "tw_equity": 56, "us_equity": 68}
     assert row.triage_signals == {
         "impact": 4,
         "new_facts": True,
         "directness": {"global": 4, "tw_equity": 2, "us_equity": 3},
+        "escalation": 0,
         "stale": False,
     }
     assert row.triaged_at is not None
@@ -597,7 +599,7 @@ async def test_irrelevant_article_is_scored_but_not_clustered(
 
     row = await _get(newsroom_database, NewsroomArticle, article_id)
     assert (row.triage_status, row.relevant, row.event_id) == ("done", False, None)
-    assert row.market_scores == {"global": 0, "tw_equity": 14, "us_equity": 0}
+    assert row.market_scores == {"global": 0, "tw_equity": 13, "us_equity": 0}
     assert await _count(newsroom_database, NewsroomEvent) == 0
 
 

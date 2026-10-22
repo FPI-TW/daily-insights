@@ -5,6 +5,7 @@ these tests pin down what the admin API validates, which service it calls with
 what, and the plain field updates (remove, hide, order) it writes itself.
 """
 
+import math
 import os
 import uuid
 from collections.abc import AsyncIterator, Sequence
@@ -568,7 +569,8 @@ async def test_edition_detail_lists_items_and_scored_candidates(
     await _article(database, blog, placed)
     await _article(database, wire, second)
 
-    # Candidate scores: max(score * weight) + 5 per extra distinct source (≤ 20).
+    # Candidate scores (p0): max(score * weight clamped to [0.9, 1.1]) plus
+    # 6 x log2(distinct sources), at most 15.
     lone = await _event(database, "Lone wire story")
     await _article(database, wire, lone, scores={"global": 40, "tw_equity": 0, "us_equity": 0})
     crowded = await _event(database, "Widely reported")
@@ -602,7 +604,7 @@ async def test_edition_detail_lists_items_and_scored_candidates(
     assert [
         (candidate["event"]["working_title"], candidate["score"])
         for candidate in body["candidates"]
-    ] == [("Lone wire story", 80.0), ("Widely reported", 70.0)]
+    ] == [("Lone wire story", 44.0), ("Widely reported", pytest.approx(33 + 6 * math.log2(3)))]
     assert body["candidates"][1]["event"]["body_ok_count"] == 0
 
 
