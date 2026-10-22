@@ -10,11 +10,18 @@ a fresh copy of it, so runs never see one another's writes.
 What a range ``[start, end]`` copies:
 
 - every source;
-- the events of ``[start - lookback, end]`` and the articles of ``[start, end]``
+- the events of ``[start, end]`` (and, before ``start``, only the published
+  ones) and the articles of ``[start, end]``
  (with their stored embeddings and triage results; bodies are cut to the
   excerpt triage reads);
 - the published editions and items of ``[start - lookback, start)``, which the
-  first replayed day's repeat screen compares with;
+  first replayed day's repeat screen compares with, and the embeddings of those
+  published events' articles (the nearest-story repeat screen compares events
+  by their mean article vector); their bodies and feed summaries stay behind.
+  ``lookback`` is 2 days, or the variant's ``repeat_lookback_days`` when longer
+  (a separate template, named with the lookback). Published editions inside
+  the hold-out period are only pipeline input this way: never queried by hand,
+  never shown;
 - read-only reference data for ``[start, end]`` (the editor ratings, edition
   items and duplicate-screen decisions production recorded), written as
   ``reference.json`` next to the template and never loaded as live rows.
@@ -87,6 +94,9 @@ class ReplayEnvironment:
     def runs_dir(self) -> Path:
         return self.root / "runs"
 
+    def ledger_path(self, round_: str) -> Path:
+        return self.root / "ledger" / f"{round_}.jsonl"
+
     def snapshot_dir(self, snapshot: "Snapshot") -> Path:
         return self.root / "snapshots" / snapshot.name
 
@@ -98,12 +108,16 @@ class Snapshot:
     lookback_days: int = PUBLISHED_LOOKBACK_DAYS
 
     @property
+    def _suffix(self) -> str:
+        return "" if self.lookback_days == PUBLISHED_LOOKBACK_DAYS else f"-lb{self.lookback_days}"
+
+    @property
     def name(self) -> str:
-        return f"{self.start:%Y%m%d}-{self.end:%Y%m%d}"
+        return f"{self.start:%Y%m%d}-{self.end:%Y%m%d}{self._suffix}"
 
     @property
     def template(self) -> str:
-        return f"replay_{self.start:%Y%m%d}_{self.end:%Y%m%d}"
+        return f"replay_{self.start:%Y%m%d}_{self.end:%Y%m%d}{self._suffix.replace('-', '_')}"
 
     @property
     def history_start(self) -> date:
@@ -297,18 +311,29 @@ def _filters(snapshot: Snapshot) -> dict[str, str]:
         f"SELECT id FROM newsroom_editions WHERE status = 'published' "
         f"AND edition_date >= '{history}' AND edition_date < '{start}'"
     )
+    # Before the range only the published events are copied (the repeat screen
+    # reads nothing else), so as little as possible of earlier days leaves production.
+    published_events = (
+        f"SELECT event_id FROM newsroom_edition_items WHERE edition_id IN ({earlier_editions})"
+    )
     return {
         "newsroom_sources": "true",
-        "newsroom_events": f"edition_date BETWEEN '{history}' AND '{end}'",
-        "newsroom_articles": f"edition_date BETWEEN '{start}' AND '{end}'",
+        "newsroom_events": (
+            f"edition_date BETWEEN '{start}' AND '{end}' OR id IN ({published_events})"
+        ),
+        "newsroom_articles": (
+            f"edition_date BETWEEN '{start}' AND '{end}' OR event_id IN ({published_events})"
+        ),
         "newsroom_editions": f"id IN ({earlier_editions})",
         "newsroom_edition_items": f"edition_id IN ({earlier_editions})",
     }
 
 
-def _select_expression(table: str, column: str) -> str:
-    if table == "newsroom_articles" and column == "body":
-        return f"left(body, {BODY_EXCERPT_CHARS}) AS body"
+def _select_expression(table: str, column: str, snapshot: Snapshot) -> str:
+    """The exported value; an article before the range keeps no body or feed summary."""
+    if table == "newsroom_articles" and column in ("body", "feed_summary"):
+        value = f"left(body, {BODY_EXCERPT_CHARS})" if column == "body" else column
+        return f"CASE WHEN edition_date >= '{snapshot.start}' THEN {value} END AS {column}"
     return f'"{column}"'
 
 
@@ -390,7 +415,7 @@ def prepare(
         for table, where in _filters(snapshot).items():
             remote = set(source.columns(table))
             columns = [column for column in _local_columns(connection, table) if column in remote]
-            select = ", ".join(_select_expression(table, column) for column in columns)
+            select = ", ".join(_select_expression(table, column, snapshot) for column in columns)
             quoted = ", ".join(f'"{column}"' for column in columns)
             with (
                 source.copy_out(f"SELECT {select} FROM {table} WHERE {where}") as process,

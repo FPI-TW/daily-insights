@@ -11,8 +11,23 @@ window rebuilt the same way must still hit.
 The same request asked again within one run (a retry after an answer that
 broke the stage contract) gets the next stored answer, so retries replay as
 they first happened.
+
+A repetition number (``replay_rep``) asks for an independent draw of the same
+request: repetition 1 is the key every earlier run stored, any other number is
+part of the key, so a rerun with ``--rep 2`` gets fresh answers once and then
+replays them for free.
+
+Answers fetched live are priced and appended to the round's ledger (``costs``)
+with the provider's usage, including DeepSeek's cache-hit input tokens.
+
+A provider that is unreachable, times out, rate-limits or answers 5xx is asked
+again after a growing pause (``API_RETRY_DELAYS``). When the retries run out
+the failure is recorded in ``ApiFailures`` before it propagates, so the runner
+can void the market day instead of keeping what the pipeline did without that
+call (a score-only fallback, or a duplicate or repeat screen silently skipped).
 """
 
+import asyncio
 import hashlib
 import json
 import os
@@ -20,16 +35,21 @@ import re
 import tempfile
 import uuid
 from collections import Counter
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable, Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
+import httpx
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.modules.newsroom.models import NewsroomLlmCall
 from daily_insights_api.modules.newsroom.providers import CallAudit, Embedder, JsonModel
+from daily_insights_api.modules.newsroom.queue import RetryableStageError
+from daily_insights_api.modules.newsroom.replay.costs import Ledger
 
 ResultT = TypeVar("ResultT", bound=BaseModel)
 
@@ -40,6 +60,98 @@ CACHE_REQUEST_ID = "replay-cache"
 
 class ReplayCacheMiss(RuntimeError):
     """An offline replay needed an answer the cache does not have."""
+
+
+# Pauses before each further attempt after a transient provider failure.
+API_RETRY_DELAYS: tuple[float, ...] = (2.0, 5.0, 10.0, 20.0, 40.0)
+_TRANSIENT = re.compile(r"_provider_(unreachable|timeout|http_429|http_5\d\d)$")
+
+
+def transient(error: RetryableStageError) -> bool:
+    """A provider outage rather than an answer the model got wrong."""
+    return _TRANSIENT.search(error.code) is not None
+
+
+@dataclass
+class ApiFailures:
+    """Calls whose transient provider failures outlasted every retry, in order."""
+
+    calls: list[tuple[str, str]] = field(default_factory=list)
+
+    def add(self, audit: CallAudit, code: str) -> None:
+        self.calls.append((f"{audit.stage} {audit.prompt_version or '-'}", code))
+
+
+Sleep = Callable[[float], Awaitable[None]]
+
+
+async def with_retries[T](
+    call: Callable[[], Awaitable[T]],
+    *,
+    audit: CallAudit,
+    failures: ApiFailures | None,
+    delays: Sequence[float] = API_RETRY_DELAYS,
+    sleep: Sleep = asyncio.sleep,
+) -> T:
+    """``call()``, asked again after each transient failure; the last one is recorded."""
+    for attempt in range(len(delays) + 1):
+        try:
+            return await call()
+        except RetryableStageError as error:
+            if not transient(error):
+                raise
+            if attempt == len(delays):
+                if failures is not None:
+                    failures.add(audit, error.code)
+                raise
+            await sleep(delays[attempt])
+    raise AssertionError("unreachable")
+
+
+_rep: ContextVar[int] = ContextVar("replay_rep", default=1)
+# The usage of every provider reply while a live call is in flight.
+_usage_sink: ContextVar[list[dict[str, Any]] | None] = ContextVar("replay_usage_sink", default=None)
+
+
+@contextmanager
+def replay_rep(rep: int) -> Iterator[None]:
+    """Answer the calls made inside (and in tasks started inside) as repetition ``rep``."""
+    if rep < 1:
+        raise ValueError("a repetition number starts at 1")
+    token = _rep.set(rep)
+    try:
+        yield
+    finally:
+        _rep.reset(token)
+
+
+def current_rep() -> int:
+    return _rep.get()
+
+
+async def record_usage(response: httpx.Response) -> None:
+    """httpx response hook: keep the reply's ``usage`` (and served model) for pricing."""
+    sink = _usage_sink.get()
+    if sink is None or response.status_code >= 400:
+        return
+    try:
+        await response.aread()
+        data = response.json()
+    except (httpx.HTTPError, ValueError):
+        return
+    if isinstance(data, dict) and isinstance(data.get("usage"), dict):
+        sink.append({**data["usage"], "model": data.get("model")})
+
+
+def watch_usage(client: Any) -> None:
+    """Record the usage of every reply a provider client's ``httpx`` client receives.
+
+    The provider classes keep their client private; the replay only adds a
+    response hook to it, so the production request path is unchanged.
+    """
+    http: httpx.AsyncClient | None = getattr(client, "_client", None)
+    if http is not None:
+        http.event_hooks["response"] = [*http.event_hooks["response"], record_usage]
 
 
 def canonical_ids(text: str) -> tuple[str, list[str]]:
@@ -74,20 +186,27 @@ def restore_ids(text: str, ids: Sequence[str]) -> str:
 
 
 def request_key(
-    *, model: str, system: str, payload: dict[str, Any], subject: uuid.UUID | None
+    *,
+    model: str,
+    system: str,
+    payload: dict[str, Any],
+    subject: uuid.UUID | None,
+    rep: int = 1,
 ) -> tuple[str, list[str]]:
-    """SHA-256 of the request with its event ids replaced, and those ids."""
+    """SHA-256 of the request with its event ids replaced, and those ids.
+
+    Repetition 1 hashes exactly what runs before repetitions existed hashed.
+    """
     canonical, ids = canonical_ids(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
-    material = json.dumps(
-        {
-            "model": model,
-            "system": system,
-            "payload": canonical,
-            "subject": None if subject is None else str(subject),
-        },
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
+    request: dict[str, Any] = {
+        "model": model,
+        "system": system,
+        "payload": canonical,
+        "subject": None if subject is None else str(subject),
+    }
+    if rep != 1:
+        request["rep"] = rep
+    material = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(material.encode("utf-8")).hexdigest(), ids
 
 
@@ -112,6 +231,8 @@ class CachedAnswer:
     result: str
     input_tokens: int
     output_tokens: int
+    # DeepSeek's cache-hit share of ``input_tokens``; None before it was recorded.
+    cache_hit_tokens: int | None = None
 
 
 class ResponseCache:
@@ -131,7 +252,12 @@ class ResponseCache:
         if stored is None or occurrence >= len(stored["answers"]):
             return None
         answer = stored["answers"][occurrence]
-        return CachedAnswer(answer["result"], answer["input_tokens"], answer["output_tokens"])
+        return CachedAnswer(
+            answer["result"],
+            answer["input_tokens"],
+            answer["output_tokens"],
+            answer.get("cache_hit_tokens"),
+        )
 
     def store_answer(
         self, key: str, occurrence: int, answer: CachedAnswer, *, model: str, audit: CallAudit
@@ -151,6 +277,7 @@ class ResponseCache:
                     "result": answer.result,
                     "input_tokens": answer.input_tokens,
                     "output_tokens": answer.output_tokens,
+                    "cache_hit_tokens": answer.cache_hit_tokens,
                 }
             )
             _write_json(path, stored)
@@ -176,9 +303,11 @@ class CallCount:
     hits: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
-    # Tokens of the calls that went to the provider in this run.
+    # Tokens of the calls that went to the provider in this run, and their price.
     live_input_tokens: int = 0
     live_output_tokens: int = 0
+    live_cache_hit_tokens: int = 0
+    live_usd: float = 0.0
 
     @property
     def misses(self) -> int:
@@ -196,8 +325,15 @@ class CacheStats:
         label = f"{audit.stage} {audit.prompt_version or '-'}"
         return self.llm.setdefault(label, CallCount())
 
+    def count_label(self, label: str) -> CallCount:
+        """A copy of the counts under ``label`` as they stand now."""
+        return replace(self.llm.get(label) or CallCount())
+
+    def live_usd(self) -> float:
+        return sum(count.live_usd for count in self.llm.values()) + self.embed.live_usd
+
     def as_dict(self) -> dict[str, Any]:
-        def row(count: CallCount) -> dict[str, int]:
+        def row(count: CallCount) -> dict[str, Any]:
             return {
                 "calls": count.calls,
                 "hits": count.hits,
@@ -206,11 +342,14 @@ class CacheStats:
                 "output_tokens": count.output_tokens,
                 "live_input_tokens": count.live_input_tokens,
                 "live_output_tokens": count.live_output_tokens,
+                "live_cache_hit_tokens": count.live_cache_hit_tokens,
+                "live_usd": round(count.live_usd, 6),
             }
 
         return {
             "llm": {label: row(count) for label, count in sorted(self.llm.items())},
             "embed": row(self.embed),
+            "live_usd": round(self.live_usd(), 6),
         }
 
 
@@ -236,12 +375,20 @@ class CachedJsonModel:
         *,
         live: Callable[[], JsonModel] | None,
         gate: CallGate | None = None,
+        ledger: Ledger | None = None,
+        failures: ApiFailures | None = None,
+        retry_delays: Sequence[float] = API_RETRY_DELAYS,
+        sleep: Sleep = asyncio.sleep,
     ) -> None:
         self._cache = cache
         self._stats = stats
         self._live_factory = live
         self._live: JsonModel | None = None
         self._gate = gate
+        self._ledger = ledger
+        self._failures = failures
+        self._retry_delays = retry_delays
+        self._sleep = sleep
         self._occurrences: Counter[str] = Counter()
 
     async def aclose(self) -> None:
@@ -263,10 +410,15 @@ class CachedJsonModel:
         if gated and self._gate is not None:
             await self._gate.arrive()
         key, ids = request_key(
-            model=model, system=system, payload=payload, subject=audit.subject_id
+            model=model,
+            system=system,
+            payload=payload,
+            subject=audit.subject_id,
+            rep=current_rep(),
         )
+        # Only an answer moves to the next occurrence: a live call that failed
+        # stored nothing, so its retry must fill the same slot or it is lost.
         occurrence = self._occurrences[key]
-        self._occurrences[key] += 1
         count = self._stats.count(audit)
         count.calls += 1
         cached = self._cache.answer(key, occurrence)
@@ -287,13 +439,14 @@ class CachedJsonModel:
                 )
             )
         else:
-            result, tokens = await self._ask(
+            result, tokens, cache_hit = await self._ask(
                 database,
                 model=model,
                 system=system,
                 payload=payload,
                 result_type=result_type,
                 audit=audit,
+                count=count,
             )
             count.live_input_tokens += tokens[0]
             count.live_output_tokens += tokens[1]
@@ -301,11 +454,15 @@ class CachedJsonModel:
                 key,
                 occurrence,
                 CachedAnswer(
-                    label_ids(result.model_dump_json(by_alias=True), ids), tokens[0], tokens[1]
+                    label_ids(result.model_dump_json(by_alias=True), ids),
+                    tokens[0],
+                    tokens[1],
+                    cache_hit,
                 ),
                 model=model,
                 audit=audit,
             )
+        self._occurrences[key] += 1
         count.input_tokens += tokens[0]
         count.output_tokens += tokens[1]
         if gated and self._gate is not None:
@@ -321,28 +478,63 @@ class CachedJsonModel:
         payload: dict[str, Any],
         result_type: type[ResultT],
         audit: CallAudit,
-    ) -> tuple[ResultT, tuple[int, int]]:
+        count: CallCount,
+    ) -> tuple[ResultT, tuple[int, int], int | None]:
         if self._live_factory is None:
             raise ReplayCacheMiss(f"no cached answer for a {audit.stage} call")
         if self._live is None:
             self._live = self._live_factory()
+        live = self._live
         before = {id(row) for row in database.new if isinstance(row, NewsroomLlmCall)}
-        result = await self._live.complete(
-            database,
-            model=model,
-            system=system,
-            payload=payload,
-            result_type=result_type,
-            audit=audit,
-        )
+        usages: list[dict[str, Any]] = []
+        token = _usage_sink.set(usages)
+        failed = True
+        try:
+            result = await with_retries(
+                lambda: live.complete(
+                    database,
+                    model=model,
+                    system=system,
+                    payload=payload,
+                    result_type=result_type,
+                    audit=audit,
+                ),
+                audit=audit,
+                failures=self._failures,
+                delays=self._retry_delays,
+                sleep=self._sleep,
+            )
+            failed = False
+        finally:
+            _usage_sink.reset(token)
+            # A failed call is paid for too.
+            if self._ledger is not None:
+                entry = self._ledger.chat(
+                    stage=f"{audit.stage} {audit.prompt_version or '-'}",
+                    model=model,
+                    usages=usages,
+                    failed=failed,
+                )
+                if entry is not None:
+                    count.live_usd += entry.usd
+                    count.live_cache_hit_tokens += entry.cache_hit_tokens or 0
         rows = [
             row
             for row in database.new
             if isinstance(row, NewsroomLlmCall) and id(row) not in before
         ]
-        return result, (
-            sum(row.input_tokens or 0 for row in rows),
-            sum(row.output_tokens or 0 for row in rows),
+        hits = [
+            int(usage["prompt_cache_hit_tokens"])
+            for usage in usages
+            if isinstance(usage.get("prompt_cache_hit_tokens"), int)
+        ]
+        return (
+            result,
+            (
+                sum(row.input_tokens or 0 for row in rows),
+                sum(row.output_tokens or 0 for row in rows),
+            ),
+            sum(hits) if hits else None,
         )
 
 
@@ -356,12 +548,20 @@ class CachedEmbedder:
         *,
         model: str,
         live: Callable[[], Embedder] | None,
+        ledger: Ledger | None = None,
+        failures: ApiFailures | None = None,
+        retry_delays: Sequence[float] = API_RETRY_DELAYS,
+        sleep: Sleep = asyncio.sleep,
     ) -> None:
         self._cache = cache
         self._stats = stats
         self._model = model
         self._live_factory = live
         self._live: Embedder | None = None
+        self._ledger = ledger
+        self._failures = failures
+        self._retry_delays = retry_delays
+        self._sleep = sleep
 
     async def aclose(self) -> None:
         closer: Callable[[], Awaitable[None]] | None = getattr(self._live, "aclose", None)
@@ -386,9 +586,26 @@ class CachedEmbedder:
                 raise ReplayCacheMiss("no cached vector for a working title")
             if self._live is None:
                 self._live = self._live_factory()
-            for text, vector in zip(
-                missing, await self._live.embed(database, missing, audit=audit), strict=True
-            ):
+            usages: list[dict[str, Any]] = []
+            token = _usage_sink.set(usages)
+            live = self._live
+            try:
+                fetched = await with_retries(
+                    lambda: live.embed(database, missing, audit=audit),
+                    audit=audit,
+                    failures=self._failures,
+                    delays=self._retry_delays,
+                    sleep=self._sleep,
+                )
+            finally:
+                _usage_sink.reset(token)
+                tokens = sum(int(usage.get("prompt_tokens") or 0) for usage in usages)
+                self._stats.embed.live_input_tokens += tokens
+                if self._ledger is not None and usages:
+                    self._stats.embed.live_usd += self._ledger.embedding(
+                        model=self._model, tokens=tokens
+                    ).usd
+            for text, vector in zip(missing, fetched, strict=True):
                 self._cache.store_vector(self._model, text, vector)
                 vectors[text] = vector
         return [vectors[text] for text in texts]

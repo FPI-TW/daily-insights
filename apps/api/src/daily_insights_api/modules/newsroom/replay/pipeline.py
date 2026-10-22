@@ -9,9 +9,10 @@ only. Everything else a replay runs (triage, the screens, the editor,
 import uuid
 from collections.abc import Collection, Iterator
 from contextlib import contextmanager
+from datetime import date
 from typing import Any
 
-from daily_insights_api.modules.newsroom import assembly, scoring
+from daily_insights_api.modules.newsroom import assembly, scoring, triage
 from daily_insights_api.modules.newsroom.contracts import TriageResult
 from daily_insights_api.modules.newsroom.variants import SelectionVariant
 
@@ -30,8 +31,24 @@ def triage_result(
             "impact": signals.get("impact"),
             "directness": signals.get("directness"),
             "escalation": signals.get("escalation", 0),
+            # Stored from the event-date prompt on; absent reads as unknown.
+            "event_date": signals.get("event_date"),
         }
     )
+
+
+def scored_result(
+    result: TriageResult, *, variant: SelectionVariant, edition_date: date, manual: bool
+) -> tuple[TriageResult, bool]:
+    """The judgements scores come from, and whether the event-date rule held the article.
+
+    As in the triage handler: under ``event_date_rule`` an article (other than
+    a manual one) whose fact is dated before its window has no new facts.
+    """
+    dated_old = (
+        variant.event_date_rule and not manual and triage.dated_before_window(result, edition_date)
+    )
+    return triage.judged_result(result, dated_old=dated_old), dated_old
 
 
 def market_scores(result: TriageResult, *, variant: SelectionVariant) -> dict[str, int]:
