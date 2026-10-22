@@ -209,6 +209,16 @@ def apply_quota(rated: Sequence[Rated], story_groups: StoryGroups | None = None)
     return sorted(chosen, key=_quota_order)
 
 
+def needs_five_star_review(five_star_count: int, *, variant: SelectionVariant) -> bool:
+    """More visible 5-star picks in one market edition than the variant's soft cap.
+
+    The quota still keeps every 5-star event; this only asks a person to check
+    the ratings, since a day rarely carries more than a few market-wide stories.
+    """
+    cap = variant.five_star_soft_cap
+    return cap is not None and five_star_count > cap
+
+
 def fallback_selection(
     scores: Sequence[tuple[uuid.UUID, float]], story_groups: StoryGroups | None = None
 ) -> list[tuple[uuid.UUID, float]]:

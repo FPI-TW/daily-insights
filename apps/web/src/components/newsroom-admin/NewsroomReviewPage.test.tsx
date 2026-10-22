@@ -201,6 +201,36 @@ describe("NewsroomReviewPage", () => {
     ).toBeVisible()
   })
 
+  it("asks for a second look when a market has more than three 5-star picks", async () => {
+    client.editionDay.mockResolvedValue(
+      day(edition({ needs_five_star_review: true }))
+    )
+    client.editionDetail.mockResolvedValue(
+      detail({
+        edition: edition({ needs_five_star_review: true }),
+        items: [first, second],
+      })
+    )
+    renderPage()
+
+    expect(await screen.findByText(/More than 3 five-star picks/)).toBeVisible()
+    expect(
+      within(screen.getByRole("tab", { name: /Global/ })).getByText(
+        "Review 5-star"
+      )
+    ).toBeVisible()
+  })
+
+  it("shows no 5-star review prompt within the soft cap", async () => {
+    renderPage()
+
+    expect(
+      await screen.findByRole("article", { name: "Chip export rules" })
+    ).toBeVisible()
+    expect(screen.queryByText(/More than 3 five-star picks/)).toBeNull()
+    expect(screen.queryByText("Review 5-star")).toBeNull()
+  })
+
   it("approves one market after confirmation", async () => {
     renderPage()
     fireEvent.click(

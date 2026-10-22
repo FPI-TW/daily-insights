@@ -89,6 +89,7 @@ export function edition(
     published_by_user_id: null,
     ignored_pending_triage: 0,
     late_fill_closed_at: null,
+    needs_five_star_review: false,
     ...overrides,
   }
 }

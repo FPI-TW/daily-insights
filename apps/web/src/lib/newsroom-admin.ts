@@ -131,6 +131,7 @@ const editionSchema = z.object({
   published_by_user_id: z.uuid().nullable(),
   ignored_pending_triage: z.number().int(),
   late_fill_closed_at: timestamp.nullable(),
+  needs_five_star_review: z.boolean(),
 }) satisfies z.ZodType<Schemas["NewsroomAdminEdition"]>
 export type NewsroomEdition = z.infer<typeof editionSchema>
 

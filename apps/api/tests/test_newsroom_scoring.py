@@ -17,6 +17,7 @@ from daily_insights_api.modules.newsroom.assembly import (
     clamp_weight,
     distinct_outlets,
     event_score,
+    needs_five_star_review,
     rank_candidates,
     source_bonus,
 )
@@ -268,3 +269,16 @@ def test_p0_ranking_narrows_the_taiwan_rewrite_bonus() -> None:
         ("crisis", pytest.approx(82 * 1.1 + 6 * math.log2(3))),
         ("opinion", 60.0),
     ]
+
+
+# --- Five-star soft cap -----------------------------------------------------------
+
+
+def test_p0_flags_more_than_three_five_star_picks() -> None:
+    assert not needs_five_star_review(0, variant=P0)
+    assert not needs_five_star_review(3, variant=P0)
+    assert needs_five_star_review(4, variant=P0)
+
+
+def test_baseline_never_flags_five_star_picks() -> None:
+    assert not needs_five_star_review(9, variant=BASELINE)

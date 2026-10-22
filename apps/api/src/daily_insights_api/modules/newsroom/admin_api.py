@@ -192,6 +192,9 @@ class NewsroomAdminEdition(BaseModel):
     published_by_user_id: uuid.UUID | None
     ignored_pending_triage: int
     late_fill_closed_at: datetime | None
+    # More visible 5-star items than the selection variant's soft cap: every
+    # one is kept, but the ratings deserve a second look.
+    needs_five_star_review: bool
 
 
 class NewsroomAdminItem(BaseModel):
@@ -668,7 +671,10 @@ async def _key_taken(
     return (await database.scalar(query.limit(1))) is not None
 
 
-def _edition_response(edition: NewsroomEdition) -> NewsroomAdminEdition:
+def _edition_response(
+    edition: NewsroomEdition, *, five_stars: int, variant: SelectionVariant
+) -> NewsroomAdminEdition:
+    """``five_stars``: the edition's 5-star items not removed, hidden or abandoned."""
     return NewsroomAdminEdition(
         id=edition.id,
         edition_date=edition.edition_date,
@@ -682,6 +688,7 @@ def _edition_response(edition: NewsroomEdition) -> NewsroomAdminEdition:
         published_by_user_id=edition.published_by_user_id,
         ignored_pending_triage=edition.ignored_pending_triage,
         late_fill_closed_at=edition.late_fill_closed_at,
+        needs_five_star_review=assembly.needs_five_star_review(five_stars, variant=variant),
     )
 
 
@@ -799,6 +806,11 @@ async def _edition_for(
             )
         )
     ).first()
+
+
+def _is_live(item: NewsroomEditionItem) -> bool:
+    """Still part of the edition: not removed, hidden or abandoned."""
+    return item.removed_at is None and item.hidden_at is None and item.abandoned_at is None
 
 
 def _item_response(item: NewsroomEditionItem, event: NewsroomAdminEvent) -> NewsroomAdminItem:
@@ -996,6 +1008,7 @@ async def delete_source(source_id: uuid.UUID, actor: AdminWrite, database: Datab
 async def edition_day(
     _: AdminRead,
     database: Database,
+    variant: Variant,
     edition_date: Annotated[date | None, Query(alias="date")] = None,
 ) -> NewsroomAdminEditionDay:
     """The three market editions of one date (default: today in Taipei)."""
@@ -1010,6 +1023,7 @@ async def edition_day(
         ).all()
     }
     counts: dict[uuid.UUID, NewsroomAdminItemCounts] = {}
+    five_stars: dict[uuid.UUID, int] = {}
     if editions:
         live = and_(
             NewsroomEditionItem.removed_at.is_(None),
@@ -1035,13 +1049,25 @@ async def edition_day(
                         | (NewsroomEditionItem.why_status == "failed"),
                     ),
                     func.count().filter(live, NewsroomEvent.analysis_status == "needs_body"),
+                    func.count().filter(live, NewsroomEditionItem.stars == 5),
                 )
                 .join(NewsroomEvent, NewsroomEvent.id == NewsroomEditionItem.event_id)
                 .where(NewsroomEditionItem.edition_id.in_([e.id for e in editions.values()]))
                 .group_by(NewsroomEditionItem.edition_id)
             )
         ).all()
-        for edition_id, active, removed, hidden, abandoned, ready, failed, needs_body in rows:
+        for (
+            edition_id,
+            active,
+            removed,
+            hidden,
+            abandoned,
+            ready,
+            failed,
+            needs_body,
+            five_star,
+        ) in rows:
+            five_stars[edition_id] = five_star
             counts[edition_id] = NewsroomAdminItemCounts(
                 active=active,
                 removed=removed,
@@ -1074,7 +1100,11 @@ async def edition_day(
         markets=[
             NewsroomAdminMarketSummary(
                 market_code=market_code,
-                edition=_edition_response(editions[market_code])
+                edition=_edition_response(
+                    editions[market_code],
+                    five_stars=five_stars.get(editions[market_code].id, 0),
+                    variant=variant,
+                )
                 if market_code in editions
                 else None,
                 counts=counts.get(editions[market_code].id, empty)
@@ -1122,7 +1152,13 @@ async def edition_detail(
     return NewsroomAdminEditionDetail(
         edition_date=edition_date,
         market_code=market_code,
-        edition=_edition_response(edition) if edition is not None else None,
+        edition=_edition_response(
+            edition,
+            five_stars=sum(1 for item in items if item.stars == 5 and _is_live(item)),
+            variant=variant,
+        )
+        if edition is not None
+        else None,
         items=[_item_response(item, views[item.event_id]) for item in items],
         candidates=[
             NewsroomAdminCandidate(score=score, event=views[event_id])

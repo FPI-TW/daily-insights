@@ -877,6 +877,9 @@ const resources: Resource = {
       newsroomAdminPublishedAutomatically: "{{time}} 自動發布",
       newsroomAdminFallbackWarning:
         "精選評分失敗，此版依粗分排序且沒有星等，請特別檢查。",
+      newsroomAdminFiveStarReview:
+        "五星超過 3 則，請人工覆核星等是否合理（五星仍全數保留）。",
+      newsroomAdminFiveStarReviewShort: "五星待覆核",
       newsroomAdminIgnoredPending:
         "組稿時有 {{count}} 篇文章尚未初篩而被略過。",
       newsroomAdminNotAssembled:
@@ -1943,6 +1946,9 @@ const resources: Resource = {
       newsroomAdminPublishedAutomatically: "{{time}} 自动发布",
       newsroomAdminFallbackWarning:
         "精选评分失败，此版依粗分排序且没有星级，请特别检查。",
+      newsroomAdminFiveStarReview:
+        "五星超过 3 则，请人工复核星级是否合理（五星仍全数保留）。",
+      newsroomAdminFiveStarReviewShort: "五星待复核",
       newsroomAdminIgnoredPending:
         "组稿时有 {{count}} 篇文章尚未初筛而被略过。",
       newsroomAdminNotAssembled:
@@ -3060,6 +3066,9 @@ const resources: Resource = {
         "Published automatically at {{time}}",
       newsroomAdminFallbackWarning:
         "The editor pass failed: this edition is ordered by score without stars. Review it carefully.",
+      newsroomAdminFiveStarReview:
+        "More than 3 five-star picks: check the ratings by hand (every five-star pick is still kept).",
+      newsroomAdminFiveStarReviewShort: "Review 5-star",
       newsroomAdminIgnoredPending:
         "{{count}} untriaged articles were skipped at assembly.",
       newsroomAdminNotAssembled:
