@@ -64,8 +64,9 @@ class Selection:
     topics: tuple[str, ...] = ENERGY_TOPICS
     min_escalation: int = 1
     title_pattern: str = ENERGY_TITLE_PATTERN
-    # Per day: 12 over the eight replayed days is about the 100 _common.md asks for.
-    control_sample: int = 12
+    # Per day. Eligible articles are few on quiet days (10/11 has one), so 25 a day
+    # comes to roughly the 100 _common.md asks for over the eight replayed days.
+    control_sample: int = 25
     control_impacts: tuple[int, ...] = (4, 5)
 
     def describe(self) -> str:
