@@ -9,6 +9,7 @@ retries fall back to score order (D5).
 """
 
 import asyncio
+import html
 import logging
 import math
 import re
@@ -51,7 +52,15 @@ from daily_insights_api.modules.newsroom.worker import Runtime
 
 logger = logging.getLogger(__name__)
 
-EDITOR_PROMPT_VERSION = "newsroom.editor.v3"
+# Version per editor prompt file (``SelectionVariant.editor_prompt``), written to
+# the LLM audit and to every stored rating.
+EDITOR_PROMPT_VERSIONS: Mapping[str, str] = {
+    "editor_v3": "newsroom.editor.v3",
+    "editor": "newsroom.editor.v4",
+}
+# Editor prompt v4 asks for a reason when the stars and the event's top triage
+# impact differ by at least this much.
+REASON_STAR_GAP = 2
 DEDUPE_PROMPT_VERSION = "newsroom.dedupe.v2"
 REPEAT_PROMPT_VERSION = "newsroom.repeat.v1"
 DEDUPE_HEADLINES = 3
@@ -246,6 +255,10 @@ def validate_ratings(result: EditorResult, expected: set[str]) -> dict[str, int]
     return ratings
 
 
+def editor_prompt_version(*, variant: SelectionVariant) -> str:
+    return EDITOR_PROMPT_VERSIONS[variant.editor_prompt]
+
+
 # --- Candidate loading -------------------------------------------------------------
 
 
@@ -275,6 +288,19 @@ class _ArticleRow:
     has_body: bool
     story_type: str | None
     first_seen_at: datetime
+    # Read by the extended editor input only (``SelectionVariant.editor_extended_input``).
+    feed_summary: str | None = None
+    # Triage's raw judgements; ``None`` / 0 when a stored signal is missing or malformed.
+    impact: int | None = None
+    escalation: int = 0
+
+
+def _signal(signals: Any, key: str, low: int, high: int) -> int | None:
+    """An integer triage signal within ``[low, high]``, or ``None``."""
+    value = signals.get(key) if isinstance(signals, dict) else None
+    if isinstance(value, int) and not isinstance(value, bool) and low <= value <= high:
+        return value
+    return None
 
 
 async def _load_event_articles(
@@ -294,6 +320,8 @@ async def _load_event_articles(
                 NewsroomArticle.body_status,
                 NewsroomArticle.story_type,
                 NewsroomArticle.first_seen_at,
+                NewsroomArticle.feed_summary,
+                NewsroomArticle.triage_signals,
             )
             .join(NewsroomArticle, NewsroomArticle.event_id == NewsroomEvent.id)
             .join(NewsroomSource, NewsroomSource.id == NewsroomArticle.source_id)
@@ -319,6 +347,8 @@ async def _load_event_articles(
         body,
         story_type,
         first_seen_at,
+        feed_summary,
+        signals,
     ) in rows:
         titles[event_id] = working_title
         articles.setdefault(event_id, []).append(
@@ -333,6 +363,10 @@ async def _load_event_articles(
                 has_body=body == "ok",
                 story_type=story_type,
                 first_seen_at=first_seen_at,
+                feed_summary=feed_summary,
+                impact=_signal(signals, "impact", 1, 5),
+                # Signals stored before triage v3 carry no escalation: none.
+                escalation=_signal(signals, "escalation", 0, 2) or 0,
             )
         )
     return titles, articles
@@ -889,6 +923,13 @@ async def screen_published_repeats(
 
 # --- Editor pass -----------------------------------------------------------------
 
+# The extended editor input's feed summary: one or two sentences, about this long.
+EDITOR_SUMMARY_CHARS = 150
+# Sentence ends: the CJK full stop and full-width or ASCII ! and ?; a period only
+# after a lowercase letter or digit and before a space or the end, so "U.S." does
+# not end a sentence.
+_SENTENCE_END = re.compile(r"[\u3002\uff01\uff1f!?]|(?<=[a-z0-9])\.(?=\s|$)")
+
 
 def _story_labels(
     candidates: Sequence[Candidate], story_groups: StoryGroups
@@ -911,12 +952,84 @@ def _story_labels(
     }
 
 
+def lead_summary(text: str | None, title: str = "") -> str | None:
+    """A feed summary cut to its first two sentences and about ``EDITOR_SUMMARY_CHARS``.
+
+    Some feeds leave HTML entities in their summaries; they are decoded first. A
+    summary that only repeats the headline says nothing more, so it counts as none.
+    """
+    squashed = " ".join(html.unescape(text or "").split())
+    if not squashed or squashed == " ".join(title.split()):
+        return None
+    ends = [match.end() for match in _SENTENCE_END.finditer(squashed)]
+    if len(ends) > 2:
+        squashed = squashed[: ends[1]]
+    if len(squashed) <= EDITOR_SUMMARY_CHARS:
+        return squashed
+    # Prefer ending on a full sentence unless that leaves only a fragment.
+    cut = max((end for end in ends if end <= EDITOR_SUMMARY_CHARS), default=0)
+    if cut >= EDITOR_SUMMARY_CHARS // 3:
+        return squashed[:cut]
+    return squashed[:EDITOR_SUMMARY_CHARS].rstrip() + "…"
+
+
+@dataclass(frozen=True, slots=True)
+class EventBrief:
+    """What the extended editor input adds to an event, from its selectable reports."""
+
+    max_impact: int | None
+    max_escalation: int
+    main_story_type: str | None
+    lead_summary: str | None
+
+
+def event_brief(rows: Sequence[_ArticleRow], headlines: Sequence[tuple[str, str]]) -> EventBrief:
+    """Top impact and escalation, the commonest story type and the lead headline's summary.
+
+    Price-action pieces are left out as in ``rank_candidates``. The main story
+    type is the one with the most reports, ties going to the higher impact and
+    then to the earlier report; the summary is that of the first headline
+    shown (in ``headlines`` order) whose report has one.
+    """
+    selectable = [row for row in rows if row.story_type not in UNSELECTABLE_STORY_TYPES]
+    impacts = [row.impact for row in selectable if row.impact is not None]
+    counts: Counter[str] = Counter()
+    type_impact: dict[str, int] = {}
+    for row in selectable:
+        if row.story_type is not None:
+            counts[row.story_type] += 1
+            type_impact[row.story_type] = max(type_impact.get(row.story_type, 0), row.impact or 0)
+    # ``counts`` keeps first-seen order, so ``min`` settles a full tie on the earlier report.
+    main = min(counts, key=lambda kind: (-counts[kind], -type_impact[kind]), default=None)
+    summary = next(
+        (
+            text
+            for title, source in headlines
+            for row in selectable
+            if row.title == title
+            and row.source_name == source
+            and (text := lead_summary(row.feed_summary, title)) is not None
+        ),
+        None,
+    )
+    return EventBrief(
+        max_impact=max(impacts, default=None),
+        max_escalation=max((row.escalation for row in selectable), default=0),
+        main_story_type=main,
+        lead_summary=summary,
+    )
+
+
 def _editor_payload(
     market: str,
     candidates: Sequence[Candidate],
     follow_ups: dict[uuid.UUID, PublishedEvent],
     story_groups: StoryGroups,
+    *,
+    variant: SelectionVariant,
+    articles: Mapping[uuid.UUID, Sequence[_ArticleRow]],
 ) -> dict[str, Any]:
+    """The editor's input; the baseline variant's is exactly the eb6ad34 payload."""
     labels = _story_labels(candidates, story_groups)
     events: list[dict[str, Any]] = []
     for candidate in candidates:
@@ -925,10 +1038,21 @@ def _editor_payload(
             "working_title": candidate.working_title,
             "report_count": candidate.article_count,
             "source_count": candidate.source_count,
-            "headlines": [
-                {"title": title, "source": source} for title, source in candidate.headlines
-            ],
         }
+        brief = (
+            event_brief(articles.get(candidate.event_id, ()), candidate.headlines)
+            if variant.editor_extended_input
+            else None
+        )
+        if brief is not None:
+            event["max_impact"] = brief.max_impact
+            event["max_escalation"] = brief.max_escalation
+            event["main_story_type"] = brief.main_story_type
+        event["headlines"] = [
+            {"title": title, "source": source} for title, source in candidate.headlines
+        ]
+        if brief is not None and brief.lead_summary is not None:
+            event["lead_summary"] = brief.lead_summary
         if candidate.event_id in labels:
             event["story_group"] = labels[candidate.event_id]
         earlier = follow_ups.get(candidate.event_id)
@@ -941,17 +1065,51 @@ def _editor_payload(
     return {"market": market, "events": events}
 
 
+def missing_reasons(
+    result: EditorResult,
+    candidates: Sequence[Candidate],
+    articles: Mapping[uuid.UUID, Sequence[_ArticleRow]],
+) -> int:
+    """Ratings ``REASON_STAR_GAP`` or more from their event's top impact that give no reason."""
+    impacts = {
+        str(candidate.event_id): event_brief(
+            articles.get(candidate.event_id, ()), candidate.headlines
+        ).max_impact
+        for candidate in candidates
+    }
+    return sum(
+        1
+        for rating in result.ratings
+        if not rating.reason
+        and (impact := impacts.get(rating.event_id)) is not None
+        and abs(rating.stars - impact) >= REASON_STAR_GAP
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class EditorRatings:
+    stars: dict[str, int]
+    # The reasons the editor gave, by event id; ratings without one are absent.
+    reasons: dict[str, str] = field(default_factory=dict)
+
+
 async def _rate(
     runtime: Runtime,
     market: str,
     candidates: Sequence[Candidate],
+    articles: Mapping[uuid.UUID, Sequence[_ArticleRow]],
     follow_ups: dict[uuid.UUID, PublishedEvent],
     story_groups: StoryGroups,
     *,
+    variant: SelectionVariant,
     sleep: Sleep,
     retry_delay: timedelta,
-) -> dict[str, int] | None:
-    """Editor stars per event id, or ``None`` once retries are exhausted."""
+) -> EditorRatings | None:
+    """Editor stars (and reasons) per event id, or ``None`` once retries are exhausted.
+
+    A missing reason never fails the call: the prompt asks for one, the count of
+    those left out is only logged.
+    """
     expected = {str(candidate.event_id) for candidate in candidates}
     for attempt in range(1, EDITOR_ATTEMPTS + 1):
         async with runtime.session_factory() as database:
@@ -959,10 +1117,17 @@ async def _rate(
                 result = await runtime.llm.complete(
                     database,
                     model=runtime.settings.newsroom_editor_model,
-                    system=load_prompt("editor"),
-                    payload=_editor_payload(market, candidates, follow_ups, story_groups),
+                    system=load_prompt(variant.editor_prompt),
+                    payload=_editor_payload(
+                        market,
+                        candidates,
+                        follow_ups,
+                        story_groups,
+                        variant=variant,
+                        articles=articles,
+                    ),
                     result_type=EditorResult,
-                    audit=CallAudit("editor", None, EDITOR_PROMPT_VERSION),
+                    audit=CallAudit("editor", None, editor_prompt_version(variant=variant)),
                 )
                 ratings = validate_ratings(result, expected)
             except (RetryableStageError, FatalStageError) as error:
@@ -980,7 +1145,17 @@ async def _rate(
                 await sleep(retry_delay.total_seconds())
                 continue
             await database.commit()
-            return ratings
+            if variant.editor_extended_input:
+                missing = missing_reasons(result, candidates, articles)
+                if missing:
+                    logger.warning(
+                        "newsroom.editor_reasons_missing",
+                        extra={"market": market, "count": missing},
+                    )
+            return EditorRatings(
+                ratings,
+                {rating.event_id: rating.reason for rating in result.ratings if rating.reason},
+            )
     return None
 
 
@@ -1208,27 +1383,28 @@ async def _assemble_market(
         )
     if published is not None:
         return MarketReport(market, "skipped_published")
+    variant = get_variant(runtime.settings.newsroom_selection_variant)
     candidates = rank_candidates(
-        titles,
-        articles,
-        market,
-        excluded=repeats.excluded,
-        variant=get_variant(runtime.settings.newsroom_selection_variant),
+        titles, articles, market, excluded=repeats.excluded, variant=variant
     )
     by_id = {candidate.event_id: candidate for candidate in candidates}
-    ratings = (
+    rated = (
         await _rate(
             runtime,
             market,
             candidates,
+            articles,
             repeats.follow_ups,
             story_groups,
+            variant=variant,
             sleep=sleep,
             retry_delay=retry_delay,
         )
         if candidates
-        else {}
+        else EditorRatings({})
     )
+    ratings = None if rated is None else rated.stars
+    reasons = {} if rated is None else rated.reasons
     if ratings is None:
         mode = "fallback"
         picks = [
@@ -1277,7 +1453,8 @@ async def _assemble_market(
                     stars=ratings[str(candidate.event_id)],
                     picked=candidate.event_id in picked,
                     follow_up=candidate.event_id in repeats.follow_ups,
-                    prompt_version=EDITOR_PROMPT_VERSION,
+                    prompt_version=editor_prompt_version(variant=variant),
+                    reason=reasons.get(str(candidate.event_id)),
                 )
                 for position, candidate in enumerate(candidates, start=1)
             )

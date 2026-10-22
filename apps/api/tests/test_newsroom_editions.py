@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import UTC, date, datetime
 
@@ -10,16 +11,24 @@ from daily_insights_api.modules.newsroom.analysis import (
     symbol_catalog,
 )
 from daily_insights_api.modules.newsroom.assembly import (
+    EDITOR_SUMMARY_CHARS,
     STORY_GROUP_LIMIT,
     ArticleSignal,
     Candidate,
     EditorContractError,
+    PublishedEvent,
     Rated,
+    _ArticleRow,
     _editor_payload,
+    _signal,
     apply_quota,
+    editor_prompt_version,
+    event_brief,
     event_score,
     fallback_selection,
     key_figures,
+    lead_summary,
+    missing_reasons,
     same_story,
     same_story_titles,
     validate_duplicate_groups,
@@ -37,7 +46,7 @@ from daily_insights_api.modules.newsroom.translation import (
     to_zh_hans,
     zh_hant_digest,
 )
-from daily_insights_api.modules.newsroom.variants import BASELINE
+from daily_insights_api.modules.newsroom.variants import BASELINE, P0
 from daily_insights_api.modules.orchestration.functions import _run_newsroom_assemble
 from daily_insights_api.modules.orchestration.worker import ClaimedFunction
 
@@ -234,12 +243,12 @@ def test_fallback_keeps_the_given_order_on_equal_scores() -> None:
 # --- Editor contract ------------------------------------------------------------------
 
 
-def _candidate(name: str) -> Candidate:
+def _candidate(name: str, headlines: tuple[tuple[str, str], ...] | None = None) -> Candidate:
     return Candidate(
         event_id=uuid.uuid5(uuid.NAMESPACE_URL, name),
         working_title=name,
         score=50.0,
-        headlines=((name, "CNA"),),
+        headlines=headlines or ((name, "CNA"),),
         article_count=1,
         source_count=1,
         trust_tier=1,
@@ -247,15 +256,204 @@ def _candidate(name: str) -> Candidate:
     )
 
 
+def _row(
+    event: Candidate,
+    title: str,
+    *,
+    source: str = "CNA",
+    story_type: str | None = "catalyst",
+    impact: int | None = 3,
+    escalation: int = 0,
+    summary: str | None = None,
+    minute: int = 0,
+) -> _ArticleRow:
+    return _ArticleRow(
+        event_id=event.event_id,
+        title=title,
+        source_id=uuid.uuid5(uuid.NAMESPACE_URL, source),
+        source_name=source,
+        weight=1.0,
+        trust_tier=2,
+        market_scores={},
+        has_body=True,
+        story_type=story_type,
+        first_seen_at=datetime(2026, 10, 16, 0, minute, tzinfo=UTC),
+        feed_summary=summary,
+        impact=impact,
+        escalation=escalation,
+    )
+
+
 def test_editor_payload_labels_story_groups_present_in_the_market() -> None:
     a, b, c, d, e = (_candidate(name) for name in "abcde")
     # Group 3 has only one candidate in this market, so it carries no label.
     groups = {c.event_id: 5, a.event_id: 5, b.event_id: 3, e.event_id: 9, d.event_id: 9}
-    payload = _editor_payload("tw_equity", [a, b, c, d], {}, groups)
+    payload = _editor_payload("tw_equity", [a, b, c, d], {}, groups, variant=BASELINE, articles={})
     assert [event.get("story_group") for event in payload["events"]] == ["g1", None, "g1", None]
-    assert _editor_payload("tw_equity", [d, e, a, c], {}, groups)["events"][0]["story_group"] == (
-        "g1"
+    reordered = _editor_payload(
+        "tw_equity", [d, e, a, c], {}, groups, variant=BASELINE, articles={}
     )
+    assert reordered["events"][0]["story_group"] == "g1"
+
+
+def _payload_fixture() -> tuple[
+    list[Candidate],
+    dict[uuid.UUID, PublishedEvent],
+    dict[uuid.UUID, int],
+    dict[uuid.UUID, list[_ArticleRow]],
+]:
+    first = _candidate("荷姆茲", (("油輪遇襲", "Reuters"), ("航道受阻", "CNA")))
+    second = _candidate("聯準會", (("聯準會按兵不動", "CNBC"),))
+    third = _candidate("台積電", (("台積電法說", "經濟日報"),))
+    follow_ups = {
+        first.event_id: PublishedEvent(
+            event_id=uuid.uuid5(uuid.NAMESPACE_URL, "published"),
+            edition_date=date(2026, 10, 20),
+            working_title="荷姆茲",
+            headline="油輪遇襲",
+            summary="",
+        )
+    }
+    groups = {second.event_id: 1, third.event_id: 1}
+    articles = {
+        first.event_id: [
+            _row(first, "油輪遇襲", source="Reuters", impact=5, escalation=2),
+            _row(first, "航道受阻", summary="船隻改道。保費上升。油價走高。"),
+        ],
+        second.event_id: [_row(second, "聯準會按兵不動", source="CNBC", story_type="official")],
+    }
+    return [first, second, third], follow_ups, groups, articles
+
+
+def _wire(payload: dict[str, object]) -> str:
+    # How providers.JsonModel serialises the payload into the request.
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def test_baseline_editor_payload_is_unchanged_byte_for_byte() -> None:
+    candidates, follow_ups, groups, articles = _payload_fixture()
+    payload = _editor_payload(
+        "global", candidates, follow_ups, groups, variant=BASELINE, articles=articles
+    )
+    first, second, third = (str(candidate.event_id) for candidate in candidates)
+    assert _wire(payload) == (
+        '{"market":"global","events":['
+        f'{{"event_id":"{first}","working_title":"荷姆茲","report_count":1,"source_count":1,'
+        '"headlines":[{"title":"油輪遇襲","source":"Reuters"},{"title":"航道受阻","source":"CNA"}],'
+        '"earlier_coverage":{"edition_date":"2026-10-20","headline":"油輪遇襲"}},'
+        f'{{"event_id":"{second}","working_title":"聯準會","report_count":1,"source_count":1,'
+        '"headlines":[{"title":"聯準會按兵不動","source":"CNBC"}],"story_group":"g1"},'
+        f'{{"event_id":"{third}","working_title":"台積電","report_count":1,"source_count":1,'
+        '"headlines":[{"title":"台積電法說","source":"經濟日報"}],"story_group":"g1"}]}'
+    )
+
+
+def test_p0_editor_payload_adds_impact_type_summary_and_escalation() -> None:
+    candidates, follow_ups, groups, articles = _payload_fixture()
+    payload = _editor_payload(
+        "global", candidates, follow_ups, groups, variant=P0, articles=articles
+    )
+    first, second, third = payload["events"]
+    assert list(first) == [
+        "event_id",
+        "working_title",
+        "report_count",
+        "source_count",
+        "max_impact",
+        "max_escalation",
+        "main_story_type",
+        "headlines",
+        "lead_summary",
+        "earlier_coverage",
+    ]
+    # The lead headline has no summary, so the next one shown lends its first two sentences.
+    assert (first["max_impact"], first["max_escalation"], first["main_story_type"]) == (
+        5,
+        2,
+        "catalyst",
+    )
+    assert first["lead_summary"] == "船隻改道。保費上升。"
+    assert (second["max_impact"], second["main_story_type"], second["story_group"]) == (
+        3,
+        "official",
+        "g1",
+    )
+    assert "lead_summary" not in second
+    # An event without loaded reports still carries every key the prompt describes.
+    assert (third["max_impact"], third["max_escalation"], third["main_story_type"]) == (
+        None,
+        0,
+        None,
+    )
+
+
+def test_main_story_type_skips_price_action_and_breaks_ties_on_impact() -> None:
+    event = _candidate("e")
+    rows = [
+        _row(event, "盤勢1", story_type="price_action", impact=5, escalation=2),
+        _row(event, "盤勢2", story_type="price_action"),
+        _row(event, "盤勢3", story_type="price_action"),
+        _row(event, "評論", story_type="opinion", impact=2),
+        _row(event, "數據", story_type="data", impact=4),
+    ]
+    brief = event_brief(rows, event.headlines)
+    # Price-action pieces neither name the type nor lend their impact or escalation.
+    assert (brief.main_story_type, brief.max_impact, brief.max_escalation) == ("data", 4, 0)
+    tied = [
+        _row(event, "a", story_type="opinion", impact=3),
+        _row(event, "b", story_type="catalyst", impact=3),
+    ]
+    assert event_brief(tied, event.headlines).main_story_type == "opinion"
+    assert event_brief([_row(event, "x", story_type="price_action")], ()).main_story_type is None
+
+
+def test_lead_summary_follows_the_headline_order() -> None:
+    event = _candidate("e", (("B", "Reuters"), ("A", "CNA")))
+    rows = [
+        _row(event, "A", summary="甲摘要。"),
+        _row(event, "B", source="Reuters", summary="乙摘要。"),
+        _row(event, "C", summary="丙摘要。"),
+    ]
+    assert event_brief(rows, event.headlines).lead_summary == "乙摘要。"
+    # A summary that repeats its headline, or a blank one, is passed over.
+    rows[1] = _row(event, "B", source="Reuters", summary=" B ")
+    assert event_brief(rows, event.headlines).lead_summary == "甲摘要。"
+
+
+def test_lead_summary_keeps_two_sentences_within_the_limit() -> None:
+    assert lead_summary(None) is None
+    assert lead_summary("  ") is None
+    assert lead_summary("Fed holds.\n Markets  rise.") == "Fed holds. Markets rise."
+    assert lead_summary("一。二。三。") == "一。二。"
+    assert lead_summary("The U.S. economy grew. Jobs rose. Prices fell.") == (
+        "The U.S. economy grew. Jobs rose."
+    )
+    assert lead_summary("A&#8230; B&#10;C") == "A… B C"
+    long_sentence = "甲" * 100 + "。" + "乙" * 100 + "。"
+    assert lead_summary(long_sentence) == "甲" * 100 + "。"
+    unbroken = "x" * 400
+    cut = lead_summary(unbroken)
+    assert cut == "x" * EDITOR_SUMMARY_CHARS + "…"
+    # A sentence end too early to keep falls back to the hard cut.
+    assert lead_summary("短。" + "長" * 300) == ("短。" + "長" * 300)[:EDITOR_SUMMARY_CHARS] + "…"
+
+
+@pytest.mark.parametrize(
+    ("signals", "impact", "escalation"),
+    [
+        ({"impact": 4, "escalation": 2}, 4, 2),
+        # Signals stored before triage v3 have no escalation.
+        ({"impact": 5, "new_facts": True, "stale": False}, 5, None),
+        ({"impact": 9, "escalation": 3}, None, None),
+        ({"impact": True, "escalation": "2"}, None, None),
+        (None, None, None),
+    ],
+)
+def test_stored_triage_signals_are_read_defensively(
+    signals: object, impact: int | None, escalation: int | None
+) -> None:
+    assert _signal(signals, "impact", 1, 5) == impact
+    assert _signal(signals, "escalation", 0, 2) == escalation
 
 
 def _result(*pairs: tuple[str, int]) -> EditorResult:
@@ -332,6 +530,62 @@ def test_zh_hant_digest_covers_the_headline_and_summary() -> None:
     assert len(digest) == 64
     assert digest != zh_hant_digest("標題改", "摘要")
     assert digest != zh_hant_digest("標題", "摘要改")
+
+
+def test_editor_ratings_read_reasons_and_accept_none() -> None:
+    result = EditorResult.model_validate(
+        {
+            "ratings": [
+                {"event_id": "a", "stars": 5, "reason": " 關鍵航道中斷推升油價 "},
+                {"event_id": "b", "stars": 3},
+            ]
+        }
+    )
+    assert [rating.reason for rating in result.ratings] == ["關鍵航道中斷推升油價", ""]
+    assert validate_ratings(result, {"a", "b"}) == {"a": 5, "b": 3}
+
+
+def test_missing_reasons_count_only_wide_gaps_without_one() -> None:
+    wide, narrow, unknown = (_candidate(name) for name in ("wide", "narrow", "unknown"))
+    articles = {
+        wide.event_id: [_row(wide, "wide", impact=5)],
+        narrow.event_id: [_row(narrow, "narrow", impact=4)],
+        unknown.event_id: [_row(unknown, "unknown", impact=None)],
+    }
+    candidates = [wide, narrow, unknown]
+
+    def result(reason: str) -> EditorResult:
+        return EditorResult.model_validate(
+            {
+                "ratings": [
+                    {"event_id": str(wide.event_id), "stars": 3, "reason": reason},
+                    {"event_id": str(narrow.event_id), "stars": 3},
+                    {"event_id": str(unknown.event_id), "stars": 1},
+                ]
+            }
+        )
+
+    assert missing_reasons(result(""), candidates, articles) == 1
+    assert missing_reasons(result("與台股關聯間接"), candidates, articles) == 0
+
+
+def test_editor_prompt_version_follows_the_variant() -> None:
+    assert editor_prompt_version(variant=BASELINE) == "newsroom.editor.v3"
+    assert editor_prompt_version(variant=P0) == "newsroom.editor.v4"
+
+
+def test_editor_prompt_v4_explains_the_extended_input() -> None:
+    baseline, p0 = load_prompt(BASELINE.editor_prompt), load_prompt(P0.editor_prompt)
+    assert baseline != p0
+    for needle in ("max_impact", "max_escalation", "main_story_type", "lead_summary", "reason"):
+        assert needle in p0
+        assert needle not in baseline
+    for needle in ("JSON", "ratings", "event_id", "stars", "global", "tw_equity", "us_equity"):
+        assert needle in p0
+    # Anchors describe kinds of stories; the 10/18-10/22 replay window's own
+    # stories must not leak in, or replaying it would grade the prompt on itself.
+    for leak in ("荷姆茲", "Hormuz", "聯茂", "Meta", "特斯拉", "Tesla", "布蘭特", "108"):
+        assert leak not in p0
 
 
 @pytest.mark.parametrize("name", ["editor", "dedupe", "repeat", "analysis", "why", "translate"])
