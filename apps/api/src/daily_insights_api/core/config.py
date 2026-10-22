@@ -106,9 +106,12 @@ class Settings(BaseSettings):
     # Newsroom pipeline (docs/specs/newsroom-pipeline.md). Every LLM stage has its
     # own model setting so a stage can be swapped without touching the others.
     newsroom_enabled: bool = False
-    # Scoring constants and prompts for triage and assembly (newsroom/variants.py);
-    # "baseline" rolls back to the 2026-10-21 behaviour.
-    newsroom_selection_variant: Literal["baseline", "p0"] = "p0"
+    # Scoring constants and prompts for triage and assembly (newsroom/variants.py).
+    # "baseline" is the 2026-10-21 behaviour and stays the default until a
+    # recalibrated variant passes its replay checks (p0 failed the calm period).
+    newsroom_selection_variant: Literal["baseline", "p0", "p0b", "oldnews", "earnings_merge"] = (
+        "baseline"
+    )
     newsroom_llm_base_url: str = "https://api.deepseek.com"
     newsroom_llm_api_key: SecretStr | None = None
     newsroom_triage_model: str = "deepseek-chat"

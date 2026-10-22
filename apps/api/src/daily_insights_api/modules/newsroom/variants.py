@@ -14,11 +14,11 @@ easily.
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Literal
 
-VariantName = Literal["baseline", "p0"]
+VariantName = Literal["baseline", "p0", "p0b", "oldnews", "earnings_merge"]
 SourceBonusMode = Literal["linear", "log2"]
 
 
@@ -45,6 +45,21 @@ class SelectionVariant:
     # More five-star picks than this in one market flag the edition for review
     # (all are still kept); None never flags.
     five_star_soft_cap: int | None
+    # ``prompts/<name>.txt`` sections appended, in order, to the triage prompt.
+    triage_prompt_addenda: tuple[str, ...] = ()
+    # The duplicate screen's prompt and its appended sections.
+    dedupe_prompt: str = "dedupe"
+    dedupe_prompt_addenda: tuple[str, ...] = ()
+    # Triage reports ``event_date``; an article whose event date is more than a
+    # day before its window opens never opens an event and has no new facts.
+    event_date_rule: bool = False
+    # Published stories the repeat screen compares with: the last N days, and
+    # (when set) only the K nearest to each candidate by embedding.
+    repeat_lookback_days: int = 2
+    repeat_nearest_limit: int | None = None
+    # Grouped events about one company's earnings release merge without the
+    # title-similarity bars.
+    earnings_merge_path: bool = False
 
 
 def _per_market(global_: float, tw_equity: float, us_equity: float) -> Mapping[str, float]:
@@ -83,8 +98,34 @@ P0 = SelectionVariant(
     five_star_soft_cap=3,
 )
 
+# P0 tightened after its calm-period replay (10/10-10/12 gained three global
+# five-stars from single attacks and threats): energy and shipping need an
+# actual supply disruption, and the editor's five stars also a price reaction.
+P0B = replace(P0, name="p0b", triage_prompt="triage_p0b", editor_prompt="editor_p0b")
+
+# P0B plus a guard against old news re-entering as new: triage dates the core
+# fact, and the repeat screen looks back 14 days at the 5 nearest stories.
+OLDNEWS = replace(
+    P0B,
+    name="oldnews",
+    triage_prompt_addenda=("triage_addendum_event_date",),
+    event_date_rule=True,
+    repeat_lookback_days=14,
+    repeat_nearest_limit=5,
+)
+
+# P0B plus one event per earnings release: an earnings call's figures,
+# guidance and executive remarks belong together.
+EARNINGS_MERGE = replace(
+    P0B,
+    name="earnings_merge",
+    triage_prompt_addenda=("triage_addendum_earnings",),
+    dedupe_prompt_addenda=("dedupe_addendum_earnings",),
+    earnings_merge_path=True,
+)
+
 VARIANTS: Mapping[VariantName, SelectionVariant] = MappingProxyType(
-    {variant.name: variant for variant in (BASELINE, P0)}
+    {variant.name: variant for variant in (BASELINE, P0, P0B, OLDNEWS, EARNINGS_MERGE)}
 )
 
 

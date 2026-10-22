@@ -4,6 +4,7 @@ The model's JSON is untrusted: every stage parses it with ``model_validate`` and
 treats a ``ValidationError`` as a retryable ``*_schema_invalid`` failure.
 """
 
+from datetime import date
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
@@ -63,6 +64,18 @@ class EmbeddingTranslation(_Strict):
     summary: Annotated[str, StringConstraints(strip_whitespace=True, max_length=2_000)] = ""
 
 
+def _lenient_date(value: object) -> object:
+    """A ``YYYY-MM-DD`` string becomes a date; anything else reads as unknown."""
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
 class TriageResult(_Strict):
     """Discrete judgements only; ``scoring.py`` turns them into market scores.
 
@@ -80,6 +93,9 @@ class TriageResult(_Strict):
     event: EventMatch | EventNew | None = None
     # Answered from triage v3 on; earlier prompts and stored signals have none.
     escalation: Escalation = 0
+    # The day the core fact happened or was announced (oldnews variant only);
+    # unknown, unparsable or absent reads as None.
+    event_date: Annotated[date | None, BeforeValidator(_lenient_date)] = None
 
 
 REASON_MAX_CHARS = 200

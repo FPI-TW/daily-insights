@@ -57,6 +57,7 @@ logger = logging.getLogger(__name__)
 EDITOR_PROMPT_VERSIONS: Mapping[str, str] = {
     "editor_v3": "newsroom.editor.v3",
     "editor": "newsroom.editor.v4",
+    "editor_p0b": "newsroom.editor.v5",
 }
 # Editor prompt v4 asks for a reason when the stars and the event's top triage
 # impact differ by at least this much.
@@ -257,6 +258,14 @@ def validate_ratings(result: EditorResult, expected: set[str]) -> dict[str, int]
 
 def editor_prompt_version(*, variant: SelectionVariant) -> str:
     return EDITOR_PROMPT_VERSIONS[variant.editor_prompt]
+
+
+def dedupe_prompt(*, variant: SelectionVariant) -> tuple[str, str]:
+    """The duplicate screen's prompt text with the variant's addenda, and its audit version."""
+    parts = (variant.dedupe_prompt, *variant.dedupe_prompt_addenda)
+    text = "\n\n".join(load_prompt(part) for part in parts)
+    version = "+".join((DEDUPE_PROMPT_VERSION, *variant.dedupe_prompt_addenda))
+    return text, version
 
 
 # --- Candidate loading -------------------------------------------------------------
@@ -641,21 +650,21 @@ async def merge_duplicate_candidates(
     that stay open (one story told from several angles, or related stories the
     model over-grouped) are returned as a story group.
     """
-    union = _candidate_union(
-        titles, articles, variant=get_variant(runtime.settings.newsroom_selection_variant)
-    )
+    variant = get_variant(runtime.settings.newsroom_selection_variant)
+    union = _candidate_union(titles, articles, variant=variant)
     if len(union) < 2:
         return DuplicateScreen()
     event_ids = list(union)
+    system, prompt_version = dedupe_prompt(variant=variant)
     async with runtime.session_factory() as database:
         try:
             result = await runtime.llm.complete(
                 database,
                 model=runtime.settings.newsroom_editor_model,
-                system=load_prompt("dedupe"),
+                system=system,
                 payload=_dedupe_payload(list(union.values())),
                 result_type=DuplicateGroups,
-                audit=CallAudit("editor", None, DEDUPE_PROMPT_VERSION),
+                audit=CallAudit("editor", None, prompt_version),
             )
             groups = validate_duplicate_groups(result, {str(event_id) for event_id in union})
             vectors = (
@@ -665,7 +674,7 @@ async def merge_duplicate_candidates(
                         await runtime.embedder.embed(
                             database,
                             [titles[event_id] for event_id in event_ids],
-                            audit=CallAudit("embed", None, DEDUPE_PROMPT_VERSION),
+                            audit=CallAudit("embed", None, prompt_version),
                         ),
                         strict=True,
                     )

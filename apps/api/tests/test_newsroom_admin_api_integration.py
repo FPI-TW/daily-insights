@@ -92,7 +92,10 @@ async def client(
     database: async_sessionmaker[AsyncSession], admin: User
 ) -> AsyncIterator[AsyncClient]:
     app = create_app(
-        Settings(_env_file=None, environment="test"), readiness(True), session_factory=database
+        # Candidate scores and the five-star flag below are p0's.
+        Settings(_env_file=None, environment="test", newsroom_selection_variant="p0"),
+        readiness(True),
+        session_factory=database,
     )
     session = Session(csrf_token_hash=hash_token(CSRF_TOKEN, LOCAL_SESSION_SECRET))
 

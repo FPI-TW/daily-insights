@@ -135,7 +135,12 @@ def _runtime(
     session_factory: async_sessionmaker[AsyncSession], llm: FakeLlm, embedder: Any = None
 ) -> Runtime:
     return Runtime(
-        settings=Settings(newsroom_enabled=True, newsroom_admin_base_url="https://admin.test/"),
+        # Expectations below are p0 scores; the production default is baseline.
+        settings=Settings(
+            newsroom_enabled=True,
+            newsroom_admin_base_url="https://admin.test/",
+            newsroom_selection_variant="p0",
+        ),
         session_factory=session_factory,
         llm=llm,
         embedder=embedder or NoEmbedder(),

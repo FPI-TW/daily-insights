@@ -1,5 +1,9 @@
+from datetime import date
+
 from daily_insights_api.core.config import Settings
+from daily_insights_api.modules.newsroom.assembly import dedupe_prompt, editor_prompt_version
 from daily_insights_api.modules.newsroom.contracts import EditorResult, TriageResult
+from daily_insights_api.modules.newsroom.triage import load_triage_prompt
 from daily_insights_api.modules.newsroom.variants import BASELINE, P0, VARIANTS, get_variant
 
 
@@ -23,8 +27,49 @@ def test_variants_cover_every_market_and_impact() -> None:
     assert P0.source_bonus_mode == "log2"
 
 
-def test_settings_default_to_p0() -> None:
-    assert Settings(_env_file=None).newsroom_selection_variant == "p0"
+def test_settings_default_to_baseline() -> None:
+    assert Settings(_env_file=None).newsroom_selection_variant == "baseline"
+
+
+def test_p0b_variants_differ_only_where_intended() -> None:
+    p0b = get_variant("p0b")
+    assert (p0b.triage_prompt, p0b.editor_prompt) == ("triage_p0b", "editor_p0b")
+    assert p0b.impact_base == P0.impact_base
+    oldnews = get_variant("oldnews")
+    assert oldnews.event_date_rule and oldnews.repeat_lookback_days == 14
+    assert oldnews.triage_prompt == "triage_p0b" and not oldnews.earnings_merge_path
+    earnings = get_variant("earnings_merge")
+    assert earnings.earnings_merge_path and not earnings.event_date_rule
+    assert earnings.dedupe_prompt_addenda == ("dedupe_addendum_earnings",)
+    for variant in (BASELINE, P0, p0b):
+        assert variant.triage_prompt_addenda == ()
+        assert variant.repeat_lookback_days == 2 and variant.repeat_nearest_limit is None
+
+
+def test_every_variant_prompt_loads() -> None:
+    for variant in VARIANTS.values():
+        prompt = load_triage_prompt(variant=variant)
+        assert prompt.version.split(":")[0].split("+")[1:] == list(variant.triage_prompt_addenda)
+        text, version = dedupe_prompt(variant=variant)
+        assert text and version.startswith("newsroom.dedupe.v2")
+        assert editor_prompt_version(variant=variant)
+
+
+def test_event_date_is_lenient() -> None:
+    base = {
+        "story_type": "data",
+        "new_facts": True,
+        "impact": 4,
+        "directness": {"global": 4, "tw_equity": 2, "us_equity": 3},
+        "topic": "economy",
+        "event": None,
+    }
+    assert TriageResult.model_validate(base).event_date is None
+    assert TriageResult.model_validate({**base, "event_date": "2026-10-02"}).event_date == date(
+        2026, 10, 2
+    )
+    for value in (None, "", "10/02", "unknown", 20261002):
+        assert TriageResult.model_validate({**base, "event_date": value}).event_date is None
 
 
 def test_older_model_answers_still_validate() -> None:

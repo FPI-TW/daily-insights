@@ -54,7 +54,11 @@ EMBED_CONCURRENCY = 2
 TRIAGE_CONCURRENCY = 4
 # Version label per triage prompt file (``SelectionVariant.triage_prompt``); the
 # content hash is appended, so an edited file never reuses a label.
-TRIAGE_PROMPT_BASE_VERSIONS: Mapping[str, str] = {"triage_v2": "triage-v2", "triage": "triage-v3"}
+TRIAGE_PROMPT_BASE_VERSIONS: Mapping[str, str] = {
+    "triage_v2": "triage-v2",
+    "triage": "triage-v3",
+    "triage_p0b": "triage-v4",
+}
 EMBED_TRANSLATE_PROMPT_BASE_VERSION = "embed-translate-v1"
 # A headline with any CJK character is embedded as written; others are first
 # translated to Traditional Chinese. Comparing 2026-10-03..14 offline, English
@@ -78,25 +82,35 @@ class TriagePrompt:
     version: str
 
 
-def _versioned_prompt(name: str, base_version: str) -> TriagePrompt:
-    text = (
+def _prompt_text(name: str) -> str:
+    return (
         files("daily_insights_api.modules.newsroom")
         .joinpath("prompts", f"{name}.txt")
         .read_text(encoding="utf-8")
         .strip()
     )
+
+
+def _versioned_prompt(name: str, base_version: str, addenda: tuple[str, ...] = ()) -> TriagePrompt:
+    """``prompts/<name>.txt`` with each addendum appended after a blank line.
+
+    The label names the addenda (``triage-v4+triage_addendum_event_date``) and
+    ends with a hash of the whole text, so an edited file never reuses a label.
+    """
+    text = "\n\n".join(_prompt_text(part) for part in (name, *addenda))
     digest = hashlib.sha256(text.encode()).hexdigest()
-    return TriagePrompt(text=text, version=f"{base_version}:{digest[:12]}")
+    label = "+".join((base_version, *addenda))
+    return TriagePrompt(text=text, version=f"{label}:{digest[:12]}")
 
 
 def load_triage_prompt(*, variant: SelectionVariant) -> TriagePrompt:
-    """The triage prompt ``variant`` is built with (v2 for baseline, v3 for p0)."""
-    return _triage_prompt(variant.triage_prompt)
+    """The triage prompt ``variant`` is built with (v2 baseline, v3 p0, v4 p0b, plus addenda)."""
+    return _triage_prompt(variant.triage_prompt, variant.triage_prompt_addenda)
 
 
 @cache
-def _triage_prompt(name: str) -> TriagePrompt:
-    return _versioned_prompt(name, TRIAGE_PROMPT_BASE_VERSIONS[name])
+def _triage_prompt(name: str, addenda: tuple[str, ...]) -> TriagePrompt:
+    return _versioned_prompt(name, TRIAGE_PROMPT_BASE_VERSIONS[name], addenda)
 
 
 @cache
