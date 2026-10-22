@@ -854,11 +854,20 @@ def test_a_fallback_day_is_invalid_and_left_out_of_comparisons() -> None:
     assert "| 2026-10-20 | tw_equity | 1 |" not in text
 
 
-def test_the_golden_set_draft_waits_for_the_editors() -> None:
+def test_the_golden_set_is_confirmed_except_the_tanker_item() -> None:
     items = golden.load()
     assert [item.id for item in items] == [f"G{n}" for n in range(1, 8)]
-    assert {item.status for item in items} == {"待編輯確認"}
+    assert {item.id: item.status for item in items if item.status != "已確認"} == {
+        "G4": "待編輯確認"
+    }
+    assert {item.annotator for item in items} == {"產品負責人"}
     assert {item.expect for item in items} == {"eq 5", "gte 4", "lt 5"}
+    mixed = _event("m", stars=2)
+    mixed.title = "葉門青年運動再襲利雅德機場 美軍於阿曼灣攔截商船"
+    single = _event("s", stars=3)
+    single.title = "美軍在阿曼灣擊中巴拿馬籍貨輪"
+    g6 = next(item for item in items if item.id == "G6")
+    assert [g6.matches(row) for row in (mixed, single)] == [False, True]
 
 
 def _golden_item(expect: str, *keywords: str, exclude: tuple[str, ...] = ()) -> golden.GoldenItem:

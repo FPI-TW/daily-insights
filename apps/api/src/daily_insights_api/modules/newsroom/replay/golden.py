@@ -4,7 +4,8 @@ Each item names a story by title keywords, a date range and a market, and an
 expected star condition (``eq 5``, ``gte 4``, ``lt 5``). Every keyword (a
 regular expression) must appear in one and the same title, the event's working
 title or one of its reports' titles, and none of the ``exclude`` expressions
-may; an event matches when any of its titles does.
+may; an event matches when any of its titles does. ``exclude_titles`` drops an
+event whose working title matches, whatever its reports say (a mixed report).
 
 One story can be several events (split by triage, or continued over days). A
 "must reach" condition (``eq``, ``gte``, ``gt``) passes when the best-rated
@@ -49,6 +50,7 @@ class GoldenItem:
     annotator: str
     status: str
     note: str = ""
+    exclude_titles: tuple[str, ...] = ()
 
     @property
     def operator(self) -> str:
@@ -67,6 +69,8 @@ class GoldenItem:
         )
 
     def matches(self, row: EventRow) -> bool:
+        if any(re.search(word, row.title, re.IGNORECASE) for word in self.exclude_titles):
+            return False
         return any(self.matches_text(text) for text in row.texts() if text)
 
 
@@ -87,8 +91,9 @@ def _item(data: dict[str, Any]) -> GoldenItem:
         annotator=str(data["annotator"]),
         status=str(data["status"]),
         note=str(data.get("note", "")),
+        exclude_titles=tuple(data.get("exclude_titles", ())),
     )
-    for word in (*item.keywords, *item.exclude):
+    for word in (*item.keywords, *item.exclude, *item.exclude_titles):
         re.compile(word)
     return item
 
@@ -169,16 +174,24 @@ def _stars(value: int | None) -> str:
 
 def items_markdown(items: Sequence[GoldenItem]) -> list[str]:
     lines = [
-        "| id | 說明 | 市場 | 日期 | 標題關鍵字 (同一標題全部出現) | 排除 | 預期 | 標註者 | 狀態 |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| id | 說明 | 市場 | 日期 | 標題關鍵字 (同一標題全部出現) | 排除 | 預期 | 標註者 | 狀態"
+        " | 備註 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for item in items:
+        excluded = " / ".join(
+            [
+                *(f"`{word}`" for word in item.exclude),
+                *(f"事件標題 `{word}`" for word in item.exclude_titles),
+            ]
+        )
         lines.append(
             f"| {item.id} | {_cell(item.description)} | {item.market}"
             f" | {item.start:%m/%d}~{item.end:%m/%d}"
             f" | {_cell(' + '.join(f'`{word}`' for word in item.keywords))}"
-            f" | {_cell(' / '.join(f'`{word}`' for word in item.exclude)) or '—'}"
-            f" | `{item.expect}` | {_cell(item.annotator)} | {item.status} |"
+            f" | {_cell(excluded) or '—'}"
+            f" | `{item.expect}` | {_cell(item.annotator)} | {item.status}"
+            f" | {_cell(item.note) or '—'} |"
         )
     return lines
 
