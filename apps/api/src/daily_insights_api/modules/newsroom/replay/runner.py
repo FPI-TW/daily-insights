@@ -12,6 +12,16 @@ shown as unrated). ``editor`` keeps triage and event assignment and runs the
 real assembly (duplicate screen, repeat screen, editor pass, quotas).
 ``triage`` also clears the window's events and triages every article again in
 ``first_seen_at`` order through the real triage handler before assembling.
+``retriage`` rebuilds a base variant's triage replay from the cache, re-judges
+only the articles a prompt change can affect under the run's variant (see
+``retriage``), keeps every event assignment, and assembles under the variant.
+
+``--rep`` draws the assembly's model calls (and a re-triage's) again as an
+independent repetition; ``--triage-rep`` does the same for a full triage pass.
+Repetition 1 is what earlier runs cached. A market day whose editor fell back
+to scores, whose triage pass hit provider failures, or that was skipped is
+marked invalid and left out of every comparison. Rerunning a range after a
+failure only asks again what failed: every successful answer is cached.
 
 Days run in order. After a day is assembled its drafts are marked published in
 the copy, so the next day's repeat screen compares with what this replay
@@ -27,7 +37,7 @@ import uuid
 from collections import Counter, defaultdict
 from collections.abc import Sequence
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -39,6 +49,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from daily_insights_api.core.config import Settings
 from daily_insights_api.core.database import create_engine, create_session_factory
 from daily_insights_api.modules.newsroom import assembly, clock, queue, scoring, triage
+from daily_insights_api.modules.newsroom.contracts import TriageResult
 from daily_insights_api.modules.newsroom.models import (
     MARKET_CODES,
     NewsroomArticle,
@@ -50,26 +61,31 @@ from daily_insights_api.modules.newsroom.models import (
 )
 from daily_insights_api.modules.newsroom.notifier import LogNotifier
 from daily_insights_api.modules.newsroom.providers import (
+    CallAudit,
     Embedder,
     JsonModel,
     OpenAICompatibleEmbedder,
     OpenAICompatibleJsonModel,
 )
-from daily_insights_api.modules.newsroom.queue import Claim
-from daily_insights_api.modules.newsroom.replay import pipeline, snapshot
+from daily_insights_api.modules.newsroom.queue import Claim, FatalStageError, RetryableStageError
+from daily_insights_api.modules.newsroom.replay import pipeline, retriage, snapshot
 from daily_insights_api.modules.newsroom.replay.cache import (
     CachedEmbedder,
     CachedJsonModel,
     CacheStats,
     ReplayCacheMiss,
     ResponseCache,
+    replay_rep,
+    watch_usage,
 )
+from daily_insights_api.modules.newsroom.replay.costs import Ledger, ledger_total, read_ledger
 from daily_insights_api.modules.newsroom.replay.metrics import (
     DEFAULT_TRACKS,
     EventRow,
     MarketDay,
     Track,
     TrackedRow,
+    invalid_reason_for,
     summary,
 )
 from daily_insights_api.modules.newsroom.replay.snapshot import (
@@ -83,14 +99,20 @@ from daily_insights_api.modules.newsroom.worker import Runtime
 
 logger = logging.getLogger(__name__)
 
-Stages = Literal["score", "editor", "triage"]
-STAGES: tuple[Stages, ...] = ("score", "editor", "triage")
+Stages = Literal["score", "editor", "triage", "retriage"]
+STAGES: tuple[Stages, ...] = ("score", "editor", "triage", "retriage")
 MAX_CONCURRENCY = 8
 HEADLINES_SHOWN = 3
 SLACK_ENVIRONMENT = "DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL"
 REVIEW_BASE_URL = "http://replay.invalid"
 # Fatal triage codes that would fail every article: stop instead of going on.
 ABORTING_FATAL_CODES = ("_http_401", "_http_402", "_http_403", "_configuration_missing")
+# Triage failures that mean the provider was unavailable rather than the article bad
+# (a 400 is one article's content refused; invalid JSON is the model's answer).
+PROVIDER_FAILURE_PREFIX = "triage_provider_"
+ARTICLE_FAILURE_CODES = ("triage_provider_http_400", "triage_provider_invalid_json")
+RETRIAGE_ATTEMPTS = 3
+DEFAULT_ROUND = "p0b"
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +125,23 @@ class RunOptions:
     offline: bool = False
     keep_database: bool = False
     tracks: tuple[Track, ...] = DEFAULT_TRACKS
+    # Repetition of the assembly's calls and of a re-triage's calls.
+    rep: int = 1
+    # Repetition of a full triage pass (also the base pass of a re-triage).
+    triage_rep: int = 1
+    # ``retriage`` only: the variant whose triage replay supplies the events.
+    base_variant: SelectionVariant | None = None
+    selection: retriage.Selection = field(default_factory=retriage.Selection)
+    # ``retriage`` only: rebuild the base and estimate, call nothing live.
+    dry_run: bool = False
+    # Days not replayed, each marked invalid with its reason.
+    skip_days: tuple[tuple[date, str], ...] = ()
+    # The ledger every live call of this round is written to.
+    round: str = DEFAULT_ROUND
+
+    @property
+    def skipped(self) -> dict[date, str]:
+        return dict(self.skip_days)
 
 
 # --- Deterministic triage order --------------------------------------------------------
@@ -185,6 +224,14 @@ class _Context:
     reference: dict[str, Any]
     gate_holder: list[TriageGate | None]
     day_notes: dict[str, list[str]] = field(default_factory=dict)
+    # ``retriage``: the base variant's runtime, recording its triage requests.
+    base_runtime: Runtime | None = None
+    recorder: retriage.RecordingModel | None = None
+    stats: CacheStats | None = None
+    retriaged: list[dict[str, Any]] = field(default_factory=list)
+    estimate: retriage.Estimate = field(default_factory=retriage.Estimate)
+    # Days whose triage pass the provider failed, with the count.
+    triage_failures: dict[date, int] = field(default_factory=dict)
 
     @property
     def sessions(self) -> async_sessionmaker[AsyncSession]:
@@ -193,6 +240,10 @@ class _Context:
     @property
     def variant(self) -> SelectionVariant:
         return self.options.variant
+
+    @property
+    def base_variant(self) -> SelectionVariant:
+        return self.options.base_variant or self.options.variant
 
     def note(self, day: date, text_: str) -> None:
         self.day_notes.setdefault(day.isoformat(), []).append(text_)
@@ -269,23 +320,28 @@ def _runtime(
     engine: AsyncEngine,
     gate_holder: list[TriageGate | None],
     stats: CacheStats,
+    ledger: Ledger,
 ) -> Runtime:
     cache = ResponseCache(environment.cache_dir)
 
     def live_model() -> JsonModel:
-        return OpenAICompatibleJsonModel(
+        model = OpenAICompatibleJsonModel(
             base_url=settings.newsroom_llm_base_url,
             api_key=_key(environment, "NEWSROOM_LLM_API_KEY"),
             timeout_seconds=settings.newsroom_llm_timeout_seconds,
         )
+        watch_usage(model)
+        return model
 
     def live_embedder() -> Embedder:
-        return OpenAICompatibleEmbedder(
+        embedder = OpenAICompatibleEmbedder(
             base_url=settings.newsroom_embedding_base_url,
             api_key=_key(environment, "NEWSROOM_EMBEDDING_API_KEY"),
             model=settings.newsroom_embedding_model,
             timeout_seconds=settings.newsroom_embedding_timeout_seconds,
         )
+        watch_usage(embedder)
+        return embedder
 
     return Runtime(
         settings=settings,
@@ -293,14 +349,16 @@ def _runtime(
         llm=CachedJsonModel(
             cache,
             stats,
-            live=None if options.offline else live_model,
+            live=None if options.offline or options.dry_run else live_model,
             gate=_HeldGate(gate_holder),
+            ledger=ledger,
         ),
         embedder=CachedEmbedder(
             cache,
             stats,
             model=settings.newsroom_embedding_model,
-            live=None if options.offline else live_embedder,
+            live=None if options.offline or options.dry_run else live_embedder,
+            ledger=ledger,
         ),
         notifier=LogNotifier(),
         renderer=None,
@@ -451,6 +509,7 @@ def _row(
         escalation=details.escalation if details else None,
         topic=details.topic if details else None,
         headlines=shown[:HEADLINES_SHOWN],
+        article_titles=list(details.titles if details else ()),
         prod_event_ids=list(details.prod_event_ids if details else ()) or [str(event_id)],
         tw50=match_tw50(title, *shown),
     )
@@ -805,6 +864,11 @@ async def _assemble_day(context: _Context, day: date) -> list[MarketDay]:
             )
         )
     await _publish_day(context, day)
+    failures = context.triage_failures.get(day)
+    for market_day in days:
+        market_day.invalid_reason = invalid_reason_for(market_day.selection_mode) or (
+            f"初篩有 {failures} 篇因供應商連線失敗而沒有結果" if failures else None
+        )
     return days
 
 
@@ -894,12 +958,12 @@ async def _reset_window(context: _Context, day: date) -> list[uuid.UUID]:
     return article_ids
 
 
-async def _triage_window(context: _Context, day: date) -> None:
+async def _triage_window(context: _Context, day: date, runtime: Runtime | None = None) -> None:
     article_ids = await _reset_window(context, day)
     window = context.options.concurrency
     gate = TriageGate(len(article_ids), window)
     context.gate_holder[0] = gate
-    handler = triage._triage_handler(context.runtime)
+    handler = triage._triage_handler(runtime or context.runtime)
     outcomes: Counter[str] = Counter()
     errors: Counter[str] = Counter()
 
@@ -970,6 +1034,13 @@ async def _triage_window(context: _Context, day: date) -> None:
             text("SELECT count(*) FROM newsroom_events WHERE edition_date = :day"), {"day": day}
         )
     missing = failures.pop("triage_embedding_missing", 0)
+    unreachable = sum(
+        count
+        for code, count in failures.items()
+        if code and code.startswith(PROVIDER_FAILURE_PREFIX) and code not in ARTICLE_FAILURE_CODES
+    )
+    if unreachable:
+        context.triage_failures[day] = unreachable
     context.note(
         day,
         f"重跑初篩: {len(article_ids)} 篇 (成功 {outcomes['done']}、失敗 {sum(failures.values())}"
@@ -977,6 +1048,190 @@ async def _triage_window(context: _Context, day: date) -> None:
         + (f"; 失敗原因 {dict(failures)}" if failures else "")
         + (f"; 非預期錯誤 {dict(errors)}" if errors else ""),
     )
+
+
+# --- retriage --------------------------------------------------------------------------
+
+
+async def _judged(context: _Context, day: date) -> list[retriage.Judged]:
+    async with context.sessions() as database:
+        rows = (
+            await database.execute(
+                select(
+                    NewsroomArticle.id,
+                    NewsroomArticle.title,
+                    NewsroomArticle.topic,
+                    NewsroomArticle.story_type,
+                    NewsroomArticle.triage_signals,
+                    NewsroomArticle.relevant,
+                    NewsroomArticle.event_id,
+                )
+                .where(NewsroomArticle.edition_date == day, NewsroomArticle.triage_status == "done")
+                .order_by(NewsroomArticle.first_seen_at, NewsroomArticle.id)
+            )
+        ).all()
+    return [
+        retriage.Judged(
+            article_id=row[0],
+            edition_date=day,
+            title=row[1],
+            topic=row[2],
+            story_type=row[3],
+            signals=dict(row[4] or {}),
+            relevant=bool(row[5]),
+            event_id=row[6],
+        )
+        for row in rows
+    ]
+
+
+def _judgement(result: TriageResult | None) -> dict[str, Any]:
+    if result is None:
+        return {}
+    return {
+        "impact": result.impact,
+        "escalation": result.escalation,
+        "story_type": result.story_type,
+        "new_facts": result.new_facts,
+        "event_date": result.event_date.isoformat() if result.event_date else None,
+    }
+
+
+async def _ask_again(
+    context: _Context, article: retriage.Judged, request: retriage.Request
+) -> TriageResult | str:
+    """The run variant's triage answer to the base call's request, or the failure code."""
+    prompt = triage.load_triage_prompt(variant=context.variant)
+    code = "retriage_failed"
+    for _ in range(RETRIAGE_ATTEMPTS):
+        try:
+            async with context.sessions() as database:
+                result = await context.runtime.llm.complete(
+                    database,
+                    model=request.model,
+                    system=prompt.text,
+                    payload=request.payload,
+                    result_type=TriageResult,
+                    audit=CallAudit("triage", article.article_id, prompt.version),
+                )
+                await database.commit()
+            return result
+        except RetryableStageError as error:
+            code = error.code
+        except FatalStageError as error:
+            if error.code.endswith(ABORTING_FATAL_CODES):
+                raise ReplayError(f"a re-triage call failed fatally ({error.code})") from error
+            return error.code
+    return code
+
+
+async def _retriage_day(context: _Context, day: date) -> bool:
+    """Rebuild the base triage, re-judge the chosen articles; False on a dry run."""
+    assert context.base_runtime is not None and context.recorder is not None
+    assert context.stats is not None
+    options = context.options
+    context.recorder.requests.clear()
+    triage_label = f"triage {triage.load_triage_prompt(variant=context.base_variant).version}"
+    before = context.stats.count_label(triage_label)
+    with replay_rep(options.triage_rep):
+        await _triage_window(context, day, runtime=context.base_runtime)
+    after = context.stats.count_label(triage_label)
+    articles = await _judged(context, day)
+    targets, controls = retriage.select(articles, options.selection)
+    requests = context.recorder.requests
+    chosen = [
+        (group, article)
+        for group, members in (("target", targets), ("control", controls))
+        for article in members
+        if article.article_id in requests
+    ]
+    base_chars = sum(
+        len(request.system)
+        + len(json.dumps(request.payload, ensure_ascii=False, separators=(",", ":")))
+        for request in requests.values()
+    )
+    calls = max(after.calls - before.calls, 1)
+    prompt = triage.load_triage_prompt(variant=context.variant)
+    context.estimate.add(
+        day,
+        [requests[article.article_id] for _, article in chosen],
+        system=prompt.text,
+        tokens_per_char=(after.input_tokens - before.input_tokens) / max(base_chars, 1),
+        output_per_call=(after.output_tokens - before.output_tokens) / calls,
+    )
+    context.note(
+        day,
+        f"目標重判: 以 {context.base_variant.name} 的初篩重建事件分群,"
+        f" 選出目標 {len(targets)} 篇、對照 {len(controls)} 篇以 {context.variant.name}"
+        f" 的 triage prompt 重判 (rep {options.rep})",
+    )
+    if options.dry_run:
+        return False
+    semaphore = asyncio.Semaphore(options.concurrency)
+
+    async def one(group: str, article: retriage.Judged) -> None:
+        async with semaphore:
+            answer = await _ask_again(context, article, requests[article.article_id])
+        base = pipeline.triage_result(
+            topic=article.topic, story_type=article.story_type, signals=article.signals
+        )
+        record: dict[str, Any] = {
+            "edition_date": day.isoformat(),
+            "group": group,
+            "article_id": str(article.article_id),
+            "event_id": str(article.event_id) if article.event_id else None,
+            "title": article.title,
+            "topic": article.topic,
+            "base": _judgement(base) | {"relevant": article.relevant},
+            "applied": False,
+        }
+        if isinstance(answer, str):
+            record["error"] = answer
+        elif base is not None:
+            merged = retriage.merged_result(base, answer)
+            record["new"] = _judgement(merged)
+            if group == "target":
+                record["applied"] = True
+                async with context.sessions() as database:
+                    await database.execute(
+                        update(NewsroomArticle)
+                        .where(NewsroomArticle.id == article.article_id)
+                        .values(
+                            story_type=merged.story_type,
+                            triage_signals=scoring.triage_signals(merged)
+                            | {"stale": article.signals.get("stale", False), "retriaged": True},
+                        )
+                    )
+                    await database.commit()
+        context.retriaged.append(record)
+
+    with replay_rep(options.rep):
+        async with asyncio.TaskGroup() as group_:
+            for group, article in chosen:
+                group_.create_task(one(group, article))
+    # Scores and relevance follow the stored judgements under the run's variant.
+    await _rescore(context, day)
+    failed = sum(
+        1 for row in context.retriaged if row["edition_date"] == day.isoformat() and "error" in row
+    )
+    if failed:
+        context.note(day, f"目標重判失敗 {failed} 篇, 沿用 base 的判斷")
+    return True
+
+
+def _skipped_day(day: date, reason: str) -> list[MarketDay]:
+    return [
+        MarketDay(
+            edition_date=day.isoformat(),
+            market=market,
+            selection_mode="skipped",
+            candidates=[],
+            picks=[],
+            notes=[f"未重播: {reason}"],
+            invalid_reason=reason,
+        )
+        for market in MARKET_CODES
+    ]
 
 
 # --- Entry point -----------------------------------------------------------------------
@@ -1020,6 +1275,23 @@ def _notes(options: RunOptions) -> list[str]:
         notes.append(
             "editor: 從正式組稿之後的事件狀態出發, 正式組稿時已自動合併的重複事件不會再被提出。"
         )
+    if options.rep != 1 or options.triage_rep != 1:
+        notes.append(
+            f"重跑: 組稿與目標重判的模型呼叫為第 {options.rep} 次抽樣、完整初篩為第"
+            f" {options.triage_rep} 次抽樣 (快取鍵含抽樣編號; 第 1 次沿用既有快取)。"
+            "DeepSeek API 沒有隨機種子參數, 無法固定抽樣, 只能固定輸入。"
+        )
+    if options.stages == "retriage":
+        notes.append(
+            f"retriage: 先以 {options.base_variant.name if options.base_variant else '?'}"
+            " 的 triage 重播 (完整初篩第 1 次抽樣, 快取) 重建事件分群,"
+            f" 再以 {options.variant.name} 的 triage prompt 只重判選中的文章"
+            " (與 base 呼叫完全相同的文章與候選事件輸入), 更新 impact、escalation、"
+            "story_type、new_facts、event_date 與分數; topic、directness 與事件歸屬不變。"
+            f" 選取條件: {options.selection.describe()}。"
+            " base 判為 relevant 的文章才可能被選; 因重判跌破 relevant 的文章退出事件,"
+            " base 判為不 relevant、新 prompt 下可能達標的文章不會被加入 (近似)。"
+        )
     if options.stages == "triage":
         notes.append(
             "triage: 清空每日事件後依 first_seen_at 順序以真實 triage handler 重新初篩與歸屬, "
@@ -1033,7 +1305,14 @@ def _notes(options: RunOptions) -> list[str]:
 
 def _run_name(environment: ReplayEnvironment, options: RunOptions, now: datetime) -> Path:
     stamp = now.astimezone(clock.TAIPEI).strftime("%Y%m%d-%H%M")
-    base = environment.runs_dir / f"{stamp}-{options.variant.name}-{options.stages}"
+    name = f"{stamp}-{options.variant.name}-{options.stages}"
+    if options.rep != 1 or options.triage_rep != 1:
+        name += f"-rep{options.rep}" + (
+            f"-trep{options.triage_rep}" if options.triage_rep != 1 else ""
+        )
+    if options.dry_run:
+        name += "-dryrun"
+    base = environment.runs_dir / name
     path, suffix = base, 2
     while path.exists():
         path, suffix = Path(f"{base}-{suffix}"), suffix + 1
@@ -1044,12 +1323,17 @@ async def run(environment: ReplayEnvironment, options: RunOptions) -> Path:
     """Replay ``options.snapshot`` and write its run directory; returns the directory."""
     if not 1 <= options.concurrency <= MAX_CONCURRENCY:
         raise ReplayError(f"--concurrency must be between 1 and {MAX_CONCURRENCY}")
+    if options.stages == "retriage" and options.base_variant is None:
+        raise ReplayError("a retriage run needs --base-variant")
+    if options.dry_run and options.stages != "retriage":
+        raise ReplayError("--dry-run only applies to a retriage run")
     # Nothing a replay starts may reach Slack, whatever the shell exported.
     os.environ.pop(SLACK_ENVIRONMENT, None)
     metadata = snapshot.prepare(environment, options.snapshot)
     reference = snapshot.load_reference(environment, options.snapshot)
     started = datetime.now(UTC)
     run_dir = _run_name(environment, options, started)
+    ledger = Ledger(environment.ledger_path(options.round), run_dir.name)
     database = f"run_{started:%Y%m%d%H%M%S}_{options.variant.name}_{options.stages}"
     snapshot.create_database(environment, database, template=options.snapshot.template)
     try:
@@ -1058,31 +1342,56 @@ async def run(environment: ReplayEnvironment, options: RunOptions) -> Path:
         engine = create_engine(settings)
         stats = CacheStats()
         gate_holder: list[TriageGate | None] = [None]
-        runtime = _runtime(environment, options, settings, engine, gate_holder, stats)
+        runtime = _runtime(environment, options, settings, engine, gate_holder, stats, ledger)
         context = _Context(environment, options, runtime, engine, reference, gate_holder)
+        context.stats = stats
+        if options.stages == "retriage":
+            context.recorder = retriage.RecordingModel(runtime.llm)
+            context.base_runtime = replace(
+                runtime,
+                settings=settings.model_copy(
+                    update={"newsroom_selection_variant": context.base_variant.name}
+                ),
+                llm=context.recorder,
+            )
         days: list[MarketDay] = []
         try:
             for day in options.snapshot.dates():
                 logger.info("newsroom.replay_day", extra={"edition_date": day.isoformat()})
+                if day in options.skipped:
+                    days += _skipped_day(day, options.skipped[day])
+                    context.note(day, f"未重播, 標為作廢: {options.skipped[day]}")
+                    continue
                 if options.stages == "score":
                     days += await _score_day(context, day)
                     continue
-                if options.stages == "triage":
-                    await _triage_window(context, day)
+                if options.stages == "retriage":
+                    if not await _retriage_day(context, day):
+                        continue
+                elif options.stages == "triage":
+                    with replay_rep(options.triage_rep):
+                        await _triage_window(context, day)
                 else:
                     await _rescore(context, day)
-                days += await _assemble_day(context, day)
+                with replay_rep(options.rep):
+                    days += await _assemble_day(context, day)
         finally:
             await runtime.aclose()
             await engine.dispose()
     finally:
         if not options.keep_database:
             snapshot.drop_database(environment, database)
+    round_total = ledger_total(read_ledger(ledger.path))
     meta = {
         "start": options.snapshot.start.isoformat(),
         "end": options.snapshot.end.isoformat(),
         "variant": options.variant.name,
         "stages": options.stages,
+        "base_variant": options.base_variant.name if options.base_variant else None,
+        "rep": options.rep,
+        "triage_rep": options.triage_rep,
+        "selection": options.selection.describe() if options.stages == "retriage" else None,
+        "skipped": {day.isoformat(): reason for day, reason in options.skip_days},
         "concurrency": options.concurrency,
         "started_at": started.astimezone(clock.TAIPEI).isoformat(timespec="seconds"),
         "finished_at": datetime.now(UTC).astimezone(clock.TAIPEI).isoformat(timespec="seconds"),
@@ -1096,6 +1405,8 @@ async def run(environment: ReplayEnvironment, options: RunOptions) -> Path:
         "database": database if options.keep_database else None,
         "run_dir": str(run_dir),
         "cache": stats.as_dict(),
+        "round": options.round,
+        "round_usd": round(round_total["usd"], 6),
         "notes": _notes(options),
         "day_notes": context.day_notes,
         "tracks": [
@@ -1103,7 +1414,29 @@ async def run(environment: ReplayEnvironment, options: RunOptions) -> Path:
             for track in options.tracks
         ],
     }
+    if options.stages == "retriage":
+        meta["retriage_estimate"] = {
+            **context.estimate.as_dict(),
+            "note": "dry run: 只估算, 沒有呼叫"
+            if options.dry_run
+            else "執行前估算 (實際花費見 cache)",
+        }
+    if options.dry_run:
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "run.json").write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        return run_dir
     write_run(run_dir, meta, days)
+    if context.retriaged:
+        (run_dir / "retriage.json").write_text(
+            json.dumps(
+                sorted(context.retriaged, key=lambda row: (row["edition_date"], row["article_id"])),
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
     return run_dir
 
 

@@ -88,6 +88,8 @@ class EventRow:
     escalation: int | None = None
     topic: str | None = None
     headlines: list[str] = field(default_factory=list)
+    # Every relevant report's title (runs before this field have only ``headlines``).
+    article_titles: list[str] = field(default_factory=list)
     # Production events this one stands for: itself, or after a triage replay
     # the production events most of its articles belonged to.
     prod_event_ids: list[str] = field(default_factory=list)
@@ -96,6 +98,10 @@ class EventRow:
     @property
     def company_story(self) -> bool:
         return self.topic == COMPANY_TOPIC
+
+    def texts(self) -> list[str]:
+        """The working title and every report title known for the event."""
+        return [self.title, *(self.article_titles or self.headlines)]
 
     @classmethod
     def load(cls, data: dict[str, Any]) -> "EventRow":
@@ -134,6 +140,13 @@ class MarketDay:
     # Score replay only: whether production's list and edition came out again.
     reproduction: dict[str, Any] | None = None
     notes: list[str] = field(default_factory=list)
+    # Set when the day must not be compared (the editor fell back to scores,
+    # the day was skipped, or triage failed); every comparison leaves it out.
+    invalid_reason: str | None = None
+
+    @property
+    def valid(self) -> bool:
+        return self.invalid_reason is None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -145,6 +158,10 @@ class MarketDay:
         values["picks"] = [EventRow.load(row) for row in data["picks"]]
         values["tracked"] = [TrackedRow.load(row) for row in data.get("tracked", [])]
         values["reference_picks"] = [EventRow.load(row) for row in data.get("reference_picks", [])]
+        # Runs written before days were marked invalid: judge them the same way.
+        values["invalid_reason"] = data.get("invalid_reason") or invalid_reason_for(
+            data["selection_mode"]
+        )
         return cls(**values)
 
     # --- metrics ---------------------------------------------------------------------
@@ -209,6 +226,14 @@ class MarketDay:
         }
 
 
+FALLBACK_REASON = "精選失敗, 退回粗分排序 (fallback)"
+
+
+def invalid_reason_for(selection_mode: str) -> str | None:
+    """Why a market day cannot be compared, judged from how it was selected."""
+    return FALLBACK_REASON if selection_mode == "fallback" else None
+
+
 # --- Markdown --------------------------------------------------------------------------
 
 
@@ -249,8 +274,9 @@ def _overview(days: Sequence[MarketDay]) -> list[str]:
             else "—"
         )
         five = f"{day.five_stars}" + (" 需覆核" if day.five_star_review else "")
+        mode = day.selection_mode + ("" if day.valid else " (作廢)")
         lines.append(
-            f"| {day.edition_date} | {day.market} | {day.selection_mode} | {five}"
+            f"| {day.edition_date} | {day.market} | {mode} | {five}"
             f" | {_distribution(day)} | {len(day.picks)} | {overlap['same']}"
             f" | {overlap['replay_only']} | {overlap['production_only']}"
             f" | {_percent(day.relevant / day.articles if day.articles else None)}"
@@ -372,6 +398,25 @@ def _cache_lines(stats: dict[str, Any]) -> list[str]:
     return lines
 
 
+def invalid_lines(days: Sequence[MarketDay]) -> list[str]:
+    """The market days left out of every comparison, and why."""
+    invalid = [day for day in days if not day.valid]
+    lines = ["## 作廢的市場日", ""]
+    if not invalid:
+        return [*lines, "- 無", ""]
+    lines += [
+        "以下市場日不列入任何比較 (五星數、版面差異、金標準、穩定入選集合):",
+        "",
+        "| 日期 | 市場 | 模式 | 原因 |",
+        "| --- | --- | --- | --- |",
+    ]
+    lines += [
+        f"| {day.edition_date} | {day.market} | {day.selection_mode} | {day.invalid_reason} |"
+        for day in invalid
+    ]
+    return [*lines, ""]
+
+
 def _day_notes(notes: dict[str, list[str]]) -> list[str]:
     if not notes:
         return []
@@ -407,6 +452,7 @@ def summary(meta: dict[str, Any], days: Sequence[MarketDay]) -> str:
         "",
         *_overview(days),
         "",
+        *invalid_lines(days),
         *_day_notes(meta.get("day_notes", {})),
         *_agreement(days),
         *_reproduction(days),
@@ -449,13 +495,25 @@ def compare(
     """Side-by-side Markdown of two runs over the same dates and markets."""
     left_name = f"{left_meta['variant']}/{left_meta['stages']}"
     right_name = f"{right_meta['variant']}/{right_meta['stages']}"
-    by_key = {(day.edition_date, day.market): day for day in right}
+    by_key = {(day.edition_date, day.market): day for day in right if day.valid}
+    skipped = [day for day in [*left, *right] if not day.valid]
     lines = [
         f"# 重播比較: {left_name} vs {right_name}",
         "",
         f"- 左: `{left_meta['run_dir']}`",
         f"- 右: `{right_meta['run_dir']}`",
         "",
+        *(
+            [
+                "作廢而不比較的市場日: "
+                + "、".join(
+                    f"{day.edition_date} {day.market} ({day.invalid_reason})" for day in skipped
+                ),
+                "",
+            ]
+            if skipped
+            else []
+        ),
         "## 五星數與星等分布",
         "",
         f"| 日期 | 市場 | 五星 {left_name} | 五星 {right_name}"
@@ -463,7 +521,7 @@ def compare(
         f" | 版面相同 | 僅左 | 僅右 | relevant {left_name} | relevant {right_name} |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
-    pairs = [(day, by_key.get((day.edition_date, day.market))) for day in left]
+    pairs = [(day, by_key.get((day.edition_date, day.market))) for day in left if day.valid]
     for day, other in pairs:
         if other is None:
             continue

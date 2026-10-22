@@ -30,6 +30,8 @@ def triage_result(
             "impact": signals.get("impact"),
             "directness": signals.get("directness"),
             "escalation": signals.get("escalation", 0),
+            # Stored from the event-date prompt on; absent reads as unknown.
+            "event_date": signals.get("event_date"),
         }
     )
 
