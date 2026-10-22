@@ -23,6 +23,8 @@ StoryType = Literal[
 Impact = Annotated[int, Field(ge=1, le=5)]
 Directness = Annotated[int, Field(ge=0, le=4)]
 Stars = Annotated[int, Field(ge=1, le=5)]
+# 0 not a running story or no change, 1 a continuation, 2 a clear escalation.
+Escalation = Annotated[int, Field(ge=0, le=2)]
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 LongText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)]
 
@@ -76,11 +78,16 @@ class TriageResult(_Strict):
     directness: MarketDirectness
     # Required when the computed scores make the article relevant; ignored otherwise.
     event: EventMatch | EventNew | None = None
+    # Answered from triage v3 on; earlier prompts and stored signals have none.
+    escalation: Escalation = 0
 
 
 class EditorRating(_Strict):
     event_id: str
     stars: Stars
+    # One short sentence; the extended editor input asks for it when the stars
+    # and the triage impact differ by two or more.
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] = ""
 
 
 class EditorResult(_Strict):
