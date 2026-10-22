@@ -64,10 +64,13 @@ def triage_signals(result: TriageResult) -> dict[str, object]:
     """The raw judgements, stored so the formula can be recalibrated without new calls.
 
     Signals stored before triage answered ``escalation`` have none; read them as 0.
+    ``event_date`` is an ISO date or None (only the event-date prompt answers it);
+    signals stored without it read as None.
     """
     return {
         "impact": result.impact,
         "new_facts": result.new_facts,
         "directness": result.directness.as_dict(),
         "escalation": result.escalation,
+        "event_date": None if result.event_date is None else result.event_date.isoformat(),
     }
