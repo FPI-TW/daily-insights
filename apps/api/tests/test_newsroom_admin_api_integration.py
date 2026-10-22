@@ -5,6 +5,7 @@ these tests pin down what the admin API validates, which service it calls with
 what, and the plain field updates (remove, hide, order) it writes itself.
 """
 
+import math
 import os
 import uuid
 from collections.abc import AsyncIterator, Sequence
@@ -522,6 +523,7 @@ async def test_edition_day_summarises_each_market(
     assert list(markets) == ["global", "tw_equity", "us_equity"]
     assert markets["global"]["edition"]["selection_mode"] == "fallback"
     assert markets["global"]["edition"]["ignored_pending_triage"] == 3
+    assert markets["global"]["edition"]["needs_five_star_review"] is False
     assert markets["global"]["counts"] == {
         "active": 3,
         "removed": 1,
@@ -568,7 +570,8 @@ async def test_edition_detail_lists_items_and_scored_candidates(
     await _article(database, blog, placed)
     await _article(database, wire, second)
 
-    # Candidate scores: max(score * weight) + 5 per extra distinct source (≤ 20).
+    # Candidate scores (p0): max(score * weight clamped to [0.9, 1.1]) plus
+    # 6 x log2(distinct sources), at most 15.
     lone = await _event(database, "Lone wire story")
     await _article(database, wire, lone, scores={"global": 40, "tw_equity": 0, "us_equity": 0})
     crowded = await _event(database, "Widely reported")
@@ -602,7 +605,7 @@ async def test_edition_detail_lists_items_and_scored_candidates(
     assert [
         (candidate["event"]["working_title"], candidate["score"])
         for candidate in body["candidates"]
-    ] == [("Lone wire story", 80.0), ("Widely reported", 70.0)]
+    ] == [("Lone wire story", 44.0), ("Widely reported", pytest.approx(33 + 6 * math.log2(3)))]
     assert body["candidates"][1]["event"]["body_ok_count"] == 0
 
 
@@ -619,6 +622,43 @@ async def test_edition_detail_without_an_edition_still_lists_candidates(
     assert response.json()["edition"] is None
     assert response.json()["items"] == []
     assert [c["score"] for c in response.json()["candidates"]] == [60.0]
+
+
+async def test_more_than_three_visible_five_stars_flag_the_edition(
+    database: async_sessionmaker[AsyncSession], client: AsyncClient
+) -> None:
+    crowded = await _edition(database, "global")
+    for rank in range(1, 5):
+        await _item(database, crowded, await _event(database, f"Big {rank}"), rank, stars=5)
+    # Three visible 5-star items: the removed, hidden and abandoned ones do not count.
+    calm = await _edition(database, "tw_equity")
+    now = datetime.now(UTC)
+    for rank, values in enumerate(
+        (
+            {},
+            {},
+            {},
+            {"removed_at": now},
+            {"hidden_at": now},
+            {"abandoned_at": now},
+        ),
+        start=1,
+    ):
+        await _item(database, calm, await _event(database, f"TW {rank}"), rank, stars=5, **values)
+    await _item(database, calm, await _event(database, "TW four stars"), 7, stars=4)
+
+    day = await client.get(f"{BASE}/editions", params={"date": DAY.isoformat()})
+    crowded_detail = await client.get(f"{BASE}/editions/{DAY.isoformat()}/global")
+    calm_detail = await client.get(f"{BASE}/editions/{DAY.isoformat()}/tw_equity")
+
+    assert day.status_code == 200, day.text
+    flags = {
+        market["market_code"]: market["edition"] and market["edition"]["needs_five_star_review"]
+        for market in day.json()["markets"]
+    }
+    assert flags == {"global": True, "tw_equity": False, "us_equity": None}
+    assert crowded_detail.json()["edition"]["needs_five_star_review"] is True
+    assert calm_detail.json()["edition"]["needs_five_star_review"] is False
 
 
 async def test_publish_one_market(

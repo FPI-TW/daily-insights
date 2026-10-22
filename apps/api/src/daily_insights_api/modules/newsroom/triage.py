@@ -42,6 +42,7 @@ from daily_insights_api.modules.newsroom.queue import (
     RetryableStageError,
     StageHandler,
 )
+from daily_insights_api.modules.newsroom.variants import get_variant
 from daily_insights_api.modules.newsroom.worker import Registration, Runtime, StageBinding
 
 logger = logging.getLogger(__name__)
@@ -352,7 +353,9 @@ def _triage_handler(runtime: Runtime) -> StageHandler:
                 stage="triage", subject_id=claim_.row_id, prompt_version=prompt.version
             ),
         )
-        scores = scoring.market_scores(result)
+        scores = scoring.market_scores(
+            result, variant=get_variant(runtime.settings.newsroom_selection_variant)
+        )
         relevant = scoring.is_relevant(scores)
         try:
             choice = resolve_event_choice(result, candidates, relevant=relevant)

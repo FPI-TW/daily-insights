@@ -46,6 +46,7 @@ from daily_insights_api.modules.newsroom.providers import CallAudit
 from daily_insights_api.modules.newsroom.queue import FatalStageError, RetryableStageError
 from daily_insights_api.modules.newsroom.scoring import STORY_TYPE_CAP, UNSELECTABLE_STORY_TYPES
 from daily_insights_api.modules.newsroom.translation import contract_error, load_prompt
+from daily_insights_api.modules.newsroom.variants import SelectionVariant, get_variant
 from daily_insights_api.modules.newsroom.worker import Runtime
 
 logger = logging.getLogger(__name__)
@@ -79,8 +80,6 @@ _KEY_FIGURE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)(?![\d.])(?!\s*[年月日季
 # half were split duplicates or stories another market already carried).
 CANDIDATE_LIMIT = 40
 HEADLINES_PER_EVENT = 5
-MULTI_SOURCE_BONUS = 5.0
-MULTI_SOURCE_BONUS_CAP = 20.0
 FIVE_STAR_UNLIMITED = 5
 FOUR_STAR_LIMIT = 5
 FILL_TARGET = 5
@@ -116,13 +115,45 @@ class ArticleSignal:
     cap: float = math.inf
 
 
-def event_score(signals: Sequence[ArticleSignal]) -> float:
-    """``max(min(score * source weight, cap))`` plus 5 per extra outlet, capped at +20."""
+def distinct_outlets(signals: Sequence[ArticleSignal]) -> int:
+    """The ``n`` of the multi-source bonus: distinct publishers among ``signals``.
+
+    One outlet's several feeds count once. Outlets rewriting one another still
+    count separately; independent sources are a planned replacement (P1).
+    """
+    return len({signal.outlet for signal in signals})
+
+
+def source_bonus(n: int, market: str, *, variant: SelectionVariant) -> float:
+    """Points for ``n`` outlets reporting an event in ``market``; one outlet earns none."""
+    if n <= 1:
+        return 0.0
+    step = variant.source_bonus_step[market]
+    cap = variant.source_bonus_cap[market]
+    if variant.source_bonus_mode == "linear":
+        return min(step * (n - 1), cap)
+    return min(step * math.log2(n), cap)
+
+
+def clamp_weight(weight: float, *, variant: SelectionVariant) -> float:
+    """``weight`` held inside the variant's range, so no source dominates on weight alone."""
+    if variant.weight_clamp is None:
+        return weight
+    low, high = variant.weight_clamp
+    return min(max(weight, low), high)
+
+
+def event_score(
+    signals: Sequence[ArticleSignal], market: str, *, variant: SelectionVariant
+) -> float:
+    """``max(min(score * clamped source weight, cap))`` plus the multi-source bonus."""
     if not signals:
         return 0.0
-    best = max(min(signal.market_score * signal.weight, signal.cap) for signal in signals)
-    extra_outlets = len({signal.outlet for signal in signals}) - 1
-    return best + min(extra_outlets * MULTI_SOURCE_BONUS, MULTI_SOURCE_BONUS_CAP)
+    best = max(
+        min(signal.market_score * clamp_weight(signal.weight, variant=variant), signal.cap)
+        for signal in signals
+    )
+    return best + source_bonus(distinct_outlets(signals), market, variant=variant)
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +207,16 @@ def apply_quota(rated: Sequence[Rated], story_groups: StoryGroups | None = None)
         fillers = [item for item in ordered if item.stars == FILLER_STARS]
         chosen += fillers[: FILL_TARGET - len(chosen)]
     return sorted(chosen, key=_quota_order)
+
+
+def needs_five_star_review(five_star_count: int, *, variant: SelectionVariant) -> bool:
+    """More visible 5-star picks in one market edition than the variant's soft cap.
+
+    The quota still keeps every 5-star event; this only asks a person to check
+    the ratings, since a day rarely carries more than a few market-wide stories.
+    """
+    cap = variant.five_star_soft_cap
+    return cap is not None and five_star_count > cap
 
 
 def fallback_selection(
@@ -314,7 +355,7 @@ def _signals(rows: Sequence[_ArticleRow], market: str) -> list[ArticleSignal]:
 
 
 async def event_scores(
-    database: AsyncSession, edition_date: date, market: str
+    database: AsyncSession, edition_date: date, market: str, *, variant: SelectionVariant
 ) -> dict[uuid.UUID, float]:
     """``market``'s score (spec §6.3 step 2) for every open event of the window.
 
@@ -323,7 +364,10 @@ async def event_scores(
     with this, while assembly additionally filters (``rank_candidates``).
     """
     _, articles = await _load_event_articles(database, edition_date)
-    return {event_id: event_score(_signals(rows, market)) for event_id, rows in articles.items()}
+    return {
+        event_id: event_score(_signals(rows, market), market, variant=variant)
+        for event_id, rows in articles.items()
+    }
 
 
 def _candidate_order(candidate: Candidate) -> tuple[float, int, int, int, datetime, str]:
@@ -344,6 +388,7 @@ def rank_candidates(
     market: str,
     *,
     excluded: Collection[uuid.UUID] = (),
+    variant: SelectionVariant,
 ) -> list[Candidate]:
     """Eligible events for ``market`` by score: relevant, scored, with a full text.
 
@@ -365,7 +410,7 @@ def rank_candidates(
             Candidate(
                 event_id=event_id,
                 working_title=titles[event_id],
-                score=event_score(signals),
+                score=event_score(signals, market, variant=variant),
                 headlines=tuple(
                     (row.title, row.source_name) for row in best_first[:HEADLINES_PER_EVENT]
                 ),
@@ -385,11 +430,15 @@ def _candidate_union(
     titles: dict[uuid.UUID, str],
     articles: dict[uuid.UUID, list[_ArticleRow]],
     excluded: Collection[uuid.UUID] = (),
+    *,
+    variant: SelectionVariant,
 ) -> dict[uuid.UUID, Candidate]:
     """Every market's candidates, each event once at its best score."""
     union: dict[uuid.UUID, Candidate] = {}
     for market in MARKET_CODES:
-        for candidate in rank_candidates(titles, articles, market, excluded=excluded):
+        for candidate in rank_candidates(
+            titles, articles, market, excluded=excluded, variant=variant
+        ):
             kept = union.get(candidate.event_id)
             if kept is None or candidate.score > kept.score:
                 union[candidate.event_id] = candidate
@@ -558,7 +607,9 @@ async def merge_duplicate_candidates(
     that stay open (one story told from several angles, or related stories the
     model over-grouped) are returned as a story group.
     """
-    union = _candidate_union(titles, articles)
+    union = _candidate_union(
+        titles, articles, variant=get_variant(runtime.settings.newsroom_selection_variant)
+    )
     if len(union) < 2:
         return DuplicateScreen()
     event_ids = list(union)
@@ -758,7 +809,9 @@ async def screen_published_repeats(
     published event's is excluded; any other match stays a candidate and is
     shown to the editor as a follow-up. Every match is recorded.
     """
-    union = _candidate_union(titles, articles)
+    union = _candidate_union(
+        titles, articles, variant=get_variant(runtime.settings.newsroom_selection_variant)
+    )
     if not union:
         return RepeatScreen()
     async with runtime.session_factory() as database:
@@ -1155,7 +1208,13 @@ async def _assemble_market(
         )
     if published is not None:
         return MarketReport(market, "skipped_published")
-    candidates = rank_candidates(titles, articles, market, excluded=repeats.excluded)
+    candidates = rank_candidates(
+        titles,
+        articles,
+        market,
+        excluded=repeats.excluded,
+        variant=get_variant(runtime.settings.newsroom_selection_variant),
+    )
     by_id = {candidate.event_id: candidate for candidate in candidates}
     ratings = (
         await _rate(

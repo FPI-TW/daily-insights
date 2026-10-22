@@ -366,8 +366,8 @@ async def test_assembly_selects_by_quota_and_queues_analysis(
         ("global-5", 3),
     ]
     assert [item.rank for item in items] == [1, 2, 3, 4]
-    # Weighted score 50 x 1.5 plus one extra source.
-    assert items[0].editor_score == 80.0
+    # Score 50 with the 1.5 weight clamped to 1.1, plus p0's bonus for two outlets.
+    assert items[0].editor_score == pytest.approx(61.0)
     assert all(item.why_status == "pending" and item.origin == "model" for item in items)
     # tw_equity has no event scored above zero for it.
     assert await _items(newsroom_database, editions["tw_equity"].id) == []
@@ -403,7 +403,7 @@ async def test_assembly_selects_by_quota_and_queues_analysis(
         ("global-1", 1, False),
     ]
     assert [row.position for row in ratings] == list(range(1, 9))
-    assert ratings[0].score == 80.0
+    assert ratings[0].score == pytest.approx(61.0)
     assert all(
         row.prompt_version == assembly.EDITOR_PROMPT_VERSION and not row.follow_up
         for row in ratings
@@ -1462,8 +1462,8 @@ async def test_feeds_of_one_outlet_count_as_one_source(
     scores = sorted(
         item.editor_score or 0.0 for item in await _items(newsroom_database, editions["global"].id)
     )
-    # Only the second outlet earns the +5 bonus.
-    assert scores == [60.0, 65.0]
+    # Only the second outlet earns the bonus (p0: 6 x log2(2)).
+    assert scores == [60.0, 66.0]
 
 
 async def test_equal_scores_rank_by_corroboration_then_age(

@@ -37,6 +37,7 @@ from daily_insights_api.modules.newsroom.translation import (
     to_zh_hans,
     zh_hant_digest,
 )
+from daily_insights_api.modules.newsroom.variants import BASELINE
 from daily_insights_api.modules.orchestration.functions import _run_newsroom_assemble
 from daily_insights_api.modules.orchestration.worker import ClaimedFunction
 
@@ -190,25 +191,34 @@ def test_event_score_uses_best_weighted_article_plus_source_bonus() -> None:
         ArticleSignal(source_b, 70, 0.5),
         ArticleSignal(source_c, 10, 2.0),
     ]
-    assert event_score(signals) == 90.0 + 10.0
+    assert event_score(signals, "global", variant=BASELINE) == 90.0 + 10.0
 
 
 def test_event_score_caps_multi_source_bonus_at_twenty() -> None:
     signals = [ArticleSignal(f"outlet-{index}", 50, 1.0) for index in range(9)]
-    assert event_score(signals) == 70.0
+    assert event_score(signals, "global", variant=BASELINE) == 70.0
 
 
 def test_event_score_single_source_has_no_bonus() -> None:
     source = "Reuters"
-    assert event_score([ArticleSignal(source, 40, 1.0), ArticleSignal(source, 30, 1.0)]) == 40.0
-    assert event_score([]) == 0.0
+    assert (
+        event_score(
+            [ArticleSignal(source, 40, 1.0), ArticleSignal(source, 30, 1.0)],
+            "global",
+            variant=BASELINE,
+        )
+        == 40.0
+    )
+    assert event_score([], "global", variant=BASELINE) == 0.0
 
 
 def test_story_type_cap_holds_after_the_source_weight() -> None:
     # An opinion piece at its 60 ceiling stays at 60 from a 1.2-weighted source.
-    assert event_score([ArticleSignal("CNA", 60, 1.2, cap=60)]) == 60.0
-    assert event_score([ArticleSignal("CNA", 40, 1.2, cap=60)]) == 48.0
-    assert event_score([ArticleSignal("CNA", 82, 1.2)]) == pytest.approx(98.4)
+    assert event_score([ArticleSignal("CNA", 60, 1.2, cap=60)], "global", variant=BASELINE) == 60.0
+    assert event_score([ArticleSignal("CNA", 40, 1.2, cap=60)], "global", variant=BASELINE) == 48.0
+    assert event_score(
+        [ArticleSignal("CNA", 82, 1.2)], "global", variant=BASELINE
+    ) == pytest.approx(98.4)
 
 
 def test_fallback_takes_top_five_by_score() -> None:

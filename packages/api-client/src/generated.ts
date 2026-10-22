@@ -2725,6 +2725,8 @@ export interface components {
        * @enum {string}
        */
       market_code: "global" | "tw_equity" | "us_equity"
+      /** Needs Five Star Review */
+      needs_five_star_review: boolean
       /** Published At */
       published_at: string | null
       /** Published By User Id */
