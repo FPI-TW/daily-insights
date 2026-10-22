@@ -25,7 +25,6 @@ from pathlib import Path
 from daily_insights_api import models as registered_models  # noqa: F401
 from daily_insights_api.modules.newsroom.replay import metrics, runner, snapshot
 from daily_insights_api.modules.newsroom.replay.cache import ReplayCacheMiss
-from daily_insights_api.modules.newsroom.replay.pipeline import VariantUnsupportedError
 from daily_insights_api.modules.newsroom.variants import VARIANTS, get_variant
 
 DEFAULT_START = date(2026, 10, 18)
@@ -147,7 +146,7 @@ def main(args: list[str] | None = None) -> int:
                 print(options.output)
             else:
                 print(text, end="")
-    except (snapshot.ReplayError, ReplayCacheMiss, VariantUnsupportedError) as error:
+    except (snapshot.ReplayError, ReplayCacheMiss) as error:
         print(f"newsroom replay failed: {error}", file=sys.stderr)
         return 1
     return 0

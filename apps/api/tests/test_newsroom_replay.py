@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from daily_insights_api.modules.newsroom.contracts import EditorResult, TriageResult
 from daily_insights_api.modules.newsroom.models import NewsroomEvent, NewsroomLlmCall
 from daily_insights_api.modules.newsroom.providers import CallAudit
-from daily_insights_api.modules.newsroom.replay import metrics, runner, snapshot
+from daily_insights_api.modules.newsroom.replay import metrics, pipeline, runner
 from daily_insights_api.modules.newsroom.replay.cache import (
     CachedEmbedder,
     CachedJsonModel,
@@ -26,6 +26,7 @@ from daily_insights_api.modules.newsroom.replay.cache import (
 )
 from daily_insights_api.modules.newsroom.replay.metrics import EventRow, MarketDay, TrackedRow
 from daily_insights_api.modules.newsroom.replay.tw50 import CONSTITUENTS, match_tw50
+from daily_insights_api.modules.newsroom.variants import BASELINE, P0
 from daily_insights_api.scripts import run_newsroom_replay
 
 TRIAGE_AUDIT = CallAudit("triage", uuid.UUID(int=7), "triage-v2:abc")
@@ -344,6 +345,7 @@ def _event(
     topic: str = "companies",
     tw50: list[str] | None = None,
     position: int = 1,
+    reason: str = "",
 ) -> EventRow:
     return EventRow(
         event_id=name,
@@ -357,13 +359,14 @@ def _event(
         topic=topic,
         prod_event_ids=[name],
         tw50=tw50 or [],
+        reason=reason,
     )
 
 
 def _day(market: str = "tw_equity") -> MarketDay:
     picks = [
         _event("a", stars=5, impact=5, picked=True, tw50=["2330"], position=1),
-        _event("b", stars=4, impact=2, picked=True, position=2),
+        _event("b", stars=4, impact=2, picked=True, position=2, reason="needs a reason"),
         _event("c", stars=3, impact=3, picked=True, topic="economy", position=3),
     ]
     return MarketDay(
@@ -434,6 +437,7 @@ def test_the_summary_lists_the_overview_edition_and_tracking() -> None:
     assert "| editor x | 2 | 1 | 1 | 10 | 2 | 5 | 1 |" in text
     assert "- 2026-10-20: rescored" in text
     assert "### triage impact 與星等差距 ≥ 2 級 (2 則)" in text
+    assert "| 2 | 50.0 | ★4 | 2 | 是 | title b | needs a reason |" in text
 
 
 def test_compare_shows_both_runs_side_by_side() -> None:
@@ -451,6 +455,8 @@ def test_compare_shows_both_runs_side_by_side() -> None:
     assert "| 僅左 | ★3 |" in text
     assert "| 僅右 | — | — | ★4 |" in text
     assert "| 聯茂擴產 | 2026-10-20 | tw_equity | title b |" in text
+    assert "## p0/score: triage impact 與星等差距 ≥ 2 級 (2 則)" in text
+    assert "| 2026-10-20 | tw_equity | 2 | 50.0 | ★4 | 2 | 是 | title b | needs a reason |" in text
 
 
 def test_tracks_are_parsed_from_the_command_line() -> None:
@@ -497,13 +503,21 @@ def test_the_script_defaults_to_the_review_window() -> None:
         run_newsroom_replay.parse_args(["run", "--start", "2026-10-22", "--end", "2026-10-18"])
 
 
-def test_the_script_refuses_a_variant_this_branch_cannot_score(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
-) -> None:
-    def unexpected(*_: Any) -> None:
-        raise AssertionError("no snapshot before the variant check")
-
-    monkeypatch.setattr(snapshot, "prepare", unexpected)
-    code = run_newsroom_replay.main(["--root", str(tmp_path), "run", "--variant", "p0"])
-    assert code == 1
-    assert "variant 'p0'" in capsys.readouterr().err
+def test_rescoring_follows_the_variant() -> None:
+    result = pipeline.triage_result(
+        topic="economy",
+        story_type="data",
+        signals={
+            "impact": 5,
+            "new_facts": False,
+            "directness": {"global": 4, "tw_equity": 2, "us_equity": 0},
+        },
+    )
+    assert result is not None and result.escalation == 0
+    assert pipeline.market_scores(result, variant=BASELINE) == {
+        "global": 81,
+        "tw_equity": 52,
+        "us_equity": 0,
+    }
+    assert pipeline.market_scores(result, variant=P0)["global"] == 85
+    assert pipeline.triage_result(topic=None, story_type="data", signals={"impact": 3}) is None

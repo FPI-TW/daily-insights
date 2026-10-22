@@ -228,6 +228,11 @@ export function NewsroomReviewPage({
                 {t(`newsroomAdminMarket_${code}`)}
               </span>
               <EditionStatus edition={entry?.edition ?? null} />
+              {entry?.edition?.needs_five_star_review ? (
+                <StatusBadge tone="caution">
+                  {t("newsroomAdminFiveStarReviewShort")}
+                </StatusBadge>
+              ) : null}
               <span className="text-xs">
                 {t("newsroomAdminItemCount", {
                   count: entry?.counts.active ?? 0,
@@ -453,12 +458,12 @@ function EditionHeader({
         ) : null}
       </div>
       {edition.selection_mode === "fallback" ? (
-        <p
-          role="alert"
-          className="m-0 rounded-lg border border-market-caution/50 bg-market-caution/10 p-3 text-sm font-bold text-market-caution"
-        >
+        <CautionNotice role="alert">
           {t("newsroomAdminFallbackWarning")}
-        </p>
+        </CautionNotice>
+      ) : null}
+      {edition.needs_five_star_review ? (
+        <CautionNotice>{t("newsroomAdminFiveStarReview")}</CautionNotice>
       ) : null}
       {edition.ignored_pending_triage > 0 ? (
         <p className="m-0 text-sm text-sea-ink-soft">
@@ -468,6 +473,23 @@ function EditionHeader({
         </p>
       ) : null}
     </div>
+  )
+}
+
+function CautionNotice({
+  role,
+  children,
+}: {
+  role?: "alert"
+  children: ReactNode
+}) {
+  return (
+    <p
+      role={role}
+      className="m-0 rounded-lg border border-market-caution/50 bg-market-caution/10 p-3 text-sm font-bold text-market-caution"
+    >
+      {children}
+    </p>
   )
 }
 

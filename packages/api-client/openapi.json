@@ -3601,6 +3601,10 @@
             "title": "Market Code",
             "type": "string"
           },
+          "needs_five_star_review": {
+            "title": "Needs Five Star Review",
+            "type": "boolean"
+          },
           "published_at": {
             "anyOf": [
               {
@@ -3648,7 +3652,8 @@
           "published_at",
           "published_by_user_id",
           "ignored_pending_triage",
-          "late_fill_closed_at"
+          "late_fill_closed_at",
+          "needs_five_star_review"
         ],
         "title": "NewsroomAdminEdition",
         "type": "object"

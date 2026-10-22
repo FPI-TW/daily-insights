@@ -81,6 +81,8 @@ class EventRow:
     # 1-based place in the edition when picked.
     rank: int | None = None
     follow_up: bool = False
+    # The editor's one-sentence reason (editor prompt v4 on).
+    reason: str = ""
     # Highest triage impact and escalation among the event's relevant reports.
     impact: int | None = None
     escalation: int | None = None
@@ -294,6 +296,20 @@ def _agreement(days: Sequence[MarketDay]) -> list[str]:
     return [*lines, ""]
 
 
+def _gap_table(rows: Sequence[EventRow]) -> list[str]:
+    lines = [
+        "| 名次 | 粗分 | 星等 | impact | 入選 | 標題 | 精選 reason |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        lines.append(
+            f"| {row.position or '—'} | {_score(row.score)} | {_stars(row.stars)}"
+            f" | {row.impact or '—'} | {'是' if row.picked else '否'} | {_cell(row.title)}"
+            f" | {_cell(row.reason) or '—'} |"
+        )
+    return lines
+
+
 def _reproduction(days: Sequence[MarketDay]) -> list[str]:
     checked = [day for day in days if day.reproduction is not None]
     if not checked:
@@ -415,7 +431,7 @@ def summary(meta: dict[str, Any], days: Sequence[MarketDay]) -> str:
         ]
         gaps = day.impact_gaps()
         lines += [f"### triage impact 與星等差距 ≥ {GAP_LEVELS} 級 ({len(gaps)} 則)", ""]
-        lines += [*_event_table(gaps, with_rank=False), ""] if gaps else ["- 無", ""]
+        lines += [*_gap_table(gaps), ""] if gaps else ["- 無", ""]
     return "\n".join(lines) + "\n"
 
 
@@ -480,6 +496,25 @@ def compare(
                 f" | {_stars(b.stars) if b else '—'} | {_score(b.score) if b else '—'}"
                 f" | {_cell(title)} |"
             )
+        lines.append("")
+    runs: tuple[tuple[str, Sequence[MarketDay]], ...] = (
+        (left_name, left),
+        (right_name, [theirs for _, theirs in pairs if theirs is not None]),
+    )
+    for name, run_days in runs:
+        gaps = [(gap_day, row) for gap_day in run_days for row in gap_day.impact_gaps()]
+        lines += [
+            f"## {name}: triage impact 與星等差距 ≥ {GAP_LEVELS} 級 ({len(gaps)} 則)",
+            "",
+            "| 日期 | 市場 | 名次 | 粗分 | 星等 | impact | 入選 | 標題 | 精選 reason |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        lines += [
+            f"| {gap_day.edition_date} | {gap_day.market} | {row.position or '—'}"
+            f" | {_score(row.score)} | {_stars(row.stars)} | {row.impact or '—'}"
+            f" | {'是' if row.picked else '否'} | {_cell(row.title)} | {_cell(row.reason) or '—'} |"
+            for gap_day, row in gaps
+        ]
         lines.append("")
     lines += [
         "## 指定事件追蹤",

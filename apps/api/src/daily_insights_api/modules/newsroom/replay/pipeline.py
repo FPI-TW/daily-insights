@@ -1,9 +1,9 @@
 """The pipeline functions a replay calls with a variant, in one place.
 
-Scoring and quota code takes the variant as a keyword-only argument once the
-P0 work lands; keeping every such call here means a signature change touches
-this module only. Everything else a replay runs (triage, the screens, the
-editor, ``write_draft``) goes through ``Runtime.settings`` as in production.
+Scoring, ranking and quota code take the variant as a keyword-only argument;
+keeping every such call here means a signature change touches this module
+only. Everything else a replay runs (triage, the screens, the editor,
+``write_draft``) reads the variant from ``Runtime.settings`` as in production.
 """
 
 import uuid
@@ -13,19 +13,7 @@ from typing import Any
 
 from daily_insights_api.modules.newsroom import assembly, scoring
 from daily_insights_api.modules.newsroom.contracts import TriageResult
-from daily_insights_api.modules.newsroom.variants import BASELINE, SelectionVariant
-
-
-class VariantUnsupportedError(RuntimeError):
-    """This branch's scoring code cannot build ``variant`` yet."""
-
-
-def require_supported(variant: SelectionVariant) -> None:
-    if variant is not BASELINE:
-        raise VariantUnsupportedError(
-            f"variant {variant.name!r} needs the P0 scoring code; "
-            "this branch only reproduces the baseline"
-        )
+from daily_insights_api.modules.newsroom.variants import SelectionVariant
 
 
 def triage_result(
@@ -47,12 +35,10 @@ def triage_result(
 
 
 def market_scores(result: TriageResult, *, variant: SelectionVariant) -> dict[str, int]:
-    require_supported(variant)
-    return scoring.market_scores(result)
+    return scoring.market_scores(result, variant=variant)
 
 
-def is_relevant(scores: dict[str, int], *, variant: SelectionVariant) -> bool:
-    require_supported(variant)
+def is_relevant(scores: dict[str, int]) -> bool:
     return scoring.is_relevant(scores)
 
 
@@ -78,11 +64,14 @@ def rank_candidates(
     limit: bool = True,
 ) -> list[assembly.Candidate]:
     """``assembly.rank_candidates``; with ``limit=False`` every eligible event, same order."""
-    require_supported(variant)
     if limit:
-        return assembly.rank_candidates(titles, articles, market, excluded=excluded)
+        return assembly.rank_candidates(
+            titles, articles, market, excluded=excluded, variant=variant
+        )
     with _unlimited_candidates():
-        return assembly.rank_candidates(titles, articles, market, excluded=excluded)
+        return assembly.rank_candidates(
+            titles, articles, market, excluded=excluded, variant=variant
+        )
 
 
 def apply_quota(
@@ -91,11 +80,13 @@ def apply_quota(
     *,
     variant: SelectionVariant,
 ) -> list[assembly.Rated]:
-    require_supported(variant)
+    # The quota rules are the same for every variant; the soft cap only flags.
+    del variant
     return assembly.apply_quota(rated, story_groups)
 
 
 def five_star_review(picks: list[assembly.Rated], *, variant: SelectionVariant) -> bool:
-    """Whether the variant's soft cap would flag these picks for review."""
-    cap = variant.five_star_soft_cap
-    return cap is not None and sum(1 for pick in picks if pick.stars == 5) > cap
+    """Whether the admin console would flag these picks for review (soft cap)."""
+    return assembly.needs_five_star_review(
+        sum(1 for pick in picks if pick.stars == 5), variant=variant
+    )

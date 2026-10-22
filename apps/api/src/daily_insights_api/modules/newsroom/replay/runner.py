@@ -343,7 +343,7 @@ async def _rescore(context: _Context, day: date) -> None:
                 incomplete += 1
                 continue
             scores = pipeline.market_scores(result, variant=context.variant)
-            relevant = pipeline.is_relevant(scores, variant=context.variant)
+            relevant = pipeline.is_relevant(scores)
             if scores == stored and relevant == bool(was_relevant):
                 continue
             changed += 1
@@ -431,6 +431,7 @@ def _row(
     rank: int | None = None,
     follow_up: bool = False,
     headlines: Sequence[str] = (),
+    reason: str = "",
 ) -> EventRow:
     details = info.get(event_id)
     shown = list(headlines) or list(details.titles[:HEADLINES_SHOWN] if details else ())
@@ -443,6 +444,7 @@ def _row(
         picked=picked,
         rank=rank,
         follow_up=follow_up,
+        reason=reason,
         impact=details.impact if details else None,
         escalation=details.escalation if details else None,
         topic=details.topic if details else None,
@@ -744,6 +746,7 @@ async def _assemble_day(context: _Context, day: date) -> list[MarketDay]:
                     picked=rating.event_id in ranks,
                     rank=ranks.get(rating.event_id),
                     follow_up=rating.follow_up,
+                    reason=rating.reason or "",
                     headlines=[t for t, _ in by_id[rating.event_id].headlines]
                     if rating.event_id in by_id
                     else (),
@@ -1024,7 +1027,6 @@ def _run_name(environment: ReplayEnvironment, options: RunOptions, now: datetime
 
 async def run(environment: ReplayEnvironment, options: RunOptions) -> Path:
     """Replay ``options.snapshot`` and write its run directory; returns the directory."""
-    pipeline.require_supported(options.variant)
     if not 1 <= options.concurrency <= MAX_CONCURRENCY:
         raise ReplayError(f"--concurrency must be between 1 and {MAX_CONCURRENCY}")
     # Nothing a replay starts may reach Slack, whatever the shell exported.

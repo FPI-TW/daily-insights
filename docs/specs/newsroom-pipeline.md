@@ -189,6 +189,9 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 - 輸出（`newsroom/contracts.py::TriageResult`）：`topic`、`story_type`、`new_facts`、`impact`（1–5）、各市場 `directness`（0–4）、
   `event`：`{"match": "<event_id>"}` 或 `{"new": "<working_title>"}`。`market_scores` 與 `relevant` 由程式（`scoring.py`）計算，
   稿件類型上限（盤勢 40、預告 55、評論 60、公關稿 45）由程式套用。不相關文章不歸屬事件。（2026-10-14 修正：原本由模型直接給分。）
+- 評分常數由 selection variant 決定（`newsroom/variants.py`，設定 `DAILY_INSIGHTS_NEWSROOM_SELECTION_VARIANT`，預設 `p0`；`baseline` 為回滾用）：
+  impact 1–5 的基礎分 p0 為 30／45／62／80／100（baseline 40／54／68／82／96），再乘各市場 directness 係數；無新事實扣 15 分，
+  p0 在初篩判定 `escalation = 2`（明顯升級）時不扣。`triage_signals` 保存 `escalation`，舊資料沒有此鍵時視為 0。
 - 發布時間早於收稿窗起點 2 小時以上的文章只能併入既有事件，不得開新事件（池外手動文章除外）。
 - 併發：同一 `edition_date` 的「事件歸屬寫入」以 advisory lock 序列化，避免兩篇同事件文章同時開新事件；
   LLM 呼叫本身可並行，寫入時若選擇「新事件」須在鎖內再做一次 kNN（相似度 ≥ 門檻則改歸屬既有事件）。
@@ -200,7 +203,9 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 **組稿（08:00，由統一編排 daily routine 的 `newsroom_assemble` function 觸發，冪等）**
 
 1. 等待窗內初篩（§3）。
-2. 每市場計算事件粗分：`max(article.market_scores[m] × source.weight)` + 多來源加分（每多一家不同媒體 +5，最多 +20；同一媒體的多個頻道只算一家）。
+2. 每市場計算事件粗分：`max(article.market_scores[m] × source.weight)` + 多來源加分，n 為不同媒體數（同一媒體的多個頻道只算一家）。
+   p0：權重先夾在 [0.9, 1.1]，加分為 `min(CAP, STEP × log2(n))`（global、us_equity STEP 6、CAP 15；tw_equity STEP 4、CAP 10）；
+   baseline：權重不夾，每多一家 +5，最多 +20。
    稿件類型上限在乘上來源權重之後套用。
    盤勢稿不計分、不計來源數。
 3. 只有 `relevant` 且含至少一篇 `body_status = ok` 文章、且有非盤勢稿的事件可入選；取粗分前 40 名（同分依來源數、篇數、
@@ -208,7 +213,12 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
    附上前版標題送精選。
 4. 精選呼叫（每市場一次）：輸入事件 id、working title、最多 5 則報導標題與來源、報導家數，以及去重分組但未合併者的 `story_group`；輸出每個事件的 `stars`（1–5）。
    評分準則沿用並改寫 `news/prompts/selection_criteria.txt` 的精神（市場相關性、可信度、重要性）。
+   p0（editor prompt v4，2026-10-22）另外輸入事件內最高 `max_impact`、最高 `max_escalation`、主要 `main_story_type`（篇數最多的非盤勢類型）
+   與代表報導的 `lead_summary`（feed 摘要前兩句、約 150 字），prompt 加入逐市場星等錨點；輸出每筆可附 `reason`（30 字內，
+   星等與 `max_impact` 相差 ≥ 2 時要求填寫，缺漏或過長不讓呼叫失敗），寫入 `newsroom_editor_ratings.reason`。
 5. 套 D8 配額（程式）。精選失敗（重試耗盡）→ `selection_mode = fallback`：依粗分取前 5 名（同組上限照樣適用）、`stars = null`，Slack 通知。
+   五星軟上限（p0 為 3）：5 星仍全收，但某市場版可見（未移除、隱藏、放棄）的 5 星項目超過上限時，後台版次回應的
+   `needs_five_star_review` 為 true，審核頁顯示「五星待覆核」提示；即時計算，不存欄位，Slack 訊息不變。
 6. 建立 `draft` 版次與項目，事件 `analysis_status = pending`、項目 `why_status = pending`。
 7. 全部市場組稿完成後 Slack 通知「草稿完成」（各市場則數、5 星事件標題、後台連結）。
 

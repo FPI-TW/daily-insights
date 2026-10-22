@@ -39,6 +39,7 @@ from daily_insights_api.modules.newsroom.queue import (
     run_claimed,
 )
 from daily_insights_api.modules.newsroom.reembed import reembed_articles
+from daily_insights_api.modules.newsroom.variants import BASELINE, P0, SelectionVariant
 from daily_insights_api.modules.newsroom.worker import Runtime, StageBinding
 
 pytestmark = pytest.mark.integration
@@ -81,6 +82,8 @@ class FakeJsonModel:
     # Answers the embed stage's translation of non-Chinese headlines.
     translate: Reply = _translated
     translations: list[dict[str, Any]] = field(default_factory=list)
+    # The selection variant the runtime under test is configured with.
+    variant: SelectionVariant = P0
 
     async def complete(
         self,
@@ -117,7 +120,7 @@ class FakeJsonModel:
                 )
             )
             return result_type.model_validate(answer)
-        assert system == triage.load_triage_prompt().text
+        assert system == triage.load_triage_prompt(variant=self.variant).text
         self.payloads.append(payload)
         if self.barrier is not None:
             await self.barrier.wait()
@@ -167,11 +170,13 @@ def _runtime(
     *,
     llm: FakeJsonModel | None = None,
     embedder: FakeEmbedder | None = None,
+    variant: SelectionVariant = P0,
 ) -> Runtime:
     return Runtime(
         settings=Settings(
             newsroom_triage_model="triage-test-model",
             newsroom_translate_model="translate-test-model",
+            newsroom_selection_variant=variant.name,
         ),
         session_factory=session_factory,
         llm=llm or FakeJsonModel(lambda payload: relevant({"new": "unused"})),
@@ -479,11 +484,13 @@ async def test_first_article_opens_a_new_event(
     row = await _get(newsroom_database, NewsroomArticle, article_id)
     assert row.triage_status == "done"
     assert (row.relevant, row.topic, row.story_type) == (True, "policy", "official")
-    assert row.market_scores == {"global": 82, "tw_equity": 57, "us_equity": 70}
+    # Impact 4 is 80 on the default (p0) scale, scaled by each market's directness.
+    assert row.market_scores == {"global": 80, "tw_equity": 56, "us_equity": 68}
     assert row.triage_signals == {
         "impact": 4,
         "new_facts": True,
         "directness": {"global": 4, "tw_equity": 2, "us_equity": 3},
+        "escalation": 0,
         "stale": False,
     }
     assert row.triaged_at is not None
@@ -501,8 +508,23 @@ async def test_first_article_opens_a_new_event(
         article_id,
         "triage-test-model",
     )
-    assert audit.prompt_version == triage.load_triage_prompt().version
+    assert audit.prompt_version == triage.load_triage_prompt(variant=P0).version
     assert audit.error_code is None
+
+
+async def test_baseline_variant_triages_with_the_v2_prompt(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id = await _source(newsroom_database)
+    await _queued_for_triage(newsroom_database, source_id, "Fed holds rates", 0)
+    llm = FakeJsonModel(lambda payload: relevant({"new": "聯準會維持利率不變"}), variant=BASELINE)
+
+    assert await _run(_runtime(newsroom_database, llm=llm, variant=BASELINE), "triage") == ["done"]
+
+    async with newsroom_database() as database:
+        audit = (await database.scalars(select(NewsroomLlmCall))).one()
+    assert audit.prompt_version is not None
+    assert audit.prompt_version.startswith("triage-v2:")
 
 
 async def test_body_is_withheld_unless_the_fetch_succeeded(
@@ -597,7 +619,7 @@ async def test_irrelevant_article_is_scored_but_not_clustered(
 
     row = await _get(newsroom_database, NewsroomArticle, article_id)
     assert (row.triage_status, row.relevant, row.event_id) == ("done", False, None)
-    assert row.market_scores == {"global": 0, "tw_equity": 14, "us_equity": 0}
+    assert row.market_scores == {"global": 0, "tw_equity": 13, "us_equity": 0}
     assert await _count(newsroom_database, NewsroomEvent) == 0
 
 

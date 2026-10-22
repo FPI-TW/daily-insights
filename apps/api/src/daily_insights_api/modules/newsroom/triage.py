@@ -10,7 +10,7 @@ import hashlib
 import logging
 import re
 import uuid
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from functools import cache
@@ -42,6 +42,7 @@ from daily_insights_api.modules.newsroom.queue import (
     RetryableStageError,
     StageHandler,
 )
+from daily_insights_api.modules.newsroom.variants import SelectionVariant, get_variant
 from daily_insights_api.modules.newsroom.worker import Registration, Runtime, StageBinding
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,9 @@ SUMMARY_MAX_CHARS = 1_000
 BODY_EXCERPT_CHARS = 1_500
 EMBED_CONCURRENCY = 2
 TRIAGE_CONCURRENCY = 4
-TRIAGE_PROMPT_BASE_VERSION = "triage-v2"
+# Version label per triage prompt file (``SelectionVariant.triage_prompt``); the
+# content hash is appended, so an edited file never reuses a label.
+TRIAGE_PROMPT_BASE_VERSIONS: Mapping[str, str] = {"triage_v2": "triage-v2", "triage": "triage-v3"}
 EMBED_TRANSLATE_PROMPT_BASE_VERSION = "embed-translate-v1"
 # A headline with any CJK character is embedded as written; others are first
 # translated to Traditional Chinese. Comparing 2026-10-03..14 offline, English
@@ -86,9 +89,14 @@ def _versioned_prompt(name: str, base_version: str) -> TriagePrompt:
     return TriagePrompt(text=text, version=f"{base_version}:{digest[:12]}")
 
 
+def load_triage_prompt(*, variant: SelectionVariant) -> TriagePrompt:
+    """The triage prompt ``variant`` is built with (v2 for baseline, v3 for p0)."""
+    return _triage_prompt(variant.triage_prompt)
+
+
 @cache
-def load_triage_prompt() -> TriagePrompt:
-    return _versioned_prompt("triage", TRIAGE_PROMPT_BASE_VERSION)
+def _triage_prompt(name: str) -> TriagePrompt:
+    return _versioned_prompt(name, TRIAGE_PROMPT_BASE_VERSIONS[name])
 
 
 @cache
@@ -304,6 +312,7 @@ def _embed_handler(runtime: Runtime) -> StageHandler:
 
 def _triage_handler(runtime: Runtime) -> StageHandler:
     async def handle(database: AsyncSession, claim_: Claim) -> dict[str, Any]:
+        variant = get_variant(runtime.settings.newsroom_selection_variant)
         article = (
             await database.execute(
                 select(
@@ -334,7 +343,7 @@ def _triage_handler(runtime: Runtime) -> StageHandler:
             embedding=embedding,
             exclude_article_id=claim_.row_id,
         )
-        prompt = load_triage_prompt()
+        prompt = load_triage_prompt(variant=variant)
         result = await runtime.llm.complete(
             database,
             model=runtime.settings.newsroom_triage_model,
@@ -352,7 +361,7 @@ def _triage_handler(runtime: Runtime) -> StageHandler:
                 stage="triage", subject_id=claim_.row_id, prompt_version=prompt.version
             ),
         )
-        scores = scoring.market_scores(result)
+        scores = scoring.market_scores(result, variant=variant)
         relevant = scoring.is_relevant(scores)
         try:
             choice = resolve_event_choice(result, candidates, relevant=relevant)

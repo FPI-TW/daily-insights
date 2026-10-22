@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, date, datetime
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from daily_insights_api.core.config import Settings
@@ -10,6 +11,7 @@ from daily_insights_api.modules.newsroom.clustering import CandidateEvent
 from daily_insights_api.modules.newsroom.contracts import EventNew, TriageResult
 from daily_insights_api.modules.newsroom.notifier import LogNotifier
 from daily_insights_api.modules.newsroom.queue import RetryableStageError
+from daily_insights_api.modules.newsroom.variants import BASELINE, P0, SelectionVariant
 from daily_insights_api.modules.newsroom.worker import Runtime
 
 
@@ -37,10 +39,11 @@ def _candidate(title: str = "Fed holds rates") -> CandidateEvent:
     return CandidateEvent(id=uuid.uuid4(), working_title=title, similarity=0.9, titles=("A", "B"))
 
 
-def test_prompt_is_versioned_by_its_content() -> None:
-    prompt = triage.load_triage_prompt()
-    assert prompt.version.startswith("triage-v2:")
-    assert len(prompt.version) == len("triage-v2:") + 12
+@pytest.mark.parametrize(("variant", "label"), [(BASELINE, "triage-v2"), (P0, "triage-v3")])
+def test_prompt_is_versioned_by_its_content(variant: SelectionVariant, label: str) -> None:
+    prompt = triage.load_triage_prompt(variant=variant)
+    assert prompt.version.startswith(f"{label}:")
+    assert len(prompt.version) == len(f"{label}:") + 12
     # JSON mode providers require the word in the prompt; the keys must match the contract.
     for needle in (
         "JSON",
@@ -57,6 +60,45 @@ def test_prompt_is_versioned_by_its_content() -> None:
         assert needle in prompt.text
     for story_type in scoring.STORY_TYPE_CAP:
         assert story_type in prompt.text
+
+
+def test_each_variant_loads_its_own_triage_prompt() -> None:
+    baseline = triage.load_triage_prompt(variant=BASELINE)
+    p0 = triage.load_triage_prompt(variant=P0)
+    assert baseline.text != p0.text
+    assert baseline.version.split(":")[1] != p0.version.split(":")[1]
+    # Only v3 asks for escalation; v2 is frozen as the baseline.
+    assert "escalation" not in baseline.text
+    for needle in ("escalation", "航道", "升級"):
+        assert needle in p0.text
+    assert triage.load_triage_prompt(variant=P0) is p0
+
+
+def _answer(**extra: object) -> dict[str, object]:
+    return {
+        "story_type": "catalyst",
+        "new_facts": True,
+        "impact": 5,
+        "directness": {"global": 4, "tw_equity": 3, "us_equity": 3},
+        "topic": "commodities",
+        "event": {"new": "航道遇襲"},
+    } | extra
+
+
+@pytest.mark.parametrize("escalation", [0, 1, 2])
+def test_v3_answers_carry_escalation(escalation: int) -> None:
+    assert TriageResult.model_validate(_answer(escalation=escalation)).escalation == escalation
+
+
+def test_v2_answers_without_escalation_read_as_zero() -> None:
+    assert TriageResult.model_validate(_answer()).escalation == 0
+
+
+@pytest.mark.parametrize("escalation", [-1, 3, 1.5, None])
+def test_escalation_outside_zero_to_two_is_a_schema_error(escalation: object) -> None:
+    # The provider validates the parsed JSON this way and retries a ValidationError.
+    with pytest.raises(ValidationError):
+        TriageResult.model_validate(_answer(escalation=escalation))
 
 
 def test_translation_prompt_is_versioned_and_asks_for_json() -> None:
@@ -119,12 +161,16 @@ def test_payload_carries_candidates_and_body_only_when_given() -> None:
 
 
 def test_scores_follow_impact_and_directness() -> None:
-    assert scoring.market_scores(_result(None, impact=5, directness=(4, 3, 2))) == {
+    assert scoring.market_scores(
+        _result(None, impact=5, directness=(4, 3, 2)), variant=BASELINE
+    ) == {
         "global": 96,
         "tw_equity": 82,
         "us_equity": 67,
     }
-    assert scoring.market_scores(_result(None, impact=1, directness=(4, 0, 1))) == {
+    assert scoring.market_scores(
+        _result(None, impact=1, directness=(4, 0, 1)), variant=BASELINE
+    ) == {
         "global": 40,
         "tw_equity": 0,
         "us_equity": 14,
@@ -133,14 +179,20 @@ def test_scores_follow_impact_and_directness() -> None:
 
 def test_a_weak_link_alone_never_makes_an_article_relevant() -> None:
     for impact in (1, 2, 3, 4, 5):
-        scores = scoring.market_scores(_result(None, impact=impact, directness=(1, 1, 0)))
+        scores = scoring.market_scores(
+            _result(None, impact=impact, directness=(1, 1, 0)), variant=BASELINE
+        )
         assert not scoring.is_relevant(scores)
-    assert scoring.is_relevant(scoring.market_scores(_result(None, impact=1, directness=(4, 0, 0))))
+    assert scoring.is_relevant(
+        scoring.market_scores(_result(None, impact=1, directness=(4, 0, 0)), variant=BASELINE)
+    )
 
 
 def test_no_new_facts_lowers_every_market() -> None:
-    fresh = scoring.market_scores(_result(None, impact=3, directness=(4, 3, 0)))
-    rehash = scoring.market_scores(_result(None, impact=3, directness=(4, 3, 0), new_facts=False))
+    fresh = scoring.market_scores(_result(None, impact=3, directness=(4, 3, 0)), variant=BASELINE)
+    rehash = scoring.market_scores(
+        _result(None, impact=3, directness=(4, 3, 0), new_facts=False), variant=BASELINE
+    )
     assert rehash == {
         "global": fresh["global"] - 15,
         "tw_equity": fresh["tw_equity"] - 15,
@@ -153,7 +205,7 @@ def test_no_new_facts_lowers_every_market() -> None:
     [("price_action", 40), ("preview", 55), ("opinion", 60), ("press_release", 45)],
 )
 def test_story_type_caps_are_applied_by_code(story_type: str, cap: int) -> None:
-    scores = scoring.market_scores(_result(None, story_type=story_type, impact=5))
+    scores = scoring.market_scores(_result(None, story_type=story_type, impact=5), variant=BASELINE)
     assert scores["global"] == cap
     assert max(scores.values()) == cap
 
@@ -163,6 +215,7 @@ def test_triage_signals_keep_the_raw_judgements() -> None:
         "impact": 2,
         "new_facts": False,
         "directness": {"global": 4, "tw_equity": 1, "us_equity": 3},
+        "escalation": 0,
     }
 
 
