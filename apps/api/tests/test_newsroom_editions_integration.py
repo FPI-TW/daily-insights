@@ -1,3 +1,4 @@
+import math
 import os
 import uuid
 from collections.abc import AsyncIterator, Callable, Sequence
@@ -52,7 +53,7 @@ from daily_insights_api.modules.newsroom.queue import (
     claim,
     run_claimed,
 )
-from daily_insights_api.modules.newsroom.variants import P0
+from daily_insights_api.modules.newsroom.variants import BASELINE, OLDNEWS, P0, VariantName
 from daily_insights_api.modules.newsroom.worker import Runtime, StageBinding
 
 pytestmark = pytest.mark.integration
@@ -132,14 +133,18 @@ class NoEmbedder:
 
 
 def _runtime(
-    session_factory: async_sessionmaker[AsyncSession], llm: FakeLlm, embedder: Any = None
+    session_factory: async_sessionmaker[AsyncSession],
+    llm: FakeLlm,
+    embedder: Any = None,
+    *,
+    variant: VariantName = "p0",
 ) -> Runtime:
     return Runtime(
         # Expectations below are p0 scores; the production default is baseline.
         settings=Settings(
             newsroom_enabled=True,
             newsroom_admin_base_url="https://admin.test/",
-            newsroom_selection_variant="p0",
+            newsroom_selection_variant=variant,
         ),
         session_factory=session_factory,
         llm=llm,
@@ -1925,6 +1930,142 @@ async def test_assembly_drops_repeats_of_published_stories_and_flags_follow_ups(
     }
     assert all(row.scope == "published" for row in decisions)
     assert "已排除 1 個前版已上架且無新事實的事件" in _notices(runtime).sent[0].lines
+
+
+def _direction(degrees: float) -> list[float]:
+    radians = math.radians(degrees)
+    return [math.cos(radians), math.sin(radians)] + [0.0] * (EMBEDDING_DIMENSIONS - 2)
+
+
+async def _point(
+    session_factory: async_sessionmaker[AsyncSession], event_id: uuid.UUID, degrees: float
+) -> None:
+    """Embed every article of ``event_id`` along one direction of the first plane."""
+    async with session_factory() as database:
+        await database.execute(
+            update(NewsroomArticle)
+            .where(NewsroomArticle.event_id == event_id)
+            .values(embedding=_direction(degrees))
+        )
+        await database.commit()
+
+
+async def test_nearest_published_ranks_by_mean_article_embedding(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    cna = await _source(newsroom_database, "cna")
+    near = await _published_yesterday(newsroom_database, cna, "near", days_ago=3)
+    middle = await _published_yesterday(newsroom_database, cna, "middle", days_ago=5)
+    far = await _published_yesterday(newsroom_database, cna, "far", days_ago=10)
+    unembedded = await _published_yesterday(newsroom_database, cna, "unembedded", days_ago=4)
+    candidate = await _event(newsroom_database, "candidate", sources=[cna], scores={"global": 90})
+    for event_id, degrees in ((near, 10), (middle, 40), (far, 80), (candidate, 0)):
+        await _point(newsroom_database, event_id, degrees)
+    published = [near, middle, far, unembedded]
+
+    async with newsroom_database() as database:
+        assert await assembly.nearest_published(database, [candidate], published, limit=2) == {
+            candidate: [near, middle]
+        }
+        assert await assembly.nearest_published(database, [candidate], published, limit=5) == {
+            candidate: [near, middle, far]
+        }
+        assert await assembly.nearest_published(database, [candidate], [], limit=5) == {}
+
+
+async def test_repeat_screen_shows_each_candidates_nearest_published_stories(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    cna = await _source(newsroom_database, "cna")
+    stories = {
+        name: await _published_yesterday(newsroom_database, cna, name, days_ago=days_ago)
+        for name, days_ago in (
+            ("jobs", 9),
+            ("rates", 1),
+            ("oil", 2),
+            ("chips", 6),
+            ("ancient", 15),
+        )
+    }
+    hidden = await _published_yesterday(newsroom_database, cna, "hidden", days_ago=3, hidden=True)
+    jobs_again = await _event(newsroom_database, "jobs-again", sources=[cna], scores={"global": 95})
+    oil_again = await _event(newsroom_database, "oil-again", sources=[cna], scores={"global": 90})
+    angles = {"jobs": 0, "rates": 30, "oil": 90, "chips": 60, "ancient": 1}
+    for name, degrees in angles.items():
+        await _point(newsroom_database, stories[name], degrees)
+    await _point(newsroom_database, hidden, 0)
+    await _point(newsroom_database, jobs_again, 0)
+    await _point(newsroom_database, oil_again, 89)
+    candidates = [jobs_again, oil_again]
+
+    async with newsroom_database() as database:
+        nearest_one = replace(OLDNEWS, repeat_nearest_limit=1)
+        shown = await assembly.published_for_screen(
+            database, EDITION_DATE, candidates, variant=nearest_one
+        )
+        # 14 days back: ``ancient`` is out of reach and ``hidden`` never reached readers.
+        assert set(shown) == {stories["jobs"], stories["oil"]}
+        shown = await assembly.published_for_screen(
+            database, EDITION_DATE, candidates, variant=replace(OLDNEWS, repeat_nearest_limit=2)
+        )
+        # A story near both candidates is shown once.
+        assert set(shown) == {stories["jobs"], stories["rates"], stories["oil"], stories["chips"]}
+        # Without a limit the screen shows the whole lookback, as baseline does.
+        assert set(
+            await assembly.published_for_screen(
+                database,
+                EDITION_DATE,
+                candidates,
+                variant=replace(OLDNEWS, repeat_nearest_limit=None),
+            )
+        ) == {stories[name] for name in ("jobs", "rates", "oil", "chips")}
+        assert set(
+            await assembly.published_for_screen(
+                database, EDITION_DATE, candidates, variant=BASELINE
+            )
+        ) == {stories["rates"], stories["oil"]}
+
+
+async def test_oldnews_assembly_drops_a_repeat_of_a_story_published_days_ago(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    cna = await _source(newsroom_database, "cna")
+    jobs = await _published_yesterday(newsroom_database, cna, "jobs", days_ago=9)
+    await _point(newsroom_database, jobs, 0)
+    for index in range(6):
+        other = await _published_yesterday(newsroom_database, cna, f"other{index}", days_ago=1)
+        await _point(newsroom_database, other, 30 + 10 * index)
+    recap = await _event(newsroom_database, "jobs-recap", sources=[cna], scores={"global": 95})
+    await _point(newsroom_database, recap, 2)
+    shown: list[set[str]] = []
+
+    def matches(payload: dict[str, Any]) -> dict[str, Any]:
+        shown.append({item["headline"] for item in payload["published"]})
+        [candidate] = payload["candidates"]
+        return {
+            "matches": [
+                {"event_id": candidate["event_id"], "published_id": str(jobs), "new_facts": False}
+            ]
+        }
+
+    llm = FakeLlm({PublishedMatches: matches, EditorResult: _stars_by_title({}, default=4)})
+    embedder = TitleEmbedder({"jobs": [1.0, 0.0]})
+    runtime = _runtime(newsroom_database, llm, embedder, variant="oldnews")
+
+    report = await assembly.assemble_editions(runtime, EDITION_DATE, sleep=_no_sleep)
+
+    # Five nearest of the seven published stories, the nine-day-old one among them.
+    assert shown == [
+        {"jobs 上架標題", *(f"other{index} 上架標題" for index in range(4))},
+    ]
+    assert report.excluded_repeats == 1
+    async with newsroom_database() as database:
+        [decision] = (await database.scalars(select(NewsroomDedupeDecision))).all()
+    assert (decision.scope, decision.outcome, decision.matched_title) == (
+        "published",
+        "excluded",
+        "jobs",
+    )
 
 
 async def test_repeat_screen_failure_never_blocks_assembly(

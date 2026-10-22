@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, date, datetime
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -11,7 +12,13 @@ from daily_insights_api.modules.newsroom.clustering import CandidateEvent
 from daily_insights_api.modules.newsroom.contracts import EventNew, TriageResult
 from daily_insights_api.modules.newsroom.notifier import LogNotifier
 from daily_insights_api.modules.newsroom.queue import RetryableStageError
-from daily_insights_api.modules.newsroom.variants import BASELINE, P0, SelectionVariant
+from daily_insights_api.modules.newsroom.variants import (
+    BASELINE,
+    OLDNEWS,
+    P0,
+    P0B,
+    SelectionVariant,
+)
 from daily_insights_api.modules.newsroom.worker import Runtime
 
 
@@ -158,6 +165,33 @@ def test_payload_carries_candidates_and_body_only_when_given() -> None:
     )
     assert len(with_body["article"]["body_excerpt"]) == triage.BODY_EXCERPT_CHARS
     assert with_body["candidate_events"] == []
+    # Only the event-date prompt is told when the publisher dated the article.
+    assert "published_at" not in with_body["article"]
+
+
+def test_event_date_payload_carries_the_publication_time_in_taipei() -> None:
+    def article(published_at: datetime | None) -> Any:
+        payload = triage.triage_payload(
+            title="t",
+            source_name="s",
+            trust_tier=1,
+            summary=None,
+            body_excerpt=None,
+            candidates=[],
+            published_at=published_at,
+            with_published_at=True,
+        )
+        return payload["article"]
+
+    assert article(datetime(2026, 10, 11, 3, 20, tzinfo=UTC))["published_at"] == (
+        "2026-10-11T11:20:00+08:00"
+    )
+    assert article(None) == {
+        "title": "t",
+        "source": {"name": "s", "trust_tier": 1},
+        "summary": "",
+        "published_at": None,
+    }
 
 
 def test_scores_follow_impact_and_directness() -> None:
@@ -216,6 +250,7 @@ def test_triage_signals_keep_the_raw_judgements() -> None:
         "new_facts": False,
         "directness": {"global": 4, "tw_equity": 1, "us_equity": 3},
         "escalation": 0,
+        "event_date": None,
     }
 
 
@@ -226,6 +261,79 @@ def test_published_before_window_allows_two_hours_of_slack() -> None:
     assert not triage.published_before_window(datetime(2026, 10, 6, 22, 0, tzinfo=UTC), edition)
     assert triage.published_before_window(datetime(2026, 10, 6, 21, 59, tzinfo=UTC), edition)
     assert not triage.published_before_window(datetime(2026, 10, 7, 9, 0, tzinfo=UTC), edition)
+
+
+def _dated(event_date: str | None, story_type: str = "data") -> TriageResult:
+    return TriageResult.model_validate(
+        {
+            "topic": "economy",
+            "story_type": story_type,
+            "new_facts": True,
+            "impact": 5,
+            "directness": {"global": 4, "tw_equity": 2, "us_equity": 4},
+            "event": {"new": "x"},
+            "event_date": event_date,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("event_date", "old"),
+    [
+        # Edition 10-12's window opens 10-11 08:00 Taipei; one day of slack.
+        ("2026-10-12", False),
+        ("2026-10-11", False),
+        ("2026-10-10", False),
+        ("2026-10-09", True),
+        ("2026-10-02", True),
+        # A date after the window (a scheduled release) is never old.
+        ("2026-10-20", False),
+        (None, False),
+    ],
+)
+def test_event_date_more_than_a_day_before_the_window_is_old(
+    event_date: str | None, old: bool
+) -> None:
+    assert triage.dated_before_window(_dated(event_date), date(2026, 10, 12)) is old
+
+
+def test_preview_is_never_old_whatever_its_date() -> None:
+    assert not triage.dated_before_window(_dated("2026-10-02", "preview"), date(2026, 10, 12))
+    assert triage.dated_before_window(_dated("2026-10-02", "opinion"), date(2026, 10, 12))
+
+
+def test_old_event_date_scores_as_no_new_facts() -> None:
+    result = _dated("2026-10-02")
+    held = triage.judged_result(result, dated_old=True)
+    assert held.new_facts is False
+    assert held.model_dump(exclude={"new_facts"}) == result.model_dump(exclude={"new_facts"})
+    # An old fact is no clear escalation either, so p0b's waiver cannot cancel the penalty.
+    escalated = result.model_copy(update={"escalation": scoring.CLEAR_ESCALATION})
+    assert triage.judged_result(escalated, dated_old=True).escalation == 1
+    assert scoring.market_scores(
+        triage.judged_result(escalated, dated_old=True), variant=OLDNEWS
+    ) == scoring.market_scores(held, variant=OLDNEWS)
+    assert triage.judged_result(result, dated_old=False) is result
+    fresh = scoring.market_scores(result, variant=OLDNEWS)
+    assert scoring.market_scores(held, variant=OLDNEWS) == {
+        market: score - scoring.NO_NEW_FACTS_PENALTY for market, score in fresh.items()
+    }
+
+
+def test_triage_signals_store_the_event_date() -> None:
+    assert scoring.triage_signals(_dated("2026-10-02"))["event_date"] == "2026-10-02"
+    assert scoring.triage_signals(_dated(None))["event_date"] is None
+
+
+def test_oldnews_prompt_appends_the_event_date_section_to_p0b() -> None:
+    p0b = triage.load_triage_prompt(variant=P0B)
+    oldnews = triage.load_triage_prompt(variant=OLDNEWS)
+    assert oldnews.text.startswith(p0b.text + "\n\n")
+    addendum = oldnews.text[len(p0b.text) :]
+    for needle in ("event_date", "published_at", "YYYY-MM-DD", "null", "preview", "JSON"):
+        assert needle in addendum
+    assert oldnews.version.startswith("triage-v4+triage_addendum_event_date:")
+    assert "event_date" not in p0b.text
 
 
 def test_irrelevant_article_never_joins_an_event() -> None:
