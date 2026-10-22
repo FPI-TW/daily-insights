@@ -58,6 +58,12 @@ def test_title_companies(title: str, companies: set[str]) -> None:
         ("甲公司發表新款晶片", False),
         ("甲公司執行長離職", False),
         ("甲公司宣布收購乙公司", False),
+        # A merger, joint venture or new fab is a decision of its own.
+        ("甲公司第三季法說會證實洽談合併", False),
+        ("甲公司Q3財報 合資晶圓廠2028年量產", False),
+        ("Acme Q3 earnings call confirms merger talks", False),
+        # Consolidated figures are not a merger.
+        ("台積電第三季合併營收優於預期", True),
     ],
 )
 def test_is_earnings_title(title: str, earnings: bool) -> None:
@@ -152,3 +158,29 @@ def test_earnings_addenda_state_the_rule_with_generic_examples(name: str) -> Non
     # Examples are generic; the replay window's own earnings must not leak in.
     for detail in ("Meta", "特斯拉", "Tesla", "臉書"):
         assert detail not in text
+
+
+TESLA_RESULTS = "特斯拉公布第三季財報 獲利優於預期"
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [
+        # 2026-10-22's own titles: two companies, so never one company's release.
+        "SpaceX第三季首度轉盈並證實與特斯拉洽談合併",
+        "馬斯克宣布SpaceX與特斯拉合資晶圓廠Terafab目標2028年第三季量產",
+        # The same decisions naming the one company only, with a quarter or an earnings word.
+        "特斯拉第三季法說會證實洽談合併",
+        "特斯拉Q3財報 Terafab晶圓廠目標2028年量產",
+        "特斯拉第三季財報電話會議宣布合資晶圓廠",
+        "Tesla Q3 earnings call confirms merger talks",
+    ],
+)
+def test_a_merger_or_fab_never_joins_the_earnings_release(decision: str) -> None:
+    # The product owner's call (2026-10-22): these are decisions of their own.
+    assert not same_earnings_release(TESLA_RESULTS, decision, "data", "data")
+    assert not same_earnings_release(decision, TESLA_RESULTS, "data", "data")
+    results, other = uuid.uuid4(), uuid.uuid4()
+    titles = {results: TESLA_RESULTS, other: decision}
+    articles = {results: _rows(results, "data", "data"), other: _rows(other, "data")}
+    assert earnings_angles(titles, articles, results, [other]) == []
