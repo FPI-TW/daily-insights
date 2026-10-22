@@ -112,6 +112,18 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         "--dry-run", action="store_true", help="retriage: select and estimate, call nothing"
     )
     run.add_argument(
+        "--via",
+        choices=sorted(VARIANTS),
+        help="retriage: re-judge energy articles under this variant first (e.g. p0b)",
+    )
+    run.add_argument("--via-rep", type=int, default=1, help="repetition of the --via step")
+    run.add_argument(
+        "--select",
+        choices=retriage.SELECT_MODES,
+        default="energy",
+        help="retriage: what the run variant re-judges (energy, pool = top-40 events, none)",
+    )
+    run.add_argument(
         "--skip-day",
         action="append",
         default=[],
@@ -177,8 +189,10 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
             options.skip_days = tuple(_skip_day(text) for text in options.skip_day)
         except ValueError as error:
             parser.error(str(error))
-        if options.rep < 1 or options.triage_rep < 1:
-            parser.error("--rep and --triage-rep start at 1")
+        if min(options.rep, options.triage_rep, options.via_rep) < 1:
+            parser.error("--rep, --triage-rep and --via-rep start at 1")
+        if options.via and options.stages != "retriage":
+            parser.error("--via only applies to --stages retriage")
         if options.stages == "retriage" and options.base_variant is None:
             parser.error("--stages retriage needs --base-variant")
         if options.dry_run and options.stages != "retriage":
@@ -190,7 +204,11 @@ def _snapshot(options: argparse.Namespace) -> snapshot.Snapshot:
     """The range, copied with as many earlier published days as the variants read."""
     lookback = options.lookback_days
     if lookback is None:
-        names = [getattr(options, "variant", None), getattr(options, "base_variant", None)]
+        names = [
+            getattr(options, "variant", None),
+            getattr(options, "base_variant", None),
+            getattr(options, "via", None),
+        ]
         lookback = max(
             [PUBLISHED_LOOKBACK_DAYS]
             + [get_variant(name).repeat_lookback_days for name in names if name]
@@ -287,6 +305,9 @@ def main(args: list[str] | None = None) -> int:
                             get_variant(options.base_variant) if options.base_variant else None
                         ),
                         selection=_selection(options),
+                        via_variant=get_variant(options.via) if options.via else None,
+                        via_rep=options.via_rep,
+                        select_mode=options.select,
                         dry_run=options.dry_run,
                         skip_days=options.skip_days,
                         round=options.round,

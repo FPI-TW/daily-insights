@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import random
 import uuid
 from collections.abc import Sequence
@@ -11,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import event as orm_event
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from daily_insights_api.modules.newsroom import triage
 from daily_insights_api.modules.newsroom.contracts import EditorResult, TriageResult
 from daily_insights_api.modules.newsroom.models import NewsroomEvent, NewsroomLlmCall
 from daily_insights_api.modules.newsroom.providers import CallAudit
@@ -39,7 +41,7 @@ from daily_insights_api.modules.newsroom.replay.cache import (
 )
 from daily_insights_api.modules.newsroom.replay.metrics import EventRow, MarketDay, TrackedRow
 from daily_insights_api.modules.newsroom.replay.tw50 import CONSTITUENTS, match_tw50
-from daily_insights_api.modules.newsroom.variants import BASELINE, P0
+from daily_insights_api.modules.newsroom.variants import BASELINE, OLDNEWS, P0, P0B
 from daily_insights_api.scripts import run_newsroom_replay
 
 TRIAGE_AUDIT = CallAudit("triage", uuid.UUID(int=7), "triage-v2:abc")
@@ -1009,3 +1011,87 @@ def test_a_stored_event_date_is_rebuilt_with_the_judgement() -> None:
         },
     )
     assert result is not None and result.event_date == date(2026, 10, 2)
+
+
+# --- oldnews and earnings_merge in a re-triage -------------------------------------------
+
+
+def test_the_event_date_prompt_payload_matches_the_triage_handler() -> None:
+    published = datetime(2026, 10, 11, 3, 20, tzinfo=UTC)
+    base = triage.triage_payload(
+        title="美9月非農大幅降溫",
+        source_name="自由財經",
+        trust_tier=2,
+        summary="近一週全球金融市場",
+        body_excerpt="正文",
+        candidates=[],
+    )
+    article = _judged("美9月非農大幅降溫", impact=4)
+    article = dataclasses.replace(article, published_at=published)
+    request = retriage.Request("s", base, "m")
+    assert runner.retriage_payload(request, article, P0B) is base
+    assert runner.retriage_payload(request, article, OLDNEWS) == triage.triage_payload(
+        title="美9月非農大幅降溫",
+        source_name="自由財經",
+        trust_tier=2,
+        summary="近一週全球金融市場",
+        body_excerpt="正文",
+        candidates=[],
+        published_at=published,
+        with_published_at=True,
+    )
+
+
+def test_rescoring_under_oldnews_drops_the_new_facts_of_an_old_date() -> None:
+    result = pipeline.triage_result(
+        topic="economy",
+        story_type="data",
+        signals={
+            "impact": 4,
+            "new_facts": True,
+            "directness": {"global": 3, "tw_equity": 2, "us_equity": 3},
+            "escalation": 2,
+            "event_date": "2026-10-02",
+        },
+    )
+    assert result is not None
+    day = date(2026, 10, 12)
+    scored, old = pipeline.scored_result(result, variant=OLDNEWS, edition_date=day, manual=False)
+    assert old and not scored.new_facts and scored.escalation < 2
+    assert pipeline.scored_result(result, variant=OLDNEWS, edition_date=day, manual=True) == (
+        result,
+        False,
+    )
+    assert pipeline.scored_result(result, variant=P0B, edition_date=day, manual=False) == (
+        result,
+        False,
+    )
+
+
+def test_the_pool_selection_takes_every_relevant_article_of_the_pool_events() -> None:
+    inside, outside = _judged("a", impact=2), _judged("b", impact=5)
+    dropped = dataclasses.replace(_judged("c", impact=2), event_id=inside.event_id, relevant=False)
+    assert inside.event_id is not None
+    assert retriage.select_pool([inside, outside, dropped], [inside.event_id]) == [inside]
+
+
+def test_a_chained_retriage_is_parsed() -> None:
+    options = run_newsroom_replay.parse_args(
+        [
+            "run",
+            "--stages",
+            "retriage",
+            "--base-variant",
+            "p0",
+            "--via",
+            "p0b",
+            "--variant",
+            "oldnews",
+            "--select",
+            "pool",
+        ]
+    )
+    assert (options.via, options.via_rep, options.select) == ("p0b", 1, "pool")
+    assert run_newsroom_replay._snapshot(options).lookback_days == 14
+    with pytest.raises(SystemExit):
+        run_newsroom_replay.parse_args(["run", "--via", "p0b"])

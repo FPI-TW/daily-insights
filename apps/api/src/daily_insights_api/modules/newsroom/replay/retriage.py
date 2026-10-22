@@ -11,6 +11,11 @@ are replaced; topic, directness and the event an article belongs to stay.
 
 A control sample of other high-impact articles is asked too and only reported,
 to check that the change leaves the rest of the scale alone.
+
+Steps can be chained (``--via``): p0's events, p0b's energy re-judgement
+(cached), then a variant built on p0b re-judges the articles of the events in
+some market's top 40 (``pool``: oldnews dates their facts) or nothing
+(``none``: earnings_merge only reassembles).
 """
 
 import hashlib
@@ -19,8 +24,8 @@ import re
 import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import date
-from typing import Any
+from datetime import date, datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +43,10 @@ ENERGY_TITLE_PATTERN = (
     r"attack|strike|missile|drone|blockade|ultimatum"
 )
 ENERGY_TOPICS = ("commodities",)
+# energy: the articles the p0b tightening can move; pool: every relevant article of
+# an event in some market's top 40; none: re-judge nothing.
+SelectMode = Literal["energy", "pool", "none"]
+SELECT_MODES: tuple[SelectMode, ...] = ("energy", "pool", "none")
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,14 +57,15 @@ class Selection:
     shipping: one of ``topics``, ``escalation >= min_escalation``, or a title
     matching ``title_pattern``. The control sample takes up to
     ``control_sample`` other relevant articles with an impact in
-    ``control_impacts`` per run, in a fixed order (a hash of the article id).
+    ``control_impacts`` per day, in a fixed order (a hash of the article id).
     """
 
     min_impact: int = 3
     topics: tuple[str, ...] = ENERGY_TOPICS
     min_escalation: int = 1
     title_pattern: str = ENERGY_TITLE_PATTERN
-    control_sample: int = 50
+    # Per day: 12 over the eight replayed days is about the 100 _common.md asks for.
+    control_sample: int = 12
     control_impacts: tuple[int, ...] = (4, 5)
 
     def describe(self) -> str:
@@ -63,7 +73,7 @@ class Selection:
             f"relevant 且 impact ≥ {self.min_impact}, 並且 (主題屬 {'/'.join(self.topics)}"
             f" 或 escalation ≥ {self.min_escalation} 或標題符合能源/航運/攻擊字詞);"
             f" 對照樣本: 其餘 relevant、impact ∈ {set(self.control_impacts)} 的文章,"
-            f" 依文章 id 雜湊固定順序取 {self.control_sample} 篇 (只報告不套用)"
+            f" 依文章 id 雜湊固定順序每天取 {self.control_sample} 篇 (只報告不套用)"
         )
 
 
@@ -79,6 +89,8 @@ class Judged:
     signals: dict[str, Any]
     relevant: bool
     event_id: uuid.UUID | None
+    published_at: datetime | None = None
+    manual: bool = False
 
     @property
     def impact(self) -> int | None:
@@ -121,6 +133,12 @@ def select(articles: Iterable[Judged], selection: Selection) -> tuple[list[Judge
         key=lambda article: _order(article.article_id),
     )
     return targets, others[: selection.control_sample]
+
+
+def select_pool(articles: Iterable[Judged], pool: Iterable[uuid.UUID]) -> list[Judged]:
+    """The relevant articles of the events in ``pool`` (some market's top 40)."""
+    events = set(pool)
+    return [article for article in articles if article.relevant and article.event_id in events]
 
 
 def merged_result(base: TriageResult, answer: TriageResult) -> TriageResult:
@@ -174,13 +192,14 @@ class RecordingModel:
 
 @dataclass
 class Estimate:
-    """Tokens and USD a targeted re-triage would spend, before it runs."""
+    """Tokens and USD a targeted re-triage would spend, before it runs (cache misses only)."""
 
     calls: int = 0
     input_tokens: float = 0.0
     system_tokens: float = 0.0
     output_tokens: float = 0.0
     per_day: dict[str, int] = field(default_factory=dict)
+    per_step: dict[str, int] = field(default_factory=dict)
 
     def add(
         self,
@@ -190,8 +209,11 @@ class Estimate:
         system: str,
         tokens_per_char: float,
         output_per_call: float,
+        label: str = "",
     ) -> None:
-        self.per_day[day.isoformat()] = len(requests)
+        when = day.isoformat()
+        self.per_day[when] = self.per_day.get(when, 0) + len(requests)
+        self.per_step[label] = self.per_step.get(label, 0) + len(requests)
         for request in requests:
             payload = json.dumps(request.payload, ensure_ascii=False, separators=(",", ":"))
             self.calls += 1
@@ -212,6 +234,7 @@ class Estimate:
         return {
             "calls": self.calls,
             "per_day": self.per_day,
+            "per_step": self.per_step,
             "input_tokens": round(self.input_tokens),
             "system_tokens": round(self.system_tokens),
             "output_tokens": round(self.output_tokens),

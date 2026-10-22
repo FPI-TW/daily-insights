@@ -73,10 +73,14 @@ class Group:
 # --- Slot differences ------------------------------------------------------------------
 
 
-def boundary(mine: int | None, theirs: int | None) -> str:
+UNRATED = "對方未評 (不在前 40、前版排除或分群不同)"
+NO_RATINGS = "正式當日無評分紀錄 (只知入選者星等)"
+
+
+def boundary(mine: int | None, theirs: int | None, *, unrated: str = UNRATED) -> str:
     """Where an event picked on one side only sits between the two ratings."""
     if theirs is None:
-        return "對方未評 (不在前 40、前版排除或分群不同)"
+        return unrated
     if mine is None:
         return "本方未評"
     if mine == theirs:
@@ -104,7 +108,9 @@ def _stars(day: MarketDay, key: Key) -> dict[str, int | None]:
     return stars
 
 
-def slot_diff(left: MarketDay, right: MarketDay, key: Key) -> SlotDiff:
+def slot_diff(
+    left: MarketDay, right: MarketDay, key: Key, *, right_unrated: str = UNRATED
+) -> SlotDiff:
     """Picks on one side only, classified by the star boundary they sit on."""
     left_picks = {key(row): row for row in left.picks}
     right_picks = {key(row): row for row in right.picks}
@@ -112,7 +118,7 @@ def slot_diff(left: MarketDay, right: MarketDay, key: Key) -> SlotDiff:
     boundaries: Counter[str] = Counter()
     for event, row in left_picks.items():
         if event not in right_picks:
-            boundaries[boundary(row.stars, right_stars.get(event))] += 1
+            boundaries[boundary(row.stars, right_stars.get(event), unrated=right_unrated)] += 1
     for event, row in right_picks.items():
         if event not in left_picks:
             boundaries[boundary(row.stars, left_stars.get(event))] += 1
@@ -172,9 +178,12 @@ def pairwise_noise(
             other = day if right_is_reference else right.day(day.edition_date, day.market)
             if other is None or not day.valid or not other.valid:
                 continue
+            unrated = UNRATED
             if right_is_reference:
                 other = reference_day(day)
-            diff = slot_diff(day, other, key)
+                if not day.reference_stars:
+                    unrated = NO_RATINGS
+            diff = slot_diff(day, other, key, right_unrated=unrated)
             changed += diff.changed
             slots += max(len(day.picks), len(other.picks))
             boundaries.update(diff.boundaries)
