@@ -1,7 +1,7 @@
 import os
 import uuid
 from collections.abc import AsyncIterator, Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -1432,6 +1432,10 @@ async def test_price_action_reports_neither_qualify_nor_score(
             "working_title": "央行升息半碼",
             "report_count": 1,
             "source_count": 1,
+            # The p0 variant's extended input; these articles carry no triage signals.
+            "max_impact": None,
+            "max_escalation": 0,
+            "main_story_type": "official",
             "headlines": [{"title": "央行升息半碼 report 0", "source": "Reuters"}],
         }
     ]
@@ -1439,6 +1443,106 @@ async def test_price_action_reports_neither_qualify_nor_score(
     [item] = await _items(newsroom_database, editions["tw_equity"].id)
     # Scored on the decision alone: no bonus for the two reaction pieces.
     assert (item.event_id, item.editor_score) == (decision, 90.0)
+
+
+def _with_variant(runtime: Runtime, variant: str) -> Runtime:
+    return replace(
+        runtime,
+        settings=runtime.settings.model_copy(update={"newsroom_selection_variant": variant}),
+    )
+
+
+_HEADLINES = [
+    {"title": "航道遇襲 report 0", "source": "Reuters"},
+    {"title": "航道遇襲 report 1", "source": "Cna"},
+]
+
+
+async def _extended_input_event(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> uuid.UUID:
+    reuters = await _source(newsroom_database, "reuters")
+    cna = await _source(newsroom_database, "cna")
+    udn = await _source(newsroom_database, "udn")
+    event_id = await _event(
+        newsroom_database,
+        "航道遇襲",
+        sources=[reuters, cna, udn],
+        scores={"global": 90},
+        story_types=["catalyst", "catalyst", "price_action"],
+    )
+    signals = {
+        "航道遇襲 report 0": ({"impact": 5, "new_facts": True, "stale": False}, None),
+        "航道遇襲 report 1": (
+            {"impact": 4, "new_facts": True, "escalation": 2, "stale": False},
+            "油輪改道。保費上升。運價走高。",
+        ),
+        # A reaction piece: neither its impact nor its escalation counts.
+        "航道遇襲 report 2": ({"impact": 5, "escalation": 2}, "油價大漲。"),
+    }
+    async with newsroom_database() as database:
+        for title, (triage_signals, summary) in signals.items():
+            await database.execute(
+                update(NewsroomArticle)
+                .where(NewsroomArticle.title == title)
+                .values(triage_signals=triage_signals, feed_summary=summary)
+            )
+        await database.commit()
+    return event_id
+
+
+async def test_p0_editor_input_reads_stored_signals_and_summaries(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    event_id = await _extended_input_event(newsroom_database)
+    llm = FakeLlm({EditorResult: _stars_by_title({}, default=4)})
+
+    await assembly.assemble_editions(
+        _with_variant(_runtime(newsroom_database, llm), "p0"), EDITION_DATE, sleep=_no_sleep
+    )
+
+    [(_, payload)] = [call for call in llm.calls if call[1]["market"] == "global"]
+    # Both reports were first seen together, so their headline order is arbitrary;
+    # either way the first with a summary is report 1.
+    assert sorted(payload["events"][0].pop("headlines"), key=lambda line: line["title"]) == (
+        _HEADLINES
+    )
+    assert payload["events"] == [
+        {
+            "event_id": str(event_id),
+            "working_title": "航道遇襲",
+            "report_count": 2,
+            "source_count": 2,
+            "max_impact": 5,
+            "max_escalation": 2,
+            "main_story_type": "catalyst",
+            "lead_summary": "油輪改道。保費上升。",
+        }
+    ]
+
+
+async def test_baseline_editor_input_keeps_the_eb6ad34_fields(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    event_id = await _extended_input_event(newsroom_database)
+    llm = FakeLlm({EditorResult: _stars_by_title({}, default=4)})
+
+    await assembly.assemble_editions(
+        _with_variant(_runtime(newsroom_database, llm), "baseline"), EDITION_DATE, sleep=_no_sleep
+    )
+
+    [(_, payload)] = [call for call in llm.calls if call[1]["market"] == "global"]
+    assert sorted(payload["events"][0].pop("headlines"), key=lambda line: line["title"]) == (
+        _HEADLINES
+    )
+    assert payload["events"] == [
+        {
+            "event_id": str(event_id),
+            "working_title": "航道遇襲",
+            "report_count": 2,
+            "source_count": 2,
+        }
+    ]
 
 
 async def test_feeds_of_one_outlet_count_as_one_source(
