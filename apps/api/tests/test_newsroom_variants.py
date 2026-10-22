@@ -1,3 +1,4 @@
+import hashlib
 from datetime import date
 
 from daily_insights_api.core.config import Settings
@@ -52,6 +53,10 @@ def test_every_variant_prompt_loads() -> None:
         assert prompt.version.split(":")[0].split("+")[1:] == list(variant.triage_prompt_addenda)
         text, version = dedupe_prompt(variant=variant)
         assert text and version.startswith("newsroom.dedupe.v2")
+        if variant.dedupe_prompt_addenda:
+            assert version.rsplit(":", 1)[1] == hashlib.sha256(text.encode()).hexdigest()[:12]
+        else:
+            assert version == "newsroom.dedupe.v2"
         assert editor_prompt_version(variant=variant)
 
 
