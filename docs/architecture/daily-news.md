@@ -90,7 +90,7 @@ flowchart TB
 | `newsroom_edit_log`         | 每個管理員動作的 append-only 紀錄（`before`／`after` JSONB）                                                                                          |
 | `newsroom_llm_calls`        | 每次 LLM／embedding 呼叫的稽核：stage、model、prompt 版本、token、延遲、request id、錯誤碼；不存 prompt 與正文                                        |
 | `newsroom_dedupe_decisions` | 組稿時模型提議的每組重複事件（同窗合併、前版比對）與程式的處理結果，append-only                                                                       |
-| `newsroom_editor_ratings`   | 組稿時精選對每個候選的星等、名次、粗分與是否入選，append-only                                                                                         |
+| `newsroom_editor_ratings`   | 組稿時精選對每個候選的星等、名次、粗分、是否入選與理由（`reason`），append-only                                                                       |
 
 `selection_mode` 為 `pending`、`editor`（精選成功）、`fallback`（精選失敗改用粗分）或
 `legacy`（舊管線搬移）。項目 `origin` 為 `model`、`manual`（管理員加入）或 `legacy`。

@@ -213,6 +213,9 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
    附上前版標題送精選。
 4. 精選呼叫（每市場一次）：輸入事件 id、working title、最多 5 則報導標題與來源、報導家數，以及去重分組但未合併者的 `story_group`；輸出每個事件的 `stars`（1–5）。
    評分準則沿用並改寫 `news/prompts/selection_criteria.txt` 的精神（市場相關性、可信度、重要性）。
+   p0（editor prompt v4，2026-10-22）另外輸入事件內最高 `max_impact`、最高 `max_escalation`、主要 `main_story_type`（篇數最多的非盤勢類型）
+   與代表報導的 `lead_summary`（feed 摘要前兩句、約 150 字），prompt 加入逐市場星等錨點；輸出每筆可附 `reason`（30 字內，
+   星等與 `max_impact` 相差 ≥ 2 時要求填寫，缺漏或過長不讓呼叫失敗），寫入 `newsroom_editor_ratings.reason`。
 5. 套 D8 配額（程式）。精選失敗（重試耗盡）→ `selection_mode = fallback`：依粗分取前 5 名（同組上限照樣適用）、`stars = null`，Slack 通知。
    五星軟上限（p0 為 3）：5 星仍全收，但某市場版可見（未移除、隱藏、放棄）的 5 星項目超過上限時，後台版次回應的
    `needs_five_star_review` 為 true，審核頁顯示「五星待覆核」提示；即時計算，不存欄位，Slack 訊息不變。
