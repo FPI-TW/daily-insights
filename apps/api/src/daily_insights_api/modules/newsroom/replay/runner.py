@@ -32,6 +32,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
+from sqlalchemy import event as orm_event
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -105,6 +106,17 @@ class RunOptions:
 # --- Deterministic triage order --------------------------------------------------------
 
 _member: ContextVar[int | None] = ContextVar("replay_triage_member", default=None)
+_article: ContextVar[uuid.UUID | None] = ContextVar("replay_triage_article", default=None)
+# Events a triage replay opens are named after the article that opened them.
+# Assembly breaks exact ties (articles of one feed poll share ``first_seen_at``)
+# by event id, so random ids would reorder the editor's list from run to run.
+REPLAY_EVENT_NAMESPACE = uuid.UUID("6f1d3a52-8a8e-4f0b-9a63-6d1e2b7c4e10")
+
+
+def _replay_event_id(target: NewsroomEvent, args: Any, kwargs: dict[str, Any]) -> None:
+    article_id = _article.get()
+    if article_id is not None and kwargs.get("id") is None:
+        target.id = uuid.uuid5(REPLAY_EVENT_NAMESPACE, str(article_id))
 
 
 class TriageGate:
@@ -888,6 +900,7 @@ async def _triage_window(context: _Context, day: date) -> None:
 
     async def one(index: int, article_id: uuid.UUID) -> None:
         _member.set(index)
+        _article.set(article_id)
         await gate.wait_start(index)
         outcome = "pending"
         try:
@@ -916,11 +929,13 @@ async def _triage_window(context: _Context, day: date) -> None:
         finally:
             await gate.finish(index)
 
+    orm_event.listen(NewsroomEvent, "init", _replay_event_id)
     try:
         async with asyncio.TaskGroup() as group:
             for index, article_id in enumerate(article_ids):
                 group.create_task(one(index, article_id))
     finally:
+        orm_event.remove(NewsroomEvent, "init", _replay_event_id)
         context.gate_holder[0] = None
     async with context.sessions() as database:
         failures = Counter(
@@ -992,7 +1007,8 @@ def _notes(options: RunOptions) -> list[str]:
             "triage: 清空每日事件後依 first_seen_at 順序以真實 triage handler 重新初篩與歸屬, "
             f"並行 {options.concurrency}; 每篇只看得到排在它前 {options.concurrency} 篇以前的事件"
             " (固定順序, 重跑結果相同)。正式環境是隨收稿時間陸續初篩, 事件分群可能因此不同。"
-            "事件 id 重新產生, 與正式比較時以文章多數所屬的正式事件對應。",
+            "新開事件的 id 由開出它的文章 id 推導 (固定), "
+            "與正式比較時以文章多數所屬的正式事件對應。",
         )
     return notes
 

@@ -7,10 +7,11 @@ from typing import Any, cast
 
 import pytest
 from pydantic import BaseModel
+from sqlalchemy import event as orm_event
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.modules.newsroom.contracts import EditorResult, TriageResult
-from daily_insights_api.modules.newsroom.models import NewsroomLlmCall
+from daily_insights_api.modules.newsroom.models import NewsroomEvent, NewsroomLlmCall
 from daily_insights_api.modules.newsroom.providers import CallAudit
 from daily_insights_api.modules.newsroom.replay import metrics, runner, snapshot
 from daily_insights_api.modules.newsroom.replay.cache import (
@@ -301,6 +302,22 @@ async def test_a_member_that_never_calls_the_model_does_not_block_the_others() -
         group.create_task(member(1, calls=False))
         group.create_task(member(2, calls=True))
     assert order.index(0) < order.index(2)
+
+
+def test_events_a_triage_replay_opens_are_named_after_their_article() -> None:
+    article = uuid.uuid4()
+    orm_event.listen(NewsroomEvent, "init", runner._replay_event_id)
+    try:
+        assert NewsroomEvent(working_title="t").id is None
+        token = runner._article.set(article)
+        try:
+            first = NewsroomEvent(working_title="t").id
+            assert first == NewsroomEvent(working_title="u").id
+            assert first is not None and first != article
+        finally:
+            runner._article.reset(token)
+    finally:
+        orm_event.remove(NewsroomEvent, "init", runner._replay_event_id)
 
 
 def test_story_groups_are_rebuilt_from_the_window_decisions() -> None:
