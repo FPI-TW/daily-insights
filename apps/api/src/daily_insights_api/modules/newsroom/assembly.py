@@ -106,7 +106,9 @@ EARNINGS_TITLE_WORDS = (
     "EPS",
 )
 # Titles with an earnings word that are still another story: a monthly sales
-# report, a preview, and the company's other news (products, lawsuits, people, deals).
+# report, a preview, and the company's other news (products, lawsuits, people,
+# deals). A merger, joint venture or new fab is a decision of its own even when
+# announced on the call (product owner, 2026-10-22), so it never joins the results.
 EARNINGS_OTHER_STORY_WORDS = (
     "前瞻",
     "前夕",
@@ -124,6 +126,10 @@ EARNINGS_OTHER_STORY_WORDS = (
     "亮相",
     "收購",
     "併購",
+    "合資",
+    "晶圓廠",
+    "建廠",
+    "量產",
     "離職",
     "辭任",
     "接任",
@@ -132,7 +138,11 @@ EARNINGS_OTHER_STORY_WORDS = (
     "launch",
     "unveil",
     "acquisition",
+    "merger",
+    "joint venture",
 )
+# 合併 is a merger unless it reads as consolidated figures (合併營收, 合併財報).
+_MERGER = re.compile(r"合併(?!營收|財報|報表|損益|營業|毛利|淨利|獲利)")
 # A quarter named in a title (第三季, Q3) also marks a results story.
 _QUARTER = re.compile(r"第[一二三四1-4]季|(?<![A-Za-z])[Qq][1-4](?!\d)")
 _MONTHLY_SALES = re.compile(r"(?:\d{1,2}|[一二三四五六七八九十]{1,3})月份?(?:合併)?營收|月營收")
@@ -796,6 +806,7 @@ def is_earnings_title(title: str) -> bool:
     return (
         earnings
         and not any(word.casefold() in folded for word in EARNINGS_OTHER_STORY_WORDS)
+        and _MERGER.search(title) is None
         and _MONTHLY_SALES.search(title) is None
     )
 
