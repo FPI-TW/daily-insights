@@ -39,6 +39,7 @@ from daily_insights_api.modules.newsroom.queue import (
     run_claimed,
 )
 from daily_insights_api.modules.newsroom.reembed import reembed_articles
+from daily_insights_api.modules.newsroom.variants import BASELINE, P0, SelectionVariant
 from daily_insights_api.modules.newsroom.worker import Runtime, StageBinding
 
 pytestmark = pytest.mark.integration
@@ -81,6 +82,8 @@ class FakeJsonModel:
     # Answers the embed stage's translation of non-Chinese headlines.
     translate: Reply = _translated
     translations: list[dict[str, Any]] = field(default_factory=list)
+    # The selection variant the runtime under test is configured with.
+    variant: SelectionVariant = P0
 
     async def complete(
         self,
@@ -117,7 +120,7 @@ class FakeJsonModel:
                 )
             )
             return result_type.model_validate(answer)
-        assert system == triage.load_triage_prompt().text
+        assert system == triage.load_triage_prompt(variant=self.variant).text
         self.payloads.append(payload)
         if self.barrier is not None:
             await self.barrier.wait()
@@ -167,11 +170,13 @@ def _runtime(
     *,
     llm: FakeJsonModel | None = None,
     embedder: FakeEmbedder | None = None,
+    variant: SelectionVariant = P0,
 ) -> Runtime:
     return Runtime(
         settings=Settings(
             newsroom_triage_model="triage-test-model",
             newsroom_translate_model="translate-test-model",
+            newsroom_selection_variant=variant.name,
         ),
         session_factory=session_factory,
         llm=llm or FakeJsonModel(lambda payload: relevant({"new": "unused"})),
@@ -501,8 +506,23 @@ async def test_first_article_opens_a_new_event(
         article_id,
         "triage-test-model",
     )
-    assert audit.prompt_version == triage.load_triage_prompt().version
+    assert audit.prompt_version == triage.load_triage_prompt(variant=P0).version
     assert audit.error_code is None
+
+
+async def test_baseline_variant_triages_with_the_v2_prompt(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id = await _source(newsroom_database)
+    await _queued_for_triage(newsroom_database, source_id, "Fed holds rates", 0)
+    llm = FakeJsonModel(lambda payload: relevant({"new": "聯準會維持利率不變"}), variant=BASELINE)
+
+    assert await _run(_runtime(newsroom_database, llm=llm, variant=BASELINE), "triage") == ["done"]
+
+    async with newsroom_database() as database:
+        audit = (await database.scalars(select(NewsroomLlmCall))).one()
+    assert audit.prompt_version is not None
+    assert audit.prompt_version.startswith("triage-v2:")
 
 
 async def test_body_is_withheld_unless_the_fetch_succeeded(
