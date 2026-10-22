@@ -297,19 +297,49 @@ upload immediately; version conflicts still require explicit replacement.
 
 Confirmed registration failures remove unreferenced objects. Ambiguous commits
 are rechecked before deletion; unavailable DB/storage retains the object for
-retry. Browser PUT uses temporary `podcasts/direct/{expires}/{trading-date}/{locale}/{asset-id}.{ext}`.
-New v2 completions register `podcasts/YYYY/MM/DD/{locale}/podcast_{version}.{mp3|mp4}`
+retry. Legacy v1/v2 tickets PUT to temporary
+`podcasts/direct/{expires}/{trading-date}/{locale}/{asset-id}.{ext}`.
+v2/v3 completions register `podcasts/YYYY/MM/DD/{locale}/podcast_{version}.{mp3|mp4}`
 with padded dates and the locale variant version, then clean staging after commit.
-Existing files and v1 completions retain their paths. Verify replacement preserves
+Existing files and v1 completions retain their paths; v2 and v3 use the same final paths. Verify replacement preserves
 archived versions and a retry returns the same asset even after staging deletion.
-Every five minutes cleanup scans only exact staging and final grammars under `podcasts/`.
-Staging requires URL expiry and last modification plus the default 24-hour grace;
-final orphans require last modification plus grace. Under the date lock, cleanup
-rechecks modification time and all DB references. Active and archived assets are
-protected; malformed dates, legacy/import and unrelated paths are skipped.
+New v3 tickets PUT to
+`podcasts/staging/{scope}/{expires}/{trading-date}/{locale}/{asset-id}.{ext}`.
+The HMAC scope binds environment, database connection identity (excluding password),
+R2 endpoint and bucket to the session signing secret. Every five minutes cleanup
+lists only that exact scope. Both URL expiry and last modification must exceed the
+default 24-hour grace; the date/object locks protect the final modification-time
+and Asset-reference checks. A different catalog or environment cannot sweep this
+scope even when its bucket and signing secret are identical.
+
+Final audio is never swept based on missing local DB references. Unscoped v1/v2
+staging, legacy/import paths and old session tombstones are retained for manual
+reconciliation; neither the API loop nor the retired media-worker loop runs legacy
+session deletion. Explicit upload compensation still cleans its own attempt, and
+explicit episode removal retains its existing behavior. Malformed paths are skipped.
 Final collisions require matching size/MIME/full SHA and no DB references; otherwise
 409 leaves the destination untouched. Unknown commit/write outcomes retain objects.
-Failed deletions and late objects are retried by later sweeps.
+Failed scoped-staging deletions and late scoped uploads are retried by later sweeps.
+Successful deletion emits `podcast.object.deleted`; background staging cleanup also
+emits `podcast.staging_cleanup.deleted` with environment, bucket and object key.
+Neither event includes credentials or signed URLs.
+
+Use separate buckets and bucket-scoped R2 tokens for development, staging and
+production. Never copy production R2 write/delete credentials into local tests.
+The scope is a safeguard for accidental shared-bucket configuration, not an access
+control boundary. A clone with identical environment, DB identity and session secret
+is indistinguishable; change the environment/DB and credentials before starting it.
+Session-secret, DB identity or endpoint changes retain the previous scope for manual
+review; DB password rotation preserves it. Final/unscoped orphan retention can grow
+storage usage, so reconcile a reviewed key list across all owning catalogs before
+manual deletion. No new cloud service is required.
+
+Deploy this fix to every API replica and any legacy worker that can access the
+bucket, and stop older binaries before resuming background work. Existing v1/v2
+tickets remain accepted; new v3 tickets require the fixed API and are incompatible
+with a rollback to the old API. Verify new upload/retry/playback and check the scoped
+cleanup events before any audio recovery. Code changes alone do not protect objects
+from an old process or an external token with delete access.
 
 7. For routine recovery after this schema-boundary migration, keep every legacy
    scheduler and worker quiesced, apply a forward fix, and rerun `deploy.sh`.
@@ -338,6 +368,9 @@ Use Cloudflare's proxied DNS with a conservative TTL during initial cutover.
 Cutover must not modify or delete the legacy services or data.
 
 ## Podcast R2 migration
+
+For scoped background cleanup and deployment/rollback precautions, see the
+[Podcast cleanup isolation runbook](podcast-upload-cutover.md#2026-10-23-清理隔離修正部署).
 
 1. Export and review a source inventory. Attach one trading date and locale to
    each source key; reject duplicates or ambiguous mappings.

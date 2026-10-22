@@ -11,13 +11,14 @@ from datetime import UTC, date, datetime, timedelta
 from typing import BinaryIO, Literal
 
 from fastapi import HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.config import Settings
 from daily_insights_api.core.enums import AssetKind, AssetStatus
+from daily_insights_api.core.observability import emit_event
 from daily_insights_api.modules.assets.api import Asset, ObjectRef, ObjectStore
 from daily_insights_api.modules.audit.api import record_audit_event
 from daily_insights_api.modules.podcasts.direct_upload import (
@@ -48,6 +49,7 @@ from daily_insights_api.modules.podcasts.service import (
     audio_duration_seconds,
     serialized_chapters,
 )
+from daily_insights_api.modules.podcasts.staging_paths import staging_scope
 from daily_insights_api.modules.podcasts.storage_paths import final_audio_key
 
 logger = logging.getLogger(__name__)
@@ -63,7 +65,8 @@ class DirectUploadRequest(BaseModel):
 
 class UploadTicket(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    version: Literal[1, 2] = 1
+    version: Literal[1, 2, 3] = 1
+    staging_scope: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     actor_id: uuid.UUID
     asset_id: uuid.UUID
     trading_date: date
@@ -74,11 +77,18 @@ class UploadTicket(BaseModel):
     began_published: bool
     generation: int = Field(default=0, ge=0)
 
+    @model_validator(mode="after")
+    def require_scoped_staging(self) -> "UploadTicket":
+        if (self.version == 3) != (self.staging_scope is not None):
+            raise ValueError("Only v3 tickets require a staging scope")
+        return self
+
     @property
     def object_key(self) -> str:
         extension = "mp3" if self.file.mime_type == "audio/mpeg" else "mp4"
+        prefix = f"podcasts/staging/{self.staging_scope}/" if self.version == 3 else UPLOAD_PREFIX
         return (
-            f"{UPLOAD_PREFIX}{self.expires}/{self.trading_date}/"
+            f"{prefix}{self.expires}/{self.trading_date}/"
             f"{self.file.locale}/{self.asset_id}.{extension}"
         )
 
@@ -139,9 +149,12 @@ def decode_ticket(token: str, settings: Settings) -> UploadTicket:
         payload, signature = token.rsplit(".", 1)
         if not hmac.compare_digest(signature, _signature(settings, payload)):
             raise ValueError("signature")
-        return UploadTicket.model_validate_json(
+        ticket = UploadTicket.model_validate_json(
             base64.b64decode(payload, altchars=b"-_", validate=True)
         )
+        if ticket.version == 3 and ticket.staging_scope != staging_scope(settings):
+            raise ValueError("staging scope")
+        return ticket
     except (ValueError, ValidationError) as error:
         raise HTTPException(403, detail={"code": "invalid_upload_token"}) from error
 
@@ -188,8 +201,12 @@ async def delete_unreferenced(
     try:
         await finish_io(store.delete(ref))
     except OBJECT_STORE_ERRORS:
-        logger.warning("Podcast object deletion deferred to orphan cleanup")
+        logger.warning(
+            "Podcast object deletion deferred",
+            extra={"bucket": ref.bucket, "object_key": ref.key},
+        )
         return False
+    emit_event("podcast.object.deleted", bucket=ref.bucket, object_key=ref.key)
     return True
 
 
@@ -257,7 +274,8 @@ async def sign_direct_upload(
     targets = []
     for item, _, mime in files:
         ticket = UploadTicket(
-            version=2,
+            version=3,
+            staging_scope=staging_scope(settings),
             actor_id=actor.user.id,
             asset_id=uuid.uuid4(),
             trading_date=payload.trading_date,
@@ -502,7 +520,7 @@ async def complete_direct_upload(
         await lock_upload_object(database, ticket.asset_id)
         recovered = await _completed(database, ticket)
         if recovered is not None:
-            if ticket.version == 2:
+            if ticket.version >= 2:
                 await delete_unreferenced(database, store, ref)
             await database.commit()
             return recovered
@@ -520,7 +538,7 @@ async def complete_direct_upload(
             # Conditional final writes use the verified bytes, never a mutable copy source.
             async with asyncio.timeout(540):
                 duration, chapters = await verify_audio(store, ref, ticket, spool=spool)
-                if ticket.version == 2:
+                if ticket.version >= 2:
                     referenced = await database.scalar(
                         select(Asset.id).where(Asset.object_key == final_ref.key)
                     )
@@ -551,7 +569,7 @@ async def complete_direct_upload(
         )
         committing = True
         await database.commit()
-        if ticket.version == 2:
+        if ticket.version >= 2:
             # A failed cleanup cannot turn a committed upload into a failed registration.
             try:
                 await _lock_upload_date(database, ticket.trading_date)
