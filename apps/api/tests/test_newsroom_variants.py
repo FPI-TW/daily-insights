@@ -41,3 +41,16 @@ def test_older_model_answers_still_validate() -> None:
     assert triage.escalation == 0
     editor = EditorResult.model_validate({"ratings": [{"event_id": "e1", "stars": 4}]})
     assert editor.ratings[0].reason == ""
+
+
+def test_editor_reason_never_fails_the_call() -> None:
+    result = EditorResult.model_validate(
+        {
+            "ratings": [
+                {"event_id": "e1", "stars": 2, "reason": None},
+                {"event_id": "e2", "stars": 5, "reason": "  " + "很" * 300},
+            ]
+        }
+    )
+    assert result.ratings[0].reason == ""
+    assert len(result.ratings[1].reason) == 200

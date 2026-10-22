@@ -6,7 +6,7 @@ treats a ``ValidationError`` as a retryable ``*_schema_invalid`` failure.
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
 
 MarketCode = Literal["global", "tw_equity", "us_equity"]
 Topic = Literal["markets", "economy", "companies", "policy", "technology", "commodities"]
@@ -82,12 +82,25 @@ class TriageResult(_Strict):
     escalation: Escalation = 0
 
 
+REASON_MAX_CHARS = 200
+
+
+def _lenient_reason(value: object) -> object:
+    """A missing or overlong reason never fails the editor call: null reads as
+    empty and the text is cut to ``REASON_MAX_CHARS``. Other types still fail."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()[:REASON_MAX_CHARS]
+    return value
+
+
 class EditorRating(_Strict):
     event_id: str
     stars: Stars
     # One short sentence; the extended editor input asks for it when the stars
     # and the triage impact differ by two or more.
-    reason: Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] = ""
+    reason: Annotated[str, BeforeValidator(_lenient_reason)] = ""
 
 
 class EditorResult(_Strict):
