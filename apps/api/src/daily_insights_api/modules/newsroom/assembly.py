@@ -52,7 +52,15 @@ from daily_insights_api.modules.newsroom.worker import Runtime
 
 logger = logging.getLogger(__name__)
 
-EDITOR_PROMPT_VERSION = "newsroom.editor.v3"
+# Version per editor prompt file (``SelectionVariant.editor_prompt``), written to
+# the LLM audit and to every stored rating.
+EDITOR_PROMPT_VERSIONS: Mapping[str, str] = {
+    "editor_v3": "newsroom.editor.v3",
+    "editor": "newsroom.editor.v4",
+}
+# Editor prompt v4 asks for a reason when the stars and the event's top triage
+# impact differ by at least this much.
+REASON_STAR_GAP = 2
 DEDUPE_PROMPT_VERSION = "newsroom.dedupe.v2"
 REPEAT_PROMPT_VERSION = "newsroom.repeat.v1"
 DEDUPE_HEADLINES = 3
@@ -205,6 +213,10 @@ def validate_ratings(result: EditorResult, expected: set[str]) -> dict[str, int]
     if ratings.keys() != expected:
         raise EditorContractError("editor_schema_invalid")
     return ratings
+
+
+def editor_prompt_version(*, variant: SelectionVariant) -> str:
+    return EDITOR_PROMPT_VERSIONS[variant.editor_prompt]
 
 
 # --- Candidate loading -------------------------------------------------------------
@@ -1001,6 +1013,34 @@ def _editor_payload(
     return {"market": market, "events": events}
 
 
+def missing_reasons(
+    result: EditorResult,
+    candidates: Sequence[Candidate],
+    articles: Mapping[uuid.UUID, Sequence[_ArticleRow]],
+) -> int:
+    """Ratings ``REASON_STAR_GAP`` or more from their event's top impact that give no reason."""
+    impacts = {
+        str(candidate.event_id): event_brief(
+            articles.get(candidate.event_id, ()), candidate.headlines
+        ).max_impact
+        for candidate in candidates
+    }
+    return sum(
+        1
+        for rating in result.ratings
+        if not rating.reason
+        and (impact := impacts.get(rating.event_id)) is not None
+        and abs(rating.stars - impact) >= REASON_STAR_GAP
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class EditorRatings:
+    stars: dict[str, int]
+    # The reasons the editor gave, by event id; ratings without one are absent.
+    reasons: dict[str, str] = field(default_factory=dict)
+
+
 async def _rate(
     runtime: Runtime,
     market: str,
@@ -1012,8 +1052,12 @@ async def _rate(
     variant: SelectionVariant,
     sleep: Sleep,
     retry_delay: timedelta,
-) -> dict[str, int] | None:
-    """Editor stars per event id, or ``None`` once retries are exhausted."""
+) -> EditorRatings | None:
+    """Editor stars (and reasons) per event id, or ``None`` once retries are exhausted.
+
+    A missing reason never fails the call: the prompt asks for one, the count of
+    those left out is only logged.
+    """
     expected = {str(candidate.event_id) for candidate in candidates}
     for attempt in range(1, EDITOR_ATTEMPTS + 1):
         async with runtime.session_factory() as database:
@@ -1031,7 +1075,7 @@ async def _rate(
                         articles=articles,
                     ),
                     result_type=EditorResult,
-                    audit=CallAudit("editor", None, EDITOR_PROMPT_VERSION),
+                    audit=CallAudit("editor", None, editor_prompt_version(variant=variant)),
                 )
                 ratings = validate_ratings(result, expected)
             except (RetryableStageError, FatalStageError) as error:
@@ -1049,7 +1093,17 @@ async def _rate(
                 await sleep(retry_delay.total_seconds())
                 continue
             await database.commit()
-            return ratings
+            if variant.editor_extended_input:
+                missing = missing_reasons(result, candidates, articles)
+                if missing:
+                    logger.warning(
+                        "newsroom.editor_reasons_missing",
+                        extra={"market": market, "count": missing},
+                    )
+            return EditorRatings(
+                ratings,
+                {rating.event_id: rating.reason for rating in result.ratings if rating.reason},
+            )
     return None
 
 
@@ -1280,7 +1334,7 @@ async def _assemble_market(
     variant = get_variant(runtime.settings.newsroom_selection_variant)
     candidates = rank_candidates(titles, articles, market, excluded=repeats.excluded)
     by_id = {candidate.event_id: candidate for candidate in candidates}
-    ratings = (
+    rated = (
         await _rate(
             runtime,
             market,
@@ -1293,8 +1347,10 @@ async def _assemble_market(
             retry_delay=retry_delay,
         )
         if candidates
-        else {}
+        else EditorRatings({})
     )
+    ratings = None if rated is None else rated.stars
+    reasons = {} if rated is None else rated.reasons
     if ratings is None:
         mode = "fallback"
         picks = [
@@ -1343,7 +1399,8 @@ async def _assemble_market(
                     stars=ratings[str(candidate.event_id)],
                     picked=candidate.event_id in picked,
                     follow_up=candidate.event_id in repeats.follow_ups,
-                    prompt_version=EDITOR_PROMPT_VERSION,
+                    prompt_version=editor_prompt_version(variant=variant),
+                    reason=reasons.get(str(candidate.event_id)),
                 )
                 for position, candidate in enumerate(candidates, start=1)
             )

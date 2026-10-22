@@ -22,11 +22,13 @@ from daily_insights_api.modules.newsroom.assembly import (
     _editor_payload,
     _signal,
     apply_quota,
+    editor_prompt_version,
     event_brief,
     event_score,
     fallback_selection,
     key_figures,
     lead_summary,
+    missing_reasons,
     same_story,
     same_story_titles,
     validate_duplicate_groups,
@@ -519,6 +521,62 @@ def test_zh_hant_digest_covers_the_headline_and_summary() -> None:
     assert len(digest) == 64
     assert digest != zh_hant_digest("標題改", "摘要")
     assert digest != zh_hant_digest("標題", "摘要改")
+
+
+def test_editor_ratings_read_reasons_and_accept_none() -> None:
+    result = EditorResult.model_validate(
+        {
+            "ratings": [
+                {"event_id": "a", "stars": 5, "reason": " 關鍵航道中斷推升油價 "},
+                {"event_id": "b", "stars": 3},
+            ]
+        }
+    )
+    assert [rating.reason for rating in result.ratings] == ["關鍵航道中斷推升油價", ""]
+    assert validate_ratings(result, {"a", "b"}) == {"a": 5, "b": 3}
+
+
+def test_missing_reasons_count_only_wide_gaps_without_one() -> None:
+    wide, narrow, unknown = (_candidate(name) for name in ("wide", "narrow", "unknown"))
+    articles = {
+        wide.event_id: [_row(wide, "wide", impact=5)],
+        narrow.event_id: [_row(narrow, "narrow", impact=4)],
+        unknown.event_id: [_row(unknown, "unknown", impact=None)],
+    }
+    candidates = [wide, narrow, unknown]
+
+    def result(reason: str) -> EditorResult:
+        return EditorResult.model_validate(
+            {
+                "ratings": [
+                    {"event_id": str(wide.event_id), "stars": 3, "reason": reason},
+                    {"event_id": str(narrow.event_id), "stars": 3},
+                    {"event_id": str(unknown.event_id), "stars": 1},
+                ]
+            }
+        )
+
+    assert missing_reasons(result(""), candidates, articles) == 1
+    assert missing_reasons(result("與台股關聯間接"), candidates, articles) == 0
+
+
+def test_editor_prompt_version_follows_the_variant() -> None:
+    assert editor_prompt_version(variant=BASELINE) == "newsroom.editor.v3"
+    assert editor_prompt_version(variant=P0) == "newsroom.editor.v4"
+
+
+def test_editor_prompt_v4_explains_the_extended_input() -> None:
+    baseline, p0 = load_prompt(BASELINE.editor_prompt), load_prompt(P0.editor_prompt)
+    assert baseline != p0
+    for needle in ("max_impact", "max_escalation", "main_story_type", "lead_summary", "reason"):
+        assert needle in p0
+        assert needle not in baseline
+    for needle in ("JSON", "ratings", "event_id", "stars", "global", "tw_equity", "us_equity"):
+        assert needle in p0
+    # Anchors describe kinds of stories; the 10/18-10/22 replay window's own
+    # stories must not leak in, or replaying it would grade the prompt on itself.
+    for leak in ("荷姆茲", "Hormuz", "聯茂", "Meta", "特斯拉", "Tesla", "布蘭特", "108"):
+        assert leak not in p0
 
 
 @pytest.mark.parametrize("name", ["editor", "dedupe", "repeat", "analysis", "why", "translate"])

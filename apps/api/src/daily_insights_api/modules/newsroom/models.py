@@ -484,6 +484,8 @@ class NewsroomEditorRating(UUIDPrimaryKeyMixin, Base):
     # Shown to the editor as a follow-up of an earlier edition's item.
     follow_up: Mapped[bool] = mapped_column(Boolean, nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    # The editor's one-sentence reason (editor prompt v4 on); NULL when it gave none.
+    reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

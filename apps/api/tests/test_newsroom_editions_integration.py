@@ -52,6 +52,7 @@ from daily_insights_api.modules.newsroom.queue import (
     claim,
     run_claimed,
 )
+from daily_insights_api.modules.newsroom.variants import P0
 from daily_insights_api.modules.newsroom.worker import Runtime, StageBinding
 
 pytestmark = pytest.mark.integration
@@ -86,6 +87,8 @@ class FakeLlm:
 
     responders: dict[type[BaseModel], Responder] = field(default_factory=dict)
     calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    # System prompt per call, by stage.
+    systems: list[tuple[str, str]] = field(default_factory=list)
 
     async def complete(
         self,
@@ -104,12 +107,17 @@ class FakeLlm:
             # Tests that do not exercise the duplicate screens see no duplicates.
             return result_type()
         self.calls.append((audit.stage, payload))
+        self.systems.append((audit.stage, system))
         response = self.responders[result_type](payload)
         if isinstance(response, Exception):
             raise response
         database.add(
             NewsroomLlmCall(
-                stage=audit.stage, subject_id=audit.subject_id, model=model, latency_ms=1
+                stage=audit.stage,
+                subject_id=audit.subject_id,
+                model=model,
+                prompt_version=audit.prompt_version,
+                latency_ms=1,
             )
         )
         return result_type.model_validate(response)
@@ -405,7 +413,7 @@ async def test_assembly_selects_by_quota_and_queues_analysis(
     assert [row.position for row in ratings] == list(range(1, 9))
     assert ratings[0].score == 80.0
     assert all(
-        row.prompt_version == assembly.EDITOR_PROMPT_VERSION and not row.follow_up
+        row.prompt_version == assembly.editor_prompt_version(variant=P0) and not row.follow_up
         for row in ratings
     )
 
@@ -1543,6 +1551,102 @@ async def test_baseline_editor_input_keeps_the_eb6ad34_fields(
             "source_count": 2,
         }
     ]
+
+
+async def _editor_audit(newsroom_database: async_sessionmaker[AsyncSession]) -> list[str | None]:
+    async with newsroom_database() as database:
+        return list(
+            await database.scalars(
+                select(NewsroomLlmCall.prompt_version).where(NewsroomLlmCall.stage == "editor")
+            )
+        )
+
+
+async def _stored_ratings(
+    newsroom_database: async_sessionmaker[AsyncSession], market: str
+) -> list[NewsroomEditorRating]:
+    async with newsroom_database() as database:
+        return list(
+            await database.scalars(
+                select(NewsroomEditorRating).where(NewsroomEditorRating.market_code == market)
+            )
+        )
+
+
+async def test_p0_editor_uses_prompt_v4_and_keeps_its_reasons(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    await _extended_input_event(newsroom_database)
+    llm = FakeLlm(
+        {
+            EditorResult: lambda payload: {
+                "ratings": [
+                    {"event_id": event["event_id"], "stars": 2, "reason": " 與本版關聯間接 "}
+                    for event in payload["events"]
+                ]
+            }
+        }
+    )
+
+    await assembly.assemble_editions(
+        _with_variant(_runtime(newsroom_database, llm), "p0"), EDITION_DATE, sleep=_no_sleep
+    )
+
+    assert {system for stage, system in llm.systems if stage == "editor"} == {
+        translation.load_prompt("editor")
+    }
+    assert set(await _editor_audit(newsroom_database)) == {"newsroom.editor.v4"}
+    [rating] = await _stored_ratings(newsroom_database, "global")
+    assert (rating.stars, rating.reason, rating.prompt_version) == (
+        2,
+        "與本版關聯間接",
+        "newsroom.editor.v4",
+    )
+
+
+async def test_a_missing_reason_is_logged_but_never_fails_the_editor(
+    newsroom_database: async_sessionmaker[AsyncSession], caplog: pytest.LogCaptureFixture
+) -> None:
+    await _extended_input_event(newsroom_database)
+    # Two stars against a top impact of 5, without the reason the prompt asks for.
+    llm = FakeLlm({EditorResult: _stars_by_title({}, default=2)})
+
+    with caplog.at_level("WARNING", logger=assembly.logger.name):
+        await assembly.assemble_editions(
+            _with_variant(_runtime(newsroom_database, llm), "p0"), EDITION_DATE, sleep=_no_sleep
+        )
+
+    # One editor call per market with candidates: no retry, no fallback.
+    assert llm.stages().count("editor") == 1
+    editions = await _editions(newsroom_database)
+    assert editions["global"].selection_mode == "editor"
+    [rating] = await _stored_ratings(newsroom_database, "global")
+    assert (rating.stars, rating.reason) == (2, None)
+    [record] = [row for row in caplog.records if row.message == "newsroom.editor_reasons_missing"]
+    assert (record.__dict__["market"], record.__dict__["count"]) == ("global", 1)
+
+
+async def test_baseline_editor_uses_prompt_v3(
+    newsroom_database: async_sessionmaker[AsyncSession], caplog: pytest.LogCaptureFixture
+) -> None:
+    await _extended_input_event(newsroom_database)
+    llm = FakeLlm({EditorResult: _stars_by_title({}, default=2)})
+
+    with caplog.at_level("WARNING", logger=assembly.logger.name):
+        await assembly.assemble_editions(
+            _with_variant(_runtime(newsroom_database, llm), "baseline"),
+            EDITION_DATE,
+            sleep=_no_sleep,
+        )
+
+    assert {system for stage, system in llm.systems if stage == "editor"} == {
+        translation.load_prompt("editor_v3")
+    }
+    assert set(await _editor_audit(newsroom_database)) == {"newsroom.editor.v3"}
+    [rating] = await _stored_ratings(newsroom_database, "global")
+    assert (rating.reason, rating.prompt_version) == (None, "newsroom.editor.v3")
+    # The v3 prompt asks for no reason, so none is reported missing.
+    assert not [row for row in caplog.records if row.message == "newsroom.editor_reasons_missing"]
 
 
 async def test_feeds_of_one_outlet_count_as_one_source(
