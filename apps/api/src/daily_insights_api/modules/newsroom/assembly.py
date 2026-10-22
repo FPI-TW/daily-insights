@@ -9,6 +9,7 @@ retries fall back to score order (D5).
 """
 
 import asyncio
+import hashlib
 import html
 import logging
 import math
@@ -427,11 +428,19 @@ def editor_prompt_version(*, variant: SelectionVariant) -> str:
 
 
 def dedupe_prompt(*, variant: SelectionVariant) -> tuple[str, str]:
-    """The duplicate screen's prompt text with the variant's addenda, and its audit version."""
+    """The duplicate screen's prompt text with the variant's addenda, and its audit version.
+
+    A version with addenda ends with a hash of the whole text, as triage's does,
+    so an edited addendum never shares a label with the text it replaced. The
+    plain prompt keeps its bare ``newsroom.dedupe.v2`` label.
+    """
     parts = (variant.dedupe_prompt, *variant.dedupe_prompt_addenda)
     text = "\n\n".join(load_prompt(part) for part in parts)
-    version = "+".join((DEDUPE_PROMPT_VERSION, *variant.dedupe_prompt_addenda))
-    return text, version
+    if not variant.dedupe_prompt_addenda:
+        return text, DEDUPE_PROMPT_VERSION
+    digest = hashlib.sha256(text.encode()).hexdigest()[:12]
+    label = "+".join((DEDUPE_PROMPT_VERSION, *variant.dedupe_prompt_addenda))
+    return text, f"{label}:{digest}"
 
 
 # --- Candidate loading -------------------------------------------------------------

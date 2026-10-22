@@ -142,7 +142,7 @@ def test_only_earnings_merge_appends_the_earnings_prompts() -> None:
     assert triage.text.startswith(load_triage_prompt(variant=P0B).text)
     assert triage.text.endswith(load_prompt("triage_addendum_earnings"))
     text, version = dedupe_prompt(variant=earnings)
-    assert version == "newsroom.dedupe.v2+dedupe_addendum_earnings"
+    assert version.startswith("newsroom.dedupe.v2+dedupe_addendum_earnings:")
     assert text == load_prompt("dedupe") + "\n\n" + load_prompt("dedupe_addendum_earnings")
     for variant in (BASELINE, P0, P0B):
         assert dedupe_prompt(variant=variant) == (load_prompt("dedupe"), "newsroom.dedupe.v2")
