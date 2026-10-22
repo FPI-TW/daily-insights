@@ -89,6 +89,8 @@ MAX_CONCURRENCY = 8
 HEADLINES_SHOWN = 3
 SLACK_ENVIRONMENT = "DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL"
 REVIEW_BASE_URL = "http://replay.invalid"
+# Fatal triage codes that would fail every article: stop instead of going on.
+ABORTING_FATAL_CODES = ("_http_401", "_http_402", "_http_403", "_configuration_missing")
 
 
 @dataclass(frozen=True, slots=True)
@@ -925,7 +927,17 @@ async def _triage_window(context: _Context, day: date) -> None:
                     errors[type(error).__name__] += 1
                     outcome = "pending"
                 if outcome == "fatal":
-                    raise ReplayError("a triage call failed fatally (provider key or quota?)")
+                    async with context.sessions() as database:
+                        code = await database.scalar(
+                            select(NewsroomArticle.triage_error_code).where(
+                                NewsroomArticle.id == article_id
+                            )
+                        )
+                    # A key, balance or configuration failure would fail every
+                    # article; anything else (a provider refusing one article's
+                    # content) fails that article only, as in production.
+                    if code is None or code.endswith(ABORTING_FATAL_CODES):
+                        raise ReplayError(f"a triage call failed fatally ({code})")
                 if outcome != "pending":
                     break
             outcomes[outcome] += 1
@@ -937,6 +949,9 @@ async def _triage_window(context: _Context, day: date) -> None:
         async with asyncio.TaskGroup() as group:
             for index, article_id in enumerate(article_ids):
                 group.create_task(one(index, article_id))
+    except* (ReplayError, ReplayCacheMiss) as group_error:
+        # Report the first reason rather than the task group around it.
+        raise group_error.exceptions[0] from None
     finally:
         orm_event.remove(NewsroomEvent, "init", _replay_event_id)
         context.gate_holder[0] = None
