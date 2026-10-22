@@ -72,6 +72,7 @@ from daily_insights_api.modules.newsroom.providers import (
 from daily_insights_api.modules.newsroom.queue import Claim, FatalStageError, RetryableStageError
 from daily_insights_api.modules.newsroom.replay import pipeline, retriage, snapshot
 from daily_insights_api.modules.newsroom.replay.cache import (
+    ApiFailures,
     CachedEmbedder,
     CachedJsonModel,
     CacheStats,
@@ -337,6 +338,7 @@ def _runtime(
     gate_holder: list[TriageGate | None],
     stats: CacheStats,
     ledger: Ledger,
+    failures: ApiFailures,
 ) -> Runtime:
     cache = ResponseCache(environment.cache_dir)
 
@@ -368,6 +370,7 @@ def _runtime(
             live=None if options.offline or options.dry_run else live_model,
             gate=_HeldGate(gate_holder),
             ledger=ledger,
+            failures=failures,
         ),
         embedder=CachedEmbedder(
             cache,
@@ -375,6 +378,7 @@ def _runtime(
             model=settings.newsroom_embedding_model,
             live=None if options.offline or options.dry_run else live_embedder,
             ledger=ledger,
+            failures=failures,
         ),
         notifier=LogNotifier(),
         renderer=None,
@@ -1491,6 +1495,22 @@ async def _retriage_day(context: _Context, day: date) -> bool:
     return True
 
 
+def _void_failed_calls(
+    context: _Context,
+    day: date,
+    days: Sequence[MarketDay],
+    failed: Sequence[tuple[str, str]],
+) -> None:
+    """A day with a call that outlasted every retry is not a result: mark it invalid."""
+    if not failed:
+        return
+    calls = Counter(f"{label} ({code})" for label, code in failed)
+    reason = "API 失敗重試用盡: " + "、".join(f"{call} {n} 次" for call, n in calls.items())
+    context.note(day, reason + "; 本日作廢 (重播不採用退回粗分排序或略過篩檢的結果)")
+    for market_day in days:
+        market_day.invalid_reason = market_day.invalid_reason or reason
+
+
 def _skipped_day(day: date, reason: str) -> list[MarketDay]:
     return [
         MarketDay(
@@ -1631,7 +1651,10 @@ async def run(environment: ReplayEnvironment, options: RunOptions) -> Path:
         engine = create_engine(settings)
         stats = CacheStats()
         gate_holder: list[TriageGate | None] = [None]
-        runtime = _runtime(environment, options, settings, engine, gate_holder, stats, ledger)
+        failures = ApiFailures()
+        runtime = _runtime(
+            environment, options, settings, engine, gate_holder, stats, ledger, failures
+        )
         context = _Context(environment, options, runtime, engine, reference, gate_holder)
         context.stats = stats
         if options.stages == "retriage":
@@ -1647,6 +1670,7 @@ async def run(environment: ReplayEnvironment, options: RunOptions) -> Path:
         try:
             for day in options.snapshot.dates():
                 logger.info("newsroom.replay_day", extra={"edition_date": day.isoformat()})
+                failed_before = len(failures.calls)
                 if day in options.skipped:
                     days += _skipped_day(day, options.skipped[day])
                     context.note(day, f"未重播, 標為作廢: {options.skipped[day]}")
@@ -1663,7 +1687,9 @@ async def run(environment: ReplayEnvironment, options: RunOptions) -> Path:
                 else:
                     await _rescore(context, day)
                 with replay_rep(options.rep):
-                    days += await _assemble_day(context, day)
+                    assembled = await _assemble_day(context, day)
+                _void_failed_calls(context, day, assembled, failures.calls[failed_before:])
+                days += assembled
         finally:
             await runtime.aclose()
             await engine.dispose()

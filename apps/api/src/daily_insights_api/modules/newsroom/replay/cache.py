@@ -19,8 +19,15 @@ replays them for free.
 
 Answers fetched live are priced and appended to the round's ledger (``costs``)
 with the provider's usage, including DeepSeek's cache-hit input tokens.
+
+A provider that is unreachable, times out, rate-limits or answers 5xx is asked
+again after a growing pause (``API_RETRY_DELAYS``). When the retries run out
+the failure is recorded in ``ApiFailures`` before it propagates, so the runner
+can void the market day instead of keeping what the pipeline did without that
+call (a score-only fallback, or a duplicate or repeat screen silently skipped).
 """
 
+import asyncio
 import hashlib
 import json
 import os
@@ -41,6 +48,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.modules.newsroom.models import NewsroomLlmCall
 from daily_insights_api.modules.newsroom.providers import CallAudit, Embedder, JsonModel
+from daily_insights_api.modules.newsroom.queue import RetryableStageError
 from daily_insights_api.modules.newsroom.replay.costs import Ledger
 
 ResultT = TypeVar("ResultT", bound=BaseModel)
@@ -52,6 +60,52 @@ CACHE_REQUEST_ID = "replay-cache"
 
 class ReplayCacheMiss(RuntimeError):
     """An offline replay needed an answer the cache does not have."""
+
+
+# Pauses before each further attempt after a transient provider failure.
+API_RETRY_DELAYS: tuple[float, ...] = (2.0, 5.0, 10.0, 20.0, 40.0)
+_TRANSIENT = re.compile(r"_provider_(unreachable|timeout|http_429|http_5\d\d)$")
+
+
+def transient(error: RetryableStageError) -> bool:
+    """A provider outage rather than an answer the model got wrong."""
+    return _TRANSIENT.search(error.code) is not None
+
+
+@dataclass
+class ApiFailures:
+    """Calls whose transient provider failures outlasted every retry, in order."""
+
+    calls: list[tuple[str, str]] = field(default_factory=list)
+
+    def add(self, audit: CallAudit, code: str) -> None:
+        self.calls.append((f"{audit.stage} {audit.prompt_version or '-'}", code))
+
+
+Sleep = Callable[[float], Awaitable[None]]
+
+
+async def with_retries[T](
+    call: Callable[[], Awaitable[T]],
+    *,
+    audit: CallAudit,
+    failures: ApiFailures | None,
+    delays: Sequence[float] = API_RETRY_DELAYS,
+    sleep: Sleep = asyncio.sleep,
+) -> T:
+    """``call()``, asked again after each transient failure; the last one is recorded."""
+    for attempt in range(len(delays) + 1):
+        try:
+            return await call()
+        except RetryableStageError as error:
+            if not transient(error):
+                raise
+            if attempt == len(delays):
+                if failures is not None:
+                    failures.add(audit, error.code)
+                raise
+            await sleep(delays[attempt])
+    raise AssertionError("unreachable")
 
 
 _rep: ContextVar[int] = ContextVar("replay_rep", default=1)
@@ -322,6 +376,9 @@ class CachedJsonModel:
         live: Callable[[], JsonModel] | None,
         gate: CallGate | None = None,
         ledger: Ledger | None = None,
+        failures: ApiFailures | None = None,
+        retry_delays: Sequence[float] = API_RETRY_DELAYS,
+        sleep: Sleep = asyncio.sleep,
     ) -> None:
         self._cache = cache
         self._stats = stats
@@ -329,6 +386,9 @@ class CachedJsonModel:
         self._live: JsonModel | None = None
         self._gate = gate
         self._ledger = ledger
+        self._failures = failures
+        self._retry_delays = retry_delays
+        self._sleep = sleep
         self._occurrences: Counter[str] = Counter()
 
     async def aclose(self) -> None:
@@ -424,18 +484,25 @@ class CachedJsonModel:
             raise ReplayCacheMiss(f"no cached answer for a {audit.stage} call")
         if self._live is None:
             self._live = self._live_factory()
+        live = self._live
         before = {id(row) for row in database.new if isinstance(row, NewsroomLlmCall)}
         usages: list[dict[str, Any]] = []
         token = _usage_sink.set(usages)
         failed = True
         try:
-            result = await self._live.complete(
-                database,
-                model=model,
-                system=system,
-                payload=payload,
-                result_type=result_type,
+            result = await with_retries(
+                lambda: live.complete(
+                    database,
+                    model=model,
+                    system=system,
+                    payload=payload,
+                    result_type=result_type,
+                    audit=audit,
+                ),
                 audit=audit,
+                failures=self._failures,
+                delays=self._retry_delays,
+                sleep=self._sleep,
             )
             failed = False
         finally:
@@ -482,6 +549,9 @@ class CachedEmbedder:
         model: str,
         live: Callable[[], Embedder] | None,
         ledger: Ledger | None = None,
+        failures: ApiFailures | None = None,
+        retry_delays: Sequence[float] = API_RETRY_DELAYS,
+        sleep: Sleep = asyncio.sleep,
     ) -> None:
         self._cache = cache
         self._stats = stats
@@ -489,6 +559,9 @@ class CachedEmbedder:
         self._live_factory = live
         self._live: Embedder | None = None
         self._ledger = ledger
+        self._failures = failures
+        self._retry_delays = retry_delays
+        self._sleep = sleep
 
     async def aclose(self) -> None:
         closer: Callable[[], Awaitable[None]] | None = getattr(self._live, "aclose", None)
@@ -515,8 +588,15 @@ class CachedEmbedder:
                 self._live = self._live_factory()
             usages: list[dict[str, Any]] = []
             token = _usage_sink.set(usages)
+            live = self._live
             try:
-                fetched = await self._live.embed(database, missing, audit=audit)
+                fetched = await with_retries(
+                    lambda: live.embed(database, missing, audit=audit),
+                    audit=audit,
+                    failures=self._failures,
+                    delays=self._retry_delays,
+                    sleep=self._sleep,
+                )
             finally:
                 _usage_sink.reset(token)
                 tokens = sum(int(usage.get("prompt_tokens") or 0) for usage in usages)

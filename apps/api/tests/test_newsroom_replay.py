@@ -1104,3 +1104,92 @@ def test_a_chained_retriage_is_parsed() -> None:
     assert run_newsroom_replay._snapshot(options).lookback_days == 14
     with pytest.raises(SystemExit):
         run_newsroom_replay.parse_args(["run", "--via", "p0b"])
+
+
+# --- Provider outages ---------------------------------------------------------------------
+
+
+class OutageModel(ScriptedModel):
+    """Unreachable ``outages`` times, then answers."""
+
+    def __init__(self, answers: Sequence[dict[str, Any]], outages: int) -> None:
+        super().__init__(answers)
+        self.outages = outages
+
+    async def complete[R: BaseModel](
+        self,
+        database: AsyncSession,
+        *,
+        model: str,
+        system: str,
+        payload: dict[str, Any],
+        result_type: type[R],
+        audit: CallAudit,
+    ) -> R:
+        if self.outages:
+            self.outages -= 1
+            raise RetryableStageError("editor_provider_unreachable")
+        return await super().complete(
+            database,
+            model=model,
+            system=system,
+            payload=payload,
+            result_type=result_type,
+            audit=audit,
+        )
+
+
+async def test_a_provider_outage_is_retried_and_recorded_when_retries_run_out(
+    tmp_path: Path,
+) -> None:
+    pauses: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        pauses.append(seconds)
+
+    event_id = uuid.uuid4()
+    failures = cache_module.ApiFailures()
+
+    def client(live: ScriptedModel) -> CachedJsonModel:
+        return CachedJsonModel(
+            ResponseCache(tmp_path / str(len(pauses))),
+            CacheStats(),
+            live=lambda: live,
+            failures=failures,
+            retry_delays=(1.0, 2.0),
+            sleep=sleep,
+        )
+
+    async def ask(model: CachedJsonModel) -> int:
+        result = await model.complete(
+            _session(FakeSession()),
+            model="m",
+            system="s",
+            payload=_editor_payload(event_id),
+            result_type=EditorResult,
+            audit=EDITOR_AUDIT,
+        )
+        return result.ratings[0].stars
+
+    assert await ask(client(OutageModel([_ratings((event_id, 4))], outages=2))) == 4
+    assert pauses == [1.0, 2.0] and failures.calls == []
+    with pytest.raises(RetryableStageError):
+        await ask(client(OutageModel([_ratings((event_id, 4))], outages=3)))
+    assert failures.calls == [("editor newsroom.editor.v3", "editor_provider_unreachable")]
+    # A wrong answer is the stage's to retry, not an outage.
+    with pytest.raises(RetryableStageError):
+        await ask(client(FlakyModel([_ratings((event_id, 4))], failures=1)))
+    assert len(failures.calls) == 1
+
+
+def test_a_day_with_an_exhausted_call_is_void() -> None:
+    days = [_day("global"), _day("us_equity")]
+    context = cast(runner._Context, type("C", (), {"note": lambda self, day, text: None})())
+    runner._void_failed_calls(
+        context,
+        date(2026, 10, 20),
+        days,
+        [("editor newsroom.repeat.v1", "editor_provider_timeout")],
+    )
+    assert all(not day.valid for day in days)
+    assert "newsroom.repeat.v1" in (days[0].invalid_reason or "")
