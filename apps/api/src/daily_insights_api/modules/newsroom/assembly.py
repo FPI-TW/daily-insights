@@ -82,6 +82,161 @@ DEDUPE_FIGURE_SIMILARITY = 0.75
 # a "market awaits the call" preview against the results, 0.873; other stories
 # of the same company or theme 0.85 and below.
 DEDUPE_ARTICLE_SIMILARITY = 0.88
+# The earnings_merge variant's path for one release's angles whose articles drift
+# apart too (on 2026-10-22 one company's results and its "results vs EPS" take
+# scored 0.68 by title and 0.69 by articles): two grouped events merge whatever
+# their similarity when both are mainly data and their working titles name the
+# same single company and an earnings word. Its decisions record this threshold,
+# as no similarity bar applied.
+EARNINGS_MERGE_THRESHOLD = 0.0
+EARNINGS_TITLE_WORDS = (
+    "財報",
+    "法說",
+    "季報",
+    "財測",
+    "營收",
+    "業績",
+    "獲利",
+    "毛利",
+    "電話會議",
+    "earnings",
+    "guidance",
+    "results",
+    "quarterly",
+    "EPS",
+)
+# Titles with an earnings word that are still another story: a monthly sales
+# report, a preview, and the company's other news (products, lawsuits, people, deals).
+EARNINGS_OTHER_STORY_WORDS = (
+    "前瞻",
+    "前夕",
+    "將公布",
+    "即將",
+    "preview",
+    "ahead of",
+    "訴訟",
+    "起訴",
+    "官司",
+    "罰",
+    "新品",
+    "發表",
+    "推出",
+    "亮相",
+    "收購",
+    "併購",
+    "離職",
+    "辭任",
+    "接任",
+    "任命",
+    "lawsuit",
+    "launch",
+    "unveil",
+    "acquisition",
+)
+# A quarter named in a title (第三季, Q3) also marks a results story.
+_QUARTER = re.compile(r"第[一二三四1-4]季|(?<![A-Za-z])[Qq][1-4](?!\d)")
+_MONTHLY_SALES = re.compile(r"(?:\d{1,2}|[一二三四五六七八九十]{1,3})月份?(?:合併)?營收|月營收")
+# Well-known companies by every name a working title may use; the longer names
+# are matched first, so 美超微 is not also read as 超微.
+COMPANY_ALIASES: Mapping[str, tuple[str, ...]] = {
+    "tsmc": ("台積電", "TSMC"),
+    "nvidia": ("輝達", "Nvidia", "NVDA"),
+    "apple": ("蘋果", "Apple", "AAPL"),
+    "microsoft": ("微軟", "Microsoft", "MSFT"),
+    "alphabet": ("Alphabet", "谷歌", "Google", "GOOGL"),
+    "amazon": ("亞馬遜", "Amazon", "AMZN"),
+    "meta": ("Meta", "臉書", "Facebook"),
+    "tesla": ("特斯拉", "Tesla", "TSLA"),
+    "broadcom": ("博通", "Broadcom", "AVGO"),
+    "amd": ("超微", "AMD"),
+    "supermicro": ("美超微", "Supermicro", "Super Micro", "SMCI"),
+    "micron": ("美光", "Micron"),
+    "intel": ("英特爾", "Intel", "INTC"),
+    "qualcomm": ("高通", "Qualcomm"),
+    "netflix": ("網飛", "Netflix", "NFLX"),
+    "oracle": ("甲骨文", "Oracle"),
+    "ibm": ("IBM",),
+    "spacex": ("SpaceX",),
+    "asml": ("艾司摩爾", "ASML"),
+    "samsung": ("三星電子", "Samsung"),
+    "sk_hynix": ("SK海力士", "海力士", "SK Hynix"),
+    "foxconn": ("鴻海", "Foxconn"),
+    "mediatek": ("聯發科", "MediaTek"),
+    "jpmorgan": ("摩根大通", "JPMorgan"),
+}
+_ALIASES_LONGEST_FIRST = sorted(
+    ((alias, company) for company, aliases in COMPANY_ALIASES.items() for alias in aliases),
+    key=lambda pair: -len(pair[0]),
+)
+# A title's leading subject: its opening Latin name, or its opening Chinese run cut
+# where the name gives way to a period, an earnings word or a verb.
+_LEADING_LATIN = re.compile(r"[A-Z][A-Za-z0-9&-]+")
+_LEADING_CJK = re.compile(r"[一-鿿]+")
+_SUBJECT_ENDS = (
+    "第",
+    "前",
+    "上",
+    "下",
+    "本",
+    "今年",
+    "明年",
+    "全年",
+    "單季",
+    "首季",
+    "公布",
+    "宣布",
+    "發布",
+    "財報",
+    "法說",
+    "季報",
+    "財測",
+    "營收",
+    "業績",
+    "電話",
+    "執行長",
+    "董事長",
+    "財務長",
+    "總裁",
+    "股價",
+    "盤後",
+    "獲利",
+    "預估",
+    "上修",
+    "下修",
+    "調升",
+    "調降",
+)
+_SUBJECT_CHARS = (2, 6)
+# Leading subjects that are not one company.
+_GENERIC_SUBJECTS = frozenset(
+    {
+        "美國",
+        "美股",
+        "台股",
+        "台灣",
+        "中國",
+        "陸股",
+        "日本",
+        "日股",
+        "歐洲",
+        "歐股",
+        "南韓",
+        "韓國",
+        "全球",
+        "市場",
+        "投資人",
+        "分析師",
+        "華爾街",
+        "科技股",
+        "科技巨頭",
+        "七大科技巨頭",
+        "半導體",
+        "企業",
+    }
+)
+_GENERIC_LATIN = frozenset(
+    {"AI", "US", "EU", "UK", "ETF", "CPI", "GDP", "PMI", "IPO", "CEO", "CFO", "EPS", "Fed", "OPEC"}
+)
 # An amount or rate in a title: two or more digits, or a decimal. A number
 # followed by a date unit (year, month, day, quarter, week) is not one.
 _KEY_FIGURE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)(?![\d.])(?!\s*[年月日季週周])")
@@ -584,6 +739,107 @@ def same_story(
     )
 
 
+def _leading_subject(title: str) -> str | None:
+    """A title's opening Latin name or Chinese subject; None when neither reads as one."""
+    text = title.strip()
+    latin = _LEADING_LATIN.match(text)
+    if latin is not None:
+        return None if latin.group() in _GENERIC_LATIN else latin.group()
+    run = _LEADING_CJK.match(text)
+    if run is None:
+        return None
+    low, high = _SUBJECT_CHARS
+    ends = [index for word in _SUBJECT_ENDS if (index := run.group().find(word, low)) >= 0]
+    subject = run.group()[: min(ends, default=len(run.group()))]
+    if not low <= len(subject) <= high or subject in _GENERIC_SUBJECTS:
+        return None
+    return subject
+
+
+def title_companies(title: str) -> frozenset[str]:
+    """The companies a working title names: known names anywhere, plus an unknown leading subject.
+
+    Known names (``COMPANY_ALIASES``) give their canonical keys; Latin names match
+    whole words regardless of case. The title's leading subject counts as one
+    more company unless it is (or starts with) a known name, so a title led by an
+    unknown company and naming a known one names two.
+    """
+    text = title.strip()
+    found: set[str] = set()
+    for alias, company in _ALIASES_LONGEST_FIRST:
+        pattern = re.escape(alias)
+        if alias.isascii():
+            pattern = rf"(?<![A-Za-z]){pattern}(?![A-Za-z])"
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match is not None:
+            found.add(company)
+            # Blank the name out so a shorter alias inside it does not match too.
+            text = text[: match.start()] + " " * len(alias) + text[match.end() :]
+    subject = _leading_subject(title)
+    if subject is not None:
+        folded = subject.casefold()
+        known = any(
+            folded.startswith(alias.casefold()) or alias.casefold().startswith(folded)
+            for alias, _ in _ALIASES_LONGEST_FIRST
+        )
+        if not known:
+            found.add(folded)
+    return frozenset(found)
+
+
+def is_earnings_title(title: str) -> bool:
+    """Whether a working title reports an earnings release itself (not a preview or other news)."""
+    folded = title.casefold()
+    earnings = _QUARTER.search(title) is not None or any(
+        word.casefold() in folded for word in EARNINGS_TITLE_WORDS
+    )
+    return (
+        earnings
+        and not any(word.casefold() in folded for word in EARNINGS_OTHER_STORY_WORDS)
+        and _MONTHLY_SALES.search(title) is None
+    )
+
+
+def same_earnings_release(
+    title: str, other: str, story_type: str | None, other_story_type: str | None
+) -> bool:
+    """Whether two grouped events are one company's earnings release told from two angles.
+
+    Both must be mainly data, report the release itself and name the same one
+    company; a title naming no company, or several, never qualifies.
+    """
+    if story_type != "data" or other_story_type != "data":
+        return False
+    if not (is_earnings_title(title) and is_earnings_title(other)):
+        return False
+    companies = title_companies(title)
+    return len(companies) == 1 and companies == title_companies(other)
+
+
+def earnings_angles(
+    titles: Mapping[uuid.UUID, str],
+    articles: Mapping[uuid.UUID, Sequence[_ArticleRow]],
+    target: uuid.UUID,
+    others: Sequence[uuid.UUID],
+) -> list[uuid.UUID]:
+    """Those of ``others`` that are angles of the same earnings release as ``target``.
+
+    The earnings_merge variant's path: each event's main story type is read as
+    the editor input reads it (``event_brief``), price-action pieces left out.
+    """
+    main = event_brief(articles[target], ()).main_story_type
+    return [
+        event_id
+        for event_id in others
+        if same_earnings_release(
+            titles[target],
+            titles[event_id],
+            main,
+            event_brief(articles[event_id], ()).main_story_type,
+        )
+    ]
+
+
 def _decision(
     edition_date: date,
     scope: str,
@@ -594,6 +850,7 @@ def _decision(
     outcome: str,
     new_facts: bool | None = None,
     article_similarity: float | None = None,
+    threshold: float = DEDUPE_TITLE_SIMILARITY,
 ) -> NewsroomDedupeDecision:
     return NewsroomDedupeDecision(
         edition_date=edition_date,
@@ -604,7 +861,7 @@ def _decision(
         matched_title=matched[1][:500],
         title_similarity=similarity,
         article_similarity=article_similarity,
-        threshold=DEDUPE_TITLE_SIMILARITY,
+        threshold=threshold,
         shared_figure=bool(key_figures(event[1]) & key_figures(matched[1])),
         new_facts=new_facts,
         outcome=outcome,
@@ -645,7 +902,9 @@ async def merge_duplicate_candidates(
     "market awaits X" events crowd the real one out of its nearest candidates),
     which spends quota slots on repeats. One model call over every market's
     candidates proposes groups; an event joins its group's best-covered event
-    only when their working titles or their articles also match (``same_story``).
+    only when their working titles or their articles also match (``same_story``),
+    or, under the earnings_merge variant, when both are angles of one company's
+    earnings release (``earnings_angles``; recorded with ``EARNINGS_MERGE_THRESHOLD``).
     Every proposed pair is recorded with both similarities, merged or not. The events of a group
     that stay open (one story told from several angles, or related stories the
     model over-grouped) are returned as a story group.
@@ -701,6 +960,14 @@ async def merge_duplicate_candidates(
                 for event_id, value in similarity.items()
                 if same_story(value, closeness.get(event_id), titles[event_id], titles[target])
             ]
+            earnings = (
+                earnings_angles(
+                    titles, articles, target, [i for i in similarity if i not in sources]
+                )
+                if variant.earnings_merge_path
+                else []
+            )
+            sources += earnings
             outcome = "merged"
             if sources:
                 try:
@@ -730,6 +997,11 @@ async def merge_duplicate_candidates(
                     similarity=value,
                     article_similarity=closeness.get(event_id),
                     outcome=outcome if event_id in sources else "below_threshold",
+                    threshold=(
+                        EARNINGS_MERGE_THRESHOLD
+                        if event_id in earnings
+                        else DEDUPE_TITLE_SIMILARITY
+                    ),
                 )
                 for event_id, value in similarity.items()
             )

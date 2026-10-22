@@ -1412,6 +1412,67 @@ async def test_assembly_merges_angles_of_one_story_whose_articles_are_close(
     assert [item.event_id for item in items] == [results, preview]
 
 
+@pytest.mark.parametrize("variant", ["earnings_merge", "p0b", "p0", "baseline"])
+async def test_earnings_merge_joins_one_release_s_angles_whatever_their_similarity(
+    newsroom_database: async_sessionmaker[AsyncSession], variant: str
+) -> None:
+    reuters = await _source(newsroom_database, "reuters")
+    cna = await _source(newsroom_database, "cna")
+    scores = {"tw_equity": 90}
+    data = ["data", "data"]
+    titles = {
+        "台積電第三季獲利優於預期": data,
+        "台積電上調全年財測": ["data"],
+        "台積電法說會 董事長談AI需求": ["opinion"],
+        "台積電發表新製程": ["data"],
+        "聯發科第三季獲利優於預期": ["data"],
+    }
+    events = {
+        title: await _event(
+            newsroom_database,
+            title,
+            sources=[reuters, cna][: len(types)],
+            scores=scores,
+            story_types=types,
+        )
+        for title, types in titles.items()
+    }
+
+    def groups(payload: dict[str, Any]) -> dict[str, Any]:
+        return {"groups": [[str(event_id) for event_id in events.values()]]}
+
+    llm = FakeLlm({DuplicateGroups: groups, EditorResult: _stars_by_title({}, default=4)})
+    # Every working title is far from the others, and no article is embedded.
+    directions = ([1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0], [0.7, 0.7])
+    embedder = TitleEmbedder(dict(zip(titles, directions, strict=True)))
+    runtime = _with_variant(_runtime(newsroom_database, llm, embedder), variant)
+
+    report = await assembly.assemble_editions(runtime, EDITION_DATE, sleep=_no_sleep)
+
+    async with newsroom_database() as database:
+        decisions = (await database.scalars(select(NewsroomDedupeDecision))).all()
+    outcomes = {row.event_title: (row.outcome, row.threshold) for row in decisions}
+    target = events["台積電第三季獲利優於預期"]
+    guidance = await _get(newsroom_database, NewsroomEvent, events["台積電上調全年財測"])
+    if variant == "earnings_merge":
+        assert report.merged_duplicates == 1
+        assert (guidance.status, guidance.merged_into_id) == ("merged", target)
+        assert outcomes.pop("台積電上調全年財測") == ("merged", assembly.EARNINGS_MERGE_THRESHOLD)
+    else:
+        assert report.merged_duplicates == 0
+        assert guidance.status == "open"
+        assert outcomes.pop("台積電上調全年財測") == (
+            "below_threshold",
+            assembly.DEDUPE_TITLE_SIMILARITY,
+        )
+    # The chair's remarks (opinion), another story of the company and another
+    # company's results stay apart under every variant.
+    assert outcomes == dict.fromkeys(
+        ("台積電法說會 董事長談AI需求", "台積電發表新製程", "聯發科第三季獲利優於預期"),
+        ("below_threshold", assembly.DEDUPE_TITLE_SIMILARITY),
+    )
+
+
 async def test_price_action_reports_neither_qualify_nor_score(
     newsroom_database: async_sessionmaker[AsyncSession],
 ) -> None:
