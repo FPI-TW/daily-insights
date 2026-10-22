@@ -4,7 +4,7 @@ export pnpm_config_verify_deps_before_run := false
 
 .PHONY: help init dev dev-detached dev-web dev-api stop restart logs ps \
 	migrate bootstrap-admin format format-check lint type-check test test-db \
-	generate-morning-reports assemble-newsroom newsroom-quality newsroom-reembed \
+	generate-morning-reports assemble-newsroom newsroom-quality newsroom-reembed newsroom-replay \
 	backfill-index-daily-bars \
 	check-index-catalog check-nginx check-production-deployment \
 	check build
@@ -79,6 +79,17 @@ newsroom-quality: ## 印出重點新聞品質指標（唯讀，可傳 START、EN
 newsroom-reembed: ## 以目前的 embedding 模型與翻譯重算文章向量（預設收稿中的版次，可傳 START、END）
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
 	docker compose run --rm --build newsroom-worker python -m daily_insights_api.scripts.run_newsroom_reembed $(if $(START),--start $(START),) $(if $(END),--end $(END),)
+
+# The replay runs on the host on purpose: `docker compose run --build` would
+# build the production project. It only reads production (read-only exports)
+# and writes to its own pgvector container `newsroom-replay-pg` on 127.0.0.1.
+NEWSROOM_REPLAY_ROOT ?= $(abspath $(CURDIR)/..)/.newsroom-replay
+newsroom-replay: ## 離線重播選稿 (唯讀正式庫; CMD=prepare|run|compare|teardown, START END VARIANT STAGES ARGS)
+	NEWSROOM_REPLAY_ROOT="$(NEWSROOM_REPLAY_ROOT)" uv run --project apps/api python -m daily_insights_api.scripts.run_newsroom_replay \
+		$(or $(CMD),run) \
+		$(if $(filter prepare run,$(or $(CMD),run)),$(if $(START),--start $(START),) $(if $(END),--end $(END),),) \
+		$(if $(filter run,$(or $(CMD),run)),$(if $(VARIANT),--variant $(VARIANT),) $(if $(STAGES),--stages $(STAGES),),) \
+		$(ARGS)
 
 backfill-index-daily-bars: ## 一次性把指數日 K 灌進資料庫（可傳 PERIOD，預設 2y）
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
