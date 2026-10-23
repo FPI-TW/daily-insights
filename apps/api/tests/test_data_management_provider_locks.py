@@ -62,7 +62,7 @@ async def test_morning_manual_and_scheduled_paths_take_the_same_lock_before_work
 
     monkeypatch.setattr(morning_report, "_provider_lock_key", lock_key)
     monkeypatch.setattr(morning_report, "_run_market_unlocked", provider_work)
-    market: LaunchMarketCode = "crypto"
+    market: LaunchMarketCode = "us_equity"
     edition = date(2026, 9, 7)
 
     await morning_report._run_market(
@@ -75,7 +75,7 @@ async def test_morning_manual_and_scheduled_paths_take_the_same_lock_before_work
         cast(Any, factory), cast(TwelveDataAdapter, object()), market, edition
     )
     assert events == ["lock", "publication-check", "provider", "unlock"]
-    assert keys == [("daily-market", "crypto", edition)] * 2
+    assert keys == [("daily-market", "us_equity", edition)] * 2
 
 
 @pytest.mark.asyncio

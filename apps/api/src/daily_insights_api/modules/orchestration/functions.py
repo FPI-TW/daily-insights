@@ -206,10 +206,6 @@ TWELVE_MANIFESTS: dict[str, TwelveManifest] = {
         ("IEF", "global_macro_bonds", "USD", None, None),
         ("UUP", "global_macro_bonds", "USD", None, None),
     ),
-    "crypto_daily_bars": tuple(
-        (symbol, "crypto", "USD", None, None)
-        for symbol in ("BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD", "ADA/USD")
-    ),
     "us_mega_cap_daily_bars": tuple(
         (symbol, "us_equity", "USD", None, None)
         for symbol in ("AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "AVGO", "TSLA")
@@ -220,7 +216,6 @@ TWELVE_BOOTSTRAP = {
     "commodity_daily_bars": 800,
     "fx_daily_bars": 400,
     "rates_proxy_daily_bars": 400,
-    "crypto_daily_bars": 485,
     "us_mega_cap_daily_bars": 400,
 }
 

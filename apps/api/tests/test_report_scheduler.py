@@ -187,7 +187,7 @@ async def test_scheduled_restart_skips_all_published_markets_before_provider_wor
             "scheduler.edition.already_published",
             {
                 "edition_date": "2026-08-30",
-                "skipped_market_codes": ["global_macro_bonds", "crypto", "us_equity"],
+                "skipped_market_codes": ["global_macro_bonds", "us_equity"],
             },
         )
     ]

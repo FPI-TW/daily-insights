@@ -6,12 +6,16 @@ production deployment，正式排程由統一編排每日 08:00 routine 的
 [`five-market-morning-report-baseline.md`](five-market-morning-report-baseline.md)
 作為現行第一波晨報的市場、來源與驗收政策；舊文件只保留為歷史決策紀錄。
 
+2026-10-23 起加密貨幣移出第一波：launch manifest（`three-market.v10`）只保留
+`global_macro_bonds` 與 `us_equity`，不再抓取 Twelve Data 加密貨幣日線或發布加密
+貨幣晨報。本文件以下「三市場」與 `crypto` 相關敘述保留為原始決策紀錄。
+
 ## 1. 決策摘要
 
-第一波正式晨報固定為下列三個市場，順序不得由 runtime 自動改變：
+第一波正式晨報固定為下列市場，順序不得由 runtime 自動改變：
 
 1. `global_macro_bonds`：宏觀／債券
-2. `crypto`：加密貨幣
+2. `crypto`：加密貨幣（2026-10-23 移出第一波）
 3. `us_equity`：美股
 
 Twelve Data 是這三個市場晨報的 raw-data provider。晨報 runtime 不得在請求失敗、
@@ -108,7 +112,8 @@ request ID 是否存在等 sanitized metadata。Twelve Data 本次未回傳 requ
   各 100 credits，兩方向均回傳 2 筆並通過 adapter。`datetime` 是無 offset 的美股
   market-local datetime，本版只取其 market-local calendar date 作 `source_as_of`。
 - Probe 已證明三個 endpoint 的 credential 權限、實際欄位、上述 credit weight 與本版
-  所需歷史深度。帳戶分鐘額度、daily limit、外部展示授權及 attribution 仍須由正式
+  所需歷史深度。（2026-10-23 以 `/api_usage` 查詢目前方案為 `pro`，每分鐘 1,597
+  credits；每日 routine 約 60 credits。）daily limit、外部展示授權及 attribution 仍須由正式
   dashboard／合約仍需另行留存證據；runtime 不以 manifest 核准狀態或外部 hash 作為
   啟動條件。
 
@@ -250,7 +255,8 @@ completed EOD * 100`。圖表只顯示 Brent/Gold 的最新 30 個共同完成�
 
 ### Launch manifest
 
-- [x] Manifest 僅包含 `global_macro_bonds`、`crypto`、`us_equity`。
+- [x] Manifest 僅包含 `global_macro_bonds`、`crypto`、`us_equity`。（2026-10-23 起移除
+      `crypto`，`three-market.v10` 僅含 `global_macro_bonds` 與 `us_equity`。）
 - [x] 每個 block 的順序、required fields、歷史窗、公式、單位、精度與三語標籤均已
       凍結並版本化。
 - [x] Twelve Data 無法完整供應的 block 未出現在 manifest 或正式 UI。

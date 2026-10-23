@@ -58,9 +58,7 @@ from daily_insights_api.modules.reports.api import (
     TableColumn,
     _bundle,
     _commodity_ratio_window_dates,
-    _daily_change,
     _error_blocks_for_dataset,
-    _normalized_points,
     _previous_close_change,
     _quantize,
     _ratio_common_date_points,
@@ -80,7 +78,6 @@ REPORT_DATASETS: dict[str, tuple[str, ...]] = {
         "fx_daily_bars",
         "rates_proxy_daily_bars",
     ),
-    "crypto": ("crypto_daily_bars",),
     "us_equity": ("us_mega_cap_daily_bars",),
 }
 MACRO_DATASETS = frozenset(
@@ -948,74 +945,6 @@ def _report_bundle(
             )
         )
         return _bundle(market_code, ordered)
-
-    if market_code == "crypto":
-        symbols: tuple[str, ...] = ("BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD", "ADA/USD")
-        histories = {
-            symbol: _symbol_history(rows, "crypto_daily_bars", symbol) for symbol in symbols
-        }
-        if all(
-            len(history) >= 30 and history[-1].open_value is not None
-            for history in histories.values()
-        ):
-            blocks.extend(
-                (
-                    TableBlock(
-                        id="crypto.overview",
-                        status="ok",
-                        source_as_of=min(
-                            history[-1].observation_date for history in histories.values()
-                        ),
-                        columns=(
-                            TableColumn(id="asset"),
-                            TableColumn(id="price", unit_code="usd"),
-                            TableColumn(id="change", unit_code="percent"),
-                        ),
-                        rows=tuple(
-                            (
-                                TableCell(text=symbol.split("/")[0]),
-                                TableCell(
-                                    value=_quantize(
-                                        history[-1].value,
-                                        block_precision("crypto.overview"),
-                                        block_rounding("crypto.overview"),
-                                    )
-                                ),
-                                TableCell(
-                                    value=_quantize(
-                                        _daily_change(history[-1].open_value, history[-1].value),
-                                        block_precision("crypto.overview"),
-                                        block_rounding("crypto.overview"),
-                                    )
-                                ),
-                            )
-                            for symbol, history in histories.items()
-                        ),
-                    ),
-                    SeriesBlock(
-                        id="crypto.normalized_performance",
-                        status="ok",
-                        source_as_of=min(
-                            history[-1].observation_date for history in histories.values()
-                        ),
-                        unit_code="index",
-                        series=tuple(
-                            ChartSeries(
-                                id=symbol.split("/")[0].lower(),
-                                points=_normalized_points(
-                                    _daily_bars(history),
-                                    precision=block_precision("crypto.normalized_performance"),
-                                    rounding=block_rounding("crypto.normalized_performance"),
-                                ),
-                            )
-                            for symbol, history in histories.items()
-                        ),
-                    ),
-                )
-            )
-        else:
-            blocks.extend(_error_report_blocks(market_code, "crypto.daily_bars"))
-        return _bundle(market_code, tuple(blocks))
 
     symbols = ("AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "AVGO", "TSLA")
     histories = {

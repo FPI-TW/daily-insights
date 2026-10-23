@@ -412,7 +412,7 @@ export function createAdministrationClient(transport: ApiTransport) {
         morning_reports_enabled: ready("twelve_data"),
         yfinance_enabled: ready("yahoo_finance"),
         twse_enabled: ready("twse"),
-        markets: ["global_macro_bonds", "crypto", "us_equity"],
+        markets: ["global_macro_bonds", "us_equity"],
         rerunnable_providers: [],
         daily_news_enabled: catalog.features.daily_news ?? false,
         news_markets: ["global", "tw_equity", "us_equity"],

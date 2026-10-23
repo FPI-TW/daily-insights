@@ -28,7 +28,6 @@ from daily_insights_api.modules.reports.morning_report import (
     _market_datasets,
     _next_revision,
     _normalized_common_date_points,
-    _normalized_points,
     _quantize,
     _ratio_common_date_points,
     _revision_lock_key,
@@ -41,12 +40,11 @@ from daily_insights_api.modules.reports.morning_report import (
 )
 
 
-def test_manifest_freezes_three_markets_and_block_order() -> None:
-    assert MORNING_REPORT_DERIVATION_VERSION == "twelve-data.three-market.v9"
-    assert ACTIVE_LAUNCH_MANIFEST.version == "three-market.v9"
+def test_manifest_freezes_launch_markets_and_block_order() -> None:
+    assert MORNING_REPORT_DERIVATION_VERSION == "twelve-data.three-market.v10"
+    assert ACTIVE_LAUNCH_MANIFEST.version == "three-market.v10"
     assert tuple(market.market_code for market in ACTIVE_LAUNCH_MANIFEST.markets) == (
         "global_macro_bonds",
-        "crypto",
         "us_equity",
     )
     assert tuple(market.market_code for market in ACTIVE_LAUNCH_MANIFEST.markets) == (
@@ -56,22 +54,20 @@ def test_manifest_freezes_three_markets_and_block_order() -> None:
         "macro.commodities",
         "macro.rates_fx",
         "macro.commodity_ratios",
-        "crypto.overview",
-        "crypto.normalized_performance",
         "us.mega_caps",
     ]
     assert {
         block.rounding for market in ACTIVE_LAUNCH_MANIFEST.markets for block in market.blocks
     } == {"ROUND_HALF_EVEN"}
-    assert block_precision("crypto.overview") == 4
+    assert block_precision("macro.commodities") == 4
     assert block_precision("us.mega_caps") == 2
-    assert block_rounding("crypto.overview") == "ROUND_HALF_EVEN"
+    assert block_rounding("us.mega_caps") == "ROUND_HALF_EVEN"
 
 
 def test_manifest_hash_is_stable_and_changes_with_content() -> None:
     round_trip = LaunchManifest.model_validate(ACTIVE_LAUNCH_MANIFEST.model_dump(mode="json"))
     assert round_trip.sha256 == ACTIVE_LAUNCH_MANIFEST.sha256
-    changed = round_trip.model_copy(update={"version": "three-market.v10"})
+    changed = round_trip.model_copy(update={"version": "three-market.v11"})
     assert changed.sha256 != round_trip.sha256
 
 
@@ -205,7 +201,9 @@ def test_manifest_rejects_blocks_with_multiple_dataset_references() -> None:
 
 def test_manifest_rejects_dataset_reused_by_another_market() -> None:
     payload = ACTIVE_LAUNCH_MANIFEST.model_dump(mode="json")
-    payload["markets"][1]["blocks"][0]["datasets"] = ("macro.commodity_eod",)
+    us_blocks = payload["markets"][1]["blocks"]
+    reused = {**us_blocks[0], "id": "us.reused", "datasets": ("macro.commodity_eod",)}
+    payload["markets"][1]["blocks"] = (*us_blocks, reused)
 
     with pytest.raises(ValueError, match="every dataset must be referenced by exactly one market"):
         LaunchManifest.model_validate(payload)
@@ -274,52 +272,29 @@ def test_runtime_rejects_required_fields_outside_the_adapter_contract() -> None:
 
 
 def test_runtime_enforces_manifest_block_order_and_atomic_status() -> None:
-    blocks = _error_blocks("crypto")
-    _validate_manifest_output("crypto", blocks)
+    blocks = _error_blocks("global_macro_bonds")
+    _validate_manifest_output("global_macro_bonds", blocks)
 
     with pytest.raises(DataSourceContractError, match="exactly match manifest order"):
-        _validate_manifest_output("crypto", tuple(reversed(blocks)))
+        _validate_manifest_output("global_macro_bonds", tuple(reversed(blocks)))
 
-    wrong_kind = (
-        blocks[0].model_copy(update={"kind": "series"}),
-        blocks[1],
-    )
+    wrong_kind = (blocks[0].model_copy(update={"kind": "series"}), *blocks[1:])
     with pytest.raises(DataSourceContractError, match="block kinds"):
-        _validate_manifest_output("crypto", wrong_kind)
+        _validate_manifest_output("global_macro_bonds", wrong_kind)
 
-    mixed = (
-        blocks[0].model_copy(update={"status": "ok"}),
-        blocks[1],
-    )
+    mixed = (blocks[0].model_copy(update={"status": "ok"}), *blocks[1:])
     with pytest.raises(DataSourceContractError, match="mixed block statuses"):
-        _validate_manifest_output("crypto", mixed)
+        _validate_manifest_output("global_macro_bonds", mixed)
 
-    excessive_precision = blocks[0].model_copy(
+    (table,) = _error_blocks("us_equity")
+    excessive_precision = table.model_copy(
         update={
             "columns": (TableColumn(id="asset"),),
-            "rows": ((TableCell(value=Decimal("1.00001")),),),
+            "rows": ((TableCell(value=Decimal("1.001")),),),
         }
     )
     with pytest.raises(DataSourceContractError, match="exceeds manifest precision"):
-        _validate_manifest_output("crypto", (excessive_precision, blocks[1]))
-
-
-def test_normalized_performance_uses_first_close_inside_thirty_day_window() -> None:
-    bars = tuple(
-        DailyBar(
-            instrument_source_id="BTC/USD",
-            market="crypto",
-            symbol="BTC/USD",
-            trade_date=date(2026, 7, 1) + timedelta(days=index),
-            close=Decimal(index + 1),
-            volume=1,
-        )
-        for index in range(31)
-    )
-    points = _normalized_points(bars)
-    assert len(points) == 30
-    assert points[0].value == Decimal(100)
-    assert points[-1].value == Decimal(1550)
+        _validate_manifest_output("us_equity", (excessive_precision,))
 
 
 def test_macro_normalization_uses_latest_thirty_exact_common_provider_dates() -> None:

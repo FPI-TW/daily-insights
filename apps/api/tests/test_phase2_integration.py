@@ -166,7 +166,7 @@ async def phase2_harness() -> AsyncIterator[Phase2Harness]:
         database.add(
             OrganizationMarketPolicy(
                 organization_id=organization_id,
-                market_code="crypto",
+                market_code="global_macro_bonds",
                 is_visible=False,
                 contract_reference="phase2-hidden-market",
                 reason="Phase 2 tenant isolation test",
@@ -587,7 +587,7 @@ async def test_report_api_filters_hidden_market_localizes_and_marks_stale(
     )
     await _publish(
         phase2_harness.session_factory,
-        market_code="crypto",
+        market_code="global_macro_bonds",
         edition_date=date.today(),
         source_as_of=stale_as_of,
     )
@@ -615,7 +615,7 @@ async def test_report_api_filters_hidden_market_localizes_and_marks_stale(
     assert detail.json()["presentation"]["locale"] == "en"
     assert detail.json()["content"]["metrics"][0]["value"] == "123.4500"
 
-    hidden = await phase2_harness.client.get("/api/reports/crypto/latest")
+    hidden = await phase2_harness.client.get("/api/reports/global_macro_bonds/latest")
     assert hidden.status_code == 404
     unsupported_locale = await phase2_harness.client.get(
         "/api/reports/us_equity/latest",
@@ -634,7 +634,7 @@ async def test_report_api_distinguishes_missing_publication_from_hidden_market(
         "message": "report has not been generated",
     }
 
-    hidden = await phase2_harness.client.get("/api/reports/crypto/latest")
+    hidden = await phase2_harness.client.get("/api/reports/global_macro_bonds/latest")
     assert hidden.status_code == 404
     assert hidden.json()["detail"] == "report not found"
 
@@ -655,7 +655,7 @@ async def test_report_api_allows_internal_preview_without_tenant_membership(
     )
     await _publish(
         phase2_harness.session_factory,
-        market_code="crypto",
+        market_code="global_macro_bonds",
         edition_date=today,
         source_as_of=today,
     )
@@ -663,7 +663,7 @@ async def test_report_api_allows_internal_preview_without_tenant_membership(
     member_list = await phase2_harness.client.get("/api/reports")
     assert member_list.status_code == 200, member_list.text
     assert [report["market_code"] for report in member_list.json()] == ["us_equity"]
-    member_hidden = await phase2_harness.client.get("/api/reports/crypto/latest")
+    member_hidden = await phase2_harness.client.get("/api/reports/global_macro_bonds/latest")
     assert member_hidden.status_code == 404
     member_invalid = await phase2_harness.client.get("/api/reports/not-a-market/latest")
     assert member_invalid.status_code == 404
@@ -680,10 +680,10 @@ async def test_report_api_allows_internal_preview_without_tenant_membership(
         internal_list = await phase2_harness.client.get("/api/reports")
         assert internal_list.status_code == 200, internal_list.text
         assert [report["market_code"] for report in internal_list.json()] == [
-            "crypto",
+            "global_macro_bonds",
             "us_equity",
         ]
-        internal_detail = await phase2_harness.client.get("/api/reports/crypto/latest")
+        internal_detail = await phase2_harness.client.get("/api/reports/global_macro_bonds/latest")
         assert internal_detail.status_code == 200, internal_detail.text
         internal_invalid = await phase2_harness.client.get("/api/reports/not-a-market/latest")
         assert internal_invalid.status_code == 404

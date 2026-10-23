@@ -92,8 +92,9 @@ formula = "top two gainers followed by top two losers as returned by provider"
 
 ### 成本
 
-權值股共 8 檔，符合每分鐘 8 credits 的限制。`get_completed_prices` 以 `/eod`
-批次對齊最新完成交易日，再逐 symbol 取 `/time_series` 日線，供應商仍按 symbol 計費。
+權值股共 8 檔，每檔各一次 `/eod` 與 `/time_series`，約 16 credits；每日 routine 的
+Twelve Data 總用量約 60 credits。目前方案（2026-10-23 以 `/api_usage` 查詢）為 `pro`，
+每分鐘 1,597 credits，額度足夠。供應商按 symbol 計費，批次不會減少 credits。
 
 ## 4. manifest 的硬約束（動手前必讀）
 
@@ -121,8 +122,8 @@ formula = "top two gainers followed by top two losers as returned by provider"
 - `morning_report.py` 的 `_next_revision` 會比對 `latest_manifest_hash`，
   manifest 變了就產生**新的 revision**。這是設計上的正確行為，不要繞過。
 - 同時要更新兩個版本字串：
-  - `LaunchManifest.version`（目前 `"three-market.v9"`）
-  - `MORNING_REPORT_DERIVATION_VERSION`（目前 `"twelve-data.three-market.v9"`）
+  - `LaunchManifest.version`（目前 `"three-market.v10"`）
+  - `MORNING_REPORT_DERIVATION_VERSION`（目前 `"twelve-data.three-market.v10"`）
 
 若這次同時要做市場擴充，**把 manifest 的改動合併成一次**，避免連續 bump 產生多個 revision。
 

@@ -77,9 +77,9 @@ Implementation status: foundation complete. The provider adapter, immutable
 publication contract, database-backed orchestration primitives, and customer
 read API are implemented. Formal report content and the customer report UI
 moved to Phase 6B, which has since implemented them for the first wave. The
-current first wave is macro/bonds, crypto, and US equities only; the other five
-markets remain outside the launch manifest within the long-term eight-market
-catalog. Production scheduling now runs through the unified orchestration daily
+current first wave is macro/bonds and US equities only (crypto was removed on
+2026-10-23); the other six markets remain outside the launch manifest within the
+long-term eight-market catalog. Production scheduling now runs through the unified orchestration daily
 routine; alerts remain production-readiness work. See
 [`phase-2-data-reports.md`](phase-2-data-reports.md) and the accepted
 [`twelve-data-three-market-morning-report-plan.md`](twelve-data-three-market-morning-report-plan.md).
@@ -336,9 +336,9 @@ Accept when:
 Blocking decisions: exact operations, upload limits, scanning, versioning, and
 deletion/recovery.
 
-### Phase 6B — first-wave three-market report content and customer UI
+### Phase 6B — first-wave report content and customer UI
 
-Implementation status: implemented. The versioned three-market launch manifest,
+Implementation status: implemented. The versioned first-wave launch manifest,
 Twelve Data-backed publication through the `market_reports_publish` projection
 in the daily orchestration routine, and the customer report UI are in place.
 
@@ -347,8 +347,9 @@ Deliver:
 - the accepted
   [`twelve-data-three-market-morning-report-plan.md`](twelve-data-three-market-morning-report-plan.md)
   as the first gated deliverable;
-- a versioned launch manifest for macro/bonds, crypto, and US equities, using
-  Twelve Data only and without runtime fallback;
+- a versioned launch manifest for macro/bonds and US equities (crypto was
+  removed from the first wave on 2026-10-23), using Twelve Data only and without
+  runtime fallback;
 - production probe evidence for exact codes/symbols, required fields/rows/
   series/history, freshness, formulas, windows, units, and three-language
   labels;
@@ -359,10 +360,10 @@ Deliver:
 - complete three-locale labels, units, policy behavior, loading/null/chart-gap
   states, and report failure states. AI summary is not part of this phase.
 
-Taiwan equities has a navigable not-launched page that shows its market news
-edition but no report content, list entry, manifest block, or production
-publication; the former direct-URL mock previews are gone. FX, Hong Kong, and
-Mainland China also remain outside the first-wave manifest; Hong Kong equities
+Taiwan equities has a navigable page that shows its TWSE index and
+institutional-flow blocks and market news edition but no report content, list entry, manifest block, or production
+publication; the former direct-URL mock previews are gone. Crypto, FX, Hong
+Kong, and Mainland China also remain outside the first-wave manifest; Hong Kong equities
 has a navigable not-launched page with index and sector-heatmap panels but no
 report content.
 

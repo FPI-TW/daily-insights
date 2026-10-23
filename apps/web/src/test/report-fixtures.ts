@@ -11,7 +11,10 @@ import {
 } from "#/lib/provisional-reports"
 
 type FixtureCode =
-  (typeof launchMarketCodes)[number] | "tw_equity" | "tw_index_derivatives"
+  | (typeof launchMarketCodes)[number]
+  | "crypto"
+  | "tw_equity"
+  | "tw_index_derivatives"
 
 const text = (key: string): ReportValue => ({ kind: "translation", key })
 const value = (content: string | number): ReportValue => ({
