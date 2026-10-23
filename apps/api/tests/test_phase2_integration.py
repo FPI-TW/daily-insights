@@ -64,9 +64,7 @@ async def ready() -> bool:
 
 @pytest_asyncio.fixture
 async def phase2_harness() -> AsyncIterator[Phase2Harness]:
-    database_url = os.getenv("DAILY_INSIGHTS_TEST_DATABASE_URL") or os.getenv(
-        "DAILY_INSIGHTS_DATABASE_URL"
-    )
+    database_url = os.getenv("DAILY_INSIGHTS_TEST_DATABASE_URL")
     if database_url is None:
         pytest.skip("DAILY_INSIGHTS_TEST_DATABASE_URL is required for integration tests")
     settings = Settings(
