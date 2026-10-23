@@ -6,5 +6,5 @@ export pnpm_config_verify_deps_before_run=false
 pnpm format:check
 pnpm lint:check
 pnpm type:check
-pnpm test
+# test-db runs the full `pnpm test` against an isolated PostgreSQL.
 make test-db

@@ -34,7 +34,7 @@
     "test:web": "pnpm --filter @daily-insights/web test",
     "test:e2e": "pnpm --filter @daily-insights/web test:e2e",
     "test:client": "pnpm --filter @daily-insights/api-client test",
-    "test:api": "uv run --project apps/api pytest -c apps/api/pyproject.toml apps/api/tests",
+    "test:api": "uv run --project apps/api pytest -c apps/api/pyproject.toml -n 4 apps/api/tests",
     "test:watch": "pnpm --filter @daily-insights/web test:watch",
     "test:coverage": "pnpm --filter @daily-insights/web test:coverage",
     "check": "pnpm format:check && pnpm lint:check && pnpm type:check && pnpm api-client:check && pnpm test && pnpm build",

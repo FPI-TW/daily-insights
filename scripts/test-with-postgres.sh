@@ -7,7 +7,10 @@ container_id="$(
     -e POSTGRES_USER=daily_insights \
     -e POSTGRES_PASSWORD=daily_insights \
     -p 127.0.0.1::5432 \
-    postgres:17-alpine
+    postgres:17-alpine \
+    -c fsync=off \
+    -c synchronous_commit=off \
+    -c full_page_writes=off
 )"
 
 cleanup() {

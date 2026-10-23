@@ -44,6 +44,15 @@ uv run uvicorn daily_insights_api.main:app --reload
 完整 API 測試需要 PostgreSQL，建議由根目錄執行 `make test-db`，避免略過
 整合測試。
 
+測試執行時會忽略 `apps/api/.env` 與程序環境中的 `DAILY_INSIGHTS_*`（
+`DAILY_INSIGHTS_TEST_*` 除外），並固定以 `test` 環境執行，與 CI 一致。
+整合測試只使用 `DAILY_INSIGHTS_TEST_DATABASE_URL`，其資料庫名稱必須含有
+`test` 或 `ci`（例如 `daily_insights_test`），否則 pytest 直接拒絕執行。
+該資料庫僅作為維護連線；每個 pytest 程序（含 `pytest -n` 的 worker）會建立
+自己的 `<名稱>_<worker>` 工作資料庫與已 migrate 的 template，測試結束後刪除。
+CI 另設 `DAILY_INSIGHTS_TEST_DATABASE_REQUIRED=true`，缺少測試資料庫時直接
+失敗而不是略過。
+
 API 僅讀取 `apps/api/.env` 與程序環境中的 `DAILY_INSIGHTS_*` 變數，不讀取
 根目錄或 Web 的設定檔。Compose 會以內部 PostgreSQL hostname 覆寫
 `DAILY_INSIGHTS_DATABASE_URL`；直接執行 API 時，該 URL 必須指向本機可連線

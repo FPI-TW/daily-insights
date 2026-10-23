@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import os
 import uuid
 from collections.abc import AsyncIterator
@@ -1082,6 +1083,16 @@ async def test_news_refresh_screens_full_pool_refills_and_classifies_failures(
             self.max_active_summaries = 0
             self.active_translations = 0
             self.max_active_translations = 0
+            # Each call waits for a peer instead of sleeping a fixed interval, so
+            # overlap is proven even when database work before every model call
+            # is slower than the sleep (e.g. under parallel CI load).
+            self.summaries_overlapped = asyncio.Event()
+            self.translations_overlapped = asyncio.Event()
+
+        @staticmethod
+        async def _await_peer(overlapped: asyncio.Event) -> None:
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(overlapped.wait(), timeout=1)
 
         async def select(
             self,
@@ -1121,9 +1132,11 @@ async def test_news_refresh_screens_full_pool_refills_and_classifies_failures(
             del article_text
             self.active_summaries += 1
             self.max_active_summaries = max(self.max_active_summaries, self.active_summaries)
+            if self.active_summaries >= 2:
+                self.summaries_overlapped.set()
             self.events.append("summary:start")
             try:
-                await asyncio.sleep(0.01)
+                await self._await_peer(self.summaries_overlapped)
                 summary = LocalizedSummary(
                     headline=f"{locale} {candidate.headline}", summary=f"{locale} summary"
                 )
@@ -1145,9 +1158,11 @@ async def test_news_refresh_screens_full_pool_refills_and_classifies_failures(
             self.max_active_translations = max(
                 self.max_active_translations, self.active_translations
             )
+            if self.active_translations >= 2:
+                self.translations_overlapped.set()
             self.events.append("translation:start")
             try:
-                await asyncio.sleep(0.01)
+                await self._await_peer(self.translations_overlapped)
                 if candidate.id == self.failed_candidate_id and locale == "en":
                     self.translation_failures += 1
                     raise ModelCallError(

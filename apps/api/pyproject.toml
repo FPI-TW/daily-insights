@@ -32,6 +32,7 @@ dev = [
   "pandas-stubs>=3.0.5.260730",
   "pytest>=8.4,<9",
   "pytest-asyncio>=1.1,<2",
+  "pytest-xdist>=3.8,<4",
   "ruff>=0.12,<1",
   "types-boto3[s3]>=1.40,<2",
 ]

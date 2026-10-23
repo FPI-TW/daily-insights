@@ -1280,7 +1280,10 @@ async def test_a_taiex_write_failure_is_reported_without_poisoning_the_transacti
 
     async with session_factory() as database:
         held = await database.scalar(
-            text("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'")
+            text(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND database = "
+                "(SELECT oid FROM pg_database WHERE datname = current_database())"
+            )
         )
         assert held == 0
 
@@ -1394,7 +1397,10 @@ async def test_a_slow_taiex_fetch_does_not_block_a_yahoo_refresh(
     # is the whole reason minutes of spaced requests cost no contention.
     async with session_factory() as database:
         held = await database.scalar(
-            text("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'")
+            text(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND database = "
+                "(SELECT oid FROM pg_database WHERE datname = current_database())"
+            )
         )
         assert held == 0
 
