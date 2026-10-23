@@ -1001,6 +1001,104 @@ async def test_legacy_data_management_archive_rejects_writes(
             )
 
 
+async def test_news_refresh_reports_discovery_counts_and_thin_candidate_pool(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, sessions = orchestration_database
+    now = datetime.now(UTC)
+    async with sessions.begin() as database:
+        job = JobRun(
+            job_key="news_global_refresh_job",
+            kind="function",
+            trigger="manual",
+            registry_version="test",
+            registry_snapshot={},
+            edition_date=now.date(),
+            status="pending",
+        )
+        database.add(job)
+        await database.flush()
+        database.add(
+            FunctionRun(
+                job_run_id=job.id,
+                function_key="news_global_refresh",
+                provider_key="internal_services",
+                scope={},
+                status="pending",
+            )
+        )
+
+    candidates = [
+        Candidate(
+            id=f"{index:064x}",
+            url=f"https://source{index}.example/story",
+            hostname=f"source{index}.example",
+            source_name=f"Source {index}",
+            headline=f"Story {index}",
+        )
+        for index in range(2)
+    ]
+
+    async def discover(*_: object, **__: object) -> list[Candidate]:
+        return candidates
+
+    async def extract(*_: object, **__: object) -> list[ExtractionOutcome]:
+        return [
+            ExtractionOutcome(
+                candidate,
+                failure=NewsFailure(
+                    code="source_access_denied",
+                    action="skip",
+                    stage="article",
+                    scope=f"source:{candidate.hostname}",
+                    candidate_id=candidate.id,
+                ),
+            )
+            for candidate in candidates
+        ]
+
+    class Client:
+        model_name = "test-news-model"
+        selection_prompt_digest = "a" * 64
+        selection_prompt_version = "selection-test"
+
+        async def aclose(self) -> None:
+            return None
+
+    events: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(orchestration_news_functions, "_client", lambda _: Client())
+    monkeypatch.setattr(orchestration_news_functions, "discover_feed_candidates", discover)
+    monkeypatch.setattr(orchestration_news_functions, "_extract_candidate_outcomes", extract)
+    monkeypatch.setattr(
+        orchestration_news_functions,
+        "emit_event",
+        lambda name, **fields: events.append((name, fields)),
+    )
+    claimed = await claim_ready_function(engine, sessions, owner="news-refresh-test", now=now)
+    assert claimed is not None
+
+    try:
+        await orchestration_news_functions.refresh_news(
+            Settings(environment="test", daily_news_enabled=True), sessions, claimed
+        )
+    finally:
+        await claimed.connection.close()
+
+    # Two candidates against a floor of ten (five global stories, doubled).
+    monitored = [
+        (name, fields)
+        for name, fields in events
+        if name.startswith(("news.candidates.", "news.sources."))
+    ]
+    assert monitored == [
+        ("news.candidates.discovered", {"market": "global", "count": 2}),
+        ("news.candidates.below_floor", {"market": "global", "count": 2, "floor": 10}),
+        ("news.candidates.merged", {"market": "global", "total": 2}),
+        ("news.sources.usable", {"market": "global", "count": 0}),
+    ]
+
+
 async def test_news_refresh_screens_full_pool_refills_and_classifies_failures(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
     monkeypatch: pytest.MonkeyPatch,

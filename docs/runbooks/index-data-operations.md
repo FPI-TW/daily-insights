@@ -55,18 +55,20 @@ change, using the configured production database and provider credentials:
 ```sh
 # Ten international indices from Yahoo:
 python -m daily_insights_api.scripts.run_index_daily_bars --once --period 2y
-
-# ^TWII plus the TWSE institutional datasets:
-python -m daily_insights_api.scripts.run_institutional_flows --once
 ```
 
-Both operations use upserts and are safe to rerun after a provider interruption.
-The TWSE operation observes its queued worker run and returns a retryable failure
-for partial or failed outcomes. Its TWII selector refreshes the newest two
-months first, then keeps requesting any missing month in the required 25-month
-window; a partially successful first run therefore does not permanently
-truncate chart history. These commands must not be used to bypass provider
-terms or rate limits.
+The operation uses upserts and is safe to rerun after a provider interruption.
+It must not be used to bypass provider terms or rate limits.
+
+^TWII needs no manual backfill: the daily `twse_daily_update` job refreshes the
+newest two months first, then keeps requesting any missing month in the
+required 25-month window, so a partially successful run does not permanently
+truncate chart history. The TWSE institutional datasets have no historical
+backfill tool; the daily job stores only the latest published trading day, so
+their history accumulates from the first scheduled run. The former
+`run_institutional_flows --once` command was removed because it queued work for
+the retired data-management worker and left a pending legacy run that blocks
+the next deployment's legacy-queue check.
 
 Validate each settled tracked series after the run. The database must contain at
 least 450 bars per symbol, and the newest stored `trade_date` must be within
