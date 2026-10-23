@@ -6,3 +6,11 @@ allowBuilds:
   esbuild: true
   lightningcss: true
   unrs-resolver: true
+
+overrides:
+  # @tailwindcss/typography 0.5.x pins postcss-selector-parser 6.0.10
+  # (GHSA-rj75-hqrm-r3gf); 7.x keeps the API it uses and yields identical CSS.
+  "@tailwindcss/typography>postcss-selector-parser": ^7.1.6
+  # TanStack devtools auto-installs solid-js as a peer, which pnpm update leaves
+  # alone; 1.9.17+ depends on seroval 1.6.8+ (GHSA-p6vx-979v-rg4c, GHSA-jp82-f5mq-hwhp).
+  solid-js: ^1.9.17
