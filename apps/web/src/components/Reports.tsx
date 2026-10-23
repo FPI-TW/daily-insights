@@ -779,7 +779,7 @@ function ReportBlockView({
   )
 }
 
-export function ReportErrorScreen({ error }: { error: Error }) {
+export function ReportErrorScreen({ error }: { error: unknown }) {
   void error
   const { t } = useTranslation()
   const router = useRouter()

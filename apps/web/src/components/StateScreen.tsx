@@ -41,11 +41,15 @@ export function NotFoundScreen() {
   )
 }
 
-export function ErrorScreen({ error }: { error: Error }) {
+// TanStack Router types route errors as unknown: anything can be thrown.
+export function ErrorScreen({ error }: { error: unknown }) {
   const router = useRouter()
   const { t } = useTranslation()
   const requestId =
-    "requestId" in error && typeof error.requestId === "string"
+    typeof error === "object" &&
+    error !== null &&
+    "requestId" in error &&
+    typeof error.requestId === "string"
       ? error.requestId
       : null
   return (
