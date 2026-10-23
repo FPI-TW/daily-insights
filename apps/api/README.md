@@ -164,19 +164,27 @@ CLI 重跑 inventory 時，會在任何 copy／輸出寫入之前核對既有 ma
 
 複製前檢查也跨 manifest 核對每個 target 與 Asset ID 的永久歸屬；subset、重組或混入新項目不能繞過既有紀錄。其他 manifest 已持有的項目回傳 `migration_entry_owned_by_another_manifest`，整份 inventory 在任何複製前被拒絕，同一 manifest 的合法 verified 重試仍保留。
 
-### 同步直傳 v2 物件路徑
+### 同步直傳 v3 暫存隔離與正式路徑
 
-新 browser 上傳的 signed PUT 仍指向唯一暫存路徑
-`podcasts/direct/{expires}/{trading_date}/{locale}/{asset_id}.{mp3|mp4}`。
-v2 complete 在交易日鎖與 generation fence 內，先檢查目前語系版本，再驗證
+新 browser 上傳的 signed PUT 指向唯一暫存路徑
+`podcasts/staging/{scope}/{expires}/{trading_date}/{locale}/{asset_id}.{mp3|mp4}`。
+scope 是以 session secret 對環境、資料庫身分（不含密碼）、R2 endpoint 與 bucket
+計算的 HMAC；v3 complete 會核對 scope，避免相同 secret 下跨資料庫重播憑證。
+v2/v3 complete 在交易日鎖與 generation fence 內，先檢查目前語系版本，再驗證
 HEAD、完整 SHA-256、時長與章節，以已驗證 spool 和 `put_if_absent` 建立正式檔
 `podcasts/YYYY/MM/DD/{locale}/podcast_{logical_version}.{mp3|mp4}`（月日補零）。
 正式路徑版本與 variant 一致，登記 commit 後才清暫存；替換保留 archived 檔。
 
-公開 request／response 不變。v1 HMAC 憑證繼續在原路徑完成，既有檔案不搬移；
+公開 request／response 不變。既有 v1/v2 HMAC 憑證仍可完成，v1 在原路徑登記，
+v2 沿用原暫存路徑及相同正式路徑；既有檔案不搬移；
 播放仍依 Asset object key，legacy service／import 的路徑與 metadata helper 不變。
 重試以 asset ID 及正式 identity 找回已提交結果。正式路徑碰撞僅可重用未引用且
 size／MIME／完整 SHA 相同的檔案，否則 `409 upload_destination_conflict`，不覆寫
 或刪除既有檔案。補償重新取得日期鎖檢查引用，只刪確定由此嘗試建立的正式檔；
-DB 結果不明保留物件。定期清理涵蓋完整有效 grammar 的暫存與正式孤兒，保留
-所有 active／archived 引用和 legacy／import 路徑。
+DB 結果不明保留物件。定期清理僅列舉本 scope 的有效暫存路徑，保留所有
+active／archived 引用；不掃描正式孤兒、舊 `podcasts/direct/`、legacy／import
+或其他環境 scope。API 與舊 media worker 的迴圈均停止清理無 scope 的 session。
+成功刪除發出 `podcast.object.deleted`；背景清理另記錄含環境／bucket／key 的
+`podcast.staging_cleanup.deleted`。部署需停止所有仍使用舊清理的程式；各環境仍須
+使用獨立桶及 bucket-scoped token。設定完整相同的 clone 無法由 scope 區分。
+保留的孤兒及舊 scope 可能增加儲存用量，須經人工核對後處理。
