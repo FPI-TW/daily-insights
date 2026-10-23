@@ -160,7 +160,10 @@ provider request。啟用晨報不需要額外設定 manifest 核准狀態或 ha
 
 [`release.yml`](../../.github/workflows/release.yml)：
 
-1. 呼叫 [`ci.yml`](../../.github/workflows/ci.yml)；
+1. 驗證程式碼：若 main commit 來自本 repo 分支的 PR，且該 PR 最近一次完成的
+   Pull Request CI 通過並記錄了與此 commit 完全相同的 tree，直接沿用該結果；否則（含
+   fork PR、直接 push、`workflow_dispatch` 或查詢失敗）呼叫
+   [`ci.yml`](../../.github/workflows/ci.yml)；
 2. 建置 `linux/amd64` API 與 Web images；
 3. 發布至 `ghcr.io/fpi-tw/daily-insights-api` 與
    `ghcr.io/fpi-tw/daily-insights-web`；

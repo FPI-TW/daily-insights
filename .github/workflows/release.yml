@@ -28,12 +28,66 @@ env:
   WEB_IMAGE_REPOSITORY: ghcr.io/fpi-tw/daily-insights-web
 
 jobs:
+  # Squash merges give main a new commit, but when its tree is exactly the tree
+  # a passing pull request CI run verified, running the same suite again proves
+  # nothing new. Any lookup failure or mismatch leaves the output empty, so
+  # verify runs. Fork pull requests always rerun: their workflow files are
+  # whatever the fork supplied.
+  reuse-pr-verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+
+    outputs:
+      verified_run_id: ${{ steps.lookup.outputs.verified_run_id }}
+
+    steps:
+      - id: lookup
+        name: Find a pull request CI run that verified this tree
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          tree=$(gh api "repos/$REPO/commits/$GITHUB_SHA" --jq .commit.tree.sha) || exit 0
+          heads=$(gh api "repos/$REPO/commits/$GITHUB_SHA/pulls" --jq \
+            ".[] | select(.merged_at != null and .head.repo.full_name == \"$REPO\") | .head.sha") || exit 0
+          for head in $heads; do
+            # Only the newest finished run for the head counts, so a later
+            # failure on the same code is never masked by an earlier success.
+            latest=$(gh api "repos/$REPO/actions/workflows/pull-request.yml/runs?head_sha=$head&status=completed&per_page=20" --jq \
+              "[.workflow_runs[] | select(.event == \"pull_request\" and .head_repository.full_name == \"$REPO\")][0] | \"\\(.id) \\(.conclusion)\"") || continue
+            read -r run_id conclusion <<<"$latest"
+            [ "$conclusion" = success ] || continue
+            directory=$(mktemp -d)
+            gh run download "$run_id" --repo "$REPO" --name verified-tree --dir "$directory" >/dev/null 2>&1 || continue
+            if [ "$(cat "$directory/verified-tree.txt")" = "$tree" ]; then
+              echo "verified_run_id=$run_id" >>"$GITHUB_OUTPUT"
+              echo "::notice title=CI reused::Pull request CI run $run_id verified tree $tree"
+              exit 0
+            fi
+          done
+          echo "::notice title=CI required::No passing pull request CI run verified tree $tree"
+
   verify:
+    needs: reuse-pr-verification
+    if: ${{ !cancelled() && needs.reuse-pr-verification.outputs.verified_run_id == '' }}
     uses: ./.github/workflows/ci.yml
 
   build-push:
-    needs: verify
-    if: github.ref == 'refs/heads/main'
+    needs: [reuse-pr-verification, verify]
+    if: >-
+      ${{
+        !cancelled() &&
+        github.ref == 'refs/heads/main' &&
+        (needs.verify.result == 'success' ||
+          (needs.verify.result == 'skipped' &&
+            needs.reuse-pr-verification.outputs.verified_run_id != ''))
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
