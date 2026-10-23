@@ -475,7 +475,7 @@ async def test_full_morning_conflicts_with_every_legacy_provider_operation(
             await enqueue_run(
                 database,
                 operation="morning_market",
-                market_code="crypto",
+                market_code="us_equity",
                 requester_id=user.id,
                 request_id="b",
             )

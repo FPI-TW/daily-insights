@@ -73,9 +73,9 @@ def test_run_response_discriminator_preserves_market_scope() -> None:
         "error": None,
     }
     response = response_adapter.validate_python(
-        {**base, "operation": "morning_market", "market_code": "crypto"}
+        {**base, "operation": "morning_market", "market_code": "us_equity"}
     )
-    assert response.operation == "morning_market" and response.market_code == "crypto"
+    assert response.operation == "morning_market" and response.market_code == "us_equity"
     with pytest.raises(ValidationError):
         response_adapter.validate_python(
             {**base, "operation": "index_yahoo", "market_code": "crypto"}

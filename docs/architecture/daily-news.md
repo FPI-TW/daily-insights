@@ -50,10 +50,12 @@ flowchart LR
    台股與美股三個 refresh functions；三者都取得 terminal 結果後才執行
    `news_publish`。Refresh 只準備候選與 workflow 成果，不負責發布。
 2. Worker 依結構化失敗分類決定恢復，與新聞篇數、edition `partial` 狀態分離。
-   暫時故障每 30 分鐘重試缺失 scopes，並遵守更長的 `Retry-After`。
-   任一市場 refresh 因系統性錯誤進入 `retry_wait` 時，同一 JobRun 的其他市場暫停
+   暫時故障於 5 分鐘後重試缺失 scopes（一次初始執行加最多三次重試），並遵守更長的
+   `Retry-After`。Manual JobRun 中任一市場 refresh 因系統性錯誤進入 `retry_wait` 時，
+   同一 JobRun 的其他市場暫停
    claim，直到原市場恢復成功；若錯誤為不可重試的 block／attention，尚未執行的市場
-   會以相同安全錯誤代碼終止。單篇摘要／翻譯驗證耗盡形成的 `partial` 或
+   會以相同安全錯誤代碼終止。Automatic JobRun 的各市場 refresh 不受其他市場等待重試
+   或失敗影響。單篇摘要／翻譯驗證耗盡形成的 `partial` 或
    `unavailable` 不啟動此跨市場閘門。
    completion、ownership 驗證與下一筆 retry 寫入在同一交易完成。`next_attempt_at`
    未到不得 claim；10:00:00 起不再開始新的自動外部 attempt，已送出的單次請求可完成
@@ -141,7 +143,8 @@ flowchart LR
 
 市場版本顯示在各市場報告頁下方，並受組織的市場可見性政策限制：
 `GET /api/news/{market_code}/latest` 對不可見或未定義的市場回 404，內部角色可
-預覽所有市場。台股沒有正式報告，其報告頁顯示「報告尚未推出」加台股新聞；原本
+預覽所有市場。台股沒有正式報告，其報告頁顯示台股圖表、法人籌碼區塊加台股新聞，
+不顯示「報告尚未推出」；原本
 以直接網址提供的台股示範數字已移除。
 
 ## 來源註冊表
@@ -236,7 +239,11 @@ id；FunctionRun／Attempt 保存續跑、租約與 attempt provenance。
 
 新增 `news_workflows` 保存每市場執行階段、成功進度與結構化失敗；`news_checkpoints`
 保存指紋、候選中繼資料、驗證結果與修正預算；`news_dependency_states` 保存來源／模型
-共用冷卻、暫停及 probe 所有權。中間 checkpoint 48 小時後清理，正式新聞與稽核保留。
+共用冷卻、暫停及 probe 所有權。統一編排另以 `news_candidate_batches` 保存每次 refresh
+attempt 的候選批次與結果摘要（`news_candidates` 屬於 edition 或 batch 其一）、
+`prepared_news_items` 保存三語驗證完成且等待 `news_publish` 的項目，
+`news_candidate_publications` 記錄人工上架 JobRun、候選與新聞的對應。
+中間 checkpoint 48 小時後清理，正式新聞與稽核保留。
 文章正文與完整 prompt 不寫入資料表；續跑或人工上架會重新擷取必要原文。
 
 ## 後台候選監控與人工上架
@@ -266,7 +273,9 @@ revision、已上架新聞（含 zh-hant 標題、`origin`、`hidden`）與全�
 - `POST /api/admin/news/items/{item_id}/hide`、`/unhide`：隱藏或恢復一則新聞。隱藏的
   新聞留在不可變的版本內，但 `GET /api/news/latest` 與市場版讀取 API 不再回傳；操作可
   重複、記錄 `news.item_hidden`／`news.item_unhidden` audit。
-- `POST /api/admin/news/candidates/publish`，body `{"edition_id", "candidate_ids": [1 到 10 個]}`：
+- `POST /api/admin/news/candidates/publish`，body `{"edition_id", "candidate_ids": [1 到 10 個]}`
+  （尚無版本時改傳當日 `edition_date` 與 `market_code`，以該市場最新候選批次建立
+  `unavailable` 基底版本）：
   建立一個 `news_publish_job`（202，回傳 JobRun）。每次提交都建立新的 manual run；
   多筆候選上架與其他 Internal Services 新聞工作共用 Provider lock，衝突時依序執行，
   不因已有 pending／running 工作回傳 409。版本不是該日該市場的最新 revision 時回 409、
@@ -276,7 +285,8 @@ revision、已上架新聞（含 zh-hant 標題、`origin`、`hidden`）與全�
   以「目前最大 rank + 1」建立 `origin='manual'` 的 `news_items` 與三語
   `news_presentations`，候選改為 `published` 並連結 `item_id`，記錄
   `news.candidate_published` audit；每則各自 commit，失敗的候選只寫入 `publish_error`
-  （`edition_superseded`、`already_published`、`url_already_published`、`fetch_failed`、
+  （`edition_superseded`、`already_published`、`url_already_published`、`item_hidden`、
+  `duplicate_event`、`importance_quota_reached`、`fetch_failed`、
   `summary_failed`、`translation_failed`）且階段不變。執行結果為
   `succeeded`／`partial`／`failed`，`result`
   含各候選的結果代碼。模型未分類的候選以 `topic=markets`、`importance=3`、
@@ -362,8 +372,8 @@ Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主�
   一次只回兩則的來源目前沒有納入。
 - Twelve Data 的 `/press_releases` 已評估不採用：必須帶 symbol 查詢、沒有原文
   URL、內容為付費通稿且近乎沒有當日稿件（2026-09-02 實測 NVDA 近 3 天 0 筆）。
-- Reuters 對非瀏覽器請求回應 `401`，CNBC、BBC 與 AP 封鎖爬蟲，均不在註冊表內。
-- 日經的文章頁有付費牆，候選會在擷取階段以 `news.source.failed` 記錄；WSJ、MarketWatch、Investing.com、Forbes 已因同樣原因移出註冊表。SEC 8-K 的連結是申報索引頁，摘要品質取決於索引頁文字。
+- Reuters 對非瀏覽器請求回應 `401`，BBC 與 AP 封鎖爬蟲，均不在註冊表內。
+- 日經的文章頁有付費牆，其 feed 已於 2026-09-14 移出執行清單；WSJ、MarketWatch、Investing.com、Forbes 已因同樣原因移出註冊表。SEC 8-K 的連結是申報索引頁，摘要品質取決於索引頁文字。
 - `langdetect` 對短標題的判斷不穩定，因此只在新聞稿 feed 啟用語言過濾。
 - 人工覆核只到隱藏與上架：無法編輯標題或摘要；若模型選題或摘要品質整體不佳，仍需
   調整 `modules/news/prompts` 中的選題準則後手動重跑。
@@ -378,9 +388,9 @@ Guardian 金鑰不是 placeholder，且兩個主機名稱清單只含精確主�
 沿用最近可用版本，不另行提示版本日期；客戶端也不顯示完整或不完整的狀態標記。從未產生過內容的市場仍回 unavailable，不編造新聞。
 此保留策略需要 API 與資料庫可正常存取，不代表基礎設施故障時仍能提供新頁面。
 
-選題若違反來源上限或多樣性規則，從模型原有排名中選出符合全部規則的最大子集；
-相同則數優先保留排名較前者。未知 ID、重複事件與結構錯誤仍拒絕。最多十個候選，
-搜尋不超過 1024 個子集，不增加模型呼叫。選題範例的 market 必須符合該版本允許值。
+選題若違反來源上限、星等配額或多樣性規則，依模型原有排名逐一保留仍符合規則的稿件
+（五星不受則數與網域上限限制）。未知 ID、重複事件與結構錯誤仍拒絕，
+不增加模型呼叫。選題範例的 market 必須符合該版本允許值。
 
 選稿、摘要或翻譯的 JSON schema 驗證失敗時，既有一次重試加入固定的修正指引。Provider
 回傳內容無法解析為 JSON object 時記為 `provider_invalid_json`；可解析但不符合嚴格 schema

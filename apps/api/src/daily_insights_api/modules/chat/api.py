@@ -204,7 +204,7 @@ def _minimal_cross_page_reports(snapshot: dict[str, object]) -> list[dict[str, o
     reports = snapshot.get("cross_page_reports")
     if not isinstance(reports, list):
         return []
-    # Formal launch markets are a fixed three-market set. Limit malformed defensive input to
+    # Formal launch markets are a fixed set. Limit malformed defensive input to
     # that product invariant, while retaining every real authorized market identity.
     return [
         {

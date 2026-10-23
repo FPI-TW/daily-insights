@@ -30,7 +30,8 @@ Daily Insights 比照 FindB：
 2. `appleboy/ssh-action` 將值放入該次 SSH deployment process 的環境；
 3. `docker compose up` 建立 container 時，將環境寫入 Docker container
    configuration；
-4. API、Web、nginx 都使用 `restart: unless-stopped`；
+4. API、Web、nginx、`orchestration-worker` 與 `orchestration-dispatcher` 都使用
+   `restart: unless-stopped`；
 5. EC2 reboot 後，systemd 啟動 Docker，Docker 以既有 container
    configuration 自動恢復服務。
 
@@ -283,7 +284,7 @@ docker logs --tail=200 daily-insights-nginx
 - EC2 reboot 後 5 個 production container 由 Docker 自動恢復且通過 health check 的
   證據：`api`、`web`、`nginx`、`orchestration-worker` 與
   `orchestration-dispatcher`；另須證明 worker 先 healthy，dispatcher 才啟動；
-- 下一個台北 08:00 只有一個 RoutineRun，包含六個 Provider jobs、兩個 projection
+- 下一個台北 08:00 只有一個 RoutineRun，包含七個 Provider jobs、兩個 projection
   jobs、functions／attempts、實際 provenance，以及 10:00 soft deadline 後的 terminal
   狀態；
 - 告警實際送達與目標流量的 CPU、memory、disk、database、latency headroom。

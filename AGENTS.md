@@ -149,7 +149,7 @@ tanstackIntent:
 4. Test Configuration
    - Prompt: Validate test runner setup and execution.
    - When to use: When test rules are added or test configuration changes.
-   - Current test runner: `vitest`
+   - Current test runners: `vitest` (web, api-client) and `pytest` with pytest-xdist (API)
    - Checklist:
      - Confirm the selected test runner matches the project setup.
      - Run `test`.

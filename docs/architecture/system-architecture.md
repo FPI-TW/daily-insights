@@ -39,8 +39,9 @@ apps/api
     tenancy        organizations, memberships, roles
     markets        catalog and organization visibility
     reports        report versions, localized presentation contracts, scheduler
-    data_sources   provider adapters (Twelve Data, FinDB, yfinance) and normalized DTOs
+    data_sources   provider adapters (Twelve Data, FinDB, yfinance, TWSE, TradingView) and normalized DTOs
     news           feed discovery, safe extraction, DeepSeek daily news editions
+    analyst_viewpoints  read-only sync of upstream analyst viewpoints
     podcasts       episode catalog, publication lifecycle, localized metadata
     chat           conversations, messages, generation records, SSE
     model_runtime  globally versioned model configuration
@@ -48,6 +49,7 @@ apps/api
     admin          privileged use cases composed from domain services
     audit          security and privileged-operation evidence
     operations     health/readiness and scheduled daily jobs
+    orchestration  daily routine, provider jobs/functions, worker and dispatcher
 
 packages/api-client
   generated web-facing OpenAPI client and schemas
@@ -122,13 +124,12 @@ the API. The root env file is limited to local Compose infrastructure wiring.
   match, then checks `zh-hant` → `zh-hans` → `en` in order.
 - Podcast episode identity is the admin-specified unique trading date.
 - The privileged Podcast browser upload accepts one to three files per request.
-  It uses the stable canonical key
-  `podcasts/{trading-date}/audio/{locale}/podcast.{mp3|mp4}`. Replacing an
-  existing locale requires explicit confirmation and its expected current
-  version. A same-extension replacement overwrites the same stable key; an
-  MP3/MP4 format change writes the new stable-extension key before deleting the
-  replaced old-format key. Both paths update checksum and object metadata,
-  increment the logical version, and are audited.
+  Each signed PUT targets a scoped staging key; completion registers the
+  versioned key `podcasts/YYYY/MM/DD/{locale}/podcast_{version}.{mp3|mp4}`.
+  Replacing an existing locale requires explicit confirmation and its expected
+  current version. A replacement registers a new versioned key and archives the
+  replaced asset instead of overwriting it. Registration updates checksum and
+  object metadata, increments the logical version, and is audited.
 - Existing legacy Podcast objects use a separate migration path. Inventory must
   assign every source object an explicitly reviewed locale; the application
   does not infer locale from a legacy key. Each object is copied to an

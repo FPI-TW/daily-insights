@@ -26,7 +26,12 @@ not requirements until accepted.
 - The internal back office has two privileged roles:
   - `admin`: organization and member CRUD, organization market visibility,
     shared asset management, model configuration, and conversation viewing.
-  - `asset_manager`: shared R2 asset maintenance only.
+  - `asset_manager`: the Podcast audio workflow (upload, replace and import
+    audio, which creates the episode when needed; edit chapters; publish and
+    unpublish; remove draft episodes) and internal preview of reports, news,
+    markets and analyst viewpoints. Creating blank episodes and editing
+    trilingual titles and summaries remain `admin`-only, and it has no
+    organization, member, model-configuration or conversation access.
 - `org_member` is a customer-facing member with no back-office permissions.
 
 ### Identity provisioning
@@ -68,14 +73,19 @@ and Traditional Chinese, Simplified Chinese, and English labels for all eight.
 ### First-wave morning-report plan
 
 The long-term catalog remains eight markets, but the current first-wave launch
-is fixed to macro/bonds, crypto, and US equities. Taiwan equities appears in
-report navigation only as a not-launched page that carries the Taiwan market
-news edition; it has no report content, launch manifest entry, or production
-publication, and the former direct-URL mock previews for Taiwan equities and
+is fixed to macro/bonds and US equities. Crypto was removed from the first wave
+on 2026-10-23: it stays in the long-term catalog and the analyst-viewpoint sync,
+but has no launch-manifest market, Twelve Data fetch, report publication, or
+customer navigation entry. Taiwan equities appears in report navigation without
+a morning report: its page shows the TWSE index and institutional-flow blocks
+plus the Taiwan market news edition, it has no launch manifest entry or
+production report publication, and the former direct-URL mock previews for Taiwan equities and
 Taiwan index derivatives were removed on 2026-09-02. FX, Hong Kong, and
-Mainland China also remain outside this wave.
+Mainland China also remain outside this wave; Hong Kong equities appears in
+report navigation as a not-launched page with index and sector-heatmap panels
+but no report content.
 
-Twelve Data is the temporary sole raw-data provider for the three launch
+Twelve Data is the temporary sole raw-data provider for the first-wave launch
 markets. There is no runtime fallback to FinDB or another provider, no proxy
 substitution, and no cross-provider history stitching. Only complete blocks
 that pass the licensed read-only probe enter the versioned manifest; unsupported
@@ -93,8 +103,8 @@ is retained only as historical investigation evidence.
 - PDF remains an allowed downloadable asset format.
 - Reports, chart labels, and narrative content support Traditional Chinese
   (`zh-hant`), Simplified Chinese (`zh-hans`), and English (`en`).
-- Twelve Data is the temporary only raw-data source for the three-market
-  first-wave contract. Its license, exact endpoints/symbols, history, credits,
+- Twelve Data is the temporary only raw-data source for the first-wave
+  morning-report contract. Its license, exact endpoints/symbols, history, credits,
   freshness, and external-display rights require a credentialed read-only
   probe. FinDB remains isolated behind its adapter for future work and is not a
   runtime fallback for this launch.
@@ -127,8 +137,9 @@ is retained only as historical investigation evidence.
 - Assets are shared across customers. There is no customer upload capability.
 - After the complete application architecture is established, Podcast is the
   first customer-facing vertical slice.
-- Formal eight-market content and the customer report interface remain pending
-  during the Podcast pilot.
+- Formal eight-market content and the customer report interface remained pending
+  during the Podcast pilot; the first-wave three-market reports and customer
+  report interface have since shipped under Phase 6B.
 - Every authenticated organization shares one Podcast catalog; market
   visibility policy does not filter Podcast episodes.
 - Initial Podcast audio already in R2 is migrated to immutable,
@@ -141,8 +152,9 @@ is retained only as historical investigation evidence.
   old-path copies only after verified cutover.
 - The privileged browser upload endpoint accepts one to three files per request,
   with at most one file per locale. Browser PUT writes an immutable temporary key
-  `podcasts/direct/{expires}/{trading-date}/{locale}/{asset-uuid}.{mp3|mp4}`.
-  New v2 completion validates the full stream and conditionally creates
+  `podcasts/staging/{scope}/{expires}/{trading-date}/{locale}/{asset-uuid}.{mp3|mp4}`,
+  where `{scope}` is a per-deployment HMAC; v1/v2 tickets keep `podcasts/direct/`.
+  v2/v3 completion validates the full stream and conditionally creates
   `podcasts/YYYY/MM/DD/{locale}/podcast_{logical-version}.{mp3|mp4}`; month/day
   are padded and the version matches the date/locale variant. Registration commits
   before staging cleanup. Replacements increment the version and preserve archived
@@ -202,8 +214,7 @@ These are the implementation baseline unless a later ADR supersedes them:
 These do not block the Phase 0 foundation, but must be resolved before the
 named capability is accepted:
 
-- Exact asset operations for `asset_manager`, maximum upload size, supported
-  MIME types, malware scanning, versioning, and deletion/recovery policy.
+- Maximum upload size, supported MIME types, malware scanning, versioning, and deletion/recovery policy.
 - Which derived indicators and report formulas exist, who approves them, and
   whether multilingual narrative is machine-generated or editorially
   reviewed.

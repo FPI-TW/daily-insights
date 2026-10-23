@@ -5,10 +5,9 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-LaunchMarketCode = Literal["global_macro_bonds", "crypto", "us_equity"]
+LaunchMarketCode = Literal["global_macro_bonds", "us_equity"]
 LAUNCH_MARKET_ORDER: tuple[LaunchMarketCode, ...] = (
     "global_macro_bonds",
-    "crypto",
     "us_equity",
 )
 
@@ -125,7 +124,7 @@ class LaunchManifest(ManifestModel):
 
 
 ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
-    version="three-market.v9",
+    version="three-market.v10",
     provider="twelve_data",
     markets=(
         MarketManifest(
@@ -190,37 +189,6 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
                             "oil_gold_ratio": "Oil-Gold Ratio",
                             "copper_gold_ratio": "Copper-Gold Ratio",
                         },
-                    },
-                ),
-            ),
-        ),
-        MarketManifest(
-            market_code="crypto",
-            blocks=(
-                BlockManifest(
-                    id="crypto.overview",
-                    kind="table",
-                    datasets=("crypto.daily_bars",),
-                    formula="latest close; daily change=(close/open-1)*100",
-                    unit_code="usd_percent",
-                    precision=4,
-                    labels={
-                        "zh-hant": "加密資產總覽",
-                        "zh-hans": "加密资产总览",
-                        "en": "Crypto overview",
-                    },
-                ),
-                BlockManifest(
-                    id="crypto.normalized_performance",
-                    kind="series",
-                    datasets=("crypto.daily_bars",),
-                    formula="normalized close=close/first_close*100 over the last 30 observations",
-                    unit_code="index",
-                    precision=4,
-                    labels={
-                        "zh-hant": "標準化表現",
-                        "zh-hans": "标准化表现",
-                        "en": "Normalized performance",
                     },
                 ),
             ),
@@ -309,23 +277,6 @@ ACTIVE_LAUNCH_MANIFEST = LaunchManifest(
             timezone="provider daily-series calendar date",
             day_boundary="latest /eod-anchored completed session",
             freshness="latest two completed provider sessions",
-        ),
-        DatasetManifest(
-            key="crypto.daily_bars",
-            endpoint="/time_series",
-            symbols=("BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD", "ADA/USD"),
-            symbol_units={
-                "BTC/USD": "USD",
-                "ETH/USD": "USD",
-                "SOL/USD": "USD",
-                "XRP/USD": "USD",
-                "ADA/USD": "USD",
-            },
-            required_fields=("datetime", "open", "high", "low", "close"),
-            minimum_history=485,
-            timezone="UTC per provider crypto time-series contract",
-            day_boundary="provider 1day bar calendar date",
-            freshness="latest completed 1day bar",
         ),
         DatasetManifest(
             key="us.mega_cap_daily_bars",

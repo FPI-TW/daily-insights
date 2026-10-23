@@ -37,7 +37,7 @@ in-flight attempt may finish; after the deadline remaining retryable functions
 become terminal and dependent degraded publications may proceed. Publication
 functions and projection jobs that only become ready at the deadline
 receive one initial attempt, but a failed publication attempt is not retried past
-the deadline. Provider-specific HTTP refresh endpoints are removed, so operators start only the three market
+the deadline. Provider-specific HTTP refresh endpoints are removed, so operators start only the four market
 jobs or the feature-specific news and analyst jobs.
 
 Market reports, the Macro Dashboard, and news publish as soon as their upstream
@@ -131,7 +131,7 @@ design; use a manual current-edition job or a controlled pre-deadline test.
    `legacy_data_management_runs`; the history remains available only through
    `GET /api/admin/orchestration/legacy-runs`.
 5. Start `orchestration-worker` and wait for health, then start the dispatcher.
-6. On the next day, verify one RoutineRun, eight jobs (six provider jobs and two
+6. On the next day, verify one RoutineRun, nine jobs (seven provider jobs and two
    projection jobs), provider function attempts, projection publications, and
    the 10:00 terminal state.
 

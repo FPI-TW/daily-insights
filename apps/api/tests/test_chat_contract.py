@@ -154,7 +154,7 @@ def test_defensive_context_limit_preserves_cross_market_identity_with_escaped_co
                 "summary": escaped,
                 "content_excerpt": escaped,
             }
-            for market_code in ("global_macro_bonds", "crypto", "us_equity")
+            for market_code in ("global_macro_bonds", "us_equity")
         ],
     }
 
@@ -165,7 +165,6 @@ def test_defensive_context_limit_preserves_cross_market_identity_with_escaped_co
     assert isinstance(reports, list)
     assert {report["market_code"] for report in reports if isinstance(report, dict)} == {
         "global_macro_bonds",
-        "crypto",
         "us_equity",
     }
     assert all(report.get("content_excerpt") for report in reports if isinstance(report, dict))

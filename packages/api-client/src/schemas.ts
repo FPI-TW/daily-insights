@@ -4,11 +4,7 @@ import trackedIndexCatalogContract from "./tracked-index-catalog.json"
 export const localeSchema = z.enum(["zh-hant", "zh-hans", "en"])
 export type Locale = z.infer<typeof localeSchema>
 
-export const launchMarketCodeSchema = z.enum([
-  "global_macro_bonds",
-  "crypto",
-  "us_equity",
-])
+export const launchMarketCodeSchema = z.enum(["global_macro_bonds", "us_equity"])
 export type LaunchMarketCode = z.infer<typeof launchMarketCodeSchema>
 // Every market in the API catalog; visibility per organization comes from
 // /api/markets, which is what drives customer navigation.

@@ -411,7 +411,7 @@ def test_projection_report_bundle_preserves_existing_publication_contract() -> N
     assert set(bundle.presentations) == {"zh-hant", "zh-hans", "en"}
     assert ACTIVE_LAUNCH_MANIFEST.version
     assert ACTIVE_LAUNCH_MANIFEST.sha256
-    assert MORNING_REPORT_DERIVATION_VERSION == "twelve-data.three-market.v9"
+    assert MORNING_REPORT_DERIVATION_VERSION == "twelve-data.three-market.v10"
 
 
 def test_macro_projection_uses_dashboard_canonical_history_ids_and_units() -> None:

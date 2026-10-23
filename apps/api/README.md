@@ -61,17 +61,18 @@ API 僅讀取 `apps/api/.env` 與程序環境中的 `DAILY_INSIGHTS_*` 變數，
 本機測試 Podcast 直傳時，使用獨立的開發 R2 bucket 和僅限該 bucket 的物件
 讀寫金鑰。在 `apps/api/.env` 設定 `DAILY_INSIGHTS_R2_ENDPOINT_URL`、
 `DAILY_INSIGHTS_R2_BUCKET_NAME`、`DAILY_INSIGHTS_R2_ACCESS_KEY_ID` 與
-`DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY`；本地 Compose 的 API 與
-`podcast-media-worker` 會讀取同一份設定。開發 bucket 的 CORS 須允許
+`DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY`；本地 Compose 的 API 會讀取這份設定。
+開發 bucket 的 CORS 須允許
 `http://localhost:${APP_PORT}`（`APP_PORT` 預設為 `8080`），並依
 [正式環境 runbook 的直傳 CORS 範例](../../docs/runbooks/production.md#r2-browser-upload-cors)
 允許直傳方法與標頭。切勿將金鑰提交到 Git，或用正式 bucket 進行本地上傳測試。
-直傳完成後，音檔需由 `podcast-media-worker` 驗證並寫入資料庫，才會出現在
-後台清單；新節目完成處理後會發布，並出現在前台 `/podcasts`。
+直傳完成後，API 會在 complete 請求內同步驗證音檔並寫入資料庫，之後才會
+出現在後台清單；新節目完成處理後會發布，並出現在前台 `/podcasts`。
 
 `DAILY_INSIGHTS_DATABASE_URL` 只會在 `development` 或 `test` 使用本機
 預設值；staging 與 production 必須明確提供資料庫、獨立 session/password
-secret、FinDB API key，以及完整 R2 endpoint、bucket 與 access credentials。
+secret、已啟用功能所需的 provider credential（例如晨報的 Twelve Data API
+key），以及完整 R2 endpoint、bucket 與 access credentials。
 缺漏、placeholder、非 HTTPS 外部端點或不合理的 signed URL TTL 都會在程序
 啟動前 fail closed。所有 credential 都使用 secret 型別，禁止出現在
 OpenAPI、回應或結構化 log。
@@ -93,9 +94,10 @@ OpenAPI、回應或結構化 log。
 - `GET /api/podcasts/{episode_id}?locale=zh-hant`
 - `POST /api/podcasts/{episode_id}/audio-url?locale=zh-hant`
 
-內部 Podcast API 位於 `/api/admin/podcasts`。`admin` 可發布與下架；
-`admin` 與 `asset_manager` 的 browser workflow 使用同步直傳 v2，一次上傳
-1–3 個語系，正式路徑詳見下方「同步直傳 v2 物件路徑」。保留的 legacy
+內部 Podcast API 位於 `/api/admin/podcasts`。`admin` 與 `asset_manager` 可發布與下架，
+建立空白節目與編輯三語標題、摘要僅限 `admin`；
+`admin` 與 `asset_manager` 的 browser workflow 使用同步直傳 v3，一次上傳
+1–3 個語系，正式路徑詳見下方「同步直傳 v3 暫存隔離與正式路徑」。保留的 legacy
 multipart endpoint 仍寫入
 `podcasts/{trading-date}/audio/{locale}/podcast.{ext}`，其中 `{ext}` 僅支援
 `mp3` 與 `mp4`。同交易日同語系確認後
