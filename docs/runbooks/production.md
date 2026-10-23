@@ -27,7 +27,8 @@ Cloudflare, RDS, or R2 resources:
   convergence, and report container failures;
 - [`infra/production/env`](../../infra/production/env) documents the GitHub
   production Environment contract; those files are never copied to EC2;
-- [`release.yml`](../../.github/workflows/release.yml) reuses CI, publishes
+- [`release.yml`](../../.github/workflows/release.yml) reuses a passing pull
+  request CI run that verified the identical tree (otherwise it runs CI), publishes
   x86_64 API/Web images to GHCR, deploys immutable digests over SSH, and
   validates health after migration;
 - [`install-host-bundle.sh`](../../scripts/production/install-host-bundle.sh)
