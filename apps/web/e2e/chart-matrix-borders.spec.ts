@@ -51,6 +51,9 @@ for (const deviceScaleFactor of [1, 2]) {
       context,
       request,
     }, info) => {
+      // Two markets of charts, each resized and re-themed while every frame's
+      // pixels are polled, routinely outlast the default 30s on CI runners.
+      test.slow()
       await resetMockApi(request)
       await authenticateAs(context, "org_member")
       const errors: string[] = []

@@ -142,6 +142,10 @@ jobs:
 
   deploy:
     needs: build-push
+    # The implicit success() also requires every transitive dependency to have
+    # succeeded, so a verify job skipped for reused pull request CI would skip
+    # the deployment as well. build-push already encodes that gate.
+    if: ${{ !cancelled() && needs.build-push.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production
