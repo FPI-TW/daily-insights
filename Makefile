@@ -6,7 +6,11 @@ export pnpm_config_verify_deps_before_run := false
 	migrate bootstrap-admin format format-check lint type-check test test-db \
 	generate-morning-reports generate-daily-news backfill-index-daily-bars \
 	check-index-catalog check-nginx check-production-deployment \
-	capture-hsi-heatmap check build
+	capture-hsi-heatmap check build require-local-api-environment
+
+# The local api container reads apps/api/.env; Settings defaults to development
+# when DAILY_INSIGHTS_ENVIRONMENT is absent.
+API_ENVIRONMENT = $(or $(shell sed -n 's/^DAILY_INSIGHTS_ENVIRONMENT=//p' apps/api/.env 2>/dev/null | tail -n 1 | tr -d "\"' \r"),development)
 
 help: ## 顯示可用指令
 	@awk 'BEGIN {FS = ":.*## "; printf "Daily Insights 開發指令：\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -63,11 +67,17 @@ bootstrap-admin: ## 建立初始 admin（需 EMAIL 與 NAME）
 	@test -n "$(NAME)" || { echo "請提供 NAME，例如 make bootstrap-admin EMAIL=admin@example.com NAME='Admin'。"; exit 1; }
 	docker compose run --rm api python -m daily_insights_api.scripts.bootstrap_admin --email "$(EMAIL)" --display-name "$(NAME)"
 
-generate-morning-reports: ## 本地使用 Twelve Data 單次產生三市場晨報（可傳 EDITION_DATE）
+require-local-api-environment:
+	@case "$(API_ENVIRONMENT)" in \
+		development|test) ;; \
+		*) echo "apps/api/.env 的 DAILY_INSIGHTS_ENVIRONMENT 為 $(API_ENVIRONMENT)；此指令只允許 development 或 test。"; exit 1;; \
+	esac
+
+generate-morning-reports: require-local-api-environment ## 本地使用 Twelve Data 單次產生首波晨報（可傳 EDITION_DATE）
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
 	docker compose run --rm --build api python -m daily_insights_api.scripts.run_morning_reports --once $(if $(EDITION_DATE),--edition-date $(EDITION_DATE),)
 
-generate-daily-news: ## 本地使用 DeepSeek 單次產生本日新聞（可傳 EDITION_DATE、MARKET=global|tw_equity|us_equity）
+generate-daily-news: require-local-api-environment ## 本地使用 DeepSeek 單次產生本日新聞（可傳 EDITION_DATE、MARKET=global|tw_equity|us_equity）
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
 	docker compose run --rm --build api python -m daily_insights_api.scripts.run_daily_news --once $(if $(EDITION_DATE),--edition-date $(EDITION_DATE),) $(if $(MARKET),--market $(MARKET),)
 
