@@ -100,6 +100,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    # Each shard starts its own mock API and dev server on a separate runner.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -122,12 +128,12 @@ jobs:
       - run: pnpm --filter @daily-insights/web exec playwright install --with-deps chromium
 
       # The suite starts its own mock API and Vite dev server; see playwright.config.ts.
-      - run: pnpm test:e2e
+      - run: pnpm test:e2e --shard=${{ matrix.shard }}/2
 
       - if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: playwright-test-results
+          name: playwright-test-results-${{ matrix.shard }}
           path: apps/web/test-results
           retention-days: 7
 
