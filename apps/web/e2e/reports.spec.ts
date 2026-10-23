@@ -195,10 +195,10 @@ test("US market renders a responsive VIX chart with MACD and KD", async ({
     page.getByRole("heading", { name: "Index technicals", exact: true })
   ).toHaveCount(0)
   await expect(
-    page.getByRole("heading", { name: "VIX volatility trend" })
+    page.getByRole("heading", { name: "VIX trend", exact: true })
   ).toBeVisible()
   const vixPanel = page
-    .getByRole("heading", { name: "VIX volatility trend" })
+    .getByRole("heading", { name: "VIX trend", exact: true })
     .locator("xpath=ancestor::section[1]")
   await expect
     .poll(async () => (await vixPanel.locator("canvas").boundingBox())?.height)
@@ -406,7 +406,7 @@ test("US shell and price charts render before delayed news, report and moving av
     page.getByRole("heading", { name: "Index performance", exact: true })
   ).toBeVisible()
   await expect(
-    page.getByRole("heading", { name: "VIX volatility trend" })
+    page.getByRole("heading", { name: "VIX trend", exact: true })
   ).toBeVisible()
   await expect(
     page.getByRole("heading", { name: "Analyst viewpoint", exact: true })
@@ -515,7 +515,7 @@ test("report not generated, not launched and invalid markets retain their states
   await expect(
     page.getByText("This section has not been generated yet.", { exact: true })
   ).toBeVisible()
-  await page.goto("/en/reports/hk_equity")
+  await page.goto("/en/reports/cn_equity")
   await expect(
     page.getByRole("heading", { name: "Report not launched yet", exact: true })
   ).toBeVisible()
