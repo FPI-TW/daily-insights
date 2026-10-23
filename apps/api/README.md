@@ -94,7 +94,8 @@ OpenAPI、回應或結構化 log。
 - `GET /api/podcasts/{episode_id}?locale=zh-hant`
 - `POST /api/podcasts/{episode_id}/audio-url?locale=zh-hant`
 
-內部 Podcast API 位於 `/api/admin/podcasts`。`admin` 可發布與下架；
+內部 Podcast API 位於 `/api/admin/podcasts`。`admin` 與 `asset_manager` 可發布與下架，
+建立空白節目與編輯三語標題、摘要僅限 `admin`；
 `admin` 與 `asset_manager` 的 browser workflow 使用同步直傳 v3，一次上傳
 1–3 個語系，正式路徑詳見下方「同步直傳 v3 暫存隔離與正式路徑」。保留的 legacy
 multipart endpoint 仍寫入
