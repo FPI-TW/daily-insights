@@ -15,6 +15,7 @@ docs/
   runbooks/         維運操作手冊
 infra/
   nginx/            開發環境入口基礎設定
+  production/       正式環境 nginx 設定與部署環境變數契約
 ```
 
 新增領域或服務前，請先閱讀[系統架構](docs/architecture/system-architecture.md)與[實作路線圖](docs/architecture/roadmap.md)。
@@ -86,7 +87,8 @@ make bootstrap-admin EMAIL=admin@example.com NAME="Admin"
 
 本地需要驗證每日重大新聞時，可執行 `make generate-daily-news`；它同樣只允許
 development／test 環境的一次性執行，使用 `apps/api/.env` 中的 DeepSeek credential，
-並只會產生台北時間當日的版本。正式環境以 `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`
+預設產生台北時間當日的版本，也可傳入 `EDITION_DATE=YYYY-MM-DD` 與
+`MARKET=global|tw_equity|us_equity`。正式環境以 `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`
 旗標啟用，詳見[每日重大新聞架構與部署](docs/architecture/daily-news.md)。
 
 目前已完成身份／租戶、結構化報告基礎與 Podcast 先行版的本機實作。正式 R2

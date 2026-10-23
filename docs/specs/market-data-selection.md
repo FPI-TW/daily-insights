@@ -83,7 +83,7 @@ formula = "top two gainers followed by top two losers as returned by provider"
 | 權值股   | `AAPL`、`MSFT`、`NVDA`、`GOOGL`、`AMZN`、`META`、`AVGO`、`TSLA` | 客戶實際關心的標的 |
 
 五大指數由獨立的指數日線 pipeline 寫入 `index_daily_bars`，不納入晨報 publication
-的 Twelve Data quote snapshot。
+的 Twelve Data 資料集。
 
 ### 顯示方式
 
@@ -92,27 +92,25 @@ formula = "top two gainers followed by top two losers as returned by provider"
 
 ### 成本
 
-權值股共 8 檔，符合每分鐘 8 credits 的限制。`get_quotes` 以逗號分隔批次查詢，
-供應商仍按 symbol 計費。
+權值股共 8 檔，符合每分鐘 8 credits 的限制。`get_completed_prices` 以 `/eod`
+批次對齊最新完成交易日，再逐 symbol 取 `/time_series` 日線，供應商仍按 symbol 計費。
 
 ## 4. manifest 的硬約束（動手前必讀）
 
-`LaunchManifest.validate_references` 有六條規則會擋住不完整的改動：
+`LaunchManifest.validate_references` 至少有下列六條規則會擋住不完整的改動：
 
-| 規則                                             | 對本次改動的影響                           |
-| ------------------------------------------------ | ------------------------------------------ |
-| `markets` 順序必須完全等於 `LAUNCH_MARKET_ORDER` | 只改 `us_equity` 內容不受影響              |
-| **每個 block 只能引用 1 個 dataset**             | `us.mega_caps` 只引用 `us.mega_cap_quotes` |
-| **每個 dataset 只能被 1 個市場引用**             | 權值股 dataset 只掛 `us_equity`            |
-| `symbol_units` 必須涵蓋每個 symbol               | `us.mega_cap_quotes` 要逐一列出 8 檔       |
-| **每個 unit 必須是三碼大寫**（`^[A-Z]{3}$`）     | 全部填 `"USD"`                             |
-| 每個 block 必須有三語 labels                     | 權值股 block 要有 zh-hant / zh-hans / en   |
+| 規則                                             | 對本次改動的影響                               |
+| ------------------------------------------------ | ---------------------------------------------- |
+| `markets` 順序必須完全等於 `LAUNCH_MARKET_ORDER` | 只改 `us_equity` 內容不受影響                  |
+| **每個 block 只能引用 1 個 dataset**             | `us.mega_caps` 只引用 `us.mega_cap_daily_bars` |
+| **每個 dataset 只能被 1 個市場引用**             | 權值股 dataset 只掛 `us_equity`                |
+| `symbol_units` 必須涵蓋每個 symbol               | `us.mega_cap_daily_bars` 要逐一列出 8 檔       |
+| **每個 unit 必須是三碼大寫**（`^[A-Z]{3}$`）     | 全部填 `"USD"`                                 |
+| 每個 block 必須有三語 labels                     | 權值股 block 要有 zh-hant / zh-hans / en       |
 
-另外 `DatasetManifest.endpoint` 是 `Literal["/quote", "/time_series", "/market_movers/stocks"]`。
-新 dataset 用 `/quote`，已在允許值內。若確定完全不再使用 movers，
-可考慮把該 literal 值移除，但那會連帶影響 `TWELVE_DATA_CONTRACT_HASH`
-（`adapter.py:27` 的 `b"twelve-data:quote,time_series,market_movers/stocks,asset-type:2026-08-31.v3"`）
-—— **建議這次先保留，減少 blast radius**。
+另外 `DatasetManifest.endpoint` 是 `Literal["/eod", "/time_series", "/market_movers/stocks"]`。
+權值股 dataset 用 `/time_series`，已在允許值內。若確定完全不再使用 movers，
+可考慮把該 literal 值移除 —— **建議這次先保留，減少 blast radius**。
 
 ## 5. 版本與 revision 的連鎖反應
 
@@ -123,8 +121,8 @@ formula = "top two gainers followed by top two losers as returned by provider"
 - `morning_report.py` 的 `_next_revision` 會比對 `latest_manifest_hash`，
   manifest 變了就產生**新的 revision**。這是設計上的正確行為，不要繞過。
 - 同時要更新兩個版本字串：
-  - `LaunchManifest.version`（目前 `"three-market.v4"`）
-  - `MORNING_REPORT_DERIVATION_VERSION`（目前 `"twelve-data.three-market.v4"`）
+  - `LaunchManifest.version`（目前 `"three-market.v9"`）
+  - `MORNING_REPORT_DERIVATION_VERSION`（目前 `"twelve-data.three-market.v9"`）
 
 若這次同時要做市場擴充，**把 manifest 的改動合併成一次**，避免連續 bump 產生多個 revision。
 
@@ -155,7 +153,7 @@ formula = "top two gainers followed by top two losers as returned by provider"
 
 1. 確認 `/quote` 是否支援批次 symbol
 2. 確認美元計價的銅代碼是否存在
-3. `launch_manifest.py`：保留 `us.mega_cap_quotes` DatasetManifest 與 `us.mega_caps`
+3. `launch_manifest.py`：保留 `us.mega_cap_daily_bars` DatasetManifest 與 `us.mega_caps`
    BlockManifest，移除 `us.market_movers` 的 block 與 dataset
 4. `launch_manifest.py`：`version` bump
 5. `morning_report.py`：建立權值股 dataset 的 build 分支，移除 `us.market_movers` 分支；

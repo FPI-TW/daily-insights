@@ -23,8 +23,8 @@
 - signed URL 契約只接受 active、metadata 完整且目前 R2 bytes checksum 相符的
   asset。HEAD 沒有可信 SHA-256 時會串流重算，不使用 ETag 當內容 checksum。
 - staging/production 啟動時必須具備有效的 database、session、password
-  pepper、FinDB 與 R2 設定；placeholder、非 HTTPS endpoint 與不合法 bucket
-  會 fail closed。
+  pepper 與 R2 設定，以及已啟用外部服務（Twelve Data、新聞／聊天模型等）的
+  設定；placeholder、非 HTTPS endpoint 與不合法 bucket 會 fail closed。
 - Web 與 API 使用各自的服務設定檔，不共享 application env。根目錄 `.env`
   只負責本機 Compose/PostgreSQL wiring；provider、model 與 R2 credential
   只會注入 API。
@@ -36,16 +36,18 @@
   CSRF token 只保留於記憶體，重新整理後透過同源受保護 endpoint 輪替。
 - OpenAPI 與 TypeScript client 可重現產生，CI 會檢查 drift；API response
   另以 Zod 在執行期 trust boundary 驗證。
-- nginx 已區分一般 API、signed URL issuance 與未來 SSE transport。R2 audio
+- nginx 已區分一般 API、signed URL issuance 與聊天 SSE transport。R2 audio
   bytes 不經 nginx/API，credential 不進入 browser bundle。
-- operations 擁有 component readiness，分別呈現 database、FinDB
-  configuration 與 R2 runtime initialization。FinDB/R2 的外部連線可用性由
+- operations 擁有 component readiness，分別呈現 database、Twelve Data／
+  每日新聞／分析師觀點／聊天 configuration 與 R2 runtime initialization。
+  外部 provider/R2 的連線可用性由
   模組事件與告警觀察，不作為整個應用程式的 traffic-removal gate，避免短暫
   上游故障讓 last-known-good 報告與既有內容一起下線。結構化 HTTP/module
   event 會遮罩 credential、token、password 等敏感欄位。
 
 本階段的原始驗收不包含 Podcast 列表、詳情、播放器或內容管理 HTTP API；
-這些功能現已由後續 Phase 3 變更實作。報告、聊天與一般資產管理介面仍未完成。
+這些功能現已由後續 Phase 3 變更實作。報告與聊天介面已由後續變更實作，一般
+資產管理介面仍未完成。
 
 ## 驗收證據
 

@@ -92,9 +92,9 @@ CloudWatch, security-group control, and future scaling are clearer with EC2.
 
 ## Secrets
 
-- Store database credentials, session/password secrets, FinDB key, API R2
-  credentials, and deployment SSH key in the protected GitHub `production`
-  environment. Scope the API R2 key to the application bucket with object
+- Store database credentials, session/password secrets, enabled-provider API
+  keys, API R2 credentials, and deployment SSH key in the protected GitHub
+  `production` environment. Scope the API R2 key to the application bucket with object
   read/write/delete and listing permissions: signing, verification and orphan
   cleanup now share the API runtime. Retired media-worker credentials are no
   longer required by release or Compose.

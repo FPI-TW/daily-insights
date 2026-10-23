@@ -1,7 +1,8 @@
 # Twelve Data 三市場晨報計劃
 
-狀態：第一波核心功能已完成本機實作與 credentialed provider probe；manifest
-核准、授權證據、資料庫整合測試與 production deployment 尚未完成。本文件取代
+狀態：第一波已完成本機實作、credentialed provider probe、資料庫整合測試與
+production deployment，正式排程由統一編排每日 08:00 routine 的
+`market_reports_publish` 發布；授權證據的留存依 §5 處理，不在程式碼中追蹤。本文件取代
 [`five-market-morning-report-baseline.md`](five-market-morning-report-baseline.md)
 作為現行第一波晨報的市場、來源與驗收政策；舊文件只保留為歷史決策紀錄。
 
@@ -24,10 +25,10 @@ provider 的歷史序列接在一起。
 > Twelve Data 失敗時自動改讀 Yahoo，以及把 Yahoo 與其他 provider 的歷史序列
 > 接成同一條。
 
-`tw_equity` 與 `tw_index_derivatives` 不在第一波資料與 publication 範圍。現有
-元件、三語翻譯、mock fixture 與 route code 保留，但不出現在晨報 tab 或報告列表；
-登入使用者直接輸入既有 URL 時仍可預覽，頁面必須清楚標示「尚未上線／示意資料」，
-不得呼叫或冒充正式 publication API。
+`tw_equity` 與 `tw_index_derivatives` 不在第一波資料與 publication 範圍，不出現在
+報告列表；晨報 tab 依 `/api/markets` 回傳的可見市場呈現。未納入 manifest 的市場頁
+不呼叫或冒充正式 publication API，顯示「報告尚未推出」，或只呈現該市場自有的
+非晨報區塊（例如台股的 TWSE 加權指數與三大法人資料）。
 
 `forex`、`hk_equity`、`cn_equity` 仍屬八市場 catalog 與 organization market
 policy，但不納入本次 launch manifest。第一版沿用目前簡版 UI；完整 `/reference`
@@ -116,7 +117,8 @@ request ID 是否存在等 sanitized metadata。Twelve Data 本次未回傳 requ
 - 新增 `macro.rates_fx_quotes` 資料集（`/quote` 批次）：TLT、IEF 代理美債長端與中段殖利率
   走勢、UUP 代理美元指數（provider 沒有 `US10Y`、`DXY` 等 exact symbol），加上 USD/TWD、
   USD/JPY、EUR/USD 現貨。對應 `macro.rates_fx` metric 區塊，單位依報價幣別（USD、TWD、JPY），
-  漲跌幅同樣以前收計算。manifest 升為 `three-market.v6`。
+  漲跌幅同樣以前收計算。manifest 升為 `three-market.v6`。（現行 manifest 已改為
+  `/time_series` 的 `macro.rates_fx_daily_bars`。）
 - `/api/markets` 改依市場目錄順序回傳，客戶端導覽不再是代碼字母序。
 
 ### 2026-09-04 修正：商品 EOD 與 scheduler restart deduplication
@@ -133,7 +135,8 @@ request ID 是否存在等 sanitized metadata。Twelve Data 本次未回傳 requ
 - 商品卡 value 是 `/eod` close，change 為 `(latest EOD - previous completed EOD) / previous
 completed EOD * 100`。圖表只顯示 Brent/Gold 的最新 30 個共同完成日期；Copper history 僅用於
   自身前收計算。公開 label 為「商品收盤」／「商品收盘」／`Commodity EOD`，block id 和 report API
-  shape 不變。
+  shape 不變。（現行 manifest 的 `macro.commodity_eod` 已擴充為 WTI/USD、XBR/USD、
+  XAU/USD、XAG/USD、HG1，圖表改為兩年期油金比／銅金比 `macro.commodity_ratios`。）
 - scheduler 固定在 `08:00 Asia/Taipei`。每個 scheduled attempt 在任何 provider call 前以
   `report_key + market_code + edition_date` 查 `ReportPublication`；任何 revision、包含
   complete/partial/unavailable 都是已完成，僅執行缺少的 launch markets。全數存在時發出
@@ -158,7 +161,9 @@ completed EOD * 100`。圖表只顯示 Brent/Gold 的最新 30 個共同完成�
   `/quote` 資料集：`us.mega_cap_quotes`（AAPL、MSFT、NVDA、GOOGL、AMZN、META、AVGO、TSLA，
   依漲跌幅排序的表格）。movers adapter 程式碼已移除，endpoint literal 與 contract hash 保留。
 - `/quote` 支援逗號分隔的批次查詢（每 symbol 1 credit），adapter 的 `get_quotes` 依
-  `symbol_types` 分組後每組一次請求，逐 symbol 沿用單筆契約檢查。
+  `symbol_types` 分組後每組一次請求，逐 symbol 沿用單筆契約檢查。（現行 manifest 已改為
+  `/time_series` 的 `us.mega_cap_daily_bars`，由 `get_completed_prices` 以 `/eod` 對齊最新
+  完成交易日；`get_quotes` 已移除。）
 - 漲跌幅改由本專案計算：`(close - previous_close) / previous_close * 100`，
   `previous_close` 缺漏或為 0 視為契約錯誤；供應商的 `percent_change` 只留在 provenance。
 - `HG1` 不帶 `type=commodity` 時會被解析為 Homag Group AG（FSX、EUR），先前商品快照的銅
@@ -281,11 +286,14 @@ completed EOD * 100`。圖表只顯示 Brent/Gold 的最新 30 個共同完成�
 
 ### Web UI
 
-- [x] 晨報 tab 只顯示宏觀／債券、加密貨幣、美股。
+- [x] 晨報 tab 只顯示宏觀／債券、加密貨幣、美股。（後續改由 `/api/markets` 可見市場
+      清單驅動 tab，見 [`web-presentation.md`](../specs/web-presentation.md) §2.5。）
 - [x] 晨報列表只顯示三個正式市場。
 - [x] 「五市場晨報」已在三語文案中改為「三市場晨報」。
-- [x] 台股與台指期元件、翻譯、mock fixture 與 route code 保留。
-- [x] 台股與台指期直接 URL 仍可開啟，且清楚標示「尚未上線／示意資料」。
+- [x] 台股與台指期元件、翻譯、mock fixture 與 route code 保留。（mock fixture 現僅供
+      測試使用。）
+- [x] 台股與台指期直接 URL 仍可開啟，且清楚標示「尚未上線／示意資料」。（台股頁現改為
+      呈現 TWSE 指數與法人資料；台指期顯示「報告尚未推出」。）
 - [x] 台灣預覽頁不呼叫正式 publication API，也不顯示成正式報告。
 - [x] 三個正式市場不再顯示硬編 mock 數值。
 - [x] 初次載入具有 skeleton、`role="status"` 與 `aria-live`。

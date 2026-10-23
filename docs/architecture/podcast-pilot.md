@@ -2,7 +2,8 @@
 
 狀態：本機功能已完成第一輪實作、整合測試及 mock-based browser E2E；隔離的
 live R2 adapter QA 亦已完成。實際 browser 對 R2 播放、live endpoint 流程與
-Phase 4 上線驗收仍待執行。八大市場正式內容與報告前端在此期間維持 pending。
+Phase 4 上線驗收仍待執行。八大市場正式內容與報告前端在此期間維持 pending；
+首波三市場報告與前端其後已於 Phase 6B 交付。
 
 ## 實作狀態
 

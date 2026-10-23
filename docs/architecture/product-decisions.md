@@ -73,7 +73,9 @@ report navigation only as a not-launched page that carries the Taiwan market
 news edition; it has no report content, launch manifest entry, or production
 publication, and the former direct-URL mock previews for Taiwan equities and
 Taiwan index derivatives were removed on 2026-09-02. FX, Hong Kong, and
-Mainland China also remain outside this wave.
+Mainland China also remain outside this wave; Hong Kong equities appears in
+report navigation as a not-launched page with index and sector-heatmap panels
+but no report content.
 
 Twelve Data is the temporary sole raw-data provider for the three launch
 markets. There is no runtime fallback to FinDB or another provider, no proxy
@@ -127,8 +129,9 @@ is retained only as historical investigation evidence.
 - Assets are shared across customers. There is no customer upload capability.
 - After the complete application architecture is established, Podcast is the
   first customer-facing vertical slice.
-- Formal eight-market content and the customer report interface remain pending
-  during the Podcast pilot.
+- Formal eight-market content and the customer report interface remained pending
+  during the Podcast pilot; the first-wave three-market reports and customer
+  report interface have since shipped under Phase 6B.
 - Every authenticated organization shares one Podcast catalog; market
   visibility policy does not filter Podcast episodes.
 - Initial Podcast audio already in R2 is migrated to immutable,
@@ -141,8 +144,9 @@ is retained only as historical investigation evidence.
   old-path copies only after verified cutover.
 - The privileged browser upload endpoint accepts one to three files per request,
   with at most one file per locale. Browser PUT writes an immutable temporary key
-  `podcasts/direct/{expires}/{trading-date}/{locale}/{asset-uuid}.{mp3|mp4}`.
-  New v2 completion validates the full stream and conditionally creates
+  `podcasts/staging/{scope}/{expires}/{trading-date}/{locale}/{asset-uuid}.{mp3|mp4}`,
+  where `{scope}` is a per-deployment HMAC; v1/v2 tickets keep `podcasts/direct/`.
+  v2/v3 completion validates the full stream and conditionally creates
   `podcasts/YYYY/MM/DD/{locale}/podcast_{logical-version}.{mp3|mp4}`; month/day
   are padded and the version matches the date/locale variant. Registration commits
   before staging cleanup. Replacements increment the version and preserve archived

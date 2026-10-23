@@ -45,9 +45,11 @@
 1. 統一 dispatcher 於台北每日 08:00 建立當日 RoutineRun，其中唯一的
    `internal_services_daily_update` JobRun 包含三個 refresh functions；三者 terminal
    後執行 `news_publish`。Refresh 與 publish 分離，publish 不再抓取外部資料。
-2. 暫時故障每 30 分鐘只重試缺失 scopes；供應商要求更久時延後至其期限。
-   任一市場的系統性錯誤等待重試時，同批其他市場不得 claim；原市場恢復成功後才繼續。
-   不可重試的系統性錯誤會以同一安全代碼終止尚未執行的同批市場。這項跨市場閘門不適用
+2. 暫時故障於 5 分鐘後只重試缺失 scopes（一次初始執行加最多三次重試）；供應商要求
+   更久時延後至其期限。
+   Manual JobRun 中任一市場的系統性錯誤等待重試時，同批其他市場不得 claim；原市場恢復
+   成功後才繼續。不可重試的系統性錯誤會以同一安全代碼終止尚未執行的同批市場。
+   Automatic JobRun 的各市場不受此閘門限制。這項跨市場閘門不適用
    於單篇摘要／翻譯驗證失敗所形成的 `partial`／`unavailable`。
 3. 10:00:00 起不開始新的 automatic 外部 attempt；進行中的單次請求可完成並保存。
    `news_publish` 會在 dependencies terminal 後執行，避免 routine 永久等待。
@@ -62,7 +64,7 @@
 5. 供應商暫停時一次只允許一個 worker 試做一筆待處理模型請求。成功才解除暫停；
    失敗記錄新原因，JSON 失敗也不在 probe 內額外修正。
 6. Manual jobs 僅限當日，含 10:00 後；建立後使用一小時 soft deadline，允許立即執行
-   與一次 30 分鐘重試。截止後不再開始 refresh attempt，已執行工作可完成，隨後
+   與每 5 分鐘一次、最多三次重試。截止後不再開始 refresh attempt，已執行工作可完成，隨後
    `news_publish` 依 terminal dependencies 以可用批次取得一次發布機會；若該發布失敗，
    不再跨越 deadline 重試。失敗保留進度；跨日由新日作業處理。
    「重新抓取」是新執行，不是 checkpoint 續跑；修正預算是各恢復鏈中每個輸入獨立。
@@ -91,8 +93,8 @@
 - Feed 成功中繼資料可重用；全文 feed 和必要文章正文會重新取得。失敗 feed 才再探索。
 - 每次外部呼叫後短交易保存，不在付費呼叫期間持有長交易。文章必須三語都通過才發布。
 - 翻譯沿用摘要的嚴格 JSON schema，但不再執行逐字數字比對；結構失敗記錄
-  `translation_invalid_json` 並分類為 `translation_failed`，不得只因繁中摘要已通過就略過。
-  歷史紀錄中的 `translation_ungrounded_number` 仍保留原安全分類。
+  `translation_schema_invalid` 並分類為 `translation_failed`，不得只因繁中摘要已通過就略過。
+  歷史紀錄中的 `translation_invalid_json`、`translation_ungrounded_number` 仍保留原安全分類。
 - 人工上架亦限當日，並於模型呼叫前與發布交易中檢查目前版本、人工隱藏、事件去重及
   配額；五星不設上限，四星最多十則，一至三星合計最多五則，不為湊足下限放寬品質。
 - 市場／日期 advisory lock 隔離版本；發布交易再次鎖定作業並確認租約所有權。隱藏的

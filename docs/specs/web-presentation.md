@@ -288,7 +288,8 @@ Hydration 完成後，各區塊使用 TanStack Query 與 `createBrowserTransport
 Query key 以 user ID、organization ID 隔離，再加入資料依賴的 market、locale、
 日期／range；今日觀點不依語言而重複建立 cache。資料 60 秒內保持 fresh，無 observer
 的 cache 保留 5 分鐘。mount、視窗重新顯示與 reconnect 只對 stale 資料背景刷新。
-不輪詢、不自動重試。同一 key 已有內容時刷新保留內容，局部提示 pending；失敗顯示
+除港股產業熱力圖在簽章圖片 URL 到期前重新請求外不輪詢，不自動重試。
+同一 key 已有內容時刷新保留內容，局部提示 pending；失敗顯示
 局部錯誤與重試按鈕，不清掉成功區塊。指數多 symbol 保留部分成功結果，401 不降級
 成部分失敗。Query cancellation 傳至實際 fetch；圖表／均線／VIX／法人每個 request
 10 秒 timeout，宏觀 60 秒，deadline 包括讀取回應 body。

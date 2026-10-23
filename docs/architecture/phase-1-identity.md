@@ -22,7 +22,8 @@ tests.
   carried by a secure HTTP-only, same-site cookie; authenticated mutations also
   require the per-session `X-CSRF-Token`.
 - Login failures use a generic response and are rate limited by normalized
-  email plus the trusted client address. Attempts are held in PostgreSQL with
+  email plus the trusted client address, with additional per-address and
+  global budgets. Attempts are held in PostgreSQL with
   expiry cleanup, so limits survive process restarts and apply across workers.
 - Deployment secrets must be independent, non-placeholder values of at least
   32 characters. Login, password-change, and one-time-password responses use
@@ -36,7 +37,8 @@ MFA, password recovery, and Singapore-region SES are confirmed follow-up work.
 - `admin` can manage organizations, internal users, customer memberships,
   contractual seat limits, and organization market policy.
 - `asset_manager` has no organization, membership, market-policy, or audit
-  administration permission. Its R2 capabilities arrive in Phase 4.
+  administration permission. Its R2 capabilities arrived with the Phase 3
+  Podcast audio workflow.
 - `org_member` has no back-office permission.
 - Product tenant identity comes from the authenticated active membership.
   Browser headers cannot select or override an organization.
