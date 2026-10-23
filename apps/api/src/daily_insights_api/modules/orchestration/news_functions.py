@@ -633,6 +633,17 @@ async def refresh_news(
             discovered = await discover_feed_candidates(
                 feeds_http, allowed, market=market, bodies=bodies
             )
+        emit_event("news.candidates.discovered", market=market, count=len(discovered))
+        # The feed registry is the only discovery path, so a registry-wide outage
+        # would otherwise surface only as a thin edition; the floor flags it early.
+        floor = spec.target_items * 2
+        if len(discovered) < floor:
+            emit_event(
+                "news.candidates.below_floor",
+                market=market,
+                count=len(discovered),
+                floor=floor,
+            )
         capped = _cap_discovery(
             discovered,
             per_source=spec.max_discovery_per_source,
@@ -641,6 +652,7 @@ async def refresh_news(
             interleave=spec.interleave_sources,
             impact_patterns=spec.headline_impact_patterns,
         )
+        emit_event("news.candidates.merged", market=market, total=len(capped))
         extraction_outcomes = await _extract_candidate_outcomes(
             capped, allowed, settings.news_fetch_timeout_seconds, bodies
         )
@@ -654,6 +666,7 @@ async def refresh_news(
             interleave=spec.interleave_sources,
             impact_patterns=spec.headline_impact_patterns,
         )
+        emit_event("news.sources.usable", market=market, count=len(usable))
         digest = _digest(
             usable,
             client.model_name,
