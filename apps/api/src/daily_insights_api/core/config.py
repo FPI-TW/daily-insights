@@ -114,6 +114,14 @@ class Settings(BaseSettings):
     )
     newsroom_llm_base_url: str = "https://api.deepseek.com"
     newsroom_llm_api_key: SecretStr | None = None
+    # Subscription gateways such as OpenCode Go ask clients to name themselves
+    # instead of sending the HTTP library's User-Agent.
+    newsroom_llm_user_agent: str = Field(default="daily-insights-newsroom/1.0", min_length=1)
+    # Header that carries a stable per-stage session id for routing and prompt
+    # caching (OpenCode Go reads x-opencode-session); empty sends no such header.
+    newsroom_llm_session_header: str | None = Field(
+        default=None, pattern=r"^([A-Za-z0-9][A-Za-z0-9-]*)?$"
+    )
     newsroom_triage_model: str = "deepseek-chat"
     newsroom_editor_model: str = "deepseek-chat"
     newsroom_analysis_model: str = "deepseek-chat"

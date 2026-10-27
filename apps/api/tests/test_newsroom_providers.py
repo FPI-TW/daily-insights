@@ -7,7 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.modules.newsroom.contracts import AnalysisResult
 from daily_insights_api.modules.newsroom.models import NewsroomLlmCall
-from daily_insights_api.modules.newsroom.providers import CallAudit, OpenAICompatibleJsonModel
+from daily_insights_api.modules.newsroom.providers import (
+    CallAudit,
+    OpenAICompatibleJsonModel,
+    session_id,
+)
 from daily_insights_api.modules.newsroom.queue import RetryableStageError
 
 COMPLETE = {
@@ -97,3 +101,55 @@ async def test_a_valid_first_reply_makes_a_single_call() -> None:
 
     assert len(requests) == 1
     assert [row.error_code for row in session.added] == [None]
+
+
+def _header_model(seen: list[httpx.Headers], **options: Any) -> Any:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": json.dumps(COMPLETE, ensure_ascii=False)}}]},
+        )
+
+    model = OpenAICompatibleJsonModel(
+        base_url="https://llm.test", api_key="k", timeout_seconds=5, **options
+    )
+    model._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return model
+
+
+async def _complete_as(model: Any, audit: CallAudit) -> None:
+    await model.complete(
+        cast(AsyncSession, _Session()),
+        model="deepseek-v4.1-flash",
+        system="system prompt",
+        payload={"markets": ["tw_equity"]},
+        result_type=AnalysisResult,
+        audit=audit,
+    )
+
+
+async def test_calls_name_the_client_and_share_a_session_per_stage_and_prompt() -> None:
+    seen: list[httpx.Headers] = []
+    model = _header_model(
+        seen, user_agent="daily-insights-newsroom/1.0", session_header="x-opencode-session"
+    )
+
+    await _complete_as(model, CallAudit("analysis", None, "v2"))
+    await _complete_as(model, CallAudit("analysis", None, "v2"))
+    await _complete_as(model, CallAudit("triage", None, "v2"))
+
+    assert [headers["user-agent"] for headers in seen] == ["daily-insights-newsroom/1.0"] * 3
+    assert seen[0]["authorization"] == "Bearer k"
+    sessions = [headers["x-opencode-session"] for headers in seen]
+    assert sessions[0] == sessions[1] == session_id(CallAudit("analysis", None, "v2"))
+    assert sessions[2] != sessions[0]
+
+
+async def test_no_session_header_is_sent_unless_configured() -> None:
+    seen: list[httpx.Headers] = []
+
+    await _complete_as(_header_model(seen), CallAudit("analysis", None, "v2"))
+
+    assert "x-opencode-session" not in seen[0]
+    assert seen[0]["user-agent"].startswith("python-httpx/")
