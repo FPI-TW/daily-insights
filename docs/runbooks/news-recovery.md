@@ -342,6 +342,117 @@ log 中的 `newsroom.periodic_error`（`task = newsroom_purge_bodies`）。正�
   繼續；租約已過期的 `pending` 資料列會自動被重新領取。停用期間沒有輪詢，該段時間發布的
   文章若已超過 24 小時不會補收。
 
+## 切換 LLM 供應商
+
+所有 LLM 階段（初篩、精選、分析、為何重要、翻譯，以及 embed 前的標題翻譯）共用
+`DAILY_INSIGHTS_NEWSROOM_LLM_*` 這組 OpenAI 相容設定；embedding 走
+`DAILY_INSIGHTS_NEWSROOM_EMBEDDING_*`，換 LLM 供應商時不需要改。目前使用過兩組：
+DeepSeek 官方 API 與 OpenCode Go 訂閱（2026-10-27 起，DeepSeek 金鑰在 10-24 開始回
+402 後停用）。兩者是同一個模型（DeepSeek-V4.1-Flash），差別在端點、識別 header 與
+預設是否推理。
+
+| 設定（`DAILY_INSIGHTS_` 之後）    | DeepSeek 官方                 | OpenCode Go                                  |
+| --------------------------------- | ----------------------------- | -------------------------------------------- |
+| `NEWSROOM_LLM_BASE_URL`           | `https://api.deepseek.com`    | `https://opencode.ai/inference/go/openai/v1` |
+| `NEWSROOM_LLM_API_KEY`            | DeepSeek 平台金鑰             | OpenCode Go 訂閱金鑰                         |
+| 四個 `NEWSROOM_*_MODEL`           | `deepseek-chat`               | `deepseek-v4.1-flash`                        |
+| `NEWSROOM_LLM_USER_AGENT`         | `daily-insights-newsroom/1.0` | `daily-insights-newsroom/1.0`                |
+| `NEWSROOM_LLM_SESSION_HEADER`     | 空白（不送）                  | `x-opencode-session`（必填）                 |
+| `NEWSROOM_LLM_EXTRA_BODY`         | 空白                          | `{"thinking":{"type":"disabled"}}`           |
+| `NEWSROOM_EDITOR_EXTRA_BODY`      | 空白                          | 空白（精選要推理時才設）                     |
+| `NEWSROOM_EDITOR_TIMEOUT_SECONDS` | 空白                          | 空白（精選推理時建議 240–300）               |
+
+DeepSeek 官方：
+
+```sh
+DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL=https://api.deepseek.com
+DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY=<DeepSeek 金鑰>
+DAILY_INSIGHTS_NEWSROOM_LLM_USER_AGENT=daily-insights-newsroom/1.0
+DAILY_INSIGHTS_NEWSROOM_LLM_SESSION_HEADER=
+DAILY_INSIGHTS_NEWSROOM_LLM_EXTRA_BODY=
+DAILY_INSIGHTS_NEWSROOM_EDITOR_EXTRA_BODY=
+DAILY_INSIGHTS_NEWSROOM_EDITOR_TIMEOUT_SECONDS=
+DAILY_INSIGHTS_NEWSROOM_TRIAGE_MODEL=deepseek-chat
+DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL=deepseek-chat
+DAILY_INSIGHTS_NEWSROOM_ANALYSIS_MODEL=deepseek-chat
+DAILY_INSIGHTS_NEWSROOM_TRANSLATE_MODEL=deepseek-chat
+```
+
+OpenCode Go（精選也不推理；要讓精選推理時，另設
+`DAILY_INSIGHTS_NEWSROOM_EDITOR_EXTRA_BODY='{"thinking":{"type":"enabled"},"reasoning_effort":"high"}'`
+與 `DAILY_INSIGHTS_NEWSROOM_EDITOR_TIMEOUT_SECONDS=300`，並先以重播驗證）：
+
+```sh
+DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL=https://opencode.ai/inference/go/openai/v1
+DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY=<OpenCode Go 金鑰>
+DAILY_INSIGHTS_NEWSROOM_LLM_USER_AGENT=daily-insights-newsroom/1.0
+DAILY_INSIGHTS_NEWSROOM_LLM_SESSION_HEADER=x-opencode-session
+DAILY_INSIGHTS_NEWSROOM_LLM_EXTRA_BODY='{"thinking":{"type":"disabled"}}'
+DAILY_INSIGHTS_NEWSROOM_EDITOR_EXTRA_BODY=
+DAILY_INSIGHTS_NEWSROOM_EDITOR_TIMEOUT_SECONDS=
+DAILY_INSIGHTS_NEWSROOM_TRIAGE_MODEL=deepseek-v4.1-flash
+DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL=deepseek-v4.1-flash
+DAILY_INSIGHTS_NEWSROOM_ANALYSIS_MODEL=deepseek-v4.1-flash
+DAILY_INSIGHTS_NEWSROOM_TRANSLATE_MODEL=deepseek-v4.1-flash
+```
+
+設定說明：
+
+- **Session header**：Go 拒絕沒有 `x-opencode-session` 的呼叫（HTTP 400
+  `MissingSessionID`），佇列會把它當成不可重試錯誤，整批資料列直接 `failed`。因此
+  base URL 在 `opencode.ai` 而 session header 空白時，持有 LLM 金鑰的服務
+  （`newsroom-worker`、`orchestration-worker`，本機另有 API）都拒絕啟動
+  （`newsroom_llm_session_header is required for opencode.ai`）。
+  session id 由 stage 與 prompt 版本產生，同一階段的呼叫共用一個，讓 Go 命中同一份
+  prompt 快取。
+- **關閉推理**：Go 的 `deepseek-v4.1-flash` 預設會推理，而 prompt 都是在不推理的
+  DeepSeek 上校準的，所以 `LLM_EXTRA_BODY` 要關閉推理。`{"reasoning_effort":"none"}` 也
+  有效；`"reasoning_effort":"minimal"`、`enable_thinking`、`chat_template_kwargs` 都關不掉。
+- **額外欄位**：`LLM_EXTRA_BODY` 是單行 JSON 物件，合併進每一次 chat completion（含
+  修復重試）；`EDITOR_EXTRA_BODY` 只用於精選、去重與重複新聞篩選，頂層 key 覆蓋
+  `LLM_EXTRA_BODY` 的同名 key。兩者都不能設定 `model`、`messages`、`response_format`、
+  `temperature`、`stream`，否則設定驗證失敗、服務不會啟動。`apps/api/.env` 中可用單引號
+  包住或不加引號；GitHub Variable 直接貼 JSON，不加引號。
+- **稽核**：Go 不回 `x-request-id`，`newsroom_llm_calls.request_id` 改記
+  `x-opencode-log-id`；向 OpenCode 回報問題時提供這個值。
+- **額度**：Go 的 `deepseek-v4.1-flash` 每月約 US$80 額度，任 5 小時內最多用掉 20%、
+  每週 50%。台北時間週一至週五 09:00–12:00、14:00–18:00 是 Go 的尖峰，同樣的呼叫
+  扣得比較多。可在 OpenCode console 開啟 Extra Usage，額度用完後改扣預付餘額。
+
+### 切換步驟
+
+1. 確認要執行的映像包含這組設定（`DAILY_INSIGHTS_NEWSROOM_LLM_SESSION_HEADER` 等）。
+   舊映像會忽略不認得的設定，對 Go 送出沒有 session header 的請求，全部得到 400。
+2. 本機：改 `apps/api/.env`，再重新建立會呼叫 LLM 的容器（`restart` 不會重讀
+   `env_file`）：
+   `docker compose up -d --no-build --force-recreate newsroom-worker orchestration-worker api`。
+   正式環境：在 GitHub `production` environment 更新 Secret
+   `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY` 與上表的 Variables，再執行 release workflow
+   重新部署（[正式環境維運操作手冊](production.md#release-procedure)）；deploy 會重新建立
+   `orchestration-worker` 與 `newsroom-worker`。
+3. 確認 worker log 沒有 `fatal`，並查看切換後的呼叫：
+
+   ```sql
+   SELECT stage, model, error_code, count(*), max(request_id) AS sample_request_id
+   FROM newsroom_llm_calls
+   WHERE created_at > now() - interval '15 minutes'
+   GROUP BY stage, model, error_code
+   ORDER BY stage, error_code NULLS FIRST;
+   ```
+
+4. 切換前因供應商錯誤而 `failed` 的資料列不會自動恢復，依錯誤碼[重新排入](#重新排入)；
+   已發布的空版次見[版次發布與晚到補上](#版次發布與晚到補上)。
+
+### 供應商錯誤碼
+
+| 錯誤碼                         | DeepSeek 官方              | OpenCode Go                                                                      | 處置                                                                                                                                                               |
+| ------------------------------ | -------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `<stage>_provider_http_400`    | 請求格式或 model 錯誤      | 缺 session header（`MissingSessionID`）或 model 不存在（`Model is unavailable`） | 不可重試。修正設定、重新部署後重新排入                                                                                                                             |
+| `<stage>_provider_http_401`    | 金鑰錯誤或被撤銷           | 金鑰錯誤（`Invalid credential`）                                                 | 不可重試。換金鑰、重新部署後重新排入                                                                                                                               |
+| `<stage>_provider_http_402`    | 餘額不足（10-24 停擺原因） | 文件未列出                                                                       | 不可重試。儲值或切換供應商後重新排入                                                                                                                               |
+| `<stage>_provider_http_429`    | 限流                       | 限流                                                                             | 自動重試，依 `Retry-After` 退避                                                                                                                                    |
+| `<stage>_provider_usage_limit` | —                          | 5 小時、每週或每月額度用完（HTTP 429 `GoUsageLimitError`）                       | 自動重試，依 `retry-after` 等待（最多 6 小時；沒有時 60 分鐘）。每次等待仍算一次嘗試，週／月額度用完會先轉 `failed`，額度恢復或開啟 Extra Usage 後依錯誤碼重新排入 |
+
 ## 舊管線的執行紀錄
 
 - 舊新聞的 orchestration job／function runs（`news_*_refresh`、`news_publish`、
