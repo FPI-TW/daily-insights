@@ -17,7 +17,6 @@ from daily_insights_api.modules.newsroom.providers import (
     session_id,
 )
 from daily_insights_api.modules.newsroom.queue import (
-    MAX_BACKOFF,
     FatalStageError,
     RetryableStageError,
 )
@@ -260,13 +259,15 @@ def test_a_spent_go_allowance_waits_for_retry_after(status: int) -> None:
     assert isinstance(error, RetryableStageError)
     assert error.code == "triage_provider_usage_limit"
     assert error.retry_after == timedelta(hours=2)
+    assert not error.counts_attempt
 
 
-def test_a_spent_go_allowance_without_retry_after_waits_the_longest_backoff() -> None:
+def test_a_spent_go_allowance_without_retry_after_leaves_the_wait_to_the_queue() -> None:
     error = classify_http_error("triage", _status_error(429, GO_USAGE_LIMIT))
 
     assert isinstance(error, RetryableStageError)
-    assert error.retry_after == MAX_BACKOFF
+    assert error.retry_after is None
+    assert not error.counts_attempt
 
 
 def test_other_provider_refusals_keep_their_status_codes() -> None:
@@ -298,6 +299,7 @@ def test_other_provider_refusals_keep_their_status_codes() -> None:
         "triage_provider_http_429",
         timedelta(seconds=30),
     )
+    assert throttled.counts_attempt
     assert [type(error) for error in (missing_session, bad_key, unpaid)] == [FatalStageError] * 3
     assert [error.code for error in (missing_session, bad_key, unpaid)] == [
         "triage_provider_http_400",

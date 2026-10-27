@@ -9,7 +9,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.newsroom.browser import PageRenderer, build_renderer
+from daily_insights_api.modules.newsroom.clock import TAIPEI
 from daily_insights_api.modules.newsroom.notifier import Notice, Notifier, build_notifier
 from daily_insights_api.modules.newsroom.providers import (
     Embedder,
@@ -25,8 +26,10 @@ from daily_insights_api.modules.newsroom.providers import (
     OpenAICompatibleJsonModel,
 )
 from daily_insights_api.modules.newsroom.queue import (
+    MAX_BACKOFF,
     Claim,
     FatalStageError,
+    RetryableStageError,
     StageHandler,
     StageSpec,
     claim,
@@ -152,6 +155,29 @@ class NewsroomWorker:
             )
         )
 
+    async def _on_wait(self, claim_: Claim, error: RetryableStageError) -> None:
+        # A spent provider allowance (OpenCode Go) is today's only error that
+        # waits without counting an attempt.
+        if error.retry_after is not None:
+            resets_at = (datetime.now(UTC) + error.retry_after).astimezone(TAIPEI)
+            reset = f"預計台北時間 {resets_at:%Y-%m-%d %H:%M} 恢復"
+        else:
+            reset = f"回應未提供恢復時間 每 {MAX_BACKOFF.seconds // 60} 分鐘重試一次"
+        await self._runtime.notifier.send(
+            Notice(
+                kind="provider_usage_limit",
+                title=f"新聞管線 {claim_.stage.name} 階段的 OpenCode Go 額度已用完",
+                lines=(
+                    reset,
+                    "資料列留在佇列等待 不會用掉重試次數",
+                    "要提早恢復可在 OpenCode console 開啟 Extra Usage",
+                    f"錯誤代碼 {error.code}",
+                ),
+                # One notice per stage per hour, like the fatal-error notices.
+                dedupe_key=f"usage_limit:{claim_.stage.name}",
+            )
+        )
+
     async def _stage_loop(self, binding: StageBinding) -> None:
         poll = self._runtime.settings.newsroom_worker_poll_seconds
         while True:
@@ -164,6 +190,7 @@ class NewsroomWorker:
                         item,
                         binding.handler,
                         on_fatal=self._on_fatal,
+                        on_wait=self._on_wait,
                     )
                     logger.info(
                         "newsroom.stage",

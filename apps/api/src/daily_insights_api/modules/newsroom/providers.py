@@ -19,18 +19,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.newsroom.models import EMBEDDING_DIMENSIONS, NewsroomLlmCall
-from daily_insights_api.modules.newsroom.queue import (
-    MAX_BACKOFF,
-    FatalStageError,
-    RetryableStageError,
-)
+from daily_insights_api.modules.newsroom.queue import FatalStageError, RetryableStageError
 
 ResultT = TypeVar("ResultT", bound=BaseModel)
 
 FATAL_STATUS = {400, 401, 402, 403, 404}
 # OpenCode Go answers a spent 5-hour, weekly or monthly allowance with HTTP 429,
 # {"type":"error","error":{"type":"GoUsageLimitError",...}} and retry-after. The
-# allowance comes back on its own, so the row waits for it instead of failing.
+# allowance comes back on its own, so the row waits for it without spending its
+# attempts, however long a weekly or monthly reset takes.
 USAGE_LIMIT_ERROR_TYPES = {"GoUsageLimitError"}
 
 
@@ -66,11 +63,10 @@ def classify_http_error(stage: str, error: Exception) -> RetryableStageError | F
     if isinstance(error, httpx.HTTPStatusError):
         status = error.response.status_code
         if _error_type(error.response) in USAGE_LIMIT_ERROR_TYPES:
-            # Without retry-after, wait the longest plain backoff so a window that
-            # lasts hours does not spend every attempt within minutes.
             return RetryableStageError(
                 f"{stage}_provider_usage_limit",
-                retry_after=_retry_after(error.response) or MAX_BACKOFF,
+                retry_after=_retry_after(error.response),
+                counts_attempt=False,
             )
         if status in FATAL_STATUS:
             return FatalStageError(f"{stage}_provider_http_{status}")
