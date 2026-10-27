@@ -8,7 +8,7 @@ audit row per call. Stages never talk to httpx directly.
 import json
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Protocol, TypeVar
@@ -19,11 +19,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.config import Settings
 from daily_insights_api.modules.newsroom.models import EMBEDDING_DIMENSIONS, NewsroomLlmCall
-from daily_insights_api.modules.newsroom.queue import FatalStageError, RetryableStageError
+from daily_insights_api.modules.newsroom.queue import (
+    MAX_BACKOFF,
+    FatalStageError,
+    RetryableStageError,
+)
 
 ResultT = TypeVar("ResultT", bound=BaseModel)
 
 FATAL_STATUS = {400, 401, 402, 403, 404}
+# OpenCode Go answers a spent 5-hour, weekly or monthly allowance with HTTP 429,
+# {"type":"error","error":{"type":"GoUsageLimitError",...}} and retry-after. The
+# allowance comes back on its own, so the row waits for it instead of failing.
+USAGE_LIMIT_ERROR_TYPES = {"GoUsageLimitError"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,10 +51,27 @@ def _retry_after(response: httpx.Response) -> timedelta | None:
         return None
 
 
+def _error_type(response: httpx.Response) -> str | None:
+    try:
+        data = response.json()
+    except ValueError:
+        return None
+    error = data.get("error") if isinstance(data, dict) else None
+    kind = error.get("type") if isinstance(error, dict) else None
+    return kind if isinstance(kind, str) else None
+
+
 def classify_http_error(stage: str, error: Exception) -> RetryableStageError | FatalStageError:
     """Map a transport or HTTP failure onto the two queue outcomes (spec §5)."""
     if isinstance(error, httpx.HTTPStatusError):
         status = error.response.status_code
+        if _error_type(error.response) in USAGE_LIMIT_ERROR_TYPES:
+            # Without retry-after, wait the longest plain backoff so a window that
+            # lasts hours does not spend every attempt within minutes.
+            return RetryableStageError(
+                f"{stage}_provider_usage_limit",
+                retry_after=_retry_after(error.response) or MAX_BACKOFF,
+            )
         if status in FATAL_STATUS:
             return FatalStageError(f"{stage}_provider_http_{status}")
         return RetryableStageError(
@@ -77,7 +102,12 @@ def _audit_row(
         input_tokens=_int((usage or {}).get("prompt_tokens")),
         output_tokens=_int((usage or {}).get("completion_tokens")),
         latency_ms=int((time.monotonic() - started) * 1000),
-        request_id=response.headers.get("x-request-id") if response is not None else None,
+        # OpenCode Go sends no x-request-id; its support traces calls by x-opencode-log-id.
+        request_id=(
+            response.headers.get("x-request-id") or response.headers.get("x-opencode-log-id")
+            if response is not None
+            else None
+        ),
         error_code=error_code,
     )
 
@@ -124,27 +154,45 @@ class OpenAICompatibleJsonModel:
         user_agent: str | None = None,
         session_header: str | None = None,
         extra_body: dict[str, Any] | None = None,
+        stage_extra_body: Mapping[str, dict[str, Any]] | None = None,
+        stage_timeout_seconds: Mapping[str, float] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._user_agent = user_agent
         self._session_header = session_header
         self._extra_body = dict(extra_body or {})
+        # Per audit stage: extra fields merged over ``extra_body``, and the timeout.
+        self._stage_extra_body = {
+            stage: dict(extra) for stage, extra in (stage_extra_body or {}).items()
+        }
+        self._stage_timeout_seconds = dict(stage_timeout_seconds or {})
         self._client = httpx.AsyncClient(
             timeout=timeout_seconds, follow_redirects=False, cookies=None, trust_env=False
         )
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "OpenAICompatibleJsonModel":
-        if settings.newsroom_llm_api_key is None:
-            raise FatalStageError("newsroom_llm_configuration_missing")
+    def from_settings(
+        cls, settings: Settings, *, api_key: str | None = None
+    ) -> "OpenAICompatibleJsonModel":
+        """The client the settings describe; ``api_key`` replaces the settings key
+        (the replay reads it at run time and keeps it out of its settings)."""
+        if api_key is None:
+            if settings.newsroom_llm_api_key is None:
+                raise FatalStageError("newsroom_llm_configuration_missing")
+            api_key = settings.newsroom_llm_api_key.get_secret_value()
+        editor_timeout = settings.newsroom_editor_timeout_seconds
         return cls(
             base_url=settings.newsroom_llm_base_url,
-            api_key=settings.newsroom_llm_api_key.get_secret_value(),
+            api_key=api_key,
             timeout_seconds=settings.newsroom_llm_timeout_seconds,
             user_agent=settings.newsroom_llm_user_agent,
             session_header=settings.newsroom_llm_session_header,
             extra_body=settings.newsroom_llm_extra_body,
+            # Every newsroom_editor_model call (selection, dedupe, repeat screen)
+            # is audited as stage "editor".
+            stage_extra_body={"editor": settings.newsroom_editor_extra_body},
+            stage_timeout_seconds={} if editor_timeout is None else {"editor": editor_timeout},
         )
 
     def _headers(self, audit: CallAudit) -> dict[str, str]:
@@ -206,6 +254,7 @@ class OpenAICompatibleJsonModel:
         # The client's own fields come last so the configured extras never replace them.
         body = {
             **self._extra_body,
+            **self._stage_extra_body.get(audit.stage, {}),
             "model": model,
             "response_format": {"type": "json_object"},
             "temperature": 0,
@@ -218,6 +267,7 @@ class OpenAICompatibleJsonModel:
                 f"{self._base_url}/chat/completions",
                 headers=self._headers(audit),
                 json=body,
+                timeout=self._stage_timeout_seconds.get(audit.stage, httpx.USE_CLIENT_DEFAULT),
             )
             response.raise_for_status()
         except Exception as error:
