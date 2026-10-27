@@ -598,8 +598,10 @@ def test_rescoring_follows_the_variant() -> None:
 
 
 def test_repetition_one_keeps_the_key_earlier_runs_stored() -> None:
-    def key(**rep: int) -> str:
-        return request_key(model="m", system="s", payload={"a": 1}, subject=None, **rep)[0]
+    def key(rep: int | None = None) -> str:
+        if rep is None:
+            return request_key(model="m", system="s", payload={"a": 1}, subject=None)[0]
+        return request_key(model="m", system="s", payload={"a": 1}, subject=None, rep=rep)[0]
 
     assert key(rep=1) == key()
     assert key(rep=2) not in {key(), key(rep=3)}

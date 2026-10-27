@@ -17,6 +17,11 @@ request: repetition 1 is the key every earlier run stored, any other number is
 part of the key, so a rerun with ``--rep 2`` gets fresh answers once and then
 replays them for free.
 
+A provider other than the production one (``provider.LlmProvider``, e.g.
+OpenCode Go) adds its tag to the key: the endpoint and the extra request
+fields, so thinking on and off never share an answer and a Go answer never
+lands on a DeepSeek entry.
+
 Answers fetched live are priced and appended to the round's ledger (``costs``)
 with the provider's usage, including DeepSeek's cache-hit input tokens.
 
@@ -49,7 +54,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from daily_insights_api.modules.newsroom.models import NewsroomLlmCall
 from daily_insights_api.modules.newsroom.providers import CallAudit, Embedder, JsonModel
 from daily_insights_api.modules.newsroom.queue import RetryableStageError
-from daily_insights_api.modules.newsroom.replay.costs import Ledger
+from daily_insights_api.modules.newsroom.replay.costs import Ledger, cache_hit_tokens
 
 ResultT = TypeVar("ResultT", bound=BaseModel)
 
@@ -192,10 +197,12 @@ def request_key(
     payload: dict[str, Any],
     subject: uuid.UUID | None,
     rep: int = 1,
+    provider: str | None = None,
 ) -> tuple[str, list[str]]:
     """SHA-256 of the request with its event ids replaced, and those ids.
 
-    Repetition 1 hashes exactly what runs before repetitions existed hashed.
+    Repetition 1 without a provider tag hashes exactly what runs before
+    repetitions and providers existed hashed.
     """
     canonical, ids = canonical_ids(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     request: dict[str, Any] = {
@@ -206,6 +213,8 @@ def request_key(
     }
     if rep != 1:
         request["rep"] = rep
+    if provider is not None:
+        request["provider"] = provider
     material = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(material.encode("utf-8")).hexdigest(), ids
 
@@ -379,11 +388,14 @@ class CachedJsonModel:
         failures: ApiFailures | None = None,
         retry_delays: Sequence[float] = API_RETRY_DELAYS,
         sleep: Sleep = asyncio.sleep,
+        provider: str | None = None,
     ) -> None:
         self._cache = cache
         self._stats = stats
         self._live_factory = live
         self._live: JsonModel | None = None
+        # Part of every request key (``request_key``); None for the production provider.
+        self.provider = provider
         self._gate = gate
         self._ledger = ledger
         self._failures = failures
@@ -415,6 +427,7 @@ class CachedJsonModel:
             payload=payload,
             subject=audit.subject_id,
             rep=current_rep(),
+            provider=self.provider,
         )
         # Only an answer moves to the next occurrence: a live call that failed
         # stored nothing, so its retry must fill the same slot or it is lost.
@@ -523,11 +536,7 @@ class CachedJsonModel:
             for row in database.new
             if isinstance(row, NewsroomLlmCall) and id(row) not in before
         ]
-        hits = [
-            int(usage["prompt_cache_hit_tokens"])
-            for usage in usages
-            if isinstance(usage.get("prompt_cache_hit_tokens"), int)
-        ]
+        hits = [hit for hit in map(cache_hit_tokens, usages) if hit is not None]
         return (
             result,
             (

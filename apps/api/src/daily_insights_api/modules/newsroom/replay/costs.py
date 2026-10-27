@@ -14,6 +14,10 @@ Prices are USD per 1M tokens as published by the providers, read on 2026-10-22:
   01:00-04:00 and 06:00-10:00 UTC Monday to Friday (Chinese public holidays,
   which are off-peak, are priced at peak here, so totals err high).
 - OpenAI ``text-embedding-3-large``: input 0.13.
+
+OpenCode Go bills a subscription allowance instead; each reply carries the
+pay-as-you-go price of the call (``usage.opencode.list_cost``), and that list
+cost is what the ledger records for it.
 """
 
 import json
@@ -91,6 +95,10 @@ class LedgerEntry:
     cache_hit_tokens: int | None
     usd: float
     failed: bool = False
+    # OpenCode Go: the list cost the replies reported (then ``usd`` is that cost)
+    # and the reasoning tokens inside ``output_tokens``.
+    list_cost: float | None = None
+    reasoning_tokens: int | None = None
 
 
 class Ledger:
@@ -120,9 +128,12 @@ class Ledger:
         at = datetime.now(UTC)
         input_tokens = sum(_int(row.get("prompt_tokens")) for row in rows)
         output_tokens = sum(_int(row.get("completion_tokens")) for row in rows)
-        hits = [row.get("prompt_cache_hit_tokens") for row in rows]
+        hits = [cache_hit_tokens(row) for row in rows]
         cache_hit = sum(_int(value) for value in hits) if any(v is not None for v in hits) else None
         served = next((str(row["model"]) for row in rows if row.get("model")), None)
+        list_costs = [cost for cost in map(_list_cost, rows) if cost is not None]
+        reasoning = [value for value in map(_reasoning_tokens, rows) if value is not None]
+        list_cost = sum(list_costs) if list_costs else None
         entry = LedgerEntry(
             at=at.isoformat(timespec="seconds"),
             run=self.run,
@@ -133,7 +144,9 @@ class Ledger:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cache_hit_tokens=cache_hit,
-            usd=chat_cost(
+            usd=list_cost
+            if list_cost is not None
+            else chat_cost(
                 served or model,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
@@ -141,6 +154,8 @@ class Ledger:
                 at=at,
             ),
             failed=failed,
+            list_cost=list_cost,
+            reasoning_tokens=sum(reasoning) if reasoning else None,
         )
         self.add(entry)
         return entry
@@ -166,6 +181,28 @@ def _int(value: Any) -> int:
     return value if isinstance(value, int) else 0
 
 
+def cache_hit_tokens(usage: dict[str, Any]) -> int | None:
+    """Cached input tokens of one reply: DeepSeek's own field, or the OpenAI one Go sends."""
+    value = usage.get("prompt_cache_hit_tokens")
+    if isinstance(value, int):
+        return value
+    details = usage.get("prompt_tokens_details")
+    cached = details.get("cached_tokens") if isinstance(details, dict) else None
+    return cached if isinstance(cached, int) else None
+
+
+def _list_cost(usage: dict[str, Any]) -> float | None:
+    opencode = usage.get("opencode")
+    cost = opencode.get("list_cost") if isinstance(opencode, dict) else None
+    return float(cost) if isinstance(cost, int | float) and not isinstance(cost, bool) else None
+
+
+def _reasoning_tokens(usage: dict[str, Any]) -> int | None:
+    details = usage.get("completion_tokens_details")
+    value = details.get("reasoning_tokens") if isinstance(details, dict) else None
+    return value if isinstance(value, int) else None
+
+
 def read_ledger(path: Path) -> list[LedgerEntry]:
     if not path.exists():
         return []
@@ -183,6 +220,7 @@ def ledger_total(entries: Iterable[LedgerEntry]) -> dict[str, Any]:
         "input_tokens": sum(row.input_tokens for row in rows),
         "cache_hit_tokens": sum(row.cache_hit_tokens or 0 for row in rows),
         "output_tokens": sum(row.output_tokens for row in rows),
+        "reasoning_tokens": sum(row.reasoning_tokens or 0 for row in rows),
         "usd": sum(row.usd for row in rows),
     }
 

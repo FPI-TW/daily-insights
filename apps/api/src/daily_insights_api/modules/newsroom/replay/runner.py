@@ -92,6 +92,7 @@ from daily_insights_api.modules.newsroom.replay.metrics import (
     invalid_reason_for,
     summary,
 )
+from daily_insights_api.modules.newsroom.replay.provider import LlmProvider
 from daily_insights_api.modules.newsroom.replay.snapshot import (
     ReplayEnvironment,
     ReplayError,
@@ -152,6 +153,8 @@ class RunOptions:
     skip_days: tuple[tuple[date, str], ...] = ()
     # The ledger every live call of this round is written to.
     round: str = DEFAULT_ROUND
+    # Triage and editor calls go to this provider instead of production's.
+    provider: LlmProvider | None = None
 
     @property
     def skipped(self) -> dict[date, str]:
@@ -293,6 +296,26 @@ def _provider_setting(environment: ReplayEnvironment, name: str, default: str) -
 
 
 def _settings(environment: ReplayEnvironment, options: RunOptions, database: str) -> Settings:
+    settings = _production_settings(environment, options, database)
+    provider = options.provider
+    if provider is None:
+        return settings
+    # ``parse_extra_body`` already refused the client's own request fields.
+    return settings.model_copy(
+        update={
+            "newsroom_llm_base_url": provider.base_url,
+            "newsroom_triage_model": provider.model,
+            "newsroom_editor_model": provider.model,
+            "newsroom_llm_user_agent": provider.user_agent,
+            "newsroom_llm_session_header": provider.session_header,
+            "newsroom_llm_extra_body": dict(provider.extra_body),
+        }
+    )
+
+
+def _production_settings(
+    environment: ReplayEnvironment, options: RunOptions, database: str
+) -> Settings:
     defaults = Settings(_env_file=None)
     return Settings(
         _env_file=None,
@@ -343,9 +366,14 @@ def _runtime(
     cache = ResponseCache(environment.cache_dir)
 
     def live_model() -> JsonModel:
+        provider = options.provider
         model = OpenAICompatibleJsonModel(
             base_url=settings.newsroom_llm_base_url,
-            api_key=_key(environment, "NEWSROOM_LLM_API_KEY"),
+            api_key=(
+                provider.read_key()
+                if provider is not None
+                else _key(environment, "NEWSROOM_LLM_API_KEY")
+            ),
             timeout_seconds=settings.newsroom_llm_timeout_seconds,
             user_agent=settings.newsroom_llm_user_agent,
             session_header=settings.newsroom_llm_session_header,
@@ -374,6 +402,7 @@ def _runtime(
             gate=_HeldGate(gate_holder),
             ledger=ledger,
             failures=failures,
+            provider=options.provider.cache_tag() if options.provider else None,
         ),
         embedder=CachedEmbedder(
             cache,
@@ -1264,6 +1293,7 @@ def _uncached(
             payload=payload,
             subject=article.article_id,
             rep=rep,
+            provider=context.options.provider.cache_tag() if context.options.provider else None,
         )
         if cache.answer(key, 0) is None:
             missing.append(retriage.Request(prompt.text, payload, request.model))
@@ -1570,6 +1600,13 @@ def _notes(options: RunOptions) -> list[str]:
         notes.append(
             "editor: 從正式組稿之後的事件狀態出發, 正式組稿時已自動合併的重複事件不會再被提出。"
         )
+    if options.provider is not None:
+        notes.append(
+            f"供應商: 初篩與組稿的模型呼叫改送 {options.provider.base_url}"
+            f" ({options.provider.model}, extra body"
+            f" {json.dumps(dict(options.provider.extra_body), ensure_ascii=False)});"
+            " 快取鍵含供應商與 extra body, 不與正式供應商的答案混用。"
+        )
     if options.rep != 1 or options.triage_rep != 1:
         notes.append(
             f"重跑: 組稿與目標重判的模型呼叫為第 {options.rep} 次抽樣、完整初篩為第"
@@ -1618,6 +1655,8 @@ def _notes(options: RunOptions) -> list[str]:
 def _run_name(environment: ReplayEnvironment, options: RunOptions, now: datetime) -> Path:
     stamp = now.astimezone(clock.TAIPEI).strftime("%Y%m%d-%H%M")
     name = f"{stamp}-{options.variant.name}-{options.stages}"
+    if options.provider is not None:
+        name += "-alt"
     if options.rep != 1 or options.triage_rep != 1:
         name += f"-rep{options.rep}" + (
             f"-trep{options.triage_rep}" if options.triage_rep != 1 else ""
@@ -1722,6 +1761,7 @@ async def run(environment: ReplayEnvironment, options: RunOptions) -> Path:
         "exported_at": metadata.get("exported_at"),
         "triage_model": settings.newsroom_triage_model,
         "editor_model": settings.newsroom_editor_model,
+        "provider": options.provider.describe() if options.provider else None,
         "embedding_model": settings.newsroom_embedding_model,
         "database": database if options.keep_database else None,
         "run_dir": str(run_dir),
