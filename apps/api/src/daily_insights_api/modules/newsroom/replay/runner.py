@@ -1680,6 +1680,8 @@ def _notes(options: RunOptions) -> list[str]:
 
 
 def _run_name(environment: ReplayEnvironment, options: RunOptions, now: datetime) -> Path:
+    """A new run directory, created here so runs started in the same minute never
+    share one (a run writes its files only when it ends)."""
     stamp = now.astimezone(clock.TAIPEI).strftime("%Y%m%d-%H%M")
     name = f"{stamp}-{options.variant.name}-{options.stages}"
     if options.provider is not None:
@@ -1693,10 +1695,15 @@ def _run_name(environment: ReplayEnvironment, options: RunOptions, now: datetime
     if options.dry_run:
         name += "-dryrun"
     base = environment.runs_dir / name
+    environment.runs_dir.mkdir(parents=True, exist_ok=True)
     path, suffix = base, 2
-    while path.exists():
-        path, suffix = Path(f"{base}-{suffix}"), suffix + 1
-    return path
+    while True:
+        try:
+            path.mkdir()
+        except FileExistsError:
+            path, suffix = Path(f"{base}-{suffix}"), suffix + 1
+        else:
+            return path
 
 
 async def run(environment: ReplayEnvironment, options: RunOptions) -> Path:

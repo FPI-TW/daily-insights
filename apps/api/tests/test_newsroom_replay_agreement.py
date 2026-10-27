@@ -502,3 +502,20 @@ def test_label_candidates_union_picks_and_the_top_by_score() -> None:
     assert "| 1 | tx | - | 5 (1/1) | 4 (1/1) |  |  |" in text
     assert "| 2 | ty | - | 3 (0/1) | 4 (1/1) |  |  |" in text
     assert "tz" not in text
+
+
+def test_runs_started_in_the_same_minute_get_their_own_directories(tmp_path: Path) -> None:
+    environment = snapshot.ReplayEnvironment(root=tmp_path)
+    options = runner.RunOptions(
+        snapshot=snapshot.Snapshot(datetime(2026, 10, 18).date(), datetime(2026, 10, 22).date()),
+        variant=BASELINE,
+        stages="triage",
+        provider=GO,
+        label="A",
+    )
+    now = datetime(2026, 10, 27, 4, tzinfo=UTC)
+    first = runner._run_name(environment, options, now)
+    second = runner._run_name(environment, options, now)
+    assert first.name == "20261027-1200-baseline-triage-alt-A"
+    assert second.name == "20261027-1200-baseline-triage-alt-A-2"
+    assert first.is_dir() and second.is_dir()
