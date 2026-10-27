@@ -1,5 +1,7 @@
 """Workstream ③: approval, 09:00 auto-publish, 12:00 late-fill close, edits (spec §6.3).
 
+Also the operator's reopen of a published edition for re-assembly after an outage.
+
 Owner: editions worktree. The admin API (workstream ④) calls only these
 functions for anything that touches translation, analysis or publication;
 each writes ``newsroom_edit_log``.
@@ -15,7 +17,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import ColumnElement, and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -279,6 +281,144 @@ async def reanalyze_event(
     )
 
 
+ReopenAction = Literal["reopen", "skip", "refuse"]
+
+
+@dataclass(frozen=True, slots=True)
+class ReopenCheck:
+    """What reopening one edition would do, and why it would not."""
+
+    edition_id: uuid.UUID
+    edition_date: date
+    market_code: str
+    status: str
+    live_items: int
+    abandoned_items: int
+    late_fill_deadline: datetime
+    new_late_fill_deadline: datetime | None
+    action: ReopenAction
+    reason: str | None = None
+
+
+async def check_reopen(
+    database: AsyncSession,
+    edition: NewsroomEdition,
+    *,
+    force: bool,
+    late_fill_deadline: datetime | None,
+    now: datetime | None = None,
+) -> ReopenCheck:
+    """Decide whether a published edition may go back to draft for re-assembly.
+
+    Only an edition without a live item may, unless ``force``: reopening one
+    takes its items away from readers until it is published again. The late
+    fill restarts with the reopen, so a deadline that has already passed needs
+    a new one; otherwise the next sweep would abandon every re-assembled item
+    as soon as the edition is published again.
+    """
+    moment = now or _now()
+    live = await database.scalar(
+        select(func.count())
+        .select_from(NewsroomEditionItem)
+        .where(NewsroomEditionItem.edition_id == edition.id, live_item_condition())
+    )
+    abandoned = await database.scalar(
+        select(func.count())
+        .select_from(NewsroomEditionItem)
+        .where(
+            NewsroomEditionItem.edition_id == edition.id,
+            NewsroomEditionItem.abandoned_at.is_not(None),
+        )
+    )
+    action: ReopenAction = "reopen"
+    reason: str | None = None
+    if edition.status != "published":
+        action, reason = "skip", "already a draft"
+    elif live and not force:
+        action, reason = "refuse", f"{live} live item(s); --force reopens it anyway"
+    elif late_fill_deadline is not None and late_fill_deadline <= moment:
+        action, reason = "refuse", "the new late-fill deadline has already passed"
+    elif late_fill_deadline is None and edition.late_fill_deadline <= moment:
+        action, reason = "refuse", "the late-fill deadline has passed; give a new one"
+    return ReopenCheck(
+        edition_id=edition.id,
+        edition_date=edition.edition_date,
+        market_code=edition.market_code,
+        status=edition.status,
+        live_items=int(live or 0),
+        abandoned_items=int(abandoned or 0),
+        late_fill_deadline=edition.late_fill_deadline,
+        new_late_fill_deadline=late_fill_deadline,
+        action=action,
+        reason=reason,
+    )
+
+
+async def reopen_edition(
+    database: AsyncSession,
+    edition_id: uuid.UUID,
+    *,
+    force: bool = False,
+    late_fill_deadline: datetime | None = None,
+    user_id: uuid.UUID | None = None,
+    now: datetime | None = None,
+) -> ReopenCheck:
+    """Return a published edition to draft so assembly can rebuild it.
+
+    The edition waits for that re-assembly (``assembled_at`` is cleared), and
+    the next sweep after it publishes the edition once it has a live item. The
+    late fill restarts: abandoned items get another chance and the deadline
+    moves to ``late_fill_deadline`` when given. ``user_id`` records the reopen
+    in the edit log; an operator's script run without one leaves no entry.
+    """
+    edition = await _edition_for_update(database, edition_id)
+    check = await check_reopen(
+        database, edition, force=force, late_fill_deadline=late_fill_deadline, now=now
+    )
+    if check.action == "refuse":
+        raise ValueError(check.reason)
+    if check.action == "skip":
+        return check
+    before = {
+        "status": edition.status,
+        "published_at": edition.published_at.isoformat() if edition.published_at else None,
+        "late_fill_deadline": edition.late_fill_deadline.isoformat(),
+        "live_items": check.live_items,
+        "abandoned_items": check.abandoned_items,
+    }
+    edition.status = "draft"
+    edition.published_at = None
+    edition.published_by_user_id = None
+    edition.assembled_at = None
+    edition.late_fill_closed_at = None
+    edition.held_empty_at = None
+    if late_fill_deadline is not None:
+        edition.late_fill_deadline = late_fill_deadline
+    await database.execute(
+        update(NewsroomEditionItem)
+        .where(
+            NewsroomEditionItem.edition_id == edition.id,
+            NewsroomEditionItem.abandoned_at.is_not(None),
+        )
+        .values(abandoned_at=None)
+    )
+    await database.flush()
+    if user_id is not None:
+        editlog.record_edit(
+            database,
+            entity_type="edition",
+            entity_id=edition.id,
+            action="reopen",
+            user_id=user_id,
+            before=before,
+            after={
+                "status": "draft",
+                "late_fill_deadline": edition.late_fill_deadline.isoformat(),
+            },
+        )
+    return check
+
+
 # --- Periodic tasks ----------------------------------------------------------------
 
 
@@ -291,8 +431,16 @@ def _has_live_item() -> ColumnElement[bool]:
 
 
 def _due_draft(moment: datetime) -> ColumnElement[bool]:
-    """A draft past its auto-publish time."""
-    return and_(NewsroomEdition.status == "draft", NewsroomEdition.auto_publish_at <= moment)
+    """A draft past its auto-publish time that assembly has built.
+
+    Assembly always sets ``assembled_at``; only a reopened edition lacks it,
+    and it waits for its re-assembly.
+    """
+    return and_(
+        NewsroomEdition.status == "draft",
+        NewsroomEdition.auto_publish_at <= moment,
+        NewsroomEdition.assembled_at.is_not(None),
+    )
 
 
 async def auto_publish_due(database: AsyncSession, *, now: datetime | None = None) -> int:
@@ -300,7 +448,7 @@ async def auto_publish_due(database: AsyncSession, *, now: datetime | None = Non
 
     A due draft without one stays a draft (see ``hold_empty_due``) until a
     re-assembly gives it items, when the next sweep publishes it; an admin may
-    still approve it empty.
+    still approve it empty. A reopened edition waits for its re-assembly.
     """
     moment = now or _now()
     due = (
@@ -327,7 +475,8 @@ async def hold_empty_due(
 ) -> list[HeldEdition]:
     """Mark due drafts without a live item as held; returns those held just now.
 
-    Each edition is returned once, so its operators are notified once.
+    Each edition is returned once, so its operators are notified once; a
+    reopen clears the mark.
     """
     moment = now or _now()
     rows = (

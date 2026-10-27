@@ -262,15 +262,62 @@ async def enqueue(
     """Put rows (back) on a stage's queue, e.g. "re-analyse" from the admin console."""
     if not row_ids:
         return
+    await database.execute(
+        update(stage.model)
+        .where(stage.model.id.in_(list(row_ids)))
+        .values(_reset(stage, "pending", reset_attempts=reset_attempts))
+    )
+
+
+def _reset(stage: StageSpec, status: str, *, reset_attempts: bool = True) -> dict[str, Any]:
     values: dict[str, Any] = {
-        f"{stage.column}_status": "pending",
+        f"{stage.column}_status": status,
         f"{stage.column}_next_attempt_at": None,
         f"{stage.column}_error_code": None,
     }
     if reset_attempts:
         values[f"{stage.column}_attempts"] = 0
+    return values
+
+
+def failed_with(stage: StageSpec, error_codes: Sequence[str]) -> Any:
+    """Rows that failed ``stage`` with one of ``error_codes``."""
+    return and_(_col(stage, "status") == "failed", _col(stage, "error_code").in_(list(error_codes)))
+
+
+def in_flight(stage: StageSpec, now: datetime) -> Any:
+    """Rows a worker may be processing, or backing off from a retryable error.
+
+    Recovery leaves them alone: resetting one fences off the running attempt
+    after its model call has already been paid for.
+    """
+    return and_(_col(stage, "status") == "pending", _col(stage, "next_attempt_at") > now)
+
+
+async def requeue_failed(
+    database: AsyncSession, stage: StageSpec, row_ids: Sequence[uuid.UUID]
+) -> int:
+    """``enqueue`` the rows that are still ``failed``; returns how many it put back."""
+    if not row_ids:
+        return 0
+    result = await database.execute(
+        update(stage.model)
+        .where(stage.model.id.in_(list(row_ids)), _col(stage, "status") == "failed")
+        .values(_reset(stage, "pending"))
+    )
+    return int(getattr(result, "rowcount", 0))
+
+
+async def park(database: AsyncSession, stage: StageSpec, row_ids: Sequence[uuid.UUID]) -> None:
+    """Take rows off a stage's queue (``idle``) until an earlier stage queues them again.
+
+    An article sent back to ``embed`` parks its triage: the new embedding
+    queues triage on success, and nothing triages the old one meanwhile.
+    """
+    if not row_ids:
+        return
     await database.execute(
-        update(stage.model).where(stage.model.id.in_(list(row_ids))).values(values)
+        update(stage.model).where(stage.model.id.in_(list(row_ids))).values(_reset(stage, "idle"))
     )
 
 

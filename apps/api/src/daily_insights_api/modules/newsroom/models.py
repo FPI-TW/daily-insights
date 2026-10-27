@@ -347,7 +347,7 @@ class NewsroomEdition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Set once the 12:00 late-fill sweep has run for this edition.
     late_fill_closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Set when the auto-publish sweep first held this draft back for having no
-    # live item; operators are notified then, once.
+    # live item; operators are notified then, once. A reopen clears it.
     held_empty_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 

@@ -636,6 +636,7 @@ async def _placed_event(
                 late_fill_deadline=clock.late_fill_deadline(edition_date),
                 status="published" if published else "draft",
                 published_at=datetime.now(UTC) if published else None,
+                assembled_at=datetime.now(UTC),
             )
             database.add(edition)
             await database.flush()
@@ -1044,6 +1045,7 @@ async def test_auto_publish_holds_an_empty_draft_and_notifies_once(
                 market_code="global",
                 auto_publish_at=clock.auto_publish_at(EDITION_DATE),
                 late_fill_deadline=clock.late_fill_deadline(EDITION_DATE),
+                assembled_at=datetime.now(UTC),
             )
         )
         # The outage: triage failed for the window's articles.
@@ -1112,6 +1114,7 @@ async def test_hold_empty_due_skips_drafts_not_yet_due(
                 market_code="global",
                 auto_publish_at=clock.auto_publish_at(EDITION_DATE),
                 late_fill_deadline=clock.late_fill_deadline(EDITION_DATE),
+                assembled_at=datetime.now(UTC),
             )
         )
         await database.commit()
