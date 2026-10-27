@@ -103,12 +103,33 @@ class JsonModel(Protocol):
     ) -> ResultT: ...
 
 
+SESSION_NAMESPACE = uuid.UUID("5d0f3a52-8c1e-4f5b-9a57-2f1c6b8e4d10")
+
+
+def session_id(audit: CallAudit) -> str:
+    """One stable id per stage and prompt version, so calls sharing a system prompt
+    reach the same provider cache."""
+    return str(uuid.uuid5(SESSION_NAMESPACE, f"{audit.stage}:{audit.prompt_version or ''}"))
+
+
 class OpenAICompatibleJsonModel:
     """Chat completions in JSON mode, temperature 0, validated into ``result_type``."""
 
-    def __init__(self, *, base_url: str, api_key: str, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        timeout_seconds: float,
+        user_agent: str | None = None,
+        session_header: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
+        self._user_agent = user_agent
+        self._session_header = session_header
+        self._extra_body = dict(extra_body or {})
         self._client = httpx.AsyncClient(
             timeout=timeout_seconds, follow_redirects=False, cookies=None, trust_env=False
         )
@@ -121,7 +142,18 @@ class OpenAICompatibleJsonModel:
             base_url=settings.newsroom_llm_base_url,
             api_key=settings.newsroom_llm_api_key.get_secret_value(),
             timeout_seconds=settings.newsroom_llm_timeout_seconds,
+            user_agent=settings.newsroom_llm_user_agent,
+            session_header=settings.newsroom_llm_session_header,
+            extra_body=settings.newsroom_llm_extra_body,
         )
+
+    def _headers(self, audit: CallAudit) -> dict[str, str]:
+        headers = {"Authorization": f"Bearer {self._api_key}"}
+        if self._user_agent:
+            headers["User-Agent"] = self._user_agent
+        if self._session_header:
+            headers[self._session_header] = session_id(audit)
+        return headers
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -171,7 +203,9 @@ class OpenAICompatibleJsonModel:
         result_type: type[R],
         audit: CallAudit,
     ) -> "_Answer[R] | _Invalid":
+        # The client's own fields come last so the configured extras never replace them.
         body = {
+            **self._extra_body,
             "model": model,
             "response_format": {"type": "json_object"},
             "temperature": 0,
@@ -182,7 +216,7 @@ class OpenAICompatibleJsonModel:
         try:
             response = await self._client.post(
                 f"{self._base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self._api_key}"},
+                headers=self._headers(audit),
                 json=body,
             )
             response.raise_for_status()

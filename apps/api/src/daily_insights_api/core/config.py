@@ -1,12 +1,13 @@
+import json
 import re
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal, Self
+from typing import Annotated, Any, Literal, Self
 from urllib.parse import urlparse
 
-from pydantic import Field, SecretStr, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["development", "test", "staging", "production"]
 LOCAL_DATABASE_URL = (
@@ -16,6 +17,10 @@ LOCAL_SESSION_SECRET = "development-only-session-secret-change-me"
 LOCAL_PASSWORD_PEPPER = "development-only-password-pepper-change-me"
 PLACEHOLDER_MARKERS = ("change_me", "change-me", "development-only")
 API_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
+# Request fields the newsroom LLM client owns; newsroom_llm_extra_body cannot set them.
+NEWSROOM_LLM_RESERVED_BODY_FIELDS = frozenset(
+    {"model", "messages", "response_format", "temperature", "stream"}
+)
 
 
 class Settings(BaseSettings):
@@ -114,6 +119,17 @@ class Settings(BaseSettings):
     )
     newsroom_llm_base_url: str = "https://api.deepseek.com"
     newsroom_llm_api_key: SecretStr | None = None
+    # Subscription gateways such as OpenCode Go ask clients to name themselves
+    # instead of sending the HTTP library's User-Agent.
+    newsroom_llm_user_agent: str = Field(default="daily-insights-newsroom/1.0", min_length=1)
+    # Header that carries a stable per-stage session id for routing and prompt
+    # caching (OpenCode Go reads x-opencode-session); empty sends no such header.
+    newsroom_llm_session_header: str | None = Field(
+        default=None, pattern=r"^([A-Za-z0-9][A-Za-z0-9-]*)?$"
+    )
+    # JSON object merged into every chat completion body, for provider switches
+    # such as {"thinking":{"type":"disabled"}} on OpenCode Go. Empty sends nothing extra.
+    newsroom_llm_extra_body: Annotated[dict[str, Any], NoDecode] = Field(default_factory=dict)
     newsroom_triage_model: str = "deepseek-chat"
     newsroom_editor_model: str = "deepseek-chat"
     newsroom_analysis_model: str = "deepseek-chat"
@@ -139,6 +155,21 @@ class Settings(BaseSettings):
     r2_access_key_id: SecretStr | None = None
     r2_secret_access_key: SecretStr | None = None
     r2_signed_url_ttl_seconds: int = Field(default=900, ge=60, le=3600)
+
+    @field_validator("newsroom_llm_extra_body", mode="before")
+    @classmethod
+    def parse_newsroom_llm_extra_body(cls, value: object) -> object:
+        if isinstance(value, str):
+            return json.loads(value) if value.strip() else {}
+        return value
+
+    @field_validator("newsroom_llm_extra_body")
+    @classmethod
+    def keep_newsroom_llm_request_fields(cls, value: dict[str, Any]) -> dict[str, Any]:
+        reserved = sorted(NEWSROOM_LLM_RESERVED_BODY_FIELDS & value.keys())
+        if reserved:
+            raise ValueError(f"newsroom_llm_extra_body cannot set {', '.join(reserved)}")
+        return value
 
     @model_validator(mode="after")
     def require_external_database_configuration(self) -> Self:

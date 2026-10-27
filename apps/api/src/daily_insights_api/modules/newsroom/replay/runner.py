@@ -347,6 +347,9 @@ def _runtime(
             base_url=settings.newsroom_llm_base_url,
             api_key=_key(environment, "NEWSROOM_LLM_API_KEY"),
             timeout_seconds=settings.newsroom_llm_timeout_seconds,
+            user_agent=settings.newsroom_llm_user_agent,
+            session_header=settings.newsroom_llm_session_header,
+            extra_body=settings.newsroom_llm_extra_body,
         )
         watch_usage(model)
         return model
