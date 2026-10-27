@@ -8,7 +8,7 @@ audit row per call. Stages never talk to httpx directly.
 import json
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Protocol, TypeVar
@@ -154,27 +154,45 @@ class OpenAICompatibleJsonModel:
         user_agent: str | None = None,
         session_header: str | None = None,
         extra_body: dict[str, Any] | None = None,
+        stage_extra_body: Mapping[str, dict[str, Any]] | None = None,
+        stage_timeout_seconds: Mapping[str, float] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._user_agent = user_agent
         self._session_header = session_header
         self._extra_body = dict(extra_body or {})
+        # Per audit stage: extra fields merged over ``extra_body``, and the timeout.
+        self._stage_extra_body = {
+            stage: dict(extra) for stage, extra in (stage_extra_body or {}).items()
+        }
+        self._stage_timeout_seconds = dict(stage_timeout_seconds or {})
         self._client = httpx.AsyncClient(
             timeout=timeout_seconds, follow_redirects=False, cookies=None, trust_env=False
         )
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "OpenAICompatibleJsonModel":
-        if settings.newsroom_llm_api_key is None:
-            raise FatalStageError("newsroom_llm_configuration_missing")
+    def from_settings(
+        cls, settings: Settings, *, api_key: str | None = None
+    ) -> "OpenAICompatibleJsonModel":
+        """The client the settings describe; ``api_key`` replaces the settings key
+        (the replay reads it at run time and keeps it out of its settings)."""
+        if api_key is None:
+            if settings.newsroom_llm_api_key is None:
+                raise FatalStageError("newsroom_llm_configuration_missing")
+            api_key = settings.newsroom_llm_api_key.get_secret_value()
+        editor_timeout = settings.newsroom_editor_timeout_seconds
         return cls(
             base_url=settings.newsroom_llm_base_url,
-            api_key=settings.newsroom_llm_api_key.get_secret_value(),
+            api_key=api_key,
             timeout_seconds=settings.newsroom_llm_timeout_seconds,
             user_agent=settings.newsroom_llm_user_agent,
             session_header=settings.newsroom_llm_session_header,
             extra_body=settings.newsroom_llm_extra_body,
+            # Every newsroom_editor_model call (selection, dedupe, repeat screen)
+            # is audited as stage "editor".
+            stage_extra_body={"editor": settings.newsroom_editor_extra_body},
+            stage_timeout_seconds={} if editor_timeout is None else {"editor": editor_timeout},
         )
 
     def _headers(self, audit: CallAudit) -> dict[str, str]:
@@ -236,6 +254,7 @@ class OpenAICompatibleJsonModel:
         # The client's own fields come last so the configured extras never replace them.
         body = {
             **self._extra_body,
+            **self._stage_extra_body.get(audit.stage, {}),
             "model": model,
             "response_format": {"type": "json_object"},
             "temperature": 0,
@@ -248,6 +267,7 @@ class OpenAICompatibleJsonModel:
                 f"{self._base_url}/chat/completions",
                 headers=self._headers(audit),
                 json=body,
+                timeout=self._stage_timeout_seconds.get(audit.stage, httpx.USE_CLIENT_DEFAULT),
             )
             response.raise_for_status()
         except Exception as error:

@@ -370,3 +370,138 @@ def test_an_opencode_worker_needs_the_session_header() -> None:
     for header in (None, ""):
         with pytest.raises(ValidationError, match="newsroom_llm_session_header is required"):
             _go_worker(newsroom_llm_session_header=header)
+
+
+THINKING_HIGH = {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
+
+
+def _calls_by_stage(
+    settings: Settings, seen: list[tuple[dict[str, Any], dict[str, Any]]]
+) -> OpenAICompatibleJsonModel:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((json.loads(request.content), request.extensions["timeout"]))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": json.dumps(COMPLETE, ensure_ascii=False)}}]},
+        )
+
+    model = OpenAICompatibleJsonModel.from_settings(settings, api_key="replay-key")
+    model._client = httpx.AsyncClient(
+        timeout=settings.newsroom_llm_timeout_seconds, transport=httpx.MockTransport(handler)
+    )
+    return model
+
+
+async def test_editor_calls_get_their_own_extra_fields_and_timeout() -> None:
+    seen: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    settings = Settings(
+        _env_file=None,
+        newsroom_llm_extra_body={**THINKING_OFF, "max_tokens": 4000},
+        newsroom_editor_extra_body=THINKING_HIGH,
+        newsroom_editor_timeout_seconds=240,
+    )
+    model = _calls_by_stage(settings, seen)
+
+    await _complete_as(model, CallAudit("editor", None, "editor-v2"))
+    await _complete_as(model, CallAudit("triage", None, "v2"))
+
+    (editor_body, editor_timeout), (triage_body, triage_timeout) = seen
+    assert editor_body["thinking"] == {"type": "enabled"}
+    assert editor_body["reasoning_effort"] == "high"
+    assert editor_body["max_tokens"] == 4000
+    assert editor_body["response_format"] == {"type": "json_object"}
+    assert triage_body["thinking"] == {"type": "disabled"}
+    assert "reasoning_effort" not in triage_body
+    assert editor_timeout["read"] == 240
+    assert triage_timeout["read"] == 90
+
+
+async def test_empty_editor_settings_inherit_the_shared_ones(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DAILY_INSIGHTS_NEWSROOM_EDITOR_EXTRA_BODY", "")
+    monkeypatch.setenv("DAILY_INSIGHTS_NEWSROOM_EDITOR_TIMEOUT_SECONDS", "")
+    settings = Settings(_env_file=None, newsroom_llm_extra_body=THINKING_OFF)
+    assert settings.newsroom_editor_extra_body == {}
+    assert settings.newsroom_editor_timeout_seconds is None
+    seen: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    model = _calls_by_stage(settings, seen)
+
+    await _complete_as(model, CallAudit("editor", None, "editor-v2"))
+    await _complete_as(model, CallAudit("triage", None, "v2"))
+
+    (editor_body, editor_timeout), (triage_body, triage_timeout) = seen
+    assert {key: value for key, value in editor_body.items() if key != "messages"} == {
+        key: value for key, value in triage_body.items() if key != "messages"
+    }
+    assert editor_timeout == triage_timeout
+
+
+def test_editor_settings_are_read_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DAILY_INSIGHTS_NEWSROOM_EDITOR_EXTRA_BODY", json.dumps(THINKING_HIGH))
+    monkeypatch.setenv("DAILY_INSIGHTS_NEWSROOM_EDITOR_TIMEOUT_SECONDS", "300")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.newsroom_editor_extra_body == THINKING_HIGH
+    assert settings.newsroom_editor_timeout_seconds == 300
+
+
+@pytest.mark.parametrize("value", [0, 301])
+def test_the_editor_timeout_is_bounded(value: float) -> None:
+    with pytest.raises(ValidationError, match="newsroom_editor_timeout_seconds"):
+        Settings(_env_file=None, newsroom_editor_timeout_seconds=value)
+
+
+@pytest.mark.parametrize("field", ["model", "messages", "response_format", "temperature", "stream"])
+def test_editor_extra_fields_cannot_replace_the_request_the_client_owns(field: str) -> None:
+    with pytest.raises(ValidationError, match=f"newsroom_editor_extra_body cannot set {field}"):
+        Settings(_env_file=None, newsroom_editor_extra_body={**THINKING_HIGH, field: True})
+
+
+async def test_a_reasoning_reply_is_parsed_from_content_alone() -> None:
+    session = _Session()
+    reply = httpx.Response(
+        200,
+        json={
+            "model": "deepseek-v4.1-flash",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "reasoning_content": "The why list needs one entry per market.",
+                        "content": json.dumps(COMPLETE, ensure_ascii=False),
+                    }
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 900,
+                "completion_tokens": 410,
+                "completion_tokens_details": {"reasoning_tokens": 300},
+                "prompt_tokens_details": {"cached_tokens": 640},
+                "cost": 0,
+                "opencode": {"billing_source": "go", "list_cost": 0.0004},
+            },
+        },
+    )
+
+    result = await _complete(_replying_model(reply), session)
+
+    assert result.headline == COMPLETE["headline"]
+    assert [(row.input_tokens, row.output_tokens) for row in session.added] == [(900, 410)]
+
+
+async def test_the_replay_key_replaces_the_missing_settings_key() -> None:
+    seen: list[httpx.Headers] = []
+    settings = Settings(_env_file=None, newsroom_llm_session_header="x-opencode-session")
+    with pytest.raises(FatalStageError, match="newsroom_llm_configuration_missing"):
+        OpenAICompatibleJsonModel.from_settings(settings)
+    model = OpenAICompatibleJsonModel.from_settings(settings, api_key="replay-key")
+    await model.aclose()
+    model._client = _header_model(seen)._client
+
+    await _complete_as(model, CallAudit("editor", None, "editor-v2"))
+
+    assert seen[0]["authorization"] == "Bearer replay-key"
+    assert seen[0]["user-agent"] == "daily-insights-newsroom/1.0"
+    assert seen[0]["x-opencode-session"] == session_id(CallAudit("editor", None, "editor-v2"))

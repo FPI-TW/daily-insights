@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 from urllib.parse import urlparse
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["development", "test", "staging", "production"]
@@ -135,6 +135,12 @@ class Settings(BaseSettings):
     newsroom_analysis_model: str = "deepseek-chat"
     newsroom_translate_model: str = "deepseek-chat"
     newsroom_llm_timeout_seconds: float = Field(default=90, gt=0, le=300)
+    # Editor calls (selection, dedupe, repeat screen) may reason while the other
+    # stages stay non-thinking: these fields are merged over newsroom_llm_extra_body
+    # (top-level keys replace) for editor calls only. Empty inherits it unchanged.
+    newsroom_editor_extra_body: Annotated[dict[str, Any], NoDecode] = Field(default_factory=dict)
+    # Reasoning replies take longer; empty uses newsroom_llm_timeout_seconds.
+    newsroom_editor_timeout_seconds: float | None = Field(default=None, gt=0, le=300)
     newsroom_embedding_base_url: str = "https://api.openai.com/v1"
     newsroom_embedding_api_key: SecretStr | None = None
     newsroom_embedding_model: str = "text-embedding-3-large"
@@ -156,20 +162,27 @@ class Settings(BaseSettings):
     r2_secret_access_key: SecretStr | None = None
     r2_signed_url_ttl_seconds: int = Field(default=900, ge=60, le=3600)
 
-    @field_validator("newsroom_llm_extra_body", mode="before")
+    @field_validator("newsroom_llm_extra_body", "newsroom_editor_extra_body", mode="before")
     @classmethod
     def parse_newsroom_llm_extra_body(cls, value: object) -> object:
         if isinstance(value, str):
             return json.loads(value) if value.strip() else {}
         return value
 
-    @field_validator("newsroom_llm_extra_body")
+    @field_validator("newsroom_llm_extra_body", "newsroom_editor_extra_body")
     @classmethod
-    def keep_newsroom_llm_request_fields(cls, value: dict[str, Any]) -> dict[str, Any]:
+    def keep_newsroom_llm_request_fields(
+        cls, value: dict[str, Any], info: ValidationInfo
+    ) -> dict[str, Any]:
         reserved = sorted(NEWSROOM_LLM_RESERVED_BODY_FIELDS & value.keys())
         if reserved:
-            raise ValueError(f"newsroom_llm_extra_body cannot set {', '.join(reserved)}")
+            raise ValueError(f"{info.field_name} cannot set {', '.join(reserved)}")
         return value
+
+    @field_validator("newsroom_editor_timeout_seconds", mode="before")
+    @classmethod
+    def inherit_blank_newsroom_editor_timeout(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
 
     @model_validator(mode="after")
     def require_external_database_configuration(self) -> Self:
