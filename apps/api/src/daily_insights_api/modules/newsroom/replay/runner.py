@@ -377,18 +377,17 @@ def _runtime(
     cache = ResponseCache(environment.cache_dir)
 
     def live_model() -> JsonModel:
+        # from_settings, so the replay sends what production sends (headers, extras,
+        # per-stage overrides) with the key read at run time: the --llm-* provider's
+        # key file, or the keys container's key.
         provider = options.provider
-        model = OpenAICompatibleJsonModel(
-            base_url=settings.newsroom_llm_base_url,
+        model = OpenAICompatibleJsonModel.from_settings(
+            settings,
             api_key=(
                 provider.read_key()
                 if provider is not None
                 else _key(environment, "NEWSROOM_LLM_API_KEY")
             ),
-            timeout_seconds=settings.newsroom_llm_timeout_seconds,
-            user_agent=settings.newsroom_llm_user_agent,
-            session_header=settings.newsroom_llm_session_header,
-            extra_body=settings.newsroom_llm_extra_body,
         )
         watch_usage(model)
         return model

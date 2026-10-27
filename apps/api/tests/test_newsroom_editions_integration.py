@@ -636,6 +636,7 @@ async def _placed_event(
                 late_fill_deadline=clock.late_fill_deadline(edition_date),
                 status="published" if published else "draft",
                 published_at=datetime.now(UTC) if published else None,
+                assembled_at=datetime.now(UTC),
             )
             database.add(edition)
             await database.flush()
@@ -1023,6 +1024,111 @@ async def test_auto_publish_releases_drafts_at_nine(
         assert (await database.scalars(select(NewsroomEditLog))).all() == []
         assert await publishing.auto_publish_due(database, now=nine) == 0
     del item_ids
+
+
+async def test_auto_publish_holds_an_empty_draft_and_notifies_once(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    runtime = _runtime(newsroom_database, FakeLlm())
+    user_id = await _user(newsroom_database)
+    event_id, item_ids = await _placed_event(newsroom_database, markets=("tw_equity", "us_equity"))
+    async with newsroom_database() as database:
+        # tw_equity's only item was removed by an admin; global has none at all.
+        await database.execute(
+            update(NewsroomEditionItem)
+            .where(NewsroomEditionItem.id == item_ids["tw_equity"])
+            .values(removed_at=datetime.now(UTC))
+        )
+        database.add(
+            NewsroomEdition(
+                edition_date=EDITION_DATE,
+                market_code="global",
+                auto_publish_at=clock.auto_publish_at(EDITION_DATE),
+                late_fill_deadline=clock.late_fill_deadline(EDITION_DATE),
+                assembled_at=datetime.now(UTC),
+            )
+        )
+        # The outage: triage failed for the window's articles.
+        await database.execute(
+            update(NewsroomArticle)
+            .where(NewsroomArticle.event_id == event_id)
+            .values(triage_status="failed", triage_error_code="triage_provider_http_402")
+        )
+        await database.commit()
+    auto_publish = next(
+        task
+        for task in publishing.register(runtime).periodic
+        if task.name == "newsroom_auto_publish"
+    )
+
+    # The real 09:00 of 2026-09-30 has passed.
+    await auto_publish.run()
+    editions = await _editions(newsroom_database)
+    assert editions["us_equity"].status == "published"
+    assert editions["global"].status == "draft"
+    assert editions["tw_equity"].status == "draft"
+    assert editions["global"].held_empty_at is not None
+    assert editions["tw_equity"].held_empty_at == editions["global"].held_empty_at
+    assert editions["us_equity"].held_empty_at is None
+    notices = _notices(runtime).sent
+    assert [notice.kind for notice in notices] == ["edition_empty_held"]
+    assert notices[0].title == "2026-09-30 版次沒有任何項目 暫停自動發布"
+    assert notices[0].lines[:2] == (
+        "市場 global, tw_equity",
+        "收稿 1 篇 初篩失敗 1 篇 (triage_provider_http_402 1)",
+    )
+    assert notices[0].link == "https://admin.test/admin/newsroom?date=2026-09-30"
+
+    # Still empty a minute later: no second notice.
+    await auto_publish.run()
+    assert len(_notices(runtime).sent) == 1
+
+    # A re-assembly gives global an item; the next sweep publishes it.
+    source = await _source(newsroom_database, "reassembled")
+    late_event = await _event(newsroom_database, "Late story", sources=[source], scores={})
+    async with newsroom_database() as database:
+        database.add(
+            NewsroomEditionItem(edition_id=editions["global"].id, event_id=late_event, rank=1)
+        )
+        await database.commit()
+    await auto_publish.run()
+    editions = await _editions(newsroom_database)
+    assert editions["global"].status == "published"
+    assert editions["tw_equity"].status == "draft"
+    assert len(_notices(runtime).sent) == 1
+
+    # An admin may still approve the empty edition.
+    async with newsroom_database() as database:
+        await publishing.publish_edition(database, editions["tw_equity"].id, user_id=user_id)
+        await database.commit()
+    assert (await _editions(newsroom_database))["tw_equity"].status == "published"
+
+
+async def test_hold_empty_due_skips_drafts_not_yet_due(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    async with newsroom_database() as database:
+        database.add(
+            NewsroomEdition(
+                edition_date=EDITION_DATE,
+                market_code="global",
+                auto_publish_at=clock.auto_publish_at(EDITION_DATE),
+                late_fill_deadline=clock.late_fill_deadline(EDITION_DATE),
+                assembled_at=datetime.now(UTC),
+            )
+        )
+        await database.commit()
+    nine = clock.auto_publish_at(EDITION_DATE)
+    async with newsroom_database() as database:
+        assert await publishing.hold_empty_due(database, now=nine - timedelta(seconds=1)) == []
+        assert await publishing.auto_publish_due(database, now=nine) == 0
+        held = await publishing.hold_empty_due(database, now=nine)
+        assert [(edition.edition_date, edition.market_code) for edition in held] == [
+            (EDITION_DATE, "global")
+        ]
+        assert await publishing.hold_empty_due(database, now=nine) == []
+        assert await publishing.triage_summary(database, EDITION_DATE) == "收稿時段沒有任何文章"
+        await database.commit()
 
 
 async def test_late_fill_close_abandons_unready_items_once_and_notifies(
