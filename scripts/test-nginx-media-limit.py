@@ -138,10 +138,11 @@ def check(production: bool, revision: str | None) -> None:
             for path in (
                 "/api/health",
                 "/api/v1/chat/stream",
-                "/api/admin/podcasts/uploads",
                 "/zh-hant/login",
             ):
                 assert request(path) == 200, path
+            legacy_upload_status = request("/api/admin/podcasts/uploads")
+            assert legacy_upload_status == (410 if production else 200)
             path = "/api/podcasts/123e4567-e89b-12d3-a456-426614174000/audio-url"
             with concurrent.futures.ThreadPoolExecutor(max_workers=40) as pool:
                 statuses = list(pool.map(request, [path] * 100))

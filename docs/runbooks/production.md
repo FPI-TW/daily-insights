@@ -234,6 +234,13 @@ Compose while retaining immutable deployment inputs.
 
 ## R2 browser upload CORS
 
+正式 `daily-insights` bucket 必須啟用 R2 Data Access Logs，以記錄成功的 object
+read、write、list、multipart 與 delete 操作。Data Access Logs 為非同步、best-effort，
+保留七天且不補記啟用前事件；事故調查仍須搭配應用程式 audit/event。Cloudflare
+自 2026-12-01 起將此功能納入 Workers Observability 計價，值班人員應監看用量。
+部署驗收時到 bucket Settings 確認狀態為 `Enabled`，並從 Workers Observability
+以 `r2` dataset、`bucket = daily-insights` 驗證新操作可查詢。
+
 The Podcast browser PUT goes directly to the private R2 bucket. Configure an
 exact allowed origin for the deployed web site; do not use `*` or a hostname
 wildcard. Replace `https://podcast.example.com` below with the exact

@@ -98,10 +98,9 @@ OpenAPI、回應或結構化 log。
 建立空白節目與編輯三語標題、摘要僅限 `admin`；
 `admin` 與 `asset_manager` 的 browser workflow 使用同步直傳 v3，一次上傳
 1–3 個語系，正式路徑詳見下方「同步直傳 v3 暫存隔離與正式路徑」。保留的 legacy
-multipart endpoint 仍寫入
-`podcasts/{trading-date}/audio/{locale}/podcast.{ext}`，其中 `{ext}` 僅支援
-`mp3` 與 `mp4`。同交易日同語系確認後
-直接覆寫該 object，並同步更新 size、MIME type、SHA-256 與邏輯版本。
+multipart endpoint 僅供 development/test 相容性測試；production nginx 與 API
+皆對 `/api/admin/podcasts/uploads` 回傳 `410 legacy_upload_retired`，不再接收或
+轉送大型 multipart body。正式環境只允許同步直傳 v3。
 
 客戶只能取得已發布內容與短效、object-scoped R2 URL。requested locale 沒有
 對應音檔時依 `zh-hant` → `zh-hans` → `en` 回退，回應會同時標明 requested

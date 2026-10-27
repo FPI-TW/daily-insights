@@ -245,7 +245,8 @@ publication、show/series/season、episode number、收聽分析、留言、訂�
   以單一 DB transaction 切換版本、遞增 episode version 並寫 audit。
   同語系競態的後完成者回傳衝突；不同語系可各自完成。介入的下架／編輯
   會阻止自動發布，不影響其他語系檔案的獨立登記。
-- 舊的 multipart endpoint 仍保留原有 stable-key 行為；新 browser workflow 使用
+- 舊的 multipart endpoint 僅保留給 development/test 相容性測試；production
+  nginx 與 API 固定回傳 `410 legacy_upload_retired`。正式 browser workflow 使用
   immutable key，舊 bytes 由既有資產保留政策管理。
 
 ## 既有 R2 搬移流程
