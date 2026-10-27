@@ -123,11 +123,13 @@ class OpenAICompatibleJsonModel:
         timeout_seconds: float,
         user_agent: str | None = None,
         session_header: str | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._user_agent = user_agent
         self._session_header = session_header
+        self._extra_body = dict(extra_body or {})
         self._client = httpx.AsyncClient(
             timeout=timeout_seconds, follow_redirects=False, cookies=None, trust_env=False
         )
@@ -142,6 +144,7 @@ class OpenAICompatibleJsonModel:
             timeout_seconds=settings.newsroom_llm_timeout_seconds,
             user_agent=settings.newsroom_llm_user_agent,
             session_header=settings.newsroom_llm_session_header,
+            extra_body=settings.newsroom_llm_extra_body,
         )
 
     def _headers(self, audit: CallAudit) -> dict[str, str]:
@@ -200,7 +203,9 @@ class OpenAICompatibleJsonModel:
         result_type: type[R],
         audit: CallAudit,
     ) -> "_Answer[R] | _Invalid":
+        # The client's own fields come last so the configured extras never replace them.
         body = {
+            **self._extra_body,
             "model": model,
             "response_format": {"type": "json_object"},
             "temperature": 0,

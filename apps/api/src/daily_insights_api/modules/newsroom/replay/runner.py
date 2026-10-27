@@ -349,6 +349,7 @@ def _runtime(
             timeout_seconds=settings.newsroom_llm_timeout_seconds,
             user_agent=settings.newsroom_llm_user_agent,
             session_header=settings.newsroom_llm_session_header,
+            extra_body=settings.newsroom_llm_extra_body,
         )
         watch_usage(model)
         return model
