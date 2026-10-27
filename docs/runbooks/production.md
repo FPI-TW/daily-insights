@@ -46,8 +46,9 @@ files.
   dispatcher persists one daily RoutineRun; the worker claims provider
   functions; the API verifies Podcast uploads synchronously; the newsroom worker
   continuously polls news sources, reads article pages through CloakBrowser, and
-  runs the key-news LLM stages (it idles while `DAILY_INSIGHTS_NEWSROOM_ENABLED`
-  is false). Size from
+  runs the key-news LLM stages (it idles while `DAILY_INSIGHTS_NEWSROOM_ENABLED`,
+  set from the GitHub Variable `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`, is false).
+  Size from
   measured upload spool, SSE memory, and CPU, not user count alone.
 - RDS PostgreSQL in private subnets is the durable store. A Single-AZ instance
   is compatible with accepted downtime and lower cost; Multi-AZ is the
@@ -104,11 +105,16 @@ CloudWatch, security-group control, and future scaling are clearer with EC2.
   read/write/delete and listing permissions: signing, verification and orphan
   cleanup now share the API runtime. Retired media-worker credentials are no
   longer required by release or Compose.
-- The newsroom's DeepSeek key comes from the existing Secret
-  `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`; release passes it to the deployment as
-  `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY`, and there is no Secret by that name. The
-  only new required newsroom Secret is `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`;
-  `DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL` is optional.
+- The newsroom reuses the legacy news pipeline's production settings. Its
+  on/off switch is the existing Variable `DAILY_INSIGHTS_DAILY_NEWS_ENABLED` and
+  its DeepSeek key the existing Secret `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`;
+  release passes them to the deployment as `DAILY_INSIGHTS_NEWSROOM_ENABLED` and
+  `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY`, and no GitHub setting has those names.
+  The only new production setting is the Secret
+  `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`. The existing flag is already
+  `true`, so create that Secret before the first deployment that includes the
+  newsroom, or release validation stops the deployment.
+  `DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL` is an optional Secret.
 - Only `newsroom-worker` receives the embedding key and ingestion settings; the
   orchestration worker receives the newsroom LLM key only for the 08:00 editor
   pass. Neither worker receives session secrets; the newsroom worker receives no

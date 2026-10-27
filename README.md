@@ -93,7 +93,7 @@ make bootstrap-admin EMAIL=admin@example.com NAME="Admin"
 與 `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY`、`DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`，
 讓 worker 收稿與初篩；需要立即產生某日草稿時執行
 `make assemble-newsroom EDITION_DATE=YYYY-MM-DD`（省略時為當日；與晨報指令相同，
-只允許 development／test 環境），再到 `/admin/newsroom` 審核。正式環境同樣以 `DAILY_INSIGHTS_NEWSROOM_ENABLED` 旗標啟用，
+只允許 development／test 環境），再到 `/admin/newsroom` 審核。正式環境沿用既有的 GitHub Variable `DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 作為開關，
 詳見[重點新聞架構與部署](docs/architecture/daily-news.md)與
 [重點新聞維運手冊](docs/runbooks/news-recovery.md)。
 

@@ -1,8 +1,8 @@
 # 重點新聞（Newsroom）
 
 狀態：收稿、初篩與事件分群、08:00 組稿、深度分析、發布、翻譯、讀者 API 與後台審核
-主控台均已實作並有測試。整條管線由 `DAILY_INSIGHTS_NEWSROOM_ENABLED` 旗標控制，
-預設關閉；關閉時 `newsroom-worker` 只維持心跳，08:00 組稿 function 以 `no_change`
+主控台均已實作並有測試。整條管線由 `DAILY_INSIGHTS_NEWSROOM_ENABLED` 旗標控制（正式環境
+由 GitHub Variable `DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 提供），預設關閉；關閉時 `newsroom-worker` 只維持心跳，08:00 組稿 function 以 `no_change`
 略過。決策來源與跨模組契約見
 [重點新聞 Newsroom 管線重構規格](../specs/newsroom-pipeline.md)；本文件描述系統
 目前的實際行為。
@@ -430,10 +430,12 @@ HTTP(S) URL。
   （唯讀根目錄、`/tmp` tmpfs、`cap_drop: ALL`、`no-new-privileges`、心跳 healthcheck），
   只拿到資料庫、newsroom 與收稿設定，不拿 session secret 或 R2 憑證。
   `orchestration-worker` 只拿組稿需要的旗標、LLM key、精選 model、Slack 與後台
-  origin，不拿 embedding key。LLM key（DeepSeek）沿用既有的 GitHub Secret
-  `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`，release workflow 以 `NEWSROOM_LLM_API_KEY` 傳入；
-  唯一新增的必填 Secret 是 `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`。GitHub
-  Secrets／Variables 與驗證規則見
+  origin，不拿 embedding key。正式環境沿用舊新聞管線既有的 GitHub 設定：開關是 Variable
+  `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`、LLM key（DeepSeek）是 Secret
+  `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`，release workflow 分別以 `NEWSROOM_ENABLED` 與
+  `NEWSROOM_LLM_API_KEY` 傳入。唯一新增的正式環境設定是 Secret
+  `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`；既有開關已是 `true`，部署前必須先建立。
+  GitHub Secrets／Variables 與驗證規則見
   [EC2 首次部署](../runbooks/ec2-first-deploy.md#2-github-production-environment)。
 - `deploy.sh` 在 migration 前停止並確認 `newsroom-worker` 已停，migration 後依序啟動並
   確認 `orchestration-worker`、`podcast-media-worker`、`newsroom-worker` 健康，最後才啟動

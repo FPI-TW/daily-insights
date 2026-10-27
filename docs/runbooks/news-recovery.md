@@ -478,7 +478,9 @@ log 中的 `newsroom.periodic_error`（`task = newsroom_purge_bodies`）。正�
 
 ## 停用與重新啟用
 
-- 停用：把 `DAILY_INSIGHTS_NEWSROOM_ENABLED` 設為 `false` 並重新部署。`newsroom-worker`
+- 停用：把開關設為 `false` 並重新部署（本機是 `apps/api/.env` 的
+  `DAILY_INSIGHTS_NEWSROOM_ENABLED`；正式環境是 GitHub Variable
+  `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`，release 以 `DAILY_INSIGHTS_NEWSROOM_ENABLED` 傳入）。`newsroom-worker`
   轉為只維持心跳，08:00 組稿回傳 `no_change`，已發布內容照常提供，進行中的佇列資料列
   保留原狀。
 - 重新啟用：設回 `true` 並確認 LLM 與 embedding 金鑰後重新部署。worker 會從資料列狀態

@@ -61,9 +61,9 @@ Conditional-required Secrets：
 
 - `DAILY_INSIGHTS_MORNING_REPORTS_ENABLED=true`：
   `DAILY_INSIGHTS_TWELVE_DATA_API_KEY`；
-- `DAILY_INSIGHTS_NEWSROOM_ENABLED=true`：`DAILY_INSIGHTS_NEWS_MODEL_API_KEY`（既有的
-  DeepSeek 金鑰，workflow 以 `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY` 傳給部署）與
-  `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`（唯一新增的必填 Secret）；
+- `DAILY_INSIGHTS_DAILY_NEWS_ENABLED=true`（重點新聞開關）：`DAILY_INSIGHTS_NEWS_MODEL_API_KEY`
+  （既有的 DeepSeek 金鑰，workflow 以 `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY` 傳給部署）與
+  `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`（唯一新增的正式環境設定）；
 - `DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED=true`：
   `DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY`；
 - `DAILY_INSIGHTS_CHAT_ENABLED=true`：`DAILY_INSIGHTS_CHAT_MODEL_API_KEY`。
@@ -85,7 +85,7 @@ PUBLIC_HOSTNAME
 DAILY_INSIGHTS_ORCHESTRATION_ENABLED
 DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE
 DAILY_INSIGHTS_MORNING_REPORTS_ENABLED
-DAILY_INSIGHTS_NEWSROOM_ENABLED
+DAILY_INSIGHTS_DAILY_NEWS_ENABLED
 DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED
 DAILY_INSIGHTS_YFINANCE_ENABLED
 DAILY_INSIGHTS_TWSE_ENABLED
@@ -100,7 +100,7 @@ Workflow 也會把 build job 產生的 `API_IMAGE` 與 `WEB_IMAGE` 視為 always
 deployment values，並驗證 immutable SHA-256 digest；兩者不是人工設定的 GitHub
 Environment Secret 或 Variable。
 
-`DAILY_INSIGHTS_MORNING_REPORTS_ENABLED`、`DAILY_INSIGHTS_NEWSROOM_ENABLED`、
+`DAILY_INSIGHTS_MORNING_REPORTS_ENABLED`、`DAILY_INSIGHTS_DAILY_NEWS_ENABLED`、
 `DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED`、`DAILY_INSIGHTS_YFINANCE_ENABLED` 與
 `DAILY_INSIGHTS_TWSE_ENABLED`、`DAILY_INSIGHTS_TRADINGVIEW_ENABLED`、`DAILY_INSIGHTS_CHAT_ENABLED` 都必須明確設為 `true`
 或 `false`。**未設定時 deployment validation 會直接中止**，不會退回 Compose
@@ -122,12 +122,17 @@ Conditional-required Variables：
   `DAILY_INSIGHTS_CHAT_MODEL_NAME`、`DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL` 與
   `DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS`。
 
-重點新聞（newsroom）的 DeepSeek 金鑰沿用既有的 Secret
-`DAILY_INSIGHTS_NEWS_MODEL_API_KEY`，不另建 `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY` Secret：
-release workflow 讀取它後，以 `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY` 傳給部署、Compose
-與應用程式。啟用時未設定，驗證會以「GitHub Secret `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`
-is required」中止。除 always-required `DAILY_INSIGHTS_NEWSROOM_ENABLED` 與啟用時必填的
-這把金鑰、`DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY` 外，
+重點新聞（newsroom）沿用舊新聞管線既有的正式環境設定，不另建同義的 GitHub 設定：
+開關是既有的 Variable `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`，DeepSeek 金鑰是既有的 Secret
+`DAILY_INSIGHTS_NEWS_MODEL_API_KEY`。release workflow 讀取後，分別以
+`DAILY_INSIGHTS_NEWSROOM_ENABLED` 與 `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY` 傳給部署、
+Compose 與應用程式；GitHub 上沒有、也不要建立這兩個名稱的設定。驗證錯誤會直接點名要
+修正的 GitHub 設定（例如「GitHub Variable `DAILY_INSIGHTS_DAILY_NEWS_ENABLED` ... must be
+true or false」、「GitHub Secret `DAILY_INSIGHTS_NEWS_MODEL_API_KEY` ... is required」）。
+
+唯一新增的正式環境設定是 Secret `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`。既有的
+`DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 已經是 `true`，所以**第一次部署含 newsroom 的版本前
+必須先建立這個 Secret**，否則 deployment validation 會中止。除上述開關與兩把必填金鑰外，
 下列都是 optional/defaulted configuration，空值時使用括號內的 Compose default：
 
 - Variables `DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL`（`https://api.deepseek.com`）與
@@ -155,7 +160,8 @@ Compose default。
 `DAILY_INSIGHTS_TRADINGVIEW_ENABLED` 控制 `hsi_sector_heatmap`：worker 以 headless Chromium 截 TradingView 港股產業熱力圖並上傳 R2，所以 worker 需要 R2 憑證與內建 Chromium 的映像。
 `DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED` 控制 Internal Services 的
 `analyst_viewpoints_sync`。所有 automatic functions 由每日 08:00 的統一 routine 建立，
-不再使用個別 scheduler container。`DAILY_INSIGHTS_NEWSROOM_ENABLED` 同時控制常駐的
+不再使用個別 scheduler container。`DAILY_INSIGHTS_DAILY_NEWS_ENABLED`（部署後為
+`DAILY_INSIGHTS_NEWSROOM_ENABLED`）同時控制常駐的
 `newsroom-worker` 與 routine 中的 `newsroom_assemble`；旗標關閉時 worker 仍啟動並維持
 健康，只是不處理任何新聞。金鑰或額度修復後的重新排入步驟見
 [重點新聞維運手冊](news-recovery.md)。

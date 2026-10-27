@@ -107,7 +107,6 @@ grep -Fq 'DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL: ${DAILY_INSIGHTS_NEWSROOM_ADMI
 # The legacy daily-news pipeline and its settings were removed at the newsroom
 # cutover; nothing in the deployment path may reintroduce them.
 for removed in \
-  DAILY_INSIGHTS_DAILY_NEWS_ENABLED \
   DAILY_INSIGHTS_MODEL_PROVIDER \
   DAILY_INSIGHTS_MODEL_NAME \
   DAILY_INSIGHTS_MODEL_API_BASE_URL \
@@ -118,30 +117,52 @@ for removed in \
     exit 1
   fi
 done
-# The newsroom keeps the legacy news GitHub Secret for its DeepSeek key. The
-# release workflow may read it once, as the source of NEWSROOM_LLM_API_KEY;
-# nothing in the deployment path may use it as an environment name.
-legacy_llm_secret=DAILY_INSIGHTS_NEWS_MODEL_API_KEY
-if grep -Eq "(^|[^A-Z_])${legacy_llm_secret}([^A-Z_]|\$)" \
-  "$compose_file" scripts/production/deploy.sh; then
-  echo "$legacy_llm_secret is a GitHub Secret name, not a deployment setting" >&2
-  exit 1
-fi
-if [ "$(grep -c "secrets[.]${legacy_llm_secret}" "$workflow_file")" -ne 1 ] ||
-  ! grep -Fq "DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY: \${{ secrets.${legacy_llm_secret} }}" "$workflow_file"; then
-  echo "release must map $legacy_llm_secret to DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY exactly once" >&2
-  exit 1
-fi
-if grep -E "(^|[^A-Z_.])${legacy_llm_secret}([^A-Z_]|\$)" "$workflow_file" |
-  grep -Ev "^[[:space:]]*#|GitHub Secret ${legacy_llm_secret} " | grep -q .; then
-  echo "release may use $legacy_llm_secret only as the newsroom LLM key's source Secret" >&2
-  exit 1
-fi
-grep -Fq "GitHub Secret ${legacy_llm_secret} (deployed as DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY) is required when the newsroom is enabled" "$workflow_file"
-if grep -Fq 'secrets.DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY' "$workflow_file"; then
-  echo "release must not read a DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY Secret; production keeps $legacy_llm_secret" >&2
-  exit 1
-fi
+# Production keeps two GitHub settings of the legacy news pipeline: the DeepSeek
+# key Secret and the on/off Variable. Release reads each exactly once, as the
+# source of a newsroom deployment setting; nothing in the deployment path may
+# use the legacy name as an environment name, and release may not read a
+# GitHub setting under the newsroom name instead.
+require_legacy_github_source() {
+  context=$1
+  label=$2
+  legacy=$3
+  target=$4
+  if grep -Eq "(^|[^A-Z_])${legacy}([^A-Z_]|\$)" \
+    "$compose_file" scripts/production/deploy.sh; then
+    echo "$legacy is a GitHub $label name, not a deployment setting" >&2
+    exit 1
+  fi
+  if [ "$(grep -c "${context}[.]${legacy}" "$workflow_file")" -ne 1 ] ||
+    ! grep -Fq "${target}: \${{ ${context}.${legacy} }}" "$workflow_file"; then
+    echo "release must map $label $legacy to $target exactly once" >&2
+    exit 1
+  fi
+  if grep -E "(^|[^A-Z_.])${legacy}([^A-Z_]|\$)" "$workflow_file" |
+    grep -Ev "^[[:space:]]*#|GitHub ${label} ${legacy} " | grep -q .; then
+    echo "release may use $legacy only as the source $label of $target" >&2
+    exit 1
+  fi
+  if grep -Fq "${context}.${target}" "$workflow_file"; then
+    echo "release must not read a $target $label; production keeps $legacy" >&2
+    exit 1
+  fi
+  grep -Fq ",${target}" "$workflow_file"
+}
+require_legacy_github_source secrets Secret \
+  DAILY_INSIGHTS_NEWS_MODEL_API_KEY DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY
+require_legacy_github_source vars Variable \
+  DAILY_INSIGHTS_DAILY_NEWS_ENABLED DAILY_INSIGHTS_NEWSROOM_ENABLED
+# Operators fix what the errors name, so they name the GitHub settings.
+for message in \
+  'GitHub Variable DAILY_INSIGHTS_DAILY_NEWS_ENABLED (deployed as DAILY_INSIGHTS_NEWSROOM_ENABLED) must be configured in the production environment' \
+  'GitHub Variable DAILY_INSIGHTS_DAILY_NEWS_ENABLED (deployed as DAILY_INSIGHTS_NEWSROOM_ENABLED) must be true or false' \
+  'GitHub Secret DAILY_INSIGHTS_NEWS_MODEL_API_KEY (deployed as DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY) is required while GitHub Variable DAILY_INSIGHTS_DAILY_NEWS_ENABLED is true' \
+  'DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY is required while GitHub Variable DAILY_INSIGHTS_DAILY_NEWS_ENABLED is true'; do
+  if ! grep -Fq "$message" "$workflow_file"; then
+    echo "release must report: $message" >&2
+    exit 1
+  fi
+done
 
 grep -Fq '/etc/daily-insights/cloudflare-realip.conf:/etc/nginx/cloudflare-realip.conf:ro' "$compose_file"
 grep -Fq '/etc/daily-insights/tls/origin.crt:/etc/nginx/tls/origin.crt:ro' "$compose_file"
@@ -234,7 +255,6 @@ grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY: ${{ secrets.DAILY_INSIGHTS_
 grep -Fq ',DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY' "$workflow_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_KEY: ${{ secrets.DAILY_INSIGHTS_CHAT_MODEL_API_KEY }}' "$workflow_file"
 for name in \
-  DAILY_INSIGHTS_NEWSROOM_ENABLED \
   DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL \
   DAILY_INSIGHTS_NEWSROOM_TRIAGE_MODEL \
   DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL \
@@ -260,10 +280,8 @@ for name in \
   grep -Fq "${name}: \${{ secrets.${name} }}" "$workflow_file"
   grep -Fq ",${name}" "$workflow_file"
 done
-grep -Fq ',DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY' "$workflow_file"
 grep -Fq 'DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL: https://${{ vars.PUBLIC_HOSTNAME }}' "$workflow_file"
 grep -Fq ',DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL' "$workflow_file"
-grep -Fq 'DAILY_INSIGHTS_NEWSROOM_ENABLED must be true or false' "$workflow_file"
 grep -Fq ',DAILY_INSIGHTS_CHAT_MODEL_API_KEY' "$workflow_file"
 grep -Fq '/opt/daily-insights/scripts/production/deploy.sh' "$workflow_file"
 

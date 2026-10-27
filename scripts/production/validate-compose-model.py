@@ -46,16 +46,18 @@ API_ENVIRONMENT_KEYS = {
 
 # Removed with the legacy daily-news pipeline; no service may still receive them.
 REMOVED_ENVIRONMENT_KEYS = {
-    "DAILY_INSIGHTS_DAILY_NEWS_ENABLED",
     "DAILY_INSIGHTS_MODEL_PROVIDER",
     "DAILY_INSIGHTS_MODEL_NAME",
     "DAILY_INSIGHTS_MODEL_API_BASE_URL",
     "DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS",
 }
-# The newsroom's DeepSeek key still lives in the legacy news GitHub Secret. The
-# release workflow maps it to DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY, so no service
-# receives it under the Secret's own name.
-LEGACY_LLM_SECRET_NAME = "DAILY_INSIGHTS_NEWS_MODEL_API_KEY"
+# Production keeps the legacy news pipeline's GitHub Secret (DeepSeek key) and
+# Variable (on/off switch). The release workflow maps each to its newsroom
+# setting, so no service receives either under the GitHub name.
+LEGACY_GITHUB_SOURCES = {
+    "DAILY_INSIGHTS_NEWS_MODEL_API_KEY": "DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY",
+    "DAILY_INSIGHTS_DAILY_NEWS_ENABLED": "DAILY_INSIGHTS_NEWSROOM_ENABLED",
+}
 # The orchestration worker runs the 08:00 newsroom_assemble function.
 NEWSROOM_ASSEMBLY_KEYS = (
     "DAILY_INSIGHTS_NEWSROOM_ENABLED",
@@ -280,11 +282,11 @@ def main() -> None:
             not REMOVED_ENVIRONMENT_KEYS.intersection(environment),
             f"{name} must not receive removed legacy daily-news settings",
         )
-        require(
-            LEGACY_LLM_SECRET_NAME not in environment,
-            f"{name} must receive the newsroom LLM key as DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY, "
-            f"not under its GitHub Secret name {LEGACY_LLM_SECRET_NAME}",
-        )
+        for github_name, setting in LEGACY_GITHUB_SOURCES.items():
+            require(
+                github_name not in environment,
+                f"{name} must receive {setting}, not its GitHub name {github_name}",
+            )
         if name != "newsroom-worker":
             require(
                 not NEWSROOM_INGESTION_KEYS.intersection(environment),

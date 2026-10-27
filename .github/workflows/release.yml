@@ -180,7 +180,9 @@ jobs:
       DAILY_INSIGHTS_YFINANCE_ENABLED: ${{ vars.DAILY_INSIGHTS_YFINANCE_ENABLED }}
       DAILY_INSIGHTS_TWSE_ENABLED: ${{ vars.DAILY_INSIGHTS_TWSE_ENABLED }}
       DAILY_INSIGHTS_TRADINGVIEW_ENABLED: ${{ vars.DAILY_INSIGHTS_TRADINGVIEW_ENABLED }}
-      DAILY_INSIGHTS_NEWSROOM_ENABLED: ${{ vars.DAILY_INSIGHTS_NEWSROOM_ENABLED }}
+      # The newsroom switch stays in the GitHub Variable the legacy news pipeline
+      # used; deployment, Compose and the app read it as NEWSROOM_ENABLED.
+      DAILY_INSIGHTS_NEWSROOM_ENABLED: ${{ vars.DAILY_INSIGHTS_DAILY_NEWS_ENABLED }}
       DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL: ${{ vars.DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL }}
       # The DeepSeek key stays in the GitHub Secret the legacy news pipeline used;
       # deployment, Compose and the app read it as NEWSROOM_LLM_API_KEY.
@@ -235,7 +237,6 @@ jobs:
             DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE \
             DAILY_INSIGHTS_MORNING_REPORTS_ENABLED \
             DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED \
-            DAILY_INSIGHTS_NEWSROOM_ENABLED \
             DAILY_INSIGHTS_YFINANCE_ENABLED \
             DAILY_INSIGHTS_TWSE_ENABLED \
             DAILY_INSIGHTS_TRADINGVIEW_ENABLED \
@@ -299,8 +300,12 @@ jobs:
               fi
             done
           fi
+          if [ -z "${DAILY_INSIGHTS_NEWSROOM_ENABLED:-}" ]; then
+            echo "::error title=Missing deployment value::GitHub Variable DAILY_INSIGHTS_DAILY_NEWS_ENABLED (deployed as DAILY_INSIGHTS_NEWSROOM_ENABLED) must be configured in the production environment"
+            missing=1
+          fi
           if ! grep -Eq '^(true|false)$' <<<"$DAILY_INSIGHTS_NEWSROOM_ENABLED"; then
-            echo "::error title=Invalid newsroom flag::DAILY_INSIGHTS_NEWSROOM_ENABLED must be true or false"
+            echo "::error title=Invalid newsroom flag::GitHub Variable DAILY_INSIGHTS_DAILY_NEWS_ENABLED (deployed as DAILY_INSIGHTS_NEWSROOM_ENABLED) must be true or false"
             missing=1
           fi
           if ! grep -Eq '^(true|false)$' <<<"$DAILY_INSIGHTS_YFINANCE_ENABLED"; then
@@ -317,11 +322,11 @@ jobs:
           fi
           if [ "$DAILY_INSIGHTS_NEWSROOM_ENABLED" = true ]; then
             if [ -z "${DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY:-}" ]; then
-              echo "::error title=Missing newsroom launch value::GitHub Secret DAILY_INSIGHTS_NEWS_MODEL_API_KEY (deployed as DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY) is required when the newsroom is enabled"
+              echo "::error title=Missing newsroom launch value::GitHub Secret DAILY_INSIGHTS_NEWS_MODEL_API_KEY (deployed as DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY) is required while GitHub Variable DAILY_INSIGHTS_DAILY_NEWS_ENABLED is true"
               missing=1
             fi
             if [ -z "${DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY:-}" ]; then
-              echo "::error title=Missing newsroom launch value::DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY is required when the newsroom is enabled"
+              echo "::error title=Missing newsroom launch value::DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY is required while GitHub Variable DAILY_INSIGHTS_DAILY_NEWS_ENABLED is true"
               missing=1
             fi
           fi
