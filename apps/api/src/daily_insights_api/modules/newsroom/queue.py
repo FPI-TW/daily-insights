@@ -240,6 +240,7 @@ also write other rows in the same session; everything commits together.
 """
 
 FatalHook = Callable[[Claim, FatalStageError], Awaitable[None]]
+WaitHook = Callable[[Claim, RetryableStageError], Awaitable[None]]
 
 
 async def run_claimed(
@@ -248,8 +249,13 @@ async def run_claimed(
     handler: StageHandler,
     *,
     on_fatal: FatalHook | None = None,
+    on_wait: WaitHook | None = None,
 ) -> str:
-    """Run ``handler`` for one claim and settle the row. Returns the outcome."""
+    """Run ``handler`` for one claim and settle the row. Returns the outcome.
+
+    After the row is settled, ``on_fatal`` hears about fatal errors and
+    ``on_wait`` about retryable errors that do not count an attempt.
+    """
     async with session_factory() as database:
         try:
             values = await handler(database, claim_)
@@ -261,6 +267,8 @@ async def run_claimed(
             database.add_all(error.audit_rows)
             outcome = await settle_retryable(database, claim_, error)
             await database.commit()
+            if on_wait is not None and not error.counts_attempt:
+                await on_wait(claim_, error)
             return outcome
         except FatalStageError as error:
             await database.rollback()

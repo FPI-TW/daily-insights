@@ -19,6 +19,7 @@ NoticeKind = Literal[
     "selection_fallback",
     "source_unhealthy",
     "late_fill_abandoned",
+    "provider_usage_limit",
     "stage_fatal",
 ]
 

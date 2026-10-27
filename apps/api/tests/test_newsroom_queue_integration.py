@@ -293,3 +293,31 @@ async def test_a_spent_allowance_waits_an_hour_without_retry_after_and_six_at_mo
     row = await _row(newsroom_database, article_id)
     assert row.embed_next_attempt_at is not None
     assert expected <= row.embed_next_attempt_at - started < expected + timedelta(minutes=1)
+
+
+async def test_only_an_uncounted_wait_reaches_the_wait_hook(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    await _article(newsroom_database)
+    heard: list[str] = []
+
+    async def on_wait(claim_: Claim, error: RetryableStageError) -> None:
+        # The row is already settled when the hook runs.
+        row = await _row(newsroom_database, claim_.row_id)
+        heard.append(f"{error.code}:{row.embed_attempts}")
+
+    for error, attempt in (
+        (RetryableStageError("embed_provider_timeout"), 1),
+        (_spent_allowance(timedelta(minutes=30)), 2),
+    ):
+
+        async def handler(database: AsyncSession, claim_: Claim, error: Any = error) -> Any:
+            raise error
+
+        future = datetime.now(UTC) + timedelta(days=30)
+        async with newsroom_database() as database:
+            claims = await claim(database, queue.EMBED, now=future)
+        assert claims[0].attempt == attempt
+        await run_claimed(newsroom_database, claims[0], handler, on_wait=on_wait)
+
+    assert heard == ["embed_provider_usage_limit:1"]
