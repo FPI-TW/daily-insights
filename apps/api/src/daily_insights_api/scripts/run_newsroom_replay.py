@@ -109,6 +109,18 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         "--llm-timeout", type=float, default=90.0, help="seconds per --llm-* provider call"
     )
     parser.add_argument(
+        "--llm-editor-extra-body",
+        default="{}",
+        metavar="JSON",
+        help="extra request fields of editor calls only, merged over --llm-extra-body",
+    )
+    parser.add_argument(
+        "--llm-editor-timeout",
+        type=float,
+        default=None,
+        help="seconds per editor call (default: --llm-timeout)",
+    )
+    parser.add_argument(
         "--production-model",
         help="model production's cached answers were stored under (default: what the"
         " keys container names now)",
@@ -305,8 +317,6 @@ def _provider(options: argparse.Namespace) -> LlmProvider | None:
     stages = tuple(dict.fromkeys(part.strip() for part in options.llm_stages.split(",")))
     if not stages or set(stages) - set(CALL_STAGES):
         raise ValueError(f"--llm-stages takes {', '.join(CALL_STAGES)}")
-    if options.llm_timeout <= 0:
-        raise ValueError("--llm-timeout must be positive")
     return LlmProvider(
         base_url=options.llm_base_url,
         model=options.llm_model,
@@ -316,6 +326,8 @@ def _provider(options: argparse.Namespace) -> LlmProvider | None:
         session_header=options.llm_session_header or None,
         stages=stages,
         timeout_seconds=options.llm_timeout,
+        editor_extra_body=parse_extra_body(options.llm_editor_extra_body),
+        editor_timeout_seconds=options.llm_editor_timeout,
     )
 
 

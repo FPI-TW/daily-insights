@@ -93,7 +93,12 @@ from daily_insights_api.modules.newsroom.replay.metrics import (
     invalid_reason_for,
     summary,
 )
-from daily_insights_api.modules.newsroom.replay.provider import CALL_STAGES, LlmProvider
+from daily_insights_api.modules.newsroom.replay.provider import (
+    CALL_STAGES,
+    LlmProvider,
+    check_request_fields,
+    check_timeout,
+)
 from daily_insights_api.modules.newsroom.replay.snapshot import (
     ReplayEnvironment,
     ReplayError,
@@ -307,7 +312,15 @@ def _settings(environment: ReplayEnvironment, options: RunOptions, database: str
     provider = options.provider
     if provider is None:
         return settings
-    # ``parse_extra_body`` already refused the client's own request fields.
+    # model_copy skips the settings validators, so the request fields and the
+    # timeouts are checked here (as the provider does when it is built).
+    try:
+        check_request_fields("the provider's extra body", provider.extra_body)
+        check_request_fields("the provider's editor extra body", provider.editor_extra_body)
+        check_timeout("the provider's timeout", provider.timeout_seconds)
+        check_timeout("the provider's editor timeout", provider.editor_timeout_seconds)
+    except ValueError as error:
+        raise ReplayError(str(error)) from error
     return settings.model_copy(
         update={
             "newsroom_llm_base_url": provider.base_url,
@@ -321,6 +334,9 @@ def _settings(environment: ReplayEnvironment, options: RunOptions, database: str
             "newsroom_llm_user_agent": provider.user_agent,
             "newsroom_llm_session_header": provider.session_header,
             "newsroom_llm_extra_body": dict(provider.extra_body),
+            # Production's editor overrides never reach the provider's calls.
+            "newsroom_editor_extra_body": dict(provider.editor_extra_body),
+            "newsroom_editor_timeout_seconds": provider.editor_timeout_seconds,
         }
     )
 

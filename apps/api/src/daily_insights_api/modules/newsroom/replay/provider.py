@@ -9,6 +9,11 @@ memory, and never written to settings, run metadata, ledgers or logs.
 
 The provider's tag (endpoint and extra fields) is part of every cache key, so
 answers with thinking on and off, or from two providers, never mix.
+
+Editor calls (selection, duplicate and repeat screens) can carry their own
+extra fields and timeout, as ``newsroom_editor_extra_body`` and
+``newsroom_editor_timeout_seconds`` let production do; the same reserved-field
+and timeout rules as the settings apply.
 """
 
 import json
@@ -23,6 +28,20 @@ from daily_insights_api.modules.newsroom.replay.snapshot import ReplayError
 
 EVAL_USER_AGENT = "daily-insights-newsroom-eval/1.0"
 CALL_STAGES = ("triage", "editor")
+# The longest per-call timeout the settings accept (``newsroom_llm_timeout_seconds``).
+MAX_TIMEOUT_SECONDS = 300.0
+
+
+def check_request_fields(name: str, body: Mapping[str, Any]) -> None:
+    """Refuse extra fields that would replace the client's own (model, messages, ...)."""
+    reserved = sorted(NEWSROOM_LLM_RESERVED_BODY_FIELDS & body.keys())
+    if reserved:
+        raise ValueError(f"{name} cannot set {', '.join(reserved)}")
+
+
+def check_timeout(name: str, seconds: float | None) -> None:
+    if seconds is not None and not 0 < seconds <= MAX_TIMEOUT_SECONDS:
+        raise ValueError(f"{name} must be above 0 and at most {MAX_TIMEOUT_SECONDS:g} seconds")
 
 
 def parse_extra_body(text: str) -> dict[str, Any]:
@@ -33,9 +52,7 @@ def parse_extra_body(text: str) -> dict[str, Any]:
         raise ValueError(f"extra body is not JSON: {error.msg}") from error
     if not isinstance(value, dict):
         raise ValueError("extra body must be a JSON object")
-    reserved = sorted(NEWSROOM_LLM_RESERVED_BODY_FIELDS & value.keys())
-    if reserved:
-        raise ValueError(f"extra body cannot set {', '.join(reserved)}")
+    check_request_fields("extra body", value)
     return value
 
 
@@ -52,15 +69,30 @@ class LlmProvider:
     # the others are answered from the production provider's cache only.
     stages: tuple[str, ...] = CALL_STAGES
     timeout_seconds: float = 90.0
+    # Merged over ``extra_body`` for editor calls only (top-level keys replace).
+    editor_extra_body: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    # None: editor calls use ``timeout_seconds``.
+    editor_timeout_seconds: float | None = None
+
+    def __post_init__(self) -> None:
+        check_request_fields("extra body", self.extra_body)
+        check_request_fields("editor extra body", self.editor_extra_body)
+        check_timeout("timeout", self.timeout_seconds)
+        check_timeout("editor timeout", self.editor_timeout_seconds)
 
     def cache_tag(self) -> str:
-        """What tells this provider's answers apart from another's for the same request."""
-        return json.dumps(
-            {"base_url": self.base_url.rstrip("/"), "extra_body": dict(self.extra_body)},
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
+        """What tells this provider's answers apart from another's for the same request.
+
+        Editor extra fields join the tag only when set, so tags (and cached
+        answers) from before they existed stay valid.
+        """
+        tag: dict[str, Any] = {
+            "base_url": self.base_url.rstrip("/"),
+            "extra_body": dict(self.extra_body),
+        }
+        if self.editor_extra_body:
+            tag["editor_extra_body"] = dict(self.editor_extra_body)
+        return json.dumps(tag, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
     def read_key(self) -> str:
         try:
@@ -81,4 +113,6 @@ class LlmProvider:
             "session_header": self.session_header,
             "stages": list(self.stages),
             "timeout_seconds": self.timeout_seconds,
+            "editor_extra_body": dict(self.editor_extra_body),
+            "editor_timeout_seconds": self.editor_timeout_seconds,
         }

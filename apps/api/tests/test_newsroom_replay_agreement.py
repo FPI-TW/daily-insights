@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import uuid
 from dataclasses import asdict
@@ -519,3 +520,112 @@ def test_runs_started_in_the_same_minute_get_their_own_directories(tmp_path: Pat
     assert first.name == "20261027-1200-baseline-triage-alt-A"
     assert second.name == "20261027-1200-baseline-triage-alt-A-2"
     assert first.is_dir() and second.is_dir()
+
+
+# --- Editor overrides and the live client ------------------------------------------------
+
+
+def test_the_provider_tag_only_changes_when_editor_fields_are_set() -> None:
+    # Tags written before editor fields existed must keep matching their cached answers.
+    assert GO.cache_tag() == (
+        '{"base_url":"https://go.test/v1","extra_body":{"thinking":{"type":"disabled"}}}'
+    )
+    thinking = dataclasses.replace(
+        GO, editor_extra_body={"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
+    )
+    assert thinking.cache_tag() != GO.cache_tag()
+    assert dataclasses.replace(GO, editor_timeout_seconds=240).cache_tag() == GO.cache_tag()
+
+
+def test_a_provider_refuses_reserved_fields_and_out_of_range_timeouts() -> None:
+    for changes in (
+        {"editor_extra_body": {"temperature": 1}},
+        {"extra_body": {"model": "x"}},
+        {"timeout_seconds": 301},
+        {"editor_timeout_seconds": 0},
+    ):
+        with pytest.raises(ValueError):
+            dataclasses.replace(GO, **changes)
+
+
+def test_the_editor_overrides_reach_the_settings_and_are_checked_again(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    production = {
+        "NEWSROOM_EDITOR_EXTRA_BODY": '{"thinking":{"type":"enabled"}}',
+        "NEWSROOM_EDITOR_TIMEOUT_SECONDS": "200",
+    }
+    monkeypatch.setattr(snapshot, "read_provider_setting", lambda _, name: production.get(name))
+    environment = snapshot.ReplayEnvironment(root=tmp_path)
+    plain = dataclasses.replace(GO, stages=("editor",))
+    options = runner.RunOptions(
+        snapshot=snapshot.Snapshot(datetime(2026, 10, 23).date(), datetime(2026, 10, 24).date()),
+        variant=BASELINE,
+        stages="editor",
+        provider=plain,
+    )
+    settings = runner._settings(environment, options, "run_db")
+    # Production's editor overrides never leak into the provider's calls.
+    assert settings.newsroom_editor_extra_body == {}
+    assert settings.newsroom_editor_timeout_seconds is None
+    reasoning = dataclasses.replace(
+        plain,
+        editor_extra_body={"thinking": {"type": "enabled"}, "reasoning_effort": "high"},
+        editor_timeout_seconds=240,
+    )
+    settings = runner._settings(
+        environment, dataclasses.replace(options, provider=reasoning), "run_db"
+    )
+    assert settings.newsroom_editor_extra_body == {
+        "thinking": {"type": "enabled"},
+        "reasoning_effort": "high",
+    }
+    assert settings.newsroom_editor_timeout_seconds == 240
+    # model_copy skips the validators; the replay checks the fields itself.
+    object.__setattr__(reasoning, "editor_extra_body", {"messages": []})
+    with pytest.raises(snapshot.ReplayError, match="messages"):
+        runner._settings(environment, dataclasses.replace(options, provider=reasoning), "run_db")
+
+
+def test_the_live_client_is_built_from_the_settings_with_the_providers_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(snapshot, "read_provider_setting", lambda *_: None)
+    key_file = tmp_path / "key"
+    key_file.write_text("sk-file\n", encoding="utf-8")
+    provider = dataclasses.replace(
+        GO,
+        key_file=key_file,
+        stages=("editor",),
+        editor_extra_body={"reasoning_effort": "high"},
+        editor_timeout_seconds=240,
+    )
+    environment = snapshot.ReplayEnvironment(root=tmp_path)
+    options = runner.RunOptions(
+        snapshot=snapshot.Snapshot(datetime(2026, 10, 23).date(), datetime(2026, 10, 24).date()),
+        variant=BASELINE,
+        stages="editor",
+        provider=provider,
+    )
+    settings = runner._settings(environment, options, "run_db")
+    runtime = runner._runtime(
+        environment,
+        options,
+        settings,
+        engine=None,  # type: ignore[arg-type]
+        gate_holder=[None],
+        stats=cache_module.CacheStats(),
+        ledger=costs.Ledger(tmp_path / "go.jsonl", "run"),
+        failures=cache_module.ApiFailures(),
+    )
+    router = runtime.llm
+    assert isinstance(router, cache_module.StageRouter)
+    go = router._routes["editor"]
+    assert isinstance(go, cache_module.CachedJsonModel) and go._live_factory is not None
+    client: Any = go._live_factory()
+    assert client._api_key == "sk-file"
+    assert client._session_header == "x-opencode-session"
+    assert client._user_agent == "daily-insights-newsroom-eval/1.0"
+    assert client._extra_body == {"thinking": {"type": "disabled"}}
+    assert client._stage_extra_body == {"editor": {"reasoning_effort": "high"}}
+    assert client._stage_timeout_seconds == {"editor": 240}
