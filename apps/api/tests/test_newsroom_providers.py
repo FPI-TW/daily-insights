@@ -364,12 +364,28 @@ def _go_worker(**overrides: Any) -> Settings:
     return Settings(_env_file=None, **values)
 
 
-def test_an_opencode_worker_needs_the_session_header() -> None:
-    assert _go_worker(newsroom_llm_session_header="x-opencode-session").newsroom_enabled
+@pytest.mark.parametrize("role", ["newsroom-worker", "orchestration-worker", "api"])
+def test_an_opencode_runtime_needs_the_session_header(role: str) -> None:
+    assert _go_worker(
+        runtime_role=role, newsroom_llm_session_header="x-opencode-session"
+    ).newsroom_enabled
 
     for header in (None, ""):
         with pytest.raises(ValidationError, match="newsroom_llm_session_header is required"):
-            _go_worker(newsroom_llm_session_header=header)
+            _go_worker(runtime_role=role, newsroom_llm_session_header=header)
+
+
+def test_a_disabled_newsroom_or_deepseek_needs_no_session_header() -> None:
+    assert not _go_worker(newsroom_enabled=False).newsroom_enabled
+    assert _go_worker(newsroom_llm_base_url="https://api.deepseek.com").newsroom_enabled
+
+
+def test_settings_without_the_llm_key_are_not_checked() -> None:
+    # The replay reads the base URL from the production container but keeps the
+    # key out of its settings.
+    settings = _go_worker(runtime_role="api", newsroom_llm_api_key=None)
+
+    assert settings.newsroom_llm_session_header is None
 
 
 THINKING_HIGH = {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}

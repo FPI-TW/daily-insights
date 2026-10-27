@@ -230,6 +230,21 @@ class Settings(BaseSettings):
         # to start with missing or placeholder keys in every environment.
         if self.runtime_role == "newsroom-worker":
             self._validate_newsroom()
+        # OpenCode Go refuses every call without x-opencode-session (HTTP 400
+        # MissingSessionID), which the queue records as fatal. Every process that
+        # builds the newsroom LLM client from its settings (the worker, the 08:00
+        # assembly in the orchestration worker, the API's admin actions) holds the
+        # key; the replay keeps the key out of its settings and is not checked.
+        if (
+            self.newsroom_enabled
+            and self.newsroom_llm_api_key is not None
+            and urlparse(self.newsroom_llm_base_url).hostname == "opencode.ai"
+            and not self.newsroom_llm_session_header
+        ):
+            raise ValueError(
+                "newsroom_llm_session_header is required for opencode.ai "
+                "(set it to x-opencode-session)"
+            )
         return self
 
     def _validate_newsroom(self) -> None:
@@ -273,16 +288,6 @@ class Settings(BaseSettings):
                     or is_placeholder_value(key.get_secret_value())
                 ):
                     raise ValueError(f"{setting}_api_key is required and cannot be a placeholder")
-            # OpenCode Go refuses every call without x-opencode-session (HTTP 400
-            # MissingSessionID), which the queue would record as a fatal failure.
-            if (
-                urlparse(self.newsroom_llm_base_url).hostname == "opencode.ai"
-                and not self.newsroom_llm_session_header
-            ):
-                raise ValueError(
-                    "newsroom_llm_session_header is required for opencode.ai "
-                    "(set it to x-opencode-session)"
-                )
             if (
                 self.newsroom_slack_webhook_url is not None
                 and self.newsroom_slack_webhook_url.get_secret_value().strip()
