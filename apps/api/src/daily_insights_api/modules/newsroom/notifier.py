@@ -20,6 +20,7 @@ NoticeKind = Literal[
     "source_unhealthy",
     "late_fill_abandoned",
     "stage_fatal",
+    "edition_empty_held",
 ]
 
 

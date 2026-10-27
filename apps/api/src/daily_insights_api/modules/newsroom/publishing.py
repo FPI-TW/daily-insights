@@ -11,17 +11,20 @@ state does not allow.
 
 import logging
 import uuid
+from collections import defaultdict
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import ColumnElement, and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.modules.newsroom import editlog, queue
 from daily_insights_api.modules.newsroom.analysis import filter_related_symbols
 from daily_insights_api.modules.newsroom.assembly import review_link
 from daily_insights_api.modules.newsroom.models import (
+    NewsroomArticle,
     NewsroomEdition,
     NewsroomEditionItem,
     NewsroomEvent,
@@ -279,19 +282,118 @@ async def reanalyze_event(
 # --- Periodic tasks ----------------------------------------------------------------
 
 
+def _has_live_item() -> ColumnElement[bool]:
+    return (
+        select(NewsroomEditionItem.id)
+        .where(NewsroomEditionItem.edition_id == NewsroomEdition.id, live_item_condition())
+        .exists()
+    )
+
+
+def _due_draft(moment: datetime) -> ColumnElement[bool]:
+    """A draft past its auto-publish time."""
+    return and_(NewsroomEdition.status == "draft", NewsroomEdition.auto_publish_at <= moment)
+
+
 async def auto_publish_due(database: AsyncSession, *, now: datetime | None = None) -> int:
-    """Publish every draft whose ``auto_publish_at`` has passed (D2, 09:00)."""
+    """Publish every due draft that has a live item (D2, 09:00).
+
+    A due draft without one stays a draft (see ``hold_empty_due``) until a
+    re-assembly gives it items, when the next sweep publishes it; an admin may
+    still approve it empty.
+    """
     moment = now or _now()
     due = (
         await database.scalars(
             select(NewsroomEdition.id)
-            .where(NewsroomEdition.status == "draft", NewsroomEdition.auto_publish_at <= moment)
+            .where(_due_draft(moment), _has_live_item())
             .order_by(NewsroomEdition.edition_date, NewsroomEdition.market_code)
         )
     ).all()
     for edition_id in due:
         await publish_edition(database, edition_id, user_id=None, now=moment)
     return len(due)
+
+
+@dataclass(frozen=True, slots=True)
+class HeldEdition:
+    edition_id: uuid.UUID
+    edition_date: date
+    market_code: str
+
+
+async def hold_empty_due(
+    database: AsyncSession, *, now: datetime | None = None
+) -> list[HeldEdition]:
+    """Mark due drafts without a live item as held; returns those held just now.
+
+    Each edition is returned once, so its operators are notified once.
+    """
+    moment = now or _now()
+    rows = (
+        await database.execute(
+            update(NewsroomEdition)
+            .where(
+                _due_draft(moment),
+                NewsroomEdition.held_empty_at.is_(None),
+                ~_has_live_item(),
+            )
+            .values(held_empty_at=moment)
+            .returning(
+                NewsroomEdition.id, NewsroomEdition.edition_date, NewsroomEdition.market_code
+            )
+            .execution_options(synchronize_session=False)
+        )
+    ).all()
+    return sorted(
+        (HeldEdition(row.id, row.edition_date, row.market_code) for row in rows),
+        key=lambda held: (held.edition_date, held.market_code),
+    )
+
+
+async def triage_summary(database: AsyncSession, edition_date: date) -> str:
+    """How the date's articles fared in triage, the usual reason an edition is empty."""
+    rows = (
+        await database.execute(
+            select(NewsroomArticle.triage_status, NewsroomArticle.triage_error_code, func.count())
+            .where(NewsroomArticle.edition_date == edition_date)
+            .group_by(NewsroomArticle.triage_status, NewsroomArticle.triage_error_code)
+        )
+    ).all()
+    total = sum(count for _, _, count in rows)
+    if not total:
+        return "收稿時段沒有任何文章"
+    failed = sorted(
+        ((count, code or "unknown") for status, code, count in rows if status == "failed"),
+        reverse=True,
+    )
+    if not failed:
+        return f"收稿 {total} 篇 沒有初篩失敗"
+    codes = ", ".join(f"{code} {count}" for count, code in failed[:3])
+    return f"收稿 {total} 篇 初篩失敗 {sum(count for count, _ in failed)} 篇 ({codes})"
+
+
+async def empty_hold_notices(
+    runtime: Runtime, database: AsyncSession, held: Sequence[HeldEdition]
+) -> list[Notice]:
+    """One notice per edition date naming the markets just held back."""
+    markets: dict[date, list[str]] = defaultdict(list)
+    for edition in held:
+        markets[edition.edition_date].append(edition.market_code)
+    return [
+        Notice(
+            kind="edition_empty_held",
+            title=f"{edition_date.isoformat()} 版次沒有任何項目 暫停自動發布",
+            lines=(
+                f"市場 {', '.join(codes)}",
+                await triage_summary(database, edition_date),
+                "可能原因: LLM 初篩 精選或分析失敗 (金鑰 額度 模型設定), 或收稿時段沒有可用文章",
+                "修正後重新排入並重新組稿; 出現項目後下一輪自動發布, 或在後台直接核准空版次",
+            ),
+            link=review_link(runtime, edition_date),
+        )
+        for edition_date, codes in sorted(markets.items())
+    ]
 
 
 async def close_late_fill(
@@ -349,9 +451,21 @@ def register(runtime: Runtime) -> Registration:
     async def auto_publish() -> None:
         async with runtime.session_factory() as database:
             published = await auto_publish_due(database)
+            held = await hold_empty_due(database)
+            notices = await empty_hold_notices(runtime, database, held)
             await database.commit()
         if published:
             logger.info("newsroom.auto_published", extra={"editions": published})
+        for edition in held:
+            logger.warning(
+                "newsroom.edition_held_empty",
+                extra={
+                    "edition_date": edition.edition_date.isoformat(),
+                    "market": edition.market_code,
+                },
+            )
+        for notice in notices:
+            await runtime.notifier.send(notice)
 
     async def late_fill() -> None:
         async with runtime.session_factory() as database:
