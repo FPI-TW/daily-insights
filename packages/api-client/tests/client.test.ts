@@ -563,6 +563,34 @@ describe("API client trust boundary", () => {
     )
   })
 
+  it("reads the Hong Kong sector heatmap with signed image urls", async () => {
+    const transport = vi.fn(async () =>
+      Response.json({
+        data_source: "HSI",
+        edition_date: "2026-10-12",
+        captured_at: "2026-10-12T00:05:00+00:00",
+        images: [
+          {
+            kind: "overview",
+            slug: "overview",
+            name: "Overview",
+            width: 1920,
+            height: 989,
+            url: "https://signed.test/heatmaps/hsi/2026-10-12/overview.png",
+            expires_in_seconds: 900,
+          },
+        ],
+      })
+    )
+    const client = createMarketClient(transport)
+    await expect(
+      client.hkSectorHeatmap({ date: "2026-10-12" })
+    ).resolves.toMatchObject({ images: [{ kind: "overview", width: 1920 }] })
+    expect(transport).toHaveBeenCalledWith(
+      "/api/markets/hk/sector-heatmap?date=2026-10-12"
+    )
+  })
+
   it("accepts a stale analyst viewpoint status without replacing stored data", async () => {
     const client = createAdministrationClient(async () =>
       Response.json({

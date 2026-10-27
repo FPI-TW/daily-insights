@@ -39,6 +39,7 @@ API_ENVIRONMENT_KEYS = {
     "DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY",
     "DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS",
     "DAILY_INSIGHTS_SESSION_SECRET",
+    "DAILY_INSIGHTS_TRADINGVIEW_ENABLED",
     "DAILY_INSIGHTS_TRUSTED_PROXY_CIDRS",
     "DAILY_INSIGHTS_TWSE_ENABLED",
 }
@@ -225,11 +226,16 @@ def main() -> None:
             "DAILY_INSIGHTS_TWELVE_DATA_API_KEY",
             "DAILY_INSIGHTS_YFINANCE_ENABLED",
             "DAILY_INSIGHTS_TWSE_ENABLED",
+            "DAILY_INSIGHTS_TRADINGVIEW_ENABLED",
             "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED",
             "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY",
             *NEWSROOM_ASSEMBLY_KEYS,
+            "DAILY_INSIGHTS_R2_ENDPOINT_URL",
+            "DAILY_INSIGHTS_R2_BUCKET_NAME",
+            "DAILY_INSIGHTS_R2_ACCESS_KEY_ID",
+            "DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY",
         }.issubset(worker_environment),
-        "orchestration-worker must receive provider, feature, and cutover settings",
+        "orchestration-worker must receive provider, feature, cutover, and R2 upload settings",
     )
     require(
         worker_environment.get("DAILY_INSIGHTS_RUNTIME_ROLE") == "orchestration-worker",
@@ -239,12 +245,8 @@ def main() -> None:
         not {
             "DAILY_INSIGHTS_SESSION_SECRET",
             "DAILY_INSIGHTS_PASSWORD_PEPPER",
-            "DAILY_INSIGHTS_R2_ENDPOINT_URL",
-            "DAILY_INSIGHTS_R2_BUCKET_NAME",
-            "DAILY_INSIGHTS_R2_ACCESS_KEY_ID",
-            "DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY",
         }.intersection(worker_environment),
-        "orchestration-worker must not receive API authentication or R2 credentials",
+        "orchestration-worker must not receive API authentication secrets",
     )
     require(
         "DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY" not in worker_environment,

@@ -12,6 +12,7 @@ ProviderKey = Literal[
     "us_treasury",
     "new_york_fed",
     "internal_services",
+    "tradingview",
     "newsroom",
 ]
 JobKind = Literal["function", "projection"]
@@ -79,6 +80,7 @@ PROVIDERS = (
     ProviderDefinition("us_treasury", "U.S. Treasury"),
     ProviderDefinition("new_york_fed", "New York Fed"),
     ProviderDefinition("internal_services", "Internal Services"),
+    ProviderDefinition("tradingview", "TradingView"),
     ProviderDefinition("newsroom", "Newsroom"),
 )
 
@@ -86,7 +88,6 @@ FUNCTIONS = (
     FunctionDefinition("commodity_daily_bars", "twelve_data", 3),
     FunctionDefinition("fx_daily_bars", "twelve_data", 3),
     FunctionDefinition("rates_proxy_daily_bars", "twelve_data", 3),
-    FunctionDefinition("crypto_daily_bars", "twelve_data", 2),
     FunctionDefinition("us_mega_cap_daily_bars", "twelve_data", 4),
     FunctionDefinition("us_index_daily_bars", "yahoo_finance", 4),
     FunctionDefinition("hk_index_daily_bars", "yahoo_finance", 4),
@@ -106,6 +107,7 @@ FUNCTIONS = (
         1,
         resources=("third_party_llm",),
     ),
+    FunctionDefinition("hsi_sector_heatmap", "tradingview", 4),
 )
 
 
@@ -122,7 +124,6 @@ JOBS = (
             "commodity_daily_bars",
             "fx_daily_bars",
             "rates_proxy_daily_bars",
-            "crypto_daily_bars",
             "us_mega_cap_daily_bars",
         ),
         automatic_key="twelve_data",
@@ -167,6 +168,14 @@ JOBS = (
         ("automatic",),
         _steps("sofr_daily_rates"),
         automatic_key="new_york_fed",
+        deadline_policy="routine",
+    ),
+    JobDefinition(
+        "tradingview_daily_update",
+        "function",
+        ("automatic",),
+        _steps("hsi_sector_heatmap"),
+        automatic_key="tradingview",
         deadline_policy="routine",
     ),
     JobDefinition(
@@ -232,6 +241,12 @@ JOBS = (
         ),
     ),
     JobDefinition(
+        "hk_equity_refresh",
+        "function",
+        ("manual",),
+        _steps("hk_index_daily_bars", "hsi_sector_heatmap"),
+    ),
+    JobDefinition(
         "analyst_viewpoints_refresh",
         "function",
         ("manual",),
@@ -248,6 +263,7 @@ DAILY_ROUTINE = RoutineDefinition(
         "us_treasury_daily_update",
         "new_york_fed_daily_update",
         "internal_services_daily_update",
+        "tradingview_daily_update",
         "newsroom_daily_assemble",
         "market_reports_publish",
         "macro_dashboard_publish",
@@ -278,6 +294,7 @@ MANUAL_MARKET_JOB_KEYS = (
     "global_macro_refresh",
     "us_equity_refresh",
     "tw_equity_refresh",
+    "hk_equity_refresh",
 )
 ADMIN_TRIGGER_JOB_KEYS = MANUAL_MARKET_JOB_KEYS
 

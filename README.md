@@ -15,6 +15,7 @@ docs/
   runbooks/         維運操作手冊
 infra/
   nginx/            開發環境入口基礎設定
+  production/       正式環境 nginx 設定與部署環境變數契約
 ```
 
 新增領域或服務前，請先閱讀[系統架構](docs/architecture/system-architecture.md)與[實作路線圖](docs/architecture/roadmap.md)。
@@ -54,7 +55,7 @@ make help          # 顯示全部指令
 make dev-web       # 僅啟動 TanStack Start，後端位址由 API_INTERNAL_URL 指定
 make dev-api       # 僅啟動 FastAPI
 make migrate       # 升級 API 資料庫 schema
-make generate-morning-reports # 本地以 Twelve Data 單次產生三市場晨報
+make generate-morning-reports # 本地以 Twelve Data 單次產生首波晨報
 make assemble-newsroom        # 本地為指定版次日期重新組稿重點新聞草稿
 make test-db       # 以隔離 PostgreSQL 執行完整測試
 make check         # 執行格式、lint、型別、測試與建置
@@ -81,7 +82,8 @@ make bootstrap-admin EMAIL=admin@example.com NAME="Admin"
 
 本地需要驗證正式晨報資料時，可執行 `make generate-morning-reports`；也可傳入
 `EDITION_DATE=YYYY-MM-DD` 指定台北報告日期。此指令只允許 development／test
-環境的一次性執行，會使用 Twelve Data 正式 credential 並消耗 API credits；不會
+環境的一次性執行（Makefile 會先檢查 `apps/api/.env` 的
+`DAILY_INSIGHTS_ENVIRONMENT`，未設定時視為 development），會使用 Twelve Data 正式 credential 並消耗 API credits；不會
 啟用背景排程。正式環境啟用晨報時只驗證功能開關、provider URL 與 API key。
 
 指令只會顯示一次隨機臨時密碼；管理員登入後必須立即更改。
@@ -90,8 +92,8 @@ make bootstrap-admin EMAIL=admin@example.com NAME="Admin"
 組稿。本地驗證時，先在 `apps/api/.env` 設定 `DAILY_INSIGHTS_NEWSROOM_ENABLED=true`
 與 `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY`、`DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`，
 讓 worker 收稿與初篩；需要立即產生某日草稿時執行
-`make assemble-newsroom EDITION_DATE=YYYY-MM-DD`（省略時為當日），再到
-`/admin/newsroom` 審核。正式環境同樣以 `DAILY_INSIGHTS_NEWSROOM_ENABLED` 旗標啟用，
+`make assemble-newsroom EDITION_DATE=YYYY-MM-DD`（省略時為當日；與晨報指令相同，
+只允許 development／test 環境），再到 `/admin/newsroom` 審核。正式環境同樣以 `DAILY_INSIGHTS_NEWSROOM_ENABLED` 旗標啟用，
 詳見[重點新聞架構與部署](docs/architecture/daily-news.md)與
 [重點新聞維運手冊](docs/runbooks/news-recovery.md)。
 

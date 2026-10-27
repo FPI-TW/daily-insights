@@ -15,7 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionm
 
 import daily_insights_api.scripts.run_orchestration_worker as orchestration_worker_script
 from daily_insights_api.core.config import Settings
+from daily_insights_api.modules.markets.api import YFINANCE_INDICES
 from daily_insights_api.modules.orchestration import worker
+from daily_insights_api.modules.orchestration.functions import YAHOO_MANIFESTS
 from daily_insights_api.modules.orchestration.models import JobRun
 from daily_insights_api.modules.orchestration.projections import (
     FrozenObservation,
@@ -29,6 +31,7 @@ from daily_insights_api.modules.orchestration.registry import (
     DAILY_ROUTINE,
     FUNCTION_BY_KEY,
     JOB_BY_KEY,
+    MANUAL_MARKET_JOB_KEYS,
     PROVIDER_BY_KEY,
     registry_digest,
     validate_registry,
@@ -65,8 +68,10 @@ def test_registry_has_expected_provider_function_job_relationships() -> None:
         "us_treasury",
         "new_york_fed",
         "internal_services",
+        "tradingview",
         "newsroom",
     }
+    assert FUNCTION_BY_KEY["hsi_sector_heatmap"].provider_key == "tradingview"
     assert len(registry_digest()) == 64
 
 
@@ -112,6 +117,7 @@ def test_automatic_provider_jobs_are_unique() -> None:
         "twse",
         "us_treasury",
         "new_york_fed",
+        "tradingview",
         "internal_services",
         "newsroom",
     ]
@@ -144,6 +150,45 @@ def test_newsroom_assembly_runs_daily_on_its_own_provider() -> None:
         "newsroom_assemble" not in {step.function_key for step in other.functions}
         for other in JOB_BY_KEY.values()
         if other.key != job.key
+    )
+
+
+def test_every_yahoo_index_is_scheduled_by_exactly_one_manifest() -> None:
+    # The manifests are derived from TRACKED_INDICES, so adding a symbol to the
+    # catalog is enough for the daily job to fetch it; this pins that contract.
+    scheduled = [
+        symbol
+        for key, entries in YAHOO_MANIFESTS.items()
+        if key.endswith("_index_daily_bars")
+        for symbol, _market, _kind in entries
+    ]
+
+    assert sorted(scheduled) == sorted(YFINANCE_INDICES)
+    assert len(scheduled) == len(set(scheduled))
+    assert [symbol for symbol, _market, _kind in YAHOO_MANIFESTS["hk_index_daily_bars"]] == [
+        "^HSI",
+        "^HSCE",
+        "^HSIL",
+    ]
+
+
+def test_manual_hk_refresh_runs_the_hong_kong_index_and_heatmap_functions() -> None:
+    job = JOB_BY_KEY["hk_equity_refresh"]
+
+    assert job.triggers == ("manual",)
+    assert [step.function_key for step in job.functions] == [
+        "hk_index_daily_bars",
+        "hsi_sector_heatmap",
+    ]
+    assert "hk_equity_refresh" in MANUAL_MARKET_JOB_KEYS
+    # The heatmap is dated by the exchange calendar, not by a Yahoo bar, so it
+    # waits for nothing: the daily routine captures it through its own provider
+    # job the moment the routine starts, well before the 09:00 pre-open.
+    assert all(step.depends_on == () for step in job.functions)
+    assert "tradingview_daily_update" in DAILY_ROUTINE.job_keys
+    assert JOB_BY_KEY["tradingview_daily_update"].automatic_key == "tradingview"
+    assert not any(
+        item.downstream_job_key == "tradingview_daily_update" for item in DAILY_ROUTINE.dependencies
     )
 
 
@@ -266,7 +311,7 @@ def test_projection_report_bundle_preserves_existing_publication_contract() -> N
     assert set(bundle.presentations) == {"zh-hant", "zh-hans", "en"}
     assert ACTIVE_LAUNCH_MANIFEST.version
     assert ACTIVE_LAUNCH_MANIFEST.sha256
-    assert MORNING_REPORT_DERIVATION_VERSION == "twelve-data.three-market.v9"
+    assert MORNING_REPORT_DERIVATION_VERSION == "twelve-data.three-market.v10"
 
 
 def test_macro_projection_uses_dashboard_canonical_history_ids_and_units() -> None:

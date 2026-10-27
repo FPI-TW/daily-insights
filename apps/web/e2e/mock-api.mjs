@@ -673,7 +673,7 @@ function pastEpisodes(locale) {
   }))
 }
 
-const reportMarkets = ["global_macro_bonds", "crypto", "us_equity"]
+const reportMarkets = ["global_macro_bonds", "us_equity"]
 const marketCatalog = [
   ["global_macro_bonds", "Macro analysis", "全球宏觀", "全球宏观"],
   ["forex", "Foreign exchange", "外匯市場", "外汇市场"],

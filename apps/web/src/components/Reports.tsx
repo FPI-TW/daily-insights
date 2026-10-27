@@ -30,7 +30,6 @@ type Translate = ReturnType<typeof useTranslation>["t"]
 
 const HIDDEN_REPORT_NAV_MARKETS = new Set<MarketCode>([
   "crypto",
-  "hk_equity",
   "cn_equity",
   "tw_index_derivatives",
 ])
@@ -780,7 +779,7 @@ function ReportBlockView({
   )
 }
 
-export function ReportErrorScreen({ error }: { error: Error }) {
+export function ReportErrorScreen({ error }: { error: unknown }) {
   void error
   const { t } = useTranslation()
   const router = useRouter()
@@ -805,14 +804,8 @@ export function ReportErrorScreen({ error }: { error: Error }) {
 // The heading and market navigation come from the reports layout, so these
 // states render only their panel; rendering a second nav here is what
 // produced the duplicated tab bar on the Taiwan page.
-export function ReportNotLaunchedScreen({
-  marketCode,
-}: {
-  locale?: Locale
-  marketCode: MarketCode
-}) {
+export function ReportNotLaunchedScreen() {
   const { t } = useTranslation()
-  if (marketCode === "tw_equity") return null
   return (
     <section
       className="surface-panel p-10 text-center"

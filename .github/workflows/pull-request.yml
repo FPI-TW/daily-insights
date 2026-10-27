@@ -4,6 +4,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
+# A newer push supersedes the run for the previous commit.
+concurrency:
+  group: pull-request-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -11,3 +16,26 @@ jobs:
   ci:
     if: github.event.pull_request.draft == false
     uses: ./.github/workflows/ci.yml
+
+  # github.sha is the PR merged into its base, which is what CI just tested.
+  # Release skips its own CI run when a squash-merged main commit has exactly
+  # this tree, so record it only after every CI job passed.
+  record-verified-tree:
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Record the verified tree
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/commits/${{ github.sha }}" \
+            --jq .commit.tree.sha >verified-tree.txt
+          cat verified-tree.txt
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verified-tree
+          path: verified-tree.txt
+          retention-days: 30

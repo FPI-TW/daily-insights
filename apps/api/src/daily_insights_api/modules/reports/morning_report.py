@@ -59,22 +59,19 @@ from daily_insights_api.modules.reports.models import ReportPublication
 _TITLES = {
     "zh-hant": {
         "global_macro_bonds": "全球宏觀與債券",
-        "crypto": "加密資產",
         "us_equity": "美國股票",
     },
     "zh-hans": {
         "global_macro_bonds": "全球宏观与债券",
-        "crypto": "加密资产",
         "us_equity": "美国股票",
     },
     "en": {
         "global_macro_bonds": "Global macro & bonds",
-        "crypto": "Crypto",
         "us_equity": "US equities",
     },
 }
 
-MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v9"
+MORNING_REPORT_DERIVATION_VERSION = "twelve-data.three-market.v10"
 
 
 @dataclass(frozen=True)
@@ -622,70 +619,6 @@ async def _build_dataset_blocks(
             ),
         )
         return (mega_caps_block,), _aggregate_provenance(quotes.provenances)
-    if dataset.key == "crypto.daily_bars":
-        symbols = dataset.symbols
-        results = await asyncio.gather(
-            *(
-                adapter.get_daily_bars(
-                    market=market_code,
-                    symbol=symbol,
-                    expected_currency=dataset.symbol_units[symbol],
-                    outputsize=dataset.minimum_history,
-                )
-                for symbol in symbols
-            )
-        )
-        as_of = min(result.items[-1].trade_date for result in results)
-        overview = TableBlock(
-            id="crypto.overview",
-            status="ok",
-            source_as_of=as_of,
-            columns=(
-                TableColumn(id="asset"),
-                TableColumn(id="price", unit_code="usd"),
-                TableColumn(id="change", unit_code="percent"),
-            ),
-            rows=tuple(
-                (
-                    TableCell(text=symbol.split("/")[0]),
-                    TableCell(
-                        value=_quantize(
-                            result.items[-1].close,
-                            block_precision("crypto.overview"),
-                            block_rounding("crypto.overview"),
-                        )
-                    ),
-                    TableCell(
-                        value=_quantize(
-                            _daily_change(result.items[-1].open, result.items[-1].close),
-                            block_precision("crypto.overview"),
-                            block_rounding("crypto.overview"),
-                        )
-                    ),
-                )
-                for symbol, result in zip(symbols, results, strict=True)
-            ),
-        )
-        normalized = SeriesBlock(
-            id="crypto.normalized_performance",
-            status="ok",
-            source_as_of=as_of,
-            unit_code="index",
-            series=tuple(
-                ChartSeries(
-                    id=symbol.split("/")[0].lower(),
-                    points=_normalized_points(
-                        result.items,
-                        precision=block_precision("crypto.normalized_performance"),
-                        rounding=block_rounding("crypto.normalized_performance"),
-                    ),
-                )
-                for symbol, result in zip(symbols, results, strict=True)
-            ),
-        )
-        return (overview, normalized), _aggregate_provenance(
-            tuple(result.provenance for result in results)
-        )
     raise DataSourceContractError(f"unsupported report dataset {dataset.key}")
 
 
@@ -761,26 +694,6 @@ def _previous_close_change(close: Decimal, previous_close: Decimal | None) -> De
     if previous_close is None or previous_close <= 0:
         raise DataSourceContractError("quote has no usable previous close for the change")
     return (close - previous_close) / previous_close * Decimal(100)
-
-
-def _normalized_points(
-    bars: tuple[DailyBar, ...],
-    *,
-    precision: int = 4,
-    rounding: str = "ROUND_HALF_EVEN",
-) -> tuple[ChartPoint, ...]:
-    window = bars[-30:]
-    base = window[0].close
-    if base is None or base == 0:
-        return tuple(ChartPoint(x=str(bar.trade_date), value=None) for bar in window)
-    assert base is not None
-    return tuple(
-        ChartPoint(
-            x=str(bar.trade_date),
-            value=_quantize(_normalize_close(bar.close, base), precision, rounding),
-        )
-        for bar in window
-    )
 
 
 def _normalized_common_date_points(
@@ -870,12 +783,6 @@ def _ratio_common_date_points(
 
 def _normalize_close(close: Decimal | None, base: Decimal) -> Decimal | None:
     return close / base * Decimal(100) if close is not None else None
-
-
-def _daily_change(open_value: Decimal | None, close: Decimal | None) -> Decimal | None:
-    if open_value is None or open_value == 0 or close is None:
-        return None
-    return (close / open_value - Decimal(1)) * Decimal(100)
 
 
 _ROUNDING_MODES = {"ROUND_HALF_EVEN": ROUND_HALF_EVEN}

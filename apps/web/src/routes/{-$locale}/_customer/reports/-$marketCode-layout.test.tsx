@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
     }
   >(),
   navigate: vi.fn(),
+  requested: [] as [string, ...unknown[]][],
 }))
 vi.mock("@tanstack/react-router", async importOriginal => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
@@ -45,14 +46,24 @@ vi.mock("#/lib/market-queries", () => ({
         "vixAverages",
         "flows",
         "stocks",
-      ].map(key => [key, () => ({ queryKey: [key] })])
+        "latestIndices",
+        "hkSectorHeatmap",
+      ].map(key => [
+        key,
+        (...args: unknown[]) => {
+          state.requested.push([key, ...args])
+          return { queryKey: [key] }
+        },
+      ])
     ),
   useMarketQuery: ({ queryKey }: { queryKey: [string] }) =>
     state.results.get(queryKey[0]),
 }))
 vi.mock("#/components/PageContextChat", () => ({ useChatPageContext: vi.fn() }))
 vi.mock("#/components/IndexHistoryChart", () => ({
-  IndexHistoryChart: () => <section>Index history</section>,
+  IndexHistoryChart: ({ bias }: { bias?: boolean }) => (
+    <section>Index history{bias ? " with bias" : ""}</section>
+  ),
   IndexHistoryLoading: () => null,
 }))
 vi.mock("#/components/TaiwanIndexHistoryChart", () => ({
@@ -60,7 +71,9 @@ vi.mock("#/components/TaiwanIndexHistoryChart", () => ({
   TaiwanIndexHistoryLoading: () => null,
 }))
 vi.mock("#/components/VixHistoryChart", () => ({
-  VixHistoryChart: () => null,
+  VixHistoryChart: ({ symbol }: { symbol: string }) => (
+    <section>Volatility {symbol}</section>
+  ),
   VixHistoryLoading: () => null,
 }))
 vi.mock("#/components/TaiwanInstitutionalFlows", () => ({
@@ -109,6 +122,7 @@ function cellContaining(text: string) {
 beforeEach(() => {
   state.marketCode = "us_equity"
   state.results.clear()
+  state.requested.length = 0
   for (const key of [
     "markets",
     "report",
@@ -121,6 +135,8 @@ beforeEach(() => {
     "vixAverages",
     "flows",
     "stocks",
+    "latestIndices",
+    "hkSectorHeatmap",
   ])
     state.results.set(key, {
       data: undefined,
@@ -162,7 +178,7 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe("market desktop grid cells", () => {
-  it("contains US partial-report notices and retained-data refresh/errors in their original columns", () => {
+  it("announces the shared history query once at the chart and keeps report notices in their column", () => {
     const view = render(page())
     const performance = screen.getByRole("region", {
       name: "US five-index performance",
@@ -176,6 +192,7 @@ describe("market desktop grid cells", () => {
     expect(performance).toHaveClass("flex-1")
     expect(performance).not.toHaveClass("h-full")
     expect(within(performance).getByText("6,000.00")).toBeVisible()
+    expect(screen.getByText("Index history")).toBeVisible()
     expect(reportCell).toHaveClass("min-w-0")
     expect(within(reportCell).getByText("Source caveat")).toBeVisible()
     expect(within(reportCell).getByText("Some sections missing")).toBeVisible()
@@ -184,8 +201,19 @@ describe("market desktop grid cells", () => {
     query("history").isFetching = true
     query("report").isFetching = true
     view.rerender(page())
-    expect(within(historyCell).getByRole("status")).toBeVisible()
+    // The table and the chart share the history query; only the chart's
+    // section announces it, so the status never shows up twice.
+    const chart = screen.getByText("Index history")
     expect(within(reportCell).getByRole("status")).toBeVisible()
+    expect(within(historyCell).queryByRole("status")).toBeNull()
+    const historyAnnouncements = screen
+      .getAllByText("Loading market morning reports.")
+      .filter(el => !reportCell.contains(el))
+    expect(historyAnnouncements).toHaveLength(1)
+    expect(
+      chart.compareDocumentPosition(historyAnnouncements[0]!) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
     expect(Array.from(grid.children)).toEqual([historyCell, reportCell])
 
     query("history").isFetching = false
@@ -193,15 +221,122 @@ describe("market desktop grid cells", () => {
     query("report").isFetching = false
     query("report").error = new Error("offline")
     view.rerender(page())
+    expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(2)
     expect(
-      within(historyCell).getByRole("button", { name: "Retry" })
-    ).toBeVisible()
+      within(historyCell).queryByRole("button", { name: "Retry" })
+    ).toBeNull()
     expect(
       within(reportCell).getByRole("button", { name: "Retry" })
     ).toBeVisible()
     expect(within(historyCell).getByText("6,000.00")).toBeVisible()
     expect(within(reportCell).getByText("AAPL")).toBeVisible()
     expect(Array.from(grid.children)).toEqual([historyCell, reportCell])
+  })
+  it("shows HK index cards, index and volatility charts without a not-launched notice", () => {
+    state.marketCode = "hk_equity"
+    query("markets").data = [{ code: "us_equity" }, { code: "hk_equity" }]
+    query("report").data = { kind: "not-launched", marketCode: "hk_equity" }
+    query("history").data = {
+      ...query("history").data!,
+      marketCode: "hk_equity",
+      series: [
+        {
+          symbol: "^HSI",
+          bars: [
+            {
+              symbol: "^HSI",
+              market_code: "hk_equity",
+              trade_date: "2026-10-09",
+              close: "24211.35",
+              open: null,
+              high: null,
+              low: null,
+              volume: null,
+              trade_value: null,
+            },
+          ],
+        },
+      ],
+    }
+    query("vix").data = { symbol: "^HSIL", bars: [] }
+    query("latestIndices").data = [
+      {
+        symbol: "^HSI",
+        market_code: "hk_equity",
+        trade_date: "2026-10-09",
+        open: null,
+        high: null,
+        low: null,
+        close: "24211.35",
+        volume: null,
+        trade_value: null,
+        previous_close: "23785.79",
+      },
+    ]
+    query("hkSectorHeatmap").data = {
+      data_source: "HSI",
+      edition_date: "2026-10-12",
+      captured_at: "2026-10-12T00:05:00+00:00",
+      images: [
+        {
+          kind: "overview",
+          slug: "overview",
+          name: "Overview",
+          width: 1920,
+          height: 989,
+          url: "https://signed.test/overview.png",
+          expires_in_seconds: 900,
+        },
+      ],
+    }
+    render(page())
+    const hsi = screen.getByRole("region", { name: "Hang Seng Index" })
+    expect(within(hsi).getByText("24,211.35")).toBeVisible()
+    const heatmap = screen.getByRole("region", {
+      name: "Hong Kong sector heatmap",
+    })
+    expect(
+      within(heatmap).getByRole("img", {
+        name: "Hang Seng constituents sector heatmap overview",
+      })
+    ).toHaveAttribute("src", "https://signed.test/overview.png")
+    const performance = screen.getByRole("region", {
+      name: "Hong Kong index performance",
+    })
+    expect(
+      within(performance).getByRole("rowheader", { name: "Hang Seng Index" })
+    ).toBeVisible()
+    expect(
+      within(performance).queryByText("HSI Volatility Index")
+    ).not.toBeInTheDocument()
+    // Cards, then the performance table, in one column; the heatmap closes
+    // the page after the volatility chart.
+    expect(
+      hsi.compareDocumentPosition(performance) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(screen.getAllByRole("region")).toHaveLength(5)
+    expect(screen.queryByText("Report not launched yet")).toBeNull()
+    expect(screen.getByText("Index history with bias")).toBeVisible()
+    const volatility = screen.getByText("Volatility ^HSIL")
+    expect(volatility).toBeVisible()
+    expect(
+      volatility.compareDocumentPosition(heatmap) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      state.requested
+        .filter(([key]) => key === "vix")
+        .map(([, symbol]) => symbol)
+    ).toEqual(["^HSIL"])
+  })
+  it("never builds volatility queries for a market without that block", () => {
+    state.marketCode = "tw_equity"
+    query("markets").data = [{ code: "us_equity" }, { code: "tw_equity" }]
+    render(page())
+    expect(
+      state.requested.some(([key]) => key === "vix" || key === "vixAverages")
+    ).toBe(false)
   })
   it("keeps TW stocks beside retained flows while either column refreshes or fails", () => {
     state.marketCode = "tw_equity"

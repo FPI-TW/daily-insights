@@ -37,7 +37,7 @@ in-flight attempt may finish; after the deadline remaining retryable functions
 become terminal and dependent degraded publications may proceed. Publication
 functions and projection jobs that only become ready at the deadline
 receive one initial attempt, but a failed publication attempt is not retried past
-the deadline. Provider-specific HTTP refresh endpoints are removed, so operators start only the three market
+the deadline. Provider-specific HTTP refresh endpoints are removed, so operators start only the four market
 jobs or the analyst viewpoints job.
 
 Market reports and the Macro Dashboard publish as soon as their upstream
@@ -151,9 +151,10 @@ design; use a manual current-edition job or a controlled pre-deadline test.
    `legacy_data_management_runs`; the history remains available only through
    `GET /api/admin/orchestration/legacy-runs`.
 5. Start `orchestration-worker` and wait for health, then start the dispatcher.
-6. On the next day, verify one RoutineRun, nine jobs (seven provider-function
-   jobs, including `newsroom_daily_assemble`, and two projection jobs), provider
-   function attempts, projection publications, and the 10:00 terminal state.
+6. On the next day, verify one RoutineRun, ten jobs (eight provider-function
+   jobs, including `tradingview_daily_update` and `newsroom_daily_assemble`, and
+   two projection jobs), provider function attempts, projection publications, and
+   the 10:00 terminal state.
 
 Do not run a legacy scheduler after migration. Recovery is forward-only while
 new orchestration or typed-fact rows exist.

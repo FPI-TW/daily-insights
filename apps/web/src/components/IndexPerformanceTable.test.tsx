@@ -4,10 +4,12 @@ import { afterEach, describe, expect, it } from "vitest"
 import { createI18n } from "#/lib/i18n"
 import type { MarketIndexHistory } from "#/lib/indices"
 import {
-  UsIndexPerformanceTable,
-  UsIndexPerformanceTableLoading,
-  usIndexPerformanceRows,
-} from "./UsIndexPerformanceTable"
+  IndexPerformanceTable,
+  IndexPerformanceTableLoading,
+  indexPerformanceRows,
+} from "./IndexPerformanceTable"
+
+const usSymbols = ["^GSPC", "^NDX", "^DJI", "^SOX", "^RUT"]
 
 const history: MarketIndexHistory = {
   marketCode: "us_equity",
@@ -105,9 +107,9 @@ async function renderLocalized(
 
 afterEach(cleanup)
 
-describe("usIndexPerformanceRows", () => {
+describe("indexPerformanceRows", () => {
   it("uses the last settled close before calendar month and year boundaries", () => {
-    const row = usIndexPerformanceRows(history)[0]
+    const row = indexPerformanceRows(history, usSymbols)[0]
     expect(row).toMatchObject({ symbol: "^GSPC", close: "126" })
     expect(row?.daily).toBeCloseTo(5.0)
     expect(row?.monthly).toBeCloseTo(14.5454545)
@@ -115,7 +117,7 @@ describe("usIndexPerformanceRows", () => {
   })
 
   it("keeps the prescribed five-index order", () => {
-    const rows = usIndexPerformanceRows(history)
+    const rows = indexPerformanceRows(history, usSymbols)
     expect(rows.map(row => row.symbol)).toEqual([
       "^GSPC",
       "^NDX",
@@ -127,11 +129,13 @@ describe("usIndexPerformanceRows", () => {
   })
 })
 
-describe("UsIndexPerformanceTable", () => {
+describe("IndexPerformanceTable", () => {
   it("renders five rows without Forward P/E and keeps an accessible partial state", async () => {
     await renderLocalized(
-      <UsIndexPerformanceTable
+      <IndexPerformanceTable
         locale="en"
+        titleKey="indexTableTitle_us_equity"
+        symbols={usSymbols}
         history={{
           ...history,
           failedSymbols: ["^SOX"],
@@ -159,7 +163,12 @@ describe("UsIndexPerformanceTable", () => {
     "localizes the yearly-change heading for %s",
     async (locale, heading) => {
       await renderLocalized(
-        <UsIndexPerformanceTable locale={locale} history={history} />,
+        <IndexPerformanceTable
+          locale={locale}
+          titleKey="indexTableTitle_us_equity"
+          symbols={usSymbols}
+          history={history}
+        />,
         locale
       )
       expect(screen.getByRole("columnheader", { name: heading })).toBeVisible()
@@ -168,14 +177,24 @@ describe("UsIndexPerformanceTable", () => {
 
   it("adds the English index name under a localized name only", async () => {
     await renderLocalized(
-      <UsIndexPerformanceTable locale="zh-hant" history={history} />,
+      <IndexPerformanceTable
+        locale="zh-hant"
+        titleKey="indexTableTitle_us_equity"
+        symbols={usSymbols}
+        history={history}
+      />,
       "zh-hant"
     )
     const row = screen.getByRole("rowheader", { name: /標普 500 指數/ })
     expect(row).toHaveTextContent("S&P 500 Index")
     cleanup()
     await renderLocalized(
-      <UsIndexPerformanceTable locale="en" history={history} />,
+      <IndexPerformanceTable
+        locale="en"
+        titleKey="indexTableTitle_us_equity"
+        symbols={usSymbols}
+        history={history}
+      />,
       "en"
     )
     expect(
@@ -184,12 +203,76 @@ describe("UsIndexPerformanceTable", () => {
   })
 
   it("renders loading and unavailable states without failing the report", async () => {
-    await renderLocalized(<UsIndexPerformanceTableLoading />)
-    expect(screen.getByRole("status")).toHaveAccessibleName()
+    await renderLocalized(
+      <IndexPerformanceTableLoading titleKey="indexTableTitle_us_equity" />
+    )
+    expect(screen.getByRole("status")).toHaveAccessibleName(
+      "Loading US five-index performance."
+    )
     cleanup()
     await renderLocalized(
-      <UsIndexPerformanceTable locale="en" history={null} />
+      <IndexPerformanceTable
+        locale="en"
+        titleKey="indexTableTitle_us_equity"
+        symbols={usSymbols}
+        history={null}
+      />
     )
-    expect(screen.getByRole("status")).toHaveTextContent("unavailable")
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "US five-index performance is temporarily unavailable."
+    )
+  })
+
+  it("lists only the Hong Kong symbols the page asks for, so the volatility index is neither a row nor a gap", async () => {
+    const bar = (symbol: string, trade_date: string, close: string) => ({
+      symbol,
+      market_code: "hk_equity" as const,
+      trade_date,
+      open: null,
+      high: null,
+      low: null,
+      close,
+      volume: null,
+      trade_value: null,
+    })
+    await renderLocalized(
+      <IndexPerformanceTable
+        locale="en"
+        titleKey="indexTableTitle_hk_equity"
+        symbols={["^HSI", "^HSCE"]}
+        history={{
+          marketCode: "hk_equity",
+          start: "2024-10-09",
+          end: "2026-10-12",
+          failedSymbols: [],
+          series: [
+            {
+              symbol: "^HSI",
+              bars: [
+                bar("^HSI", "2025-12-31", "20000"),
+                bar("^HSI", "2026-10-09", "24000"),
+                bar("^HSI", "2026-10-12", "24240"),
+              ],
+            },
+            { symbol: "^HSCE", bars: [bar("^HSCE", "2026-10-12", "8500")] },
+            { symbol: "^HSIL", bars: [bar("^HSIL", "2026-10-12", "22.5")] },
+          ],
+        }}
+      />
+    )
+    expect(
+      screen.getByRole("region", { name: "Hong Kong index performance" })
+    ).toBeVisible()
+    expect(
+      screen.getAllByRole("rowheader").map(cell => cell.textContent)
+    ).toEqual(["Hang Seng Index", "Hang Seng China Enterprises Index"])
+    expect(screen.queryByText("22.50")).not.toBeInTheDocument()
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+    const hsi = screen.getByRole("rowheader", {
+      name: "Hang Seng Index",
+    }).parentElement!
+    expect(hsi).toHaveTextContent("24,240.00")
+    expect(hsi).toHaveTextContent("+1.00%")
+    expect(hsi).toHaveTextContent("+21.20%")
   })
 })

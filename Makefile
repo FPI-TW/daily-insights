@@ -8,7 +8,11 @@ export pnpm_config_verify_deps_before_run := false
 	newsroom-replay \
 	backfill-index-daily-bars \
 	check-index-catalog check-nginx check-production-deployment \
-	check build
+	capture-hsi-heatmap check build require-local-api-environment
+
+# The local api container reads apps/api/.env; Settings defaults to development
+# when DAILY_INSIGHTS_ENVIRONMENT is absent.
+API_ENVIRONMENT = $(or $(shell sed -n 's/^DAILY_INSIGHTS_ENVIRONMENT=//p' apps/api/.env 2>/dev/null | tail -n 1 | tr -d "\"' \r"),development)
 
 help: ## 顯示可用指令
 	@awk 'BEGIN {FS = ":.*## "; printf "Daily Insights 開發指令：\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -65,11 +69,17 @@ bootstrap-admin: ## 建立初始 admin（需 EMAIL 與 NAME）
 	@test -n "$(NAME)" || { echo "請提供 NAME，例如 make bootstrap-admin EMAIL=admin@example.com NAME='Admin'。"; exit 1; }
 	docker compose run --rm api python -m daily_insights_api.scripts.bootstrap_admin --email "$(EMAIL)" --display-name "$(NAME)"
 
-generate-morning-reports: ## 本地使用 Twelve Data 單次產生三市場晨報（可傳 EDITION_DATE）
+require-local-api-environment:
+	@case "$(API_ENVIRONMENT)" in \
+		development|test) ;; \
+		*) echo "apps/api/.env 的 DAILY_INSIGHTS_ENVIRONMENT 為 $(API_ENVIRONMENT)；此指令只允許 development 或 test。"; exit 1;; \
+	esac
+
+generate-morning-reports: require-local-api-environment ## 本地使用 Twelve Data 單次產生首波晨報（可傳 EDITION_DATE）
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
 	docker compose run --rm --build api python -m daily_insights_api.scripts.run_morning_reports --once $(if $(EDITION_DATE),--edition-date $(EDITION_DATE),)
 
-assemble-newsroom: ## 本地單次組出三市場重點新聞草稿（需啟用 newsroom，可傳 EDITION_DATE）
+assemble-newsroom: require-local-api-environment ## 本地單次組出三市場重點新聞草稿（需啟用 newsroom，可傳 EDITION_DATE）
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
 	docker compose run --rm --build newsroom-worker python -m daily_insights_api.scripts.run_newsroom_assemble $(if $(EDITION_DATE),--edition-date $(EDITION_DATE),)
 
@@ -116,6 +126,13 @@ type-check: ## 執行 Web 與 API 型別檢查
 
 test: ## 執行 Web 與 API 測試
 	pnpm test
+
+capture-hsi-heatmap: ## 在 worker 映像內擷取 TradingView HSI 熱力圖到 output/heatmap/hsi（可傳 OUT，除錯用）
+	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
+	mkdir -p $(or $(OUT),output/heatmap/hsi)
+	docker compose run --rm --build -e HOME=/tmp --user $$(id -u):$$(id -g) \
+		-v $$(cd $(or $(OUT),output/heatmap/hsi) && pwd):/output orchestration-worker \
+		python -m daily_insights_api.modules.data_sources.tradingview --out /output
 
 check-index-catalog: ## 驗證 Python 與 API client 的指數 catalog 契約
 	uv run --project apps/api pytest -c apps/api/pyproject.toml \

@@ -2,11 +2,7 @@ import { marketCodeSchema } from "@daily-insights/api-client"
 
 // Markets with a launched morning report; everything else in the catalog shows
 // the not-launched state (plus market news where an edition exists).
-export const launchMarketCodes = [
-  "global_macro_bonds",
-  "crypto",
-  "us_equity",
-] as const
+export const launchMarketCodes = ["global_macro_bonds", "us_equity"] as const
 // Markets that publish their own daily news edition.
 export const newsMarketCodes = ["tw_equity", "us_equity"] as const
 export const marketCodes = marketCodeSchema.options

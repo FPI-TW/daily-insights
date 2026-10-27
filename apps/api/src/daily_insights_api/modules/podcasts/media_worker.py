@@ -509,6 +509,11 @@ class PodcastMediaWorker:
         return True
 
     async def cleanup_one(self) -> bool:
+        """Legacy reconciliation helper; never called by background runtimes.
+
+        Callers must independently verify bucket/catalog ownership before use.
+        Legacy session keys carry no environment scope.
+        """
         now = datetime.now(UTC)
         token = uuid.uuid4()
         async with self._session_factory() as database:
@@ -605,9 +610,10 @@ class PodcastMediaWorker:
         self._heartbeat()
         while True:
             worked = await self.process_one()
-            cleaned = await self.cleanup_one()
+            # Legacy keys have no deployment scope, so automatic deletion is
+            # unsafe even when this catalog contains a cleanup tombstone.
             self._heartbeat()
-            if not worked and not cleaned:
+            if not worked:
                 await asyncio.sleep(self._settings.podcast_media_poll_seconds)
 
 

@@ -13,8 +13,8 @@
 - 每日 pipeline 使用穩定 idempotency key、資料庫 claim、lease 及
   attempt fencing token，讓重試、lease 接手與程序重啟不會讓舊 worker
   重複或覆蓋發布。
-- 現行 foundation 在任一必要輸入缺漏、契約錯誤或逾時時不建立新 publication；
-  既有最後成功 publication 仍可讀取並標示 stale。這是目前 fail-closed/LKG
+- 遷移前的 foundation 在任一必要輸入缺漏、契約錯誤或逾時時不建立新 publication；
+  既有最後成功 publication 仍可讀取並標示 stale。這是當時的 fail-closed/LKG
   實作，不是三市場晨報遷移後的接受規則。
 - 三市場晨報 feature target 改由現行計劃定義：每一 edition 都有 publication，
   可為 `complete`、`partial` 或 `unavailable`，並保留 failed source-run evidence；
@@ -84,10 +84,10 @@ Publication 至少保存：
 - 完整三語 presentation；
 - 產生此 publication 的所有成功 source run 關聯。
 
-目前 publication schema 要求 publication-level `source_as_of` 非 null，且
-現行 payload 已有 metrics/charts；這是 foundation 現況。三市場 feature PR
-必須依現行計劃遷移為 block/publication `source_as_of` 可為 null，並加入
-block/report status 與 caveat，不能把現行 non-null/LKG contract 當成新晨報規則。
+遷移前 publication schema 要求 publication-level `source_as_of` 非 null，且
+payload 已有 metrics/charts；這是當時的 foundation。三市場 feature PR 已依現行計劃
+遷移為 block/publication `source_as_of` 可為 null，並加入 block/report status 與
+caveat，不能把舊的 non-null/LKG contract 當成新晨報規則。
 
 相同 idempotency key 的重試必須回到同一 logical pipeline run。相同 report、
 market、edition、revision 只能產生一個 publication。已發布內容及其

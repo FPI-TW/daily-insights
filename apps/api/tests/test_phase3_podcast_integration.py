@@ -180,9 +180,7 @@ async def _login(client: AsyncClient, email: str, password: str) -> str:
 
 @pytest_asyncio.fixture
 async def podcast_harness() -> AsyncIterator[PodcastHarness]:
-    database_url = os.getenv("DAILY_INSIGHTS_TEST_DATABASE_URL") or os.getenv(
-        "DAILY_INSIGHTS_DATABASE_URL"
-    )
+    database_url = os.getenv("DAILY_INSIGHTS_TEST_DATABASE_URL")
     if database_url is None:
         pytest.skip("DAILY_INSIGHTS_TEST_DATABASE_URL is required")
     settings = Settings(

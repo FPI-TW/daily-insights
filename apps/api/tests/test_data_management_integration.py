@@ -43,36 +43,10 @@ from daily_insights_api.modules.identity.api import (
 from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.identity.session_models import Session
 from daily_insights_api.modules.orchestration.models import JobRun
-from daily_insights_api.scripts import run_institutional_flows, run_morning_reports
+from daily_insights_api.scripts import run_morning_reports
 from daily_insights_api.web.app import create_app
 
 pytestmark = pytest.mark.integration
-
-
-async def test_same_edition_twse_lookup_ignores_newer_terminal_history(
-    data_management_database: async_sessionmaker[AsyncSession],
-) -> None:
-    edition = date(2026, 9, 15)
-    active = DataManagementRun(
-        operation="provider_rerun",
-        market_code="twse",
-        edition_date=edition,
-        status="running",
-        created_at=datetime(2026, 9, 15, 8, tzinfo=UTC),
-    )
-    newer_terminal = DataManagementRun(
-        operation="institutional_twse",
-        market_code=None,
-        edition_date=edition,
-        status="failed",
-        created_at=datetime(2026, 9, 15, 9, tzinfo=UTC),
-    )
-    async with data_management_database.begin() as database:
-        database.add_all((active, newer_terminal))
-
-    observed = await run_institutional_flows._same_edition_run(data_management_database, edition)
-
-    assert observed == (active.id, True)
 
 
 async def test_provider_enqueue_order_resolves_without_deadlock(
@@ -198,43 +172,6 @@ async def test_automatic_twse_observes_active_work_before_terminal_success(
         )
 
     assert observed.id == active_twse.id
-
-
-async def test_automatic_twse_waits_for_cancelled_manual_lease_before_retry(
-    data_management_database: async_sessionmaker[AsyncSession],
-) -> None:
-    user = await _admin(data_management_database)
-    edition = date(2026, 9, 15)
-    cancelled = DataManagementRun(
-        operation="provider_rerun",
-        market_code="twse",
-        edition_date=edition,
-        status="cancelled",
-        requested_by_user_id=user.id,
-        lease_owner="worker-1",
-        completed_at=datetime.now(UTC),
-        error="cancelled_by_admin",
-    )
-    async with data_management_database.begin() as database:
-        database.add(cancelled)
-
-    async def release_lease(_: float) -> None:
-        async with data_management_database.begin() as database:
-            await database.execute(
-                update(DataManagementRun)
-                .where(DataManagementRun.id == cancelled.id)
-                .values(lease_owner=None, lease_expires_at=None)
-            )
-
-    outcome = await run_institutional_flows.queue_run(
-        data_management_database,
-        run_date=edition + timedelta(days=1),
-        sleep=release_lease,
-        poll_seconds=0.01,
-        timeout_seconds=1,
-    )
-
-    assert outcome == "failed"
 
 
 async def test_scheduled_morning_waits_for_provider_execution_lock(
@@ -370,7 +307,7 @@ async def test_full_morning_conflicts_with_every_legacy_provider_operation(
             await enqueue_run(
                 database,
                 operation="morning_market",
-                market_code="crypto",
+                market_code="us_equity",
                 requester_id=user.id,
                 request_id="b",
             )

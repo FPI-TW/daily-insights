@@ -478,12 +478,13 @@ def test_symbol_catalog_follows_site_dashboards() -> None:
     assert catalog["^TWII"].kind == "index"
     assert catalog["XAU/USD"].kind == "commodity"
     assert catalog["USD/TWD"].kind == "fx"
-    assert catalog["BTC/USD"].kind == "crypto"
     assert catalog["NVDA"].kind == "equity"
     assert catalog["NVDA"].market_code == "us_equity"
     assert resolve_symbol("twii") == catalog["^TWII"]
-    assert resolve_symbol("BTC") == catalog["BTC/USD"]
     assert resolve_symbol("2330.TW") is None
+    # Crypto left the first-wave launch manifest, so it has no dashboard to link.
+    assert "BTC/USD" not in catalog
+    assert resolve_symbol("BTC") is None
 
 
 def test_related_symbols_drop_anything_without_a_dashboard() -> None:

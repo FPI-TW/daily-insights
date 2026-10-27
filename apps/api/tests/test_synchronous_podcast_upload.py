@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import threading
+import uuid
 from collections.abc import AsyncIterator
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
@@ -8,9 +9,10 @@ from typing import Any
 
 import pytest
 from botocore.exceptions import EndpointConnectionError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from test_phase3_podcast_integration import (
     FakeObjectStore,
     PodcastHarness,
@@ -20,12 +22,14 @@ from test_phase3_podcast_integration import (
     podcast_harness as podcast_harness,
 )
 
+from daily_insights_api.core.models import Base
 from daily_insights_api.modules.assets.models import Asset
 from daily_insights_api.modules.assets.object_store import ListedObject, ObjectRef
 from daily_insights_api.modules.podcasts import synchronous_upload as uploads
 from daily_insights_api.modules.podcasts.direct_upload import UploadRequest
 from daily_insights_api.modules.podcasts.lifecycle import lock_upload_date
 from daily_insights_api.modules.podcasts.models import PodcastEpisode, PodcastEpisodeAudioVariant
+from daily_insights_api.modules.podcasts.staging_paths import staging_prefix
 from daily_insights_api.modules.podcasts.upload_cleanup import cleanup_orphans
 from daily_insights_api.modules.podcasts.upload_models import PodcastUploadBatch
 
@@ -281,6 +285,92 @@ class Listing:
                 yield ListedObject(ref=ref, last_modified=self.modified)
 
 
+async def test_foreign_database_sharing_bucket_cannot_delete_owner_audio(
+    podcast_harness: PodcastHarness,
+) -> None:
+    csrf, target = await sign(podcast_harness)
+    put(podcast_harness, target)
+    assert (await complete(podcast_harness, csrf, target)).status_code == 200
+    registered = final_ref(podcast_harness, target)
+    _, abandoned = await sign(podcast_harness, locale="en")
+    staging = put(podcast_harness, abandoned)
+    unknown_final = ObjectRef(bucket="podcast-private", key="podcasts/2026/10/02/en/podcast_1.mp3")
+    podcast_harness.store.put(unknown_final, BODY, "audio/mpeg", SHA)
+    before = dict(podcast_harness.store.objects)
+    now = datetime.now(UTC)
+    listing = Listing(podcast_harness.store, now)
+
+    # Real independent PostgreSQL catalog, same bucket and signing secret.
+    # Only the newly created disposable database is dropped below.
+    owner_url = podcast_harness.settings.database_url
+    assert owner_url is not None
+    database_name = f"cleanup_foreign_{uuid.uuid4().hex}"
+    admin = create_async_engine(owner_url, isolation_level="AUTOCOMMIT")
+    foreign_url = make_url(owner_url).set(database=database_name)
+    foreign_engine = create_async_engine(foreign_url)
+    foreign_settings = podcast_harness.settings.model_copy(
+        update={"database_url": foreign_url.render_as_string(hide_password=False)}
+    )
+    try:
+        async with admin.connect() as connection:
+            await connection.execute(text(f'CREATE DATABASE "{database_name}"'))
+        async with foreign_engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        foreign_sessions = async_sessionmaker(foreign_engine, expire_on_commit=False)
+        async with foreign_sessions() as database:
+            assert await database.scalar(select(func.count()).select_from(Asset)) == 0
+        assert (
+            await cleanup_orphans(
+                foreign_sessions,
+                podcast_harness.store,
+                listing,
+                foreign_settings,
+                now=now + timedelta(days=2),
+            )
+            == 0
+        )
+        assert podcast_harness.store.objects == before
+
+        # Even an adapter returning objects outside the requested scope must
+        # not authorize deletion based on this catalog's absent references.
+        class UnfilteredListing(Listing):
+            async def list_objects(self, bucket: str, prefix: str) -> AsyncIterator[ListedObject]:
+                for ref in self.store.objects:
+                    yield ListedObject(ref=ref, last_modified=self.modified)
+
+        assert (
+            await cleanup_orphans(
+                foreign_sessions,
+                podcast_harness.store,
+                UnfilteredListing(podcast_harness.store, now),
+                foreign_settings,
+                now=now + timedelta(days=2),
+            )
+            == 0
+        )
+        assert podcast_harness.store.objects == before
+        assert (
+            await cleanup_orphans(
+                podcast_harness.session_factory,
+                podcast_harness.store,
+                listing,
+                podcast_harness.settings,
+                now=now + timedelta(days=2),
+            )
+            == 1
+        )
+        assert staging not in podcast_harness.store.objects
+        assert registered in podcast_harness.store.objects
+        assert unknown_final in podcast_harness.store.objects
+        async with podcast_harness.session_factory() as database:
+            assert await database.scalar(select(func.count()).select_from(Asset)) == 1
+    finally:
+        await foreign_engine.dispose()
+        async with admin.connect() as connection:
+            await connection.execute(text(f'DROP DATABASE IF EXISTS "{database_name}"'))
+        await admin.dispose()
+
+
 async def test_sweep_protects_registered_and_recent_objects_and_retries_deletion(
     podcast_harness: PodcastHarness,
 ) -> None:
@@ -480,7 +570,7 @@ async def test_final_date_locale_and_logical_version(
     csrf, target = await sign(podcast_harness, locale=locale, mime=mime, trading_date="2026-02-03")
     staging = put(podcast_harness, target)
     ticket = uploads.decode_ticket(target["upload_token"], podcast_harness.settings)
-    assert ticket.version == 2
+    assert ticket.version == 3
     assert ticket.registered_key == f"podcasts/2026/02/03/{locale}/podcast_1.{extension}"
     result = await complete(podcast_harness, csrf, target)
     assert result.status_code == 200, result.text
@@ -497,21 +587,26 @@ async def test_final_date_locale_and_logical_version(
     assert final_ref(podcast_harness, replacement).key.endswith(f"podcast_2.{extension}")
 
 
-async def test_v1_ticket_keeps_legacy_path_then_v2_replaces(
+@pytest.mark.parametrize("legacy_version", [1, 2])
+async def test_legacy_tickets_complete_then_v3_replaces(
     podcast_harness: PodcastHarness,
+    legacy_version: int,
 ) -> None:
     csrf, target = await sign(podcast_harness)
     ticket = uploads.decode_ticket(target["upload_token"], podcast_harness.settings)
     target["upload_token"] = uploads.encode_ticket(
-        ticket.model_copy(update={"version": 1}), podcast_harness.settings
+        ticket.model_copy(update={"version": legacy_version, "staging_scope": None}),
+        podcast_harness.settings,
     )
     legacy = put(podcast_harness, target)
+    legacy_registered = final_ref(podcast_harness, target)
     assert (await complete(podcast_harness, csrf, target)).status_code == 200
     assert (await complete(podcast_harness, csrf, target)).status_code == 200
     _, replacement = await sign(podcast_harness, version=1)
     put(podcast_harness, replacement)
     assert (await complete(podcast_harness, csrf, replacement)).status_code == 200
-    assert legacy in podcast_harness.store.objects
+    assert (legacy in podcast_harness.store.objects) == (legacy_version == 1)
+    assert legacy_registered in podcast_harness.store.objects
     assert final_ref(podcast_harness, replacement) in podcast_harness.store.objects
 
 
@@ -568,7 +663,7 @@ async def test_transient_final_write_retains_staging_and_retries(
     assert staging not in podcast_harness.store.objects
 
 
-async def test_sweep_only_exact_final_grammar_after_grace(
+async def test_sweep_retains_all_unowned_final_and_legacy_paths(
     podcast_harness: PodcastHarness,
 ) -> None:
     now = datetime.now(UTC)
@@ -581,7 +676,10 @@ async def test_sweep_only_exact_final_grammar_after_grace(
             "podcasts/2026/02/03/en/podcast_0.mp3",
             "podcasts/2026/02/03/en/podcast_1.mp3.backup",
             "podcasts/2026-02-03/audio/en/podcast.mp3",
+            "podcasts/direct/1234567890/2026-02-03/en/00000000-0000-0000-0000-000000000001.mp3",
             "podcasts/direct/1234567890/2026-02-30/en/00000000-0000-0000-0000-000000000001.mp3",
+            f"{staging_prefix(podcast_harness.settings)}1234567890/2026-02-30/en/"
+            "00000000-0000-0000-0000-000000000001.mp3",
         ]
     ]
     for ref in refs:
@@ -605,10 +703,9 @@ async def test_sweep_only_exact_final_grammar_after_grace(
             podcast_harness.settings,
             now=now + timedelta(days=2),
         )
-        == 1
+        == 0
     )
-    assert refs[0] not in podcast_harness.store.objects
-    assert all(ref in podcast_harness.store.objects for ref in refs[1:])
+    assert all(ref in podcast_harness.store.objects for ref in refs)
 
 
 async def test_referenced_unrelated_final_collision_is_never_reused(
@@ -820,8 +917,8 @@ async def test_sweep_rechecks_last_modified_after_date_lock(
     from daily_insights_api.modules.podcasts import upload_cleanup
 
     now = datetime.now(UTC)
-    ref = ObjectRef(bucket="podcast-private", key="podcasts/2026/02/03/en/podcast_1.mp3")
-    podcast_harness.store.put(ref, BODY, "audio/mpeg", SHA)
+    _, target = await sign(podcast_harness)
+    ref = put(podcast_harness, target)
     listing = Listing(podcast_harness.store, now - timedelta(days=2))
     original_lock = lock_upload_date
 
@@ -855,8 +952,10 @@ async def test_cancelled_thread_delete_keeps_date_lock_until_finished(
     # cancellation and a remote deletion that succeeds before its response fails.
     csrf, loser = await sign(podcast_harness)
     _, winner = await sign(podcast_harness)
+    loser_staging = put(podcast_harness, loser)
     put(podcast_harness, winner)
     final = final_ref(podcast_harness, winner)
+    deleted_ref = loser_staging if owner == "cleanup" else final
     started = threading.Event()
     release = threading.Event()
     finished = threading.Event()
@@ -871,14 +970,14 @@ async def test_cancelled_thread_delete_keeps_date_lock_until_finished(
         started.set()
         try:
             assert release.wait(10), "test did not release the SDK deletion"
-            podcast_harness.store.objects.pop(final, None)
+            podcast_harness.store.objects.pop(deleted_ref, None)
             if lost_delete_response:
                 raise EndpointConnectionError(endpoint_url="https://r2.test")
         finally:
             finished.set()
 
     async def delayed_delete(ref: ObjectRef) -> None:
-        if ref == final:
+        if ref == deleted_ref:
             await asyncio.to_thread(sdk_delete)
         else:
             await original_delete(ref)
@@ -903,19 +1002,17 @@ async def test_cancelled_thread_delete_keeps_date_lock_until_finished(
     monkeypatch.setattr(podcast_harness.store, "delete", delayed_delete)
     monkeypatch.setattr(uploads, "_lock_upload_date", observe_lock)
     if owner == "cleanup":
-        podcast_harness.store.put(final, BODY, "audio/mpeg", SHA)
         now = datetime.now(UTC)
         deletion = asyncio.create_task(
             cleanup_orphans(
                 podcast_harness.session_factory,
                 podcast_harness.store,
-                Listing(podcast_harness.store, now - timedelta(days=2)),
+                Listing(podcast_harness.store, now),
                 podcast_harness.settings,
-                now=now,
+                now=now + timedelta(days=2),
             )
         )
     else:
-        put(podcast_harness, loser)
         monkeypatch.setattr(uploads, "register_audio", rollback_loser)
         deletion = asyncio.create_task(complete(podcast_harness, csrf, loser))
     try:
@@ -968,6 +1065,12 @@ async def test_cleanup_skips_unicode_numeric_path_segments(
         "00000000-0000-0000-0000-000000000001.mp3",
         f"podcasts/direct/1234567890/2026-02-{'03'.translate(fullwidth)}/en/"
         "00000000-0000-0000-0000-000000000001.mp3",
+    ]
+    prefix = staging_prefix(podcast_harness.settings)
+    keys += [
+        key.replace("podcasts/direct/", prefix)
+        for key in keys
+        if key.startswith("podcasts/direct/")
     ]
     refs = [ObjectRef(bucket="podcast-private", key=key) for key in keys]
     for ref in refs:

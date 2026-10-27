@@ -28,12 +28,66 @@ env:
   WEB_IMAGE_REPOSITORY: ghcr.io/fpi-tw/daily-insights-web
 
 jobs:
+  # Squash merges give main a new commit, but when its tree is exactly the tree
+  # a passing pull request CI run verified, running the same suite again proves
+  # nothing new. Any lookup failure or mismatch leaves the output empty, so
+  # verify runs. Fork pull requests always rerun: their workflow files are
+  # whatever the fork supplied.
+  reuse-pr-verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+
+    outputs:
+      verified_run_id: ${{ steps.lookup.outputs.verified_run_id }}
+
+    steps:
+      - id: lookup
+        name: Find a pull request CI run that verified this tree
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          tree=$(gh api "repos/$REPO/commits/$GITHUB_SHA" --jq .commit.tree.sha) || exit 0
+          heads=$(gh api "repos/$REPO/commits/$GITHUB_SHA/pulls" --jq \
+            ".[] | select(.merged_at != null and .head.repo.full_name == \"$REPO\") | .head.sha") || exit 0
+          for head in $heads; do
+            # Only the newest finished run for the head counts, so a later
+            # failure on the same code is never masked by an earlier success.
+            latest=$(gh api "repos/$REPO/actions/workflows/pull-request.yml/runs?head_sha=$head&status=completed&per_page=20" --jq \
+              "[.workflow_runs[] | select(.event == \"pull_request\" and .head_repository.full_name == \"$REPO\")][0] | \"\\(.id) \\(.conclusion)\"") || continue
+            read -r run_id conclusion <<<"$latest"
+            [ "$conclusion" = success ] || continue
+            directory=$(mktemp -d)
+            gh run download "$run_id" --repo "$REPO" --name verified-tree --dir "$directory" >/dev/null 2>&1 || continue
+            if [ "$(cat "$directory/verified-tree.txt")" = "$tree" ]; then
+              echo "verified_run_id=$run_id" >>"$GITHUB_OUTPUT"
+              echo "::notice title=CI reused::Pull request CI run $run_id verified tree $tree"
+              exit 0
+            fi
+          done
+          echo "::notice title=CI required::No passing pull request CI run verified tree $tree"
+
   verify:
+    needs: reuse-pr-verification
+    if: ${{ !cancelled() && needs.reuse-pr-verification.outputs.verified_run_id == '' }}
     uses: ./.github/workflows/ci.yml
 
   build-push:
-    needs: verify
-    if: github.ref == 'refs/heads/main'
+    needs: [reuse-pr-verification, verify]
+    if: >-
+      ${{
+        !cancelled() &&
+        github.ref == 'refs/heads/main' &&
+        (needs.verify.result == 'success' ||
+          (needs.verify.result == 'skipped' &&
+            needs.reuse-pr-verification.outputs.verified_run_id != ''))
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -88,6 +142,10 @@ jobs:
 
   deploy:
     needs: build-push
+    # The implicit success() also requires every transitive dependency to have
+    # succeeded, so a verify job skipped for reused pull request CI would skip
+    # the deployment as well. build-push already encodes that gate.
+    if: ${{ !cancelled() && needs.build-push.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production
@@ -121,6 +179,7 @@ jobs:
       DAILY_INSIGHTS_TWELVE_DATA_API_KEY: ${{ secrets.DAILY_INSIGHTS_TWELVE_DATA_API_KEY }}
       DAILY_INSIGHTS_YFINANCE_ENABLED: ${{ vars.DAILY_INSIGHTS_YFINANCE_ENABLED }}
       DAILY_INSIGHTS_TWSE_ENABLED: ${{ vars.DAILY_INSIGHTS_TWSE_ENABLED }}
+      DAILY_INSIGHTS_TRADINGVIEW_ENABLED: ${{ vars.DAILY_INSIGHTS_TRADINGVIEW_ENABLED }}
       DAILY_INSIGHTS_NEWSROOM_ENABLED: ${{ vars.DAILY_INSIGHTS_NEWSROOM_ENABLED }}
       DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL: ${{ vars.DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL }}
       DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY: ${{ secrets.DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY }}
@@ -177,6 +236,7 @@ jobs:
             DAILY_INSIGHTS_NEWSROOM_ENABLED \
             DAILY_INSIGHTS_YFINANCE_ENABLED \
             DAILY_INSIGHTS_TWSE_ENABLED \
+            DAILY_INSIGHTS_TRADINGVIEW_ENABLED \
             DAILY_INSIGHTS_CHAT_ENABLED \
             DAILY_INSIGHTS_R2_ENDPOINT_URL \
             DAILY_INSIGHTS_R2_BUCKET_NAME \
@@ -247,6 +307,10 @@ jobs:
           fi
           if ! grep -Eq '^(true|false)$' <<<"$DAILY_INSIGHTS_TWSE_ENABLED"; then
             echo "::error title=Invalid scheduler flag::DAILY_INSIGHTS_TWSE_ENABLED must be true or false"
+            missing=1
+          fi
+          if ! grep -Eq '^(true|false)$' <<<"$DAILY_INSIGHTS_TRADINGVIEW_ENABLED"; then
+            echo "::error title=Invalid scheduler flag::DAILY_INSIGHTS_TRADINGVIEW_ENABLED must be true or false"
             missing=1
           fi
           if [ "$DAILY_INSIGHTS_NEWSROOM_ENABLED" = true ]; then
@@ -465,7 +529,7 @@ jobs:
           username: ${{ secrets.DAILY_INSIGHTS_EC2_USER }}
           key: ${{ secrets.DAILY_INSIGHTS_EC2_SSH_KEY }}
           command_timeout: 25m
-          envs: GITHUB_TOKEN,GITHUB_ACTOR,API_IMAGE,WEB_IMAGE,PUBLIC_HOSTNAME,DAILY_INSIGHTS_DATABASE_URL,DAILY_INSIGHTS_SESSION_SECRET,DAILY_INSIGHTS_PASSWORD_PEPPER,DAILY_INSIGHTS_ORCHESTRATION_ENABLED,DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE,DAILY_INSIGHTS_MORNING_REPORTS_ENABLED,DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED,DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL,DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY,DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS,DAILY_INSIGHTS_CHAT_ENABLED,DAILY_INSIGHTS_CHAT_MODEL_PROVIDER,DAILY_INSIGHTS_CHAT_MODEL_NAME,DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL,DAILY_INSIGHTS_CHAT_MODEL_API_KEY,DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS,DAILY_INSIGHTS_TWELVE_DATA_BASE_URL,DAILY_INSIGHTS_TWELVE_DATA_API_KEY,DAILY_INSIGHTS_R2_ENDPOINT_URL,DAILY_INSIGHTS_R2_BUCKET_NAME,DAILY_INSIGHTS_R2_ACCESS_KEY_ID,DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY,DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS,DAILY_INSIGHTS_YFINANCE_ENABLED,DAILY_INSIGHTS_TWSE_ENABLED,DAILY_INSIGHTS_NEWSROOM_ENABLED,DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL,DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY,DAILY_INSIGHTS_NEWSROOM_TRIAGE_MODEL,DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL,DAILY_INSIGHTS_NEWSROOM_ANALYSIS_MODEL,DAILY_INSIGHTS_NEWSROOM_TRANSLATE_MODEL,DAILY_INSIGHTS_NEWSROOM_LLM_USER_AGENT,DAILY_INSIGHTS_NEWSROOM_LLM_SESSION_HEADER,DAILY_INSIGHTS_NEWSROOM_LLM_EXTRA_BODY,DAILY_INSIGHTS_NEWSROOM_EDITOR_EXTRA_BODY,DAILY_INSIGHTS_NEWSROOM_EDITOR_TIMEOUT_SECONDS,DAILY_INSIGHTS_NEWSROOM_EMBEDDING_BASE_URL,DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY,DAILY_INSIGHTS_NEWSROOM_EMBEDDING_MODEL,DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL,DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL,DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES,DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES,DAILY_INSIGHTS_GUARDIAN_API_KEY,DAILY_INSIGHTS_SEC_CONTACT_EMAIL
+          envs: GITHUB_TOKEN,GITHUB_ACTOR,API_IMAGE,WEB_IMAGE,PUBLIC_HOSTNAME,DAILY_INSIGHTS_DATABASE_URL,DAILY_INSIGHTS_SESSION_SECRET,DAILY_INSIGHTS_PASSWORD_PEPPER,DAILY_INSIGHTS_ORCHESTRATION_ENABLED,DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE,DAILY_INSIGHTS_MORNING_REPORTS_ENABLED,DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED,DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL,DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY,DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS,DAILY_INSIGHTS_CHAT_ENABLED,DAILY_INSIGHTS_CHAT_MODEL_PROVIDER,DAILY_INSIGHTS_CHAT_MODEL_NAME,DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL,DAILY_INSIGHTS_CHAT_MODEL_API_KEY,DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS,DAILY_INSIGHTS_TWELVE_DATA_BASE_URL,DAILY_INSIGHTS_TWELVE_DATA_API_KEY,DAILY_INSIGHTS_R2_ENDPOINT_URL,DAILY_INSIGHTS_R2_BUCKET_NAME,DAILY_INSIGHTS_R2_ACCESS_KEY_ID,DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY,DAILY_INSIGHTS_R2_SIGNED_URL_TTL_SECONDS,DAILY_INSIGHTS_YFINANCE_ENABLED,DAILY_INSIGHTS_TWSE_ENABLED,DAILY_INSIGHTS_TRADINGVIEW_ENABLED,DAILY_INSIGHTS_NEWSROOM_ENABLED,DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL,DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY,DAILY_INSIGHTS_NEWSROOM_TRIAGE_MODEL,DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL,DAILY_INSIGHTS_NEWSROOM_ANALYSIS_MODEL,DAILY_INSIGHTS_NEWSROOM_TRANSLATE_MODEL,DAILY_INSIGHTS_NEWSROOM_LLM_USER_AGENT,DAILY_INSIGHTS_NEWSROOM_LLM_SESSION_HEADER,DAILY_INSIGHTS_NEWSROOM_LLM_EXTRA_BODY,DAILY_INSIGHTS_NEWSROOM_EDITOR_EXTRA_BODY,DAILY_INSIGHTS_NEWSROOM_EDITOR_TIMEOUT_SECONDS,DAILY_INSIGHTS_NEWSROOM_EMBEDDING_BASE_URL,DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY,DAILY_INSIGHTS_NEWSROOM_EMBEDDING_MODEL,DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL,DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL,DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES,DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES,DAILY_INSIGHTS_GUARDIAN_API_KEY,DAILY_INSIGHTS_SEC_CONTACT_EMAIL
           script: |
             set -euo pipefail
             deploy_source="$HOME/daily-insights-deploy"

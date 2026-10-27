@@ -5,7 +5,9 @@ const apiPort = 3311
 
 export default defineConfig({
   testDir: "./e2e",
-  fullyParallel: false,
+  // Every test resets the mock API itself, so CI shards may split a file at
+  // any test. One worker still runs them in order: they share one mock server.
+  fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
   workers: 1,

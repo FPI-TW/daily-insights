@@ -64,6 +64,7 @@ TABLE_OWNERS = {
     "publication_source_runs": "reports",
     "report_pipeline_runs": "operations",
     "report_publications": "reports",
+    "sector_heatmap_images": "markets",
     "sessions": "identity",
     "source_runs": "operations",
     "users": "identity",

@@ -223,14 +223,14 @@ async def test_morning_execution_preserves_no_change_dataset_provenance(
     from daily_insights_api.modules.data_management import service
 
     execution = MorningMarketExecution(
-        market_code="crypto",
+        market_code="us_equity",
         publication_action="no_change",
         revision=2,
         report_status="complete",
         source_date=date(2026, 9, 7),
         datasets=(
             MorningDatasetExecution(
-                dataset_key="crypto_prices",
+                dataset_key="us.mega_cap_daily_bars",
                 status="succeeded",
                 fetched_at=datetime(2026, 9, 7, tzinfo=UTC),
                 source_as_of=date(2026, 9, 7),
@@ -247,7 +247,7 @@ async def test_morning_execution_preserves_no_change_dataset_provenance(
     monkeypatch.setattr(service, "TwelveDataAdapter", _NoopAdapter)
     monkeypatch.setattr(service, "run_morning_report_edition", execute)
     status, result, error = await execute_run(
-        _run("morning_market", "crypto"),
+        _run("morning_market", "us_equity"),
         cast(Any, None),
         Settings(environment="test", morning_reports_enabled=True, twelve_data_api_key="key"),
     )
@@ -259,7 +259,7 @@ async def test_morning_execution_preserves_no_change_dataset_provenance(
     datasets = cast(list[dict[str, object]], market["datasets"])
     dataset = datasets[0]
     assert dataset == {
-        "dataset_key": "crypto_prices",
+        "dataset_key": "us.mega_cap_daily_bars",
         "status": "succeeded",
         "fetched_at": "2026-09-07T00:00:00+00:00",
         "source_as_of": "2026-09-07",
@@ -276,7 +276,7 @@ async def test_twelve_data_provider_classifies_degraded_and_failed_markets(
 
     async def execute(*_: object, **kwargs: object) -> tuple[MorningMarketExecution, ...]:
         market = cast(tuple[str, ...], kwargs["market_codes"])[0]
-        if market == "crypto":
+        if market == "us_equity":
             raise RuntimeError("token=secret")
         return (
             MorningMarketExecution(

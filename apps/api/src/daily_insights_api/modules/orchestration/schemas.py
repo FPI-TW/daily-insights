@@ -51,6 +51,7 @@ class JobRunCreate(BaseModel):
         "global_macro_refresh",
         "us_equity_refresh",
         "tw_equity_refresh",
+        "hk_equity_refresh",
     ]
 
 

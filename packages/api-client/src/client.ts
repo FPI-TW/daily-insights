@@ -47,6 +47,7 @@ import {
   institutionalFlowsSchema,
   institutionalStocksSchema,
   marketListSchema,
+  sectorHeatmapSchema,
   dataManagementCatalogSchema,
   jobRunListSchema,
   jobRunSchema,
@@ -157,6 +158,15 @@ export function createMarketClient(transport: ApiTransport) {
           `/api/markets/tw/institutional-stocks${search ? `?${search}` : ""}`
         ),
         institutionalStocksSchema
+      )
+    },
+    async hkSectorHeatmap(options: { date?: string } = {}) {
+      const search = options.date
+        ? `?${new URLSearchParams({ date: options.date })}`
+        : ""
+      return parseResponse(
+        await transport(`/api/markets/hk/sector-heatmap${search}`),
+        sectorHeatmapSchema
       )
     },
   }
@@ -388,7 +398,7 @@ export function createAdministrationClient(transport: ApiTransport) {
         morning_reports_enabled: ready("twelve_data"),
         yfinance_enabled: ready("yahoo_finance"),
         twse_enabled: ready("twse"),
-        markets: ["global_macro_bonds", "crypto", "us_equity"],
+        markets: ["global_macro_bonds", "us_equity"],
         rerunnable_providers: [],
         macro_dashboard_enabled: true,
       })

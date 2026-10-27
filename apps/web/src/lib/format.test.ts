@@ -4,6 +4,8 @@ import {
   formatChange,
   formatIsoDate,
   formatNumber,
+  roundsToZero,
+  signedPercent,
   unitLabel,
 } from "./format"
 
@@ -102,4 +104,15 @@ it("keeps calendar dates stable and formats instants in the explicit product zon
   expect(formatDateStamp("2026-09-04T20:30:00Z", "UTC")).toBe("2026-09-04")
   expect(formatTimestamp("2026-09-04T20:30:00Z")).toBe("2026-09-05 04:30")
   expect(formatDateStamp("invalid")).toBe("—")
+})
+
+describe("signedPercent", () => {
+  it("drops the sign only when the value rounds to zero at the given digits", () => {
+    expect(signedPercent(-0.04, "en", 1)).toBe("0.0%")
+    expect(signedPercent(-0.06, "en", 1)).toBe("-0.1%")
+    expect(signedPercent(0.004, "en")).toBe("0.00%")
+    expect(signedPercent(null, "en")).toBe("—")
+    expect(roundsToZero(-0.04, 1)).toBe(true)
+    expect(roundsToZero(-0.04)).toBe(false)
+  })
 })

@@ -57,6 +57,7 @@ const catalogResult = {
     "global_macro_refresh",
     "us_equity_refresh",
     "tw_equity_refresh",
+    "hk_equity_refresh",
   ],
   features: { analyst_viewpoints: true },
 }
@@ -145,6 +146,9 @@ describe("DataManagementPage", () => {
     expect(
       screen.getByRole("button", { name: "Update exchange data" })
     ).toBeEnabled()
+    expect(
+      screen.getByRole("button", { name: "Update Hong Kong data" })
+    ).toBeEnabled()
     expect(screen.queryByRole("button", { name: "Twelve Data" })).toBeNull()
   })
 
@@ -152,6 +156,7 @@ describe("DataManagementPage", () => {
     ["Refresh global macro data", "global_macro_refresh"],
     ["Update international indices", "us_equity_refresh"],
     ["Update exchange data", "tw_equity_refresh"],
+    ["Update Hong Kong data", "hk_equity_refresh"],
   ])("queues %s as a native job run", async (label, key) => {
     catalog.mockResolvedValue(catalogResult)
     listRuns.mockResolvedValue(emptyRuns)

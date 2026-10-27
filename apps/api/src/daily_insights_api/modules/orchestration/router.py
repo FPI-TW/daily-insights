@@ -64,6 +64,8 @@ def _provider_ready(provider_key: str, settings: object) -> bool:
         return bool(getattr(settings, "twse_enabled", False))
     if provider_key == "internal_services":
         return bool(getattr(settings, "analyst_viewpoints_enabled", False))
+    if provider_key == "tradingview":
+        return bool(getattr(settings, "tradingview_enabled", False))
     if provider_key == "newsroom":
         return bool(getattr(settings, "newsroom_enabled", False))
     return True

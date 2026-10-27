@@ -1,4 +1,15 @@
 import { useEffect, useState } from "react"
+import { z } from "zod"
+
+const zoomRangeSchema = z.object({
+  start: z.number().min(0).max(100),
+  end: z.number().min(0).max(100),
+})
+/** ECharts dataZoom event: a single range or a batch of them. */
+export const zoomEventSchema = z.union([
+  zoomRangeSchema,
+  z.object({ batch: z.array(zoomRangeSchema).min(1) }),
+])
 
 export function useChartColors() {
   const [colors, setColors] = useState({

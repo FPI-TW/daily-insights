@@ -30,7 +30,8 @@ Daily Insights 比照 FindB：
 2. `appleboy/ssh-action` 將值放入該次 SSH deployment process 的環境；
 3. `docker compose up` 建立 container 時，將環境寫入 Docker container
    configuration；
-4. API、Web、nginx 都使用 `restart: unless-stopped`；
+4. API、Web、nginx、`orchestration-worker` 與 `orchestration-dispatcher` 都使用
+   `restart: unless-stopped`；
 5. EC2 reboot 後，systemd 啟動 Docker，Docker 以既有 container
    configuration 自動恢復服務。
 
@@ -87,6 +88,7 @@ DAILY_INSIGHTS_NEWSROOM_ENABLED
 DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED
 DAILY_INSIGHTS_YFINANCE_ENABLED
 DAILY_INSIGHTS_TWSE_ENABLED
+DAILY_INSIGHTS_TRADINGVIEW_ENABLED
 DAILY_INSIGHTS_CHAT_ENABLED
 DAILY_INSIGHTS_R2_ENDPOINT_URL
 DAILY_INSIGHTS_R2_BUCKET_NAME
@@ -99,7 +101,7 @@ Environment Secret 或 Variable。
 
 `DAILY_INSIGHTS_MORNING_REPORTS_ENABLED`、`DAILY_INSIGHTS_NEWSROOM_ENABLED`、
 `DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED`、`DAILY_INSIGHTS_YFINANCE_ENABLED` 與
-`DAILY_INSIGHTS_TWSE_ENABLED`、`DAILY_INSIGHTS_CHAT_ENABLED` 都必須明確設為 `true`
+`DAILY_INSIGHTS_TWSE_ENABLED`、`DAILY_INSIGHTS_TRADINGVIEW_ENABLED`、`DAILY_INSIGHTS_CHAT_ENABLED` 都必須明確設為 `true`
 或 `false`。**未設定時 deployment validation 會直接中止**，不會退回 Compose
 default。
 
@@ -145,6 +147,7 @@ Compose default。
 `DAILY_INSIGHTS_YFINANCE_ENABLED` 控制 Yahoo Finance functions；
 `DAILY_INSIGHTS_TWSE_ENABLED` 控制 TWSE 加權指數、個股法人與市場法人 functions。
 這三個 TWSE functions 在同一 Provider context 共用 client 與全域請求間隔。
+`DAILY_INSIGHTS_TRADINGVIEW_ENABLED` 控制 `hsi_sector_heatmap`：worker 以 headless Chromium 截 TradingView 港股產業熱力圖並上傳 R2，所以 worker 需要 R2 憑證與內建 Chromium 的映像。
 `DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED` 控制 Internal Services 的
 `analyst_viewpoints_sync`。所有 automatic functions 由每日 08:00 的統一 routine 建立，
 不再使用個別 scheduler container。`DAILY_INSIGHTS_NEWSROOM_ENABLED` 同時控制常駐的
@@ -162,7 +165,10 @@ provider request。啟用晨報不需要額外設定 manifest 核准狀態或 ha
 
 [`release.yml`](../../.github/workflows/release.yml)：
 
-1. 呼叫 [`ci.yml`](../../.github/workflows/ci.yml)；
+1. 驗證程式碼：若 main commit 來自本 repo 分支的 PR，且該 PR 最近一次完成的
+   Pull Request CI 通過並記錄了與此 commit 完全相同的 tree，直接沿用該結果；否則（含
+   fork PR、直接 push、`workflow_dispatch` 或查詢失敗）呼叫
+   [`ci.yml`](../../.github/workflows/ci.yml)；
 2. 建置 `linux/amd64` API 與 Web images；
 3. 發布至 `ghcr.io/fpi-tw/daily-insights-api` 與
    `ghcr.io/fpi-tw/daily-insights-web`；
@@ -286,13 +292,13 @@ docker logs --tail=200 daily-insights-nginx
 - customer/admin 登入、tenant isolation、會員/組織管理與三語系；
 - Podcast publish/unpublish、R2 CORS/range playback 與 signed URL expiry；
 - RDS backup/PITR 隔離還原結果；
-- EC2 reboot 後 7 個 production container 由 Docker 自動恢復且通過 health check 的
-  證據：`api`、`web`、`nginx`、`orchestration-worker`、`podcast-media-worker`、
-  `newsroom-worker` 與 `orchestration-dispatcher`；另須證明 worker 先 healthy，
-  dispatcher 才啟動；
-- 下一個台北 08:00 只有一個 RoutineRun，包含七個 Provider function jobs（含
-  `newsroom_daily_assemble`）、兩個 projection jobs、functions／attempts、實際
-  provenance，以及 10:00 soft deadline 後的 terminal 狀態；
+- EC2 reboot 後 8 個 production container 由 Docker 自動恢復且通過 health check 的
+  證據：`api`、`web`、`nginx`、`orchestration-worker`、`newsroom-worker`、
+  `cloakbrowser`、`browser-egress` 與 `orchestration-dispatcher`；另須證明 worker 先
+  healthy，dispatcher 才啟動；
+- 下一個台北 08:00 只有一個 RoutineRun，包含八個 Provider function jobs（含
+  `tradingview_daily_update` 與 `newsroom_daily_assemble`）、兩個 projection jobs、
+  functions／attempts、實際 provenance，以及 10:00 soft deadline 後的 terminal 狀態；
 - 啟用重點新聞時，三個市場版在 08:00 後產生草稿、09:00 自動發布，Slack 收到
   「草稿完成」通知；
 - 告警實際送達與目標流量的 CPU、memory、disk、database、latency headroom。

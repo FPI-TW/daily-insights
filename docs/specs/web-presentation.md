@@ -226,7 +226,7 @@
 - 所有漲跌值有正負號、`%`、依 locale 的紅綠慣例；零值顯示為中性的 `—` 或「持平」
 - 圖表單位文字經過翻譯，三語各自正確
 - 台股頁只有一層 tab bar
-- 導覽列包含加密市場，且市場清單由 API 驅動而非硬編碼
+- 市場清單由 API 驅動而非硬編碼（加密市場已於 2026-10-23 移出首波，不再列入報告導覽）
 - `stale`、`source_as_of`、`caveat`、block `status` 皆有對應的視覺呈現
 - 首次載入有 skeleton 且帶 `role="status"` / `aria-live`
 - 三語切換後，數字格式、顏色慣例、單位標籤全部跟著切換
@@ -276,8 +276,8 @@ markets、reports、news、analyst viewpoints 或指數／法人／宏觀資料�
 
 Hydration 完成後，各區塊使用 TanStack Query 與 `createBrowserTransport` 直接存取
 同源 `/api`，沿用 Nitro／nginx proxy；API clients 與宏觀 schema 驗證回應。
-市場清單與今日分析師觀點可跨頁共用，新聞、報告、宏觀、指數收盤、均線、VIX、
-法人資金與個股清單各自完成即可顯示。VIX 收盤與其技術指標也獨立請求；均線失敗
+市場清單與今日分析師觀點可跨頁共用，新聞、報告、宏觀、指數收盤、均線、波動率指數、
+法人資金與個股清單各自完成即可顯示。波動率指數收盤與其技術指標也獨立請求；均線失敗
 不阻擋價格圖，台灣法人與個股不等待指數歷史。保留新聞、分析師觀點、市場資訊、
 技術圖、法人資料的內容順序，以及美股指數表與大型股同列的版面。
 美股指數表／報告與台股法人／個股各自保有固定 grid 欄位，報告 caveat、背景刷新
@@ -288,7 +288,8 @@ Hydration 完成後，各區塊使用 TanStack Query 與 `createBrowserTransport
 Query key 以 user ID、organization ID 隔離，再加入資料依賴的 market、locale、
 日期／range；今日觀點不依語言而重複建立 cache。資料 60 秒內保持 fresh，無 observer
 的 cache 保留 5 分鐘。mount、視窗重新顯示與 reconnect 只對 stale 資料背景刷新。
-不輪詢、不自動重試。同一 key 已有內容時刷新保留內容，局部提示 pending；失敗顯示
+除港股產業熱力圖在簽章圖片 URL 到期前重新請求外不輪詢，不自動重試。
+同一 key 已有內容時刷新保留內容，局部提示 pending；失敗顯示
 局部錯誤與重試按鈕，不清掉成功區塊。指數多 symbol 保留部分成功結果，401 不降級
 成部分失敗。Query cancellation 傳至實際 fetch；圖表／均線／VIX／法人每個 request
 10 秒 timeout，宏觀 60 秒，deadline 包括讀取回應 body。
@@ -322,3 +323,55 @@ ECharts 6 的矩陣會將 1px 邊框對齊至正向半像素；右側貼齊 canv
 描邊會落在畫布外而遭裁切。內距讓四邊完整呈現，保留內部分隔線與原有資料配置。
 瀏覽器回歸測試直接檢查實際 canvas 四邊像素，涵蓋桌面、手機、DPR 1/2、
 縮放視窗及明暗主題切換。
+
+## 港股指數走勢與波動率圖（2026-10-14）
+
+指數走勢圖與波動率圖不再是美股頁專屬。市場頁的 `PAGE_BLOCKS` 以 `chart` 宣告
+指數走勢圖，以 `volatility` 宣告該市場的波動率指數 symbol：美股為 `^VIX`，
+港股為 `^HSIL`。走勢圖的 symbol 來自追蹤指數 catalog，排除所有波動率指數
+（`volatilitySymbols`），因此港股下拉只有恆生指數與國企指數。
+
+波動率圖、其查詢與文案都以 symbol 為參數：`vix` 與 `vixAverages` 的 query key
+為 `[..., "vix" | "vix-averages", symbol, range]`，顯示名稱經 `indexDisplayName`
+取自 `indexNameKey`，與指數卡片一致。風險參考區間依 symbol 設定：`^VIX` 保留
+20／30 的門檻線與三色區間，`^HSIL` 沒有公開的參考分級、兩年中位數已高於 20，
+因此不畫區間，y 軸純依資料，無障礙摘要也不提及區間。
+
+波動率查詢只在宣告 `volatility` 的頁面掛載（`VolatilityBlock` 子元件），
+其他市場頁不建立任何 vix query observer。
+
+## 港股指數表現表格（2026-10-14）
+
+美股的「五大指數表現」表格改為跨市場的 `IndexPerformanceTable`：收盤價與日／月／年
+漲跌的計算不變，列的順序、標題與位置由 `PAGE_BLOCKS.performance` 宣告
+（`titleKey`、`symbols`、`placement`）。美股頁宣告五檔的固定順序（非 catalog 的字母序），
+`placement: "beside"` 放在與晨報並排的左欄；港股頁 `placement: "stacked"`，表格在指數
+卡片下方，列為 `indexChartSymbolsForMarket("hk_equity")`
+（恆生指數、國企指數）。`history` query 只抓 `indexChartSymbolsForMarket` 的 symbol，
+波動率指數 `^HSIL` 不會出現在 `series` 或 `failedSymbols`，表格不另外過濾。標題鍵為
+`indexTableTitle_<marketCode>`，由 `titleKey` 明確傳入，載入／不可用／無資料文案以
+`{{title}}` 插值，型別限定為 `indexTableTitle_<MarketCode>`。`performance` 與 `bias`
+在型別上只能與 `chart` 同時宣告，且 `macro` 頁不能宣告任何市場區塊；表格不另外包
+`MarketQuerySection`，`history` 的重新整理公告與錯誤由走勢圖那一層只出現一次。
+乖離率面板與走勢圖同在 `aria-labelledby="index-history-title"` 的 section 內。
+
+## 港股產業熱力圖位置（2026-10-14）
+
+產業熱力圖移出左右欄位，改為港股頁最後一個區塊：指數走勢圖與波動率圖之後、
+頁面最下方，由頁面 wrapper 給 `mt-6`。query 仍只在 `hkEquity` 頁掛載。
+
+## 港股乖離率（2026-10-14）
+
+台股頁的 20／60／120MA 乖離率面板抽成 `IndexBiasPanel`，台股圖與跨市場的
+`IndexHistoryChart` 共用：乖離率仍以 `biasSeries` 用 API 的 sma-close-v1 均線計算，
+窗長（近一年／近 1.5 年）與刻度化（窗內位置 0–100）邏輯不變。`IndexHistoryChart`
+以 `bias` prop 決定是否在走勢圖下方顯示該面板，面板跟隨下拉選到的指數並以
+`biasTitleIndex` 命名（例如「恆生指數乖離率」）；`PAGE_BLOCKS` 以 `bias: true`
+宣告，目前只有港股頁開啟，美股頁不變。
+
+### 乖離率窗長與縮放同步（2026-10-20）
+
+港股與台股共用的 `IndexBiasPanel` 在重複點選目前窗長時保留圖形縮放、儀表數值與
+標籤密度；只有切換到另一個窗長時，才同步將儀表與圖形重設為新窗長的完整期間。
+避免僅重設 React 的縮放狀態，而 ECharts 因窗長未變、沒有重新掛載，仍顯示原本的
+局部期間。回歸測試涵蓋港股、台股的近一年／近 1.5 年選項，以及切換窗長時的重設。

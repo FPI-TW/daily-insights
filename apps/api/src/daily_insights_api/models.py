@@ -15,7 +15,11 @@ from daily_insights_api.modules.chat.models import Conversation, Message
 from daily_insights_api.modules.data_management.models import DataManagementRun
 from daily_insights_api.modules.identity.models import User
 from daily_insights_api.modules.identity.session_models import LoginThrottle, Session
-from daily_insights_api.modules.markets.models import Market, OrganizationMarketPolicy
+from daily_insights_api.modules.markets.models import (
+    Market,
+    OrganizationMarketPolicy,
+    SectorHeatmapImage,
+)
 from daily_insights_api.modules.model_runtime.models import (
     ActiveModelConfiguration,
     GenerationRecord,
@@ -113,6 +117,7 @@ __all__ = [
     "ReportPipelineRun",
     "ReportPublication",
     "RoutineRun",
+    "SectorHeatmapImage",
     "Session",
     "SourceRun",
     "User",

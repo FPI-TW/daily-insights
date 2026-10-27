@@ -29,10 +29,12 @@ from daily_insights_api.modules.analyst_viewpoints.api import AnalystViewpointSy
 from daily_insights_api.modules.analyst_viewpoints.models import AnalystViewpointSyncRun
 from daily_insights_api.modules.data_sources.api import (
     DailyBar,
+    Provenance,
     TaiexDailyBar,
     TaiexDailyBars,
     TwelveDataAdapter,
     TwelveDataTransport,
+    YfinanceDailyBars,
 )
 from daily_insights_api.modules.orchestration.facts import store_market_bars
 from daily_insights_api.modules.orchestration.models import (
@@ -505,6 +507,98 @@ async def test_taiex_missing_month_retry_keeps_latest_stored_source_date(
     assert outcome.source_as_of == latest
 
 
+async def test_yahoo_refresh_fetches_concurrently_and_bootstraps_only_new_symbols(
+    orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, sessions = orchestration_database
+    periods: dict[str, str] = {}
+    in_flight = 0
+    peak_in_flight = 0
+
+    async def latest_dates(*_: object, **__: object) -> dict[str, date]:
+        return {"^HSI": date(2026, 10, 9)}
+
+    async def store(*_: object, **__: object) -> int:
+        return 1
+
+    async def current(*_: object, **__: object) -> bool:
+        return True
+
+    class Adapter:
+        async def get_daily_bars(
+            self, *, market: str, symbol: str, period: str
+        ) -> YfinanceDailyBars:
+            nonlocal in_flight, peak_in_flight
+            periods[symbol] = period
+            in_flight += 1
+            peak_in_flight = max(peak_in_flight, in_flight)
+            await asyncio.sleep(0.01)
+            in_flight -= 1
+            fetched_at = datetime(2026, 10, 10, tzinfo=UTC)
+            return YfinanceDailyBars(
+                symbol=symbol,
+                market=market,  # type: ignore[arg-type]
+                items=(
+                    DailyBar(
+                        instrument_source_id=symbol,
+                        market=market,
+                        symbol=symbol,
+                        trade_date=date(2026, 10, 9),
+                        open=Decimal("100"),
+                        high=Decimal("101"),
+                        low=Decimal("99"),
+                        close=Decimal("100"),
+                        volume=None,
+                        source="yfinance",
+                    ),
+                ),
+                dropped_unsettled_trade_date=None,
+                provenance=Provenance(
+                    provider="yfinance",
+                    contract_version="test",
+                    contract_hash="a" * 64,
+                    endpoint="history",
+                    query_fingerprint=symbol,
+                    fetched_at=fetched_at,
+                    as_of=date(2026, 10, 9),
+                    response_digest="b" * 64,
+                    record_count=1,
+                ),
+            )
+
+    monkeypatch.setattr(orchestration_functions, "_latest_yahoo_bar_dates", latest_dates)
+    monkeypatch.setattr(orchestration_functions, "store_market_bars", store)
+    monkeypatch.setattr(orchestration_functions, "store_index_daily_bars", store)
+    monkeypatch.setattr(orchestration_functions, "fence_is_current", current)
+    claimed = ClaimedFunction(
+        connection=cast(AsyncConnection, None),
+        function_run_id=uuid.uuid4(),
+        job_run_id=uuid.uuid4(),
+        attempt_id=uuid.uuid4(),
+        function_key="hk_index_daily_bars",
+        provider_key="yahoo_finance",
+        edition_date=date(2026, 10, 10),
+        fence_token=uuid.uuid4(),
+        deadline_at=None,
+        scope={},
+    )
+
+    outcome = await orchestration_functions._run_yahoo(
+        Settings(environment="test", yfinance_enabled=True),
+        sessions,
+        claimed,
+        cast(Any, Adapter()),
+    )
+
+    assert outcome.status == "succeeded"
+    assert outcome.result is not None
+    assert outcome.result["symbols"] == ["^HSI", "^HSCE", "^HSIL"]
+    # Only the symbol without a stored series gets the two-year bootstrap.
+    assert periods == {"^HSI": "7d", "^HSCE": "2y", "^HSIL": "2y"}
+    assert peak_in_flight == 3
+
+
 async def test_treasury_failed_year_is_partial_and_retryable(
     orchestration_database: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
     monkeypatch: pytest.MonkeyPatch,
@@ -574,7 +668,7 @@ async def test_daily_routine_is_idempotent_and_worker_persists_attempts(
     assert first.id == second.id
     async with sessions() as database:
         assert await database.scalar(select(func.count()).select_from(RoutineRun)) == 1
-        assert await database.scalar(select(func.count()).select_from(JobRun)) == 9
+        assert await database.scalar(select(func.count()).select_from(JobRun)) == 10
         assert await database.scalar(select(func.count()).select_from(JobDependency)) == 8
 
     claimed = await claim_ready_function(engine, sessions, owner="integration-worker")
@@ -627,7 +721,7 @@ async def test_routine_response_uses_bounded_query_count(
         event.remove(engine.sync_engine, "before_cursor_execute", count_statement)
 
     assert len(responses) == 1
-    assert len(responses[0].jobs) == 9
+    assert len(responses[0].jobs) == 10
     assert statement_count <= 5
 
 
@@ -683,7 +777,7 @@ async def test_registry_version_change_does_not_duplicate_daily_routine(
     assert second.id == first.id
     async with sessions() as database:
         assert await database.scalar(select(func.count()).select_from(RoutineRun)) == 1
-        assert await database.scalar(select(func.count()).select_from(JobRun)) == 9
+        assert await database.scalar(select(func.count()).select_from(JobRun)) == 10
 
 
 async def test_projection_fence_token_rejects_stale_worker_with_same_owner(

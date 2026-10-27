@@ -44,6 +44,15 @@ uv run uvicorn daily_insights_api.main:app --reload
 完整 API 測試需要 PostgreSQL，建議由根目錄執行 `make test-db`，避免略過
 整合測試。
 
+測試執行時會忽略 `apps/api/.env` 與程序環境中的 `DAILY_INSIGHTS_*`（
+`DAILY_INSIGHTS_TEST_*` 除外），並固定以 `test` 環境執行，與 CI 一致。
+整合測試只使用 `DAILY_INSIGHTS_TEST_DATABASE_URL`，其資料庫名稱必須含有
+`test` 或 `ci`（例如 `daily_insights_test`），否則 pytest 直接拒絕執行。
+該資料庫僅作為維護連線；每個 pytest 程序（含 `pytest -n` 的 worker）會建立
+自己的 `<名稱>_<worker>` 工作資料庫與已 migrate 的 template，測試結束後刪除。
+CI 另設 `DAILY_INSIGHTS_TEST_DATABASE_REQUIRED=true`，缺少測試資料庫時直接
+失敗而不是略過。
+
 API 僅讀取 `apps/api/.env` 與程序環境中的 `DAILY_INSIGHTS_*` 變數，不讀取
 根目錄或 Web 的設定檔。Compose 會以內部 PostgreSQL hostname 覆寫
 `DAILY_INSIGHTS_DATABASE_URL`；直接執行 API 時，該 URL 必須指向本機可連線
@@ -52,17 +61,18 @@ API 僅讀取 `apps/api/.env` 與程序環境中的 `DAILY_INSIGHTS_*` 變數，
 本機測試 Podcast 直傳時，使用獨立的開發 R2 bucket 和僅限該 bucket 的物件
 讀寫金鑰。在 `apps/api/.env` 設定 `DAILY_INSIGHTS_R2_ENDPOINT_URL`、
 `DAILY_INSIGHTS_R2_BUCKET_NAME`、`DAILY_INSIGHTS_R2_ACCESS_KEY_ID` 與
-`DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY`；本地 Compose 的 API 與
-`podcast-media-worker` 會讀取同一份設定。開發 bucket 的 CORS 須允許
+`DAILY_INSIGHTS_R2_SECRET_ACCESS_KEY`；本地 Compose 的 API 會讀取這份設定。
+開發 bucket 的 CORS 須允許
 `http://localhost:${APP_PORT}`（`APP_PORT` 預設為 `8080`），並依
 [正式環境 runbook 的直傳 CORS 範例](../../docs/runbooks/production.md#r2-browser-upload-cors)
 允許直傳方法與標頭。切勿將金鑰提交到 Git，或用正式 bucket 進行本地上傳測試。
-直傳完成後，音檔需由 `podcast-media-worker` 驗證並寫入資料庫，才會出現在
-後台清單；新節目完成處理後會發布，並出現在前台 `/podcasts`。
+直傳完成後，API 會在 complete 請求內同步驗證音檔並寫入資料庫，之後才會
+出現在後台清單；新節目完成處理後會發布，並出現在前台 `/podcasts`。
 
 `DAILY_INSIGHTS_DATABASE_URL` 只會在 `development` 或 `test` 使用本機
 預設值；staging 與 production 必須明確提供資料庫、獨立 session/password
-secret、FinDB API key，以及完整 R2 endpoint、bucket 與 access credentials。
+secret、已啟用功能所需的 provider credential（例如晨報的 Twelve Data API
+key），以及完整 R2 endpoint、bucket 與 access credentials。
 缺漏、placeholder、非 HTTPS 外部端點或不合理的 signed URL TTL 都會在程序
 啟動前 fail closed。所有 credential 都使用 secret 型別，禁止出現在
 OpenAPI、回應或結構化 log。
@@ -84,9 +94,10 @@ OpenAPI、回應或結構化 log。
 - `GET /api/podcasts/{episode_id}?locale=zh-hant`
 - `POST /api/podcasts/{episode_id}/audio-url?locale=zh-hant`
 
-內部 Podcast API 位於 `/api/admin/podcasts`。`admin` 可發布與下架；
-`admin` 與 `asset_manager` 的 browser workflow 使用同步直傳 v2，一次上傳
-1–3 個語系，正式路徑詳見下方「同步直傳 v2 物件路徑」。保留的 legacy
+內部 Podcast API 位於 `/api/admin/podcasts`。`admin` 與 `asset_manager` 可發布與下架，
+建立空白節目與編輯三語標題、摘要僅限 `admin`；
+`admin` 與 `asset_manager` 的 browser workflow 使用同步直傳 v3，一次上傳
+1–3 個語系，正式路徑詳見下方「同步直傳 v3 暫存隔離與正式路徑」。保留的 legacy
 multipart endpoint 仍寫入
 `podcasts/{trading-date}/audio/{locale}/podcast.{ext}`，其中 `{ext}` 僅支援
 `mp3` 與 `mp4`。同交易日同語系確認後
@@ -164,19 +175,27 @@ CLI 重跑 inventory 時，會在任何 copy／輸出寫入之前核對既有 ma
 
 複製前檢查也跨 manifest 核對每個 target 與 Asset ID 的永久歸屬；subset、重組或混入新項目不能繞過既有紀錄。其他 manifest 已持有的項目回傳 `migration_entry_owned_by_another_manifest`，整份 inventory 在任何複製前被拒絕，同一 manifest 的合法 verified 重試仍保留。
 
-### 同步直傳 v2 物件路徑
+### 同步直傳 v3 暫存隔離與正式路徑
 
-新 browser 上傳的 signed PUT 仍指向唯一暫存路徑
-`podcasts/direct/{expires}/{trading_date}/{locale}/{asset_id}.{mp3|mp4}`。
-v2 complete 在交易日鎖與 generation fence 內，先檢查目前語系版本，再驗證
+新 browser 上傳的 signed PUT 指向唯一暫存路徑
+`podcasts/staging/{scope}/{expires}/{trading_date}/{locale}/{asset_id}.{mp3|mp4}`。
+scope 是以 session secret 對環境、資料庫身分（不含密碼）、R2 endpoint 與 bucket
+計算的 HMAC；v3 complete 會核對 scope，避免相同 secret 下跨資料庫重播憑證。
+v2/v3 complete 在交易日鎖與 generation fence 內，先檢查目前語系版本，再驗證
 HEAD、完整 SHA-256、時長與章節，以已驗證 spool 和 `put_if_absent` 建立正式檔
 `podcasts/YYYY/MM/DD/{locale}/podcast_{logical_version}.{mp3|mp4}`（月日補零）。
 正式路徑版本與 variant 一致，登記 commit 後才清暫存；替換保留 archived 檔。
 
-公開 request／response 不變。v1 HMAC 憑證繼續在原路徑完成，既有檔案不搬移；
+公開 request／response 不變。既有 v1/v2 HMAC 憑證仍可完成，v1 在原路徑登記，
+v2 沿用原暫存路徑及相同正式路徑；既有檔案不搬移；
 播放仍依 Asset object key，legacy service／import 的路徑與 metadata helper 不變。
 重試以 asset ID 及正式 identity 找回已提交結果。正式路徑碰撞僅可重用未引用且
 size／MIME／完整 SHA 相同的檔案，否則 `409 upload_destination_conflict`，不覆寫
 或刪除既有檔案。補償重新取得日期鎖檢查引用，只刪確定由此嘗試建立的正式檔；
-DB 結果不明保留物件。定期清理涵蓋完整有效 grammar 的暫存與正式孤兒，保留
-所有 active／archived 引用和 legacy／import 路徑。
+DB 結果不明保留物件。定期清理僅列舉本 scope 的有效暫存路徑，保留所有
+active／archived 引用；不掃描正式孤兒、舊 `podcasts/direct/`、legacy／import
+或其他環境 scope。API 與舊 media worker 的迴圈均停止清理無 scope 的 session。
+成功刪除發出 `podcast.object.deleted`；背景清理另記錄含環境／bucket／key 的
+`podcast.staging_cleanup.deleted`。部署需停止所有仍使用舊清理的程式；各環境仍須
+使用獨立桶及 bucket-scoped token。設定完整相同的 clone 無法由 scope 區分。
+保留的孤兒及舊 scope 可能增加儲存用量，須經人工核對後處理。

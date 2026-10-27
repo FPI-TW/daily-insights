@@ -1,7 +1,8 @@
 name: CI
 
 on:
-  # Main pushes are validated once through release.yml before deployment.
+  # Main pushes are validated through release.yml before deployment, which
+  # reuses a passing pull request run when it verified the same tree.
   workflow_call:
   workflow_dispatch:
 
@@ -11,15 +12,14 @@ permissions:
 jobs:
   web-quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.15.1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
@@ -32,24 +32,23 @@ jobs:
 
   api-client-quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.15.1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           enable-cache: true
 
@@ -60,18 +59,19 @@ jobs:
 
   api-quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     env:
       DAILY_INSIGHTS_ENVIRONMENT: test
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           enable-cache: true
 
@@ -82,15 +82,14 @@ jobs:
 
   web-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.15.1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
@@ -98,17 +97,57 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:web
 
-  client-tests:
+  web-e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Each shard starts its own mock API and dev server on a separate runner.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          version: 11.15.1
+          node-version: 22
+          cache: pnpm
 
-      - uses: actions/setup-node@v4
+      - run: pnpm install --frozen-lockfile
+
+      # The lockfile pins the Playwright version, and with it the browser build.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      # Downloads Chromium only on a cache miss; system libraries always come from apt.
+      - run: pnpm --filter @daily-insights/web exec playwright install --with-deps chromium
+
+      # The suite starts its own mock API and Vite dev server; see playwright.config.ts.
+      - run: pnpm test:e2e --shard=${{ matrix.shard }}/2
+
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-test-results-${{ matrix.shard }}
+          path: apps/web/test-results
+          retention-days: 7
+
+  client-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
@@ -118,6 +157,7 @@ jobs:
 
   api-integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     services:
       postgres:
@@ -138,39 +178,51 @@ jobs:
       DAILY_INSIGHTS_ENVIRONMENT: test
       DAILY_INSIGHTS_DATABASE_URL: postgresql+psycopg://daily_insights_ci:daily-insights-ci-only@127.0.0.1:5432/daily_insights_ci
       DAILY_INSIGHTS_TEST_DATABASE_URL: postgresql+psycopg://daily_insights_ci:daily-insights-ci-only@127.0.0.1:5432/daily_insights_ci
+      DAILY_INSIGHTS_TEST_DATABASE_REQUIRED: "true"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           enable-cache: true
 
+      # The service container cannot take server flags, and durability is
+      # pointless for a database that only lives for this job.
+      - name: Disable PostgreSQL durability for the ephemeral test database
+        run: |
+          docker exec ${{ job.services.postgres.id }} psql -U daily_insights_ci -d daily_insights_ci \
+            -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" \
+            -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "SELECT pg_reload_conf()"
+
       - run: uv sync --project apps/api --frozen
-      - run: uv run --project apps/api pytest -c apps/api/pyproject.toml apps/api/tests
+      - run: uv run --project apps/api pytest -c apps/api/pyproject.toml -n 4 apps/api/tests
 
       - name: Validate PostgreSQL migration round trip
         working-directory: apps/api
         run: |
           uv run alembic upgrade head
+          uv run alembic check
           uv run alembic downgrade base
           uv run alembic upgrade head
+          uv run alembic check
 
   web-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.15.1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
@@ -180,15 +232,16 @@ jobs:
 
   api-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           enable-cache: true
 
@@ -197,9 +250,10 @@ jobs:
 
   contracts:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Validate Compose contract
         env:
@@ -219,12 +273,14 @@ jobs:
       - api-client-quality
       - api-quality
       - web-tests
+      - web-e2e
       - client-tests
       - api-integration
       - web-build
       - api-build
       - contracts
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - name: Require every validation job to pass
@@ -233,6 +289,7 @@ jobs:
             "${{ needs.api-client-quality.result }}" != "success" ||
             "${{ needs.api-quality.result }}" != "success" ||
             "${{ needs.web-tests.result }}" != "success" ||
+            "${{ needs.web-e2e.result }}" != "success" ||
             "${{ needs.client-tests.result }}" != "success" ||
             "${{ needs.api-integration.result }}" != "success" ||
             "${{ needs.web-build.result }}" != "success" ||

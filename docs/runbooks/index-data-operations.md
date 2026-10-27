@@ -1,8 +1,8 @@
 # Index data operations
 
-This runbook covers the Yahoo Finance daily-index data used only by the US and
-Taiwan equity report-page charts. It does not change the public market API's
-one-year default range. Historical data is read directly from
+This runbook covers the daily-index data (Yahoo Finance, plus TWSE for
+`^TWII`) used only by the US, Hong Kong and Taiwan equity report pages. It
+does not change the public market API's one-year default range. Historical data is read directly from
 `index_daily_bars`; do not introduce a proxy or cache that substitutes another
 instrument for a tracked index.
 
@@ -22,7 +22,9 @@ earlier trading sessions are read solely as warm-up and are never exposed.
 Weekend/holiday calendar rows are not filled. Numeric values are decimal
 strings quantized to ten fractional places with half-even rounding. If the
 requested window has no settled bars, all four point lists are empty and
-`as_of` is `null`.
+`as_of` is `null`. The same response also carries `rsi` (Wilder, 14), `macd`
+(EMA 12/26/9) and `kd` (9-3-3, from high/low/close) series for the same
+sessions.
 
 ## Release gate
 
@@ -36,9 +38,10 @@ Before enabling the feature in production, confirm all of the following:
    exchange supplies rather than Yahoo. It is refreshed by the TWSE run
    alongside the institutional flows, not by this scheduler, because the two
    share one client and one request interval. Leaving it false stops ^TWII and
-   the flows together and leaves the eight Yahoo symbols unaffected.
-2. The scheduler and its 08:00 Asia/Taipei run are deployed, and the admin-only
-   **Index data** page is reachable by an administrator.
+   the flows together and leaves the ten Yahoo symbols unaffected.
+2. The orchestration dispatcher and worker, with their 08:00 Asia/Taipei daily
+   routine, are deployed, and the admin-only **Data management** page is
+   reachable by an administrator.
 3. When a release adds a tracked symbol, deploy the API and scheduler image
    first, complete the historical backfill and validation below, and only then
    deploy the web image that exposes its chart. Do not enable the chart for
@@ -50,20 +53,22 @@ Run this once in the API scheduler environment after deploying a catalog
 change, using the configured production database and provider credentials:
 
 ```sh
-# Eight international indices from Yahoo:
+# Ten international indices from Yahoo:
 python -m daily_insights_api.scripts.run_index_daily_bars --once --period 2y
-
-# ^TWII plus the TWSE institutional datasets:
-python -m daily_insights_api.scripts.run_institutional_flows --once
 ```
 
-Both operations use upserts and are safe to rerun after a provider interruption.
-The TWSE operation observes its queued worker run and returns a retryable failure
-for partial or failed outcomes. Its TWII selector refreshes the newest two
-months first, then keeps requesting any missing month in the required 25-month
-window; a partially successful first run therefore does not permanently
-truncate chart history. These commands must not be used to bypass provider
-terms or rate limits.
+The operation uses upserts and is safe to rerun after a provider interruption.
+It must not be used to bypass provider terms or rate limits.
+
+^TWII needs no manual backfill: the daily `twse_daily_update` job refreshes the
+newest two months first, then keeps requesting any missing month in the
+required 25-month window, so a partially successful run does not permanently
+truncate chart history. The TWSE institutional datasets have no historical
+backfill tool; the daily job stores only the latest published trading day, so
+their history accumulates from the first scheduled run. The former
+`run_institutional_flows --once` command was removed because it queued work for
+the retired data-management worker and left a pending legacy run that blocks
+the next deployment's legacy-queue check.
 
 Validate each settled tracked series after the run. The database must contain at
 least 450 bars per symbol, and the newest stored `trade_date` must be within
@@ -79,14 +84,16 @@ the Cboe Volatility Index itself.
 
 ## Routine and manual refresh
 
-The scheduler fetches the fixed trailing `7d` window. Administrators may use
-the Index data page to issue the same refresh; the page sends one request at a
-time and imposes a one-second cooldown. A response can be partial: successful
-symbols are committed and visible in the result table while failed symbols are
-reported for retry.
+The daily routine fetches a trailing `7d` window, widened to cover the gap
+after the newest stored bar when that bar is older than a week, and a two-year
+bootstrap for a symbol with no stored bars. Administrators may use the Data
+management page to enqueue the matching market refresh job
+(`us_equity_refresh`, `hk_equity_refresh` or `tw_equity_refresh`). A run can be
+partial: successful symbols are committed while failed symbols are reported for
+retry.
 
-If the API returns 503, check the feature flag and release gate. If it returns
-504, use the provider-specific scheduler command above, then revalidate. TWII
+If a run reports `yfinance_disabled`, check the feature flag and release gate.
+If it times out, use the provider-specific command above, then revalidate. TWII
 months are committed independently, so a timed-out or partial TWSE run may
 already have durable progress. Preserve audit events when investigating who
 initiated a refresh and which symbols failed.
