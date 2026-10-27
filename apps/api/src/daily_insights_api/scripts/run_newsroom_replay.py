@@ -123,7 +123,8 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--production-model",
         help="model production's cached answers were stored under (default: what the"
-        " keys container names now)",
+        " keys container names now); pinned, the container's extra request fields are"
+        " not applied either",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 

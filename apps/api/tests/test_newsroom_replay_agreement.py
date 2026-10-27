@@ -28,6 +28,21 @@ GO = LlmProvider(
     session_header="x-opencode-session",
 )
 EVENT = str(uuid.UUID(int=99))
+# What the keys container of the local stack sets since it moved to OpenCode Go.
+GO_STACK = {
+    "NEWSROOM_LLM_BASE_URL": "https://opencode.ai/inference/go/openai/v1",
+    "NEWSROOM_LLM_USER_AGENT": "daily-insights-newsroom/1.0",
+    "NEWSROOM_LLM_SESSION_HEADER": "x-opencode-session",
+    "NEWSROOM_LLM_EXTRA_BODY": '{"thinking":{"type":"disabled"}}',
+    "NEWSROOM_LLM_TIMEOUT_SECONDS": "120",
+    "NEWSROOM_TRIAGE_MODEL": "deepseek-v4.1-flash",
+    "NEWSROOM_EDITOR_MODEL": "deepseek-v4.1-flash",
+    "NEWSROOM_ANALYSIS_MODEL": "deepseek-v4.1-flash",
+    "NEWSROOM_TRANSLATE_MODEL": "deepseek-v4.1-flash",
+    "NEWSROOM_EDITOR_EXTRA_BODY": "",
+    "NEWSROOM_EDITOR_TIMEOUT_SECONDS": "",
+    "NEWSROOM_LLM_API_KEY": "sk-container",
+}
 
 
 def _row(
@@ -431,7 +446,7 @@ def test_only_the_named_stages_go_to_the_provider() -> None:
 def test_an_editor_only_provider_keeps_production_triage_from_the_cache(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(snapshot, "read_provider_setting", lambda *_: "deepseek-v4.1-flash")
+    monkeypatch.setattr(snapshot, "read_provider_setting", lambda _, name: GO_STACK.get(name))
     environment = snapshot.ReplayEnvironment(root=tmp_path)
     options = runner.RunOptions(
         snapshot=snapshot.Snapshot(datetime(2026, 10, 18).date(), datetime(2026, 10, 22).date()),
@@ -629,3 +644,116 @@ def test_the_live_client_is_built_from_the_settings_with_the_providers_key(
     assert client._extra_body == {"thinking": {"type": "disabled"}}
     assert client._stage_extra_body == {"editor": {"reasoning_effort": "high"}}
     assert client._stage_timeout_seconds == {"editor": 240}
+
+
+# --- Production settings from the keys container -------------------------------------------
+
+
+def _options(**changes: Any) -> runner.RunOptions:
+    options = runner.RunOptions(
+        snapshot=snapshot.Snapshot(datetime(2026, 10, 23).date(), datetime(2026, 10, 24).date()),
+        variant=BASELINE,
+        stages="editor",
+    )
+    return dataclasses.replace(options, **changes)
+
+
+def test_a_replay_without_a_provider_asks_as_production_does(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    stack = GO_STACK | {
+        "NEWSROOM_EDITOR_EXTRA_BODY": '{"reasoning_effort":"high"}',
+        "NEWSROOM_EDITOR_TIMEOUT_SECONDS": "240",
+    }
+    asked: list[str] = []
+
+    def read(_: Any, name: str) -> str | None:
+        asked.append(name)
+        return stack.get(name)
+
+    monkeypatch.setattr(snapshot, "read_provider_setting", read)
+    environment = snapshot.ReplayEnvironment(root=tmp_path)
+    settings = runner._settings(environment, _options(), "run_db")
+    assert settings.newsroom_llm_base_url == stack["NEWSROOM_LLM_BASE_URL"]
+    assert settings.newsroom_llm_session_header == "x-opencode-session"
+    assert settings.newsroom_llm_user_agent == "daily-insights-newsroom/1.0"
+    assert settings.newsroom_llm_extra_body == {"thinking": {"type": "disabled"}}
+    assert settings.newsroom_editor_extra_body == {"reasoning_effort": "high"}
+    assert settings.newsroom_editor_timeout_seconds == 240
+    assert settings.newsroom_llm_timeout_seconds == 120
+    assert settings.newsroom_analysis_model == settings.newsroom_translate_model
+    assert settings.newsroom_translate_model == "deepseek-v4.1-flash"
+    # The keys are read only by the live clients, never into the settings.
+    assert settings.newsroom_llm_api_key is None and "NEWSROOM_LLM_API_KEY" not in asked
+    tag = runner.production_cache_tag(settings)
+    assert tag is not None and "reasoning_effort" in tag and "thinking" in tag
+
+    runtime = runner._runtime(
+        environment,
+        _options(),
+        settings,
+        engine=None,  # type: ignore[arg-type]
+        gate_holder=[None],
+        stats=cache_module.CacheStats(),
+        ledger=costs.Ledger(tmp_path / "go.jsonl", "run"),
+        failures=cache_module.ApiFailures(),
+        production_tag=tag,
+    )
+    model = runtime.llm
+    assert isinstance(model, cache_module.CachedJsonModel) and model.provider == tag
+    assert model._live_factory is not None
+    client: Any = model._live_factory()
+    assert client._api_key == "sk-container"
+    assert client._session_header == "x-opencode-session"
+    assert client._stage_extra_body == {"editor": {"reasoning_effort": "high"}}
+    assert client._stage_timeout_seconds == {"editor": 240}
+
+
+def test_unset_container_settings_keep_the_defaults_and_no_extras_keep_old_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(snapshot, "read_provider_setting", lambda *_: None)
+    settings = runner._settings(snapshot.ReplayEnvironment(root=tmp_path), _options(), "run_db")
+    assert settings.newsroom_llm_session_header is None
+    assert settings.newsroom_llm_user_agent == "daily-insights-newsroom/1.0"
+    assert settings.newsroom_triage_model == "deepseek-chat"
+    assert settings.newsroom_editor_timeout_seconds is None
+    assert runner.production_cache_tag(settings) is None
+
+
+def test_a_pinned_production_model_replays_without_todays_extra_fields(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(snapshot, "read_provider_setting", lambda _, name: GO_STACK.get(name))
+    settings = runner._settings(
+        snapshot.ReplayEnvironment(root=tmp_path), _options(production_model="deepseek-chat"), "r"
+    )
+    assert settings.newsroom_triage_model == settings.newsroom_editor_model == "deepseek-chat"
+    assert settings.newsroom_llm_extra_body == {} == settings.newsroom_editor_extra_body
+    # DeepSeek-era answers keep the keys they were cached under.
+    assert runner.production_cache_tag(settings) is None
+    assert settings.newsroom_llm_session_header == "x-opencode-session"
+
+
+def test_invalid_container_settings_stop_the_replay(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    for wrong in (
+        {"NEWSROOM_LLM_EXTRA_BODY": '{"model":"other"}'},
+        {"NEWSROOM_EDITOR_EXTRA_BODY": "{not json"},
+        {"NEWSROOM_EDITOR_TIMEOUT_SECONDS": "900"},
+    ):
+        stack = GO_STACK | wrong
+        monkeypatch.setattr(snapshot, "read_provider_setting", lambda _, name, s=stack: s.get(name))
+        with pytest.raises(snapshot.ReplayError, match="settings are invalid"):
+            runner._settings(snapshot.ReplayEnvironment(root=tmp_path), _options(), "run_db")
+
+
+def test_each_call_stage_uses_its_own_cache_tag() -> None:
+    editor_only = dataclasses.replace(GO, stages=("editor",))
+    production = '{"extra_body":{"thinking":{"type":"disabled"}}}'
+    assert runner._call_tag(_options(provider=editor_only), production, "triage") == production
+    assert runner._call_tag(_options(provider=editor_only), production, "editor") == (
+        editor_only.cache_tag()
+    )
+    assert runner._call_tag(_options(), None, "editor") is None

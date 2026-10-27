@@ -42,6 +42,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
+from pydantic import ValidationError
 from sqlalchemy import event as orm_event
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -163,7 +164,8 @@ class RunOptions:
     # the other stages are then answered from production's cache only.
     provider: LlmProvider | None = None
     # The model production's cached answers were stored under, when the keys
-    # container names another one by now (a provider switch).
+    # container names another one by now (a provider switch). Those answers were
+    # asked without today's extra request fields, so pinned, none are applied.
     production_model: str | None = None
     # Appended to the run directory name (and so to its ledger entries).
     label: str | None = None
@@ -264,6 +266,8 @@ class _Context:
     estimate: retriage.Estimate = field(default_factory=retriage.Estimate)
     # Days whose triage pass the provider failed, with the count.
     triage_failures: dict[date, int] = field(default_factory=dict)
+    # Production's cache tag (``production_cache_tag``).
+    production_tag: str | None = None
 
     @property
     def sessions(self) -> async_sessionmaker[AsyncSession]:
@@ -300,15 +304,71 @@ async def _no_sleep(_: float) -> None:
     return None
 
 
-def _provider_setting(environment: ReplayEnvironment, name: str, default: str) -> str:
-    try:
-        return snapshot.read_provider_setting(environment, name) or default
-    except OSError:
-        return default
+# Production's LLM and embedding settings, copied from the keys container so a
+# replay without --llm-* asks exactly as production does (OpenCode Go refuses a
+# call without its session header). Keys are never copied: the live clients read
+# them only when a call has to go out.
+PRODUCTION_SETTINGS: dict[str, str] = {
+    "newsroom_llm_base_url": "NEWSROOM_LLM_BASE_URL",
+    "newsroom_llm_user_agent": "NEWSROOM_LLM_USER_AGENT",
+    "newsroom_llm_session_header": "NEWSROOM_LLM_SESSION_HEADER",
+    "newsroom_llm_extra_body": "NEWSROOM_LLM_EXTRA_BODY",
+    "newsroom_llm_timeout_seconds": "NEWSROOM_LLM_TIMEOUT_SECONDS",
+    "newsroom_triage_model": "NEWSROOM_TRIAGE_MODEL",
+    "newsroom_editor_model": "NEWSROOM_EDITOR_MODEL",
+    "newsroom_analysis_model": "NEWSROOM_ANALYSIS_MODEL",
+    "newsroom_translate_model": "NEWSROOM_TRANSLATE_MODEL",
+    "newsroom_editor_extra_body": "NEWSROOM_EDITOR_EXTRA_BODY",
+    "newsroom_editor_timeout_seconds": "NEWSROOM_EDITOR_TIMEOUT_SECONDS",
+    "newsroom_embedding_base_url": "NEWSROOM_EMBEDDING_BASE_URL",
+    "newsroom_embedding_model": "NEWSROOM_EMBEDDING_MODEL",
+}
+
+
+def _production_values(environment: ReplayEnvironment) -> dict[str, str]:
+    """The settings the keys container sets; unset or empty ones keep their defaults."""
+    values: dict[str, str] = {}
+    for field_name, name in PRODUCTION_SETTINGS.items():
+        try:
+            value = snapshot.read_provider_setting(environment, name)
+        except OSError:
+            value = None
+        if value:
+            values[field_name] = value
+    return values
+
+
+def production_cache_tag(settings: Settings) -> str | None:
+    """Production's extra request fields as a cache tag, so answers asked with
+    different fields (thinking on or off) never mix; None without any, so answers
+    cached before the provider took extra fields keep their keys."""
+    tag = {
+        name: value
+        for name, value in (
+            ("extra_body", settings.newsroom_llm_extra_body),
+            ("editor_extra_body", settings.newsroom_editor_extra_body),
+        )
+        if value
+    }
+    if not tag:
+        return None
+    return json.dumps(tag, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def _call_tag(options: RunOptions, production_tag: str | None, stage: str) -> str | None:
+    """The cache tag of a call of ``stage``: the --llm-* provider's or production's."""
+    provider = options.provider
+    if provider is not None and stage in provider.stages:
+        return provider.cache_tag()
+    return production_tag
 
 
 def _settings(environment: ReplayEnvironment, options: RunOptions, database: str) -> Settings:
-    settings = _production_settings(environment, options, database)
+    return _with_provider(_production_settings(environment, options, database), options)
+
+
+def _with_provider(settings: Settings, options: RunOptions) -> Settings:
+    """``settings`` with the --llm-* provider's endpoint, models and request fields."""
     provider = options.provider
     if provider is None:
         return settings
@@ -344,33 +404,41 @@ def _settings(environment: ReplayEnvironment, options: RunOptions, database: str
 def _production_settings(
     environment: ReplayEnvironment, options: RunOptions, database: str
 ) -> Settings:
-    defaults = Settings(_env_file=None)
-    pinned = options.production_model
-    return Settings(
-        _env_file=None,
-        environment="development",
-        database_url=environment.database_url(database),
-        newsroom_enabled=True,
-        newsroom_selection_variant=options.variant.name,
-        newsroom_llm_base_url=_provider_setting(
-            environment, "NEWSROOM_LLM_BASE_URL", defaults.newsroom_llm_base_url
-        ),
-        newsroom_triage_model=pinned
-        or _provider_setting(environment, "NEWSROOM_TRIAGE_MODEL", defaults.newsroom_triage_model),
-        newsroom_editor_model=pinned
-        or _provider_setting(environment, "NEWSROOM_EDITOR_MODEL", defaults.newsroom_editor_model),
-        newsroom_embedding_base_url=_provider_setting(
-            environment, "NEWSROOM_EMBEDDING_BASE_URL", defaults.newsroom_embedding_base_url
-        ),
-        newsroom_embedding_model=_provider_setting(
-            environment, "NEWSROOM_EMBEDDING_MODEL", defaults.newsroom_embedding_model
-        ),
-        # Keys stay out of the settings object; the live clients read them on a miss.
-        newsroom_llm_api_key=None,
-        newsroom_embedding_api_key=None,
-        newsroom_slack_webhook_url=None,
-        newsroom_admin_base_url=REVIEW_BASE_URL,
-    )
+    values: dict[str, Any] = _production_values(environment)
+    if options.production_model is not None:
+        # Answers cached under an earlier model were asked without today's extra
+        # request fields, so a pinned model replays them without these either.
+        values |= {
+            "newsroom_triage_model": options.production_model,
+            "newsroom_editor_model": options.production_model,
+        }
+        values.pop("newsroom_llm_extra_body", None)
+        values.pop("newsroom_editor_extra_body", None)
+    try:
+        # model_validate reads no .env file and no process environment: only the
+        # keys container's values, and the defaults.
+        return Settings.model_validate(
+            {
+                "environment": "development",
+                "database_url": environment.database_url(database),
+                "newsroom_enabled": True,
+                "newsroom_selection_variant": options.variant.name,
+                **values,
+                # Keys stay out of the settings object; the live clients read them on a miss.
+                "newsroom_llm_api_key": None,
+                "newsroom_embedding_api_key": None,
+                "newsroom_slack_webhook_url": None,
+                "newsroom_admin_base_url": REVIEW_BASE_URL,
+            }
+        )
+    except ValidationError as error:
+        problems = "; ".join(
+            f"{'.'.join(str(part) for part in issue['loc'])}: {issue['msg']}"
+            for issue in error.errors()
+        )
+        raise ReplayError(
+            f"{environment.keys_container}'s newsroom settings are invalid: {problems}"
+        ) from error
 
 
 def _key(environment: ReplayEnvironment, name: str) -> str:
@@ -389,7 +457,11 @@ def _runtime(
     stats: CacheStats,
     ledger: Ledger,
     failures: ApiFailures,
+    *,
+    production_tag: str | None = None,
 ) -> Runtime:
+    """The run's runtime; ``production_tag`` is production's cache tag
+    (``production_cache_tag`` of the settings before the provider was applied)."""
     cache = ResponseCache(environment.cache_dir)
 
     def live_model() -> JsonModel:
@@ -426,7 +498,7 @@ def _runtime(
         gate=_HeldGate(gate_holder),
         ledger=ledger,
         failures=failures,
-        provider=options.provider.cache_tag() if options.provider else None,
+        provider=options.provider.cache_tag() if options.provider else production_tag,
     )
     if options.provider is not None and set(CALL_STAGES) - set(options.provider.stages):
         # Production's provider answers the other stages from its cache only: its
@@ -438,6 +510,7 @@ def _runtime(
             gate=_HeldGate(gate_holder),
             ledger=ledger,
             failures=failures,
+            provider=production_tag,
         )
         llm = StageRouter(dict.fromkeys(options.provider.stages, llm), production)
     return Runtime(
@@ -1333,7 +1406,7 @@ def _uncached(
             payload=payload,
             subject=article.article_id,
             rep=rep,
-            provider=context.options.provider.cache_tag() if context.options.provider else None,
+            provider=_call_tag(context.options, context.production_tag, "triage"),
         )
         if cache.answer(key, 0) is None:
             missing.append(retriage.Request(prompt.text, payload, request.model))
@@ -1740,16 +1813,27 @@ async def run(environment: ReplayEnvironment, options: RunOptions) -> Path:
     snapshot.create_database(environment, database, template=options.snapshot.template)
     try:
         snapshot.migrate(environment, database)
-        settings = _settings(environment, options, database)
+        production = _production_settings(environment, options, database)
+        settings = _with_provider(production, options)
+        production_tag = production_cache_tag(production)
         engine = create_engine(settings)
         stats = CacheStats()
         gate_holder: list[TriageGate | None] = [None]
         failures = ApiFailures()
         runtime = _runtime(
-            environment, options, settings, engine, gate_holder, stats, ledger, failures
+            environment,
+            options,
+            settings,
+            engine,
+            gate_holder,
+            stats,
+            ledger,
+            failures,
+            production_tag=production_tag,
         )
         context = _Context(environment, options, runtime, engine, reference, gate_holder)
         context.stats = stats
+        context.production_tag = production_tag
         if options.stages == "retriage":
             context.recorder = retriage.RecordingModel(runtime.llm)
             context.base_runtime = replace(
@@ -1814,6 +1898,14 @@ async def run(environment: ReplayEnvironment, options: RunOptions) -> Path:
         "editor_model": settings.newsroom_editor_model,
         "provider": options.provider.describe() if options.provider else None,
         "production_model": options.production_model,
+        "production_llm": {
+            "base_url": production.newsroom_llm_base_url,
+            "user_agent": production.newsroom_llm_user_agent,
+            "session_header": production.newsroom_llm_session_header,
+            "extra_body": production.newsroom_llm_extra_body,
+            "editor_extra_body": production.newsroom_editor_extra_body,
+            "editor_timeout_seconds": production.newsroom_editor_timeout_seconds,
+        },
         "embedding_model": settings.newsroom_embedding_model,
         "database": database if options.keep_database else None,
         "run_dir": str(run_dir),
