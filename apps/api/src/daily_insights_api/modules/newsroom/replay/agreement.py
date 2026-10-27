@@ -956,6 +956,10 @@ def report(
         )
         lines += [""]
         lines += breakdown(sample, sides["正式"], sides[first], lambda i: i.topic or "-", "topic")
+        lines += [""]
+        lines += breakdown(
+            sample, sides["正式"], sides[first], lambda i: i.story_type or "-", "story_type"
+        )
     for name in names[2:]:
         lines += [
             "",
