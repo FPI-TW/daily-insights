@@ -569,9 +569,11 @@ DAILY_INSIGHTS_NEWSROOM_TRANSLATE_MODEL=deepseek-v4.1-flash
 2. 本機：改 `apps/api/.env`，再重新建立會呼叫 LLM 的容器（`restart` 不會重讀
    `env_file`）：
    `docker compose up -d --no-build --force-recreate newsroom-worker orchestration-worker api`。
-   正式環境：在 GitHub `production` environment 更新 Secret
-   `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY` 與上表的 Variables，再執行 release workflow
-   重新部署（[正式環境維運操作手冊](production.md#release-procedure)）；deploy 會重新建立
+   正式環境：在 GitHub `production` environment 更新上表的 Variables；LLM 金鑰放在既有的
+   Secret `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`（workflow 以
+   `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY` 傳給服務，沒有這個名稱的 Secret），換金鑰時更新
+   它。再執行 release workflow 重新部署
+   （[正式環境維運操作手冊](production.md#release-procedure)）；deploy 會重新建立
    `orchestration-worker` 與 `newsroom-worker`。
 3. 確認 worker log 沒有 `fatal`，並查看切換後的呼叫：
 

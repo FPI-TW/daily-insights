@@ -430,7 +430,10 @@ HTTP(S) URL。
   （唯讀根目錄、`/tmp` tmpfs、`cap_drop: ALL`、`no-new-privileges`、心跳 healthcheck），
   只拿到資料庫、newsroom 與收稿設定，不拿 session secret 或 R2 憑證。
   `orchestration-worker` 只拿組稿需要的旗標、LLM key、精選 model、Slack 與後台
-  origin，不拿 embedding key。GitHub Secrets／Variables 與驗證規則見
+  origin，不拿 embedding key。LLM key（DeepSeek）沿用既有的 GitHub Secret
+  `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`，release workflow 以 `NEWSROOM_LLM_API_KEY` 傳入；
+  唯一新增的必填 Secret 是 `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`。GitHub
+  Secrets／Variables 與驗證規則見
   [EC2 首次部署](../runbooks/ec2-first-deploy.md#2-github-production-environment)。
 - `deploy.sh` 在 migration 前停止並確認 `newsroom-worker` 已停，migration 後依序啟動並
   確認 `orchestration-worker`、`podcast-media-worker`、`newsroom-worker` 健康，最後才啟動

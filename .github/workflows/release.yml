@@ -182,7 +182,9 @@ jobs:
       DAILY_INSIGHTS_TRADINGVIEW_ENABLED: ${{ vars.DAILY_INSIGHTS_TRADINGVIEW_ENABLED }}
       DAILY_INSIGHTS_NEWSROOM_ENABLED: ${{ vars.DAILY_INSIGHTS_NEWSROOM_ENABLED }}
       DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL: ${{ vars.DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL }}
-      DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY: ${{ secrets.DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY }}
+      # The DeepSeek key stays in the GitHub Secret the legacy news pipeline used;
+      # deployment, Compose and the app read it as NEWSROOM_LLM_API_KEY.
+      DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY: ${{ secrets.DAILY_INSIGHTS_NEWS_MODEL_API_KEY }}
       DAILY_INSIGHTS_NEWSROOM_TRIAGE_MODEL: ${{ vars.DAILY_INSIGHTS_NEWSROOM_TRIAGE_MODEL }}
       DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL: ${{ vars.DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL }}
       DAILY_INSIGHTS_NEWSROOM_ANALYSIS_MODEL: ${{ vars.DAILY_INSIGHTS_NEWSROOM_ANALYSIS_MODEL }}
@@ -314,14 +316,14 @@ jobs:
             missing=1
           fi
           if [ "$DAILY_INSIGHTS_NEWSROOM_ENABLED" = true ]; then
-            for name in \
-              DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY \
-              DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY; do
-              if [ -z "${!name:-}" ]; then
-                echo "::error title=Missing newsroom launch value::$name is required when the newsroom is enabled"
-                missing=1
-              fi
-            done
+            if [ -z "${DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY:-}" ]; then
+              echo "::error title=Missing newsroom launch value::GitHub Secret DAILY_INSIGHTS_NEWS_MODEL_API_KEY (deployed as DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY) is required when the newsroom is enabled"
+              missing=1
+            fi
+            if [ -z "${DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY:-}" ]; then
+              echo "::error title=Missing newsroom launch value::DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY is required when the newsroom is enabled"
+              missing=1
+            fi
           fi
           if [ "$DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED" = true ]; then
             for name in \

@@ -98,12 +98,17 @@ CloudWatch, security-group control, and future scaling are clearer with EC2.
 ## Secrets
 
 - Store database credentials, session/password secrets, enabled-provider API
-  keys, API R2 credentials, the newsroom LLM, embedding, and Slack webhook
-  secrets, and the deployment SSH key in the protected GitHub `production`
-  environment. Scope the API R2 key to the application bucket with object
+  keys, API R2 credentials, the newsroom embedding and Slack webhook secrets,
+  and the deployment SSH key in the protected GitHub `production` environment.
+  Scope the API R2 key to the application bucket with object
   read/write/delete and listing permissions: signing, verification and orphan
   cleanup now share the API runtime. Retired media-worker credentials are no
   longer required by release or Compose.
+- The newsroom's DeepSeek key comes from the existing Secret
+  `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`; release passes it to the deployment as
+  `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY`, and there is no Secret by that name. The
+  only new required newsroom Secret is `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`;
+  `DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL` is optional.
 - Only `newsroom-worker` receives the embedding key and ingestion settings; the
   orchestration worker receives the newsroom LLM key only for the 08:00 editor
   pass. Neither worker receives session secrets; the newsroom worker receives no

@@ -111,7 +111,6 @@ for removed in \
   DAILY_INSIGHTS_MODEL_PROVIDER \
   DAILY_INSIGHTS_MODEL_NAME \
   DAILY_INSIGHTS_MODEL_API_BASE_URL \
-  DAILY_INSIGHTS_NEWS_MODEL_API_KEY \
   DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS; do
   if grep -Eq "(^|[^A-Z_])${removed}([^A-Z_]|\$)" \
     "$compose_file" "$workflow_file" scripts/production/deploy.sh; then
@@ -119,6 +118,30 @@ for removed in \
     exit 1
   fi
 done
+# The newsroom keeps the legacy news GitHub Secret for its DeepSeek key. The
+# release workflow may read it once, as the source of NEWSROOM_LLM_API_KEY;
+# nothing in the deployment path may use it as an environment name.
+legacy_llm_secret=DAILY_INSIGHTS_NEWS_MODEL_API_KEY
+if grep -Eq "(^|[^A-Z_])${legacy_llm_secret}([^A-Z_]|\$)" \
+  "$compose_file" scripts/production/deploy.sh; then
+  echo "$legacy_llm_secret is a GitHub Secret name, not a deployment setting" >&2
+  exit 1
+fi
+if [ "$(grep -c "secrets[.]${legacy_llm_secret}" "$workflow_file")" -ne 1 ] ||
+  ! grep -Fq "DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY: \${{ secrets.${legacy_llm_secret} }}" "$workflow_file"; then
+  echo "release must map $legacy_llm_secret to DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY exactly once" >&2
+  exit 1
+fi
+if grep -E "(^|[^A-Z_.])${legacy_llm_secret}([^A-Z_]|\$)" "$workflow_file" |
+  grep -Ev "^[[:space:]]*#|GitHub Secret ${legacy_llm_secret} " | grep -q .; then
+  echo "release may use $legacy_llm_secret only as the newsroom LLM key's source Secret" >&2
+  exit 1
+fi
+grep -Fq "GitHub Secret ${legacy_llm_secret} (deployed as DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY) is required when the newsroom is enabled" "$workflow_file"
+if grep -Fq 'secrets.DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY' "$workflow_file"; then
+  echo "release must not read a DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY Secret; production keeps $legacy_llm_secret" >&2
+  exit 1
+fi
 
 grep -Fq '/etc/daily-insights/cloudflare-realip.conf:/etc/nginx/cloudflare-realip.conf:ro' "$compose_file"
 grep -Fq '/etc/daily-insights/tls/origin.crt:/etc/nginx/tls/origin.crt:ro' "$compose_file"
@@ -231,13 +254,13 @@ for name in \
   grep -Fq ",${name}" "$workflow_file"
 done
 for name in \
-  DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY \
   DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY \
   DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL \
   DAILY_INSIGHTS_GUARDIAN_API_KEY; do
   grep -Fq "${name}: \${{ secrets.${name} }}" "$workflow_file"
   grep -Fq ",${name}" "$workflow_file"
 done
+grep -Fq ',DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY' "$workflow_file"
 grep -Fq 'DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL: https://${{ vars.PUBLIC_HOSTNAME }}' "$workflow_file"
 grep -Fq ',DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL' "$workflow_file"
 grep -Fq 'DAILY_INSIGHTS_NEWSROOM_ENABLED must be true or false' "$workflow_file"
