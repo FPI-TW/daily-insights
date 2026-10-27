@@ -32,12 +32,20 @@ MAX_BACKOFF = timedelta(minutes=60)
 
 
 class RetryableStageError(Exception):
-    """Transient failure: network, timeout, 429, 5xx, invalid JSON or schema."""
+    """Transient failure: network, timeout, 429, 5xx, invalid JSON or schema.
 
-    def __init__(self, code: str, *, retry_after: timedelta | None = None) -> None:
+    ``counts_attempt=False`` marks a wait rather than a failure, such as a spent
+    provider allowance that comes back on its own: the row keeps its attempts
+    and waits as often as it takes instead of running out of them.
+    """
+
+    def __init__(
+        self, code: str, *, retry_after: timedelta | None = None, counts_attempt: bool = True
+    ) -> None:
         super().__init__(code)
         self.code = code
         self.retry_after = retry_after
+        self.counts_attempt = counts_attempt
         # Audit rows for the failed call; re-added after the stage's rollback.
         self.audit_rows: list[Any] = []
 
@@ -170,9 +178,28 @@ async def settle_retryable(
     *,
     now: datetime | None = None,
 ) -> str:
-    """Schedule the next attempt, or fail the row once attempts are exhausted."""
+    """Schedule the next attempt, or fail the row once attempts are exhausted.
+
+    An error that does not count an attempt hands the claimed attempt back and
+    never fails the row. Without ``retry_after`` it waits ``MAX_BACKOFF``, so
+    such waits cannot turn into a fast loop.
+    """
     stage = claim_.stage
     moment = now or datetime.now(UTC)
+    if not error.counts_attempt:
+        await database.execute(
+            update(stage.model)
+            .where(_fenced(claim_))
+            .values(
+                {
+                    f"{stage.column}_attempts": claim_.attempt - 1,
+                    f"{stage.column}_next_attempt_at": moment
+                    + backoff(claim_.attempt, error.retry_after or MAX_BACKOFF),
+                    f"{stage.column}_error_code": error.code[:100],
+                }
+            )
+        )
+        return "pending"
     exhausted = claim_.attempt >= stage.max_attempts
     await database.execute(
         update(stage.model)

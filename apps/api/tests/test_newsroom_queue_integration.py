@@ -198,3 +198,98 @@ async def test_handler_can_settle_an_alternative_terminal_status(
     assert await run_claimed(newsroom_database, claims[0], handler) == "done"
     row = await _row(newsroom_database, article_id)
     assert (row.embed_status, row.embed_error_code) == ("failed", "embed_input_empty")
+
+
+def _spent_allowance(retry_after: timedelta | None) -> RetryableStageError:
+    return RetryableStageError(
+        "embed_provider_usage_limit", retry_after=retry_after, counts_attempt=False
+    )
+
+
+async def _run_once(
+    session_factory: async_sessionmaker[AsyncSession],
+    error: RetryableStageError,
+    *,
+    expected_attempt: int,
+) -> str:
+    async def handler(database: AsyncSession, claim_: Claim) -> dict[str, Any]:
+        raise error
+
+    future = datetime.now(UTC) + timedelta(days=30)
+    async with session_factory() as database:
+        claims = await claim(database, queue.EMBED, now=future)
+    assert len(claims) == 1 and claims[0].attempt == expected_attempt
+    return await run_claimed(session_factory, claims[0], handler)
+
+
+async def test_a_spent_allowance_waits_without_spending_attempts(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    article_id = await _article(newsroom_database)
+
+    # Far more waits than max_attempts: a weekly or monthly reset never fails the row.
+    for _ in range(queue.EMBED.max_attempts * 2):
+        started = datetime.now(UTC)
+        outcome = await _run_once(
+            newsroom_database, _spent_allowance(timedelta(hours=2)), expected_attempt=1
+        )
+        assert outcome == "pending"
+        row = await _row(newsroom_database, article_id)
+        assert (row.embed_status, row.embed_attempts) == ("pending", 0)
+        assert row.embed_error_code == "embed_provider_usage_limit"
+        assert row.embed_next_attempt_at is not None
+        wait = row.embed_next_attempt_at - started
+        assert timedelta(hours=2) <= wait < timedelta(hours=2, minutes=1)
+
+    # Every other error keeps today's accounting once the allowance is back.
+    for attempt in range(1, queue.EMBED.max_attempts + 1):
+        await _run_once(
+            newsroom_database,
+            RetryableStageError("embed_provider_timeout"),
+            expected_attempt=attempt,
+        )
+    row = await _row(newsroom_database, article_id)
+    assert (row.embed_status, row.embed_error_code) == ("failed", "embed_provider_timeout")
+
+
+async def test_a_spent_allowance_on_the_last_attempt_still_waits(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    article_id = await _article(newsroom_database)
+    for attempt in range(1, queue.EMBED.max_attempts):
+        await _run_once(
+            newsroom_database,
+            RetryableStageError("embed_provider_timeout"),
+            expected_attempt=attempt,
+        )
+
+    last = queue.EMBED.max_attempts
+    for _ in range(3):
+        assert (
+            await _run_once(newsroom_database, _spent_allowance(None), expected_attempt=last)
+            == "pending"
+        )
+    row = await _row(newsroom_database, article_id)
+    assert (row.embed_status, row.embed_attempts) == ("pending", last - 1)
+
+
+@pytest.mark.parametrize(
+    ("retry_after", "expected"),
+    [
+        (None, queue.MAX_BACKOFF),
+        (timedelta(days=5), queue.MAX_BACKOFF * 6),
+    ],
+)
+async def test_a_spent_allowance_waits_an_hour_without_retry_after_and_six_at_most(
+    newsroom_database: async_sessionmaker[AsyncSession],
+    retry_after: timedelta | None,
+    expected: timedelta,
+) -> None:
+    article_id = await _article(newsroom_database)
+    started = datetime.now(UTC)
+
+    await _run_once(newsroom_database, _spent_allowance(retry_after), expected_attempt=1)
+
+    row = await _row(newsroom_database, article_id)
+    assert row.embed_next_attempt_at is not None
+    assert expected <= row.embed_next_attempt_at - started < expected + timedelta(minutes=1)
