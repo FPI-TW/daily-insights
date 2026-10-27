@@ -260,6 +260,16 @@ class Settings(BaseSettings):
                     or is_placeholder_value(key.get_secret_value())
                 ):
                     raise ValueError(f"{setting}_api_key is required and cannot be a placeholder")
+            # OpenCode Go refuses every call without x-opencode-session (HTTP 400
+            # MissingSessionID), which the queue would record as a fatal failure.
+            if (
+                urlparse(self.newsroom_llm_base_url).hostname == "opencode.ai"
+                and not self.newsroom_llm_session_header
+            ):
+                raise ValueError(
+                    "newsroom_llm_session_header is required for opencode.ai "
+                    "(set it to x-opencode-session)"
+                )
             if (
                 self.newsroom_slack_webhook_url is not None
                 and self.newsroom_slack_webhook_url.get_secret_value().strip()

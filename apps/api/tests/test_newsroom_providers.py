@@ -350,3 +350,23 @@ async def test_x_request_id_still_wins_over_the_opencode_log_id() -> None:
     await _complete(_replying_model(answer), session)
 
     assert [row.request_id for row in session.added] == ["req-1"]
+
+
+def _go_worker(**overrides: Any) -> Settings:
+    values: dict[str, Any] = {
+        "runtime_role": "newsroom-worker",
+        "newsroom_enabled": True,
+        "newsroom_llm_base_url": "https://opencode.ai/inference/go/openai/v1",
+        "newsroom_llm_api_key": SecretStr("go-key"),
+        "newsroom_embedding_api_key": SecretStr("embedding-key"),
+        **overrides,
+    }
+    return Settings(_env_file=None, **values)
+
+
+def test_an_opencode_worker_needs_the_session_header() -> None:
+    assert _go_worker(newsroom_llm_session_header="x-opencode-session").newsroom_enabled
+
+    for header in (None, ""):
+        with pytest.raises(ValidationError, match="newsroom_llm_session_header is required"):
+            _go_worker(newsroom_llm_session_header=header)
