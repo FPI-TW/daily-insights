@@ -511,6 +511,25 @@ async def test_production_rejects_legacy_queue_creation(
     assert result.json()["detail"]["code"] == "legacy_upload_retired"
 
 
+async def test_production_rejects_legacy_multipart_upload(
+    podcast_harness: PodcastHarness,
+) -> None:
+    csrf, _ = await sign(podcast_harness)
+    podcast_harness.settings.environment = "production"
+    result = await podcast_harness.admin.post(
+        "/api/admin/podcasts/uploads",
+        headers={"X-CSRF-Token": csrf},
+        data={
+            "trading_date": "2026-10-01",
+            "reason": "initial_upload",
+        },
+        files={"en": ("legacy.mp3", BODY, "audio/mpeg")},
+    )
+    assert result.status_code == 410
+    assert result.json()["detail"]["code"] == "legacy_upload_retired"
+    assert podcast_harness.store.objects == {}
+
+
 async def test_orphan_sweep_waits_for_completion_and_protects_committed_asset(
     podcast_harness: PodcastHarness, monkeypatch: pytest.MonkeyPatch
 ) -> None:

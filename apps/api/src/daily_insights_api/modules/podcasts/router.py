@@ -512,6 +512,11 @@ async def admin_upload(
     zh_hans: Annotated[UploadFile | None, File()] = None,
     en: Annotated[UploadFile | None, File()] = None,
 ) -> PodcastEpisodeAdminResponse:
+    if request.app.state.settings.environment == "production":
+        raise HTTPException(
+            status.HTTP_410_GONE,
+            detail={"code": "legacy_upload_retired"},
+        )
     candidates: tuple[tuple[Locale, UploadFile | None], ...] = (
         ("zh-hant", zh_hant),
         ("zh-hans", zh_hans),
