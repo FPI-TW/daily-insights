@@ -22,6 +22,7 @@ from daily_insights_api.core.config import NEWSROOM_LLM_RESERVED_BODY_FIELDS
 from daily_insights_api.modules.newsroom.replay.snapshot import ReplayError
 
 EVAL_USER_AGENT = "daily-insights-newsroom-eval/1.0"
+CALL_STAGES = ("triage", "editor")
 
 
 def parse_extra_body(text: str) -> dict[str, Any]:
@@ -47,6 +48,10 @@ class LlmProvider:
     user_agent: str = EVAL_USER_AGENT
     # Header carrying the client's stable per-stage session id (``providers.session_id``).
     session_header: str | None = None
+    # Call stages sent here (``editor`` covers selection, duplicate and repeat screens);
+    # the others are answered from the production provider's cache only.
+    stages: tuple[str, ...] = CALL_STAGES
+    timeout_seconds: float = 90.0
 
     def cache_tag(self) -> str:
         """What tells this provider's answers apart from another's for the same request."""
@@ -74,4 +79,6 @@ class LlmProvider:
             "extra_body": dict(self.extra_body),
             "user_agent": self.user_agent,
             "session_header": self.session_header,
+            "stages": list(self.stages),
+            "timeout_seconds": self.timeout_seconds,
         }

@@ -26,6 +26,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from daily_insights_api.modules.newsroom.models import MARKET_CODES
 from daily_insights_api.modules.newsroom.replay import golden
 from daily_insights_api.modules.newsroom.replay.metrics import EventRow, MarketDay
 
@@ -482,4 +483,70 @@ def report(
                     *golden.verdicts_markdown(golden.evaluate_all(items, run.days)),
                     "",
                 ]
+    return "\n".join(lines) + "\n"
+
+
+def label_candidates(groups: Sequence[Group], *, top: int = 10) -> str:
+    """Per market day, every event some run picked plus the ``top`` by score, with each
+    group's stars per run and pick count, for an owner to mark must-pick or must-not-pick.
+
+    Events are matched by id, so the runs must share their triage (the same cached
+    triage replay, or production's events in editor mode).
+    """
+    slots = sorted(
+        {(day.edition_date, day.market) for g in groups for r in g.runs for day in r.days},
+        key=lambda slot: (slot[0], MARKET_CODES.index(slot[1])),
+    )
+    lines = [
+        "# 候選標註清單",
+        "",
+        f"每個市場日: 任一次重播入選的事件, 加上依分數排序的前 {top} 名。各組欄位是每次重播"
+        " 的星等 (· 分隔; - = 不在該次前 40 名或作廢) 與入選次數。最後兩欄留給標註:"
+        " 必選 (must-pick) 或不可選 (must-not-pick)。",
+    ]
+    for when, market in slots:
+        chosen: dict[str, EventRow] = {}
+        for group in groups:
+            for run in group.runs:
+                day = run.day(when, market)
+                if day is None or not day.valid:
+                    continue
+                for row in [*day.picks, *day.candidates]:
+                    if row.picked or (row.position is not None and row.position <= top):
+                        best = chosen.get(row.event_id)
+                        if best is None or (row.position or 99) < (best.position or 99):
+                            chosen[row.event_id] = row
+        if not chosen:
+            continue
+        lines += [
+            "",
+            f"## {when} {market}",
+            "",
+            "| 名次 | 標題 | impact | "
+            + " | ".join(group.name for group in groups)
+            + " | 必選 | 不可選 |",
+            "| --- | --- | --- |" + " --- |" * len(groups) + " --- | --- |",
+        ]
+        for event_id, row in sorted(chosen.items(), key=lambda item: item[1].position or 99):
+            cells = []
+            for group in groups:
+                stars, picked, valid = [], 0, 0
+                for run in group.runs:
+                    day = run.day(when, market)
+                    if day is None or not day.valid:
+                        stars.append("-")
+                        continue
+                    valid += 1
+                    found = next(
+                        (r for r in [*day.picks, *day.candidates] if r.event_id == event_id), None
+                    )
+                    stars.append("-" if found is None or found.stars is None else str(found.stars))
+                    picked += any(r.event_id == event_id for r in day.picks)
+                cells.append(f"{'·'.join(stars)} ({picked}/{valid})")
+            title = row.title.replace("|", "\\|")[:70]
+            lines.append(
+                f"| {row.position or '-'} | {title} | {row.impact or '-'} | "
+                + " | ".join(cells)
+                + " |  |  |"
+            )
     return "\n".join(lines) + "\n"

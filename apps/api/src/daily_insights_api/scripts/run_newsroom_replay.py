@@ -49,6 +49,7 @@ from daily_insights_api.modules.newsroom.replay import (
 )
 from daily_insights_api.modules.newsroom.replay.cache import ReplayCacheMiss, ResponseCache
 from daily_insights_api.modules.newsroom.replay.provider import (
+    CALL_STAGES,
     EVAL_USER_AGENT,
     LlmProvider,
     parse_extra_body,
@@ -97,6 +98,20 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--llm-user-agent", default=EVAL_USER_AGENT)
     parser.add_argument(
         "--llm-session-header", default=None, help="header for the stable session id"
+    )
+    parser.add_argument(
+        "--llm-stages",
+        default=",".join(CALL_STAGES),
+        help="call stages sent to the --llm-* provider (triage,editor); the others are"
+        " answered from the production provider's cache only",
+    )
+    parser.add_argument(
+        "--llm-timeout", type=float, default=90.0, help="seconds per --llm-* provider call"
+    )
+    parser.add_argument(
+        "--production-model",
+        help="model production's cached answers were stored under (default: what the"
+        " keys container names now)",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -176,6 +191,7 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     run.add_argument("--select-title", default=defaults.title_pattern, metavar="REGEX")
     run.add_argument("--control-sample", type=int, default=defaults.control_sample)
     run.add_argument("--round", default=runner.DEFAULT_ROUND, help="ledger the spending goes to")
+    run.add_argument("--label", default=None, help="appended to the run directory name")
 
     compare = commands.add_parser("compare", help="compare two run directories")
     compare.add_argument("left", type=Path)
@@ -201,6 +217,9 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     report.add_argument("--golden", type=Path, default=golden.GOLDEN_SET_PATH)
     report.add_argument("--title", default="多次重播報表")
     report.add_argument("--output", type=Path, help="write here instead of stdout")
+    report.add_argument(
+        "--candidates", type=Path, help="also write the labelling candidate list here"
+    )
 
     golden_ = commands.add_parser("golden", help="check the golden set against runs")
     golden_.add_argument("runs", type=Path, nargs="+")
@@ -208,6 +227,14 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
 
     cost = commands.add_parser("cost", help="the round's spending")
     cost.add_argument("--round", default=runner.DEFAULT_ROUND)
+    cost.add_argument(
+        "--group",
+        action="append",
+        default=[],
+        metavar="NAME=SUBSTRING",
+        help="latency, repairs and cost of the runs whose name contains SUBSTRING",
+    )
+    cost.add_argument("--timeout", type=float, default=90.0, help="client timeout, seconds")
 
     commands.add_parser("teardown", help="remove the throwaway database container")
 
@@ -275,6 +302,11 @@ def _provider(options: argparse.Namespace) -> LlmProvider | None:
         return None
     if not all(given):
         raise ValueError("--llm-base-url, --llm-model and --llm-key-file go together")
+    stages = tuple(dict.fromkeys(part.strip() for part in options.llm_stages.split(",")))
+    if not stages or set(stages) - set(CALL_STAGES):
+        raise ValueError(f"--llm-stages takes {', '.join(CALL_STAGES)}")
+    if options.llm_timeout <= 0:
+        raise ValueError("--llm-timeout must be positive")
     return LlmProvider(
         base_url=options.llm_base_url,
         model=options.llm_model,
@@ -282,6 +314,8 @@ def _provider(options: argparse.Namespace) -> LlmProvider | None:
         extra_body=parse_extra_body(options.llm_extra_body),
         user_agent=options.llm_user_agent,
         session_header=options.llm_session_header or None,
+        stages=stages,
+        timeout_seconds=options.llm_timeout,
     )
 
 
@@ -488,6 +522,8 @@ def main(args: list[str] | None = None) -> int:
                         skip_days=options.skip_days,
                         round=options.round,
                         provider=options.provider,
+                        production_model=options.production_model,
+                        label=options.label,
                     ),
                 )
             )
@@ -504,6 +540,8 @@ def main(args: list[str] | None = None) -> int:
                 against_production=options.against_production,
             )
             _emit(text, options.output)
+            if options.candidates:
+                _emit(multirun.label_candidates(_groups(options)), options.candidates)
         elif options.command == "golden":
             items = golden.load(options.golden)
             lines = [*golden.items_markdown(items), ""]
@@ -517,6 +555,12 @@ def main(args: list[str] | None = None) -> int:
         elif options.command == "cost":
             entries = costs.read_ledger(_environment(options).ledger_path(options.round))
             print(costs.ledger_markdown(entries), end="")
+            if options.group:
+                groups = dict(text.partition("=")[::2] for text in options.group)
+                print()
+                print(
+                    costs.calls_markdown(entries, groups, timeout_seconds=options.timeout), end=""
+                )
         else:
             left_meta, left = runner.read_run(options.left)
             right_meta, right = runner.read_run(options.right)

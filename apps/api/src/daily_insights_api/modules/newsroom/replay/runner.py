@@ -78,6 +78,7 @@ from daily_insights_api.modules.newsroom.replay.cache import (
     CacheStats,
     ReplayCacheMiss,
     ResponseCache,
+    StageRouter,
     replay_rep,
     request_key,
     watch_usage,
@@ -92,7 +93,7 @@ from daily_insights_api.modules.newsroom.replay.metrics import (
     invalid_reason_for,
     summary,
 )
-from daily_insights_api.modules.newsroom.replay.provider import LlmProvider
+from daily_insights_api.modules.newsroom.replay.provider import CALL_STAGES, LlmProvider
 from daily_insights_api.modules.newsroom.replay.snapshot import (
     ReplayEnvironment,
     ReplayError,
@@ -153,8 +154,14 @@ class RunOptions:
     skip_days: tuple[tuple[date, str], ...] = ()
     # The ledger every live call of this round is written to.
     round: str = DEFAULT_ROUND
-    # Triage and editor calls go to this provider instead of production's.
+    # The calls of ``provider.stages`` go to this provider instead of production's;
+    # the other stages are then answered from production's cache only.
     provider: LlmProvider | None = None
+    # The model production's cached answers were stored under, when the keys
+    # container names another one by now (a provider switch).
+    production_model: str | None = None
+    # Appended to the run directory name (and so to its ledger entries).
+    label: str | None = None
 
     @property
     def skipped(self) -> dict[date, str]:
@@ -304,8 +311,13 @@ def _settings(environment: ReplayEnvironment, options: RunOptions, database: str
     return settings.model_copy(
         update={
             "newsroom_llm_base_url": provider.base_url,
-            "newsroom_triage_model": provider.model,
-            "newsroom_editor_model": provider.model,
+            "newsroom_triage_model": (
+                provider.model if "triage" in provider.stages else settings.newsroom_triage_model
+            ),
+            "newsroom_editor_model": (
+                provider.model if "editor" in provider.stages else settings.newsroom_editor_model
+            ),
+            "newsroom_llm_timeout_seconds": provider.timeout_seconds,
             "newsroom_llm_user_agent": provider.user_agent,
             "newsroom_llm_session_header": provider.session_header,
             "newsroom_llm_extra_body": dict(provider.extra_body),
@@ -317,6 +329,7 @@ def _production_settings(
     environment: ReplayEnvironment, options: RunOptions, database: str
 ) -> Settings:
     defaults = Settings(_env_file=None)
+    pinned = options.production_model
     return Settings(
         _env_file=None,
         environment="development",
@@ -326,12 +339,10 @@ def _production_settings(
         newsroom_llm_base_url=_provider_setting(
             environment, "NEWSROOM_LLM_BASE_URL", defaults.newsroom_llm_base_url
         ),
-        newsroom_triage_model=_provider_setting(
-            environment, "NEWSROOM_TRIAGE_MODEL", defaults.newsroom_triage_model
-        ),
-        newsroom_editor_model=_provider_setting(
-            environment, "NEWSROOM_EDITOR_MODEL", defaults.newsroom_editor_model
-        ),
+        newsroom_triage_model=pinned
+        or _provider_setting(environment, "NEWSROOM_TRIAGE_MODEL", defaults.newsroom_triage_model),
+        newsroom_editor_model=pinned
+        or _provider_setting(environment, "NEWSROOM_EDITOR_MODEL", defaults.newsroom_editor_model),
         newsroom_embedding_base_url=_provider_setting(
             environment, "NEWSROOM_EMBEDDING_BASE_URL", defaults.newsroom_embedding_base_url
         ),
@@ -392,18 +403,32 @@ def _runtime(
         watch_usage(embedder)
         return embedder
 
-    return Runtime(
-        settings=settings,
-        session_factory=create_session_factory(engine),
-        llm=CachedJsonModel(
+    live = None if options.offline or options.dry_run else live_model
+    llm: JsonModel = CachedJsonModel(
+        cache,
+        stats,
+        live=live,
+        gate=_HeldGate(gate_holder),
+        ledger=ledger,
+        failures=failures,
+        provider=options.provider.cache_tag() if options.provider else None,
+    )
+    if options.provider is not None and set(CALL_STAGES) - set(options.provider.stages):
+        # Production's provider answers the other stages from its cache only: its
+        # key is never read, and nothing it did not answer is asked of anyone.
+        production = CachedJsonModel(
             cache,
             stats,
-            live=None if options.offline or options.dry_run else live_model,
+            live=None,
             gate=_HeldGate(gate_holder),
             ledger=ledger,
             failures=failures,
-            provider=options.provider.cache_tag() if options.provider else None,
-        ),
+        )
+        llm = StageRouter(dict.fromkeys(options.provider.stages, llm), production)
+    return Runtime(
+        settings=settings,
+        session_factory=create_session_factory(engine),
+        llm=llm,
         embedder=CachedEmbedder(
             cache,
             stats,
@@ -1601,11 +1626,13 @@ def _notes(options: RunOptions) -> list[str]:
             "editor: 從正式組稿之後的事件狀態出發, 正式組稿時已自動合併的重複事件不會再被提出。"
         )
     if options.provider is not None:
+        stages = "、".join(options.provider.stages)
         notes.append(
-            f"供應商: 初篩與組稿的模型呼叫改送 {options.provider.base_url}"
+            f"供應商: {stages} 階段的模型呼叫改送 {options.provider.base_url}"
             f" ({options.provider.model}, extra body"
-            f" {json.dumps(dict(options.provider.extra_body), ensure_ascii=False)});"
-            " 快取鍵含供應商與 extra body, 不與正式供應商的答案混用。"
+            f" {json.dumps(dict(options.provider.extra_body), ensure_ascii=False)},"
+            f" 逾時 {options.provider.timeout_seconds:g} 秒); 快取鍵含供應商與 extra body,"
+            " 不與正式供應商的答案混用; 其餘階段只讀正式供應商的快取, 不呼叫任何供應商。"
         )
     if options.rep != 1 or options.triage_rep != 1:
         notes.append(
@@ -1657,6 +1684,8 @@ def _run_name(environment: ReplayEnvironment, options: RunOptions, now: datetime
     name = f"{stamp}-{options.variant.name}-{options.stages}"
     if options.provider is not None:
         name += "-alt"
+    if options.label:
+        name += f"-{options.label}"
     if options.rep != 1 or options.triage_rep != 1:
         name += f"-rep{options.rep}" + (
             f"-trep{options.triage_rep}" if options.triage_rep != 1 else ""
@@ -1762,6 +1791,7 @@ async def run(environment: ReplayEnvironment, options: RunOptions) -> Path:
         "triage_model": settings.newsroom_triage_model,
         "editor_model": settings.newsroom_editor_model,
         "provider": options.provider.describe() if options.provider else None,
+        "production_model": options.production_model,
         "embedding_model": settings.newsroom_embedding_model,
         "database": database if options.keep_database else None,
         "run_dir": str(run_dir),

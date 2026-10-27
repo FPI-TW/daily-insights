@@ -404,3 +404,101 @@ async def test_asking_caches_under_the_provider_and_stops_at_the_budget(tmp_path
             live=lambda: live,
         )
     assert live.calls == 3
+
+
+# --- Editor-only provider runs -----------------------------------------------------------
+
+
+def test_only_the_named_stages_go_to_the_provider() -> None:
+    options = run_newsroom_replay.parse_args(
+        [
+            *("--llm-base-url", GO.base_url, "--llm-model", GO.model, "--llm-key-file", "k"),
+            *("--llm-stages", "editor", "--llm-timeout", "300"),
+            *("--production-model", "deepseek-chat", "run", "--label", "A"),
+        ]
+    )
+    assert options.provider.stages == ("editor",)
+    assert options.provider.timeout_seconds == 300
+    assert options.production_model == "deepseek-chat" and options.label == "A"
+    for wrong in (["--llm-stages", "analysis"], ["--llm-timeout", "0"]):
+        with pytest.raises(SystemExit):
+            run_newsroom_replay.parse_args(
+                [*("--llm-base-url", "u", "--llm-model", "m", "--llm-key-file", "k"), *wrong, "run"]
+            )
+
+
+def test_an_editor_only_provider_keeps_production_triage_from_the_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(snapshot, "read_provider_setting", lambda *_: "deepseek-v4.1-flash")
+    environment = snapshot.ReplayEnvironment(root=tmp_path)
+    options = runner.RunOptions(
+        snapshot=snapshot.Snapshot(datetime(2026, 10, 18).date(), datetime(2026, 10, 22).date()),
+        variant=BASELINE,
+        stages="triage",
+        provider=LlmProvider(
+            GO.base_url, GO.model, GO.key_file, stages=("editor",), timeout_seconds=300
+        ),
+        production_model="deepseek-chat",
+    )
+    settings = runner._settings(environment, options, "run_db")
+    assert settings.newsroom_triage_model == "deepseek-chat"
+    assert settings.newsroom_editor_model == GO.model
+    assert settings.newsroom_llm_timeout_seconds == 300
+    runtime = runner._runtime(
+        environment,
+        options,
+        settings,
+        engine=None,  # type: ignore[arg-type]
+        gate_holder=[None],
+        stats=cache_module.CacheStats(),
+        ledger=costs.Ledger(tmp_path / "go.jsonl", "run"),
+        failures=cache_module.ApiFailures(),
+    )
+    router = runtime.llm
+    assert isinstance(router, cache_module.StageRouter)
+    production = router._default
+    assert isinstance(production, cache_module.CachedJsonModel)
+    assert production._live_factory is None and production.provider is None
+    go = router._routes["editor"]
+    assert isinstance(go, cache_module.CachedJsonModel) and options.provider is not None
+    assert go.provider == options.provider.cache_tag()
+
+
+def test_call_stats_show_latency_repairs_and_cost_per_condition(tmp_path: Path) -> None:
+    ledger = costs.Ledger(tmp_path / "go.jsonl", "20261027-1205-baseline-triage-alt-A")
+    usage = {"prompt_tokens": 100, "completion_tokens": 10, "opencode": {"list_cost": 0.01}}
+    ledger.chat(stage="editor", model="m", usages=[usage], latency_ms=1_000)
+    ledger.chat(stage="editor", model="m", usages=[usage, usage], latency_ms=120_000)
+    other = costs.Ledger(ledger.path, "20261027-1205-baseline-triage-alt-B")
+    other.chat(stage="editor", model="m", usages=[usage], latency_ms=2_000, failed=True)
+    text = costs.calls_markdown(costs.read_ledger(ledger.path), {"A": "-A", "B": "-B", "C": "-C"})
+    rows = {line.split(" | ")[0].strip("| "): line for line in text.splitlines()[2:]}
+    assert "| 2 | 1.0 s | 120.0 s | 120.0 s | 1 | 1 | 0 |" in rows["A"]
+    assert "| 1 |" in rows["B"] and "| 0 | 0 | 1 |" in rows["B"]
+    assert rows["C"].startswith("| C | 0 |")
+
+
+def test_label_candidates_union_picks_and_the_top_by_score() -> None:
+    from daily_insights_api.modules.newsroom.replay.metrics import EventRow, MarketDay
+    from daily_insights_api.modules.newsroom.replay.multirun import Group, Run, label_candidates
+
+    def day(stars: dict[str, int], picked: set[str]) -> MarketDay:
+        rows = [
+            EventRow(event_id=e, title=f"t{e}", position=i, score=1, stars=s, picked=e in picked)
+            for i, (e, s) in enumerate(stars.items(), start=1)
+        ]
+        return MarketDay(
+            edition_date="2026-10-18",
+            market="global",
+            selection_mode="editor",
+            candidates=rows,
+            picks=[row for row in rows if row.picked],
+        )
+
+    a = Group("A", [Run("a1", {}, [day({"x": 5, "y": 3, "z": 2}, {"x"})])])
+    b = Group("B", [Run("b1", {}, [day({"x": 4, "y": 4, "z": 2}, {"x", "y"})])])
+    text = label_candidates([a, b], top=1)
+    assert "| 1 | tx | - | 5 (1/1) | 4 (1/1) |  |  |" in text
+    assert "| 2 | ty | - | 3 (0/1) | 4 (1/1) |  |  |" in text
+    assert "tz" not in text

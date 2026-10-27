@@ -38,6 +38,7 @@ import json
 import os
 import re
 import tempfile
+import time
 import uuid
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterator, Sequence
@@ -53,7 +54,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.modules.newsroom.models import NewsroomLlmCall
 from daily_insights_api.modules.newsroom.providers import CallAudit, Embedder, JsonModel
-from daily_insights_api.modules.newsroom.queue import RetryableStageError
+from daily_insights_api.modules.newsroom.queue import FatalStageError, RetryableStageError
 from daily_insights_api.modules.newsroom.replay.costs import Ledger, cache_hit_tokens
 
 ResultT = TypeVar("ResultT", bound=BaseModel)
@@ -502,6 +503,8 @@ class CachedJsonModel:
         usages: list[dict[str, Any]] = []
         token = _usage_sink.set(usages)
         failed = True
+        error_code: str | None = None
+        started = time.monotonic()
         try:
             result = await with_retries(
                 lambda: live.complete(
@@ -518,6 +521,9 @@ class CachedJsonModel:
                 sleep=self._sleep,
             )
             failed = False
+        except (RetryableStageError, FatalStageError) as error:
+            error_code = error.code
+            raise
         finally:
             _usage_sink.reset(token)
             # A failed call is paid for too.
@@ -527,6 +533,8 @@ class CachedJsonModel:
                     model=model,
                     usages=usages,
                     failed=failed,
+                    latency_ms=round((time.monotonic() - started) * 1000),
+                    error=error_code,
                 )
                 if entry is not None:
                     count.live_usd += entry.usd
@@ -544,6 +552,39 @@ class CachedJsonModel:
                 sum(row.output_tokens or 0 for row in rows),
             ),
             sum(hits) if hits else None,
+        )
+
+
+class StageRouter:
+    """A ``JsonModel`` sending each call to the model of its stage (``CallAudit.stage``)."""
+
+    def __init__(self, routes: dict[str, JsonModel], default: JsonModel) -> None:
+        self._routes = routes
+        self._default = default
+
+    async def aclose(self) -> None:
+        for model in {id(m): m for m in (*self._routes.values(), self._default)}.values():
+            closer: Callable[[], Awaitable[None]] | None = getattr(model, "aclose", None)
+            if closer is not None:
+                await closer()
+
+    async def complete(
+        self,
+        database: AsyncSession,
+        *,
+        model: str,
+        system: str,
+        payload: dict[str, Any],
+        result_type: type[ResultT],
+        audit: CallAudit,
+    ) -> ResultT:
+        return await self._routes.get(audit.stage, self._default).complete(
+            database,
+            model=model,
+            system=system,
+            payload=payload,
+            result_type=result_type,
+            audit=audit,
         )
 
 

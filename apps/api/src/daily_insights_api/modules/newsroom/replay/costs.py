@@ -21,7 +21,8 @@ cost is what the ledger records for it.
 """
 
 import json
-from collections.abc import Iterable
+import statistics
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -99,6 +100,11 @@ class LedgerEntry:
     # and the reasoning tokens inside ``output_tokens``.
     list_cost: float | None = None
     reasoning_tokens: int | None = None
+    # Wall time of the call with its retries, the HTTP replies it took (two after a
+    # repair turn) and the error that ended a failed call.
+    latency_ms: int | None = None
+    replies: int | None = None
+    error: str | None = None
 
 
 class Ledger:
@@ -120,6 +126,8 @@ class Ledger:
         model: str,
         usages: Iterable[dict[str, Any]],
         failed: bool = False,
+        latency_ms: int | None = None,
+        error: str | None = None,
     ) -> LedgerEntry | None:
         """Price and record one chat call from the usage of each of its HTTP replies."""
         rows = list(usages)
@@ -156,6 +164,9 @@ class Ledger:
             failed=failed,
             list_cost=list_cost,
             reasoning_tokens=sum(reasoning) if reasoning else None,
+            latency_ms=latency_ms,
+            replies=len(rows),
+            error=error,
         )
         self.add(entry)
         return entry
@@ -223,6 +234,50 @@ def ledger_total(entries: Iterable[LedgerEntry]) -> dict[str, Any]:
         "reasoning_tokens": sum(row.reasoning_tokens or 0 for row in rows),
         "usd": sum(row.usd for row in rows),
     }
+
+
+def _percentile(values: list[int], share: float) -> int:
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, round(share * (len(ordered) - 1)))]
+
+
+def calls_markdown(
+    entries: Iterable[LedgerEntry],
+    groups: Mapping[str, str],
+    *,
+    timeout_seconds: float = 90.0,
+) -> str:
+    """Per group (runs whose name contains its pattern): latency, repairs, failures, cost."""
+    rows = list(entries)
+    lines = [
+        "| 組 | 呼叫 | 延遲 p50 | p95 | 最長 | 超過逾時 | repair 回合 | 失敗 | 推理 tokens 平均"
+        " | 輸出 tokens 平均 | list_cost |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for name, pattern in groups.items():
+        members = [row for row in rows if pattern in row.run and row.kind == "llm"]
+        timed = [row.latency_ms for row in members if row.latency_ms is not None]
+        if not members:
+            lines.append(f"| {name} | 0 | — | — | — | — | — | — | — | — | — |")
+            continue
+        late = sum(value > timeout_seconds * 1000 for value in timed)
+        repairs = sum((row.replies or 1) > 1 for row in members)
+        failed = sum(row.failed for row in members)
+        lines.append(
+            f"| {name} | {len(members)}"
+            + (
+                f" | {_percentile(timed, 0.5) / 1000:.1f} s"
+                f" | {_percentile(timed, 0.95) / 1000:.1f} s"
+                f" | {max(timed) / 1000:.1f} s"
+                if timed
+                else " | — | — | —"
+            )
+            + f" | {late} | {repairs} | {failed}"
+            f" | {statistics.fmean(row.reasoning_tokens or 0 for row in members):.0f}"
+            f" | {statistics.fmean(row.output_tokens for row in members):.0f}"
+            f" | {sum(row.usd for row in members):.4f} |"
+        )
+    return "\n".join(lines) + "\n"
 
 
 def ledger_markdown(entries: Iterable[LedgerEntry]) -> str:
