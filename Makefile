@@ -4,7 +4,8 @@ export pnpm_config_verify_deps_before_run := false
 
 .PHONY: help init dev dev-detached dev-web dev-api stop restart logs ps \
 	migrate bootstrap-admin format format-check lint type-check test test-db \
-	generate-morning-reports assemble-newsroom newsroom-quality newsroom-reembed newsroom-replay \
+	generate-morning-reports assemble-newsroom newsroom-quality newsroom-reembed newsroom-recover \
+	newsroom-replay \
 	backfill-index-daily-bars \
 	check-index-catalog check-nginx check-production-deployment \
 	check build
@@ -79,6 +80,11 @@ newsroom-quality: ## 印出重點新聞品質指標（唯讀，可傳 START、EN
 newsroom-reembed: ## 以目前的 embedding 模型與翻譯重算文章向量（預設收稿中的版次，可傳 START、END）
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
 	docker compose run --rm --build newsroom-worker python -m daily_insights_api.scripts.run_newsroom_reembed $(if $(START),--start $(START),) $(if $(END),--end $(END),)
+
+newsroom-recover: ## 停擺後的重點新聞復原（預設 dry run；CMD=requeue|reembed-untranslated|reopen，ARGS，APPLY=1 才寫入）
+	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
+	@test -n "$(CMD)" || { echo "請提供 CMD，例如 make newsroom-recover CMD=requeue ARGS='--stage triage --error-code triage_provider_http_402'。"; exit 1; }
+	docker compose run --rm --build newsroom-worker python -m daily_insights_api.scripts.run_newsroom_recover $(CMD) $(ARGS) $(if $(APPLY),--apply,)
 
 # The replay runs on the host on purpose: `docker compose run --build` would
 # build the production project. It only reads production (read-only exports)

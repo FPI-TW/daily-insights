@@ -162,28 +162,110 @@ ORDER BY 4 DESC;
    `pending` 且 `next_attempt_at` 在未來的資料列：它可能正在處理，重設 `attempts` 會讓
    進行中的結果被 fence 掉並重複呼叫 LLM。
 3. 能用後台動作就用後台動作：後台會寫 `newsroom_edit_log`，並同時處理相依的資料列。
-4. SQL 重新排入與 `queue.enqueue` 相同：`status = 'pending'`、`attempts = 0`、
-   `next_attempt_at = NULL`（設為 `now()` 亦可，兩者都會立即被領取）、`error_code = NULL`。
-   worker 會在下一次輪詢（預設 2 秒）領取，不需要重啟。
+4. 批次重新排入使用[復原工具](#復原工具)，它先列出影響範圍，確認後才寫入；工具無法
+   使用時才以 [SQL](#sql-備援) 處理。兩者的重設相同：`status = 'pending'`、
+   `attempts = 0`、`next_attempt_at = NULL`、`error_code = NULL`。worker 會在下一次輪詢
+   （預設 2 秒）領取，不需要重啟。
 
-| 狀況                                       | 優先做法                                                                                       |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| 事件「分析失敗」或項目「『為何重要』失敗」 | 審核頁該則的「重新分析」：事件 `analysis` 與其所有未移除、未隱藏、未放棄項目的 `why` 重新排入  |
-| 「缺全文」（`needs_body`）                 | 原文對照中對某篇文章「貼上全文」，事件自動重新排入分析                                         |
-| 文章 `fetch_status = failed`               | 以 SQL 重新排入 `fetch`；全文取得後若事件仍是 `needs_body` 或要用新全文重寫，再按「重新分析」  |
-| 文章 `embed_status = failed`               | 以 SQL 重新排入 `embed`；成功後自動排入初篩                                                    |
-| 文章 `triage_status = failed`              | `embedding` 為 NULL 時重新排入 `embed`，否則重新排入 `triage`                                  |
-| 事件 `en_status = failed`                  | 改任何繁中文字會自動重新排入；否則以 SQL 重新排入 `en`                                         |
-| 事件分到錯的群                             | 後台「合併其他事件到此」或「拆分選取的文章」，受影響事件自動重新分析；不要用 SQL 改 `event_id` |
+| 狀況                                       | 優先做法                                                                                                                           |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 事件「分析失敗」或項目「『為何重要』失敗」 | 審核頁該則的「重新分析」：事件 `analysis` 與其所有未移除、未隱藏、未放棄項目的 `why` 重新排入；大量時用 `requeue --stage analysis` |
+| 「缺全文」（`needs_body`）                 | 原文對照中對某篇文章「貼上全文」，事件自動重新排入分析                                                                             |
+| 文章 `fetch_status = failed`               | `requeue --stage fetch`；全文取得後若事件仍是 `needs_body` 或要用新全文重寫，再按「重新分析」                                      |
+| 文章 `embed_status = failed`               | `requeue --stage embed`；成功後自動排入初篩                                                                                        |
+| 文章 `triage_status = failed`              | `requeue --stage triage`；沒有 embedding 或 embedding 來自未翻譯標題的文章會自動改排 `embed`                                       |
+| 外文標題因翻譯失敗以原文 embedding         | `reembed-untranslated`（只處理尚未完成初篩的文章）                                                                                 |
+| 事件 `en_status = failed`                  | 改任何繁中文字會自動重新排入；否則 `requeue --stage en`                                                                            |
+| 事件分到錯的群                             | 後台「合併其他事件到此」或「拆分選取的文章」，受影響事件自動重新分析；不要用 SQL 改 `event_id`                                     |
 
-重新排入某版次所有 `failed` 的文章 stage（以 `embed` 為例，`fetch`、`triage` 只需替換
-欄位前綴）：
+已經在佇列中的 provider 設定錯誤：只改 GitHub Secret 或 `apps/api/.env` 不會影響執行中
+的容器；正式環境需重新部署（本機需重新建立容器）讓新值生效，之後再重新排入。
+
+### 復原工具
+
+`run_newsroom_recover` 在 `newsroom-worker` 的環境執行（讀取同一個資料庫與 embedding
+設定）。**預設只列出會影響的筆數（dry run，唯讀交易），加 `--apply` 才寫入。**
+
+```sh
+# 本機（CMD 為子指令，ARGS 為其參數，APPLY=1 才寫入）
+make newsroom-recover CMD=requeue ARGS='--stage triage --error-code triage_provider_http_402 --from 2026-10-25'
+make newsroom-recover CMD=requeue ARGS='--stage triage --error-code triage_provider_http_402 --from 2026-10-25' APPLY=1
+
+# 正式環境（EC2）
+docker exec daily-insights-newsroom-worker python -m daily_insights_api.scripts.run_newsroom_recover \
+  requeue --stage triage --error-code triage_provider_http_402 --from 2026-10-25
+```
+
+| 子指令                 | 參數                                                                                              | 作用                                                                                                                                                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `requeue`              | `--stage {fetch,embed,triage,analysis,why,en}`、`--error-code <code>`（可重複）、`--from`、`--to` | 重新排入該 stage 中錯誤碼相符的 `failed` 資料列；日期為版次日期（含頭尾），省略則不限                                                                                                                         |
+| `reembed-untranslated` | `--from`、`--to`                                                                                  | 找出 embed 前翻譯因 provider 錯誤被略過、以原文 embedding 的文章（`newsroom_llm_calls` 中 `stage = 'embed'`、非 embedding model、`embed_provider_*`，且之後沒有成功的翻譯），重新排入 `embed`，成功後自動初篩 |
+| `reopen`               | `--edition-date`、`--market`、`--force`、`--extend-late-fill`、`--actor`                          | 把已發布的版次退回 draft 等待重新組稿，見[重開已發布的版次](#重開已發布的版次)                                                                                                                                |
+
+輸出為 JSON：`groups` 依版次日期列出每組資料列的去向（`queue`）、原因（`reason`）與
+筆數，`queued` 為會重新排入的總數，`queue` 為 `null` 的組只列出、不會改動：
+
+| `reason`                 | 意義                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------- |
+| `failed`                 | 重新排入原 stage                                                                                  |
+| `embedding_missing`      | 初篩失敗但沒有 embedding：改排 `embed`，初篩暫停（`idle`）到新 embedding 完成                     |
+| `untranslated_embedding` | embedding 來自未翻譯的外文標題：改排 `embed`（重新翻譯後 embedding），初篩暫停到新 embedding 完成 |
+| `embed_in_flight`        | 要改排 `embed` 但該文章的 `embed` 正在處理或退避中，不動                                          |
+| `triage_in_flight`       | （`reembed-untranslated`）初篩正在處理或退避中，不動；結束後若仍需要再執行一次                    |
+| `already_triaged`        | （`reembed-untranslated`）已完成初篩、已歸入事件，不重新 embedding                                |
+| `event_merged`           | 事件已合併到其他事件，不重新分析或翻譯                                                            |
+| `item_not_live`          | 項目已移除、隱藏或放棄，不重新排入 `why`                                                          |
+| `event_not_ready`        | 事件尚未分析完成；`why` 會隨分析一起寫入，先重新排入 `analysis`                                   |
+
+工具不寫 `newsroom_edit_log`（`reopen` 加 `--actor` 時例外），請把 `--apply` 的輸出貼在
+處置紀錄中。
+
+### 供應商停擺後的復原順序
+
+LLM 或 embedding 供應商停擺（例如 2026-10-24 起的 `HTTP 402`）時，`embed` 前的翻譯、
+初篩、精選、分析與翻譯全部失敗：文章停在 `triage_status = failed`，外文文章以原文
+embedding，09:00 的版次沒有任何項目而被[暫停自動發布](#版次發布與晚到補上)。這個機制
+加入前，2026-10-25 至 10-27 的空版次都已照常發布，需要重開。修復依下列順序，每一步都
+先 dry run 確認範圍：
+
+1. **修正金鑰或改用其他供應商**並重新部署 `newsroom-worker` 與 `orchestration-worker`
+   （見「切換 LLM 供應商」）。以最近的 `newsroom_llm_calls` 確認新呼叫已成功。
+2. **重新 embedding 未翻譯的文章**：`reembed-untranslated --from <第一天>`。先做這步，
+   避免初篩用原文向量歸群。
+3. **重新排入 embed 與初篩**：`requeue --stage embed --error-code embed_provider_http_402`
+   （若有），再 `requeue --stage triage --error-code triage_provider_http_402`。等初篩
+   完成（[查詢佇列狀態](#查詢佇列狀態)中 `triage` 沒有 `pending`）。
+4. **重開空的已發布版次**（沒有項目，或項目全被晚到補上放棄）：
+   `reopen --edition-date <日期> --extend-late-fill <HH:MM>`，每個受影響日期各一次。
+   仍是 draft（被暫停）的版次不需要重開。
+5. **重新組稿**：對每個重開或被暫停的日期執行[重新組稿](#重新組稿)。組稿會重新排入
+   失敗的事件分析。
+6. **確認發布**：下一輪 sweep（一分鐘內）發布有項目的市場；仍沒有項目的市場會發
+   `版次沒有任何項目 暫停自動發布`。分析在新的晚到補上期限前完成的項目即對讀者可見。
+7. **其他失敗**：仍在已發布版次中的事件以 `requeue --stage analysis`、`--stage why`、
+   `--stage en` 處理對應錯誤碼。
+
+### SQL 備援
+
+復原工具無法使用時，以 SQL 重新排入。重新排入某版次所有 `failed` 的文章 stage（以
+`embed` 為例，`fetch`、`triage` 只需替換欄位前綴）：
 
 ```sql
 UPDATE newsroom_articles
 SET embed_status = 'pending', embed_attempts = 0,
     embed_next_attempt_at = NULL, embed_error_code = NULL
 WHERE edition_date = DATE '2026-10-02' AND embed_status = 'failed';
+```
+
+初篩失敗且沒有 embedding 的文章改排 `embed`，初篩暫停到新 embedding 完成：
+
+```sql
+UPDATE newsroom_articles
+SET embed_status = 'pending', embed_attempts = 0,
+    embed_next_attempt_at = NULL, embed_error_code = NULL,
+    triage_status = 'idle', triage_attempts = 0,
+    triage_next_attempt_at = NULL, triage_error_code = NULL
+WHERE edition_date = DATE '2026-10-02' AND triage_status = 'failed' AND embedding IS NULL;
 ```
 
 修正金鑰後，重新排入同一錯誤碼造成的事件分析失敗：
@@ -207,9 +289,6 @@ SET en_status = 'pending', en_attempts = 0, en_next_attempt_at = NULL, en_error_
 WHERE id = '<event uuid>' AND en_status = 'failed';
 ```
 
-已經在佇列中的 provider 設定錯誤：只改 GitHub Secret 或 `apps/api/.env` 不會影響執行中
-的容器；正式環境需重新部署（本機需重新建立容器）讓新值生效，之後再重新排入。
-
 ### 重新組稿
 
 08:00 組稿失敗時，統一 orchestration 每 30 分鐘重試到 10:00；精選失敗則已自動退回
@@ -221,26 +300,32 @@ WHERE id = '<event uuid>' AND en_status = 'failed';
   日期參數與 `make assemble-newsroom` 傳入的相同。
 
 組稿是冪等的：只重建仍為 `draft` 的市場，保留管理員加入與移除的項目；已發布的
-市場不會被改動。重新組稿會再發一次「草稿完成」通知。
+市場不會被改動（要重建已發布的版次，先[重開](#重開已發布的版次)）。重新組稿會再發一次
+「草稿完成」通知，並重新排入入選事件中失敗的分析。
 
 ## Slack 通知與處置
 
 通知由 `DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL` 送出（未設定時只在 log 出現
 `newsroom.notice`）。標題以粗體顯示，帶連結的訊息最後一行為「開啟後台」。
 
-| 通知標題（範例）                                           | 內容                                                                                                                | 處置                                                                                                                                                                                                                                                                |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `2026-10-02 重點新聞草稿完成`                              | 各市場則數（精選失敗者附「精選失敗 改用粗分排序」）、5 星事件標題、「組稿時仍有 N 篇文章未完成初篩 已忽略」         | 09:00 前開啟後台審核、改字、核准。有大量未初篩文章時檢查 `embed`／`triage` 佇列與 LLM 錯誤；修正後可[重新組稿](#重新組稿)。                                                                                                                                         |
-| `2026-10-02 tw_equity 精選失敗 已改用粗分排序`             | `入選 N 則 星等留空`                                                                                                | 以 `newsroom_llm_calls` 中 `stage = 'editor'` 的錯誤碼判斷原因。草稿仍可用：可直接人工調整項目後核准，或修正後重新組稿取得星等。                                                                                                                                    |
-| `2026-10-02 us_equity 有 N 則新聞在 12:00 前未完成 已放棄` | 被放棄項目的事件標題                                                                                                | 查詢該版次項目的 `analysis_error_code`／`why_error_code`。該則已不對讀者顯示；若修正後仍要上架，見[恢復被放棄的項目](#恢復被放棄的項目)。                                                                                                                           |
-| `新聞來源「<名稱>」持續抓取失敗`                           | 來源代碼、連續失敗次數與最後錯誤碼、最後成功時間（台北時間，或「從未成功」）                                        | 開啟「新聞來源管理」確認來源。依[來源錯誤碼](#來源健康)修正網址、格式或連結規則，或暫時停用來源。同一次故障只通知一次，來源成功一次後重置。                                                                                                                         |
-| `新聞管線 <stage> 階段發生無法重試的錯誤`                  | `錯誤代碼 <code>`，例如 `triage_provider_http_401`、`embed_provider_http_402`、`newsroom_llm_configuration_missing` | 401／403：金鑰錯誤或被撤銷；402：額度不足；400／404：model 名稱或 base URL 錯誤；`*_configuration_missing`：未設定金鑰。修正 Secret 並重新部署後，[重新排入](#重新排入)該錯誤碼的 `failed` 資料列。同一 stage 與錯誤碼每小時最多通知一次（worker 重啟後重新計算）。 |
+| 通知標題（範例）                                           | 內容                                                                                                                                                                         | 處置                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `2026-10-02 重點新聞草稿完成`                              | 各市場則數（精選失敗者附「精選失敗 改用粗分排序」）、5 星事件標題、「組稿時仍有 N 篇文章未完成初篩 已忽略」                                                                  | 09:00 前開啟後台審核、改字、核准。有大量未初篩文章時檢查 `embed`／`triage` 佇列與 LLM 錯誤；修正後可[重新組稿](#重新組稿)。某市場 0 則時，09:00 不會自動發布該市場。                                                                                                                                                         |
+| `2026-10-02 tw_equity 精選失敗 已改用粗分排序`             | `入選 N 則 星等留空`                                                                                                                                                         | 以 `newsroom_llm_calls` 中 `stage = 'editor'` 的錯誤碼判斷原因。草稿仍可用：可直接人工調整項目後核准，或修正後重新組稿取得星等。                                                                                                                                                                                             |
+| `2026-10-02 us_equity 有 N 則新聞在 12:00 前未完成 已放棄` | 被放棄項目的事件標題                                                                                                                                                         | 查詢該版次項目的 `analysis_error_code`／`why_error_code`。該則已不對讀者顯示；若修正後仍要上架，見[恢復被放棄的項目](#恢復被放棄的項目)；整個版次都被放棄時改用[重開已發布的版次](#重開已發布的版次)。                                                                                                                       |
+| `2026-10-25 版次沒有任何項目 暫停自動發布`                 | `市場 global, tw_equity, us_equity`、該日文章的初篩結果（例如 `收稿 512 篇 初篩失敗 498 篇 (triage_provider_http_402 498)`，或「收稿時段沒有任何文章」）、可能原因與處置提示 | 版次維持 `draft`，讀者端繼續顯示上一個版次。依初篩錯誤碼修正原因，照[供應商停擺後的復原順序](#供應商停擺後的復原順序)重新排入並[重新組稿](#重新組稿)；有項目後下一輪自動發布。確定當天沒有新聞時在後台核准空版次。同一版次只通知一次（`held_empty_at`），重開後重新計算。                                                    |
+| `新聞來源「<名稱>」持續抓取失敗`                           | 來源代碼、連續失敗次數與最後錯誤碼、最後成功時間（台北時間，或「從未成功」）                                                                                                 | 開啟「新聞來源管理」確認來源。依[來源錯誤碼](#來源健康)修正網址、格式或連結規則，或暫時停用來源。同一次故障只通知一次，來源成功一次後重置。                                                                                                                                                                                  |
+| `新聞管線 <stage> 階段發生無法重試的錯誤`                  | `錯誤代碼 <code>`，例如 `triage_provider_http_401`、`embed_provider_http_402`、`newsroom_llm_configuration_missing`                                                          | 401／403：金鑰錯誤或被撤銷；402：額度不足；400／404：model 名稱或 base URL 錯誤；`*_configuration_missing`：未設定金鑰。修正 Secret 並重新部署後，以[復原工具](#復原工具) `requeue --stage <stage> --error-code <code>` 重新排入該錯誤碼的 `failed` 資料列。同一 stage 與錯誤碼每小時最多通知一次（worker 重啟後重新計算）。 |
 
 注意：
 
 - `stage_fatal` 標題中的 `<stage>` 是佇列 stage（`embed`、`triage`、`analysis`、`why`、
   `translate`）；錯誤碼前綴則是 `newsroom_llm_calls.stage`（`embed`、`triage`、`analysis`、
-  `why`、`translate`），可直接用來篩選稽核紀錄與要重新排入的資料列。
+  `why`、`translate`），可直接用來篩選稽核紀錄與要重新排入的資料列。復原工具的
+  `--stage` 使用欄位前綴，`translate` 佇列為 `en`。
+- `embed` 前的標題翻譯失敗（例如 `embed_provider_http_402`）不發 `stage_fatal`，文章也
+  不會 `failed`：它以原文 embedding 後照常進入初篩。修正後以 `reembed-untranslated`
+  重新 embedding 尚未初篩的文章。
 - 08:00 組稿在 `orchestration-worker` 執行，它的金鑰錯誤不會發 `stage_fatal`，而是表現為
   「精選失敗 已改用粗分排序」。
 
@@ -274,9 +359,23 @@ ORDER BY consecutive_failures DESC, last_success_at NULLS FIRST;
 ## 版次發布與晚到補上
 
 - **09:00 前**：管理員在後台核准單一市場或全部草稿，立即發布（`published_by_user_id`
-  記錄核准者）。核准在 API 內完成，不依賴 `newsroom-worker`。
+  記錄核准者）。核准在 API 內完成，不依賴 `newsroom-worker`；空的草稿也可以核准。
 - **09:00 自動發布**：由 `newsroom-worker` 每分鐘檢查。worker 當下停止時，草稿維持
   `draft`，讀者端繼續顯示上一個已發布版次並標示日期；worker 恢復後會立即補發布。
+- **空版次暫停自動發布**：到期的草稿沒有任何未移除、未隱藏、未放棄的項目時不自動
+  發布，維持 `draft`，第一次暫停時記錄 `held_empty_at` 並發出
+  [`版次沒有任何項目 暫停自動發布`](#slack-通知與處置)（同一版次只通知一次，同一日期的
+  市場合併為一則）。修正原因並[重新組稿](#重新組稿)後，有項目的市場在下一輪自動發布；
+  確定當天沒有新聞時可在後台直接核准空版次。暫停期間讀者端顯示「今日新聞準備中」與
+  上一個有內容的版次。查詢被暫停的版次：
+
+  ```sql
+  SELECT edition_date, market_code, held_empty_at, assembled_at, auto_publish_at
+  FROM newsroom_editions
+  WHERE status = 'draft' AND held_empty_at IS NOT NULL
+  ORDER BY edition_date, market_code;
+  ```
+
 - **延後自動發布**（例如需要更多審核時間），只對仍為草稿的版次有效：
 
   ```sql
@@ -295,6 +394,47 @@ ORDER BY consecutive_failures DESC, last_success_at NULLS FIRST;
   WHERE edition_date = DATE '2026-10-02' AND late_fill_closed_at IS NULL;
   ```
 
+### 重開已發布的版次
+
+組稿只重建 `draft`，已發布的版次要先以[復原工具](#復原工具)的 `reopen` 退回草稿：
+
+```sh
+# 先 dry run，確認每個市場的 action 都是 reopen
+make newsroom-recover CMD=reopen ARGS='--edition-date 2026-10-25 --extend-late-fill 18:00'
+make newsroom-recover CMD=reopen ARGS='--edition-date 2026-10-25 --extend-late-fill 18:00 --actor ops@example.com' APPLY=1
+```
+
+- **只重開沒有項目的版次**：版次仍有未移除、未隱藏、未放棄的項目時拒絕，需加
+  `--force`。重開有項目的版次會讓它從讀者端消失，直到重新發布（讀者看到上一個版次）。
+- **等待重新組稿**：重開會清除 `published_at`、`assembled_at`、`late_fill_closed_at` 與
+  `held_empty_at`，被放棄的項目恢復。`assembled_at` 為 NULL 的草稿不會被自動發布，也
+  不會被暫停通知，直到[重新組稿](#重新組稿)；組稿後下一輪 sweep 發布有項目的市場，仍
+  沒有項目則暫停並通知。
+- **晚到補上期限**：重開會重新開始晚到補上，重新發布後到期限仍未完成分析的項目會被
+  放棄。原期限已過時必須以 `--extend-late-fill` 給新期限（`HH:MM` 為台北時間今天，或
+  ISO 時間如 `2026-10-28T02:00+08:00`），否則拒絕。
+- **全有或全無**：同一日期的任一市場被拒絕時，`--apply` 不會改動任何市場；可用
+  `--market` 只處理其中一個。
+- **稽核**：`newsroom_edit_log.user_id` 不可為 NULL，只有加 `--actor <管理員 email>` 時
+  才寫入 `action = 'reopen'` 的紀錄（含重開前的狀態與項目數）；未加時保留工具輸出。
+
+工具無法使用時的 SQL 備援（同一個交易內執行，先確認版次沒有項目）：
+
+```sql
+BEGIN;
+UPDATE newsroom_editions
+SET status = 'draft', published_at = NULL, published_by_user_id = NULL,
+    assembled_at = NULL, late_fill_closed_at = NULL, held_empty_at = NULL,
+    late_fill_deadline = TIMESTAMPTZ '2026-10-27 18:00:00+08'
+WHERE edition_date = DATE '2026-10-25' AND market_code = 'global' AND status = 'published';
+UPDATE newsroom_edition_items i
+SET abandoned_at = NULL
+FROM newsroom_editions e
+WHERE e.id = i.edition_id AND e.edition_date = DATE '2026-10-25'
+  AND e.market_code = 'global' AND i.abandoned_at IS NOT NULL;
+COMMIT;
+```
+
 ### 恢復被放棄的項目
 
 被放棄的項目不會再自動上架。先修正原因，在後台對該事件「重新分析」（或以 SQL 重新
@@ -309,6 +449,9 @@ SET abandoned_at = NULL
 FROM newsroom_events e
 WHERE i.id = '<item uuid>' AND e.id = i.event_id AND e.analysis_status = 'ready';
 ```
+
+整個版次的項目都被放棄（例如停擺期間的分析全部失敗）時，改用
+[重開已發布的版次](#重開已發布的版次)並重新組稿。
 
 ### 發布後的修正
 
