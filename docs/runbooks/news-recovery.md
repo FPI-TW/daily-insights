@@ -46,7 +46,11 @@ SQL 範例使用 PostgreSQL。本機以 `docker compose exec postgres psql -U da
 ## 佇列狀態語意
 
 每個 stage 在資料列上有 `<stage>_status`、`<stage>_attempts`、`<stage>_next_attempt_at`
-與 `<stage>_error_code`：
+、`<stage>_error_code` 與 `<stage>_claim_token`：
+
+`claim_token` 是每次領取獨立產生的 UUID，與可重設的重試次數分開。重新排入或暫停工作時
+會清除 token；舊 worker 回傳 `fenced` 時，其產品資料修改會整筆回滾，LLM 呼叫紀錄仍保留。
+過期工作的錯誤不覆寫新工作，也不發送失敗／額度通知。優先使用下方的復原指令，避免只修改 attempts。
 
 | 資料表                   | Stage（欄位前綴）                            |
 | ------------------------ | -------------------------------------------- |
@@ -253,7 +257,7 @@ embedding，09:00 的版次沒有任何項目而被[暫停自動發布](#版次�
 ```sql
 UPDATE newsroom_articles
 SET embed_status = 'pending', embed_attempts = 0,
-    embed_next_attempt_at = NULL, embed_error_code = NULL
+    embed_claim_token = NULL, embed_next_attempt_at = NULL, embed_error_code = NULL
 WHERE edition_date = DATE '2026-10-02' AND embed_status = 'failed';
 ```
 
@@ -262,9 +266,9 @@ WHERE edition_date = DATE '2026-10-02' AND embed_status = 'failed';
 ```sql
 UPDATE newsroom_articles
 SET embed_status = 'pending', embed_attempts = 0,
-    embed_next_attempt_at = NULL, embed_error_code = NULL,
+    embed_claim_token = NULL, embed_next_attempt_at = NULL, embed_error_code = NULL,
     triage_status = 'idle', triage_attempts = 0,
-    triage_next_attempt_at = NULL, triage_error_code = NULL
+    triage_claim_token = NULL, triage_next_attempt_at = NULL, triage_error_code = NULL
 WHERE edition_date = DATE '2026-10-02' AND triage_status = 'failed' AND embedding IS NULL;
 ```
 
@@ -273,7 +277,7 @@ WHERE edition_date = DATE '2026-10-02' AND triage_status = 'failed' AND embeddin
 ```sql
 UPDATE newsroom_events
 SET analysis_status = 'pending', analysis_attempts = 0,
-    analysis_next_attempt_at = NULL, analysis_error_code = NULL
+    analysis_claim_token = NULL, analysis_next_attempt_at = NULL, analysis_error_code = NULL
 WHERE analysis_status = 'failed'
   AND analysis_error_code = 'analysis_provider_http_402'
   AND edition_date >= DATE '2026-10-01';
@@ -285,7 +289,8 @@ WHERE analysis_status = 'failed'
 
 ```sql
 UPDATE newsroom_events
-SET en_status = 'pending', en_attempts = 0, en_next_attempt_at = NULL, en_error_code = NULL
+SET en_status = 'pending', en_attempts = 0, en_claim_token = NULL,
+    en_next_attempt_at = NULL, en_error_code = NULL
 WHERE id = '<event uuid>' AND en_status = 'failed';
 ```
 
@@ -611,6 +616,30 @@ DAILY_INSIGHTS_NEWSROOM_TRANSLATE_MODEL=deepseek-v4.1-flash
   `GET /api/admin/orchestration/legacy-runs` 查閱，不提供任何恢復操作。
 - 舊版次的內容已搬入 `newsroom_*`（`selection_mode = legacy`），需要隱藏時在審核頁
   處理，見[重點新聞架構](../architecture/daily-news.md#舊版次資料搬移)。
+
+### 已套用舊版 import 的來源檢查
+
+`20261029_0054` 會補建 `newsroom_events.legacy_sources`（若尚無此欄位），並從仍有關聯的
+歷史文章回填來源。新部署的 `0034` 會在刪除舊表前保存每個事件的來源快照，包含跨日期重複 URL。
+如 migration 記錄 `legacy newsroom events have no recoverable source link`，可先唯讀確認：
+
+```sql
+SELECT id, edition_date, working_title
+FROM newsroom_events
+WHERE created_by = 'legacy' AND legacy_sources = '[]'::jsonb
+ORDER BY edition_date, id;
+```
+
+這些事件在舊 import 已失去文章關聯；目前資料無法可靠推回原始 URL。將切換前備份還原到
+隔離資料庫，比對版次日期、市場與舊新聞三語內容，確認對應後才補入 `legacy_sources`
+（`[{"name":"原來源名稱","url":"https://原始網址","published_at":null}]`；有發布時間則填 ISO 8601）。
+不得在正式資料庫回跑歷史 import、重新指派共用文章的 event ID，或只依標題猜測網址。
+降級 `0054` 保留來源快照，重新升級時不覆寫已有快照。
+若部署仍在原始 `0053` schema，也可直接降級至 `20261001_0033`；修正版 `0034` 的降級容許快照欄位不存在。
+
+事件合併會轉移來源快照，依 URL 去重並優先保留目標來源的名稱與發布時間，目標事件不必是歷史匯入事件。
+拆分選取文章時，對應 URL 的快照隨文章移動；只有快照、沒有文章的來源留在原事件。
+不要只用 SQL 搬移 `event_id`，以免略過來源快照與版次項目的同步處理。
 
 ## 相關文件
 

@@ -2,7 +2,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 import pytest_asyncio
@@ -183,6 +183,83 @@ async def test_enqueue_resets_a_failed_row(
             .where(NewsroomArticle.embed_status == "pending", NewsroomArticle.embed_attempts == 0)
         )
     assert pending == 1
+
+
+@pytest.mark.parametrize("outcome", ["success", "retry", "wait", "fatal"])
+async def test_reenqueue_fences_old_claim_even_when_attempt_number_is_reused(
+    newsroom_database: async_sessionmaker[AsyncSession],
+    outcome: Literal["success", "retry", "wait", "fatal"],
+) -> None:
+    article_id = await _article(newsroom_database)
+    async with newsroom_database() as database:
+        old = (await claim(database, queue.EMBED))[0]
+    async with newsroom_database() as database:
+        await queue.enqueue(database, queue.EMBED, [article_id])
+        await database.commit()
+    async with newsroom_database() as database:
+        new = (await claim(database, queue.EMBED))[0]
+    assert old.attempt == new.attempt == 1
+    assert old.token != new.token
+    heard: list[str] = []
+
+    async def on_fatal(claim_: Claim, error: FatalStageError) -> None:
+        heard.append("fatal")
+
+    async def on_wait(claim_: Claim, error: RetryableStageError) -> None:
+        heard.append("wait")
+
+    async def old_handler(database: AsyncSession, claim_: Claim) -> dict[str, Any]:
+        if outcome == "retry":
+            raise RetryableStageError("old_timeout")
+        if outcome == "wait":
+            raise RetryableStageError("old_allowance", counts_attempt=False)
+        if outcome == "fatal":
+            raise FatalStageError("old_key")
+        return {"title": "outdated result"}
+
+    assert (
+        await run_claimed(newsroom_database, old, old_handler, on_fatal=on_fatal, on_wait=on_wait)
+        == "fenced"
+    )
+    row = await _row(newsroom_database, article_id)
+    assert (row.embed_status, row.embed_attempts, row.embed_claim_token) == (
+        "pending",
+        1,
+        new.token,
+    )
+    assert row.title == "Headline"
+    assert row.embed_error_code is None
+    assert heard == []
+
+    async def new_handler(database: AsyncSession, claim_: Claim) -> dict[str, Any]:
+        return {"title": "current result"}
+
+    assert await run_claimed(newsroom_database, new, new_handler) == "done"
+    row = await _row(newsroom_database, article_id)
+    assert row.title == "current result"
+    assert row.embed_claim_token is None
+
+
+async def test_uncounted_wait_never_revives_a_previous_claim(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    await _article(newsroom_database)
+    async with newsroom_database() as database:
+        old = (await claim(database, queue.EMBED))[0]
+
+    async def wait(database: AsyncSession, claim_: Claim) -> dict[str, Any]:
+        raise RetryableStageError("allowance", counts_attempt=False)
+
+    assert await run_claimed(newsroom_database, old, wait) == "pending"
+    async with newsroom_database() as database:
+        new = (await claim(database, queue.EMBED, now=datetime.now(UTC) + timedelta(days=1)))[0]
+    assert old.attempt == new.attempt == 1
+
+    async def success(database: AsyncSession, claim_: Claim) -> dict[str, Any]:
+        return {}
+
+    assert await run_claimed(newsroom_database, old, success) == "fenced"
+    assert await run_claimed(newsroom_database, new, success) == "done"
 
 
 async def test_handler_can_settle_an_alternative_terminal_status(

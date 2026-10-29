@@ -108,7 +108,7 @@ async def merge_events(
     source_ids: Sequence[uuid.UUID],
     user_id: uuid.UUID | None,
 ) -> None:
-    """Move every article of ``source_ids`` into ``target_id``; sources become ``merged``.
+    """Move articles and source snapshots into ``target_id``; sources become ``merged``.
 
     ``user_id`` is ``None`` for the assembly's automatic duplicate merge, which
     logs instead of writing the admin edit log (that log requires an admin).
@@ -125,6 +125,15 @@ async def merge_events(
     target = events[target_id]
     if any(events[source].edition_date != target.edition_date for source in sources):
         raise EventServiceError("edition_date_mismatch")
+
+    # Some legacy links have no article in this window (URLs are globally
+    # unique). Preserve them through merges, including chains into new events.
+    # Prefer the target's original metadata when URLs overlap.
+    snapshots = {link["url"]: link for link in target.legacy_sources}
+    for source in sources:
+        for link in events[source].legacy_sources:
+            snapshots.setdefault(link["url"], link)
+    target.legacy_sources = list(snapshots.values())
 
     moved_articles = list(
         (
@@ -246,18 +255,26 @@ async def split_event(
     if len(moving) == len(current):
         raise EventServiceError("split_takes_every_article")
 
-    titles = await database.scalars(
-        select(NewsroomArticle.title)
-        .where(NewsroomArticle.id.in_(moving))
-        .order_by(NewsroomArticle.first_seen_at, NewsroomArticle.id)
-        .limit(1)
-    )
-    working_title = (titles.first() or original.working_title)[:500]
+    articles = (
+        await database.execute(
+            select(NewsroomArticle.title, NewsroomArticle.url)
+            .where(NewsroomArticle.id.in_(moving))
+            .order_by(NewsroomArticle.first_seen_at, NewsroomArticle.id)
+        )
+    ).all()
+    working_title = (articles[0].title or original.working_title)[:500]
+    moving_urls = {article.url for article in articles}
+    # A split selects articles, so snapshot-only links remain with the original.
+    moving_snapshots = [link for link in original.legacy_sources if link["url"] in moving_urls]
+    original.legacy_sources = [
+        link for link in original.legacy_sources if link["url"] not in moving_urls
+    ]
     created = NewsroomEvent(
         edition_date=original.edition_date,
         working_title=working_title,
         status="open",
         created_by="split",
+        legacy_sources=moving_snapshots,
     )
     database.add(created)
     await database.flush()

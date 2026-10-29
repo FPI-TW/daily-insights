@@ -25,7 +25,7 @@ def _worker(notifier: Notifier) -> NewsroomWorker:
 
 
 def _claim(stage: queue.StageSpec) -> Claim:
-    return Claim(stage=stage, row_id=uuid.uuid4(), attempt=1)
+    return Claim(stage=stage, row_id=uuid.uuid4(), attempt=1, token=uuid.uuid4())
 
 
 def _spent(stage: str, retry_after: timedelta | None) -> RetryableStageError:

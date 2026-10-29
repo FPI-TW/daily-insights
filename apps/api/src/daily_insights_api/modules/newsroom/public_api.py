@@ -164,6 +164,16 @@ async def _sources(
     database: AsyncSession, event_ids: Sequence[uuid.UUID]
 ) -> dict[uuid.UUID, list[NewsroomSourceLink]]:
     sources: dict[uuid.UUID, list[NewsroomSourceLink]] = defaultdict(list)
+    snapshots = await database.execute(
+        select(NewsroomEvent.id, NewsroomEvent.legacy_sources).where(
+            NewsroomEvent.id.in_(event_ids)
+        )
+    )
+    for event_id, links in snapshots:
+        for raw in links:
+            link = NewsroomSourceLink.model_validate(raw)
+            if _is_web_url(link.url):
+                sources[event_id].append(link)
     rows = await database.execute(
         select(NewsroomArticle, NewsroomSource)
         .join(NewsroomSource, NewsroomSource.id == NewsroomArticle.source_id)
@@ -176,6 +186,8 @@ async def _sources(
     )
     for article, source in rows:
         if article.event_id is None or not _is_web_url(article.url):
+            continue
+        if any(link.url == article.url for link in sources[article.event_id]):
             continue
         name = source.name
         if source.kind == "manual":

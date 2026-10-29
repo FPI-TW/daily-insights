@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from daily_insights_api import models as registered_models  # noqa: F401
 from daily_insights_api.core.config import get_settings
+from daily_insights_api.modules.newsroom.contracts import MarketCode
 from daily_insights_api.modules.newsroom.models import (
     NewsroomArticle,
     NewsroomEdition,
@@ -394,6 +395,9 @@ async def test_legacy_editions_become_readable_newsroom_editions(database_url: s
                 (4, 2, "A 臺灣標題"),
             ]
             assert tw.items[2].event_id == zh_hant.items[0].event_id
+            # This URL's article was already owned by a different event. The
+            # legacy source snapshot still preserves its reader-facing link.
+            assert [source.url for source in tw.items[1].sources] == ["https://example.com/taken"]
             assert [source.url for source in tw.items[2].sources] == ["https://example.com/a"]
             us_zh = await latest_edition(database, "us_equity", "zh-hant", today=date(2026, 9, 29))
             assert [(item.rank, item.stars, item.headline) for item in us_zh.items] == [
@@ -477,6 +481,148 @@ async def test_legacy_editions_become_readable_newsroom_editions(database_url: s
             )
     finally:
         await engine.dispose()
+
+
+async def test_repeated_legacy_url_retains_sources_for_every_date_market_and_locale(
+    database_url: str,
+) -> None:
+    url = "https://example.com/repeated"
+    days = (date(2026, 9, 28), date(2026, 9, 29))
+    markets: tuple[MarketCode, ...] = ("global", "tw_equity", "us_equity")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            for day in days:
+                for market in markets:
+                    edition_id = _edition(connection, day, market, 1)
+                    _item(connection, edition_id, 1, url, _trilingual(day.isoformat()))
+    finally:
+        engine.dispose()
+    _alembic(database_url, "upgrade", HEAD)
+    engine, sessions = await _sessions(database_url)
+    try:
+        async with sessions() as database:
+            event_ids: set[uuid.UUID] = set()
+            for day in days:
+                for market in markets:
+                    for locale in ("zh-hant", "zh-hans", "en"):
+                        edition = await latest_edition(database, market, locale, today=day)
+                        assert edition.edition_date == day
+                        assert len(edition.items) == 1
+                        item = edition.items[0]
+                        event_ids.add(item.event_id)
+                        assert [
+                            (source.name, source.url, source.published_at)
+                            for source in item.sources
+                        ] == [("Example", url, GENERATED_AT)]
+            assert len(event_ids) == 2
+            articles = (
+                await database.scalars(select(NewsroomArticle).where(NewsroomArticle.url == url))
+            ).all()
+            assert len(articles) == 1
+    finally:
+        await engine.dispose()
+
+
+async def test_old_deployment_backfills_available_sources_and_preserves_them_on_downgrade(
+    database_url: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_legacy(database_url)
+    _alembic(database_url, "upgrade", "20261027_0053")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            # An installation that already applied the original 0034 has no
+            # snapshot column. The old tables have already been dropped too.
+            connection.execute(text("ALTER TABLE newsroom_events DROP COLUMN legacy_sources"))
+    finally:
+        engine.dispose()
+    _alembic(database_url, "upgrade", HEAD)
+    assert "1 legacy newsroom events have no recoverable source link" in capsys.readouterr().err
+    engine, sessions = await _sessions(database_url)
+    try:
+        async with sessions() as database:
+            global_edition = await latest_edition(
+                database, "global", "zh-hant", today=date(2026, 9, 29)
+            )
+            assert [source.url for source in global_edition.items[0].sources] == [
+                "https://example.com/a"
+            ]
+            snapshots = {
+                event_id: links
+                for event_id, links in await database.execute(
+                    select(NewsroomEvent.id, NewsroomEvent.legacy_sources)
+                )
+            }
+            assert sum(bool(links) for links in snapshots.values()) == 3
+    finally:
+        await engine.dispose()
+
+    _alembic(database_url, "downgrade", "20261027_0053")
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            assert (
+                connection.scalar(
+                    text(
+                        "SELECT count(*) FROM information_schema.columns "
+                        "WHERE table_schema = 'public' AND column_name LIKE '%_claim_token' "
+                        "AND table_name LIKE 'newsroom_%'"
+                    )
+                )
+                == 0
+            )
+    finally:
+        engine.dispose()
+    _alembic(database_url, "upgrade", HEAD)
+    engine, sessions = await _sessions(database_url)
+    try:
+        async with sessions() as database:
+            restored = {
+                event_id: links
+                for event_id, links in await database.execute(
+                    select(NewsroomEvent.id, NewsroomEvent.legacy_sources)
+                )
+            }
+            assert restored == snapshots
+    finally:
+        await engine.dispose()
+
+
+def test_original_0053_can_downgrade_directly_without_snapshot_column(database_url: str) -> None:
+    _seed_legacy(database_url)
+    _alembic(database_url, "upgrade", "20261027_0053")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            # Original 0034 never created this column; do not apply 0054 first.
+            connection.execute(text("ALTER TABLE newsroom_events DROP COLUMN legacy_sources"))
+        _alembic(database_url, "downgrade", BEFORE_IMPORT)
+        with engine.connect() as connection:
+            # Downgrading this branch retains the independent main branch head.
+            assert BEFORE_IMPORT in connection.scalars(
+                text("SELECT version_num FROM alembic_version")
+            )
+            assert (
+                connection.scalar(
+                    text("SELECT count(*) FROM newsroom_events WHERE created_by = 'legacy'")
+                )
+                == 0
+            )
+            assert (
+                connection.scalar(
+                    text(
+                        "SELECT count(*) FROM information_schema.columns "
+                        "WHERE table_schema = 'public' AND table_name = 'newsroom_events' "
+                        "AND column_name = 'legacy_sources'"
+                    )
+                )
+                == 0
+            )
+        _alembic(database_url, "upgrade", HEAD)
+    finally:
+        engine.dispose()
 
 
 async def test_legacy_tables_are_dropped_once_their_history_moved(database_url: str) -> None:

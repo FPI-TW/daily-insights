@@ -707,6 +707,53 @@ async def test_analysis_writes_shared_fields_and_every_market_why(
     assert await _run_stage(runtime, _binding(stages, queue.WHY)) == []
 
 
+async def test_stale_analysis_rolls_back_item_whys_but_keeps_call_audit(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    event_id, item_ids = await _placed_event(newsroom_database)
+    async with newsroom_database() as database:
+        old = (await claim(database, queue.ANALYSIS))[0]
+    async with newsroom_database() as database:
+        new = (
+            await claim(
+                database,
+                queue.ANALYSIS,
+                now=datetime.now(UTC) + queue.ANALYSIS.lease + timedelta(seconds=1),
+            )
+        )[0]
+
+    async def run(claim_: queue.Claim, label: str) -> str:
+        def answer(payload: dict[str, Any]) -> dict[str, Any]:
+            result = _analysis_answer(payload)
+            result["headline"] = label
+            result["why"] = [{"market": market, "why": label} for market in payload["markets"]]
+            return result
+
+        runtime = _runtime(newsroom_database, FakeLlm({AnalysisResult: answer}))
+
+        async def handler(database: AsyncSession, item: queue.Claim) -> dict[str, Any]:
+            return await analysis.analyze_event(runtime, database, item)
+
+        return await run_claimed(newsroom_database, claim_, handler)
+
+    assert await run(new, "新的分析") == "done"
+    assert await run(old, "過期分析") == "fenced"
+    event = await _get(newsroom_database, NewsroomEvent, event_id)
+    assert event.headline_zh_hant == "新的分析"
+    for item_id in item_ids.values():
+        item = await _get(newsroom_database, NewsroomEditionItem, item_id)
+        assert item.why_zh_hant == "新的分析"
+        assert item.why_zh_hans == translation.to_zh_hans("新的分析")
+    async with newsroom_database() as database:
+        calls = (
+            await database.scalars(
+                select(NewsroomLlmCall).where(NewsroomLlmCall.subject_id == event_id)
+            )
+        ).all()
+    assert len(calls) == 2
+    assert all(call.stage == "analysis" for call in calls)
+
+
 async def test_analysis_rewrites_every_unremoved_item_pointing_at_the_event(
     newsroom_database: async_sessionmaker[AsyncSession],
 ) -> None:

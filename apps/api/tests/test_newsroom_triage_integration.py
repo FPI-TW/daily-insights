@@ -1288,6 +1288,38 @@ async def test_split_opens_a_new_event_and_requeues_the_placed_original(
     assert _logged(created_log.after)["source_event_id"] == str(original)
 
 
+async def test_split_moves_matching_snapshots_and_keeps_snapshot_only_sources(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user_id = await _user(newsroom_database)
+    source_id = await _source(newsroom_database)
+    original = await _event(newsroom_database, "Merged history")
+    moving = await _article(newsroom_database, source_id, "Moving", event_id=original)
+    staying = await _article(newsroom_database, source_id, "Staying", event_id=original)
+    moving_url = (await _get(newsroom_database, NewsroomArticle, moving)).url
+    staying_url = (await _get(newsroom_database, NewsroomArticle, staying)).url
+    snapshots = [
+        {"name": name, "url": url, "published_at": None}
+        for name, url in [
+            ("Moving publisher", moving_url),
+            ("Staying publisher", staying_url),
+            ("Snapshot only", "https://example.com/older-article"),
+        ]
+    ]
+    async with newsroom_database() as database:
+        await database.execute(
+            update(NewsroomEvent)
+            .where(NewsroomEvent.id == original)
+            .values(legacy_sources=snapshots)
+        )
+        created = await events_service.split_event(
+            database, event_id=original, article_ids=[moving], user_id=user_id
+        )
+        await database.commit()
+    assert (await _get(newsroom_database, NewsroomEvent, original)).legacy_sources == snapshots[1:]
+    assert (await _get(newsroom_database, NewsroomEvent, created)).legacy_sources == snapshots[:1]
+
+
 async def test_split_of_an_unplaced_event_leaves_analysis_idle(
     newsroom_database: async_sessionmaker[AsyncSession],
 ) -> None:

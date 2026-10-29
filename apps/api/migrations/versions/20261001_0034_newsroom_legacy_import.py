@@ -12,6 +12,8 @@ in global → tw_equity → us_equity order (``news_presentations``; missing zh-
 is converted from zh-hant with OpenCC ``tw2sp``). Each market edition gets its
 own ``legacy`` item without a "why", keeping that market's rank and stars, and
 the event gets one ``manual``-source article that carries the source link.
+Each legacy event also freezes its original source link independently of the
+globally unique article URL, so another date's event never loses that link.
 Dates that already have a newsroom edition for the market are skipped, so new
 pipeline output is never overwritten.
 
@@ -77,6 +79,7 @@ events = sa.table(
     sa.column("headline_en", sa.String()),
     sa.column("summary_en", sa.Text()),
     sa.column("related_symbols", postgresql.JSONB()),
+    sa.column("legacy_sources", postgresql.JSONB()),
     sa.column("analysis_status", sa.String()),
     sa.column("analysis_model", sa.String()),
     sa.column("analyzed_at", sa.DateTime(timezone=True)),
@@ -149,7 +152,8 @@ _VISIBLE_ITEMS = sa.text(
     )
     SELECT visible.id, visible.edition_id, visible.edition_date, visible.market_code,
            visible.generated_at, visible.model_name, visible.rank, visible.topic,
-           visible.source_url, visible.source_headline, visible.source_published_at,
+           visible.source_url, visible.source_name, visible.source_headline,
+           visible.source_published_at,
            visible.importance
     FROM visible
     JOIN chosen ON chosen.edition_id = visible.edition_id
@@ -224,6 +228,10 @@ def _group_by_story(rows: Sequence[Any]) -> list[list[Any]]:
 
 
 def upgrade() -> None:
+    op.add_column(
+        "newsroom_events",
+        sa.Column("legacy_sources", postgresql.JSONB(), nullable=False, server_default="[]"),
+    )
     bind = op.get_bind()
     legacy_items = bind.execute(_VISIBLE_ITEMS).all()
     if not legacy_items:
@@ -318,6 +326,17 @@ def _import_story(
             headline_en=_clip(english.headline, HEADLINE_MAX_CHARS) if english else None,
             summary_en=english.summary if english else None,
             related_symbols=[],
+            legacy_sources=[
+                {
+                    "name": source.source_name,
+                    "url": source.source_url,
+                    "published_at": (
+                        source.source_published_at.isoformat()
+                        if source.source_published_at is not None
+                        else None
+                    ),
+                }
+            ],
             analysis_status="ready",
             analysis_model=source.model_name,
             analyzed_at=source.generated_at,
@@ -388,3 +407,5 @@ def downgrade() -> None:
     )
     op.execute("DELETE FROM newsroom_events WHERE created_by = 'legacy'")
     op.execute("DELETE FROM newsroom_editions WHERE selection_mode = 'legacy'")
+    # Original deployments of 0034 lack this column until they upgrade to 0054.
+    op.execute("ALTER TABLE newsroom_events DROP COLUMN IF EXISTS legacy_sources")
