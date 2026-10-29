@@ -35,6 +35,7 @@ from daily_insights_api.modules.newsroom.translation import (
     contract_error,
     live_item_condition,
     load_prompt,
+    queue_english_after_analysis,
     to_zh_hans,
 )
 from daily_insights_api.modules.newsroom.worker import Registration, Runtime, StageBinding
@@ -252,6 +253,9 @@ async def analyze_event(runtime: Runtime, database: AsyncSession, claim_: Claim)
                 why_en_status="idle",
             )
         )
+    # The new headline and summary make the reader's English stale; a fenced
+    # analysis rolls this back with the rest of its writes.
+    await queue_english_after_analysis(database, event.id)
     return {
         "headline_zh_hant": result.headline,
         "summary_zh_hant": result.summary,

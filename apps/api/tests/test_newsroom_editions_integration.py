@@ -948,7 +948,7 @@ async def test_translation_covers_visible_items_and_detects_stale_digest(
     translate = translation.register(runtime).stages[0]
     sweep = translation.register(runtime).periodic[0]
 
-    # Published after analysis finished: the sweep queues English.
+    # Analysing a published event queues its English; the sweep finds it queued.
     await sweep.run()
     assert (await _get(newsroom_database, NewsroomEvent, event_id)).en_status == "pending"
     assert await _run_stage(runtime, translate) == ["done"]
@@ -1020,6 +1020,59 @@ async def test_translation_covers_visible_items_and_detects_stale_digest(
         assert event.en_source_digest != await translation.current_zh_hant_digest(
             database, event_id
         )
+
+
+async def test_reanalysing_an_old_published_edition_queues_its_english_again(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    answers = iter(["聯準會維持利率不變", "聯準會重新評估利率"])
+
+    def analysis_answer(payload: dict[str, Any]) -> dict[str, Any]:
+        return {**_analysis_answer(payload), "headline": next(answers)}
+
+    llm = FakeLlm({AnalysisResult: analysis_answer, TranslationResult: _translation})
+    runtime = _runtime(newsroom_database, llm)
+    event_id, _ = await _ready_published_event(newsroom_database, runtime)
+    translate = translation.register(runtime).stages[0]
+    assert await _run_stage(runtime, translate) == ["done"]
+    # Long past the stale-English sweep's lookback.
+    async with newsroom_database() as database:
+        await database.execute(
+            update(NewsroomEdition).values(
+                published_at=datetime.now(UTC)
+                - translation.STALE_SWEEP_LOOKBACK
+                - timedelta(days=1)
+            )
+        )
+        await database.commit()
+    user_id = await _user(newsroom_database)
+    async with newsroom_database() as database:
+        await publishing.reanalyze_event(database, event_id, user_id=user_id)
+        await database.commit()
+
+    stages = analysis.register(runtime).stages
+    assert await _run_stage(runtime, _binding(stages, queue.ANALYSIS)) == ["done"]
+    event = await _get(newsroom_database, NewsroomEvent, event_id)
+    assert event.headline_zh_hant == "聯準會重新評估利率"
+    assert event.en_status == "pending"
+    async with newsroom_database() as database:
+        assert await translation.sweep_stale_english(database) == 0
+    assert await _run_stage(runtime, translate) == ["done"]
+    event = await _get(newsroom_database, NewsroomEvent, event_id)
+    async with newsroom_database() as database:
+        assert event.en_source_digest == await translation.current_zh_hant_digest(
+            database, event_id
+        )
+
+
+async def test_analysing_a_draft_leaves_english_for_publishing(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    event_id, _ = await _placed_event(newsroom_database, published=False)
+    runtime = _runtime(newsroom_database, FakeLlm({AnalysisResult: _analysis_answer}))
+    stages = analysis.register(runtime).stages
+    assert await _run_stage(runtime, _binding(stages, queue.ANALYSIS)) == ["done"]
+    assert (await _get(newsroom_database, NewsroomEvent, event_id)).en_status == "idle"
 
 
 async def test_translation_rejects_a_missing_why(

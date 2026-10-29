@@ -137,6 +137,7 @@ flowchart TB
 | 全文 → 初篩              | triage 的領取條件               | 只領取 `fetch_status IN ('done','failed')` 的文章；全文失敗者以標題與摘要初篩                                    |
 | 組稿 → 分析              | `newsroom_assemble`             | 入選事件若為 `idle`／`failed`／`needs_body` 則 `analysis_status = pending`；項目 `why_status = pending`          |
 | 分析 → 為何重要          | analysis handler                | 同時寫入事件所有未移除項目的「為何重要」並設 `why_status = ready`                                                |
+| 分析 → 英文              | analysis handler                | 事件已有可見項目時，在同一交易內 `en_status = pending`（舊版次重新分析也會重新翻譯）                             |
 | 發布／修改 → 英文        | publishing 與每分鐘 stale sweep | 繁中標題／摘要的 digest 改變，或有項目的英文「為何重要」未備妥時 `en_status = pending`                           |
 | 貼上全文 → 分析          | `set_manual_body`               | 所屬事件若為 `needs_body`，改回 `analysis_status = pending`                                                      |
 | 合併／拆分 → 分析        | `events_service`                | 受影響且在版次中的事件 `analysis_status = pending`                                                               |
@@ -344,6 +345,7 @@ function，不與其他 provider 共用鎖。流程冪等：
 - 之後繁中被修改、項目晚到完成或被隱藏，使 digest 改變時重新排入翻譯；每分鐘的
   stale sweep 檢查近 2 天發布的版次，補上發布函式看不到的變化。`failed` 的翻譯不會被
   sweep 自動重試，要等下一次編修或人工重新排入。
+  分析完成時若事件已有可見項目，會在同一交易內排入翻譯，因此超過 2 天的已發布版次重新分析後，英文也會恢復。
 
 ### 正文清除
 

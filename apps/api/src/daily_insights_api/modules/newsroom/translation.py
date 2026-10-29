@@ -183,6 +183,20 @@ async def mark_english_stale(database: AsyncSession, event_id: uuid.UUID) -> boo
     return True
 
 
+async def queue_english_after_analysis(database: AsyncSession, event_id: uuid.UUID) -> bool:
+    """Queue English for an event whose analysis settles new zh-hant in this transaction.
+
+    ``mark_english_stale`` waits for ``analysis_status = ready``, which the
+    analysis settle writes only after its handler returns, and the sweep only
+    covers recent editions; without this, re-analysing an older published
+    edition would hide its English for good. Returns whether it queued.
+    """
+    if not await _visible_items(database, event_id):
+        return False
+    await queue.enqueue(database, queue.TRANSLATE, [event_id])
+    return True
+
+
 async def sweep_stale_english(database: AsyncSession, *, now: datetime | None = None) -> int:
     """Queue English for recently published events whose zh-hant drifted.
 
