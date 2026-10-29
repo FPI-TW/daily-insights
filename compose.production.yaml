@@ -118,7 +118,8 @@ services:
       # Chromium writes its profile and crash dumps under HOME and /tmp; both
       # must land on the tmpfs because the root filesystem is read-only.
       HOME: /tmp
-    command: ["python", "-m", "daily_insights_api.scripts.run_orchestration_worker"]
+    command:
+      ["python", "-m", "daily_insights_api.scripts.run_orchestration_worker"]
     healthcheck:
       test:
         [
@@ -175,6 +176,9 @@ services:
       DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS: ${DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS:-true}
       DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS:-25}
       DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS:-30}
+      # Preserve normal throughput; tune only after observing memory pressure.
+      DAILY_INSIGHTS_NEWSROOM_BROWSER_CONCURRENCY: "2"
+      DAILY_INSIGHTS_NEWSROOM_FETCH_CONCURRENCY: "4"
       DAILY_INSIGHTS_GUARDIAN_API_KEY: ${DAILY_INSIGHTS_GUARDIAN_API_KEY:-}
       DAILY_INSIGHTS_SEC_CONTACT_EMAIL: ${DAILY_INSIGHTS_SEC_CONTACT_EMAIL:-}
       # Every article page is read in CloakBrowser; plain HTTP takes over while
@@ -236,7 +240,7 @@ services:
       retries: 3
       start_period: 20s
     stop_grace_period: 20s
-    mem_limit: 1g
+    mem_limit: 1536m
     read_only: true
     tmpfs:
       - /tmp:size=512m,mode=1777
@@ -251,7 +255,8 @@ services:
     image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}
     container_name: daily-insights-browser-egress
     restart: unless-stopped
-    command: ["python", "-m", "daily_insights_api.scripts.run_browser_egress_proxy"]
+    command:
+      ["python", "-m", "daily_insights_api.scripts.run_browser_egress_proxy"]
     healthcheck:
       test:
         [

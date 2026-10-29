@@ -75,6 +75,8 @@ NEWSROOM_ASSEMBLY_KEYS = (
 # Ingestion settings are read only by the newsroom worker (and the blocked-host
 # kill switch by the API, for admin manual URLs).
 NEWSROOM_INGESTION_KEYS = {
+    "DAILY_INSIGHTS_NEWSROOM_BROWSER_CONCURRENCY",
+    "DAILY_INSIGHTS_NEWSROOM_FETCH_CONCURRENCY",
     "DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES",
     "DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS",
     "DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS",
@@ -175,9 +177,7 @@ def main() -> None:
             service.get("container_name") == f"daily-insights-{name}",
             f"{name} must use a stable container name for reboot diagnostics",
         )
-        require(
-            "@sha256:" in service.get("image", ""), f"{name} image must use a digest"
-        )
+        require("@sha256:" in service.get("image", ""), f"{name} image must use a digest")
         require("build" not in service, f"{name} must not build on the host")
         require(
             service.get("restart") == "unless-stopped",
@@ -190,9 +190,7 @@ def main() -> None:
         require(bool(service.get("healthcheck")), f"{name} must define a healthcheck")
         stop_grace = service.get("stop_grace_period")
         require(
-            isinstance(stop_grace, str)
-            and stop_grace.endswith("s")
-            and float(stop_grace[:-1]) > 0,
+            isinstance(stop_grace, str) and stop_grace.endswith("s") and float(stop_grace[:-1]) > 0,
             f"{name} must define a positive stop grace period",
         )
 
@@ -208,14 +206,12 @@ def main() -> None:
         "API environment must be production",
     )
     require(
-        api_environment.get("DAILY_INSIGHTS_TRUSTED_PROXY_CIDRS")
-        == EXPECTED_PROXY_NETWORK,
+        api_environment.get("DAILY_INSIGHTS_TRUSTED_PROXY_CIDRS") == EXPECTED_PROXY_NETWORK,
         "API trusted proxy setting must match the app network",
     )
     require(
         any(
-            volume.get("target") == "/var/spool/podcast-media"
-            and volume.get("type") == "volume"
+            volume.get("target") == "/var/spool/podcast-media" and volume.get("type") == "volume"
             for volume in services["api"].get("volumes", [])
         ),
         "API must have disk-backed audio verification spool space",
@@ -314,8 +310,7 @@ def main() -> None:
         "newsroom-worker",
     ):
         require(
-            services[name].get("environment", {}).get("DAILY_INSIGHTS_ENVIRONMENT")
-            == "production",
+            services[name].get("environment", {}).get("DAILY_INSIGHTS_ENVIRONMENT") == "production",
             f"{name} environment must be production",
         )
     for name in SERVICES:
@@ -346,7 +341,8 @@ def main() -> None:
     require(
         set(services["nginx"].get("cap_add", []))
         == {"CHOWN", "NET_BIND_SERVICE", "SETGID", "SETUID"},
-        "nginx must receive only the capabilities required to initialize and drop worker privileges",
+        "nginx must receive only the capabilities required to initialize "
+        "and drop worker privileges",
     )
 
     app_network = model.get("networks", {}).get("app", {})

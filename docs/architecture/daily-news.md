@@ -469,8 +469,8 @@ HTTP(S) URL。
   與 challenge 服務，所以 proxy 不套用文章白名單，白名單由 worker 在主頁面導覽時檢查。
   只有 `cloakbrowser`、`browser-egress` 與 `newsroom-worker` 能加入 `browser` 網路，
   `validate-compose-model.py` 會檢查。Chrome 在容器內不使用自身 sandbox，所以這層
-  網路隔離就是安全邊界。映像約 2.6 GB，執行時約 400 MB 記憶體（正式環境
-  `mem_limit: 1g`）。
+  網路隔離就是安全邊界。映像約 2.6 GB；執行時記憶體隨文章頁面與並行工作量變動，
+  正式環境使用 `mem_limit: 1536m`（1.5 GiB），browser／fetch 並行數維持 2／4。
 
 ## 舊版次資料搬移
 
