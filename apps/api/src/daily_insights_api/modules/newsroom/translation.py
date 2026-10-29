@@ -44,7 +44,7 @@ from daily_insights_api.modules.newsroom.worker import (
 
 logger = logging.getLogger(__name__)
 
-TRANSLATE_PROMPT_VERSION = "newsroom.translate.v1"
+TRANSLATE_PROMPT_VERSION = "newsroom.translate.v2"
 STALE_SWEEP_INTERVAL = timedelta(minutes=1)
 # Only recent editions are swept; older English is left as it is.
 STALE_SWEEP_LOOKBACK = timedelta(days=2)
@@ -153,13 +153,16 @@ def _english_is_current(
     event: NewsroomEvent, items: Sequence[NewsroomEditionItem], digest: str
 ) -> bool:
     whys = _ready_whys(items)
+    return _card_is_current(event, digest) and all(
+        item.why_en_status == "ready" and item.why_en for item in items if str(item.id) in whys
+    )
+
+
+def _card_is_current(event: NewsroomEvent, digest: str) -> bool:
     return (
         event.en_source_digest == digest
         and event.headline_en is not None
         and event.summary_en is not None
-        and all(
-            item.why_en_status == "ready" and item.why_en for item in items if str(item.id) in whys
-        )
     )
 
 
@@ -238,35 +241,46 @@ async def translate_event(
         # Nothing final to translate yet; analysis re-queues English once ready.
         return {"en_status": "idle"}
     items = await _visible_items(database, event.id)
-    whys = _ready_whys(items)
+    whys = _ready_whys([item for item in items if item.why_en_status != "ready" or not item.why_en])
     digest = zh_hant_digest(event.headline_zh_hant, event.summary_zh_hant)
-    if _english_is_current(event, items, digest):
+    translate_card = not _card_is_current(event, digest)
+    if not translate_card and not whys:
         return {}
+    payload: dict[str, Any] = {"why": whys}
+    if translate_card:
+        payload.update(headline=event.headline_zh_hant, summary=event.summary_zh_hant)
     result = await runtime.llm.complete(
         database,
         model=runtime.settings.newsroom_translate_model,
         system=load_prompt("translate"),
-        payload={
-            "headline": event.headline_zh_hant,
-            "summary": event.summary_zh_hant,
-            "why": whys,
-        },
+        payload=payload,
         result_type=TranslationResult,
         audit=CallAudit("translate", event.id, TRANSLATE_PROMPT_VERSION),
     )
-    if set(result.why) != whys.keys():
+    expected = {"why", "headline", "summary"} if translate_card else {"why"}
+    if (
+        set(result.why) != whys.keys()
+        or result.model_fields_set != expected
+        or (translate_card and (result.headline is None or result.summary is None))
+    ):
         raise contract_error(database, "translate_schema_invalid")
     for item_id, translated in result.why.items():
         await database.execute(
             update(NewsroomEditionItem)
-            .where(NewsroomEditionItem.id == uuid.UUID(item_id))
+            .where(
+                NewsroomEditionItem.id == uuid.UUID(item_id),
+                NewsroomEditionItem.why_zh_hant == whys[item_id],
+                NewsroomEditionItem.why_status == "ready",
+            )
             .values(why_en=translated, why_en_status="ready")
         )
-    return {
-        "headline_en": result.headline,
-        "summary_en": result.summary,
-        "en_source_digest": digest,
-    }
+    if translate_card:
+        return {
+            "headline_en": result.headline,
+            "summary_en": result.summary,
+            "en_source_digest": digest,
+        }
+    return {}
 
 
 def register(runtime: Runtime) -> Registration:

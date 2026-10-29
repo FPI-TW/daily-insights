@@ -501,6 +501,95 @@ async def test_assembly_rebuild_keeps_admin_actions_and_skips_published(
     assert count == 3
 
 
+async def test_fully_published_assembly_skips_all_model_passes(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id = await _source(newsroom_database, "wire")
+    for title in ("one", "two"):
+        await _event(
+            newsroom_database, title, sources=[source_id], scores=dict.fromkeys(MARKETS, 80)
+        )
+    await _published_yesterday(newsroom_database, source_id, "previous")
+    llm = FakeLlm(
+        {
+            DuplicateGroups: lambda payload: {"groups": []},
+            PublishedMatches: lambda payload: {"matches": []},
+            EditorResult: _stars_by_title({}, default=4),
+        }
+    )
+    runtime = _runtime(newsroom_database, llm)
+    await assembly.assemble_editions(runtime, EDITION_DATE, sleep=_no_sleep)
+    async with newsroom_database() as database:
+        for edition in (await _editions(newsroom_database)).values():
+            await publishing.publish_edition(database, edition.id, user_id=None)
+        await database.commit()
+    llm.calls.clear()
+    report = await assembly.assemble_editions(runtime, EDITION_DATE, sleep=_no_sleep)
+    assert all(market.action == "skipped_published" for market in report.markets)
+    assert llm.calls == []
+
+
+@pytest.mark.parametrize(
+    ("retry_after", "counts_attempt"),
+    [(timedelta(hours=5), False), (timedelta(minutes=1), True), (None, False)],
+)
+async def test_editor_provider_wait_uses_fallback_without_other_market_calls(
+    newsroom_database: async_sessionmaker[AsyncSession],
+    retry_after: timedelta | None,
+    counts_attempt: bool,
+) -> None:
+    source_id = await _source(newsroom_database, "wire")
+    await _event(newsroom_database, "one", sources=[source_id], scores=dict.fromkeys(MARKETS, 80))
+    llm = FakeLlm(
+        {
+            EditorResult: lambda payload: RetryableStageError(
+                "editor_provider_usage_limit",
+                retry_after=retry_after,
+                counts_attempt=counts_attempt,
+            )
+        }
+    )
+    sleeps: list[float] = []
+
+    async def record_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    report = await assembly.assemble_editions(
+        _runtime(newsroom_database, llm), EDITION_DATE, sleep=record_sleep
+    )
+    assert len(llm.calls) == 1
+    assert sleeps == []
+    assert all(
+        market.selection_mode == "fallback" and market.item_count == 1 for market in report.markets
+    )
+
+
+@pytest.mark.parametrize("failed_screen", [DuplicateGroups, PublishedMatches])
+async def test_screen_provider_wait_is_shared_with_later_passes(
+    newsroom_database: async_sessionmaker[AsyncSession], failed_screen: type[BaseModel]
+) -> None:
+    source_id = await _source(newsroom_database, "wire")
+    for title in ("one", "two"):
+        await _event(
+            newsroom_database, title, sources=[source_id], scores=dict.fromkeys(MARKETS, 80)
+        )
+    await _published_yesterday(newsroom_database, source_id, "previous")
+    llm = FakeLlm(
+        {
+            DuplicateGroups: lambda payload: {"groups": []},
+            PublishedMatches: lambda payload: {"matches": []},
+        }
+    )
+    llm.responders[failed_screen] = lambda payload: RetryableStageError(
+        "editor_provider_http_429", retry_after=timedelta(minutes=1)
+    )
+    report = await assembly.assemble_editions(
+        _runtime(newsroom_database, llm), EDITION_DATE, sleep=_no_sleep
+    )
+    assert len(llm.calls) == (1 if failed_screen is DuplicateGroups else 2)
+    assert all(market.selection_mode == "fallback" for market in report.markets)
+
+
 async def test_editor_contract_errors_retry_then_fall_back(
     newsroom_database: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -913,11 +1002,10 @@ async def test_why_stage_waits_for_the_event_analysis(
 
 
 def _translation(payload: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "headline": "Fed holds rates",
-        "summary": "The Fed held rates.",
-        "why": {key: f"EN {value}" for key, value in payload["why"].items()},
-    }
+    result: dict[str, Any] = {"why": {key: f"EN {value}" for key, value in payload["why"].items()}}
+    if "headline" in payload:
+        result.update(headline="Fed holds rates", summary="The Fed held rates.")
+    return result
 
 
 async def _ready_published_event(
@@ -990,6 +1078,7 @@ async def test_translation_covers_visible_items_and_detects_stale_digest(
     assert await _run_stage(runtime, translate) == ["done"]
     hidden = await _get(newsroom_database, NewsroomEditionItem, item_ids["tw_equity"])
     assert hidden.why_en == "EN tw_equity 的滑鼠理由"
+    assert llm.calls[-1][1] == {"why": {str(item_ids["tw_equity"]): "tw_equity 的滑鼠理由"}}
 
     # A rewritten "why" is translated again; the digest readers rely on stays.
     signed = (await _get(newsroom_database, NewsroomEvent, event_id)).en_source_digest
@@ -1002,6 +1091,11 @@ async def test_translation_covers_visible_items_and_detects_stale_digest(
     assert await _run_stage(runtime, translate) == ["done"]
     rewritten = await _get(newsroom_database, NewsroomEditionItem, item_ids["global"])
     assert (rewritten.why_en, rewritten.why_en_status) == ("EN 改寫的理由", "ready")
+    assert llm.calls[-1][1] == {"why": {str(item_ids["global"]): "改寫的理由"}}
+    assert (await _get(newsroom_database, NewsroomEvent, event_id)).headline_en == "Fed holds rates"
+    assert (await _get(newsroom_database, NewsroomEditionItem, item_ids["tw_equity"])).why_en == (
+        "EN tw_equity 的滑鼠理由"
+    )
     assert (await _get(newsroom_database, NewsroomEvent, event_id)).en_source_digest == signed
 
     async with newsroom_database() as database:
@@ -1020,6 +1114,44 @@ async def test_translation_covers_visible_items_and_detects_stale_digest(
         assert event.en_source_digest != await translation.current_zh_hant_digest(
             database, event_id
         )
+    assert await _run_stage(runtime, translate) == ["done"]
+    assert llm.calls[-1][1] == {
+        "headline": "聯準會按兵不動",
+        "summary": event.summary_zh_hant,
+        "why": {},
+    }
+
+
+@pytest.mark.parametrize("invalid", ["missing_card", "null_card", "unrequested_card"])
+async def test_translation_enforces_exact_requested_fields(
+    newsroom_database: async_sessionmaker[AsyncSession], invalid: str
+) -> None:
+    llm = FakeLlm({AnalysisResult: _analysis_answer, TranslationResult: _translation})
+    runtime = _runtime(newsroom_database, llm)
+    event_id, items = await _ready_published_event(newsroom_database, runtime)
+    translate = translation.register(runtime).stages[0]
+    if invalid == "unrequested_card":
+        assert await _run_stage(runtime, translate) == ["done"]
+        user_id = await _user(newsroom_database)
+        async with newsroom_database() as database:
+            await publishing.apply_why_edit(database, items["global"], "新理由", user_id=user_id)
+            await database.commit()
+
+    def invalid_reply(payload: dict[str, Any]) -> dict[str, Any]:
+        result = _translation(payload)
+        if invalid == "missing_card":
+            result.pop("headline")
+        elif invalid == "null_card":
+            result["summary"] = None
+        else:
+            result.update(headline="Unrequested", summary="Unrequested")
+        return result
+
+    llm.responders[TranslationResult] = invalid_reply
+    assert await _run_stage(runtime, translate) == ["pending"]
+    event = await _get(newsroom_database, NewsroomEvent, event_id)
+    assert event.en_error_code == "translate_schema_invalid"
+    assert event.headline_en == ("Fed holds rates" if invalid == "unrequested_card" else None)
 
 
 async def test_reanalysing_an_old_published_edition_queues_its_english_again(

@@ -14,6 +14,7 @@ import html
 import logging
 import math
 import re
+import time
 import uuid
 from collections import Counter
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
@@ -899,6 +900,25 @@ async def _settle_failed_call(
     logger.warning(event, extra={"error_code": error.code})
 
 
+@dataclass
+class EditorCooldown:
+    """Share a provider's wait across all editor passes of one assembly."""
+
+    until: float = 0.0
+
+    def waiting(self) -> bool:
+        return time.monotonic() < self.until
+
+    def observe(self, error: RetryableStageError | FatalStageError) -> None:
+        if (
+            isinstance(error, RetryableStageError)
+            and error.code.startswith("editor_")
+            and (error.retry_after is not None or not error.counts_attempt)
+        ):
+            delay = error.retry_after or queue.MAX_BACKOFF
+            self.until = max(self.until, time.monotonic() + delay.total_seconds())
+
+
 @dataclass(frozen=True, slots=True)
 class DuplicateScreen:
     """What the duplicate screen did: events merged away, and the groups left open.
@@ -916,6 +936,8 @@ async def merge_duplicate_candidates(
     edition_date: date,
     titles: dict[uuid.UUID, str],
     articles: dict[uuid.UUID, list[_ArticleRow]],
+    *,
+    cooldown: EditorCooldown | None = None,
 ) -> DuplicateScreen:
     """Merge candidates that triage split from one story.
 
@@ -930,6 +952,8 @@ async def merge_duplicate_candidates(
     that stay open (one story told from several angles, or related stories the
     model over-grouped) are returned as a story group.
     """
+    if cooldown is not None and cooldown.waiting():
+        return DuplicateScreen()
     variant = get_variant(runtime.settings.newsroom_selection_variant)
     union = _candidate_union(titles, articles, variant=variant)
     if len(union) < 2:
@@ -963,6 +987,8 @@ async def merge_duplicate_candidates(
                 else {}
             )
         except (RetryableStageError, FatalStageError) as error:
+            if cooldown is not None:
+                cooldown.observe(error)
             await _settle_failed_call(database, error, "newsroom.dedupe_failed")
             return DuplicateScreen()
         merged = 0
@@ -1220,6 +1246,8 @@ async def screen_published_repeats(
     edition_date: date,
     titles: dict[uuid.UUID, str],
     articles: dict[uuid.UUID, list[_ArticleRow]],
+    *,
+    cooldown: EditorCooldown | None = None,
 ) -> RepeatScreen:
     """Compare every market's candidates with what the last editions published.
 
@@ -1233,6 +1261,8 @@ async def screen_published_repeats(
     The variant sets how far back the screen looks and whether it shows only
     each candidate's nearest published stories (``published_for_screen``).
     """
+    if cooldown is not None and cooldown.waiting():
+        return RepeatScreen()
     variant = get_variant(runtime.settings.newsroom_selection_variant)
     union = _candidate_union(titles, articles, variant=variant)
     if not union:
@@ -1279,6 +1309,8 @@ async def screen_published_repeats(
                 else {}
             )
         except (RetryableStageError, FatalStageError) as error:
+            if cooldown is not None:
+                cooldown.observe(error)
             await _settle_failed_call(database, error, "newsroom.repeat_screen_failed")
             return RepeatScreen()
         excluded: set[uuid.UUID] = set()
@@ -1491,12 +1523,15 @@ async def _rate(
     variant: SelectionVariant,
     sleep: Sleep,
     retry_delay: timedelta,
+    cooldown: EditorCooldown | None = None,
 ) -> EditorRatings | None:
     """Editor stars (and reasons) per event id, or ``None`` once retries are exhausted.
 
     A missing reason never fails the call: the prompt asks for one, the count of
     those left out is only logged.
     """
+    if cooldown is not None and cooldown.waiting():
+        return None
     expected = {str(candidate.event_id) for candidate in candidates}
     for attempt in range(1, EDITOR_ATTEMPTS + 1):
         async with runtime.session_factory() as database:
@@ -1518,6 +1553,8 @@ async def _rate(
                 )
                 ratings = validate_ratings(result, expected)
             except (RetryableStageError, FatalStageError) as error:
+                if cooldown is not None:
+                    cooldown.observe(error)
                 if isinstance(error, EditorContractError):
                     error.audit_rows.extend(contract_error(database, error.code).audit_rows)
                 await database.rollback()
@@ -1528,6 +1565,12 @@ async def _rate(
                     extra={"market": market, "attempt": attempt, "code": error.code},
                 )
                 if isinstance(error, FatalStageError) or attempt == EDITOR_ATTEMPTS:
+                    return None
+                # Keep assembly bounded: a long provider wait uses score-order
+                # fallback now, and the other passes share its cooldown.
+                if not error.counts_attempt or (
+                    error.retry_after is not None and error.retry_after > retry_delay
+                ):
                     return None
                 await sleep(retry_delay.total_seconds())
                 continue
@@ -1759,6 +1802,7 @@ async def _assemble_market(
     now: Callable[[], datetime],
     sleep: Sleep,
     retry_delay: timedelta,
+    cooldown: EditorCooldown | None = None,
 ) -> MarketReport:
     async with runtime.session_factory() as database:
         published = await database.scalar(
@@ -1786,6 +1830,7 @@ async def _assemble_market(
             variant=variant,
             sleep=sleep,
             retry_delay=retry_delay,
+            cooldown=cooldown,
         )
         if candidates
         else EditorRatings({})
@@ -1876,6 +1921,23 @@ async def assemble_editions(
 ) -> AssemblyReport:
     """Build (or rebuild) every market's draft for ``edition_date`` (spec §6.3 1-7)."""
     clock_now = now or (lambda: datetime.now(UTC))
+    async with runtime.session_factory() as database:
+        published = set(
+            (
+                await database.scalars(
+                    select(NewsroomEdition.market_code).where(
+                        NewsroomEdition.edition_date == edition_date,
+                        NewsroomEdition.status == "published",
+                    )
+                )
+            ).all()
+        )
+    if published.issuperset(MARKET_CODES):
+        return AssemblyReport(
+            edition_date,
+            ignored_pending_triage=0,
+            markets=[MarketReport(market, "skipped_published") for market in MARKET_CODES],
+        )
     ignored = await wait_for_triage(runtime, edition_date, now=clock_now, sleep=sleep)
     if ignored:
         logger.warning(
@@ -1884,12 +1946,17 @@ async def assemble_editions(
         )
     async with runtime.session_factory() as database:
         titles, articles = await _load_event_articles(database, edition_date)
-    duplicates = await merge_duplicate_candidates(runtime, edition_date, titles, articles)
+    cooldown = EditorCooldown()
+    duplicates = await merge_duplicate_candidates(
+        runtime, edition_date, titles, articles, cooldown=cooldown
+    )
     merged = duplicates.merged
     if merged:
         async with runtime.session_factory() as database:
             titles, articles = await _load_event_articles(database, edition_date)
-    repeats = await screen_published_repeats(runtime, edition_date, titles, articles)
+    repeats = await screen_published_repeats(
+        runtime, edition_date, titles, articles, cooldown=cooldown
+    )
     report = AssemblyReport(
         edition_date, ignored, merged_duplicates=merged, excluded_repeats=len(repeats.excluded)
     )
@@ -1907,6 +1974,7 @@ async def assemble_editions(
                 now=clock_now,
                 sleep=sleep,
                 retry_delay=retry_delay,
+                cooldown=cooldown,
             )
         )
     if report.assembled:

@@ -296,6 +296,16 @@ WHERE id = '<event uuid>' AND en_status = 'failed';
 
 ### 重新組稿
 
+三個市場都已發布時，組稿會直接跳過，不再呼叫 dedupe、repeat 或精選模型。
+需要重建已發布內容時，先依「重開已發布的版次」操作退回 draft。
+組稿遇到長時間 `Retry-After` 或額度耗盡時，該次採粗分 fallback；同次組稿的其他市場及篩選
+會共用冷卻狀態，不會每 5 秒繼續重試。供應商恢復後可重新組稿尚未發布的草稿。
+
+`20261029_0055` 新增文章的 embedding 翻譯快取欄位，須先完成 migration 再啟動新版 worker。
+快取包含原文、翻譯模型與 prompt 版本的 digest；embedding 失敗後重新排入會重用成功翻譯，
+變更原文、翻譯模型或 prompt 時會自動重翻。改 embedding 模型仍需執行既有 reembed 流程。
+降級 `0055` 只刪除翻譯快取，保留原有文章、向量、`embedding_text` 與用量紀錄。
+
 08:00 組稿失敗時，統一 orchestration 每 30 分鐘重試到 10:00；精選失敗則已自動退回
 粗分（`fallback`）。需要在修正後重新組稿某日草稿時：
 

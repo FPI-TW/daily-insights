@@ -97,6 +97,15 @@ flowchart TB
 
 ## 佇列與重試
 
+外文文章的 embedding 翻譯使用獨立交易，將成功翻譯與用量紀錄一起保存到文章的
+`embedding_translation_digest`／`embedding_translation_text`。相同原文、模型與 prompt 版本可重用；
+embedding API 故障或 claim 被 fence 不會撤銷翻譯快取，並行請求以文章列鎖合併。
+此快取不寫入向量或下游狀態；它們仍由原有 claim fencing 保護。部署前需套用 migration `20261029_0055`。
+
+英文採局部翻譯：只有新聞卡 digest 過期才產生標題與摘要，只有未完成英文的理由才列入請求。
+已全部發布的日期重跑組稿會在模型步驟前直接跳過；editor 收到長時間 `Retry-After` 或額度等待時，
+本次組稿採粗分 fallback，各市場與前置篩選共用冷卻狀態，避免反覆請求供應商。
+
 所有可失敗的工作都以「資料列即佇列」表示，不使用 checkpoint 表。每個 stage 在自己的
 資料列上有 `<stage>_status`、`<stage>_attempts`、`<stage>_next_attempt_at`、
 `<stage>_error_code`、`<stage>_claim_token` 五個欄位，共用實作在 `modules/newsroom/queue.py`。

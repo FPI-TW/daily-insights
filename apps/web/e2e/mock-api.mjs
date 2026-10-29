@@ -155,6 +155,7 @@ function newsroomEvent(id, overrides) {
     article_count: 2,
     source_count: 2,
     body_ok_count: 1,
+    snapshot_sources: [],
     articles: [
       {
         id: `${id.slice(0, -1)}a`,

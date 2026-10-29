@@ -16,7 +16,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from conftest import reset_database_schema
-from sqlalchemy import Connection, create_engine, func, select, text
+from sqlalchemy import Connection, create_engine, func, inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from daily_insights_api import models as registered_models  # noqa: F401
@@ -66,6 +66,61 @@ def database_url() -> Iterator[str]:
     _alembic(url, "upgrade", BEFORE_IMPORT)
     yield url
     reset_database_schema(url)
+
+
+def test_embedding_translation_migration_preserves_article_data_on_roundtrip(
+    database_url: str,
+) -> None:
+    _alembic(database_url, "upgrade", "20261029_0054")
+    engine = create_engine(database_url)
+    article_id = uuid.uuid4()
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO newsroom_articles "
+                    "(id, source_id, url, url_hash, title, edition_date, embedding_text) "
+                    "SELECT :id, id, 'https://example.test/article', :hash, "
+                    "'Original title', '2026-10-29', 'Existing vector input' "
+                    "FROM newsroom_sources LIMIT 1"
+                ),
+                {"id": article_id, "hash": article_id.hex * 2},
+            )
+        _alembic(database_url, "upgrade", HEAD)
+        with engine.begin() as connection:
+            assert (
+                connection.execute(
+                    text("SELECT embedding_translation_text FROM newsroom_articles WHERE id = :id"),
+                    {"id": article_id},
+                ).scalar_one()
+                is None
+            )
+            connection.execute(
+                text(
+                    "UPDATE newsroom_articles SET embedding_translation_text = '譯文', "
+                    "embedding_translation_digest = :digest WHERE id = :id"
+                ),
+                {"id": article_id, "digest": "a" * 64},
+            )
+        _alembic(database_url, "downgrade", "20261029_0054")
+        columns = {column["name"] for column in inspect(engine).get_columns("newsroom_articles")}
+        assert not {"embedding_translation_text", "embedding_translation_digest"} & columns
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT title, embedding_text FROM newsroom_articles WHERE id = :id"),
+                {"id": article_id},
+            ).one() == ("Original title", "Existing vector input")
+        _alembic(database_url, "upgrade", HEAD)
+        with engine.connect() as connection:
+            assert connection.execute(
+                text(
+                    "SELECT embedding_translation_text, embedding_translation_digest "
+                    "FROM newsroom_articles WHERE id = :id"
+                ),
+                {"id": article_id},
+            ).one() == (None, None)
+    finally:
+        engine.dispose()
 
 
 def _edition(
