@@ -619,8 +619,9 @@ DAILY_INSIGHTS_NEWSROOM_TRANSLATE_MODEL=deepseek-v4.1-flash
 
 ### 已套用舊版 import 的來源檢查
 
-`20261029_0054` 會補建 `newsroom_events.legacy_sources`（若尚無此欄位），並從仍有關聯的
-歷史文章回填來源。新部署的 `0034` 會在刪除舊表前保存每個事件的來源快照，包含跨日期重複 URL。
+`20261029_0054` 會補建 `newsroom_events.legacy_sources`（若尚無此欄位），並從 import 當時建立或
+連結、仍有關聯的歷史文章回填來源；`manual` 連結以讀者端原本顯示的 hostname 命名。
+新部署的 `0034` 會在刪除舊表前保存每個事件的來源快照，包含跨日期重複 URL。
 如 migration 記錄 `legacy newsroom events have no recoverable source link`，可先唯讀確認：
 
 ```sql
@@ -639,6 +640,8 @@ ORDER BY edition_date, id;
 
 事件合併會轉移來源快照，依 URL 去重並優先保留目標來源的名稱與發布時間，目標事件不必是歷史匯入事件。
 拆分選取文章時，對應 URL 的快照隨文章移動；只有快照、沒有文章的來源留在原事件。
+兩者的編輯紀錄 `after.moved_snapshot_urls` 列出搬移的快照 URL，可據此追查讀者看到的來源變化。
+後台事件卡片會以「舊版快照」標示沒有文章的快照連結。
 不要只用 SQL 搬移 `event_id`，以免略過來源快照與版次項目的同步處理。
 
 ## 相關文件

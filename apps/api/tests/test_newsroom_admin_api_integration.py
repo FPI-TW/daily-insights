@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from test_health import readiness
 
@@ -546,6 +546,42 @@ async def test_edition_day_defaults_to_taipei_today(client: AsyncClient) -> None
     assert response.status_code == 200
     assert response.json()["edition_date"] == clock.taipei_today().isoformat()
     assert response.json()["is_today"] is True
+
+
+async def test_edition_detail_shows_snapshot_only_links_readers_see(
+    database: async_sessionmaker[AsyncSession], client: AsyncClient
+) -> None:
+    wire = await _source(database, "wire")
+    snapshot_only = {
+        "name": "Original outlet",
+        "url": "https://example.com/older",
+        "published_at": "2026-09-28T01:00:00+00:00",
+    }
+    legacy = await _event(database, "Legacy history", created_by="legacy")
+    article = await _article(database, wire, legacy)
+    async with database() as session:
+        await session.execute(
+            update(NewsroomEvent)
+            .where(NewsroomEvent.id == legacy.id)
+            .values(
+                legacy_sources=[
+                    snapshot_only,
+                    {"name": "Wire snapshot", "url": article.url, "published_at": None},
+                ]
+            )
+        )
+        await session.commit()
+    edition = await _edition(database, "global")
+    await _item(database, edition, legacy, 1)
+
+    response = await client.get(f"{BASE}/editions/{DAY.isoformat()}/global")
+
+    assert response.status_code == 200, response.text
+    shown = response.json()["items"][0]["event"]
+    assert (shown["article_count"], shown["source_count"]) == (1, 2)
+    assert [link["url"] for link in shown["articles"]] == [article.url]
+    # The link that has an article is listed once, with the article.
+    assert shown["snapshot_sources"] == [{**snapshot_only, "published_at": "2026-09-28T01:00:00Z"}]
 
 
 async def test_edition_detail_lists_items_and_scored_candidates(

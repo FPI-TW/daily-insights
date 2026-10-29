@@ -26,7 +26,7 @@ from pydantic import (
     ValidationInfo,
     field_validator,
 )
-from sqlalchemy import and_, case, distinct, func, select, update
+from sqlalchemy import and_, case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from daily_insights_api.core.config import Settings
@@ -150,6 +150,14 @@ class NewsroomAdminArticleLink(BaseModel):
     body_status: BodyStatus
 
 
+class NewsroomAdminSnapshotLink(BaseModel):
+    """A frozen legacy link with no article on the event; readers see it as a source."""
+
+    name: str
+    url: str
+    published_at: datetime | None
+
+
 class NewsroomAdminEvent(BaseModel):
     """An event with its shared analysis and the facts an editor triages by."""
 
@@ -177,6 +185,7 @@ class NewsroomAdminEvent(BaseModel):
     # Articles with a usable body; zero means "missing full text" (D18).
     body_ok_count: int
     articles: list[NewsroomAdminArticleLink]
+    snapshot_sources: list[NewsroomAdminSnapshotLink]
 
 
 class NewsroomAdminEdition(BaseModel):
@@ -712,29 +721,33 @@ def _related_symbols(raw: list[dict[str, Any]]) -> list[RelatedSymbol]:
 async def _event_views(
     database: AsyncSession, event_ids: Sequence[uuid.UUID]
 ) -> dict[uuid.UUID, NewsroomAdminEvent]:
-    """Events with their article counts and leading article links, by id."""
+    """Events with their article counts, leading article links and snapshot-only links.
+
+    ``source_count`` counts outlets across articles and snapshot-only links, so
+    it matches the links a reader sees (``public_api._sources``).
+    """
     ids = list(dict.fromkeys(event_ids))
     if not ids:
         return {}
     events = (await database.scalars(select(NewsroomEvent).where(NewsroomEvent.id.in_(ids)))).all()
     aggregates = {
-        event_id: (articles, sources, bodies)
-        for event_id, articles, sources, bodies in (
+        event_id: (articles, bodies)
+        for event_id, articles, bodies in (
             await database.execute(
                 select(
                     NewsroomArticle.event_id,
                     func.count(),
-                    # One outlet's several feeds count once, as in assembly.
-                    func.count(distinct(NewsroomSource.name)),
                     func.count().filter(NewsroomArticle.body_status == "ok"),
                 )
-                .join(NewsroomSource, NewsroomSource.id == NewsroomArticle.source_id)
                 .where(NewsroomArticle.event_id.in_(ids))
                 .group_by(NewsroomArticle.event_id)
             )
         ).all()
     }
     links: dict[uuid.UUID, list[NewsroomAdminArticleLink]] = defaultdict(list)
+    # One outlet's several feeds count once, as in assembly.
+    outlets: dict[uuid.UUID, set[str]] = defaultdict(set)
+    article_urls: dict[uuid.UUID, set[str]] = defaultdict(set)
     rows = (
         await database.execute(
             select(NewsroomArticle, NewsroomSource.name, NewsroomSource.hostname)
@@ -751,6 +764,8 @@ async def _event_views(
     ).all()
     for article, source_name, hostname in rows:
         assert article.event_id is not None
+        outlets[article.event_id].add(source_name)
+        article_urls[article.event_id].add(article.url)
         bucket = links[article.event_id]
         if len(bucket) < CARD_ARTICLE_LIMIT:
             bucket.append(
@@ -766,7 +781,13 @@ async def _event_views(
             )
     views: dict[uuid.UUID, NewsroomAdminEvent] = {}
     for event in events:
-        article_count, source_count, body_ok_count = aggregates.get(event.id, (0, 0, 0))
+        article_count, body_ok_count = aggregates.get(event.id, (0, 0))
+        snapshot_sources = [
+            NewsroomAdminSnapshotLink.model_validate(link)
+            for link in event.legacy_sources
+            if link["url"] not in article_urls[event.id]
+        ]
+        source_count = len(outlets[event.id] | {link.name for link in snapshot_sources})
         views[event.id] = NewsroomAdminEvent(
             id=event.id,
             edition_date=event.edition_date,
@@ -791,6 +812,7 @@ async def _event_views(
             source_count=source_count,
             body_ok_count=body_ok_count,
             articles=links.get(event.id, []),
+            snapshot_sources=snapshot_sources,
         )
     return views
 

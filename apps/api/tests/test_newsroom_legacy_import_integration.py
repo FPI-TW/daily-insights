@@ -536,6 +536,28 @@ async def test_old_deployment_backfills_available_sources_and_preserves_them_on_
             # An installation that already applied the original 0034 has no
             # snapshot column. The old tables have already been dropped too.
             connection.execute(text("ALTER TABLE newsroom_events DROP COLUMN legacy_sources"))
+            feed_source, feed_name = connection.execute(
+                text("SELECT id, name FROM newsroom_sources WHERE key = 'cnbc-top-news'")
+            ).one()
+            # Triage later attaches a feed article to a legacy event; that link
+            # stays live instead of being frozen by the backfill.
+            late_url = "https://example.com/triaged-later"
+            connection.execute(
+                text(
+                    "INSERT INTO newsroom_articles (id, source_id, url, url_hash, title, "
+                    "edition_date, event_id, created_at) "
+                    "SELECT :id, :source, :url, :hash, 'Later', e.edition_date, e.id, "
+                    "e.created_at + interval '1 day' "
+                    "FROM newsroom_events AS e JOIN newsroom_articles AS a ON a.event_id = e.id "
+                    "WHERE e.created_by = 'legacy' AND a.url = 'https://example.com/a'"
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "source": feed_source,
+                    "url": late_url,
+                    "hash": hashlib.sha256(late_url.encode()).hexdigest(),
+                },
+            )
     finally:
         engine.dispose()
     _alembic(database_url, "upgrade", HEAD)
@@ -546,9 +568,10 @@ async def test_old_deployment_backfills_available_sources_and_preserves_them_on_
             global_edition = await latest_edition(
                 database, "global", "zh-hant", today=date(2026, 9, 29)
             )
-            assert [source.url for source in global_edition.items[0].sources] == [
-                "https://example.com/a"
-            ]
+            assert {source.url for source in global_edition.items[0].sources} == {
+                "https://example.com/a",
+                late_url,
+            }
             snapshots = {
                 event_id: links
                 for event_id, links in await database.execute(
@@ -556,6 +579,12 @@ async def test_old_deployment_backfills_available_sources_and_preserves_them_on_
                 )
             }
             assert sum(bool(links) for links in snapshots.values()) == 3
+            names = {link["url"]: link["name"] for links in snapshots.values() for link in links}
+            assert late_url not in names
+            # The outlet names went with the legacy tables; a manual link keeps
+            # the hostname readers already saw, a linked feed article its source.
+            assert names["https://example.com/a"] == "example.com"
+            assert names["https://example.com/linked"] == feed_name
     finally:
         await engine.dispose()
 

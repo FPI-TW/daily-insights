@@ -201,6 +201,34 @@ describe("NewsroomReviewPage", () => {
     ).toBeVisible()
   })
 
+  it("lists legacy snapshot links the reader sees without an article", async () => {
+    const legacy = item({
+      event: event({
+        working_title: "Legacy history",
+        headline_zh_hant: "Legacy history",
+        article_count: 0,
+        source_count: 1,
+        articles: [],
+        snapshot_sources: [
+          {
+            name: "Original outlet",
+            url: "https://example.com/older",
+            published_at: null,
+          },
+        ],
+      }),
+    })
+    client.editionDetail.mockResolvedValue(detail({ items: [legacy] }))
+    renderPage()
+
+    const card = await screen.findByRole("article", { name: "Legacy history" })
+    expect(within(card).getByText("Original outlet")).toBeVisible()
+    expect(
+      within(card).getByRole("link", { name: "https://example.com/older" })
+    ).toHaveAttribute("href", "https://example.com/older")
+    expect(within(card).getByText("Legacy snapshot")).toBeVisible()
+  })
+
   it("asks for a second look when a market has more than three 5-star picks", async () => {
     client.editionDay.mockResolvedValue(
       day(edition({ needs_five_star_review: true }))

@@ -144,7 +144,6 @@ async def claim(
 def _fenced(claim_: Claim) -> Any:
     return and_(
         claim_.stage.model.id == claim_.row_id,
-        _col(claim_.stage, "attempts") == claim_.attempt,
         _col(claim_.stage, "claim_token") == claim_.token,
         _col(claim_.stage, "status") == "pending",
     )
@@ -256,6 +255,39 @@ FatalHook = Callable[[Claim, FatalStageError], Awaitable[None]]
 WaitHook = Callable[[Claim, RetryableStageError], Awaitable[None]]
 
 
+class _CallAudits:
+    """Every model call audit a claim's session has seen, flushed or not.
+
+    Each call is paid for whatever happens to the stage, so every rollback in
+    ``run_claimed`` discards the product writes and then re-adds these rows.
+    Autoflush may already have written a row before the stage failed; the
+    listener keeps a reference that survives the rollback.
+    """
+
+    def __init__(self, database: AsyncSession) -> None:
+        self._database = database
+        self._flushed: list[NewsroomLlmCall] = []
+        event.listen(database.sync_session, "pending_to_persistent", self._remember)
+
+    def _remember(self, session: Session, row: object) -> None:
+        if isinstance(row, NewsroomLlmCall):
+            self._flushed.append(row)
+
+    async def rollback(self, extra: Sequence[Any] = ()) -> None:
+        rows = [
+            *self._flushed,
+            *(row for row in self._database.new if isinstance(row, NewsroomLlmCall)),
+            *extra,
+        ]
+        await self._database.rollback()
+        # A stage may both leave a row in the session and attach it to its error.
+        self._flushed.clear()
+        self._database.add_all(list({id(row): row for row in rows}.values()))
+
+    def close(self) -> None:
+        event.remove(self._database.sync_session, "pending_to_persistent", self._remember)
+
+
 async def run_claimed(
     session_factory: async_sessionmaker[AsyncSession],
     claim_: Claim,
@@ -270,39 +302,23 @@ async def run_claimed(
     ``on_wait`` about retryable errors that do not count an attempt.
     """
     async with session_factory() as database:
-        # Autoflush can persist call audits before the final fence check. Keep
-        # references so a rejected claim can roll back all product writes and
-        # then save only its paid-for calls in a fresh transaction.
-        flushed_audits: list[NewsroomLlmCall] = []
-
-        def remember_audit(session: Session, row: object) -> None:
-            if isinstance(row, NewsroomLlmCall):
-                flushed_audits.append(row)
-
-        event.listen(database.sync_session, "pending_to_persistent", remember_audit)
+        audits = _CallAudits(database)
         try:
             values = await handler(database, claim_)
             settled = await settle_success(database, claim_, values)
             if not settled:
-                audits = [
-                    *flushed_audits,
-                    *(row for row in database.new if isinstance(row, NewsroomLlmCall)),
-                ]
-                await database.rollback()
-                database.add_all(audits)
+                await audits.rollback()
             await database.commit()
             return "done" if settled else "fenced"
         except RetryableStageError as error:
-            await database.rollback()
-            database.add_all(error.audit_rows)
+            await audits.rollback(error.audit_rows)
             outcome = await settle_retryable(database, claim_, error)
             await database.commit()
             if outcome != "fenced" and on_wait is not None and not error.counts_attempt:
                 await on_wait(claim_, error)
             return outcome
         except FatalStageError as error:
-            await database.rollback()
-            database.add_all(error.audit_rows)
+            await audits.rollback(error.audit_rows)
             settled = await settle_fatal(database, claim_, error)
             await database.commit()
             if settled and on_fatal is not None and error.notify:
@@ -311,12 +327,12 @@ async def run_claimed(
         except Exception:
             # A bug must not retry forever: it counts as a retryable attempt so
             # max_attempts eventually fails the row, and the worker logs it.
-            await database.rollback()
+            await audits.rollback()
             await settle_retryable(database, claim_, RetryableStageError("unexpected_error"))
             await database.commit()
             raise
         finally:
-            event.remove(database.sync_session, "pending_to_persistent", remember_audit)
+            audits.close()
 
 
 async def enqueue(

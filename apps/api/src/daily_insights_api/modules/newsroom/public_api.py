@@ -161,23 +161,22 @@ def _is_web_url(url: str) -> bool:
 
 
 async def _sources(
-    database: AsyncSession, event_ids: Sequence[uuid.UUID]
+    database: AsyncSession, events: Sequence[NewsroomEvent]
 ) -> dict[uuid.UUID, list[NewsroomSourceLink]]:
+    """Each event's links: its articles by trust, then frozen links without an article.
+
+    A legacy snapshot keeps a link whose article another date's event owns
+    (article URLs are globally unique). An article from a feed source shows its
+    live metadata; the manual source only stands in for the pasted site, so its
+    article shows the snapshot taken of the same link when there is one.
+    """
+    snapshots = {event.id: {link["url"]: link for link in event.legacy_sources} for event in events}
     sources: dict[uuid.UUID, list[NewsroomSourceLink]] = defaultdict(list)
-    snapshots = await database.execute(
-        select(NewsroomEvent.id, NewsroomEvent.legacy_sources).where(
-            NewsroomEvent.id.in_(event_ids)
-        )
-    )
-    for event_id, links in snapshots:
-        for raw in links:
-            link = NewsroomSourceLink.model_validate(raw)
-            if _is_web_url(link.url):
-                sources[event_id].append(link)
+    covered: dict[uuid.UUID, set[str]] = defaultdict(set)
     rows = await database.execute(
         select(NewsroomArticle, NewsroomSource)
         .join(NewsroomSource, NewsroomSource.id == NewsroomArticle.source_id)
-        .where(NewsroomArticle.event_id.in_(event_ids))
+        .where(NewsroomArticle.event_id.in_(list(snapshots)))
         .order_by(
             NewsroomSource.trust_tier.desc(),
             NewsroomArticle.published_at.desc().nulls_last(),
@@ -187,7 +186,10 @@ async def _sources(
     for article, source in rows:
         if article.event_id is None or not _is_web_url(article.url):
             continue
-        if any(link.url == article.url for link in sources[article.event_id]):
+        covered[article.event_id].add(article.url)
+        frozen = snapshots[article.event_id].get(article.url)
+        if source.kind == "manual" and frozen is not None:
+            sources[article.event_id].append(NewsroomSourceLink.model_validate(frozen))
             continue
         name = source.name
         if source.kind == "manual":
@@ -197,6 +199,10 @@ async def _sources(
         sources[article.event_id].append(
             NewsroomSourceLink(name=name, url=article.url, published_at=article.published_at)
         )
+    for event_id, links in snapshots.items():
+        for url, raw in links.items():
+            if url not in covered[event_id] and _is_web_url(url):
+                sources[event_id].append(NewsroomSourceLink.model_validate(raw))
     return sources
 
 
@@ -288,7 +294,7 @@ async def _edition_response(
     today: date,
     linkable_markets: frozenset[str],
 ) -> NewsroomEditionResponse:
-    sources = await _sources(database, [event.id for _, event in rows])
+    sources = await _sources(database, [event for _, event in rows])
     items = []
     for item, event in rows:
         headline, summary = _localized_text(event, locale)

@@ -3884,6 +3884,13 @@
             "title": "Related Symbols",
             "type": "array"
           },
+          "snapshot_sources": {
+            "items": {
+              "$ref": "#/components/schemas/NewsroomAdminSnapshotLink"
+            },
+            "title": "Snapshot Sources",
+            "type": "array"
+          },
           "source_count": {
             "title": "Source Count",
             "type": "integer"
@@ -3954,7 +3961,8 @@
           "article_count",
           "source_count",
           "body_ok_count",
-          "articles"
+          "articles",
+          "snapshot_sources"
         ],
         "title": "NewsroomAdminEvent",
         "type": "object"
@@ -4384,6 +4392,34 @@
         },
         "required": ["edition_date"],
         "title": "NewsroomAdminPublishDay",
+        "type": "object"
+      },
+      "NewsroomAdminSnapshotLink": {
+        "description": "A frozen legacy link with no article on the event; readers see it as a source.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": ["name", "url", "published_at"],
+        "title": "NewsroomAdminSnapshotLink",
         "type": "object"
       },
       "NewsroomAdminSource": {

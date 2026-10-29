@@ -130,9 +130,12 @@ async def merge_events(
     # unique). Preserve them through merges, including chains into new events.
     # Prefer the target's original metadata when URLs overlap.
     snapshots = {link["url"]: link for link in target.legacy_sources}
+    moved_snapshots: list[str] = []
     for source in sources:
         for link in events[source].legacy_sources:
-            snapshots.setdefault(link["url"], link)
+            if link["url"] not in snapshots:
+                snapshots[link["url"]] = link
+                moved_snapshots.append(link["url"])
     target.legacy_sources = list(snapshots.values())
 
     moved_articles = list(
@@ -205,7 +208,11 @@ async def merge_events(
     if user_id is None:
         logger.info(
             "newsroom.events_auto_merged",
-            extra={"target_event_id": str(target_id), "source_event_ids": _ids(sources)},
+            extra={
+                "target_event_id": str(target_id),
+                "source_event_ids": _ids(sources),
+                "moved_snapshot_urls": moved_snapshots,
+            },
         )
         return
 
@@ -218,6 +225,8 @@ async def merge_events(
         before={"source_event_ids": _ids(sources)},
         after={
             "moved_article_ids": _ids(moved_articles),
+            # The sources keep their own copies, so each link stays traceable.
+            "moved_snapshot_urls": moved_snapshots,
             "repointed_item_ids": _ids(repointed),
             "removed_item_ids": _ids(removed),
             "restored_item_ids": _ids(restored),
@@ -298,6 +307,7 @@ async def split_event(
         after={
             "new_event_id": str(created.id),
             "moved_article_ids": _ids(moving),
+            "moved_snapshot_urls": [link["url"] for link in moving_snapshots],
             "remaining_article_count": remaining,
             "analysis_requeued_event_ids": requeued,
         },
@@ -312,6 +322,7 @@ async def split_event(
         after={
             "source_event_id": str(event_id),
             "article_ids": _ids(moving),
+            "snapshot_urls": [link["url"] for link in moving_snapshots],
             "working_title": working_title,
         },
     )

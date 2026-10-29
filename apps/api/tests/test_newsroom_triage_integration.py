@@ -1145,6 +1145,7 @@ async def test_merge_moves_articles_and_items_and_requeues_the_target(
     assert merge_after["repointed_item_ids"] == [str(repointed), str(us_first)]
     assert merge_after["removed_item_ids"] == [str(dropped), str(us_second)]
     assert merge_after["restored_item_ids"] == []
+    assert merge_after["moved_snapshot_urls"] == []
     assert merge_after["analysis_requeued_event_ids"] == [str(target)]
     for source in (first, second):
         [source_log] = await _edits(newsroom_database, source)
@@ -1318,6 +1319,38 @@ async def test_split_moves_matching_snapshots_and_keeps_snapshot_only_sources(
         await database.commit()
     assert (await _get(newsroom_database, NewsroomEvent, original)).legacy_sources == snapshots[1:]
     assert (await _get(newsroom_database, NewsroomEvent, created)).legacy_sources == snapshots[:1]
+    [split_log] = await _edits(newsroom_database, original)
+    assert _logged(split_log.after)["moved_snapshot_urls"] == [moving_url]
+    [created_log] = await _edits(newsroom_database, created)
+    assert _logged(created_log.after)["snapshot_urls"] == [moving_url]
+
+
+async def test_merge_log_lists_the_snapshot_links_the_target_gained(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    user_id = await _user(newsroom_database)
+    shared = {"name": "Shared", "url": "https://example.com/shared", "published_at": None}
+    only = {"name": "Only", "url": "https://example.com/only", "published_at": None}
+    target = await _event(newsroom_database, "Target")
+    incoming = await _event(newsroom_database, "Incoming")
+    async with newsroom_database() as database:
+        await database.execute(
+            update(NewsroomEvent).where(NewsroomEvent.id == target).values(legacy_sources=[shared])
+        )
+        await database.execute(
+            update(NewsroomEvent)
+            .where(NewsroomEvent.id == incoming)
+            .values(legacy_sources=[{**shared, "name": "Duplicate"}, only])
+        )
+        await database.commit()
+    async with newsroom_database() as database:
+        await events_service.merge_events(
+            database, target_id=target, source_ids=[incoming], user_id=user_id
+        )
+        await database.commit()
+    assert (await _get(newsroom_database, NewsroomEvent, target)).legacy_sources == [shared, only]
+    [merge_log] = await _edits(newsroom_database, target)
+    assert _logged(merge_log.after)["moved_snapshot_urls"] == [only["url"]]
 
 
 async def test_split_of_an_unplaced_event_leaves_analysis_idle(

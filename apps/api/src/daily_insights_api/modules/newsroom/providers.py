@@ -221,7 +221,12 @@ class OpenAICompatibleJsonModel:
         ]
         failed_rows: list[NewsroomLlmCall] = []
         for attempt in range(1 + REPAIR_ATTEMPTS):
-            outcome = await self._attempt(model, messages, result_type, audit)
+            try:
+                outcome = await self._attempt(model, messages, result_type, audit)
+            except (RetryableStageError, FatalStageError) as failure:
+                # A failed repair turn must not drop the invalid turns before it.
+                failure.audit_rows[:0] = failed_rows
+                raise
             if isinstance(outcome, _Answer):
                 database.add_all(failed_rows)
                 database.add(outcome.row)

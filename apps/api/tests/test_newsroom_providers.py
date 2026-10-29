@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from datetime import timedelta
 from typing import Any, cast
 
@@ -99,6 +100,49 @@ async def test_a_second_invalid_reply_is_retryable_and_keeps_both_audit_rows() -
     assert raised.value.code == "analysis_schema_invalid"
     assert len(requests) == 2
     assert [row.error_code for row in raised.value.audit_rows] == ["analysis_schema_invalid"] * 2
+    assert session.added == []
+
+
+@pytest.mark.parametrize(
+    ("failure", "kind", "code"),
+    [
+        (httpx.Response(503), RetryableStageError, "analysis_provider_http_503"),
+        (httpx.Response(401), FatalStageError, "analysis_provider_http_401"),
+        (httpx.ConnectError("down"), RetryableStageError, "analysis_provider_unreachable"),
+    ],
+)
+async def test_a_failed_repair_turn_keeps_the_invalid_first_turn_audit(
+    failure: httpx.Response | httpx.ConnectError,
+    kind: type[RetryableStageError | FatalStageError],
+    code: str,
+) -> None:
+    requests: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": {"content": json.dumps(TRUNCATED)}}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+                },
+            )
+        if isinstance(failure, Exception):
+            raise failure
+        return failure
+
+    session = _Session()
+    with pytest.raises((RetryableStageError, FatalStageError)) as raised:
+        await _complete(_replying_model_with(handler), session)
+
+    assert isinstance(raised.value, kind)
+    assert raised.value.code == code
+    assert len(requests) == 2
+    rows = raised.value.audit_rows
+    assert [row.error_code for row in rows] == ["analysis_schema_invalid", code]
+    # The first turn's usage was paid for and stays on record.
+    assert (rows[0].input_tokens, rows[0].output_tokens) == (10, 5)
     assert session.added == []
 
 
@@ -309,8 +353,12 @@ def test_other_provider_refusals_keep_their_status_codes() -> None:
 
 
 def _replying_model(response: httpx.Response) -> Any:
+    return _replying_model_with(lambda _: response)
+
+
+def _replying_model_with(handler: Callable[[httpx.Request], httpx.Response]) -> Any:
     model = OpenAICompatibleJsonModel(base_url="https://llm.test", api_key="k", timeout_seconds=5)
-    model._client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: response))
+    model._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     return model
 
 

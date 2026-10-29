@@ -222,6 +222,16 @@ export function ReviewItemCard({
                   </a>
                 </li>
               ))}
+              {event.snapshot_sources.map(link => (
+                <li key={link.url} className="wrap-anywhere">
+                  <span className="font-bold">{link.name}</span>
+                  {" · "}
+                  <a href={link.url} target="_blank" rel="noreferrer">
+                    {link.url}
+                  </a>{" "}
+                  <StatusBadge>{t("newsroomAdminSnapshotSource")}</StatusBadge>
+                </li>
+              ))}
             </ul>
           </dd>
         </div>

@@ -58,11 +58,13 @@ export function CandidateList({
                 </StatusBadge>
               ) : null}
             </p>
-            {event.articles.length > 0 ? (
+            {event.articles.length + event.snapshot_sources.length > 0 ? (
               <p className="m-0 text-xs wrap-anywhere text-sea-ink-soft">
-                {event.articles
+                {[
+                  ...event.articles.map(article => article.source_name),
+                  ...event.snapshot_sources.map(link => link.name),
+                ]
                   .slice(0, 3)
-                  .map(article => article.source_name)
                   .join(" · ")}
               </p>
             ) : null}

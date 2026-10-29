@@ -109,7 +109,8 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 - 歷史搬移事件另有 `legacy_sources`（JSONB：`{name, url, published_at}` 陣列）保存原始來源，
   不依賴全域唯一文章 URL 的單一事件關聯。合併時把來源快照轉入目標，依 URL 去重且目標資料優先；
   不限目標的 `created_by`，連續合併保留快照。拆分時依所選文章 URL 搬移對應快照，無文章的快照留在原事件。
-  讀者端讀取所有事件的快照，與文章來源合併後依 URL 去重。
+  讀者端讀取所有事件的快照：文章連結依可信度在前、無文章的快照在後，依 URL 去重；
+  feed 文章用即時資料，`manual` 文章有同 URL 快照時用快照。後台以 `snapshot_sources` 顯示無文章的快照。
 - 深度分析結果（事件層級、跨市場共用）：
   - `headline_zh_hant`、`summary_zh_hant`、`headline_zh_hans`、`summary_zh_hans`、`headline_en`、`summary_en`。
   - `related_symbols`（JSONB 陣列，每筆 `{symbol, kind, label}`，必須能對應站內儀表板，對應不到者丟棄）。
@@ -148,9 +149,10 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 - 每個可失敗的工作以資料列欄位表示：`<stage>_status = pending` 且 `<stage>_next_attempt_at <= now()` 即可被領取。
 - 領取：`SELECT … FOR UPDATE SKIP LOCKED LIMIT n`，在同一交易內把 `next_attempt_at` 推遲一個租約時間（預設 10 分鐘），
   完成後寫回結果並清除。worker 崩潰時租約到期自然重試，不需額外的 checkpoint。
-- 每次領取產生獨立 UUID `<stage>_claim_token`，寫回比對 token、attempts 與 pending 狀態。
+- 每次領取產生獨立 UUID `<stage>_claim_token`，寫回比對 token 與 pending 狀態。
   重新排入、暫停、完成與失敗會清除 token；重試計數可歸零，但不能重用舊工作識別。
-  成功寫回被 fence 時回滾 handler 整筆交易，僅另存 LLM audit；過期失敗不修改新工作或觸發通知。
+  成功寫回被 fence 時回滾 handler 整筆交易；任何回滾都保留該次領取的 LLM audit（含已 autoflush 者）。
+  過期失敗不修改新工作或觸發通知。
 - 失敗分兩類，**不再有細緻的 failure classification**：
   - **可重試**（網路、逾時、429、5xx、JSON／schema 不合法）：`attempts += 1`，指數退避（1、2、4、8… 分鐘，上限 60 分鐘），
     遵守 `Retry-After`；超過該 stage 的 `max_attempts` 則轉 `failed`。

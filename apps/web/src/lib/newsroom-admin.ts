@@ -114,6 +114,13 @@ const eventSchema = z.object({
       body_status: bodyStatusSchema,
     })
   ),
+  snapshot_sources: z.array(
+    z.object({
+      name: z.string(),
+      url: z.string(),
+      published_at: timestamp.nullable(),
+    })
+  ),
 }) satisfies z.ZodType<Schemas["NewsroomAdminEvent"]>
 export type NewsroomEvent = z.infer<typeof eventSchema>
 export type NewsroomRelatedSymbol = NewsroomEvent["related_symbols"][number]

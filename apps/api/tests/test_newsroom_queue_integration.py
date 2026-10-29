@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from daily_insights_api import models as registered_models  # noqa: F401
@@ -119,11 +119,55 @@ async def test_retryable_failure_backs_off_then_fails_when_exhausted(
     assert row.embed_status == "failed"
     assert row.embed_error_code == "embed_provider_timeout"
     async with newsroom_database() as database:
-        # The audit row attached to the error survives; the one added in the
-        # handler's own session was rolled back with the stage.
+        # Both calls were paid for: the one attached to the error and the one
+        # the handler left in its session survive the stage's rollback.
         latencies = (await database.scalars(select(NewsroomLlmCall.latency_ms))).all()
-    assert sorted(set(latencies)) == [2]
-    assert len(latencies) == queue.EMBED.max_attempts
+    assert sorted(set(latencies)) == [1, 2]
+    assert len(latencies) == 2 * queue.EMBED.max_attempts
+
+
+@pytest.mark.parametrize("failure", ["retry", "fatal", "unexpected"])
+async def test_failed_stage_keeps_call_audits_that_autoflush_already_wrote(
+    newsroom_database: async_sessionmaker[AsyncSession],
+    failure: Literal["retry", "fatal", "unexpected"],
+) -> None:
+    article_id = await _article(newsroom_database)
+    async with newsroom_database() as database:
+        claim_ = (await claim(database, queue.EMBED))[0]
+
+    async def handler(database: AsyncSession, claim_: Claim) -> dict[str, Any]:
+        database.add(
+            NewsroomLlmCall(stage="embed", subject_id=claim_.row_id, model="m", latency_ms=1)
+        )
+        # Any query autoflushes the audit before the stage fails, like
+        # triage's window lock before ``triage_event_unavailable``.
+        await database.execute(select(NewsroomArticle.id))
+        database.add(
+            NewsroomLlmCall(stage="embed", subject_id=claim_.row_id, model="m", latency_ms=2)
+        )
+        await database.execute(
+            update(NewsroomArticle)
+            .where(NewsroomArticle.id == claim_.row_id)
+            .values(title="rolled back")
+        )
+        if failure == "retry":
+            error: Exception = RetryableStageError("embed_event_unavailable")
+        elif failure == "fatal":
+            error = FatalStageError("embed_key_revoked", notify=False)
+        else:
+            error = RuntimeError("bug")
+        raise error
+
+    if failure == "unexpected":
+        with pytest.raises(RuntimeError):
+            await run_claimed(newsroom_database, claim_, handler)
+    else:
+        await run_claimed(newsroom_database, claim_, handler)
+    row = await _row(newsroom_database, article_id)
+    assert row.title == "Headline"
+    async with newsroom_database() as database:
+        latencies = (await database.scalars(select(NewsroomLlmCall.latency_ms))).all()
+    assert sorted(latencies) == [1, 2]
 
 
 async def test_fatal_failure_fails_immediately_and_notifies(

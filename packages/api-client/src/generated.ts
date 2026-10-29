@@ -2856,6 +2856,8 @@ export interface components {
       merged_into_id: string | null
       /** Related Symbols */
       related_symbols: components["schemas"]["RelatedSymbol"][]
+      /** Snapshot Sources */
+      snapshot_sources: components["schemas"]["NewsroomAdminSnapshotLink"][]
       /** Source Count */
       source_count: number
       /**
@@ -3029,6 +3031,18 @@ export interface components {
        * Format: date
        */
       edition_date: string
+    }
+    /**
+     * NewsroomAdminSnapshotLink
+     * @description A frozen legacy link with no article on the event; readers see it as a source.
+     */
+    NewsroomAdminSnapshotLink: {
+      /** Name */
+      name: string
+      /** Published At */
+      published_at: string | null
+      /** Url */
+      url: string
     }
     /** NewsroomAdminSource */
     NewsroomAdminSource: {

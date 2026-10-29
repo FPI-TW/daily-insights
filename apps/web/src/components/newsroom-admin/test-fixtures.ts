@@ -47,6 +47,7 @@ export function event(overrides: Partial<NewsroomEvent> = {}): NewsroomEvent {
         body_status: "ok",
       },
     ],
+    snapshot_sources: [],
     ...overrides,
   }
 }

@@ -174,6 +174,14 @@ class _Newsroom:
         await self.database.flush()
 
 
+async def _reader_sources(
+    database: AsyncSession, event_id: uuid.UUID
+) -> list[public_api.NewsroomSourceLink]:
+    event = await database.get(NewsroomEvent, event_id)
+    assert event is not None
+    return (await public_api._sources(database, [event]))[event_id]
+
+
 @pytest.mark.parametrize("target_origin", ["legacy", "triage", "split"])
 async def test_merge_preserves_snapshot_only_sources_through_merge_chains(
     newsroom_database: async_sessionmaker[AsyncSession], target_origin: str
@@ -212,7 +220,7 @@ async def test_merge_preserves_snapshot_only_sources_through_merge_chains(
 
     # Read from a new session so an in-memory JSON change cannot mask a missing write.
     async with newsroom_database() as database:
-        sources = (await public_api._sources(database, [target_id]))[target_id]
+        sources = await _reader_sources(database, target_id)
         assert [(link.name, link.url, link.published_at) for link in sources] == [
             ("Original A", a, PUBLISHED_AT),
             ("Original B", b, PUBLISHED_AT),
@@ -223,10 +231,46 @@ async def test_merge_preserves_snapshot_only_sources_through_merge_chains(
         )
         await database.commit()
     async with newsroom_database() as database:
-        sources = (await public_api._sources(database, [final_id]))[final_id]
+        sources = await _reader_sources(database, final_id)
         assert {link.url for link in sources} == {a, b, c}
         assert len(sources) == 3
         assert next(link for link in sources if link.url == b).name == "Original B"
+
+
+async def test_snapshot_links_follow_article_links_and_feed_articles_stay_live(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    wire_url, blog_url, manual_url, only_url = (
+        f"https://example.com/{key}" for key in ("wire", "blog", "manual", "only")
+    )
+    async with newsroom_database() as database:
+        news = _Newsroom(database)
+        wire = await news.source("wire", trust_tier=3)
+        blog = await news.source("blog", trust_tier=1)
+        manual = await news.source("manual", kind="manual", trust_tier=2)
+        event = await news.event(
+            TODAY,
+            "Merged history",
+            created_by="legacy",
+            legacy_sources=[
+                {"name": "Snapshot only", "url": only_url, "published_at": None},
+                {"name": "Old wire name", "url": wire_url, "published_at": None},
+                {"name": "Original outlet", "url": manual_url, "published_at": None},
+            ],
+        )
+        await news.article(event, blog, blog_url, published_at=PUBLISHED_AT)
+        await news.article(event, wire, wire_url, published_at=PUBLISHED_AT)
+        await news.article(event, manual, manual_url, published_at=PUBLISHED_AT)
+        await database.commit()
+        sources = await _reader_sources(database, event.id)
+    # Highest trust first; a snapshot without an article comes last. The feed
+    # article keeps its live name and time; the manual one shows its snapshot.
+    assert [(link.name, link.url, link.published_at) for link in sources] == [
+        ("Wire", wire_url, PUBLISHED_AT),
+        ("Original outlet", manual_url, None),
+        ("Blog", blog_url, PUBLISHED_AT),
+        ("Snapshot only", only_url, None),
+    ]
 
 
 async def _latest(

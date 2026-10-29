@@ -233,14 +233,13 @@ def resolve_event_choice(
     raise RetryableStageError(SCHEMA_INVALID)
 
 
-def _keep_call_audit(
+def _mark_call_audit(
     database: AsyncSession, error: RetryableStageError, subject: uuid.UUID
 ) -> None:
-    """Carry the successful call's audit row across the rollback, marked as the failure."""
-    for row in list(database.new):
+    """Mark the successful call's audit row as the failure; ``run_claimed`` keeps it."""
+    for row in database.new:
         if isinstance(row, NewsroomLlmCall) and row.subject_id == subject:
             row.error_code = error.code
-            error.audit_rows.append(row)
 
 
 async def assign_event(
@@ -435,7 +434,7 @@ def _triage_handler(runtime: Runtime) -> StageHandler:
         try:
             choice = resolve_event_choice(result, candidates, relevant=relevant)
         except RetryableStageError as error:
-            _keep_call_audit(database, error, claim_.row_id)
+            _mark_call_audit(database, error, claim_.row_id)
             raise
         event_id = (
             None
