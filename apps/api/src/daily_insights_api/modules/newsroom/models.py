@@ -279,6 +279,9 @@ class NewsroomArticle(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # The exact text embedded: title and feed summary, translated to Traditional
     # Chinese for a non-Chinese headline, so re-embedding needs no new translation.
     embedding_text: Mapped[str | None] = mapped_column(Text)
+    # Translation checkpoint, committed independently of vector generation.
+    embedding_translation_digest: Mapped[str | None] = mapped_column(String(64))
+    embedding_translation_text: Mapped[str | None] = mapped_column(Text)
     embed_status: Mapped[str] = mapped_column(
         String(10), nullable=False, default="idle", server_default="idle"
     )

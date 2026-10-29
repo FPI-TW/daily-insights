@@ -169,7 +169,8 @@ class WhyResult(_Strict):
 
 
 class TranslationResult(_Strict):
-    headline: ShortText
-    summary: LongText
+    # Omitted for a why-only update; the handler enforces the requested keys.
+    headline: ShortText | None = None
+    summary: LongText | None = None
     # Keyed by edition item id, so each market's "why" maps back to its row.
     why: dict[str, LongText] = Field(default_factory=dict)

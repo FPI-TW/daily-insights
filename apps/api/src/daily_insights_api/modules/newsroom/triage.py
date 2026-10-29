@@ -7,6 +7,7 @@ is serialised per window by ``clustering.lock_window``.
 """
 
 import hashlib
+import json
 import logging
 import re
 import uuid
@@ -310,15 +311,49 @@ async def translated_embedding_input(
     reaching triage.
     """
     prompt = load_embed_translate_prompt()
+    payload = {"title": _squash(title), "summary": _squash(feed_summary)[:SUMMARY_MAX_CHARS]}
+    digest = hashlib.sha256(
+        json.dumps(
+            [runtime.settings.newsroom_translate_model, prompt.version, payload],
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
     try:
-        result = await runtime.llm.complete(
-            database,
-            model=runtime.settings.newsroom_translate_model,
-            system=prompt.text,
-            payload={"title": _squash(title), "summary": _squash(feed_summary)[:SUMMARY_MAX_CHARS]},
-            result_type=EmbeddingTranslation,
-            audit=CallAudit(stage="embed", subject_id=article_id, prompt_version=prompt.version),
-        )
+        # Keep both the paid call's audit and its reusable result if vector
+        # generation fails or the outer claim is fenced. The article lock
+        # coalesces concurrent translations, including lease takeovers.
+        async with runtime.session_factory() as checkpoint:
+            article = await checkpoint.scalar(
+                select(NewsroomArticle).where(NewsroomArticle.id == article_id).with_for_update()
+            )
+            if article is None:
+                raise RetryableStageError("embed_article_missing")
+            if (
+                article.embedding_translation_digest == digest
+                and article.embedding_translation_text
+            ):
+                return article.embedding_translation_text
+            result = await runtime.llm.complete(
+                checkpoint,
+                model=runtime.settings.newsroom_translate_model,
+                system=prompt.text,
+                payload=payload,
+                result_type=EmbeddingTranslation,
+                audit=CallAudit(
+                    stage="embed", subject_id=article_id, prompt_version=prompt.version
+                ),
+            )
+            text = embedding_input(result.title, result.summary) or embedding_input(
+                title, feed_summary
+            )
+            # A caller can hold an older snapshot. Such a result is harmless
+            # to return to its fenced claim but must not replace a newer cache.
+            if article.title == title and article.feed_summary == feed_summary:
+                article.embedding_translation_digest = digest
+                article.embedding_translation_text = text
+            await checkpoint.commit()
+            return text
     except (RetryableStageError, FatalStageError) as error:
         if isinstance(error, RetryableStageError) and not last_attempt:
             raise
@@ -328,7 +363,6 @@ async def translated_embedding_input(
             extra={"article_id": str(article_id), "error_code": error.code},
         )
         return embedding_input(title, feed_summary)
-    return embedding_input(result.title, result.summary) or embedding_input(title, feed_summary)
 
 
 def _embed_handler(runtime: Runtime) -> StageHandler:

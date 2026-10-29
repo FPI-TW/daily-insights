@@ -3,7 +3,7 @@ import math
 import os
 import uuid
 from collections.abc import AsyncIterator, Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, TypeVar
 
@@ -338,6 +338,152 @@ async def test_embed_writes_vector_and_hands_off_to_triage(
     ]
     assert all(audit.subject_id == article_id for audit in audits)
     assert any((audit.prompt_version or "").startswith("embed-translate-v1:") for audit in audits)
+
+
+async def test_embedding_retry_reuses_successful_translation_and_keeps_audit(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    class FlakyEmbedder(FakeEmbedder):
+        attempts = 0
+
+        async def embed(
+            self, database: AsyncSession, texts: Sequence[str], *, audit: CallAudit
+        ) -> list[list[float]]:
+            self.attempts += 1
+            if self.attempts == 1:
+                error = RetryableStageError("embed_provider_http_503")
+                error.audit_rows.append(
+                    NewsroomLlmCall(
+                        stage="embed",
+                        subject_id=audit.subject_id,
+                        model="e",
+                        latency_ms=1,
+                        error_code=error.code,
+                    )
+                )
+                raise error
+            return await super().embed(database, texts, audit=audit)
+
+    source_id = await _source(newsroom_database)
+    article_id = await _article(
+        newsroom_database, source_id, "Fed holds rates", embed_status="pending"
+    )
+    llm = FakeJsonModel(lambda payload: relevant({"new": "unused"}))
+    runtime = _runtime(
+        newsroom_database, llm=llm, embedder=FlakyEmbedder({"譯 Fed holds rates": 10})
+    )
+    assert await _run(runtime, "embed") == ["pending"]
+    stored = await _get(newsroom_database, NewsroomArticle, article_id)
+    assert stored.embedding_translation_text == "譯 Fed holds rates"
+    assert stored.embedding is None
+    async with newsroom_database() as database:
+        await database.execute(
+            update(NewsroomArticle)
+            .where(NewsroomArticle.id == article_id)
+            .values(embed_next_attempt_at=None)
+        )
+        await database.commit()
+    assert await _run(runtime, "embed") == ["done"]
+    assert len(llm.translations) == 1
+    async with newsroom_database() as database:
+        audits = (await database.scalars(select(NewsroomLlmCall))).all()
+    assert len(audits) == 3
+    assert sum(audit.model == "translate-test-model" for audit in audits) == 1
+    assert sum(audit.error_code == "embed_provider_http_503" for audit in audits) == 1
+
+
+@pytest.mark.parametrize("changed", ["title", "summary", "model", "prompt"])
+async def test_embedding_translation_cache_invalidates_on_request_change(
+    newsroom_database: async_sessionmaker[AsyncSession],
+    changed: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_id = await _source(newsroom_database)
+    article_id = await _article(
+        newsroom_database, source_id, "Fed holds rates", embed_status="pending"
+    )
+    llm = FakeJsonModel(lambda payload: relevant({"new": "unused"}))
+    runtime = _runtime(
+        newsroom_database,
+        llm=llm,
+        embedder=FakeEmbedder({"譯 Fed holds rates": 10, "譯 Fed cuts rates": 20}),
+    )
+    assert await _run(runtime, "embed") == ["done"]
+    async with newsroom_database() as database:
+        await queue.enqueue(database, queue.EMBED, [article_id])
+        await database.commit()
+    assert await _run(runtime, "embed") == ["done"]
+    assert len(llm.translations) == 1
+    if changed == "model":
+        runtime.settings = runtime.settings.model_copy(update={"newsroom_translate_model": "new"})
+    elif changed == "prompt":
+        prompt = replace(triage.load_embed_translate_prompt(), version="new-prompt")
+        monkeypatch.setattr(triage, "load_embed_translate_prompt", lambda: prompt)
+    async with newsroom_database() as database:
+        if changed in ("title", "summary"):
+            await database.execute(
+                update(NewsroomArticle)
+                .where(NewsroomArticle.id == article_id)
+                .values(
+                    **(
+                        {"title": "Fed cuts rates"}
+                        if changed == "title"
+                        else {"feed_summary": "New summary"}
+                    )
+                )
+            )
+        await queue.enqueue(database, queue.EMBED, [article_id])
+        await database.commit()
+    assert await _run(runtime, "embed") == ["done"]
+    assert len(llm.translations) == 2
+
+
+async def test_fenced_embedding_retains_only_reusable_translation_and_audits(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id = await _source(newsroom_database)
+    article_id = await _article(
+        newsroom_database, source_id, "Fed holds rates", embed_status="pending"
+    )
+    llm = FakeJsonModel(lambda payload: relevant({"new": "unused"}))
+    runtime = _runtime(
+        newsroom_database, llm=llm, embedder=FakeEmbedder({"譯 Fed holds rates": 10})
+    )
+    async with newsroom_database() as database:
+        old = (await claim(database, queue.EMBED))[0]
+        await queue.enqueue(database, queue.EMBED, [article_id])
+        await database.commit()
+    assert await run_claimed(newsroom_database, old, _binding(runtime, "embed").handler) == "fenced"
+    row = await _get(newsroom_database, NewsroomArticle, article_id)
+    assert row.embedding is None and row.triage_status == "idle"
+    assert row.embedding_translation_text == "譯 Fed holds rates"
+    assert await _run(runtime, "embed") == ["done"]
+    assert len(llm.translations) == 1
+
+
+async def test_concurrent_embedding_translations_share_the_checkpoint(
+    newsroom_database: async_sessionmaker[AsyncSession],
+) -> None:
+    source_id = await _source(newsroom_database)
+    article_id = await _article(newsroom_database, source_id, "Fed holds rates")
+    llm = FakeJsonModel(lambda payload: relevant({"new": "unused"}))
+    runtime = _runtime(newsroom_database, llm=llm)
+    async with newsroom_database() as first, newsroom_database() as second:
+        results = await asyncio.gather(
+            *(
+                triage.translated_embedding_input(
+                    runtime,
+                    database,
+                    article_id=article_id,
+                    title="Fed holds rates",
+                    feed_summary=None,
+                    last_attempt=False,
+                )
+                for database in (first, second)
+            )
+        )
+    assert results == ["譯 Fed holds rates", "譯 Fed holds rates"]
+    assert len(llm.translations) == 1
 
 
 async def test_chinese_headline_is_embedded_without_translation(

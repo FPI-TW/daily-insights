@@ -98,6 +98,9 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 - 佇列欄位（每個階段一組）：`<stage>_status`、`<stage>_attempts`、`<stage>_next_attempt_at`、`<stage>_error_code`，
   stage ∈ `fetch`（全文抓取）、`embed`、`triage`。
 - `embedding`：`vector(1536)`。
+- 外文 embedding 翻譯另存 `embedding_translation_digest`、`embedding_translation_text`。
+  digest 包含實際送出的原文標題／摘要、翻譯模型與 prompt 版本；獨立交易保存成功翻譯與 audit，
+  embedding 重試或 claim 被 fence 時仍可重用。同篇並行請求以文章列鎖共用結果，文章清除時一併刪除。
 - 初篩結果：`relevant`（bool）、`topic`、`market_scores`（JSONB：`{"global": 0-100, "tw_equity": 0-100, "us_equity": 0-100}`）、
   `event_id`。
 
@@ -211,6 +214,11 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 
 **組稿（08:00，由統一編排 daily routine 的 `newsroom_assemble` function 觸發，冪等）**
 
+進入初篩等待與模型步驟前，若所有市場皆已發布，直接回傳 `skipped_published`。
+精選遇到超過單次重試間隔的 `Retry-After`，或不計次數的額度等待，本次直接採粗分 fallback；
+同次組稿的 dedupe、repeat 與各市場精選共用供應商等待狀態，冷卻期間不再發出 editor 請求。
+短暫錯誤仍維持原有有界重試，不讓組稿阻塞數小時。
+
 1. 等待窗內初篩（§3）。
 2. 每市場計算事件粗分：`max(article.market_scores[m] × source.weight)` + 多來源加分，n 為不同媒體數（同一媒體的多個頻道只算一家）。
    p0：權重先夾在 [0.9, 1.1]，加分為 `min(CAP, STEP × log2(n))`（global、us_equity STEP 6、CAP 15；tw_equity STEP 4、CAP 10）；
@@ -245,6 +253,9 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 - worker 每分鐘檢查 `draft ∧ now() >= auto_publish_at` → 自動發布（`published_by_user_id = null`）。
 - 發布後，項目的事件分析完成即可見（D15）；`now() >= late_fill_deadline` 時分析仍未 ready 的項目設 `abandoned_at` 並 Slack 通知。
 - 發布時把可見項目的事件 `en_status` 設為 `pending`；之後繁中標題或摘要被修改（digest 改變），或繁中 `why` 重寫（項目 `why_en_status` 設回 `idle`）則再設為 `pending`。英文翻譯包含事件標題、摘要與已完成的 `why`（供後台）。
+- 翻譯 prompt `newsroom.translate.v2` 僅要求過期內容：新聞卡 digest 未變時省略 `headline`／`summary`，
+  `why` 僅包含缺少有效英文的項目；回覆欄位與 item ids 必須完全符合請求，不覆寫其他既有翻譯。
+  寫入理由前亦比對繁中來源仍與請求相同，避免覆寫後續改寫的理由狀態。
 
 ### 6.4 後台（工作樹 ④）
 
