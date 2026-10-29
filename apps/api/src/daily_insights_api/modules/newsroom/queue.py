@@ -3,8 +3,8 @@
 A row is claimable for ``stage`` when ``<stage>_status = 'pending'`` and
 ``<stage>_next_attempt_at`` is NULL or due. Claiming bumps the attempt counter
 and pushes ``next_attempt_at`` out by the lease, so a crashed worker's claim
-simply becomes due again. Settling is fenced on the attempt number: a worker
-whose lease expired and was re-claimed cannot overwrite the newer attempt.
+simply becomes due again. Settling is fenced on a unique claim token, separate
+from retry accounting: resetting attempts never makes an old claim current.
 
 Stages must not invent their own retry logic; they raise ``RetryableStageError``
 or ``FatalStageError`` (or return normally) and ``run_claimed`` settles the row.
@@ -16,13 +16,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, event, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import Session
 
 from daily_insights_api.modules.newsroom.models import (
     NewsroomArticle,
     NewsroomEditionItem,
     NewsroomEvent,
+    NewsroomLlmCall,
 )
 
 QueueModel = type[NewsroomArticle] | type[NewsroomEvent] | type[NewsroomEditionItem]
@@ -77,6 +79,7 @@ class Claim:
     stage: StageSpec
     row_id: uuid.UUID
     attempt: int
+    token: uuid.UUID
 
 
 def backoff(attempt: int, retry_after: timedelta | None = None) -> timedelta:
@@ -121,17 +124,19 @@ async def claim(
         return []
     claims: list[Claim] = []
     for row_id, current in rows:
+        token = uuid.uuid4()
         await database.execute(
             update(stage.model)
             .where(stage.model.id == row_id)
             .values(
                 {
                     f"{stage.column}_attempts": current + 1,
+                    f"{stage.column}_claim_token": token,
                     f"{stage.column}_next_attempt_at": moment + stage.lease,
                 }
             )
         )
-        claims.append(Claim(stage=stage, row_id=row_id, attempt=current + 1))
+        claims.append(Claim(stage=stage, row_id=row_id, attempt=current + 1, token=token))
     await database.commit()
     return claims
 
@@ -140,6 +145,7 @@ def _fenced(claim_: Claim) -> Any:
     return and_(
         claim_.stage.model.id == claim_.row_id,
         _col(claim_.stage, "attempts") == claim_.attempt,
+        _col(claim_.stage, "claim_token") == claim_.token,
         _col(claim_.stage, "status") == "pending",
     )
 
@@ -162,6 +168,7 @@ async def settle_success(
         .values(
             {
                 status_key: stage.done_status,
+                f"{stage.column}_claim_token": None,
                 f"{stage.column}_next_attempt_at": None,
                 f"{stage.column}_error_code": None,
                 **(values or {}),
@@ -187,26 +194,28 @@ async def settle_retryable(
     stage = claim_.stage
     moment = now or datetime.now(UTC)
     if not error.counts_attempt:
-        await database.execute(
+        result = await database.execute(
             update(stage.model)
             .where(_fenced(claim_))
             .values(
                 {
                     f"{stage.column}_attempts": claim_.attempt - 1,
+                    f"{stage.column}_claim_token": None,
                     f"{stage.column}_next_attempt_at": moment
                     + backoff(claim_.attempt, error.retry_after or MAX_BACKOFF),
                     f"{stage.column}_error_code": error.code[:100],
                 }
             )
         )
-        return "pending"
+        return "pending" if getattr(result, "rowcount", 0) else "fenced"
     exhausted = claim_.attempt >= stage.max_attempts
-    await database.execute(
+    result = await database.execute(
         update(stage.model)
         .where(_fenced(claim_))
         .values(
             {
                 f"{stage.column}_status": "failed" if exhausted else "pending",
+                f"{stage.column}_claim_token": None,
                 f"{stage.column}_next_attempt_at": None
                 if exhausted
                 else moment + backoff(claim_.attempt, error.retry_after),
@@ -214,22 +223,26 @@ async def settle_retryable(
             }
         )
     )
+    if not getattr(result, "rowcount", 0):
+        return "fenced"
     return "failed" if exhausted else "pending"
 
 
-async def settle_fatal(database: AsyncSession, claim_: Claim, error: FatalStageError) -> None:
+async def settle_fatal(database: AsyncSession, claim_: Claim, error: FatalStageError) -> bool:
     stage = claim_.stage
-    await database.execute(
+    result = await database.execute(
         update(stage.model)
         .where(_fenced(claim_))
         .values(
             {
                 f"{stage.column}_status": "failed",
+                f"{stage.column}_claim_token": None,
                 f"{stage.column}_next_attempt_at": None,
                 f"{stage.column}_error_code": error.code[:100],
             }
         )
     )
+    return bool(getattr(result, "rowcount", 0))
 
 
 StageHandler = Callable[[AsyncSession, Claim], Awaitable[dict[str, Any] | None]]
@@ -257,9 +270,26 @@ async def run_claimed(
     ``on_wait`` about retryable errors that do not count an attempt.
     """
     async with session_factory() as database:
+        # Autoflush can persist call audits before the final fence check. Keep
+        # references so a rejected claim can roll back all product writes and
+        # then save only its paid-for calls in a fresh transaction.
+        flushed_audits: list[NewsroomLlmCall] = []
+
+        def remember_audit(session: Session, row: object) -> None:
+            if isinstance(row, NewsroomLlmCall):
+                flushed_audits.append(row)
+
+        event.listen(database.sync_session, "pending_to_persistent", remember_audit)
         try:
             values = await handler(database, claim_)
             settled = await settle_success(database, claim_, values)
+            if not settled:
+                audits = [
+                    *flushed_audits,
+                    *(row for row in database.new if isinstance(row, NewsroomLlmCall)),
+                ]
+                await database.rollback()
+                database.add_all(audits)
             await database.commit()
             return "done" if settled else "fenced"
         except RetryableStageError as error:
@@ -267,17 +297,17 @@ async def run_claimed(
             database.add_all(error.audit_rows)
             outcome = await settle_retryable(database, claim_, error)
             await database.commit()
-            if on_wait is not None and not error.counts_attempt:
+            if outcome != "fenced" and on_wait is not None and not error.counts_attempt:
                 await on_wait(claim_, error)
             return outcome
         except FatalStageError as error:
             await database.rollback()
             database.add_all(error.audit_rows)
-            await settle_fatal(database, claim_, error)
+            settled = await settle_fatal(database, claim_, error)
             await database.commit()
-            if on_fatal is not None and error.notify:
+            if settled and on_fatal is not None and error.notify:
                 await on_fatal(claim_, error)
-            return "fatal"
+            return "fatal" if settled else "fenced"
         except Exception:
             # A bug must not retry forever: it counts as a retryable attempt so
             # max_attempts eventually fails the row, and the worker logs it.
@@ -285,6 +315,8 @@ async def run_claimed(
             await settle_retryable(database, claim_, RetryableStageError("unexpected_error"))
             await database.commit()
             raise
+        finally:
+            event.remove(database.sync_session, "pending_to_persistent", remember_audit)
 
 
 async def enqueue(
@@ -307,6 +339,7 @@ async def enqueue(
 def _reset(stage: StageSpec, status: str, *, reset_attempts: bool = True) -> dict[str, Any]:
     values: dict[str, Any] = {
         f"{stage.column}_status": status,
+        f"{stage.column}_claim_token": None,
         f"{stage.column}_next_attempt_at": None,
         f"{stage.column}_error_code": None,
     }

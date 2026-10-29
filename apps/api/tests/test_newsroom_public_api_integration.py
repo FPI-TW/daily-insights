@@ -15,7 +15,7 @@ from daily_insights_api.core.config import Settings
 from daily_insights_api.core.enums import SystemRole
 from daily_insights_api.core.models import Base
 from daily_insights_api.modules.identity.api import AuthContext, require_password_changed
-from daily_insights_api.modules.newsroom import public_api
+from daily_insights_api.modules.newsroom import events_service, public_api
 from daily_insights_api.modules.newsroom.clock import taipei_today
 from daily_insights_api.modules.newsroom.contracts import MarketCode
 from daily_insights_api.modules.newsroom.models import (
@@ -172,6 +172,61 @@ class _Newsroom:
         await self.database.refresh(event)
         event.en_source_digest = await current_zh_hant_digest(self.database, event.id)
         await self.database.flush()
+
+
+@pytest.mark.parametrize("target_origin", ["legacy", "triage", "split"])
+async def test_merge_preserves_snapshot_only_sources_through_merge_chains(
+    newsroom_database: async_sessionmaker[AsyncSession], target_origin: str
+) -> None:
+    a, b, c = (f"https://example.com/{key}" for key in ("a", "repeated-b", "c"))
+    original_a = {"name": "Original A", "url": a, "published_at": PUBLISHED_AT.isoformat()}
+    original_b = {"name": "Original B", "url": b, "published_at": PUBLISHED_AT.isoformat()}
+    async with newsroom_database() as database:
+        news = _Newsroom(database)
+        source = await news.source("manual", kind="manual")
+        earlier = await news.event(YESTERDAY, "Earlier B", created_by="legacy")
+        await news.article(earlier, source, b)
+        target = await news.event(
+            TODAY, "Target A", created_by=target_origin, legacy_sources=[original_a]
+        )
+        await news.article(target, source, a)
+        incoming = await news.event(
+            TODAY,
+            "Snapshot-only B",
+            created_by="legacy",
+            legacy_sources=[original_b, {**original_a, "name": "Duplicate A"}],
+        )
+        final_target = await news.event(TODAY, "Final C", created_by="triage")
+        await news.article(final_target, source, c)
+        await news.item(TODAY, target, rank=1)
+        await news.item(TODAY, incoming, rank=2)
+        target_id, incoming_id, final_id = target.id, incoming.id, final_target.id
+        await database.commit()
+        before = await latest_edition(database, "global", "zh-hant", today=TODAY)
+        assert {link.url for item in before.items for link in item.sources} == {a, b}
+        await database.rollback()
+        await events_service.merge_events(
+            database, target_id=target_id, source_ids=[incoming_id], user_id=None
+        )
+        await database.commit()
+
+    # Read from a new session so an in-memory JSON change cannot mask a missing write.
+    async with newsroom_database() as database:
+        sources = (await public_api._sources(database, [target_id]))[target_id]
+        assert [(link.name, link.url, link.published_at) for link in sources] == [
+            ("Original A", a, PUBLISHED_AT),
+            ("Original B", b, PUBLISHED_AT),
+        ]
+        await database.rollback()
+        await events_service.merge_events(
+            database, target_id=final_id, source_ids=[target_id], user_id=None
+        )
+        await database.commit()
+    async with newsroom_database() as database:
+        sources = (await public_api._sources(database, [final_id]))[final_id]
+        assert {link.url for link in sources} == {a, b, c}
+        assert len(sources) == 3
+        assert next(link for link in sources if link.url == b).name == "Original B"
 
 
 async def _latest(

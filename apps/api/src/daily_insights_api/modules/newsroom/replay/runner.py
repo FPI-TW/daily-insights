@@ -1209,16 +1209,21 @@ async def _triage_window(context: _Context, day: date, runtime: Runtime | None =
         outcome = "pending"
         try:
             for attempt in range(1, queue.TRIAGE.max_attempts + 1):
+                token = uuid.uuid4()
                 async with context.sessions() as database:
                     await database.execute(
                         update(NewsroomArticle)
                         .where(NewsroomArticle.id == article_id)
-                        .values(triage_status="pending", triage_attempts=attempt)
+                        .values(
+                            triage_status="pending",
+                            triage_attempts=attempt,
+                            triage_claim_token=token,
+                        )
                     )
                     await database.commit()
                 try:
                     outcome = await queue.run_claimed(
-                        context.sessions, Claim(queue.TRIAGE, article_id, attempt), handler
+                        context.sessions, Claim(queue.TRIAGE, article_id, attempt, token), handler
                     )
                 except ReplayCacheMiss:
                     raise

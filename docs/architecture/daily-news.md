@@ -99,7 +99,7 @@ flowchart TB
 
 所有可失敗的工作都以「資料列即佇列」表示，不使用 checkpoint 表。每個 stage 在自己的
 資料列上有 `<stage>_status`、`<stage>_attempts`、`<stage>_next_attempt_at`、
-`<stage>_error_code` 四個欄位，共用實作在 `modules/newsroom/queue.py`。
+`<stage>_error_code`、`<stage>_claim_token` 五個欄位，共用實作在 `modules/newsroom/queue.py`。
 
 | Stage       | 資料表                   | 欄位前綴   | 完成狀態 | `max_attempts` | 並行數                                           |
 | ----------- | ------------------------ | ---------- | -------- | -------------- | ------------------------------------------------ |
@@ -112,10 +112,12 @@ flowchart TB
 
 - **領取**：`<stage>_status = 'pending'` 且 `<stage>_next_attempt_at` 為 NULL 或已到期
   即可領取。worker 以 `SELECT … FOR UPDATE SKIP LOCKED` 取列，同一交易內
-  `attempts += 1` 並把 `next_attempt_at` 推遲 10 分鐘作為租約。worker 崩潰時租約到期
+  產生新的 UUID `claim_token`、`attempts += 1` 並把 `next_attempt_at` 推遲 10 分鐘作為租約。worker 崩潰時租約到期
   即自然重試。
-- **完成**：寫回結果並清除 `next_attempt_at` 與 `error_code`。寫回以 `attempts` 做
-  fence：租約過期後被重新領取的舊 attempt 無法覆寫較新的結果。
+- **完成**：寫回結果並清除 `claim_token`、`next_attempt_at` 與 `error_code`。寫回同時比對
+  token、attempts 與 pending 狀態；重排或不計次數的等待即使重用 attempt 數字，也不會接受舊 token。
+  被 fence 的成功結果會回滾整個 handler 交易，包括項目理由等其他資料列的修改，僅另存 LLM 呼叫紀錄。
+  過期工作的失敗也回傳 `fenced`，不改新工作狀態、不發送失敗或額度通知。
 - **可重試失敗**（逾時、連線錯誤、429、5xx、JSON 或 schema 不合法、未預期例外）：
   記錄錯誤碼，依 1、2、4、8… 分鐘指數退避，上限 60 分鐘；`Retry-After` 較長時遵守
   （最多 6 小時）。`attempts` 達 `max_attempts` 後轉為 `failed`。
@@ -242,6 +244,8 @@ flowchart TB
   與模型呼叫期間新開事件相似度 ≥ 0.88 者改歸屬該事件，避免同一事件被重複開啟。
 - 事件可在後台合併（被合併者 `status = merged`、指向目標）或拆分（被拆出的文章
   形成 `created_by = split` 的新事件），受影響且在版次中的事件會重新分析。
+  合併同步轉移歷史來源快照，依 URL 去重並優先保留目標事件的來源資料，連續合併也適用。
+  拆分時，對應選取文章 URL 的快照隨文章移至新事件；沒有文章關聯的快照留在原事件。
 
 ### 08:00 組稿
 
@@ -461,11 +465,19 @@ HTTP(S) URL。
 
 - 版次為 `selection_mode = legacy`、已發布；事件 `created_by = legacy`，三語標題與
   摘要直接帶入；項目 `origin = legacy`，沒有「為何重要」。
-- 原新聞的來源連結成為 `manual` 來源下的文章，供讀者端來源列表使用。
+- 原新聞的來源連結成為 `manual` 來源下的文章，並保存到各事件的 `legacy_sources` 快照
+  （名稱、URL、原始發布時間）。文章 URL 全域唯一；同一 URL 出現在不同日期時，各日期的事件仍有自己的來源快照。
+  讀者 API 不限事件建立方式，合併快照與文章連結，依 URL 去重，避免同一來源重複顯示。
 - 搬移完成後刪除舊的 `news_*` 資料表。同一個 migration 會把仍為 pending 或 running
   的舊新聞 orchestration job／function runs 取消。
 
 搬移後的歷史版次和新版次走同一個讀者 API，也可在後台依日期檢視與隱藏。
+
+修正後的 `0034` 在舊表移除前保存來源快照。`20261029_0054` 新增六個 stage 的 claim token 欄位，
+並支援已套用原始 `0034` 的資料庫：缺少快照欄位時補建，從尚有文章關聯的歷史事件回填。
+若舊 import 已遺失某事件的來源關聯，migration 會記錄數量；必須從切換前備份復原，不能依標題推測 URL。
+降級 `0054` 保留由 `0034` 擁有的快照欄位，移除 token 欄位；降級 `0034` 才移除快照欄位。
+`0034` 降級容許欄位不存在，因此原始 `0053` schema 可直接降級，不必先升級 `0054`。
 
 執行紀錄不搬移也不刪除：
 

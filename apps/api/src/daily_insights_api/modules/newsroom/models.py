@@ -1,6 +1,6 @@
 """Newsroom tables. Every retryable stage is a set of queue columns on its own row.
 
-A stage named ``<stage>`` owns ``<stage>_status``, ``<stage>_attempts``,
+A stage named ``<stage>`` owns ``<stage>_claim_token``, ``<stage>_status``, ``<stage>_attempts``,
 ``<stage>_next_attempt_at`` and ``<stage>_error_code``; ``queue.py`` is the only
 code that claims and settles them. There are no checkpoint tables: the row is the
 state (docs/specs/newsroom-pipeline.md §5).
@@ -185,12 +185,19 @@ class NewsroomEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     related_symbols: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, nullable=False, default=list, server_default="[]"
     )
+    # Frozen source links from the legacy import. Articles are unique by URL,
+    # but the same URL may back legacy events in several edition windows.
+    # Merges and splits carry these links into events of any origin.
+    legacy_sources: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
     analysis_status: Mapped[str] = mapped_column(
         String(12), nullable=False, default="idle", server_default="idle"
     )
     analysis_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    analysis_claim_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     analysis_next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     analysis_error_code: Mapped[str | None] = mapped_column(String(100))
     analysis_model: Mapped[str | None] = mapped_column(String(200))
@@ -199,6 +206,7 @@ class NewsroomEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         String(10), nullable=False, default="idle", server_default="idle"
     )
     en_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    en_claim_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     en_next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     en_error_code: Mapped[str | None] = mapped_column(String(100))
     # Digest of the zh-hant text (event + its items' why) the English came from.
@@ -264,6 +272,7 @@ class NewsroomArticle(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     fetch_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    fetch_claim_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     fetch_next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     fetch_error_code: Mapped[str | None] = mapped_column(String(100))
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
@@ -276,6 +285,7 @@ class NewsroomArticle(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     embed_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    embed_claim_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     embed_next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     embed_error_code: Mapped[str | None] = mapped_column(String(100))
     triage_status: Mapped[str] = mapped_column(
@@ -284,6 +294,7 @@ class NewsroomArticle(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     triage_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    triage_claim_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     triage_next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     triage_error_code: Mapped[str | None] = mapped_column(String(100))
     relevant: Mapped[bool | None] = mapped_column(Boolean)
@@ -388,6 +399,7 @@ class NewsroomEditionItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     why_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    why_claim_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     why_next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     why_error_code: Mapped[str | None] = mapped_column(String(100))
     why_en_status: Mapped[str] = mapped_column(
