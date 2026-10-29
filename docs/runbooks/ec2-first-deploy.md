@@ -7,7 +7,8 @@ Host: ec2-56-10-51-231.ap-southeast-1.compute.amazonaws.com
 User: ubuntu
 OS: Ubuntu 26.04 LTS
 Architecture: x86_64
-Capacity: 2 vCPU / 約 2 GB RAM / 19 GB root volume
+Instance type: t3.medium（2026-10-29 由 t3.small 升級）
+Capacity: 2 vCPU / 4 GiB RAM / 19 GB root volume
 ```
 
 2026-07-27 已透過 Docker 官方 Ubuntu repository 安裝並驗證：
@@ -20,6 +21,9 @@ Capacity: 2 vCPU / 約 2 GB RAM / 19 GB root volume
 Docker 與 containerd 已設為開機啟動，`ubuntu` 已加入 `docker` 群組並通過
 `hello-world` smoke test。EC2 不需要 Node.js、pnpm、uv、應用 Python
 dependencies、nginx、PostgreSQL、AWS CLI 或 SSM Agent。
+
+主機使用 Elastic IP；2026-10-29 的 stop／resize／start 後仍保留相同公開位址。
+記憶體盤點與升級驗證見[EC2 記憶體評估](../research/ec2-memory-assessment-2026-10-29.md)。
 
 ## 1. 部署與重開機模型
 
@@ -153,6 +157,11 @@ true or false」、「GitHub Secret `DAILY_INSIGHTS_NEWS_MODEL_API_KEY` ... is r
 `DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS`（25）與
 `DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS`（30）目前不由 workflow 傳入，固定使用
 Compose default。
+
+正式 `newsroom-worker` 在 Compose 固定使用
+`DAILY_INSIGHTS_NEWSROOM_BROWSER_CONCURRENCY=1` 與
+`DAILY_INSIGHTS_NEWSROOM_FETCH_CONCURRENCY=2`，降低同時渲染頁面與抓取內容的記憶體需求；
+不需新增 GitHub Variables。這兩個值不同於應用開發環境的預設 2／4。
 
 `DAILY_INSIGHTS_YFINANCE_ENABLED` 控制 Yahoo Finance functions；
 `DAILY_INSIGHTS_TWSE_ENABLED` 控制 TWSE 加權指數、個股法人與市場法人 functions。
