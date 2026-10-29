@@ -1,5 +1,8 @@
 # EC2 記憶體使用與規格評估（2026-10-29）
 
+目前決策：保留 `t3.medium`，正式瀏覽器並行數 **2**、fetch **4**；待後續實測確認記憶體不足再調整。
+下文保留先前 1／2 調整的歷史觀測，恢復紀錄見文末。
+
 ## 升級前評估結論
 
 升級前正式主機為 `t3.small`，2 vCPU、標稱 2 GiB RAM，Linux 實際可見約 1,905 MiB，沒有 swap。
@@ -99,7 +102,7 @@ LLM 與 embedding 透過 `providers.py` 的 HTTP clients 呼叫外部端點；
 1. **降低瀏覽器並行數，先做可比較的負載量測。**
    `Settings.newsroom_browser_concurrency` 預設 2，可先測試 1；fetch concurrency 預設 4，可同步評估 2。
    這可減少同時存活的 renderer／DOM 與抓取內容，代價是降低抓取吞吐量，需看 queue lag 與逾時是否仍可接受。
-   升級前的 `compose.production.yaml` 未傳入這兩個覆寫變數；本次修正已將 1／2 固定寫入正式 Compose。
+   升級時曾將 1／2 寫入正式 Compose；後續依使用者決策恢復 2／4，待實測確認記憶體不足再調整（見文末）。
    節省量需用相同工作負載驗證，本輪沒有聲稱已量到可回收多少 RAM。
 2. **保留已有的節省機制。**
    `browser.py` 已阻擋圖片／影音／字型、每篇文章建立 context，並在 `finally` 關閉 context。
@@ -190,8 +193,35 @@ EC2 system／instance status 均為 `ok`；外部登入頁 HTTP 200，該次回�
 `/private/tmp/pr103-ec2-medium-health.log` 與 `/private/tmp/pr103-ec2-medium-memory.log`。
 
 Compose、validator 與維運文件已同步至修正分支 `fix/production-newsroom-concurrency`，透過 PR 合併至 main。
-**下次由 GitHub main 部署前，必須合併這次 Compose 變更**，否則舊 bundle 會蓋回主機設定並恢復應用的 2／4 預設。
+原先 PR 用途是避免舊 bundle 將主機的 1／2 蓋回應用 2／4 預設；後續決策已改為保留 2／4，PR 與主機設定同步調整。
 規格升級為 EC2 控制平面上的持久變更，不受該 Compose 覆寫影響。
+
+## 後續決策：恢復原有並行數（2026-10-29）
+
+使用者改為保留原有抓取吞吐量，待後續實測確認記憶體不足再調整。
+正式主機與 [PR #128](https://github.com/FPI-TW/daily-insights/pull/128) 的 Compose 已同步恢復
+`DAILY_INSIGHTS_NEWSROOM_BROWSER_CONCURRENCY=2`、`DAILY_INSIGHTS_NEWSROOM_FETCH_CONCURRENCY=4`。
+主機規格維持 `t3.medium`，沒有再次重啟 EC2 或變更映像／資料庫。
+
+先核對正式 Compose 與先前 1／2 版本的 hash，保存
+`/opt/daily-insights/compose.production.yaml.before-concurrency-restore-20261029` 後才更新檔案。
+只重建 newsroom worker，驗證其他 7 個容器 ID 與全部映像 reference 維持一致；
+19:44 透過應用 `Settings` 確認實際生效為 browser 2、fetch 4。
+
+19:44:02、19:44:26 兩次正式 `health.sh` 均通過，8 個容器皆 healthy，外部登入頁 HTTP 200。
+兩次 MemAvailable 分別為 1,947 與 1,464 MiB（約 1.4–1.9 GiB）；
+memory PSI full avg60 分別為 0.53% 與 1.58%。這是重建後短時間快照，並非完整工作日或尖峰容量驗證，
+也不能直接套用前一階段 1／2 設定時 PSI 接近 0 的結論。
+保留目前 2／4 設定，後續若有持續壓力、OOM、queue lag 或服務異常，再依證據評估調整。
+
+補查發現 CloakBrowser 的 cgroup `memory.current` 約 1,022 MiB，接近既有 `memory.max=1 GiB`；
+`memory.events max=16072`、`oom=0`、`oom_kill=0`，memory PSI full avg60 約 3.66%。
+這些是自本次開機以來同一 browser cgroup 的累計／峰值，沒有恢復前的對照值，不能歸因為全由 2／4 造成。
+主機仍有餘裕，不能把容器觸及自身限制描述為 EC2 整體 RAM 已耗盡；
+後續評估須同時區分容器上限、主機 MemAvailable 與實際服務影響。本次沒有修改瀏覽器記憶體上限。
+
+本次部署契約檢查通過；操作紀錄在 `/private/tmp/pr128-restore-concurrency.log` 與
+`/private/tmp/pr128-restored-health.log`。
 
 ## 參考資料
 

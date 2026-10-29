@@ -159,9 +159,9 @@ true or false」、「GitHub Secret `DAILY_INSIGHTS_NEWS_MODEL_API_KEY` ... is r
 Compose default。
 
 正式 `newsroom-worker` 在 Compose 固定使用
-`DAILY_INSIGHTS_NEWSROOM_BROWSER_CONCURRENCY=1` 與
-`DAILY_INSIGHTS_NEWSROOM_FETCH_CONCURRENCY=2`，降低同時渲染頁面與抓取內容的記憶體需求；
-不需新增 GitHub Variables。這兩個值不同於應用開發環境的預設 2／4。
+`DAILY_INSIGHTS_NEWSROOM_BROWSER_CONCURRENCY=2` 與
+`DAILY_INSIGHTS_NEWSROOM_FETCH_CONCURRENCY=4`，與應用預設一致，不需新增 GitHub Variables。
+主機升級至 `t3.medium` 後先保留原有抓取吞吐量，待實測確認記憶體不足再調整並行數。
 
 `DAILY_INSIGHTS_YFINANCE_ENABLED` 控制 Yahoo Finance functions；
 `DAILY_INSIGHTS_TWSE_ENABLED` 控制 TWSE 加權指數、個股法人與市場法人 functions。
