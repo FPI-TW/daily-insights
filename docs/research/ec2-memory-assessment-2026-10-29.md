@@ -1,6 +1,6 @@
 # EC2 記憶體使用與規格評估（2026-10-29）
 
-目前決策：保留 `t3.medium`，正式瀏覽器並行數 **2**、fetch **4**；待後續實測確認記憶體不足再調整。
+目前設定：保留 `t3.medium`，瀏覽器上限 **1.5 GiB**，正式瀏覽器並行數 **2**、fetch **4**。
 下文保留先前 1／2 調整的歷史觀測，恢復紀錄見文末。
 
 ## 升級前評估結論
@@ -223,9 +223,142 @@ memory PSI full avg60 分別為 0.53% 與 1.58%。這是重建後短時間快照
 本次部署契約檢查通過；操作紀錄在 `/private/tmp/pr128-restore-concurrency.log` 與
 `/private/tmp/pr128-restored-health.log`。
 
+## 1 GiB 瀏覽器上限的連續驗證（2026-10-29）
+
+使用者要求維持 browser 2、fetch 4，檢查是否受容器記憶體上限限制，並評估是否應調高。
+本輪只讀取正式主機與容器指標，沒有調整上限、並行數、容器或 EC2 規格。
+取樣開始前核對 worker 的實際環境值為 2／4；CloakBrowser 容器與啟動時間在取樣前後一致，
+因此下列差值來自同一 cgroup，不是重啟後計數重設或不同工作階段的累計比較。
+
+### 連續取樣證據
+
+台北時間 19:50:39–19:52:19，每 20 秒取樣一次，共 6 次、約 100 秒。
+`memory.max` 確認為 1,073,741,824 bytes（1 GiB），`memory.high=max`，CPU cgroup 沒有配額上限。
+主機沒有 swap；cgroup 的 swap 上限值不代表主機有實際可用 swap。
+
+| 台北時間 | memory.current | memory.events max | browser memory PSI full avg60 | 主機 MemAvailable |
+| -------- | -------------- | ----------------- | ----------------------------- | ----------------- |
+| 19:50:39 | 907 MiB        | 50,267            | 0.45%                         | 1,532 MiB         |
+| 19:50:59 | 718 MiB        | 50,267            | 0.32%                         | 1,815 MiB         |
+| 19:51:19 | 735 MiB        | 50,456            | 0.34%                         | 1,752 MiB         |
+| 19:51:39 | 861 MiB        | 50,840            | 0.49%                         | 1,644 MiB         |
+| 19:51:59 | 1,008 MiB      | 51,153            | 0.43%                         | 1,488 MiB         |
+| 19:52:19 | 819 MiB        | 51,705            | 0.35%                         | 1,557 MiB         |
+
+- **這段期間又新增 1,438 次 max boundary 命中**，不只依賴先前累計 peak 推斷。
+  依核心定義，`memory.events max` 計數的是配置即將越過上限、需要回收的次數，不是失敗的文章數、OOM 次數或超限 bytes。
+  20 秒間隔的 memory.current 未必截到每個瞬間尖峰；max 計數增量確認期間確實再次觸頂。
+- 同一時段 direct scan 增加 170,059 pages、direct steal 增加 104,709 pages，
+  file workingset refault 增加 120,543，major fault 增加 8,235，cgroup I/O 讀取約增加 471 MiB。
+  此組合支持正在進行回收與檔案頁重新讀取，不能把所有讀取量都視為上限造成，因為沒有放寬上限的對照實驗。
+- 由 PSI total 的差值計算，期間 browser some stall 約 2.21%、full stall 約 0.44%。
+  memory.high 未設定，因此不是 memory.high 的主動節流；也不能把此數字直接解釋為文章吞吐量損失百分比。
+- 匿名記憶體約 408–614 MiB，file 約 244–377 MiB，kernel 約 23–32 MiB。
+  shmem 約 71–130 MiB 已包含在 file 中，不能再相加；容器占用並非全部都是可無成本回收的閒置快取。
+
+### 健康與其他瓶頸
+
+取樣期間及其後 `oom`、`oom_kill` 皆為 0，`State.OOMKilled=false`、restart count 為 0。
+最後 5 次 browser health check 均成功，耗時約 0.7–1.4 秒，容器為 healthy。
+有界的近期日誌檢索未匹配 browser timeout／crash，但 worker 當時沒有可用的應用事件輸出，
+因此不能僅靠日誌搜尋宣稱所有抓取皆成功。
+
+同一時段 browser 平均使用約 1.57 個 CPU core，主機 CPU PSI some avg60 約 90–92%，
+另有明顯 CPU 排隊壓力。這個 PSI 是至少部分工作等候 CPU 的時間比例，並非 CPU 使用率。
+即使放寬 RAM 上限，也不能承諾消除 CPU 瓶頸或既有抓取逾時。
+
+### 容量評估與建議
+
+**1 GiB 確實在尖峰限制瀏覽器；建議先以 1.5 GiB（Compose `1536m`）做對照試調，維持 browser 2、fetch 4。**
+目前沒有 OOM 或健康失敗證據，所以此建議是降低回收成本、增加尖峰餘裕，並非已證明需要緊急擴容。
+沒有證據支持直接取消容器上限或再升級 EC2。
+
+取樣中的 host MemAvailable 約 1,488–1,815 MiB。
+若新增的 512 MiB 全部使用，依當時最低餘裕作一階估算，主機仍約有 976 MiB（約 25%）可用；
+此估算沒有包含其他服務的新尖峰。若直接從 1 GiB 調到 2 GiB，同樣估算的低點只剩約 464 MiB（約 12%），
+因此先選 1.5 GiB 較符合目前 4 GiB 主機的餘裕。
+
+後續若執行試調，應同步正式 Compose 與主機限制，對照相近文章量與來源組合下：
+max 命中增量、PSI、回收／refault、抓取耗時、queue lag，以及 host MemAvailable 是否仍通常高於 20%。
+若回收等待降低而 CPU 排隊仍高，須分開評估 CPU 容量，不再用降低並行數同時改變比較條件。
+該評估階段尚未試調；後續依授權套用 1.5 GiB 的結果另記於下節，全天尖峰安全性仍待驗證。
+
+原始唯讀取樣與工具分別保留在 `/private/tmp/pr128-browser-limit-audit.jsonl`、
+`/private/tmp/pr128-browser-limit-audit.py`。
+
+## 套用 1.5 GiB 上限與恢復驗證（2026-10-29）
+
+使用者授權提高至 1.5 GiB，保留 browser 2、fetch 4，驗證健康與記憶體壓力，並同步 Compose、文件及 PR #128。
+
+### 新發現：1 GiB 階段已發生 OOM
+
+20:12–20:13 的新基準仍為 1 GiB，`memory.events` 已累計 `max=299013`、`oom=3`、`oom_kill=2`。
+核心日誌確認 **20:04:49、20:09:08** 在 browser cgroup 內各殺掉一個 `chrome` 程序；
+這發生在本次調整之前，更新了前次 19:50–19:52 取樣「當時尚未 OOM」的歷史狀態。
+容器仍為 running／healthy、restart count 0，但 CDP `/json/version/` 實際回覆 502。
+因此根端點的現有 healthcheck 不足以證明 Chrome 後端可用；未將該 healthy 狀態當作功能恢復證據。
+
+此時 browser CPU 平均僅約 0.019 core、回收計數沒有增量，不能把這段失效／低負載時窗的 PSI 0
+當作有效的調整前活躍負載對照。比較另列出先前同為 2／4、仍在活躍處理的 19:50–19:52 時窗。
+
+### 已套用的變更
+
+- 本地與正式 `/opt/daily-insights/compose.production.yaml` 的 `cloakbrowser.mem_limit` 均為 `1536m`，
+  即 1,610,612,736 bytes；Docker HostConfig 與核心 `memory.max` 都已核對。
+- 安裝前先渲染新舊 Compose，在記憶體內確認有效模型只有 browser mem_limit 改變；
+  原正式檔保留為 `/opt/daily-insights/compose.production.yaml.before-browser-1536m-20261029`。
+  沒有輸出 secrets 或建立包含 secrets 的 env 檔。
+- 先用 `docker update --memory 1536m` 動態套用，所有容器 ID、映像、命令與環境維持原值。
+  既有 `MemorySwap=2 GiB` 的 memory+swap 總額設定未變；主機沒有 swap，也未建立 swap。
+- 提高上限後，先前被 OOM 殺掉的 Chrome 程序未自動復原，CDP 仍回 502。
+  因此在 **20:17:33** 僅重啟 browser 容器，以 1.5 GiB 恢復 Chrome 後端。
+  容器 ID 與映像不變，StartedAt 更新；其他 7 個容器未重啟，worker 的 2／4 設定未變。
+- 已同步首次部署手冊與新聞架構文件，修正先前把 browser 執行時占用描述為固定約 400 MB 的文字。
+
+### 壓力與功能驗證
+
+恢復後 20:19:15–20:20:55 再採 6 次、每 20 秒一次的約 100 秒時窗：
+
+| 指標                                  | 先前 1 GiB 活躍時窗（19:50–19:52）           | 1.5 GiB 恢復後活躍時窗（20:19–20:20） |
+| ------------------------------------- | -------------------------------------------- | ------------------------------------- |
+| browser／fetch 並行                   | 2／4                                         | 2／4                                  |
+| CPU 平均使用核心數                    | 1.57                                         | 1.58                                  |
+| memory.current 取樣範圍               | 718–1,008 MiB                                | 976–1,171 MiB                         |
+| cgroup 存續期間 peak                  | 約 1,024 MiB                                 | 約 1,350 MiB                          |
+| 時窗內 max 命中增量                   | 1,438                                        | 0                                     |
+| 時窗內 direct scan 增量               | 170,059 pages                                | 0                                     |
+| 時窗內 file refault 增量              | 120,543                                      | 525                                   |
+| 由 PSI total 差值計算 some／full 等待 | 2.21%／0.44%                                 | 0%／0%                                |
+| 主機 MemAvailable 範圍                | 1,488–1,815 MiB                              | 1,521–1,772 MiB                       |
+| OOM／oom_kill                         | 該早期時窗仍為 0／0；20:04、20:09 後發生 OOM | 新 cgroup 累計 0／0                   |
+
+browser 實際占用已超過原 1 GiB，並在新上限下沒有新增 max 命中、direct reclaim 或 PSI total 等待。
+這支持新增空間能承接實際工作量，主機仍保有約 40–46% 的可用 RAM。
+這些視窗未固定相同文章、來源與 queue 狀態，而且中間為恢復故障而重啟了 browser，
+因此不能宣稱嚴格 A/B 實驗、把所有差異都歸因於上限，或保證完整工作日不再觸頂。
+重啟重設了 cgroup 計數器，表格比較時窗內增量，沒有用「歸零」抹除先前兩個程序遭 OOM 殺掉的事實。
+第一次跨越重啟的取樣因 StartedAt 改變而被工具判為無效，沒有用於比較。
+
+`health.sh` 已通過，8 個正式容器均 healthy。另用 worker 內的 Playwright 實際連上 CDP，
+在獨立 context／page 中執行 DOM 寫入、讀取與 JavaScript，結果成功；probe 不導覽外部 URL、不呼叫 LLM，
+結束後只關閉自己的 context。先前取用工作中頁面的探測遇到頁面被 worker 關閉的 race；
+以 `set_content` 等待 load 的探測亦曾逾時，最終使用獨立頁面的直接 DOM evaluate 完成驗證。
+這個功能測試避免僅依賴根端點的 HTTP 200；現有 Compose healthcheck 仍使用根端點，後續宜評估加入 CDP 後端探測。
+
+後續觀察重點仍為 1.5 GiB 下的 max／OOM 增量、PSI、抓取錯誤與 queue lag，並維持 2／4 以免同時改變比較條件。
+若 peak 再次接近 1.5 GiB，應先核對工作量與主機餘裕；本輪沒有進一步提高上限、降低並行數或變更 EC2 規格。
+
+操作及取樣紀錄：`/private/tmp/pr128-browser-1536m-apply.log`、
+`/private/tmp/pr128-browser-before-1536m.jsonl`、`/private/tmp/pr128-browser-after-recovery-1536m.jsonl`、
+`/private/tmp/pr128-browser-1536m-cdp-dom.log`。
+部署契約（含 nginx DNS replacement regression）已通過；提交與推送沿用既有 hooks 的完整檢查。
+
 ## 參考資料
 
 - [AWS T3 規格](https://aws.amazon.com/ec2/instance-types/t3/)：CPU、記憶體與 baseline；頁面價格為美東區，不套用為新加坡區報價。
 - [Linux PSI 定義](https://docs.kernel.org/accounting/psi.html)：some、full 與時間窗解釋。
 - [Docker stats 記憶體計算](https://docs.docker.com/reference/cli/docker/container/stats/)：Linux CLI 扣除快取的口徑。
+- [Linux cgroup v2 記憶體介面](https://docs.kernel.org/admin-guide/cgroup-v2.html)：memory.max、events、stat 與回收的定義。
+- [Docker resource constraints](https://docs.docker.com/engine/containers/resource_constraints/)：容器硬性記憶體上限與主機資源的關係。
+- [Docker container update](https://docs.docker.com/reference/cli/docker/container/update/)：動態變更運行中容器的 memory limit。
 - [AWS EC2 監控](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/monitoring_ec2.html)：主機與 CloudWatch agent 監控機制。

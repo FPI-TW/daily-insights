@@ -162,6 +162,8 @@ Compose default。
 `DAILY_INSIGHTS_NEWSROOM_BROWSER_CONCURRENCY=2` 與
 `DAILY_INSIGHTS_NEWSROOM_FETCH_CONCURRENCY=4`，與應用預設一致，不需新增 GitHub Variables。
 主機升級至 `t3.medium` 後先保留原有抓取吞吐量，待實測確認記憶體不足再調整並行數。
+瀏覽器容器的正式記憶體上限為 `1536m`（1.5 GiB）；調整依據為同一容器在 1 GiB 下
+持續命中硬上限與發生回收等待，並行數仍保持 2／4。完整量測與驗證見上述記憶體評估。
 
 `DAILY_INSIGHTS_YFINANCE_ENABLED` 控制 Yahoo Finance functions；
 `DAILY_INSIGHTS_TWSE_ENABLED` 控制 TWSE 加權指數、個股法人與市場法人 functions。
