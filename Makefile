@@ -4,7 +4,9 @@ export pnpm_config_verify_deps_before_run := false
 
 .PHONY: help init dev dev-detached dev-web dev-api stop restart logs ps \
 	migrate bootstrap-admin format format-check lint type-check test test-db \
-	generate-morning-reports generate-daily-news backfill-index-daily-bars \
+	generate-morning-reports assemble-newsroom newsroom-quality newsroom-reembed newsroom-recover \
+	newsroom-replay \
+	backfill-index-daily-bars \
 	check-index-catalog check-nginx check-production-deployment \
 	capture-hsi-heatmap check build require-local-api-environment
 
@@ -77,9 +79,33 @@ generate-morning-reports: require-local-api-environment ## 本地使用 Twelve D
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
 	docker compose run --rm --build api python -m daily_insights_api.scripts.run_morning_reports --once $(if $(EDITION_DATE),--edition-date $(EDITION_DATE),)
 
-generate-daily-news: require-local-api-environment ## 本地使用 DeepSeek 單次產生本日新聞（可傳 EDITION_DATE、MARKET=global|tw_equity|us_equity）
+assemble-newsroom: require-local-api-environment ## 本地單次組出三市場重點新聞草稿（需啟用 newsroom，可傳 EDITION_DATE）
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
-	docker compose run --rm --build api python -m daily_insights_api.scripts.run_daily_news --once $(if $(EDITION_DATE),--edition-date $(EDITION_DATE),) $(if $(MARKET),--market $(MARKET),)
+	docker compose run --rm --build newsroom-worker python -m daily_insights_api.scripts.run_newsroom_assemble $(if $(EDITION_DATE),--edition-date $(EDITION_DATE),)
+
+newsroom-quality: ## 印出重點新聞品質指標（唯讀，可傳 START、END，預設最近 7 個版次）
+	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
+	docker compose run --rm --build newsroom-worker python -m daily_insights_api.scripts.run_newsroom_quality $(if $(START),--start $(START),) $(if $(END),--end $(END),)
+
+newsroom-reembed: ## 以目前的 embedding 模型與翻譯重算文章向量（預設收稿中的版次，可傳 START、END）
+	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
+	docker compose run --rm --build newsroom-worker python -m daily_insights_api.scripts.run_newsroom_reembed $(if $(START),--start $(START),) $(if $(END),--end $(END),)
+
+newsroom-recover: ## 停擺後的重點新聞復原（預設 dry run；CMD=requeue|reembed-untranslated|reopen，ARGS，APPLY=1 才寫入）
+	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }
+	@test -n "$(CMD)" || { echo "請提供 CMD，例如 make newsroom-recover CMD=requeue ARGS='--stage triage --error-code triage_provider_http_402'。"; exit 1; }
+	docker compose run --rm --build newsroom-worker python -m daily_insights_api.scripts.run_newsroom_recover $(CMD) $(ARGS) $(if $(APPLY),--apply,)
+
+# The replay runs on the host on purpose: `docker compose run --build` would
+# build the production project. It only reads production (read-only exports)
+# and writes to its own pgvector container `newsroom-replay-pg` on 127.0.0.1.
+NEWSROOM_REPLAY_ROOT ?= $(abspath $(CURDIR)/..)/.newsroom-replay
+newsroom-replay: ## 離線重播選稿 (唯讀正式庫; CMD=prepare|run|compare|teardown, START END VARIANT STAGES ARGS)
+	NEWSROOM_REPLAY_ROOT="$(NEWSROOM_REPLAY_ROOT)" uv run --project apps/api python -m daily_insights_api.scripts.run_newsroom_replay \
+		$(or $(CMD),run) \
+		$(if $(filter prepare run,$(or $(CMD),run)),$(if $(START),--start $(START),) $(if $(END),--end $(END),),) \
+		$(if $(filter run,$(or $(CMD),run)),$(if $(VARIANT),--variant $(VARIANT),) $(if $(STAGES),--stages $(STAGES),),) \
+		$(ARGS)
 
 backfill-index-daily-bars: ## 一次性把指數日 K 灌進資料庫（可傳 PERIOD，預設 2y）
 	@test -f .env || { echo "找不到 .env，請先執行 make init。"; exit 1; }

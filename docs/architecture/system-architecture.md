@@ -40,7 +40,7 @@ apps/api
     markets        catalog and organization visibility
     reports        report versions, localized presentation contracts, scheduler
     data_sources   provider adapters (Twelve Data, FinDB, yfinance, TWSE, TradingView) and normalized DTOs
-    news           feed discovery, safe extraction, DeepSeek daily news editions
+    newsroom       source polling, safe extraction, event triage, reviewed key-news editions
     analyst_viewpoints  read-only sync of upstream analyst viewpoints
     podcasts       episode catalog, publication lifecycle, localized metadata
     chat           conversations, messages, generation records, SSE

@@ -17,7 +17,7 @@ diagnose_cutover_failure() {
   message=$1
   echo "$message" >&2
   if quiesce_schema_boundary_services; then
-    echo "Schema-boundary services are confirmed quiescent. Inspect the diagnostics, correct the failure, then rerun deploy.sh; do not start orchestration-dispatcher before the orchestration worker is healthy." >&2
+    echo "Schema-boundary services are confirmed quiescent. Inspect the diagnostics, correct the failure, then rerun deploy.sh; do not start orchestration-dispatcher before every worker is healthy." >&2
   else
     echo "Legacy schedulers could not be confirmed quiescent. Keep the deployment halted, stop every legacy scheduler and data-management-worker manually, inspect the diagnostics, then rerun deploy.sh." >&2
   fi
@@ -43,6 +43,7 @@ quiesce_schema_boundary_services() {
     daily-insights-api \
     daily-insights-orchestration-dispatcher \
     daily-insights-orchestration-worker \
+    daily-insights-newsroom-worker \
     daily-insights-morning-report-scheduler \
     daily-insights-daily-news-scheduler \
     daily-insights-analyst-viewpoints-scheduler \
@@ -102,7 +103,8 @@ DAILY_INSIGHTS_DATABASE_URL
 DAILY_INSIGHTS_SESSION_SECRET
 DAILY_INSIGHTS_PASSWORD_PEPPER
 DAILY_INSIGHTS_MORNING_REPORTS_ENABLED
-DAILY_INSIGHTS_DAILY_NEWS_ENABLED
+DAILY_INSIGHTS_NEWSROOM_ENABLED
+DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL
 DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED
 DAILY_INSIGHTS_ORCHESTRATION_ENABLED
 DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE
@@ -150,18 +152,23 @@ if [ "$DAILY_INSIGHTS_MORNING_REPORTS_ENABLED" = true ]; then
   done
 fi
 
-case "$DAILY_INSIGHTS_DAILY_NEWS_ENABLED" in
+case "$DAILY_INSIGHTS_NEWSROOM_ENABLED" in
   true | false) ;;
   *)
-    echo "DAILY_INSIGHTS_DAILY_NEWS_ENABLED must be true or false" >&2
+    echo "DAILY_INSIGHTS_NEWSROOM_ENABLED must be true or false" >&2
     exit 1
     ;;
 esac
 
-if [ "$DAILY_INSIGHTS_DAILY_NEWS_ENABLED" = true ] &&
-  [ -z "$(printenv DAILY_INSIGHTS_NEWS_MODEL_API_KEY 2>/dev/null || true)" ]; then
-  echo "enabled daily news requires deployment environment: DAILY_INSIGHTS_NEWS_MODEL_API_KEY" >&2
-  exit 1
+if [ "$DAILY_INSIGHTS_NEWSROOM_ENABLED" = true ]; then
+  for name in \
+    DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY \
+    DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY; do
+    if [ -z "$(printenv "$name" 2>/dev/null || true)" ]; then
+      echo "enabled newsroom requires deployment environment: $name" >&2
+      exit 1
+    fi
+  done
 fi
 
 case "$DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED" in
@@ -272,8 +279,21 @@ fi
 if ! wait_for_healthy_container daily-insights-orchestration-worker; then
   diagnose_cutover_failure "orchestration-worker did not become healthy"
 fi
+# CloakBrowser and its egress proxy hold no state and never touch the schema;
+# the newsroom worker reads every article page through them.
+if ! compose up -d --no-build --force-recreate --no-deps browser-egress cloakbrowser; then
+  diagnose_cutover_failure "browser-egress or cloakbrowser failed to start"
+fi
+# The newsroom worker idles with heartbeats while DAILY_INSIGHTS_NEWSROOM_ENABLED
+# is false, so it is started and verified on every release.
+if ! compose up -d --no-build --force-recreate --no-deps newsroom-worker; then
+  diagnose_cutover_failure "newsroom-worker failed to start"
+fi
+if ! wait_for_healthy_container daily-insights-newsroom-worker; then
+  diagnose_cutover_failure "newsroom-worker did not become healthy"
+fi
 
-if ! compose up -d --no-build --remove-orphans api web orchestration-dispatcher; then
+if ! compose up -d --no-build --remove-orphans api web orchestration-dispatcher newsroom-worker browser-egress cloakbrowser; then
   diagnose_cutover_failure "final service convergence failed after the replacement worker started"
 fi
 

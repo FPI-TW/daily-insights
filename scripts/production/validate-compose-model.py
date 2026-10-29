@@ -14,24 +14,21 @@ SERVICES = (
     "nginx",
     "orchestration-worker",
     "orchestration-dispatcher",
+    "newsroom-worker",
+    "browser-egress",
+    "cloakbrowser",
 )
 API_ENVIRONMENT_KEYS = {
-    "DAILY_INSIGHTS_DAILY_NEWS_ENABLED",
     "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY",
     "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL",
     "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED",
     "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS",
     "DAILY_INSIGHTS_DATABASE_URL",
     "DAILY_INSIGHTS_ENVIRONMENT",
-    "DAILY_INSIGHTS_MODEL_API_BASE_URL",
-    "DAILY_INSIGHTS_NEWS_MODEL_API_KEY",
-    "DAILY_INSIGHTS_MODEL_NAME",
-    "DAILY_INSIGHTS_MODEL_PROVIDER",
     "DAILY_INSIGHTS_MORNING_REPORTS_ENABLED",
-    "DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES",
+    "DAILY_INSIGHTS_NEWSROOM_ENABLED",
     "DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES",
-    "DAILY_INSIGHTS_GUARDIAN_API_KEY",
-    "DAILY_INSIGHTS_SEC_CONTACT_EMAIL",
+    "DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS",
     "DAILY_INSIGHTS_TWELVE_DATA_API_KEY",
     "DAILY_INSIGHTS_TWELVE_DATA_BASE_URL",
     "DAILY_INSIGHTS_YFINANCE_ENABLED",
@@ -47,10 +44,118 @@ API_ENVIRONMENT_KEYS = {
     "DAILY_INSIGHTS_TWSE_ENABLED",
 }
 
+# Removed with the legacy daily-news pipeline; no service may still receive them.
+REMOVED_ENVIRONMENT_KEYS = {
+    "DAILY_INSIGHTS_MODEL_PROVIDER",
+    "DAILY_INSIGHTS_MODEL_NAME",
+    "DAILY_INSIGHTS_MODEL_API_BASE_URL",
+    "DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS",
+}
+# Production keeps the legacy news pipeline's GitHub Secret (DeepSeek key) and
+# Variable (on/off switch). The release workflow maps each to its newsroom
+# setting, so no service receives either under the GitHub name.
+LEGACY_GITHUB_SOURCES = {
+    "DAILY_INSIGHTS_NEWS_MODEL_API_KEY": "DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY",
+    "DAILY_INSIGHTS_DAILY_NEWS_ENABLED": "DAILY_INSIGHTS_NEWSROOM_ENABLED",
+}
+# The orchestration worker runs the 08:00 newsroom_assemble function.
+NEWSROOM_ASSEMBLY_KEYS = (
+    "DAILY_INSIGHTS_NEWSROOM_ENABLED",
+    "DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL",
+    "DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY",
+    "DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL",
+    "DAILY_INSIGHTS_NEWSROOM_LLM_USER_AGENT",
+    "DAILY_INSIGHTS_NEWSROOM_LLM_SESSION_HEADER",
+    "DAILY_INSIGHTS_NEWSROOM_LLM_EXTRA_BODY",
+    "DAILY_INSIGHTS_NEWSROOM_EDITOR_EXTRA_BODY",
+    "DAILY_INSIGHTS_NEWSROOM_EDITOR_TIMEOUT_SECONDS",
+    "DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL",
+    "DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL",
+)
+# Ingestion settings are read only by the newsroom worker (and the blocked-host
+# kill switch by the API, for admin manual URLs).
+NEWSROOM_INGESTION_KEYS = {
+    "DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES",
+    "DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS",
+    "DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS",
+    "DAILY_INSIGHTS_GUARDIAN_API_KEY",
+    "DAILY_INSIGHTS_SEC_CONTACT_EMAIL",
+}
+NEWSROOM_WORKER_KEYS = {
+    "DAILY_INSIGHTS_ENVIRONMENT",
+    "DAILY_INSIGHTS_RUNTIME_ROLE",
+    "DAILY_INSIGHTS_DATABASE_URL",
+    *NEWSROOM_ASSEMBLY_KEYS,
+    "DAILY_INSIGHTS_NEWSROOM_TRIAGE_MODEL",
+    "DAILY_INSIGHTS_NEWSROOM_ANALYSIS_MODEL",
+    "DAILY_INSIGHTS_NEWSROOM_TRANSLATE_MODEL",
+    "DAILY_INSIGHTS_NEWSROOM_EMBEDDING_BASE_URL",
+    "DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY",
+    "DAILY_INSIGHTS_NEWSROOM_EMBEDDING_MODEL",
+    "DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES",
+    # Shared with the API, which applies it to admin manual URLs.
+    "DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS",
+    "DAILY_INSIGHTS_NEWSROOM_BROWSER_CDP_URL",
+    *NEWSROOM_INGESTION_KEYS,
+}
+BROWSER_CDP_URL = "http://cloakbrowser:9222"
+CLOAKBROWSER_PROXY_ARGS = {
+    "--proxy-server=http://browser-egress:3128",
+    "--proxy-bypass-list=<-loopback>",
+}
+
 
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise SystemExit(message)
+
+
+def service_networks(service: dict[str, Any]) -> set[str]:
+    return set(service.get("networks") or {})
+
+
+def validate_browser_isolation(model: dict[str, Any]) -> None:
+    """CloakBrowser may reach the internet only through browser-egress."""
+    services = model["services"]
+    require(
+        model.get("networks", {}).get("browser", {}).get("internal") is True,
+        "the browser network must be internal so CloakBrowser has no direct route out",
+    )
+    cloakbrowser = services["cloakbrowser"]
+    require(
+        service_networks(cloakbrowser) == {"browser"},
+        "cloakbrowser must sit only on the internal browser network",
+    )
+    command = [str(item) for item in cloakbrowser.get("command") or []]
+    require(
+        command[:1] == ["cloakserve"] and CLOAKBROWSER_PROXY_ARGS.issubset(command),
+        "cloakbrowser must send every request, loopback included, through browser-egress",
+    )
+    require(
+        not any(key.startswith("DAILY_INSIGHTS_") for key in cloakbrowser.get("environment", {})),
+        "cloakbrowser must not receive application settings",
+    )
+    egress = services["browser-egress"]
+    require(
+        egress.get("command")
+        == ["python", "-m", "daily_insights_api.scripts.run_browser_egress_proxy"],
+        "browser-egress must run the public-HTTPS-only egress proxy",
+    )
+    require(
+        not egress.get("environment"),
+        "browser-egress must not receive application settings",
+    )
+    require(
+        service_networks(egress) == {"app", "browser"},
+        "browser-egress must bridge only the app and browser networks",
+    )
+    on_browser = {
+        name for name, service in services.items() if "browser" in service_networks(service)
+    }
+    require(
+        on_browser == {"cloakbrowser", "browser-egress", "newsroom-worker"},
+        "only cloakbrowser, browser-egress and newsroom-worker may join the browser network",
+    )
 
 
 def main() -> None:
@@ -127,10 +232,9 @@ def main() -> None:
             "DAILY_INSIGHTS_YFINANCE_ENABLED",
             "DAILY_INSIGHTS_TWSE_ENABLED",
             "DAILY_INSIGHTS_TRADINGVIEW_ENABLED",
-            "DAILY_INSIGHTS_DAILY_NEWS_ENABLED",
-            "DAILY_INSIGHTS_NEWS_MODEL_API_KEY",
             "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED",
             "DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY",
+            *NEWSROOM_ASSEMBLY_KEYS,
             "DAILY_INSIGHTS_R2_ENDPOINT_URL",
             "DAILY_INSIGHTS_R2_BUCKET_NAME",
             "DAILY_INSIGHTS_R2_ACCESS_KEY_ID",
@@ -149,6 +253,50 @@ def main() -> None:
         }.intersection(worker_environment),
         "orchestration-worker must not receive API authentication secrets",
     )
+    require(
+        "DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY" not in worker_environment,
+        "orchestration-worker assembles drafts without embedding and must not hold that key",
+    )
+    newsroom_environment = services["newsroom-worker"].get("environment", {})
+    require(
+        set(newsroom_environment) == NEWSROOM_WORKER_KEYS,
+        "newsroom-worker must receive exactly its database, newsroom, and ingestion settings",
+    )
+    require(
+        newsroom_environment.get("DAILY_INSIGHTS_RUNTIME_ROLE") == "newsroom-worker",
+        "newsroom-worker must use its least-privilege runtime role",
+    )
+    require(
+        services["newsroom-worker"].get("command")
+        == ["python", "-m", "daily_insights_api.scripts.run_newsroom_worker"],
+        "newsroom-worker must run the newsroom worker entry point",
+    )
+    require(
+        newsroom_environment.get("DAILY_INSIGHTS_NEWSROOM_BROWSER_CDP_URL") == BROWSER_CDP_URL,
+        "newsroom-worker must reach CloakBrowser through the internal browser network",
+    )
+    validate_browser_isolation(model)
+    for name in SERVICES:
+        environment = services[name].get("environment", {})
+        require(
+            not REMOVED_ENVIRONMENT_KEYS.intersection(environment),
+            f"{name} must not receive removed legacy daily-news settings",
+        )
+        for github_name, setting in LEGACY_GITHUB_SOURCES.items():
+            require(
+                github_name not in environment,
+                f"{name} must receive {setting}, not its GitHub name {github_name}",
+            )
+        if name != "newsroom-worker":
+            require(
+                not NEWSROOM_INGESTION_KEYS.intersection(environment),
+                f"{name} must not receive newsroom ingestion settings",
+            )
+        if name not in {"newsroom-worker", "orchestration-worker"}:
+            require(
+                "DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY" not in environment,
+                f"{name} must not receive the newsroom LLM key",
+            )
     dispatcher_environment = services["orchestration-dispatcher"].get("environment", {})
     require(
         set(dispatcher_environment)
@@ -160,13 +308,19 @@ def main() -> None:
         },
         "orchestration-dispatcher must only receive queueing and activation settings",
     )
-    for name in ("orchestration-worker", "orchestration-dispatcher"):
+    for name in (
+        "orchestration-worker",
+        "orchestration-dispatcher",
+        "newsroom-worker",
+    ):
         require(
             services[name].get("environment", {}).get("DAILY_INSIGHTS_ENVIRONMENT")
             == "production",
             f"{name} environment must be production",
         )
-        require(not services[name].get("ports"), f"{name} must not publish a host port")
+    for name in SERVICES:
+        if name != "nginx":
+            require(not services[name].get("ports"), f"{name} must not publish a host port")
     web_environment = services["web"].get("environment", {})
     require(
         web_environment.get("APP_ENV") == "production",

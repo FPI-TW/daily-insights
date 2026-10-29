@@ -54,8 +54,8 @@ vi.mock("#/components/Reports", () => ({
 }))
 vi.mock("#/components/DailyNews", () => ({
   DailyNewsLoading: () => <div role="status">News loading</div>,
-  DailyNews: ({ news }: { news: { edition_id: string } | null }) => (
-    <div>{news?.edition_id ?? "News unavailable"}</div>
+  DailyNews: ({ edition }: { edition: { edition_id: string } | null }) => (
+    <div>{edition?.edition_id ?? "News unavailable"}</div>
   ),
 }))
 const { Route } = await import("./index")

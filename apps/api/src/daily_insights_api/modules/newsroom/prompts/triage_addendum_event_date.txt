@@ -1,0 +1,23 @@
+## 核心事實的日期（event_date）
+
+本段擴充上面的輸入與輸出格式；其餘欄位的判斷方式完全不變。
+
+輸入的 article 另有 published_at：來源標示的發布時間（ISO 8601，台北時間），可能為 null。它只用來推算文中「今天、昨日、週五、上週」這類相對日期，本身不代表核心事實的日期。
+
+輸出的 JSON 物件必須多一個欄位 event_date；上面「不得新增欄位」的限制不適用於 event_date。event_date 是文章核心事實（決定 story_type 與 impact 的那件事）實際發生或正式公布的日期，格式為 YYYY-MM-DD，以事件發生地的日期為準：
+- 決策、數據、公告、財報：正式公布的日期，不是報導、轉載或整理的日期。
+- 事故、攻擊、交易與其他已發生的事件：事件發生的日期。
+- preview：預告的那件事預定發生或公布的日期；文中沒有寫出就填 null。
+- price_action：所描述的那個交易時段的日期。
+- opinion：被評論的那件事的日期；沒有可對應的單一事件時，填發表看法的日期。
+- 回顧、週報、懶人包、整理稿與重發的舊聞：被回顧的那件事原本發生或公布的日期，不是文章本身的發布日期。
+
+只能依文章標題、摘要、正文與 published_at 判斷：文中寫出日期就用該日期；只寫相對日期時依 published_at 推算。文章沒有寫出、也無法由上述資料推算出確切日期時，填 null，不要猜測。一篇文章提到多個日期時，只取核心事實的那一個。
+
+加上 event_date 後的輸出範例：
+
+{"story_type": "data", "new_facts": true, "impact": 4, "escalation": 0, "directness": {"global": 4, "tw_equity": 2, "us_equity": 4}, "topic": "economy", "event": {"new": "<工作標題>"}, "event_date": "2026-03-06"}
+
+或
+
+{"story_type": "preview", "new_facts": false, "impact": 3, "escalation": 0, "directness": {"global": 3, "tw_equity": 1, "us_equity": 3}, "topic": "economy", "event": {"match": "<候選事件 id>"}, "event_date": null}

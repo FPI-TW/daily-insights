@@ -8,8 +8,6 @@ from daily_insights_api.modules.data_management.schemas import (
 from daily_insights_api.modules.data_management.service import (
     RunAlreadyActiveError,
     claim_next_run,
-    complete_news_run,
-    enqueue_automatic_news_all_run,
     enqueue_run,
     execute_run,
     heartbeat_run,
@@ -21,8 +19,6 @@ __all__ = [
     "DataManagementRunResponse",
     "RunAlreadyActiveError",
     "claim_next_run",
-    "complete_news_run",
-    "enqueue_automatic_news_all_run",
     "enqueue_run",
     "execute_run",
     "heartbeat_run",

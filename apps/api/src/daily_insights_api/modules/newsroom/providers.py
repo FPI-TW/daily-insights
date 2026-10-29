@@ -1,0 +1,427 @@
+"""OpenAI-compatible chat (JSON mode) and embedding clients for every newsroom stage.
+
+Both clients turn transport and provider failures into the two queue error kinds
+(``RetryableStageError`` / ``FatalStageError``) and write one ``newsroom_llm_calls``
+audit row per call. Stages never talk to httpx directly.
+"""
+
+import json
+import time
+import uuid
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import timedelta
+from typing import Any, Protocol, TypeVar
+
+import httpx
+from pydantic import BaseModel, ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from daily_insights_api.core.config import Settings
+from daily_insights_api.modules.newsroom.models import EMBEDDING_DIMENSIONS, NewsroomLlmCall
+from daily_insights_api.modules.newsroom.queue import FatalStageError, RetryableStageError
+
+ResultT = TypeVar("ResultT", bound=BaseModel)
+
+FATAL_STATUS = {400, 401, 402, 403, 404}
+# OpenCode Go answers a spent 5-hour, weekly or monthly allowance with HTTP 429,
+# {"type":"error","error":{"type":"GoUsageLimitError",...}} and retry-after. The
+# allowance comes back on its own, so the row waits for it without spending its
+# attempts, however long a weekly or monthly reset takes.
+USAGE_LIMIT_ERROR_TYPES = {"GoUsageLimitError"}
+
+
+@dataclass(frozen=True, slots=True)
+class CallAudit:
+    stage: str
+    subject_id: uuid.UUID | None
+    prompt_version: str | None = None
+
+
+def _retry_after(response: httpx.Response) -> timedelta | None:
+    value = response.headers.get("retry-after")
+    if value is None:
+        return None
+    try:
+        return timedelta(seconds=max(float(value), 0))
+    except ValueError:
+        return None
+
+
+def _error_type(response: httpx.Response) -> str | None:
+    try:
+        data = response.json()
+    except ValueError:
+        return None
+    error = data.get("error") if isinstance(data, dict) else None
+    kind = error.get("type") if isinstance(error, dict) else None
+    return kind if isinstance(kind, str) else None
+
+
+def classify_http_error(stage: str, error: Exception) -> RetryableStageError | FatalStageError:
+    """Map a transport or HTTP failure onto the two queue outcomes (spec §5)."""
+    if isinstance(error, httpx.HTTPStatusError):
+        status = error.response.status_code
+        if _error_type(error.response) in USAGE_LIMIT_ERROR_TYPES:
+            return RetryableStageError(
+                f"{stage}_provider_usage_limit",
+                retry_after=_retry_after(error.response),
+                counts_attempt=False,
+            )
+        if status in FATAL_STATUS:
+            return FatalStageError(f"{stage}_provider_http_{status}")
+        return RetryableStageError(
+            f"{stage}_provider_http_{status}", retry_after=_retry_after(error.response)
+        )
+    if isinstance(error, httpx.TimeoutException):
+        return RetryableStageError(f"{stage}_provider_timeout")
+    return RetryableStageError(f"{stage}_provider_unreachable")
+
+
+def _audit_row(
+    audit: CallAudit,
+    *,
+    model: str,
+    started: float,
+    response: httpx.Response | None,
+    usage: dict[str, Any] | None,
+    error_code: str | None,
+) -> NewsroomLlmCall:
+    def _int(value: Any) -> int | None:
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    return NewsroomLlmCall(
+        stage=audit.stage,
+        subject_id=audit.subject_id,
+        model=model,
+        prompt_version=audit.prompt_version,
+        input_tokens=_int((usage or {}).get("prompt_tokens")),
+        output_tokens=_int((usage or {}).get("completion_tokens")),
+        latency_ms=int((time.monotonic() - started) * 1000),
+        # OpenCode Go sends no x-request-id; its support traces calls by x-opencode-log-id.
+        request_id=(
+            response.headers.get("x-request-id") or response.headers.get("x-opencode-log-id")
+            if response is not None
+            else None
+        ),
+        error_code=error_code,
+    )
+
+
+def _fail(
+    error: RetryableStageError | FatalStageError, row: NewsroomLlmCall
+) -> RetryableStageError | FatalStageError:
+    """Attach the audit row so it survives the stage rollback (queue.run_claimed)."""
+    error.audit_rows.append(row)
+    return error
+
+
+class JsonModel(Protocol):
+    async def complete(
+        self,
+        database: AsyncSession,
+        *,
+        model: str,
+        system: str,
+        payload: dict[str, Any],
+        result_type: type[ResultT],
+        audit: CallAudit,
+    ) -> ResultT: ...
+
+
+SESSION_NAMESPACE = uuid.UUID("5d0f3a52-8c1e-4f5b-9a57-2f1c6b8e4d10")
+
+
+def session_id(audit: CallAudit) -> str:
+    """One stable id per stage and prompt version, so calls sharing a system prompt
+    reach the same provider cache."""
+    return str(uuid.uuid5(SESSION_NAMESPACE, f"{audit.stage}:{audit.prompt_version or ''}"))
+
+
+class OpenAICompatibleJsonModel:
+    """Chat completions in JSON mode, temperature 0, validated into ``result_type``."""
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        timeout_seconds: float,
+        user_agent: str | None = None,
+        session_header: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        stage_extra_body: Mapping[str, dict[str, Any]] | None = None,
+        stage_timeout_seconds: Mapping[str, float] | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        self._user_agent = user_agent
+        self._session_header = session_header
+        self._extra_body = dict(extra_body or {})
+        # Per audit stage: extra fields merged over ``extra_body``, and the timeout.
+        self._stage_extra_body = {
+            stage: dict(extra) for stage, extra in (stage_extra_body or {}).items()
+        }
+        self._stage_timeout_seconds = dict(stage_timeout_seconds or {})
+        self._client = httpx.AsyncClient(
+            timeout=timeout_seconds, follow_redirects=False, cookies=None, trust_env=False
+        )
+
+    @classmethod
+    def from_settings(
+        cls, settings: Settings, *, api_key: str | None = None
+    ) -> "OpenAICompatibleJsonModel":
+        """The client the settings describe; ``api_key`` replaces the settings key
+        (the replay reads it at run time and keeps it out of its settings)."""
+        if api_key is None:
+            if settings.newsroom_llm_api_key is None:
+                raise FatalStageError("newsroom_llm_configuration_missing")
+            api_key = settings.newsroom_llm_api_key.get_secret_value()
+        editor_timeout = settings.newsroom_editor_timeout_seconds
+        return cls(
+            base_url=settings.newsroom_llm_base_url,
+            api_key=api_key,
+            timeout_seconds=settings.newsroom_llm_timeout_seconds,
+            user_agent=settings.newsroom_llm_user_agent,
+            session_header=settings.newsroom_llm_session_header,
+            extra_body=settings.newsroom_llm_extra_body,
+            # Every newsroom_editor_model call (selection, dedupe, repeat screen)
+            # is audited as stage "editor".
+            stage_extra_body={"editor": settings.newsroom_editor_extra_body},
+            stage_timeout_seconds={} if editor_timeout is None else {"editor": editor_timeout},
+        )
+
+    def _headers(self, audit: CallAudit) -> dict[str, str]:
+        headers = {"Authorization": f"Bearer {self._api_key}"}
+        if self._user_agent:
+            headers["User-Agent"] = self._user_agent
+        if self._session_header:
+            headers[self._session_header] = session_id(audit)
+        return headers
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    async def complete(
+        self,
+        database: AsyncSession,
+        *,
+        model: str,
+        system: str,
+        payload: dict[str, Any],
+        result_type: type[ResultT],
+        audit: CallAudit,
+    ) -> ResultT:
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            },
+        ]
+        failed_rows: list[NewsroomLlmCall] = []
+        for attempt in range(1 + REPAIR_ATTEMPTS):
+            try:
+                outcome = await self._attempt(model, messages, result_type, audit)
+            except (RetryableStageError, FatalStageError) as failure:
+                # A failed repair turn must not drop the invalid turns before it.
+                failure.audit_rows[:0] = failed_rows
+                raise
+            if isinstance(outcome, _Answer):
+                database.add_all(failed_rows)
+                database.add(outcome.row)
+                return outcome.result
+            failed_rows.append(outcome.row)
+            if attempt == REPAIR_ATTEMPTS or outcome.content is None:
+                error = RetryableStageError(outcome.code)
+                error.audit_rows.extend(failed_rows)
+                raise error
+            # Temperature 0 makes a plain retry repeat the same broken answer, so
+            # the repair turn shows the model its output and what was wrong.
+            messages = [
+                *messages,
+                {"role": "assistant", "content": outcome.content},
+                {"role": "user", "content": _repair_instruction(outcome.problems)},
+            ]
+        raise AssertionError("unreachable")
+
+    async def _attempt[R: BaseModel](
+        self,
+        model: str,
+        messages: list[dict[str, str]],
+        result_type: type[R],
+        audit: CallAudit,
+    ) -> "_Answer[R] | _Invalid":
+        # The client's own fields come last so the configured extras never replace them.
+        body = {
+            **self._extra_body,
+            **self._stage_extra_body.get(audit.stage, {}),
+            "model": model,
+            "response_format": {"type": "json_object"},
+            "temperature": 0,
+            "messages": messages,
+        }
+        started = time.monotonic()
+        response: httpx.Response | None = None
+        try:
+            response = await self._client.post(
+                f"{self._base_url}/chat/completions",
+                headers=self._headers(audit),
+                json=body,
+                timeout=self._stage_timeout_seconds.get(audit.stage, httpx.USE_CLIENT_DEFAULT),
+            )
+            response.raise_for_status()
+        except Exception as error:
+            classified = classify_http_error(audit.stage, error)
+            row = _audit_row(
+                audit,
+                model=model,
+                started=started,
+                response=response,
+                usage=None,
+                error_code=classified.code,
+            )
+            raise _fail(classified, row) from error
+        usage: dict[str, Any] | None = None
+        content: str | None = None
+        try:
+            data = response.json()
+            usage = data.get("usage") if isinstance(data.get("usage"), dict) else None
+            raw = data["choices"][0]["message"]["content"]
+            content = raw if isinstance(raw, str) else None
+            parsed = json.loads(raw)
+        except (KeyError, IndexError, TypeError, AttributeError, json.JSONDecodeError):
+            code = f"{audit.stage}_provider_invalid_json"
+            row = _audit_row(
+                audit, model=model, started=started, response=response, usage=usage, error_code=code
+            )
+            return _Invalid(code, row, content, "the reply was not a valid JSON object")
+        try:
+            result = result_type.model_validate(parsed)
+        except ValidationError as error:
+            code = f"{audit.stage}_schema_invalid"
+            row = _audit_row(
+                audit, model=model, started=started, response=response, usage=usage, error_code=code
+            )
+            return _Invalid(code, row, content, _validation_problems(error))
+        row = _audit_row(
+            audit, model=model, started=started, response=response, usage=usage, error_code=None
+        )
+        return _Answer(result, row)
+
+
+REPAIR_ATTEMPTS = 1
+
+
+@dataclass(frozen=True, slots=True)
+class _Answer[R: BaseModel]:
+    result: R
+    row: NewsroomLlmCall
+
+
+@dataclass(frozen=True, slots=True)
+class _Invalid:
+    code: str
+    row: NewsroomLlmCall
+    content: str | None
+    problems: str
+
+
+def _validation_problems(error: ValidationError) -> str:
+    parts = []
+    for issue in error.errors()[:8]:
+        location = ".".join(str(part) for part in issue["loc"]) or "(root)"
+        parts.append(f"{location}: {issue['msg']}")
+    return "; ".join(parts)
+
+
+def _repair_instruction(problems: str) -> str:
+    return (
+        f"Your previous reply did not match the required JSON shape ({problems}). "
+        "Reply again with one complete JSON object that follows the field definitions in "
+        "the system message, include every required field, and output nothing but JSON."
+    )
+
+
+class Embedder(Protocol):
+    async def embed(
+        self, database: AsyncSession, texts: Sequence[str], *, audit: CallAudit
+    ) -> list[list[float]]: ...
+
+
+class OpenAICompatibleEmbedder:
+    def __init__(self, *, base_url: str, api_key: str, model: str, timeout_seconds: float) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        self._model = model
+        self._client = httpx.AsyncClient(
+            timeout=timeout_seconds, follow_redirects=False, cookies=None, trust_env=False
+        )
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "OpenAICompatibleEmbedder":
+        if settings.newsroom_embedding_api_key is None:
+            raise FatalStageError("newsroom_embedding_configuration_missing")
+        return cls(
+            base_url=settings.newsroom_embedding_base_url,
+            api_key=settings.newsroom_embedding_api_key.get_secret_value(),
+            model=settings.newsroom_embedding_model,
+            timeout_seconds=settings.newsroom_embedding_timeout_seconds,
+        )
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    async def embed(
+        self, database: AsyncSession, texts: Sequence[str], *, audit: CallAudit
+    ) -> list[list[float]]:
+        started = time.monotonic()
+        response: httpx.Response | None = None
+        try:
+            response = await self._client.post(
+                f"{self._base_url}/embeddings",
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                json={
+                    "model": self._model,
+                    "input": list(texts),
+                    "dimensions": EMBEDDING_DIMENSIONS,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            vectors = [item["embedding"] for item in sorted(data["data"], key=lambda i: i["index"])]
+        except (KeyError, TypeError, ValueError) as error:
+            code = "embed_provider_invalid_json"
+            row = _audit_row(
+                audit,
+                model=self._model,
+                started=started,
+                response=response,
+                usage=None,
+                error_code=code,
+            )
+            raise _fail(RetryableStageError(code), row) from error
+        except Exception as error:
+            classified = classify_http_error("embed", error)
+            row = _audit_row(
+                audit,
+                model=self._model,
+                started=started,
+                response=response,
+                usage=None,
+                error_code=classified.code,
+            )
+            raise _fail(classified, row) from error
+        if len(vectors) != len(texts) or any(len(v) != EMBEDDING_DIMENSIONS for v in vectors):
+            raise RetryableStageError("embed_dimension_mismatch")
+        database.add(
+            _audit_row(
+                audit,
+                model=self._model,
+                started=started,
+                response=response,
+                usage=data.get("usage") if isinstance(data.get("usage"), dict) else None,
+                error_code=None,
+            )
+        )
+        return [[float(x) for x in vector] for vector in vectors]

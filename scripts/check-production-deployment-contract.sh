@@ -39,7 +39,7 @@ if grep -q 'postgres:' "$compose_file"; then
   exit 1
 fi
 
-production_services="api web nginx orchestration-worker orchestration-dispatcher"
+production_services="api web nginx orchestration-worker orchestration-dispatcher newsroom-worker browser-egress cloakbrowser"
 for service in $production_services; do
   grep -q "^  ${service}:" "$compose_file"
   grep -q "container_name: daily-insights-${service}" "$compose_file"
@@ -65,7 +65,6 @@ for name in \
 done
 grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_BASE_URL: ${DAILY_INSIGHTS_TWELVE_DATA_BASE_URL:-https://api.twelvedata.com}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_TWELVE_DATA_API_KEY: ${DAILY_INSIGHTS_TWELVE_DATA_API_KEY:-}' "$compose_file"
-grep -Fq 'DAILY_INSIGHTS_DAILY_NEWS_ENABLED: ${DAILY_INSIGHTS_DAILY_NEWS_ENABLED:-false}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED:-false}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL:-https://analyst-viewpoints.invalid}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY:-}' "$compose_file"
@@ -95,7 +94,75 @@ grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_NAME: ${DAILY_INSIGHTS_CHAT_MODEL_NAME:-deep
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL: ${DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL:-https://api.deepseek.com}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_KEY: ${DAILY_INSIGHTS_CHAT_MODEL_API_KEY:-}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS:-90}' "$compose_file"
-grep -Fq 'DAILY_INSIGHTS_NEWS_MODEL_API_KEY: ${DAILY_INSIGHTS_NEWS_MODEL_API_KEY:-}' "$compose_file"
+newsroom_flag_services=$(grep -c 'DAILY_INSIGHTS_NEWSROOM_ENABLED: ${DAILY_INSIGHTS_NEWSROOM_ENABLED:-false}' "$compose_file")
+if [ "$newsroom_flag_services" -ne 3 ]; then
+  echo "expected DAILY_INSIGHTS_NEWSROOM_ENABLED on api, orchestration-worker and newsroom-worker; found $newsroom_flag_services" >&2
+  exit 1
+fi
+grep -Fq 'daily_insights_api.scripts.run_newsroom_worker' "$compose_file"
+grep -Fq '/tmp/newsroom-worker-heartbeat' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY: ${DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY:-}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY: ${DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY:-}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL: ${DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL:?' "$compose_file"
+# The legacy daily-news pipeline and its settings were removed at the newsroom
+# cutover; nothing in the deployment path may reintroduce them.
+for removed in \
+  DAILY_INSIGHTS_MODEL_PROVIDER \
+  DAILY_INSIGHTS_MODEL_NAME \
+  DAILY_INSIGHTS_MODEL_API_BASE_URL \
+  DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS; do
+  if grep -Eq "(^|[^A-Z_])${removed}([^A-Z_]|\$)" \
+    "$compose_file" "$workflow_file" scripts/production/deploy.sh; then
+    echo "removed legacy daily-news setting is still referenced: $removed" >&2
+    exit 1
+  fi
+done
+# Production keeps two GitHub settings of the legacy news pipeline: the DeepSeek
+# key Secret and the on/off Variable. Release reads each exactly once, as the
+# source of a newsroom deployment setting; nothing in the deployment path may
+# use the legacy name as an environment name, and release may not read a
+# GitHub setting under the newsroom name instead.
+require_legacy_github_source() {
+  context=$1
+  label=$2
+  legacy=$3
+  target=$4
+  if grep -Eq "(^|[^A-Z_])${legacy}([^A-Z_]|\$)" \
+    "$compose_file" scripts/production/deploy.sh; then
+    echo "$legacy is a GitHub $label name, not a deployment setting" >&2
+    exit 1
+  fi
+  if [ "$(grep -c "${context}[.]${legacy}" "$workflow_file")" -ne 1 ] ||
+    ! grep -Fq "${target}: \${{ ${context}.${legacy} }}" "$workflow_file"; then
+    echo "release must map $label $legacy to $target exactly once" >&2
+    exit 1
+  fi
+  if grep -E "(^|[^A-Z_.])${legacy}([^A-Z_]|\$)" "$workflow_file" |
+    grep -Ev "^[[:space:]]*#|GitHub ${label} ${legacy} " | grep -q .; then
+    echo "release may use $legacy only as the source $label of $target" >&2
+    exit 1
+  fi
+  if grep -Fq "${context}.${target}" "$workflow_file"; then
+    echo "release must not read a $target $label; production keeps $legacy" >&2
+    exit 1
+  fi
+  grep -Fq ",${target}" "$workflow_file"
+}
+require_legacy_github_source secrets Secret \
+  DAILY_INSIGHTS_NEWS_MODEL_API_KEY DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY
+require_legacy_github_source vars Variable \
+  DAILY_INSIGHTS_DAILY_NEWS_ENABLED DAILY_INSIGHTS_NEWSROOM_ENABLED
+# Operators fix what the errors name, so they name the GitHub settings.
+for message in \
+  'GitHub Variable DAILY_INSIGHTS_DAILY_NEWS_ENABLED (deployed as DAILY_INSIGHTS_NEWSROOM_ENABLED) must be configured in the production environment' \
+  'GitHub Variable DAILY_INSIGHTS_DAILY_NEWS_ENABLED (deployed as DAILY_INSIGHTS_NEWSROOM_ENABLED) must be true or false' \
+  'GitHub Secret DAILY_INSIGHTS_NEWS_MODEL_API_KEY (deployed as DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY) is required while GitHub Variable DAILY_INSIGHTS_DAILY_NEWS_ENABLED is true' \
+  'DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY is required while GitHub Variable DAILY_INSIGHTS_DAILY_NEWS_ENABLED is true'; do
+  if ! grep -Fq "$message" "$workflow_file"; then
+    echo "release must report: $message" >&2
+    exit 1
+  fi
+done
 
 grep -Fq '/etc/daily-insights/cloudflare-realip.conf:/etc/nginx/cloudflare-realip.conf:ro' "$compose_file"
 grep -Fq '/etc/daily-insights/tls/origin.crt:/etc/nginx/tls/origin.crt:ro' "$compose_file"
@@ -189,8 +256,34 @@ done
 grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY: ${{ secrets.DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY }}' "$workflow_file"
 grep -Fq ',DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY' "$workflow_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_KEY: ${{ secrets.DAILY_INSIGHTS_CHAT_MODEL_API_KEY }}' "$workflow_file"
-grep -Fq 'DAILY_INSIGHTS_NEWS_MODEL_API_KEY: ${{ secrets.DAILY_INSIGHTS_NEWS_MODEL_API_KEY }}' "$workflow_file"
-grep -Fq ',DAILY_INSIGHTS_NEWS_MODEL_API_KEY' "$workflow_file"
+for name in \
+  DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL \
+  DAILY_INSIGHTS_NEWSROOM_TRIAGE_MODEL \
+  DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL \
+  DAILY_INSIGHTS_NEWSROOM_ANALYSIS_MODEL \
+  DAILY_INSIGHTS_NEWSROOM_TRANSLATE_MODEL \
+  DAILY_INSIGHTS_NEWSROOM_LLM_USER_AGENT \
+  DAILY_INSIGHTS_NEWSROOM_LLM_SESSION_HEADER \
+  DAILY_INSIGHTS_NEWSROOM_LLM_EXTRA_BODY \
+  DAILY_INSIGHTS_NEWSROOM_EDITOR_EXTRA_BODY \
+  DAILY_INSIGHTS_NEWSROOM_EDITOR_TIMEOUT_SECONDS \
+  DAILY_INSIGHTS_NEWSROOM_EMBEDDING_BASE_URL \
+  DAILY_INSIGHTS_NEWSROOM_EMBEDDING_MODEL \
+  DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES \
+  DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES \
+  DAILY_INSIGHTS_SEC_CONTACT_EMAIL; do
+  grep -Fq "${name}: \${{ vars.${name} }}" "$workflow_file"
+  grep -Fq ",${name}" "$workflow_file"
+done
+for name in \
+  DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY \
+  DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL \
+  DAILY_INSIGHTS_GUARDIAN_API_KEY; do
+  grep -Fq "${name}: \${{ secrets.${name} }}" "$workflow_file"
+  grep -Fq ",${name}" "$workflow_file"
+done
+grep -Fq 'DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL: https://${{ vars.PUBLIC_HOSTNAME }}' "$workflow_file"
+grep -Fq ',DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL' "$workflow_file"
 grep -Fq ',DAILY_INSIGHTS_CHAT_MODEL_API_KEY' "$workflow_file"
 grep -Fq '/opt/daily-insights/scripts/production/deploy.sh' "$workflow_file"
 
@@ -277,9 +370,11 @@ export DAILY_INSIGHTS_CHAT_MODEL_API_KEY=contract-chat-model-key
 export DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS=90
 export DAILY_INSIGHTS_TWELVE_DATA_BASE_URL=
 export DAILY_INSIGHTS_TWELVE_DATA_API_KEY=
-export DAILY_INSIGHTS_DAILY_NEWS_ENABLED=false
 export DAILY_INSIGHTS_TRADINGVIEW_ENABLED=false
-export DAILY_INSIGHTS_NEWS_MODEL_API_KEY=
+export DAILY_INSIGHTS_NEWSROOM_ENABLED=false
+export DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL=https://podcast.example.test
+export DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY=
+export DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY=
 export DAILY_INSIGHTS_ORCHESTRATION_ENABLED=true
 export DAILY_INSIGHTS_CUTOVER_TAIPEI_NOW=2026-09-16T10:00:00+0800
 export DAILY_INSIGHTS_ORCHESTRATION_ACTIVATION_DATE=2026-09-17
@@ -347,6 +442,7 @@ grep -q 'compose .* run --rm --no-deps api python -m daily_insights_api.scripts.
 grep -q 'compose .* run --rm --no-deps api python -m daily_insights_api.scripts.check_legacy_queues_quiescent' "$temporary_dir/deployment.log"
 grep -q 'stop daily-insights-api' "$temporary_dir/deployment.log"
 grep -q 'stop daily-insights-orchestration-worker' "$temporary_dir/deployment.log"
+grep -q 'stop daily-insights-newsroom-worker' "$temporary_dir/deployment.log"
 grep -q 'stop daily-insights-daily-news-scheduler' "$temporary_dir/deployment.log"
 grep -q 'inspect --format {{.State.Status}} daily-insights-daily-news-scheduler' "$temporary_dir/deployment.log"
 grep -q 'inspect --format {{.State.Status}} daily-insights-index-daily-bars-scheduler' "$temporary_dir/deployment.log"
@@ -355,7 +451,10 @@ grep -q 'inspect --format {{.State.Status}} daily-insights-data-management-worke
 grep -q 'compose .* run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log"
 grep -q 'compose .* up -d --no-build --force-recreate --no-deps orchestration-worker' "$temporary_dir/deployment.log"
 grep -q 'inspect --format {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} daily-insights-orchestration-worker' "$temporary_dir/deployment.log"
-grep -q 'compose .* up -d --no-build --remove-orphans api web orchestration-dispatcher' "$temporary_dir/deployment.log"
+grep -q 'compose .* up -d --no-build --force-recreate --no-deps browser-egress cloakbrowser' "$temporary_dir/deployment.log"
+grep -q 'compose .* up -d --no-build --force-recreate --no-deps newsroom-worker' "$temporary_dir/deployment.log"
+grep -q 'inspect --format {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} daily-insights-newsroom-worker' "$temporary_dir/deployment.log"
+grep -q 'compose .* up -d --no-build --remove-orphans api web orchestration-dispatcher newsroom-worker' "$temporary_dir/deployment.log"
 grep -q 'exec daily-insights-nginx wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/api' "$temporary_dir/deployment.log"
 grep -q 'exec daily-insights-nginx wget -q -T 2 -O /dev/null http://127.0.0.1:8080/nginx-health/web' "$temporary_dir/deployment.log"
 
@@ -363,6 +462,7 @@ nginx_validate_line=$(grep -n 'run --rm --no-deps nginx nginx -t' "$temporary_di
 nginx_recreate_line=$(grep -n 'up -d --no-build --force-recreate --no-deps nginx' "$temporary_dir/deployment.log" | cut -d: -f1)
 api_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-api' "$temporary_dir/deployment.log" | head -n 1 | cut -d: -f1)
 orchestration_worker_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-orchestration-worker' "$temporary_dir/deployment.log" | head -n 1 | cut -d: -f1)
+newsroom_worker_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-newsroom-worker' "$temporary_dir/deployment.log" | head -n 1 | cut -d: -f1)
 news_stop_line=$(grep -n 'stop daily-insights-daily-news-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
 scheduler_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-daily-news-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
 index_scheduler_stopped_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-index-daily-bars-scheduler' "$temporary_dir/deployment.log" | cut -d: -f1)
@@ -372,7 +472,9 @@ migration_line=$(grep -n 'run --rm --no-deps api alembic upgrade head' "$tempora
 legacy_queue_check_line=$(grep -n 'run --rm --no-deps api python -m daily_insights_api.scripts.check_legacy_queues_quiescent' "$temporary_dir/deployment.log" | cut -d: -f1)
 worker_start_line=$(grep -n 'up -d --no-build --force-recreate --no-deps orchestration-worker' "$temporary_dir/deployment.log" | cut -d: -f1)
 worker_healthy_line=$(grep -n 'inspect --format {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} daily-insights-orchestration-worker' "$temporary_dir/deployment.log" | head -n 1 | cut -d: -f1)
-backend_converge_line=$(grep -n 'up -d --no-build --remove-orphans api web orchestration-dispatcher' "$temporary_dir/deployment.log" | cut -d: -f1)
+newsroom_worker_start_line=$(grep -n 'up -d --no-build --force-recreate --no-deps newsroom-worker' "$temporary_dir/deployment.log" | cut -d: -f1)
+newsroom_worker_healthy_line=$(grep -n 'inspect --format {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}} daily-insights-newsroom-worker' "$temporary_dir/deployment.log" | head -n 1 | cut -d: -f1)
+backend_converge_line=$(grep -n 'up -d --no-build --remove-orphans api web orchestration-dispatcher newsroom-worker' "$temporary_dir/deployment.log" | cut -d: -f1)
 if [ "$nginx_validate_line" -ge "$nginx_recreate_line" ] ||
   [ "$nginx_recreate_line" -ge "$news_stop_line" ] ||
   [ "$news_stop_line" -ge "$scheduler_stopped_line" ] ||
@@ -385,11 +487,14 @@ if [ "$nginx_validate_line" -ge "$nginx_recreate_line" ] ||
   [ "$worker_stopped_line" -ge "$migration_line" ] ||
   [ "$api_stopped_line" -ge "$migration_line" ] ||
   [ "$orchestration_worker_stopped_line" -ge "$migration_line" ] ||
+  [ "$newsroom_worker_stopped_line" -ge "$migration_line" ] ||
   [ "$orchestration_worker_stopped_line" -ge "$legacy_queue_check_line" ] ||
   [ "$legacy_queue_check_line" -ge "$migration_line" ] ||
   [ "$migration_line" -ge "$worker_start_line" ] ||
   [ "$worker_start_line" -ge "$worker_healthy_line" ] ||
-  [ "$worker_healthy_line" -ge "$backend_converge_line" ]; then
+  [ "$worker_healthy_line" -ge "$newsroom_worker_start_line" ] ||
+  [ "$newsroom_worker_start_line" -ge "$newsroom_worker_healthy_line" ] ||
+  [ "$newsroom_worker_healthy_line" -ge "$backend_converge_line" ]; then
   echo "deployment must quiesce schema-boundary services before migration and verify the new worker before restarting schedulers" >&2
   exit 1
 fi
@@ -418,6 +523,7 @@ PATH="$temporary_dir/stubs:$PATH" \
   scripts/production/deploy.sh >/dev/null
 grep -q 'stop daily-insights-api' "$temporary_dir/deployment.log"
 grep -q 'stop daily-insights-orchestration-worker' "$temporary_dir/deployment.log"
+grep -q 'stop daily-insights-newsroom-worker' "$temporary_dir/deployment.log"
 grep -q 'compose .* run --rm --no-deps api alembic upgrade head' "$temporary_dir/deployment.log"
 if grep -Eq -- '--env-file|systemctl|daily-insights[.]service' "$temporary_dir/deployment.log"; then
   echo "deployment unexpectedly used a host env file or app systemd unit" >&2
@@ -456,6 +562,7 @@ if PATH="$temporary_dir/stubs:$PATH" \
 fi
 grep -q 'Schema-boundary services are confirmed quiescent' "$temporary_dir/migration-failure.err"
 if grep -q 'up -d --no-build --force-recreate --no-deps orchestration-worker' "$temporary_dir/deployment.log" ||
+  grep -q 'up -d --no-build --force-recreate --no-deps newsroom-worker' "$temporary_dir/deployment.log" ||
   grep -q 'up -d --no-build --remove-orphans .*orchestration-dispatcher' "$temporary_dir/deployment.log"; then
   echo "migration failure must not restart the worker or scheduler" >&2
   exit 1
@@ -475,6 +582,22 @@ if grep -q 'up -d --no-build --remove-orphans .*orchestration-dispatcher' "$temp
   exit 1
 fi
 
+# The newsroom worker starts last among the workers; its failure must also keep
+# the dispatcher stopped.
+: >"$temporary_dir/deployment.log"
+if PATH="$temporary_dir/stubs:$PATH" \
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  DOCKER_FAIL_MATCH='up -d --no-build --force-recreate --no-deps newsroom-worker' \
+  scripts/production/deploy.sh >"$temporary_dir/newsroom-worker-failure.out" 2>"$temporary_dir/newsroom-worker-failure.err"; then
+  echo "deployment must fail when the newsroom worker cannot start" >&2
+  exit 1
+fi
+grep -q 'newsroom-worker failed to start' "$temporary_dir/newsroom-worker-failure.err"
+if grep -q 'up -d --no-build --remove-orphans .*orchestration-dispatcher' "$temporary_dir/deployment.log"; then
+  echo "newsroom worker startup failure must not start the orchestration dispatcher" >&2
+  exit 1
+fi
+
 assert_requiesced_after_scheduler_attempt() {
   deployment_log=$1
   scheduler_attempt_line=$(grep -n 'up -d --no-build --remove-orphans .*orchestration-dispatcher' "$deployment_log" | tail -n 1 | cut -d: -f1)
@@ -487,11 +610,14 @@ assert_requiesced_after_scheduler_attempt() {
   index_scheduler_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-index-daily-bars-scheduler' "$post_attempt_log" | head -n 1 | cut -d: -f1)
   institutional_scheduler_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-institutional-flows-scheduler' "$post_attempt_log" | head -n 1 | cut -d: -f1)
   worker_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-data-management-worker' "$post_attempt_log" | head -n 1 | cut -d: -f1)
+  newsroom_worker_stop_line=$(grep -n 'stop daily-insights-newsroom-worker' "$post_attempt_log" | head -n 1 | cut -d: -f1)
+  newsroom_worker_confirmed_line=$(grep -n 'inspect --format {{.State.Status}} daily-insights-newsroom-worker' "$post_attempt_log" | head -n 1 | cut -d: -f1)
   if [ "$dispatcher_stop_line" -ge "$dispatcher_confirmed_line" ] ||
     [ "$stop_line" -ge "$scheduler_confirmed_line" ] ||
     [ "$stop_line" -ge "$index_scheduler_confirmed_line" ] ||
     [ "$stop_line" -ge "$institutional_scheduler_confirmed_line" ] ||
-    [ "$stop_line" -ge "$worker_confirmed_line" ]; then
+    [ "$stop_line" -ge "$worker_confirmed_line" ] ||
+    [ "$newsroom_worker_stop_line" -ge "$newsroom_worker_confirmed_line" ]; then
     echo "failed deployment must confirm every schema-boundary service after stopping them" >&2
     exit 1
   fi
@@ -500,7 +626,7 @@ assert_requiesced_after_scheduler_attempt() {
 : >"$temporary_dir/deployment.log"
 if PATH="$temporary_dir/stubs:$PATH" \
   DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
-  DOCKER_FAIL_MATCH='up -d --no-build --remove-orphans api web orchestration-dispatcher' \
+  DOCKER_FAIL_MATCH='up -d --no-build --remove-orphans api web orchestration-dispatcher newsroom-worker' \
   scripts/production/deploy.sh >"$temporary_dir/convergence-failure.out" 2>"$temporary_dir/convergence-failure.err"; then
   echo "deployment must fail when final service convergence fails" >&2
   exit 1
@@ -541,11 +667,38 @@ fi
 
 if PATH="$temporary_dir/stubs:$PATH" \
   DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
-  DAILY_INSIGHTS_DAILY_NEWS_ENABLED=true \
+  DAILY_INSIGHTS_NEWSROOM_ENABLED=true \
+  DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY=contract-embedding-key \
   scripts/production/deploy.sh >/dev/null 2>&1; then
-  echo "enabled daily news must require a model API key" >&2
+  echo "enabled newsroom must require an LLM API key" >&2
   exit 1
 fi
+
+if PATH="$temporary_dir/stubs:$PATH" \
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  DAILY_INSIGHTS_NEWSROOM_ENABLED=true \
+  DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY=contract-llm-key \
+  scripts/production/deploy.sh >/dev/null 2>&1; then
+  echo "enabled newsroom must require an embedding API key" >&2
+  exit 1
+fi
+
+if PATH="$temporary_dir/stubs:$PATH" \
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  DAILY_INSIGHTS_NEWSROOM_ENABLED=maybe \
+  scripts/production/deploy.sh >/dev/null 2>&1; then
+  echo "the newsroom flag must be true or false" >&2
+  exit 1
+fi
+
+: >"$temporary_dir/deployment.log"
+PATH="$temporary_dir/stubs:$PATH" \
+  DEPLOYMENT_LOG="$temporary_dir/deployment.log" \
+  DAILY_INSIGHTS_NEWSROOM_ENABLED=true \
+  DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY=contract-llm-key \
+  DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY=contract-embedding-key \
+  scripts/production/deploy.sh >/dev/null
+grep -q 'compose .* up -d --no-build --force-recreate --no-deps newsroom-worker' "$temporary_dir/deployment.log"
 
 if PATH="$temporary_dir/stubs:$PATH" \
   DEPLOYMENT_LOG="$temporary_dir/deployment.log" \

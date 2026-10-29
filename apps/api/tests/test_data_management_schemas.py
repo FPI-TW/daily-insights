@@ -20,8 +20,6 @@ response_adapter: TypeAdapter[DataManagementRunResponse] = TypeAdapter(DataManag
     ("payload", "operation"),
     [
         ({"operation": "morning_all"}, "morning_all"),
-        ({"operation": "news_all"}, "news_all"),
-        ({"operation": "news_market", "market_code": "global"}, "news_market"),
         ({"operation": "macro_dashboard"}, "macro_dashboard"),
         (
             {"operation": "provider_rerun", "provider": "twse"},
@@ -47,9 +45,9 @@ def test_run_create_discriminator_accepts_only_valid_scope(
         {"operation": "index_yahoo"},
         {"operation": "index_yahoo", "market_code": "crypto"},
         {"operation": "institutional_twse"},
-        {"operation": "news_all", "market_code": "global"},
-        {"operation": "news_market"},
-        # Manual publishes are created only through the news management API.
+        # The retired news operations are history only.
+        {"operation": "news_all"},
+        {"operation": "news_market", "market_code": "global"},
         {"operation": "news_publish"},
         {"operation": "provider_rerun", "provider": "yfinance"},
         {"operation": "provider_rerun", "market_code": "twse"},
@@ -80,10 +78,6 @@ def test_run_response_discriminator_preserves_market_scope() -> None:
         response_adapter.validate_python(
             {**base, "operation": "index_yahoo", "market_code": "crypto"}
         )
-    news_response = response_adapter.validate_python(
-        {**base, "operation": "news_market", "market_code": "global"}
-    )
-    assert news_response.operation == "news_market" and news_response.market_code == "global"
     macro_response = response_adapter.validate_python(
         {**base, "operation": "macro_dashboard", "market_code": None, "status": "cancelled"}
     )
@@ -99,14 +93,6 @@ def test_run_response_discriminator_preserves_market_scope() -> None:
     assert provider_response.operation == "provider_rerun"
     assert provider_response.provider == "yahoo_finance"
     assert provider_response.market_code is None
-    publish_response = response_adapter.validate_python(
-        {**base, "operation": "news_publish", "market_code": None}
-    )
-    assert publish_response.operation == "news_publish" and publish_response.market_code is None
-    with pytest.raises(ValidationError):
-        response_adapter.validate_python(
-            {**base, "operation": "news_publish", "market_code": "global"}
-        )
 
 
 def test_openapi_exposes_unified_orchestration_and_read_only_legacy_archive() -> None:
@@ -220,14 +206,6 @@ def test_news_curation_migration_registers_indexes_and_refuses_lossy_downgrade()
     # The daily obligation index comes from migration 0022 (upstream); the
     # curation migration must not redefine it.
     assert "uq_data_management_runs_automatic_news_all_edition" in index_names
-    candidates = Base.metadata.tables["news_candidates"]
-    assert {"edition_id", "candidate_id", "stage", "drop_reason", "ai_rank", "item_id"} <= set(
-        candidates.columns.keys()
-    )
-    items = Base.metadata.tables["news_items"]
-    assert {"origin", "hidden_at", "hidden_by_user_id", "published_by_user_id"} <= set(
-        items.columns.keys()
-    )
     migration = (
         Path(__file__).parents[1]
         / "migrations/versions/20260909_0024_news_candidates_and_curation.py"

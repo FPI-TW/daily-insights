@@ -1,0 +1,143 @@
+{
+  "version": 2,
+  "about": "Newsroom 選稿金標準清單 (task.md 任務 0.4; 產品負責人 2026-10-22 16:40 確認, 見 .newsroom-p0b-briefs/decisions-golden.md)。keywords 為正規表示式, 必須全部出現在同一個標題 (事件工作標題或任一篇報導標題); exclude 任一出現則該標題不算; exclude_titles 對事件工作標題比對, 符合則整個事件不算。expect: eq/gte/gt 以對到事件中的最高星等判定, lt/lte 以對到事件中的最高星等判定 (任一則違反即失敗)。未進前 40 名的事件沒有星等。",
+  "items": [
+    {
+      "id": "G1",
+      "description": "伊朗攻擊荷姆茲海峽至少 15 艘貨櫃船 (以貨櫃船遇襲事件為準; 該事件標題同時寫到布蘭特逼近 108 美元)",
+      "market": "global",
+      "dates": {
+        "start": "2026-10-18",
+        "end": "2026-10-22"
+      },
+      "keywords": [
+        "伊朗|Iran|IRGC|革命衛隊",
+        "貨櫃船|container ship"
+      ],
+      "exclude": [],
+      "expect": "eq 5",
+      "annotator": "產品負責人",
+      "status": "已確認",
+      "note": "必須 ★5; 也是 task 2.2「收緊過頭」的檢查。日後若出現單獨的布蘭特 108 盤勢事件, 再另列「不得 ★5」項目。",
+      "exclude_titles": []
+    },
+    {
+      "id": "G2",
+      "description": "Meta 第三季財報",
+      "market": "us_equity",
+      "dates": {
+        "start": "2026-10-22",
+        "end": "2026-10-22"
+      },
+      "keywords": [
+        "Meta|臉書",
+        "財報|營收|EPS|獲利|earnings|revenue|Q3|第三季|第3季"
+      ],
+      "exclude": [
+        "特斯拉|Tesla"
+      ],
+      "expect": "gte 4",
+      "annotator": "產品負責人",
+      "status": "已確認",
+      "note": "排除多家合寫稿 (Meta 與特斯拉合寫的綜合稿)",
+      "exclude_titles": []
+    },
+    {
+      "id": "G3",
+      "description": "特斯拉第三季財報",
+      "market": "us_equity",
+      "dates": {
+        "start": "2026-10-22",
+        "end": "2026-10-22"
+      },
+      "keywords": [
+        "特斯拉|Tesla",
+        "財報|營收|EPS|獲利|earnings|revenue|Q3|第三季|第3季"
+      ],
+      "exclude": [
+        "Meta|SpaceX|合併|merger|Terafab"
+      ],
+      "expect": "gte 4",
+      "annotator": "產品負責人",
+      "status": "已確認",
+      "note": "排除多家合寫稿與特斯拉 SpaceX 合併、Terafab 晶圓廠兩則獨立決策。p0b 未通過可接受: 本項主要驗證對象是 earnings_merge variant。",
+      "exclude_titles": []
+    },
+    {
+      "id": "G4",
+      "description": "一週內多艘油輪遇襲創新高 (平靜期, 延續中的同類攻擊)",
+      "market": "global",
+      "dates": {
+        "start": "2026-10-10",
+        "end": "2026-10-12"
+      },
+      "keywords": [
+        "油輪|tanker",
+        "遇襲|攻擊|襲擊|attack|strike|hit"
+      ],
+      "exclude": [],
+      "expect": "lt 5",
+      "annotator": "產品負責人",
+      "status": "待編輯確認",
+      "note": "重播中的事件標題為「荷莫茲海峽油輪遇襲創開戰以來 (單週) 新高」",
+      "exclude_titles": []
+    },
+    {
+      "id": "G5",
+      "description": "利雅德機場遭飛彈攻擊 (平靜期)",
+      "market": "global",
+      "dates": {
+        "start": "2026-10-10",
+        "end": "2026-10-12"
+      },
+      "keywords": [
+        "利雅德|利雅得|Riyadh|沙烏地.{0,8}機場|沙國.{0,8}機場|Saudi airport",
+        "機場|airport"
+      ],
+      "exclude": [],
+      "expect": "lt 5",
+      "annotator": "產品負責人",
+      "status": "已確認",
+      "exclude_titles": []
+    },
+    {
+      "id": "G6",
+      "description": "美軍擊中貨輪 (平靜期)",
+      "market": "global",
+      "dates": {
+        "start": "2026-10-10",
+        "end": "2026-10-12"
+      },
+      "keywords": [
+        "美軍|美國海軍|U\\.?S\\.? (military|forces|Navy)",
+        "貨輪|商船|貨船|cargo|freighter|vessel"
+      ],
+      "exclude": [],
+      "expect": "lt 5",
+      "annotator": "產品負責人",
+      "status": "已確認",
+      "exclude_titles": [
+        "機場|airport"
+      ],
+      "note": "排除「利雅德機場遇襲＋美軍攔截商船」混合報導, 只對單一事件; 該混合報導仍照常計入平靜期每日五星數 (五星數統計不經過金標準比對)"
+    },
+    {
+      "id": "G7",
+      "description": "伊朗警告封鎖可擴及曼德海峽 (威脅性談話)",
+      "market": "global",
+      "dates": {
+        "start": "2026-10-18",
+        "end": "2026-10-22"
+      },
+      "keywords": [
+        "曼德|Mandeb",
+        "警告|威脅|可能|可擴及|擴及|warn|threat|could"
+      ],
+      "exclude": [],
+      "expect": "lt 5",
+      "annotator": "產品負責人",
+      "status": "已確認",
+      "exclude_titles": []
+    }
+  ]
+}

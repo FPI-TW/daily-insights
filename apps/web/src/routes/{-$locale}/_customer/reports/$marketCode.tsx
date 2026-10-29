@@ -236,10 +236,9 @@ function ReportPage() {
         <MarketQuerySection query={news} loading={<DailyNewsLoading />}>
           {data => (
             <DailyNews
-              news={data ?? null}
-              eyebrowKey="marketNewsEyebrow"
-              titleKey={`marketNewsTitle_${marketCode}`}
-              groupByMarket={false}
+              edition={data ?? null}
+              eyebrowKey="newsroomMarketEyebrow"
+              titleKey={`newsroomTitle_${marketCode}`}
             />
           )}
         </MarketQuerySection>

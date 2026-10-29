@@ -391,7 +391,7 @@ test("US shell and price charts render before delayed news, report and moving av
   await page.route("**/api/**", async route => {
     const path = new URL(route.request().url()).pathname
     if (
-      path.startsWith("/api/news/") ||
+      path.startsWith("/api/newsroom/") ||
       path.endsWith("/latest") ||
       path.endsWith("/moving-averages")
     )
@@ -412,7 +412,7 @@ test("US shell and price charts render before delayed news, report and moving av
     page.getByRole("heading", { name: "Analyst viewpoint", exact: true })
   ).toBeVisible()
   await expect(
-    page.getByRole("status", { name: "Loading market news" })
+    page.getByRole("status", { name: "Loading key news" })
   ).toBeVisible()
   release()
   await expect(
@@ -466,15 +466,18 @@ test("market news failure offers local retry without replacing charts", async ({
 }) => {
   await authenticateAs(context, "org_member")
   let fail = true
-  await page.route("**/api/news/us_equity/latest?*", async route => {
-    if (fail)
-      await route.fulfill({
-        status: 503,
-        contentType: "application/json",
-        body: JSON.stringify({ detail: "unavailable" }),
-      })
-    else await route.continue()
-  })
+  await page.route(
+    "**/api/newsroom/editions/latest?market=us_equity*",
+    async route => {
+      if (fail)
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "unavailable" }),
+        })
+      else await route.continue()
+    }
+  )
   await page.goto("/en/reports/us_equity")
   await expect(
     page.getByRole("button", { name: "Retry", exact: true })

@@ -29,7 +29,6 @@ async def test_readiness_reflects_database_state(ready: bool, expected_status: i
             "database": {"status": expected},
             "twelve_data_configuration": {"status": "ok"},
             "analyst_viewpoints_configuration": {"status": "ok"},
-            "daily_news_configuration": {"status": "ok"},
             "chat_configuration": {"status": "ok"},
             "r2_runtime": {"status": "ok"},
         },
@@ -67,7 +66,6 @@ async def test_production_readiness_reports_initialized_external_boundaries() ->
         "database": {"status": "ok"},
         "twelve_data_configuration": {"status": "ok"},
         "analyst_viewpoints_configuration": {"status": "ok"},
-        "daily_news_configuration": {"status": "ok"},
         "chat_configuration": {"status": "ok"},
         "r2_runtime": {"status": "ok"},
     }
@@ -101,8 +99,9 @@ async def test_phase1_openapi_exposes_only_supported_identity_flows() -> None:
         "/api/markets",
         "/api/reports",
         "/api/reports/{market_code}/latest",
-        "/api/news/latest",
+        "/api/newsroom/editions/latest",
     } <= paths
+    assert not any(path.startswith(("/api/news/", "/api/admin/news/")) for path in paths)
     assert not any(
         "register" in path or "forgot" in path or "reset-password" in path for path in paths
     )

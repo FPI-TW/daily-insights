@@ -18,21 +18,14 @@ services:
       DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL:-https://analyst-viewpoints.invalid}
       DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY:-}
       DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS:-10}
-      DAILY_INSIGHTS_DAILY_NEWS_ENABLED: ${DAILY_INSIGHTS_DAILY_NEWS_ENABLED:-false}
       DAILY_INSIGHTS_YFINANCE_ENABLED: ${DAILY_INSIGHTS_YFINANCE_ENABLED:-false}
       DAILY_INSIGHTS_TWSE_ENABLED: ${DAILY_INSIGHTS_TWSE_ENABLED:-false}
       DAILY_INSIGHTS_TRADINGVIEW_ENABLED: ${DAILY_INSIGHTS_TRADINGVIEW_ENABLED:-false}
-      DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES: ${DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES:-}
+      # The orchestration catalog reports the newsroom provider as ready from
+      # this flag; the blocked-host kill switch also guards admin manual URLs.
+      DAILY_INSIGHTS_NEWSROOM_ENABLED: ${DAILY_INSIGHTS_NEWSROOM_ENABLED:-false}
       DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES: ${DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES:-}
-      DAILY_INSIGHTS_GUARDIAN_API_KEY: ${DAILY_INSIGHTS_GUARDIAN_API_KEY:-}
-      DAILY_INSIGHTS_SEC_CONTACT_EMAIL: ${DAILY_INSIGHTS_SEC_CONTACT_EMAIL:-}
-      DAILY_INSIGHTS_MODEL_PROVIDER: ${DAILY_INSIGHTS_MODEL_PROVIDER:-deepseek}
-      DAILY_INSIGHTS_MODEL_NAME: ${DAILY_INSIGHTS_MODEL_NAME:-deepseek-chat}
-      DAILY_INSIGHTS_MODEL_API_BASE_URL: ${DAILY_INSIGHTS_MODEL_API_BASE_URL:-https://api.deepseek.com}
-      DAILY_INSIGHTS_NEWS_MODEL_API_KEY: ${DAILY_INSIGHTS_NEWS_MODEL_API_KEY:-}
-      DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS:-120}
-      DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS:-25}
-      DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS:-30}
+      DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS: ${DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS:-true}
       DAILY_INSIGHTS_CHAT_ENABLED: ${DAILY_INSIGHTS_CHAT_ENABLED:-false}
       DAILY_INSIGHTS_CHAT_MODEL_PROVIDER: ${DAILY_INSIGHTS_CHAT_MODEL_PROVIDER:-deepseek}
       DAILY_INSIGHTS_CHAT_MODEL_NAME: ${DAILY_INSIGHTS_CHAT_MODEL_NAME:-deepseek-chat}
@@ -101,22 +94,23 @@ services:
       DAILY_INSIGHTS_TRADINGVIEW_ENABLED: ${DAILY_INSIGHTS_TRADINGVIEW_ENABLED:-false}
       DAILY_INSIGHTS_TWELVE_DATA_BASE_URL: ${DAILY_INSIGHTS_TWELVE_DATA_BASE_URL:-https://api.twelvedata.com}
       DAILY_INSIGHTS_TWELVE_DATA_API_KEY: ${DAILY_INSIGHTS_TWELVE_DATA_API_KEY:-}
-      DAILY_INSIGHTS_DAILY_NEWS_ENABLED: ${DAILY_INSIGHTS_DAILY_NEWS_ENABLED:-false}
       DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED:-false}
       DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_BASE_URL:-https://analyst-viewpoints.invalid}
       DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY:-}
       DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_ANALYST_VIEWPOINTS_TIMEOUT_SECONDS:-10}
-      DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES: ${DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES:-}
-      DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES: ${DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES:-}
-      DAILY_INSIGHTS_GUARDIAN_API_KEY: ${DAILY_INSIGHTS_GUARDIAN_API_KEY:-}
-      DAILY_INSIGHTS_SEC_CONTACT_EMAIL: ${DAILY_INSIGHTS_SEC_CONTACT_EMAIL:-}
-      DAILY_INSIGHTS_MODEL_PROVIDER: ${DAILY_INSIGHTS_MODEL_PROVIDER:-deepseek}
-      DAILY_INSIGHTS_MODEL_NAME: ${DAILY_INSIGHTS_MODEL_NAME:-deepseek-chat}
-      DAILY_INSIGHTS_MODEL_API_BASE_URL: ${DAILY_INSIGHTS_MODEL_API_BASE_URL:-https://api.deepseek.com}
-      DAILY_INSIGHTS_NEWS_MODEL_API_KEY: ${DAILY_INSIGHTS_NEWS_MODEL_API_KEY:-}
-      DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_MODEL_TIMEOUT_SECONDS:-120}
-      DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS:-25}
-      DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS:-30}
+      # The 08:00 newsroom_assemble function runs here: it needs the editor
+      # model and the draft-ready notification, but never embeds or ingests.
+      DAILY_INSIGHTS_NEWSROOM_ENABLED: ${DAILY_INSIGHTS_NEWSROOM_ENABLED:-false}
+      DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL: ${DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL:-https://api.deepseek.com}
+      DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY: ${DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY:-}
+      DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL: ${DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL:-deepseek-chat}
+      DAILY_INSIGHTS_NEWSROOM_LLM_USER_AGENT: ${DAILY_INSIGHTS_NEWSROOM_LLM_USER_AGENT:-daily-insights-newsroom/1.0}
+      DAILY_INSIGHTS_NEWSROOM_LLM_SESSION_HEADER: ${DAILY_INSIGHTS_NEWSROOM_LLM_SESSION_HEADER:-}
+      DAILY_INSIGHTS_NEWSROOM_LLM_EXTRA_BODY: ${DAILY_INSIGHTS_NEWSROOM_LLM_EXTRA_BODY:-}
+      DAILY_INSIGHTS_NEWSROOM_EDITOR_EXTRA_BODY: ${DAILY_INSIGHTS_NEWSROOM_EDITOR_EXTRA_BODY:-}
+      DAILY_INSIGHTS_NEWSROOM_EDITOR_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_NEWSROOM_EDITOR_TIMEOUT_SECONDS:-}
+      DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL: ${DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL:-}
+      DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL: ${DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL:?set DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL to the public HTTPS origin}
       DAILY_INSIGHTS_R2_ENDPOINT_URL: ${DAILY_INSIGHTS_R2_ENDPOINT_URL:?set DAILY_INSIGHTS_R2_ENDPOINT_URL}
       DAILY_INSIGHTS_R2_BUCKET_NAME: ${DAILY_INSIGHTS_R2_BUCKET_NAME:?set DAILY_INSIGHTS_R2_BUCKET_NAME}
       DAILY_INSIGHTS_R2_ACCESS_KEY_ID: ${DAILY_INSIGHTS_R2_ACCESS_KEY_ID:?set DAILY_INSIGHTS_R2_ACCESS_KEY_ID from GitHub Secrets}
@@ -124,8 +118,7 @@ services:
       # Chromium writes its profile and crash dumps under HOME and /tmp; both
       # must land on the tmpfs because the root filesystem is read-only.
       HOME: /tmp
-    command:
-      ["python", "-m", "daily_insights_api.scripts.run_orchestration_worker"]
+    command: ["python", "-m", "daily_insights_api.scripts.run_orchestration_worker"]
     healthcheck:
       test:
         [
@@ -149,6 +142,139 @@ services:
       - no-new-privileges:true
     networks:
       - app
+
+  newsroom-worker:
+    image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}
+    container_name: daily-insights-newsroom-worker
+    restart: unless-stopped
+    environment:
+      DAILY_INSIGHTS_ENVIRONMENT: production
+      DAILY_INSIGHTS_RUNTIME_ROLE: newsroom-worker
+      DAILY_INSIGHTS_DATABASE_URL: ${DAILY_INSIGHTS_DATABASE_URL:?set DAILY_INSIGHTS_DATABASE_URL from GitHub Secrets}
+      # Idles with heartbeats while false; when true it refuses to start with
+      # missing or placeholder LLM and embedding keys.
+      DAILY_INSIGHTS_NEWSROOM_ENABLED: ${DAILY_INSIGHTS_NEWSROOM_ENABLED:-false}
+      DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL: ${DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL:-https://api.deepseek.com}
+      DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY: ${DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY:-}
+      DAILY_INSIGHTS_NEWSROOM_TRIAGE_MODEL: ${DAILY_INSIGHTS_NEWSROOM_TRIAGE_MODEL:-deepseek-chat}
+      DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL: ${DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL:-deepseek-chat}
+      DAILY_INSIGHTS_NEWSROOM_ANALYSIS_MODEL: ${DAILY_INSIGHTS_NEWSROOM_ANALYSIS_MODEL:-deepseek-chat}
+      DAILY_INSIGHTS_NEWSROOM_TRANSLATE_MODEL: ${DAILY_INSIGHTS_NEWSROOM_TRANSLATE_MODEL:-deepseek-chat}
+      DAILY_INSIGHTS_NEWSROOM_LLM_USER_AGENT: ${DAILY_INSIGHTS_NEWSROOM_LLM_USER_AGENT:-daily-insights-newsroom/1.0}
+      DAILY_INSIGHTS_NEWSROOM_LLM_SESSION_HEADER: ${DAILY_INSIGHTS_NEWSROOM_LLM_SESSION_HEADER:-}
+      DAILY_INSIGHTS_NEWSROOM_LLM_EXTRA_BODY: ${DAILY_INSIGHTS_NEWSROOM_LLM_EXTRA_BODY:-}
+      DAILY_INSIGHTS_NEWSROOM_EDITOR_EXTRA_BODY: ${DAILY_INSIGHTS_NEWSROOM_EDITOR_EXTRA_BODY:-}
+      DAILY_INSIGHTS_NEWSROOM_EDITOR_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_NEWSROOM_EDITOR_TIMEOUT_SECONDS:-}
+      DAILY_INSIGHTS_NEWSROOM_EMBEDDING_BASE_URL: ${DAILY_INSIGHTS_NEWSROOM_EMBEDDING_BASE_URL:-https://api.openai.com/v1}
+      DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY: ${DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY:-}
+      DAILY_INSIGHTS_NEWSROOM_EMBEDDING_MODEL: ${DAILY_INSIGHTS_NEWSROOM_EMBEDDING_MODEL:-text-embedding-3-large}
+      DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL: ${DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL:-}
+      DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL: ${DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL:?set DAILY_INSIGHTS_NEWSROOM_ADMIN_BASE_URL to the public HTTPS origin}
+      DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES: ${DAILY_INSIGHTS_NEWS_EXTRA_HOSTNAMES:-}
+      DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES: ${DAILY_INSIGHTS_NEWS_BLOCKED_HOSTNAMES:-}
+      DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS: ${DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS:-true}
+      DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_NEWS_FETCH_TIMEOUT_SECONDS:-25}
+      DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_NEWS_DISCOVERY_TIMEOUT_SECONDS:-30}
+      DAILY_INSIGHTS_GUARDIAN_API_KEY: ${DAILY_INSIGHTS_GUARDIAN_API_KEY:-}
+      DAILY_INSIGHTS_SEC_CONTACT_EMAIL: ${DAILY_INSIGHTS_SEC_CONTACT_EMAIL:-}
+      # Every article page is read in CloakBrowser; plain HTTP takes over while
+      # the browser is down.
+      DAILY_INSIGHTS_NEWSROOM_BROWSER_CDP_URL: http://cloakbrowser:9222
+    command: ["python", "-m", "daily_insights_api.scripts.run_newsroom_worker"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import time; from pathlib import Path; p = Path('/tmp/newsroom-worker-heartbeat'); assert p.exists() and time.time() - p.stat().st_mtime < 90",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    stop_grace_period: 45s
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - app
+      - browser
+
+  # CloakBrowser (Chromium) for the newsroom fetch fallback. It is only on the
+  # internal browser network: its one way out is browser-egress, which tunnels
+  # to public HTTPS addresses only. Chrome runs without its own sandbox, so this
+  # isolation is the boundary.
+  cloakbrowser:
+    image: docker.io/cloakhq/cloakbrowser@sha256:c8ba6bdddb2bd49c94b1707903b11c04f7fab7815f262acd9c72c1e627e13cb4
+    container_name: daily-insights-cloakbrowser
+    restart: unless-stopped
+    environment:
+      CLOAKBROWSER_AUTO_UPDATE: "false"
+      XDG_CONFIG_HOME: /tmp/.config
+      XDG_CACHE_HOME: /tmp/.cache
+    command:
+      [
+        "cloakserve",
+        "--proxy-server=http://browser-egress:3128",
+        "--proxy-bypass-list=<-loopback>",
+      ]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9222/', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    stop_grace_period: 20s
+    mem_limit: 1g
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - browser
+
+  browser-egress:
+    image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}
+    container_name: daily-insights-browser-egress
+    restart: unless-stopped
+    command: ["python", "-m", "daily_insights_api.scripts.run_browser_egress_proxy"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import socket; socket.create_connection(('127.0.0.1', 3128), timeout=3).close()",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    stop_grace_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - app
+      - browser
 
   orchestration-dispatcher:
     image: ${API_IMAGE:?set API_IMAGE to an immutable digest reference}
@@ -277,6 +403,9 @@ networks:
     ipam:
       config:
         - subnet: 172.30.0.0/24
+  # No route out: CloakBrowser reaches the internet only through browser-egress.
+  browser:
+    internal: true
 
 volumes:
   podcast-upload-spool:
