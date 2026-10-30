@@ -191,15 +191,7 @@ export const sectorHeatmapSchema = z.object({
 })
 export type SectorHeatmapImage = z.infer<typeof sectorHeatmapImageSchema>
 export type SectorHeatmap = z.infer<typeof sectorHeatmapSchema>
-export const dataManagementOperationSchema = z.enum([
-  "morning_all",
-  "morning_market",
-  "index_yahoo",
-  "institutional_twse",
-  "macro_dashboard",
-  "provider_rerun",
-])
-export const dataManagementRunStatusSchema = z.enum([
+export const orchestrationRunStatusSchema = z.enum([
   "pending",
   "running",
   "succeeded",
@@ -207,80 +199,6 @@ export const dataManagementRunStatusSchema = z.enum([
   "failed",
   "cancelled",
 ])
-export const dataManagementRunCreateSchema = z.discriminatedUnion("operation", [
-  z.object({ operation: z.literal("morning_all") }),
-  z.object({ operation: z.literal("macro_dashboard") }),
-  z.object({
-    operation: z.literal("provider_rerun"),
-    provider: z.enum(["twelve_data", "yahoo_finance", "twse"]),
-  }),
-])
-export type DataManagementRunCreateInput = z.infer<
-  typeof dataManagementRunCreateSchema
->
-export const dataManagementCatalogSchema = z.object({
-  taipei_date: z.iso.date(),
-  morning_reports_enabled: z.boolean(),
-  yfinance_enabled: z.boolean(),
-  twse_enabled: z.boolean(),
-  markets: z.array(launchMarketCodeSchema),
-  rerunnable_providers: z.array(
-    z.enum(["twelve_data", "yahoo_finance", "twse"])
-  ),
-  macro_dashboard_enabled: z.boolean(),
-})
-export type DataManagementCatalog = z.infer<typeof dataManagementCatalogSchema>
-const dataManagementRunBaseSchema = z.object({
-  id: z.uuid(),
-  edition_date: z.iso.date(),
-  status: dataManagementRunStatusSchema,
-  // Null when the scheduler queued the run rather than an administrator.
-  requested_by_user_id: z.uuid().nullable(),
-  created_at: z.iso.datetime({ offset: true }),
-  started_at: z.iso.datetime({ offset: true }).nullable(),
-  completed_at: z.iso.datetime({ offset: true }).nullable(),
-  result: z.record(z.string(), z.unknown()).nullable(),
-  error: z.string().nullable(),
-  scheduled_for: z.iso.datetime({ offset: true }).nullish(),
-  heartbeat_at: z.iso.datetime({ offset: true }).nullish(),
-})
-export const dataManagementRunSchema = z.discriminatedUnion("operation", [
-  dataManagementRunBaseSchema.extend({
-    operation: z.literal("morning_all"),
-    market_code: z.null(),
-  }),
-  dataManagementRunBaseSchema.extend({
-    operation: z.literal("macro_dashboard"),
-    market_code: z.null(),
-  }),
-  dataManagementRunBaseSchema.extend({
-    operation: z.literal("morning_market"),
-    market_code: launchMarketCodeSchema,
-  }),
-  dataManagementRunBaseSchema.extend({
-    operation: z.literal("index_yahoo"),
-    market_code: z.null(),
-  }),
-  dataManagementRunBaseSchema.extend({
-    operation: z.literal("institutional_twse"),
-    market_code: z.null(),
-  }),
-  dataManagementRunBaseSchema.extend({
-    operation: z.literal("provider_rerun"),
-    provider: z.enum(["twelve_data", "yahoo_finance", "twse"]),
-    market_code: z.null(),
-  }),
-])
-export type DataManagementRun = z.infer<typeof dataManagementRunSchema>
-export const dataManagementRunListSchema = z.object({
-  items: z.array(dataManagementRunSchema),
-  page: z.number().int().min(1),
-  page_size: z.literal(10),
-  total: z.number().int().nonnegative(),
-  has_more: z.boolean(),
-  active_runs: z.array(dataManagementRunSchema).optional(),
-  current_day_runs: z.array(dataManagementRunSchema).optional(),
-})
 
 export const functionAttemptSchema = z.object({
   id: z.uuid(),
@@ -321,7 +239,7 @@ export const jobRunSchema = z.object({
   trigger: z.enum(["automatic", "manual"]),
   edition_date: z.iso.date(),
   deadline_at: z.iso.datetime({ offset: true }).nullable(),
-  status: dataManagementRunStatusSchema,
+  status: orchestrationRunStatusSchema,
   requested_by_user_id: z.uuid().nullable(),
   payload: z.record(z.string(), z.unknown()).nullable(),
   started_at: z.iso.datetime({ offset: true }).nullable(),
@@ -348,7 +266,7 @@ export const routineRunSchema = z.object({
   edition_date: z.iso.date(),
   scheduled_for: z.iso.datetime({ offset: true }),
   deadline_at: z.iso.datetime({ offset: true }),
-  status: dataManagementRunStatusSchema,
+  status: orchestrationRunStatusSchema,
   started_at: z.iso.datetime({ offset: true }).nullable(),
   completed_at: z.iso.datetime({ offset: true }).nullable(),
   result: z.record(z.string(), z.unknown()).nullable(),

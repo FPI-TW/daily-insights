@@ -447,7 +447,7 @@ async def test_legacy_index_refresh_endpoint_is_removed(harness: Harness) -> Non
         await asset_client.aclose()
 
 
-async def test_data_management_requires_real_admin_session_and_csrf(harness: Harness) -> None:
+async def test_orchestration_requires_real_admin_session_and_csrf(harness: Harness) -> None:
     """Exercise the orchestration router through actual login/session checks."""
     path = "/api/admin/orchestration/job-runs"
     assert (await harness.client.get(path)).status_code == 401
@@ -459,10 +459,10 @@ async def test_data_management_requires_real_admin_session_and_csrf(harness: Har
         "/api/admin/internal-users",
         headers={"X-CSRF-Token": admin_csrf},
         json={
-            "email": "data-management-assets@example.com",
-            "display_name": "Data Management Asset Manager",
+            "email": "orchestration-assets@example.com",
+            "display_name": "Orchestration Asset Manager",
             "system_role": "asset_manager",
-            "reason": "Data management authorization test",
+            "reason": "Orchestration authorization test",
         },
     )
     assert internal.status_code == 201, internal.text
@@ -493,70 +493,6 @@ async def test_data_management_requires_real_admin_session_and_csrf(harness: Har
         json=payload,
     )
     assert accepted.status_code == 202, accepted.text
-
-
-async def test_index_refresh_disabled_returns_503(harness: Harness) -> None:
-    csrf_token = await login(harness.client, "admin@example.com", "AdminPassword123!")
-    response = await harness.client.post(
-        "/api/admin/data-sources/yfinance/daily-bars",
-        headers={"X-CSRF-Token": csrf_token},
-        json={"period": AUTOMATIC_SHORT_REFRESH_PERIOD},
-    )
-    assert response.status_code == 404
-
-
-@pytest.mark.parametrize("payload", [{}, {"period": AUTOMATIC_SHORT_REFRESH_PERIOD}])
-async def test_index_refresh_serializes_partial_result_and_audits(
-    harness: Harness,
-    monkeypatch: pytest.MonkeyPatch,
-    payload: dict[str, str],
-) -> None:
-    del monkeypatch
-    csrf_token = await login(harness.client, "admin@example.com", "AdminPassword123!")
-    response = await harness.client.post(
-        "/api/admin/data-sources/yfinance/daily-bars",
-        headers={"X-CSRF-Token": csrf_token},
-        json=payload,
-    )
-    assert response.status_code == 404
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {"period": "2y"},
-        {"symbols": ["^TWII"]},
-    ],
-)
-async def test_index_refresh_rejects_non_incremental_or_subset_payload_before_service(
-    harness: Harness,
-    monkeypatch: pytest.MonkeyPatch,
-    payload: dict[str, object],
-) -> None:
-    del monkeypatch
-    csrf_token = await login(harness.client, "admin@example.com", "AdminPassword123!")
-    response = await harness.client.post(
-        "/api/admin/data-sources/yfinance/daily-bars",
-        headers={"X-CSRF-Token": csrf_token},
-        json=payload,
-    )
-
-    assert response.status_code == 404
-
-
-async def test_index_refresh_timeout_returns_504_without_an_audit_event(
-    harness: Harness,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    del monkeypatch
-    csrf_token = await login(harness.client, "admin@example.com", "AdminPassword123!")
-    response = await harness.client.post(
-        "/api/admin/data-sources/yfinance/daily-bars",
-        headers={"X-CSRF-Token": csrf_token},
-        json={"period": AUTOMATIC_SHORT_REFRESH_PERIOD},
-    )
-
-    assert response.status_code == 404
 
 
 async def test_login_rate_limit_is_enforced_at_endpoint(harness: Harness) -> None:

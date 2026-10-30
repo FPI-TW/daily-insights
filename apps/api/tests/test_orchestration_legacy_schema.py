@@ -19,7 +19,7 @@ def test_openapi_exposes_unified_orchestration_and_read_only_legacy_archive() ->
     assert "/api/admin/orchestration/job-runs/{job_run_id}/cancel" in schema["paths"]
 
 
-def test_run_market_scope_allows_global_news_without_a_market_catalog_foreign_key() -> None:
+def test_legacy_archive_keeps_historical_market_scopes_without_a_catalog_foreign_key() -> None:
     table = Base.metadata.tables["legacy_data_management_runs"]
     checks = {
         str(constraint.sqltext)
@@ -38,7 +38,7 @@ def test_run_market_scope_allows_global_news_without_a_market_catalog_foreign_ke
     assert "market_code_valid_for_operation" in migration
 
 
-def test_macro_snapshot_and_automatic_edition_indexes_are_registered() -> None:
+def test_legacy_macro_indexes_and_current_snapshot_columns_are_registered() -> None:
     run_table = Base.metadata.tables["legacy_data_management_runs"]
     checks = [str(getattr(item, "sqltext", "")) for item in run_table.constraints]
     assert any("macro_dashboard" in check and "operation IN" in check for check in checks)
@@ -67,7 +67,7 @@ def test_provider_rerun_migration_preserves_legacy_indexes_and_guards_downgrade(
     assert "cannot downgrade while provider rerun history exists" in migration
 
 
-def test_news_scheduler_state_is_durable_and_has_historical_uniqueness() -> None:
+def test_legacy_archive_preserves_news_schedule_metadata_and_uniqueness() -> None:
     run_table = Base.metadata.tables["legacy_data_management_runs"]
     assert "scheduled_for" in run_table.columns
     index_names = {index.name for index in run_table.indexes}

@@ -92,6 +92,28 @@ to reject or stop legacy containers left by older releases.
 one-shot verification, so that entry point and its advisory lock are retained
 without a dependency on the retired module. Do not deploy it as a scheduler.
 
+Retirement also removes the macro scheduler's dedicated settings and getter,
+its orphaned configuration test, and the unused legacy API-client schemas and
+catalog compatibility method. Job and routine responses share
+`orchestrationRunStatusSchema`. Tests for the retired index endpoint's former
+503, payload, audit, and timeout behavior are removed; the endpoint-removal
+contract and real orchestration authentication/CSRF checks remain.
+
+The retired macro refresh/cache pipeline and its test-only commodity, FX, and
+DXY loaders are removed together with their orphaned tests and fixtures.
+Treasury/SOFR loaders, failure recording, the instrument catalog, and snapshot
+models remain in use by orchestration. Macro HTTP tests now verify database
+snapshot reads and authorization before those reads, rather than a cache that
+the application no longer registers.
+The unused macro/Taiwan source-diagnostics components, their component tests,
+and their dedicated translations are removed as well; the current admin page
+renders orchestration function attempts directly.
+
+Archive queries, historical job display, archive metadata, and migration
+downgrade guards still have live consumers or retained-data obligations, so
+their tests remain. The admin data-management page uses orchestration APIs;
+its UI and browser tests are unrelated to the removed backend module.
+
 ## Local development
 
 `compose.yaml` starts the dispatcher and worker with orchestration enabled by
