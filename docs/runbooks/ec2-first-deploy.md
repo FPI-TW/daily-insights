@@ -67,12 +67,13 @@ Conditional-required Secrets：
 
 - `DAILY_INSIGHTS_MORNING_REPORTS_ENABLED=true`：
   `DAILY_INSIGHTS_TWELVE_DATA_API_KEY`；
-- `DAILY_INSIGHTS_DAILY_NEWS_ENABLED=true`（重點新聞開關）：`DAILY_INSIGHTS_NEWS_MODEL_API_KEY`
-  （既有的 DeepSeek 金鑰，workflow 以 `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY` 傳給部署）與
-  `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`（唯一新增的正式環境設定）；
+- `DAILY_INSIGHTS_DAILY_NEWS_ENABLED=true`（重點新聞開關）：OpenAI 原生端點使用
+  `DAILY_INSIGHTS_NEWSROOM_OPENAI_API_KEY`，舊端點使用 `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`；
+  另須 `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`；
 - `DAILY_INSIGHTS_ANALYST_VIEWPOINTS_ENABLED=true`：
   `DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY`；
-- `DAILY_INSIGHTS_CHAT_ENABLED=true`：`DAILY_INSIGHTS_CHAT_MODEL_API_KEY`。
+- `DAILY_INSIGHTS_CHAT_ENABLED=true`：provider 為 `openai` 時使用
+  `DAILY_INSIGHTS_CHAT_OPENAI_API_KEY`，其餘使用 `DAILY_INSIGHTS_CHAT_MODEL_API_KEY`。
 
 主機設定：
 
@@ -128,25 +129,21 @@ Conditional-required Variables：
   `DAILY_INSIGHTS_CHAT_MODEL_NAME`、`DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL` 與
   `DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS`。
 
-重點新聞（newsroom）沿用舊新聞管線既有的正式環境設定，不另建同義的 GitHub 設定：
-開關是既有的 Variable `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`，DeepSeek 金鑰是既有的 Secret
-`DAILY_INSIGHTS_NEWS_MODEL_API_KEY`。release workflow 讀取後，分別以
-`DAILY_INSIGHTS_NEWSROOM_ENABLED` 與 `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY` 傳給部署、
-Compose 與應用程式；GitHub 上沒有、也不要建立這兩個名稱的設定。驗證錯誤會直接點名要
-修正的 GitHub 設定（例如「GitHub Variable `DAILY_INSIGHTS_DAILY_NEWS_ENABLED` ... must be
-true or false」、「GitHub Secret `DAILY_INSIGHTS_NEWS_MODEL_API_KEY` ... is required」）。
+重點新聞開關沿用 Variable `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`，以
+`DAILY_INSIGHTS_NEWSROOM_ENABLED` 傳給部署。新聞端點為 `https://api.openai.com/v1` 時，
+release 選用 `DAILY_INSIGHTS_NEWSROOM_OPENAI_API_KEY`；其他端點沿用舊 Secret
+`DAILY_INSIGHTS_NEWS_MODEL_API_KEY`，統一以 `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY` 傳入。
+不要建立同名的 `NEWSROOM_ENABLED` Variable 或 `NEWSROOM_LLM_API_KEY` Secret。
+原生金鑰缺失時停止部署，不退回舊金鑰；embedding key 必須另外設定。
 
-唯一新增的正式環境設定是 Secret `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`。既有的
-`DAILY_INSIGHTS_DAILY_NEWS_ENABLED` 已經是 `true`，所以**第一次部署含 newsroom 的版本前
-必須先建立這個 Secret**，否則 deployment validation 會中止。除上述開關與兩把必填金鑰外，
-下列都是 optional/defaulted configuration，空值時使用括號內的 Compose default：
+下列為 optional/defaulted configuration，空值時使用括號內的 Compose default：
 
-- Variables `DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL`（`https://api.deepseek.com`）與
+- Variables `DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL`（`https://api.openai.com/v1`）與
   `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_BASE_URL`（`https://api.openai.com/v1`）：有設定時
   必須是 absolute HTTPS URL；
 - Variables `DAILY_INSIGHTS_NEWSROOM_TRIAGE_MODEL`、`DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL`、
   `DAILY_INSIGHTS_NEWSROOM_ANALYSIS_MODEL`、`DAILY_INSIGHTS_NEWSROOM_TRANSLATE_MODEL`
-  （皆為 `deepseek-chat`）與 `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_MODEL`
+  （皆為 `gpt-6-luna`）與 `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_MODEL`
   （`text-embedding-3-large`，向量必須是 1536 維）；
 - Secret `DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL`：Slack incoming webhook，有設定時
   必須以 `https://hooks.slack.com/` 開頭；未設定時通知只寫入 worker log；
