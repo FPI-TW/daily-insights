@@ -314,6 +314,7 @@ PRODUCTION_SETTINGS: dict[str, str] = {
     "newsroom_llm_session_header": "NEWSROOM_LLM_SESSION_HEADER",
     "newsroom_llm_extra_body": "NEWSROOM_LLM_EXTRA_BODY",
     "newsroom_llm_timeout_seconds": "NEWSROOM_LLM_TIMEOUT_SECONDS",
+    "newsroom_llm_max_completion_tokens": "NEWSROOM_LLM_MAX_COMPLETION_TOKENS",
     "newsroom_triage_model": "NEWSROOM_TRIAGE_MODEL",
     "newsroom_editor_model": "NEWSROOM_EDITOR_MODEL",
     "newsroom_analysis_model": "NEWSROOM_ANALYSIS_MODEL",

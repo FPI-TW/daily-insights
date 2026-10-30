@@ -5,6 +5,7 @@ Both clients turn transport and provider failures into the two queue error kinds
 audit row per call. Stages never talk to httpx directly.
 """
 
+import asyncio
 import json
 import time
 import uuid
@@ -73,7 +74,7 @@ def classify_http_error(stage: str, error: Exception) -> RetryableStageError | F
         return RetryableStageError(
             f"{stage}_provider_http_{status}", retry_after=_retry_after(error.response)
         )
-    if isinstance(error, httpx.TimeoutException):
+    if isinstance(error, (httpx.TimeoutException, TimeoutError)):
         return RetryableStageError(f"{stage}_provider_timeout")
     return RetryableStageError(f"{stage}_provider_unreachable")
 
@@ -152,7 +153,10 @@ class OpenAICompatibleJsonModel:
         extra_body: dict[str, Any] | None = None,
         stage_extra_body: Mapping[str, dict[str, Any]] | None = None,
         stage_timeout_seconds: Mapping[str, float] | None = None,
+        max_completion_tokens: int = 32768,
     ) -> None:
+        self._timeout_seconds = timeout_seconds
+        self._max_completion_tokens = max_completion_tokens
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._user_agent = user_agent
@@ -182,6 +186,7 @@ class OpenAICompatibleJsonModel:
             base_url=settings.newsroom_llm_base_url,
             api_key=api_key,
             timeout_seconds=settings.newsroom_llm_timeout_seconds,
+            max_completion_tokens=settings.newsroom_llm_max_completion_tokens,
             user_agent=settings.newsroom_llm_user_agent,
             session_header=settings.newsroom_llm_session_header,
             extra_body=settings.newsroom_llm_extra_body,
@@ -261,15 +266,23 @@ class OpenAICompatibleJsonModel:
             "temperature": 0,
             "messages": messages,
         }
+        if model == "gpt-6-luna" or model.startswith("gpt-6-luna-"):
+            body.setdefault("reasoning_effort", "high")
+            body["max_completion_tokens"] = self._max_completion_tokens
+            if body["reasoning_effort"] != "none":
+                body.pop("temperature", None)
         started = time.monotonic()
         response: httpx.Response | None = None
         try:
-            response = await self._client.post(
-                f"{self._base_url}/chat/completions",
-                headers=self._headers(audit),
-                json=body,
-                timeout=self._stage_timeout_seconds.get(audit.stage, httpx.USE_CLIENT_DEFAULT),
-            )
+            async with asyncio.timeout(
+                self._stage_timeout_seconds.get(audit.stage, self._timeout_seconds)
+            ):
+                response = await self._client.post(
+                    f"{self._base_url}/chat/completions",
+                    headers=self._headers(audit),
+                    json=body,
+                    timeout=self._stage_timeout_seconds.get(audit.stage, httpx.USE_CLIENT_DEFAULT),
+                )
             response.raise_for_status()
         except Exception as error:
             classified = classify_http_error(audit.stage, error)
@@ -287,7 +300,22 @@ class OpenAICompatibleJsonModel:
         try:
             data = response.json()
             usage = data.get("usage") if isinstance(data.get("usage"), dict) else None
-            raw = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            if choice["message"].get("refusal") or choice.get("finish_reason") in {
+                "length",
+                "content_filter",
+            }:
+                code = f"{audit.stage}_provider_incomplete"
+                row = _audit_row(
+                    audit,
+                    model=model,
+                    started=started,
+                    response=response,
+                    usage=usage,
+                    error_code=code,
+                )
+                return _Invalid(code, row, None, "the provider refused or truncated the reply")
+            raw = choice["message"]["content"]
             content = raw if isinstance(raw, str) else None
             parsed = json.loads(raw)
         except (KeyError, IndexError, TypeError, AttributeError, json.JSONDecodeError):

@@ -29,6 +29,8 @@ from pathlib import Path
 from typing import Any
 
 PRICES_READ_ON = "2026-10-22"
+OPENAI_PRICES_READ_ON = "2026-10-30"
+OPENAI_PRICING_URL = "https://developers.openai.com/api/docs/models/gpt-6-luna"
 DEEPSEEK_PRICING_URL = "https://api-docs.deepseek.com/quick_start/pricing"
 
 
@@ -40,6 +42,7 @@ class ChatPrice:
 
 
 # Peak prices, USD per 1M tokens.
+OPENAI_LUNA = ChatPrice(cache_hit=0.01, cache_miss=0.1, output=0.5)
 DEEPSEEK_FLASH = ChatPrice(cache_hit=0.006, cache_miss=0.3, output=1.2)
 DEEPSEEK_PRO = ChatPrice(cache_hit=0.044, cache_miss=1.32, output=3.96)
 EMBEDDING_PRICES = {"text-embedding-3-large": 0.13, "text-embedding-3-small": 0.02}
@@ -52,6 +55,8 @@ MILLION = 1_000_000
 
 def chat_price(model: str) -> ChatPrice:
     """The price list of the model that answered (``deepseek-chat`` bills as Flash)."""
+    if model == "gpt-6-luna" or model.startswith("gpt-6-luna-"):
+        return OPENAI_LUNA
     return DEEPSEEK_PRO if "pro" in model.lower() else DEEPSEEK_FLASH
 
 
@@ -69,9 +74,23 @@ def chat_cost(
     output_tokens: int,
     cache_hit_tokens: int | None,
     at: datetime,
+    cache_write_tokens: int = 0,
 ) -> float:
     """USD of one chat call; an unknown cache split is priced as all misses."""
     price = chat_price(model)
+    if model == "gpt-6-luna" or model.startswith("gpt-6-luna-"):
+        hit = min(max(cache_hit_tokens or 0, 0), input_tokens)
+        writes = min(max(cache_write_tokens, 0), input_tokens - hit)
+        input_usd = (
+            hit * price.cache_hit
+            + writes * price.cache_miss * 1.25
+            + (input_tokens - hit - writes) * price.cache_miss
+        )
+        output_usd = output_tokens * price.output
+        if input_tokens > 272_000:
+            input_usd *= 2
+            output_usd *= 1.5
+        return (input_usd + output_usd) / MILLION
     hit = min(cache_hit_tokens or 0, input_tokens)
     usd = (
         hit * price.cache_hit + (input_tokens - hit) * price.cache_miss
@@ -154,12 +173,20 @@ class Ledger:
             cache_hit_tokens=cache_hit,
             usd=list_cost
             if list_cost is not None
-            else chat_cost(
-                served or model,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cache_hit_tokens=cache_hit,
-                at=at,
+            else sum(
+                chat_cost(
+                    str(row.get("model") or served or model),
+                    input_tokens=_int(row.get("prompt_tokens")),
+                    output_tokens=_int(row.get("completion_tokens")),
+                    cache_hit_tokens=cache_hit_tokens(row),
+                    cache_write_tokens=_int(
+                        row.get("prompt_tokens_details", {}).get("cache_write_tokens")
+                    )
+                    if isinstance(row.get("prompt_tokens_details"), dict)
+                    else 0,
+                    at=at,
+                )
+                for row in rows
             ),
             failed=failed,
             list_cost=list_cost,

@@ -5,7 +5,7 @@ import base64
 import hashlib
 import json
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Annotated
@@ -944,7 +944,7 @@ async def stream_chat(
     )
     deadline = asyncio.get_running_loop().time() + max(0.0, remaining)
 
-    async def response() -> AsyncIterator[bytes]:
+    async def response() -> AsyncGenerator[bytes]:
         try:
             if not replay and asyncio.get_running_loop().time() >= deadline:
                 raise TimeoutError
@@ -980,10 +980,46 @@ async def stream_chat(
             yield _event("error", {"code": code, "partial": bool(chunks)})
 
     return StreamingResponse(
-        response(),
+        _with_keepalive(response()),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+async def _with_keepalive(
+    source: AsyncGenerator[bytes], *, interval: float = 15.0
+) -> AsyncGenerator[bytes]:
+    """Keep proxies alive while reasoning, without cancelling pending provider work."""
+    queue: asyncio.Queue[bytes | Exception | None] = asyncio.Queue(maxsize=1)
+
+    async def produce() -> None:
+        # Keep every generator resume on the same task: asyncio.timeout owns
+        # that task for the full request lifetime, including time between yields.
+        try:
+            async for value in source:
+                await queue.put(value)
+        except Exception as error:
+            await queue.put(error)
+        finally:
+            await source.aclose()
+        await queue.put(None)
+
+    producer = asyncio.create_task(produce())
+    try:
+        while True:
+            try:
+                value = await asyncio.wait_for(queue.get(), timeout=interval)
+            except TimeoutError:
+                yield b": keepalive\n\n"
+                continue
+            if value is None:
+                return
+            if isinstance(value, Exception):
+                raise value
+            yield value
+    finally:
+        producer.cancel()
+        await asyncio.gather(producer, return_exceptions=True)
 
 
 def _decode_cursor(value: str | None) -> tuple[datetime, uuid.UUID] | None:

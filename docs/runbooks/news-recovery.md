@@ -1,5 +1,7 @@
 # 重點新聞維運手冊
 
+目前新聞與聊天切換至 OpenAI GPT-6 Luna 的設定、驗收與回復流程見 [遷移手冊](openai-luna-migration.md)。舊 DeepSeek／OpenCode 設定保留供回復與歷史查核。
+
 本手冊處理重點新聞（newsroom）管線的日常檢查、失敗恢復、Slack 通知處置與版次發布
 問題。管線架構見[重點新聞架構](../architecture/daily-news.md)。
 

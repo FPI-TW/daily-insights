@@ -195,7 +195,7 @@ def test_a_provider_replaces_the_endpoint_models_and_extra_fields(
         runner.RunOptions(snapshot=options.snapshot, variant=BASELINE, stages="editor"),
         "run_db",
     )
-    assert production.newsroom_triage_model == "deepseek-chat"
+    assert production.newsroom_triage_model == "gpt-6-luna"
     assert production.newsroom_llm_extra_body == {}
 
 
@@ -716,7 +716,7 @@ def test_unset_container_settings_keep_the_defaults_and_no_extras_keep_old_keys(
     settings = runner._settings(snapshot.ReplayEnvironment(root=tmp_path), _options(), "run_db")
     assert settings.newsroom_llm_session_header is None
     assert settings.newsroom_llm_user_agent == "daily-insights-newsroom/1.0"
-    assert settings.newsroom_triage_model == "deepseek-chat"
+    assert settings.newsroom_triage_model == "gpt-6-luna"
     assert settings.newsroom_editor_timeout_seconds is None
     assert runner.production_cache_tag(settings) is None
 

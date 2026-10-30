@@ -128,6 +128,8 @@ def create_app(
             base_url=resolved_settings.chat_model_api_base_url,
             api_key=resolved_settings.chat_model_api_key.get_secret_value(),
             max_output_tokens=resolved_settings.chat_max_output_tokens,
+            provider=resolved_settings.chat_model_provider,
+            reasoning_effort=resolved_settings.chat_model_reasoning_effort,
         )
 
     @app.middleware("http")

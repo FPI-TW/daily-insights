@@ -97,13 +97,14 @@ class Settings(BaseSettings):
     chat_org_max_pending: int = Field(default=8, gt=0)
     chat_user_daily_turns: int = Field(default=100, gt=0)
     chat_org_daily_turns: int = Field(default=1000, gt=0)
-    chat_max_output_tokens: int = Field(default=4096, gt=0, le=16384)
+    chat_max_output_tokens: int = Field(default=16384, gt=0, le=16384)
     chat_enabled: bool = False
-    chat_model_provider: str = "deepseek"
-    chat_model_name: str = "deepseek-chat"
-    chat_model_api_base_url: str = "https://api.deepseek.com"
+    chat_model_provider: str = "openai"
+    chat_model_name: str = "gpt-6-luna"
+    chat_model_api_base_url: str = "https://api.openai.com/v1"
+    chat_model_reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"] = "medium"
     chat_model_api_key: SecretStr | None = None
-    chat_timeout_seconds: float = Field(default=90, gt=0, le=600)
+    chat_timeout_seconds: float = Field(default=180, gt=0, le=600)
     news_fetch_timeout_seconds: float = Field(default=25, gt=0, le=120)
     # Per-feed budget for reading a publisher's RSS, JSON, or listing page.
     news_discovery_timeout_seconds: float = Field(default=30, gt=0, le=180)
@@ -122,7 +123,7 @@ class Settings(BaseSettings):
     newsroom_selection_variant: Literal["baseline", "p0", "p0b", "oldnews", "earnings_merge"] = (
         "baseline"
     )
-    newsroom_llm_base_url: str = "https://api.deepseek.com"
+    newsroom_llm_base_url: str = "https://api.openai.com/v1"
     newsroom_llm_api_key: SecretStr | None = None
     # Subscription gateways such as OpenCode Go ask clients to name themselves
     # instead of sending the HTTP library's User-Agent.
@@ -135,11 +136,12 @@ class Settings(BaseSettings):
     # JSON object merged into every chat completion body, for provider switches
     # such as {"thinking":{"type":"disabled"}} on OpenCode Go. Empty sends nothing extra.
     newsroom_llm_extra_body: Annotated[dict[str, Any], NoDecode] = Field(default_factory=dict)
-    newsroom_triage_model: str = "deepseek-chat"
-    newsroom_editor_model: str = "deepseek-chat"
-    newsroom_analysis_model: str = "deepseek-chat"
-    newsroom_translate_model: str = "deepseek-chat"
-    newsroom_llm_timeout_seconds: float = Field(default=90, gt=0, le=300)
+    newsroom_triage_model: str = "gpt-6-luna"
+    newsroom_editor_model: str = "gpt-6-luna"
+    newsroom_analysis_model: str = "gpt-6-luna"
+    newsroom_translate_model: str = "gpt-6-luna"
+    newsroom_llm_max_completion_tokens: int = Field(default=32768, gt=0, le=128000)
+    newsroom_llm_timeout_seconds: float = Field(default=240, gt=0, le=300)
     # Editor calls (selection, dedupe, repeat screen) may reason while the other
     # stages stay non-thinking: these fields are merged over newsroom_llm_extra_body
     # (top-level keys replace) for editor calls only. Empty inherits it unchanged.
@@ -338,8 +340,15 @@ class Settings(BaseSettings):
                 )
         if self.chat_enabled:
             chat_url = urlparse(self.chat_model_api_base_url)
-            if self.chat_model_provider not in {"deepseek", "openai-compatible"}:
-                raise ValueError("chat_model_provider must be deepseek or openai-compatible")
+            if self.chat_model_provider not in {"deepseek", "openai-compatible", "openai"}:
+                raise ValueError(
+                    "chat_model_provider must be deepseek, openai-compatible or openai"
+                )
+            if (
+                self.chat_model_provider == "openai"
+                and self.chat_model_api_base_url != "https://api.openai.com/v1"
+            ):
+                raise ValueError("openai chat requires https://api.openai.com/v1")
             if chat_url.scheme != "https" or not chat_url.netloc:
                 raise ValueError("chat_model_api_base_url must be an absolute HTTPS URL")
             if (

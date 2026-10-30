@@ -44,7 +44,11 @@ class OpenAICompatibleStream:
         messages: list[dict[str, str]],
         timeout_seconds: float,
         max_output_tokens: int = 4096,
+        provider: str = "openai-compatible",
+        reasoning_effort: str = "medium",
     ) -> None:
+        self._provider = provider
+        self._reasoning_effort = reasoning_effort
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._model = model
@@ -56,6 +60,22 @@ class OpenAICompatibleStream:
     async def __aiter__(self) -> AsyncIterator[str]:
         started = time.monotonic()
         usage: dict[str, Any] = {}
+        visible = False
+        finished = False
+        failure: str | None = None
+        body: dict[str, Any] = {
+            "model": self._model,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            "messages": self._messages,
+        }
+        if self._provider == "openai":
+            body.update(
+                max_completion_tokens=self._max_output_tokens,
+                reasoning_effort=self._reasoning_effort,
+            )
+        else:
+            body["max_tokens"] = self._max_output_tokens
         try:
             async with httpx.AsyncClient(trust_env=False, follow_redirects=False) as client:
                 async with client.stream(
@@ -65,22 +85,17 @@ class OpenAICompatibleStream:
                         "Authorization": f"Bearer {self._api_key}",
                         "Content-Type": "application/json",
                     },
-                    json={
-                        "model": self._model,
-                        "stream": True,
-                        "stream_options": {"include_usage": True},
-                        "messages": self._messages,
-                        "max_tokens": self._max_output_tokens,
-                    },
+                    json=body,
                     timeout=httpx.Timeout(self._timeout),
                 ) as response:
-                    response.raise_for_status()
                     self.metadata.provider_request_id = response.headers.get("x-request-id")
+                    response.raise_for_status()
                     async for line in response.aiter_lines():
                         if not line.startswith("data:"):
                             continue
                         raw = line.removeprefix("data:").strip()
                         if raw == "[DONE]":
+                            finished = True
                             continue
                         try:
                             event = json.loads(raw)
@@ -97,10 +112,20 @@ class OpenAICompatibleStream:
                         choices = event.get("choices")
                         if not isinstance(choices, list) or not choices:
                             continue
-                        delta = choices[0].get("delta") if isinstance(choices[0], dict) else None
+                        choice = choices[0] if isinstance(choices[0], dict) else {}
+                        if choice.get("finish_reason") in {"length", "content_filter"}:
+                            failure = "provider_incomplete"
+                        delta = choice.get("delta")
+                        if isinstance(delta, dict) and delta.get("refusal"):
+                            failure = "provider_refusal"
                         content = delta.get("content") if isinstance(delta, dict) else None
                         if isinstance(content, str) and content:
+                            visible = visible or bool(content.strip())
                             yield content
+            if failure is not None:
+                raise ValueError(failure)
+            if not visible or not finished:
+                raise ValueError("provider_empty_or_interrupted")
         finally:
             self.metadata.input_tokens = _optional_int(usage.get("prompt_tokens"))
             self.metadata.output_tokens = _optional_int(usage.get("completion_tokens"))
@@ -108,7 +133,17 @@ class OpenAICompatibleStream:
 
 
 class OpenAICompatibleChatProvider:
-    def __init__(self, *, base_url: str, api_key: str, max_output_tokens: int = 4096) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        max_output_tokens: int = 4096,
+        provider: str = "openai-compatible",
+        reasoning_effort: str = "medium",
+    ) -> None:
+        self._provider = provider
+        self._reasoning_effort = reasoning_effort
         self._base_url = base_url
         self._api_key = api_key
         self._max_output_tokens = max_output_tokens
@@ -123,6 +158,8 @@ class OpenAICompatibleChatProvider:
             messages=messages,
             timeout_seconds=timeout_seconds,
             max_output_tokens=self._max_output_tokens,
+            provider=self._provider,
+            reasoning_effort=self._reasoning_effort,
         )
 
 

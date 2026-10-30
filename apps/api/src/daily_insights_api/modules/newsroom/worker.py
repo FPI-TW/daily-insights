@@ -8,7 +8,7 @@ module it owns; this file wires them together and must not hold stage logic.
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -20,6 +20,7 @@ from daily_insights_api.modules.newsroom.browser import PageRenderer, build_rend
 from daily_insights_api.modules.newsroom.clock import TAIPEI
 from daily_insights_api.modules.newsroom.notifier import Notice, Notifier, build_notifier
 from daily_insights_api.modules.newsroom.providers import (
+    REPAIR_ATTEMPTS,
     Embedder,
     JsonModel,
     OpenAICompatibleEmbedder,
@@ -129,7 +130,20 @@ def collect_registrations(runtime: Runtime) -> Registration:
         translation.register(runtime),
         publishing.register(runtime),
     ):
-        merged.stages.extend(part.stages)
+        for binding in part.stages:
+            if binding.stage.name in {"embed", "triage", "analysis", "why", "translate"}:
+                seconds = (
+                    (1 + REPAIR_ATTEMPTS) * runtime.settings.newsroom_llm_timeout_seconds
+                    + runtime.settings.newsroom_embedding_timeout_seconds
+                    + 60
+                )
+                binding = replace(
+                    binding,
+                    stage=replace(
+                        binding.stage, lease=max(binding.stage.lease, timedelta(seconds=seconds))
+                    ),
+                )
+            merged.stages.append(binding)
         merged.periodic.extend(part.periodic)
     return merged
 
