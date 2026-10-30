@@ -316,6 +316,11 @@ catalog／JobRun 契約及現有 enqueue／history／dependency UI，保留 GET 
 管理功能。另加入 hover preload 無市場 API 請求，以及問答跨市場載入期間重置／最新
 publication、news context 更新的回歸測試。
 
+局部新聞 retry 與 report-not-generated E2E 會先等待對應的 503／404 API 回應，
+再驗證錯誤或空白狀態。SSR shell 在 hydration 前已存在；CI 的 Vite 模組載入與
+hydration 時間不應耗用資料完成後的 UI 斷言期限。保留原本的斷言 timeout、重試次數
+與狀態檢查，不以固定 sleep 或放寬全域 timeout 處理初始化時間差。
+
 ## 圖表矩陣外框修正（2026-10-05）
 
 美股指數趨勢、VIX 與台股加權指數的 ECharts matrix 左右各保留 1px 內距。

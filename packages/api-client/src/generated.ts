@@ -1168,9 +1168,9 @@ export interface paths {
      * Get Tw Institutional Flows
      * @description Stored TWSE market flows, in 億元.
      *
-     *     Read from the tables the `institutional_twse` data-management run fills, not
-     *     from TWSE: the source answers one date per request and spaces its callers,
-     *     which no page load can wait for.
+     *     Read from tables populated by the orchestration TWSE provider functions.
+     *     TWSE answers one date per request and spaces its callers, so page loads
+     *     use stored data instead of waiting for the source.
      */
     get: operations["get_tw_institutional_flows_api_markets_tw_institutional_flows_get"]
     put?: never

@@ -80,6 +80,40 @@ cutover migration cancelled any that were still pending or running. The
 `legacy_data_management_runs` archive likewise keeps its historical `news_all`,
 `news_market`, and `news_publish` rows read-only.
 
+The retired `data_management` module, data-management worker entry point, and
+macro-dashboard scheduler entry point have been removed. The archive model now
+lives in `orchestration.models.DataManagementRun`; its table, constraints, indexes,
+and read-only trigger are unchanged. `GET /api/admin/orchestration/legacy-runs`
+retains its response and pagination, and `check_legacy_queues_quiescent` still
+checks both the pre-cutover table and the archive. Deployment guards continue
+to reject or stop legacy containers left by older releases.
+
+`make generate-morning-reports` still uses `run_morning_reports` for local
+one-shot verification, so that entry point and its advisory lock are retained
+without a dependency on the retired module. Do not deploy it as a scheduler.
+
+Retirement also removes the macro scheduler's dedicated settings and getter,
+its orphaned configuration test, and the unused legacy API-client schemas and
+catalog compatibility method. Job and routine responses share
+`orchestrationRunStatusSchema`. Tests for the retired index endpoint's former
+503, payload, audit, and timeout behavior are removed; the endpoint-removal
+contract and real orchestration authentication/CSRF checks remain.
+
+The retired macro refresh/cache pipeline and its test-only commodity, FX, and
+DXY loaders are removed together with their orphaned tests and fixtures.
+Treasury/SOFR loaders, failure recording, the instrument catalog, and snapshot
+models remain in use by orchestration. Macro HTTP tests now verify database
+snapshot reads and authorization before those reads, rather than a cache that
+the application no longer registers.
+The unused macro/Taiwan source-diagnostics components, their component tests,
+and their dedicated translations are removed as well; the current admin page
+renders orchestration function attempts directly.
+
+Archive queries, historical job display, archive metadata, and migration
+downgrade guards still have live consumers or retained-data obligations, so
+their tests remain. The admin data-management page uses orchestration APIs;
+its UI and browser tests are unrelated to the removed backend module.
+
 ## Local development
 
 `compose.yaml` starts the dispatcher and worker with orchestration enabled by

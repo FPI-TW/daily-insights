@@ -48,7 +48,6 @@ import {
   institutionalStocksSchema,
   marketListSchema,
   sectorHeatmapSchema,
-  dataManagementCatalogSchema,
   jobRunListSchema,
   jobRunSchema,
   orchestrationCatalogSchema,
@@ -385,23 +384,6 @@ export function createAdministrationClient(transport: ApiTransport) {
         ),
         jobRunSchema
       )
-    },
-    async dataManagementCatalog() {
-      const catalog = await parseResponse(
-        await transport("/api/admin/orchestration/catalog"),
-        orchestrationCatalogSchema
-      )
-      const ready = (key: string) =>
-        catalog.providers.find(provider => provider.key === key)?.ready ?? false
-      return dataManagementCatalogSchema.parse({
-        taipei_date: catalog.taipei_date,
-        morning_reports_enabled: ready("twelve_data"),
-        yfinance_enabled: ready("yahoo_finance"),
-        twse_enabled: ready("twse"),
-        markets: ["global_macro_bonds", "us_equity"],
-        rerunnable_providers: [],
-        macro_dashboard_enabled: true,
-      })
     },
     async analystViewpointStatus() {
       return parseResponse(

@@ -32,7 +32,6 @@ from daily_insights_api.modules.reports.macro_dashboard import (
     Point,
     load_sofr,
     load_treasury,
-    refresh_macro_dashboard,
 )
 from daily_insights_api.modules.reports.macro_dashboard_models import MacroDashboardSnapshot
 from daily_insights_api.modules.reports.macro_diagnostics import diagnostics
@@ -93,7 +92,6 @@ __all__ = [
     "diagnostics",
     "load_sofr",
     "load_treasury",
-    "refresh_macro_dashboard",
     "run_morning_report_edition",
     "visible_report_market_codes",
 ]
