@@ -107,16 +107,14 @@ CloudWatch, security-group control, and future scaling are clearer with EC2.
   read/write/delete and listing permissions: signing, verification and orphan
   cleanup now share the API runtime. Retired media-worker credentials are no
   longer required by release or Compose.
-- The newsroom reuses the legacy news pipeline's production settings. Its
-  on/off switch is the existing Variable `DAILY_INSIGHTS_DAILY_NEWS_ENABLED` and
-  its DeepSeek key the existing Secret `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`;
-  release passes them to the deployment as `DAILY_INSIGHTS_NEWSROOM_ENABLED` and
-  `DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY`, and no GitHub setting has those names.
-  The only new production setting is the Secret
-  `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`. The existing flag is already
-  `true`, so create that Secret before the first deployment that includes the
-  newsroom, or release validation stops the deployment.
-  `DAILY_INSIGHTS_NEWSROOM_SLACK_WEBHOOK_URL` is an optional Secret.
+- The newsroom switch remains the GitHub Variable `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`,
+  deployed as `DAILY_INSIGHTS_NEWSROOM_ENABLED`. OpenAI uses separate Secrets
+  `DAILY_INSIGHTS_NEWSROOM_OPENAI_API_KEY` and `DAILY_INSIGHTS_CHAT_OPENAI_API_KEY`,
+  mapped to the existing runtime key names. A missing native key stops deployment;
+  it never falls back to a legacy credential. Keep the legacy
+  `DAILY_INSIGHTS_NEWS_MODEL_API_KEY` and `DAILY_INSIGHTS_CHAT_MODEL_API_KEY` for
+  explicitly selected legacy providers. Embeddings use the independent
+  `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`; the newsroom Slack webhook remains optional.
 - Only `newsroom-worker` receives the embedding key and ingestion settings; the
   orchestration worker receives the newsroom LLM key only for the 08:00 editor
   pass. Neither worker receives session secrets; the newsroom worker receives no
