@@ -89,11 +89,11 @@ if grep -Eq '^  (morning-report-scheduler|daily-news-scheduler|analyst-viewpoint
   exit 1
 fi
 grep -Fq 'DAILY_INSIGHTS_CHAT_ENABLED: ${DAILY_INSIGHTS_CHAT_ENABLED:-false}' "$compose_file"
-grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_PROVIDER: ${DAILY_INSIGHTS_CHAT_MODEL_PROVIDER:-deepseek}' "$compose_file"
-grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_NAME: ${DAILY_INSIGHTS_CHAT_MODEL_NAME:-deepseek-chat}' "$compose_file"
-grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL: ${DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL:-https://api.deepseek.com}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_PROVIDER: ${DAILY_INSIGHTS_CHAT_MODEL_PROVIDER:-openai}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_NAME: ${DAILY_INSIGHTS_CHAT_MODEL_NAME:-gpt-6-luna}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL: ${DAILY_INSIGHTS_CHAT_MODEL_API_BASE_URL:-https://api.openai.com/v1}' "$compose_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_KEY: ${DAILY_INSIGHTS_CHAT_MODEL_API_KEY:-}' "$compose_file"
-grep -Fq 'DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS:-90}' "$compose_file"
+grep -Fq 'DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS: ${DAILY_INSIGHTS_CHAT_TIMEOUT_SECONDS:-180}' "$compose_file"
 newsroom_flag_services=$(grep -c 'DAILY_INSIGHTS_NEWSROOM_ENABLED: ${DAILY_INSIGHTS_NEWSROOM_ENABLED:-false}' "$compose_file")
 if [ "$newsroom_flag_services" -ne 3 ]; then
   echo "expected DAILY_INSIGHTS_NEWSROOM_ENABLED on api, orchestration-worker and newsroom-worker; found $newsroom_flag_services" >&2
@@ -148,8 +148,11 @@ require_legacy_github_source() {
   fi
   grep -Fq ",${target}" "$workflow_file"
 }
-require_legacy_github_source secrets Secret \
-  DAILY_INSIGHTS_NEWS_MODEL_API_KEY DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY
+grep -Fq 'DAILY_INSIGHTS_NEWSROOM_LLM_API_KEY: ${{ secrets.DAILY_INSIGHTS_NEWS_MODEL_API_KEY }}' "$workflow_file"
+grep -Fq '. scripts/production/select-llm-credentials.sh' "$workflow_file"
+for name in DAILY_INSIGHTS_NEWSROOM_OPENAI_API_KEY DAILY_INSIGHTS_CHAT_OPENAI_API_KEY; do
+  grep -Fq "${name}: \${{ secrets.${name} }}" "$workflow_file"
+done
 require_legacy_github_source vars Variable \
   DAILY_INSIGHTS_DAILY_NEWS_ENABLED DAILY_INSIGHTS_NEWSROOM_ENABLED
 # Operators fix what the errors name, so they name the GitHub settings.
@@ -257,6 +260,10 @@ grep -Fq 'DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY: ${{ secrets.DAILY_INSIGHTS_
 grep -Fq ',DAILY_INSIGHTS_ANALYST_VIEWPOINTS_API_KEY' "$workflow_file"
 grep -Fq 'DAILY_INSIGHTS_CHAT_MODEL_API_KEY: ${{ secrets.DAILY_INSIGHTS_CHAT_MODEL_API_KEY }}' "$workflow_file"
 for name in \
+  DAILY_INSIGHTS_CHAT_MODEL_REASONING_EFFORT \
+  DAILY_INSIGHTS_CHAT_MAX_OUTPUT_TOKENS \
+  DAILY_INSIGHTS_NEWSROOM_LLM_TIMEOUT_SECONDS \
+  DAILY_INSIGHTS_NEWSROOM_LLM_MAX_COMPLETION_TOKENS \
   DAILY_INSIGHTS_NEWSROOM_LLM_BASE_URL \
   DAILY_INSIGHTS_NEWSROOM_TRIAGE_MODEL \
   DAILY_INSIGHTS_NEWSROOM_EDITOR_MODEL \

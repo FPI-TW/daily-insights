@@ -33,7 +33,7 @@ flowchart TB
     POLL --> ART[("newsroom_articles")]
     ART --> FETCH["fetch：全文抓取＋品質檢查"]
     ART --> EMB["embed：標題＋摘要 embedding"]
-    EMB --> TRI["triage：DeepSeek 初篩<br/>市場粗分、主題、事件歸屬"]
+    EMB --> TRI["triage：GPT-6 Luna 初篩<br/>市場粗分、主題、事件歸屬"]
     FETCH -. 全文有定論後才初篩 .-> TRI
     TRI --> EVT[("newsroom_events<br/>單一版次窗")]
     DISP["orchestration-dispatcher<br/>08:00 RoutineRun"] --> JOB["newsroom_daily_assemble<br/>orchestration-worker"]
@@ -239,7 +239,7 @@ embedding API 故障或 claim 被 fence 不會撤銷翻譯快取，並行請求�
   `make newsroom-reembed`（預設重算收稿中版次的所有文章向量，可傳 `START`、`END`），
   事件歸屬與已發布版次不受影響。品質指標的跨日重複判定也用文章向量，跨越切換日的比較
   需要把前 2 天一起重算。
-- `triage`：DeepSeek JSON mode、temperature 0。輸入標題、來源、摘要或全文前段，以及
+- `triage`：GPT-6 Luna JSON mode、reasoning_effort high（不送 temperature）。輸入標題、來源、摘要或全文前段，以及
   同一版次窗內 kNN 最相近的 10 個事件（附 `working_title` 與 2 則代表標題）。模型只回答
   離散判斷：`story_type`（official、data、catalyst、price_action、preview、opinion、
   press_release、other）、`new_facts`、`impact`（1–5）、各市場 `directness`（0–4）、
@@ -419,9 +419,9 @@ function，不與其他 provider 共用鎖。流程冪等：
 | 變數                                                                           | 預設                           | 使用者                                     | 用途                                                                      |
 | ------------------------------------------------------------------------------ | ------------------------------ | ------------------------------------------ | ------------------------------------------------------------------------- |
 | `NEWSROOM_ENABLED`                                                             | `false`                        | newsroom-worker、orchestration-worker、api | 啟用常駐管線與 08:00 組稿；api 用於 orchestration 目錄狀態                |
-| `NEWSROOM_LLM_BASE_URL`、`NEWSROOM_LLM_API_KEY`                                | `https://api.deepseek.com`     | newsroom-worker、orchestration-worker      | DeepSeek（OpenAI-compatible）                                             |
-| `NEWSROOM_TRIAGE_MODEL`、`NEWSROOM_ANALYSIS_MODEL`、`NEWSROOM_TRANSLATE_MODEL` | `deepseek-chat`                | newsroom-worker                            | 初篩、分析與為何重要、英文翻譯（含 embed 前把非中文標題譯成繁中）的 model |
-| `NEWSROOM_EDITOR_MODEL`                                                        | `deepseek-chat`                | orchestration-worker                       | 08:00 精選的 model                                                        |
+| `NEWSROOM_LLM_BASE_URL`、`NEWSROOM_LLM_API_KEY`                                | `https://api.openai.com/v1`    | newsroom-worker、orchestration-worker      | OpenAI Chat Completions，high 推理                                        |
+| `NEWSROOM_TRIAGE_MODEL`、`NEWSROOM_ANALYSIS_MODEL`、`NEWSROOM_TRANSLATE_MODEL` | `gpt-6-luna`                   | newsroom-worker                            | 初篩、分析與為何重要、英文翻譯（含 embed 前把非中文標題譯成繁中）的 model |
+| `NEWSROOM_EDITOR_MODEL`                                                        | `gpt-6-luna`                   | orchestration-worker                       | 08:00 精選的 model                                                        |
 | `NEWSROOM_LLM_TIMEOUT_SECONDS`                                                 | `90`                           | 同 LLM                                     | 單次 LLM 呼叫 timeout                                                     |
 | `NEWSROOM_EMBEDDING_BASE_URL`、`NEWSROOM_EMBEDDING_API_KEY`                    | `https://api.openai.com/v1`    | newsroom-worker                            | OpenAI-compatible embedding                                               |
 | `NEWSROOM_EMBEDDING_MODEL`、`NEWSROOM_EMBEDDING_TIMEOUT_SECONDS`               | `text-embedding-3-large`、`30` | newsroom-worker                            | embedding model 與 timeout（向量固定 1536 維）                            |
@@ -449,7 +449,7 @@ HTTP(S) URL。
   只拿到資料庫、newsroom 與收稿設定，不拿 session secret 或 R2 憑證。
   `orchestration-worker` 只拿組稿需要的旗標、LLM key、精選 model、Slack 與後台
   origin，不拿 embedding key。正式環境沿用舊新聞管線既有的 GitHub 設定：開關是 Variable
-  `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`、LLM key（DeepSeek）是 Secret
+  `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`、LLM key（OpenAI）是 Secret
   `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`，release workflow 分別以 `NEWSROOM_ENABLED` 與
   `NEWSROOM_LLM_API_KEY` 傳入。唯一新增的正式環境設定是 Secret
   `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`；既有開關已是 `true`，部署前必須先建立。
@@ -515,7 +515,7 @@ HTTP(S) URL。
   （`DAILY_INSIGHTS_NEWS_IGNORE_ROBOTS`）。瀏覽器補抓也遵守同樣的白名單、robots.txt
   規則、付費牆與大小限制，對外連線只經 `browser-egress`（只連公開 HTTPS 位址）。
 - LLM 與 embedding 呼叫的稽核不保存 prompt 與正文；正文 30 天後清除。
-- 精選、分析、翻譯都依賴同一個 DeepSeek 帳號；帳號額度或權限問題會以 `stage_fatal`
+- 精選、分析、翻譯都依賴新聞專用 OpenAI 金鑰；帳號額度或權限問題會以 `stage_fatal`
   或 `selection_fallback` 通知呈現，修復後需要人工重新排入 `failed` 的資料列。
 - 第一版後台不提供「附指示重跑」與手動星等；英文內容不可編輯。
 
@@ -525,3 +525,5 @@ HTTP(S) URL。
 - [重點新聞 Newsroom 管線重構規格](../specs/newsroom-pipeline.md)
 - [統一 orchestration 操作手冊](../runbooks/unified-orchestration.md)
 - [非執行中的新聞來源](inactive-news-sources.md)
+
+目前模型切換與金鑰、逾時、token 上限及回復步驟見 [OpenAI Luna 遷移手冊](../runbooks/openai-luna-migration.md)。

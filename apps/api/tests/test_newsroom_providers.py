@@ -479,7 +479,7 @@ async def test_editor_calls_get_their_own_extra_fields_and_timeout() -> None:
     assert triage_body["thinking"] == {"type": "disabled"}
     assert "reasoning_effort" not in triage_body
     assert editor_timeout["read"] == 240
-    assert triage_timeout["read"] == 90
+    assert triage_timeout["read"] == settings.newsroom_llm_timeout_seconds
 
 
 async def test_empty_editor_settings_inherit_the_shared_ones(

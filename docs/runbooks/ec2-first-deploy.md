@@ -1,5 +1,7 @@
 # EC2 首次部署操作手冊
 
+目前新聞與聊天切換至 OpenAI GPT-6 Luna 的設定、驗收與回復流程見 [遷移手冊](openai-luna-migration.md)。舊 DeepSeek／OpenCode 設定保留供回復與歷史查核。
+
 正式主機：
 
 ```text

@@ -782,7 +782,7 @@ async def test_analysis_writes_shared_fields_and_every_market_why(
     assert event.headline_zh_hans == "联准会维持利率不变"
     assert event.summary_zh_hans == "联准会宣布维持利率。市场关注软件类股。"
     assert event.related_symbols == [{"symbol": "^GSPC", "kind": "index", "label": "標普 500"}]
-    assert event.analysis_model == "deepseek-chat"
+    assert event.analysis_model == "gpt-6-luna"
     assert event.analyzed_at is not None
     for market, item_id in item_ids.items():
         item = await _get(newsroom_database, NewsroomEditionItem, item_id)

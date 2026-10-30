@@ -1,5 +1,7 @@
 # Production runbook recommendation
 
+目前新聞與聊天切換至 OpenAI GPT-6 Luna 的設定、驗收與回復流程見 [遷移手冊](openai-luna-migration.md)。舊 DeepSeek／OpenCode 設定保留供回復與歷史查核。
+
 Target: AWS Singapore (`ap-southeast-1`), fewer than 1,000 concurrent users,
 daily data freshness, and a product that accepts brief outages but requires
 automatic recovery and alerting.

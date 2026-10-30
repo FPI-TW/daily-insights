@@ -26,7 +26,7 @@ newsroom_sources（DB 管理）
    ▼
 newsroom_articles ──全文抓取＋品質檢查──► body（Postgres，保留 30 天）
    │  embedding（OpenAI-compatible）
-   │  逐篇初篩（DeepSeek）：市場粗分、主題、事件歸屬（kNN top-5 候選事件 + LLM 判斷）
+   │  逐篇初篩（GPT-6 Luna）：市場粗分、主題、事件歸屬（kNN top-5 候選事件 + LLM 判斷）
    ▼
 newsroom_events（單一版次窗內的事件）
    │  08:00 組稿：每市場取粗分前 30 事件 → 精選 LLM 打「事件×市場」星等 → 程式套配額
@@ -56,7 +56,7 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 | D9  | 同一事件可出現在多個市場版：標題、事實摘要、來源、相關標的共用；「為何重要」依市場各一段。                                                                                                                 |
 | D10 | 事件分群：embedding 找本版次窗內最相近的 5 個事件 → 放入初篩呼叫由 LLM 判斷歸屬或開新事件。後台可合併／拆分事件。                                                                                          |
 | D11 | embedding 使用 OpenAI-compatible API（預設 `text-embedding-3-large`，1536 維；2026-10-14 由 3-small 改，非中文標題先翻成繁中再 embed），向量存 `pgvector`。                                                |
-| D12 | 四個 LLM 階段（初篩、精選、深度分析、英文翻譯）全部使用 DeepSeek，但每階段 model 可獨立設定。                                                                                                              |
+| D12 | 四個 LLM 階段（初篩、精選、深度分析、英文翻譯）全部使用 OpenAI GPT-6 Luna、high 推理，但每階段 model 可獨立設定。                                                                                          |
 | D13 | 新聞管線由獨立常駐的 news worker 以「資料列即佇列」方式運作（`next_attempt_at` + `FOR UPDATE SKIP LOCKED`），不使用 checkpoint 表。                                                                        |
 | D14 | 跨日事件一律視為新事件：事件只存在於單一版次窗內。隱藏只對當版有效。已上架的事件，後續版次只有出現新事實才能再上架，組稿時與前 2 天已發布項目比對（2026-10-14 修正）。                                     |
 | D15 | 09:00 只發布已完成項目；未完成者完成後自動補上，12:00 仍未完成則放棄並通知。                                                                                                                               |
@@ -196,7 +196,7 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 ### 6.2 初篩與分群（工作樹 ②）
 
 - embedding：標題 + feed 摘要（不等全文，見 §5.1）。
-- 初篩呼叫（DeepSeek，JSON mode，temperature 0）輸入：文章標題、來源、摘要／正文前段、**同 `edition_date` 窗內** kNN 最相近的
+- 初篩呼叫（GPT-6 Luna，JSON mode，reasoning_effort high，不送 temperature）輸入：文章標題、來源、摘要／正文前段、**同 `edition_date` 窗內** kNN 最相近的
   10 個事件（以文章 embedding 對窗內已歸屬事件的文章做 cosine 搜尋，取不重複事件，附事件 `working_title` 與 2 則代表標題）。
 - 輸出（`newsroom/contracts.py::TriageResult`）：`topic`、`story_type`、`new_facts`、`impact`（1–5）、各市場 `directness`（0–4）、
   `event`：`{"match": "<event_id>"}` 或 `{"new": "<working_title>"}`。`market_scores` 與 `relevant` 由程式（`scoring.py`）計算，
@@ -276,8 +276,8 @@ newsroom_editions（published，可持續編修，編輯紀錄寫入 newsroom_ed
 | 變數                                                                                                    | 用途                                         |
 | ------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
 | `NEWSROOM_ENABLED`                                                                                      | 啟用 news worker 與 08:00 組稿（預設 false） |
-| `NEWSROOM_LLM_BASE_URL`、`NEWSROOM_LLM_API_KEY`                                                         | DeepSeek（OpenAI-compatible）                |
-| `NEWSROOM_TRIAGE_MODEL`、`NEWSROOM_EDITOR_MODEL`、`NEWSROOM_ANALYSIS_MODEL`、`NEWSROOM_TRANSLATE_MODEL` | 各階段 model（預設 `deepseek-chat`）         |
+| `NEWSROOM_LLM_BASE_URL`、`NEWSROOM_LLM_API_KEY`                                                         | OpenAI Chat Completions                      |
+| `NEWSROOM_TRIAGE_MODEL`、`NEWSROOM_EDITOR_MODEL`、`NEWSROOM_ANALYSIS_MODEL`、`NEWSROOM_TRANSLATE_MODEL` | 各階段 model（預設 `gpt-6-luna`）            |
 | `NEWSROOM_EMBEDDING_BASE_URL`、`NEWSROOM_EMBEDDING_API_KEY`、`NEWSROOM_EMBEDDING_MODEL`                 | embedding（預設 `text-embedding-3-large`）   |
 | `NEWSROOM_SLACK_WEBHOOK_URL`                                                                            | 通知；未設定時只寫 log                       |
 | `NEWSROOM_ADMIN_BASE_URL`                                                                               | Slack 訊息中的後台連結                       |
