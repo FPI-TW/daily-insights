@@ -448,11 +448,11 @@ HTTP(S) URL。
   （唯讀根目錄、`/tmp` tmpfs、`cap_drop: ALL`、`no-new-privileges`、心跳 healthcheck），
   只拿到資料庫、newsroom 與收稿設定，不拿 session secret 或 R2 憑證。
   `orchestration-worker` 只拿組稿需要的旗標、LLM key、精選 model、Slack 與後台
-  origin，不拿 embedding key。正式環境沿用舊新聞管線既有的 GitHub 設定：開關是 Variable
-  `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`、LLM key（OpenAI）是 Secret
-  `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`，release workflow 分別以 `NEWSROOM_ENABLED` 與
-  `NEWSROOM_LLM_API_KEY` 傳入。唯一新增的正式環境設定是 Secret
-  `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`；既有開關已是 `true`，部署前必須先建立。
+  origin，不拿 embedding key。正式環境開關沿用 Variable
+  `DAILY_INSIGHTS_DAILY_NEWS_ENABLED`，以 `NEWSROOM_ENABLED` 傳入。OpenAI 原生端點使用
+  Secret `DAILY_INSIGHTS_NEWSROOM_OPENAI_API_KEY`，舊端點使用
+  `DAILY_INSIGHTS_NEWS_MODEL_API_KEY`，兩者都以 `NEWSROOM_LLM_API_KEY` 傳入；原生金鑰缺失時
+  不會退回舊金鑰。embedding 另外使用 `DAILY_INSIGHTS_NEWSROOM_EMBEDDING_API_KEY`。
   GitHub Secrets／Variables 與驗證規則見
   [EC2 首次部署](../runbooks/ec2-first-deploy.md#2-github-production-environment)。
 - `deploy.sh` 在 migration 前停止並確認 `newsroom-worker` 已停，migration 後依序啟動並

@@ -64,8 +64,27 @@ ORDER BY stage, error_code NULLS FIRST;
 
 ## 驗證記錄
 
-2026-10-30：兩把專用金鑰已安全存入 GitHub production Secrets，`gpt-6-luna` 的新聞 high 與聊天 medium 最小 API 探測皆回傳 200。四個新聞階段（初篩、精選、分析、翻譯）及聊天兩輪、取消均已通過真實 API 煙霧測試，測試資料為虛構，未連線正式資料庫。新增遷移測試 31 項通過；格式、lint、型別、API client、建置與部署契約通過。完整測試通過：Web 332、API client 31、API 1,755。正式切換結果須於完成後更新本節。
+2026-10-30：兩把專用金鑰已安全存入 GitHub production Secrets，`gpt-6-luna` 的新聞 high 與聊天 medium 最小 API 探測皆回傳 200。四個新聞階段（初篩、精選、分析、翻譯）及聊天兩輪、取消均已通過真實 API 煙霧測試，測試資料為虛構，未連線正式資料庫。新增遷移測試 31 項通過；格式、lint、型別、API client、建置與部署契約通過。完整測試通過：Web 332、API client 31、API 1,755。正式切換與驗收結果如下。
 
 切換前成功 release：`40873979866`（main `37a0707`）；API digest `sha256:8e668eecfe9b8d6958032e8ce671e421bb664edd7ff53f284019db4f8ca8bab2`，Web digest `sha256:1d206df4ae5247fd29d8d3a351247877c0c8a1cad1fb996117c3bd1eb20d9f31`。已明確固定舊新聞端點與四個模型、新聞逾時 90 秒、聊天 token 上限 4096，保留相容版本先上線的切換順序。
 
 參考：[模型規格](https://developers.openai.com/api/docs/models/gpt-6-luna)、[推理與請求遷移](https://developers.openai.com/api/docs/guides/latest-model)、[Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)。
+
+### 正式切換紀錄
+
+- [PR #130](https://github.com/FPI-TW/daily-insights/pull/130) 已合併；main commit 為 `f8d72230bd5511797abcaab3deff527ccb042e2b`，13 項遠端 CI 檢查全部通過。
+- 相容版本 [release 41055604257](https://github.com/FPI-TW/daily-insights/actions/runs/41055604257) 成功，先確認舊 DeepSeek 端點、四個模型、新聞 90 秒及聊天 4096 token 預算仍生效。
+- Luna [release 41056343341](https://github.com/FPI-TW/daily-insights/actions/runs/41056343341) 於 2026-10-30 20:38:48（Asia/Taipei）完成，八個容器均健康。
+- 正式 API 與兩個 worker 已逐項核對模型、端點、新聞 high／聊天 medium、completion 預算與逾時。embedding 仍是 `text-embedding-3-large`、原 OpenAI 端點；所有功能開關與切換前相同。
+- 使用正式容器的實際設定及專用金鑰，四個新聞階段、聊天首輪／延續對話／取消均通過隔離煙霧測試；未寫入正式新聞或使用者對話資料。
+- 2026-10-30 20:40:30–20:55:29（Asia/Taipei）完成 902.5 秒觀察、17 次取樣；八個容器每次皆健康且 restart count 為 0。正式管線記錄 18 次 Luna 成功呼叫（embed 前翻譯 5、初篩 13），新增錯誤為 0。
+- 驗收初期核對時，近 24 小時有 1,973 篇文章已處於 `triage_status=failed`，沒有待處理文章；切換前稽核顯示 DeepSeek 402。這些既有失敗資料依本次範圍保留，未自動重新排入；新進文章已成功使用 Luna。舊金鑰仍保留，但不可將仍回傳 402 的 DeepSeek 視為可用的立即回復目標。
+
+正式映像：
+
+| 服務          | digest                                                                    |
+| ------------- | ------------------------------------------------------------------------- |
+| API 與 worker | `sha256:a85900ede143fda626b9499e0127cd41e247248af586e5e30df8e16e2dd73fa9` |
+| Web           | `sha256:8990a8dd52fb21210273878554a777787de25037a9b8b8ca90aa67e5dad6bfe1` |
+
+兩把 OpenAI 金鑰皆不過期、限 Chat Completions Request，已安全保存於指定 GitHub production Secrets；本機煙霧測試的金鑰暫存檔已刪除。只記錄非機密設定、稽核統計及 request ID，不保存金鑰、正式文章正文或使用者對話。
