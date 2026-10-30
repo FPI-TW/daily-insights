@@ -377,3 +377,176 @@ class PublicationFunctionAttempt(Base):
         ForeignKey("function_attempts.id", ondelete="RESTRICT"),
         primary_key=True,
     )
+
+
+class DataManagementRun(UUIDPrimaryKeyMixin, Base):
+    """Read-only history of provider operations retired at the orchestration cutover.
+
+    The database trigger rejects all writes. Keep the complete historical
+    mapping, constraints, and indexes for schema introspection and migrations;
+    application callers only query this archive.
+    """
+
+    __tablename__ = "legacy_data_management_runs"
+    __table_args__ = (
+        CheckConstraint(
+            (
+                "operation IN ('morning_all', 'morning_market', 'index_yahoo', "
+                "'institutional_twse', 'news_all', 'news_market', 'news_publish', "
+                "'macro_dashboard', 'provider_rerun')"
+            ),
+            name="operation_valid",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'running', 'succeeded', 'partial', 'failed', 'cancelled')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "("
+            "(operation = 'morning_market' AND market_code IN "
+            "('global_macro_bonds', 'crypto', 'us_equity')) OR "
+            "(operation = 'provider_rerun' AND market_code IN "
+            "('twelve_data', 'yahoo_finance', 'twse')) OR "
+            "(operation = 'news_market' AND market_code IN "
+            "('global', 'tw_equity', 'us_equity')) OR "
+            "(operation IN ('morning_all', 'index_yahoo', 'institutional_twse', 'news_all', "
+            "'news_publish', 'macro_dashboard') "
+            "AND market_code IS NULL)"
+            ")",
+            name="market_code_valid_for_operation",
+        ),
+        Index(
+            "uq_data_management_runs_active_morning",
+            text("(1)"),
+            unique=True,
+            postgresql_where=text(
+                "status IN ('pending', 'running') "
+                "AND operation IN ('morning_all', 'morning_market')"
+            ),
+        ),
+        Index(
+            "uq_data_management_runs_active_index",
+            text("(1)"),
+            unique=True,
+            postgresql_where=text("status IN ('pending', 'running') AND operation = 'index_yahoo'"),
+        ),
+        Index(
+            "uq_data_management_runs_active_institutional",
+            text("(1)"),
+            unique=True,
+            postgresql_where=text(
+                "status IN ('pending', 'running') AND operation = 'institutional_twse'"
+            ),
+        ),
+        Index(
+            "uq_data_management_runs_active_news",
+            text("(1)"),
+            unique=True,
+            postgresql_where=text(
+                "status IN ('pending', 'running') AND operation IN ('news_all', 'news_market') "
+                "AND requested_by_user_id IS NOT NULL"
+            ),
+        ),
+        # The 08:00 obligation is durable history, rather than an in-memory
+        # scheduler marker.  Retrying a terminal automatic row must therefore
+        # never create another automatic all-market run for that edition.
+        Index(
+            "uq_data_management_runs_automatic_news_all_edition",
+            "edition_date",
+            unique=True,
+            postgresql_where=text("operation = 'news_all' AND requested_by_user_id IS NULL"),
+        ),
+        # A retry is an independently durable, future-due market operation.
+        # Keeping historical rows in the key makes a worker crash/recovery
+        # unable to enqueue the same scheduled retry twice.
+        Index(
+            "uq_data_management_runs_automatic_news_market_retry",
+            "edition_date",
+            "market_code",
+            "scheduled_for",
+            unique=True,
+            postgresql_where=text(
+                "operation = 'news_market' AND requested_by_user_id IS NULL "
+                "AND scheduled_for IS NOT NULL"
+            ),
+        ),
+        # Manual publishes are their own class: one at a time, but they never
+        # wait for (or block) a news rerun.
+        Index(
+            "uq_data_management_runs_active_news_publish",
+            text("(1)"),
+            unique=True,
+            postgresql_where=text(
+                "status IN ('pending', 'running') AND operation = 'news_publish'"
+            ),
+        ),
+        Index(
+            "uq_data_management_runs_active_manual_macro_dashboard",
+            text("(1)"),
+            unique=True,
+            postgresql_where=text(
+                "status IN ('pending', 'running') AND operation = 'macro_dashboard' "
+                "AND requested_by_user_id IS NOT NULL"
+            ),
+        ),
+        Index(
+            "uq_data_management_runs_active_provider_rerun",
+            "market_code",
+            unique=True,
+            postgresql_where=text(
+                "status IN ('pending', 'running') AND operation = 'provider_rerun'"
+            ),
+        ),
+        Index(
+            "uq_data_management_runs_running_macro_dashboard",
+            text("(1)"),
+            unique=True,
+            postgresql_where=text("status = 'running' AND operation = 'macro_dashboard'"),
+        ),
+        # Scheduled macro work is an edition record, not a retry mechanism.
+        # Manual rows retain their history and are deliberately not covered.
+        Index(
+            "uq_data_management_runs_automatic_macro_dashboard_edition",
+            "edition_date",
+            unique=True,
+            postgresql_where=text("operation = 'macro_dashboard' AND requested_by_user_id IS NULL"),
+        ),
+        Index("ix_data_management_runs_created_at", "created_at"),
+        Index("uq_data_management_runs_resume_of", "resume_of_id", unique=True),
+    )
+
+    operation: Mapped[str] = mapped_column(String(32), nullable=False)
+    # This is an operation scope, not always a row in the market catalog:
+    # news has a valid cross-market ``global`` edition.  The operation-specific
+    # check constraint above keeps each operation's scope finite and valid.
+    market_code: Mapped[str | None] = mapped_column(String(50))
+    edition_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
+    # Null when the scheduler queued it: nobody asked, it was due.
+    requested_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    lease_owner: Mapped[str | None] = mapped_column(String(200))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Manual work and the initial automatic all-market edition are eligible as
+    # soon as they are queued.  Automatic market retry rows are not claimable
+    # until this durable Taipei-time timestamp.
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resume_of_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(String(500))
+    # Operation input that cannot be expressed by operation/market/date alone;
+    # only news_publish uses it ({"edition_id": ..., "candidate_ids": [...]}).
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+        onupdate=text("now()"),
+    )

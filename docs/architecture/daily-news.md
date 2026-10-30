@@ -501,8 +501,8 @@ HTTP(S) URL。
 
 - `legacy_data_management_runs` 是唯讀封存（自 migration `20260916_0028` 起以 trigger
   保護），其中 `news_all`、`news_market`、`news_publish` 等歷史紀錄完整保留，仍可由
-  `GET /api/admin/orchestration/legacy-runs` 查閱。切換只移除 `data_management` 中
-  執行這些新聞操作的程式路徑。
+  `GET /api/admin/orchestration/legacy-runs` 查閱。已停用的 `data_management` 模組與
+  worker 已移除，封存 model 由 `orchestration.models.DataManagementRun` 維護。
 - 使用已移除 key（`news_global_refresh`、`news_tw_equity_refresh`、
   `news_us_equity_refresh`、`news_publish`、`news_daily_update`、`news_*_refresh_job`、
   `news_publish_job`）的 orchestration job／function runs 留在歷史中，後台照常列出，

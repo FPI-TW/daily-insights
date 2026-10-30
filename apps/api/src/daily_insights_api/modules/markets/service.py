@@ -1181,8 +1181,8 @@ async def store_institutional_stock_flows(
     return len(rows)
 
 
-# The one market these flows are collected for. data_management passes it back
-# in when it stores a run's rows, so it lives with the tables it belongs to.
+# The one market these flows are collected for. Orchestration provider functions
+# pass it back when storing rows, so it lives with the tables it belongs to.
 INSTITUTIONAL_MARKET_CODE = "tw_equity"
 # The one market the TradingView sector heatmap is captured for; the worker
 # stamps its ledger rows with it and the read endpoint filters by it.

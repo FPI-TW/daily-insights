@@ -524,7 +524,7 @@ class MacroDashboardService:
     """Compatibility wrapper for non-HTTP callers.
 
     The application no longer registers this service: production refreshes are
-    invoked by the durable data-management worker and HTTP always reads DB.
+    published by orchestration projections and HTTP always reads DB.
     """
 
     def __init__(self, settings: Settings) -> None:

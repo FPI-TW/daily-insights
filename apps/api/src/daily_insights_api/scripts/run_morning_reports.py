@@ -12,7 +12,6 @@ from daily_insights_api.core.config import get_settings, is_placeholder_value
 from daily_insights_api.core.database import create_engine, create_session_factory
 from daily_insights_api.core.logging import configure_logging
 from daily_insights_api.core.observability import emit_event
-from daily_insights_api.modules.data_management.service import TWELVE_DATA_EXECUTION_LOCK_KEY
 from daily_insights_api.modules.data_sources.api import (
     RetryPolicy,
     TwelveDataAdapter,
@@ -46,6 +45,8 @@ __all__ = [
 # of crashing the container into an immediate restart loop. Non-exception
 # outcomes are final for the day.
 RETRY_POLICY = SameDayRetry()
+# Preserve the advisory lock used by concurrent local morning-report commands.
+TWELVE_DATA_EXECUTION_LOCK_KEY = 5_239_842_371_114_216
 
 
 @asynccontextmanager

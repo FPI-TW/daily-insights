@@ -5,7 +5,6 @@ import httpx
 import pytest
 
 from daily_insights_api.core.config import Settings
-from daily_insights_api.modules.data_management import service
 from daily_insights_api.modules.data_sources.errors import DataSourceTransientError
 from daily_insights_api.modules.reports import macro_dashboard as macro
 from daily_insights_api.modules.reports.macro_diagnostics import (
@@ -73,39 +72,6 @@ async def test_treasury_keeps_successful_year_and_reports_failed_year() -> None:
 def test_typed_provider_error_preserves_http_status() -> None:
     assert classify(DataSourceTransientError("private", http_status=503)) == ("http_error", 503)
     assert classify(httpx.ReadTimeout("private")) == ("timeout", None)
-
-
-@pytest.mark.parametrize(
-    "history_status,error",
-    [
-        ("ok", None),
-        ("disabled", None),
-        ("unavailable", "macro_sources_unavailable"),
-    ],
-)
-async def test_run_error_precedence(
-    monkeypatch: pytest.MonkeyPatch, history_status: str, error: str | None
-) -> None:
-    dashboard = macro.MacroDashboard.model_validate(
-        {
-            "fetched_at": "2026-09-14T00:00:00Z",
-            "histories": [
-                {
-                    "id": "sofr",
-                    "symbol": "SOFR",
-                    "unit": "percent",
-                    "source": "New York Fed",
-                    "status": history_status,
-                }
-            ],
-            "calendar": {"date": "2026-09-14", "source": "", "status": "disabled"},
-        }
-    )
-    monkeypatch.setattr(service, "refresh_macro_dashboard", AsyncMock(return_value=dashboard))
-    status, result, actual, _ = await service._execute_macro(Settings())
-    assert actual == error
-    assert status == ("partial" if error else "succeeded")
-    assert "sources" in result
 
 
 async def test_multiple_source_failures_without_calendar_source(

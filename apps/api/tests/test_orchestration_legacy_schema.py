@@ -1,98 +1,9 @@
 from pathlib import Path
 
-import pytest
-from pydantic import TypeAdapter, ValidationError
-
 import daily_insights_api.models as registered_models  # noqa: F401
 from daily_insights_api.core.config import Settings
 from daily_insights_api.core.models import Base
-from daily_insights_api.modules.data_management.schemas import (
-    DataManagementRunCreate,
-    DataManagementRunResponse,
-)
 from daily_insights_api.web.app import create_app
-
-adapter: TypeAdapter[DataManagementRunCreate] = TypeAdapter(DataManagementRunCreate)
-response_adapter: TypeAdapter[DataManagementRunResponse] = TypeAdapter(DataManagementRunResponse)
-
-
-@pytest.mark.parametrize(
-    ("payload", "operation"),
-    [
-        ({"operation": "morning_all"}, "morning_all"),
-        ({"operation": "macro_dashboard"}, "macro_dashboard"),
-        (
-            {"operation": "provider_rerun", "provider": "twse"},
-            "provider_rerun",
-        ),
-    ],
-)
-def test_run_create_discriminator_accepts_only_valid_scope(
-    payload: dict[str, str], operation: str
-) -> None:
-    assert adapter.validate_python(payload).operation == operation
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {"operation": "morning_all", "market_code": "crypto"},
-        # Legacy queue operations remain readable as history but are no longer
-        # accepted by the generic admin create endpoint.
-        {"operation": "morning_market", "market_code": "crypto"},
-        {"operation": "morning_market"},
-        {"operation": "morning_market", "market_code": "tw_equity"},
-        {"operation": "index_yahoo"},
-        {"operation": "index_yahoo", "market_code": "crypto"},
-        {"operation": "institutional_twse"},
-        # The retired news operations are history only.
-        {"operation": "news_all"},
-        {"operation": "news_market", "market_code": "global"},
-        {"operation": "news_publish"},
-        {"operation": "provider_rerun", "provider": "yfinance"},
-        {"operation": "provider_rerun", "market_code": "twse"},
-    ],
-)
-def test_run_create_discriminator_rejects_invalid_scope(payload: dict[str, str]) -> None:
-    with pytest.raises(ValidationError):
-        adapter.validate_python(payload)
-
-
-def test_run_response_discriminator_preserves_market_scope() -> None:
-    base = {
-        "id": "08a70c25-7e41-4dce-a576-fc56589e1db3",
-        "edition_date": "2026-09-07",
-        "status": "succeeded",
-        "requested_by_user_id": "ee77eab0-3910-4706-803c-ffaf979f1ff7",
-        "created_at": "2026-09-07T00:00:00Z",
-        "started_at": None,
-        "completed_at": None,
-        "result": None,
-        "error": None,
-    }
-    response = response_adapter.validate_python(
-        {**base, "operation": "morning_market", "market_code": "us_equity"}
-    )
-    assert response.operation == "morning_market" and response.market_code == "us_equity"
-    with pytest.raises(ValidationError):
-        response_adapter.validate_python(
-            {**base, "operation": "index_yahoo", "market_code": "crypto"}
-        )
-    macro_response = response_adapter.validate_python(
-        {**base, "operation": "macro_dashboard", "market_code": None, "status": "cancelled"}
-    )
-    assert macro_response.operation == "macro_dashboard" and macro_response.status == "cancelled"
-    provider_response = response_adapter.validate_python(
-        {
-            **base,
-            "operation": "provider_rerun",
-            "provider": "yahoo_finance",
-            "market_code": None,
-        }
-    )
-    assert provider_response.operation == "provider_rerun"
-    assert provider_response.provider == "yahoo_finance"
-    assert provider_response.market_code is None
 
 
 def test_openapi_exposes_unified_orchestration_and_read_only_legacy_archive() -> None:
