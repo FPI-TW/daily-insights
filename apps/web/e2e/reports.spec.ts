@@ -478,7 +478,11 @@ test("market news failure offers local retry without replacing charts", async ({
       else await route.continue()
     }
   )
+  const failedNews = page.waitForResponse(
+    "**/api/newsroom/editions/latest?market=us_equity*"
+  )
   await page.goto("/en/reports/us_equity")
+  expect((await failedNews).status()).toBe(503)
   await expect(
     page.getByRole("button", { name: "Retry", exact: true })
   ).toBeVisible()
@@ -514,7 +518,11 @@ test("report not generated, not launched and invalid markets retain their states
 }) => {
   await authenticateAs(context, "org_member")
   await resetMockApi(request, { reports: "not_generated" })
+  const missingReport = page.waitForResponse(
+    "**/api/reports/us_equity/latest?locale=en"
+  )
   await page.goto("/en/reports/us_equity")
+  expect((await missingReport).status()).toBe(404)
   await expect(
     page.getByText("This section has not been generated yet.", { exact: true })
   ).toBeVisible()
