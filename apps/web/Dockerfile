@@ -5,6 +5,7 @@ WORKDIR /workspace
 RUN corepack enable && corepack prepare pnpm@11.15.1 --activate
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches patches
 COPY apps/web/package.json apps/web/package.json
 COPY packages/api-client/package.json packages/api-client/package.json
 RUN pnpm install --frozen-lockfile --filter @daily-insights/web...
