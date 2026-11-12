@@ -35,7 +35,7 @@ vi.mock("#/lib/market-queries", async importOriginal => ({
   ...(await importOriginal<typeof import("#/lib/market-queries")>()),
   marketQueries: () =>
     Object.fromEntries(
-      ["markets", "reports", "news", "viewpoints"].map(key => [
+      ["reports", "news"].map(key => [
         key,
         () => ({
           queryKey: ["market", "u", "o", key],
@@ -47,10 +47,6 @@ vi.mock("#/lib/market-queries", async importOriginal => ({
 vi.mock("#/components/PageContextChat", () => ({ useChatPageContext: vi.fn() }))
 vi.mock("#/components/Reports", () => ({
   ReportErrorScreen: () => null,
-  ReportList: ({ viewpoints }: { viewpoints: { points: string[] }[] }) => (
-    <div>{viewpoints.flatMap(v => v.points).join(",")}</div>
-  ),
-  AnalystViewpointsLoading: () => <div role="status">Viewpoints loading</div>,
 }))
 vi.mock("#/components/DailyNews", () => ({
   DailyNewsLoading: () => <div role="status">News loading</div>,
@@ -75,8 +71,7 @@ beforeEach(() => {
   state.hydrated = true
   client = new QueryClient()
   state.functions.clear()
-  for (const key of ["markets", "reports", "viewpoints"])
-    state.functions.set(key, vi.fn().mockResolvedValue([]))
+  state.functions.set("reports", vi.fn().mockResolvedValue([]))
   state.functions.set(
     "news",
     vi.fn().mockResolvedValue({ edition_id: "news-ready" })
@@ -92,25 +87,7 @@ describe("reports browser sections", () => {
     state.hydrated = false
     show()
     expect(screen.getByText("News loading")).toBeVisible()
-    expect(screen.getByText("Viewpoints loading")).toBeVisible()
     for (const fn of state.functions.values()) expect(fn).not.toHaveBeenCalled()
-  })
-  it("renders viewpoints while news and report summaries are still pending", async () => {
-    state.functions.set(
-      "news",
-      vi.fn(() => new Promise(() => {}))
-    )
-    state.functions.set(
-      "reports",
-      vi.fn(() => new Promise(() => {}))
-    )
-    state.functions.set(
-      "viewpoints",
-      vi.fn().mockResolvedValue([{ points: ["Independent viewpoint"] }])
-    )
-    show()
-    expect(await screen.findByText("Independent viewpoint")).toBeVisible()
-    expect(screen.getByText("News loading")).toBeVisible()
   })
   it("offers local retry after first error", async () => {
     state.functions.set(

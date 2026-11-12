@@ -38,7 +38,6 @@ vi.mock("#/lib/market-queries", () => ({
         "markets",
         "report",
         "news",
-        "viewpoints",
         "macro",
         "history",
         "averages",
@@ -127,7 +126,6 @@ beforeEach(() => {
     "markets",
     "report",
     "news",
-    "viewpoints",
     "macro",
     "history",
     "averages",
@@ -147,7 +145,6 @@ beforeEach(() => {
     })
   query("markets").data = [{ code: "us_equity" }, { code: "tw_equity" }]
   query("report").data = { kind: "report", report: partialReport }
-  query("viewpoints").data = []
   query("history").data = {
     marketCode: "us_equity",
     start: "2026-10-01",

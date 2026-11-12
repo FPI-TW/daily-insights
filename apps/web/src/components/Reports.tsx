@@ -4,11 +4,10 @@ import ReactECharts from "echarts-for-react"
 import { motion } from "motion/react"
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import type { AnalystViewpoint, Locale } from "@daily-insights/api-client"
+import type { Locale } from "@daily-insights/api-client"
 import {
   directionClass,
   formatChange,
-  formatTimestamp,
   formatNumber,
   literalDirection,
   unitLabel,
@@ -203,92 +202,6 @@ export function ReportShell({
   )
 }
 
-export function ReportList({
-  locale: _locale,
-  viewpoints = [],
-  markets,
-}: {
-  locale?: Locale
-  viewpoints?: ReadonlyArray<AnalystViewpoint>
-  markets?: ReadonlyArray<NavMarket>
-}) {
-  return <AnalystViewpoints viewpoints={viewpoints} markets={markets} />
-}
-
-export function AnalystViewpointsLoading() {
-  const { t } = useTranslation()
-  return (
-    <section
-      className="mb-6 animate-pulse rounded-[13px] border border-line bg-surface p-5"
-      aria-live="polite"
-      role="status"
-      aria-label={t("analystViewpointsLoading")}
-    >
-      <p className="sr-only">{t("analystViewpointsLoading")}</p>
-      <div className="h-4 w-40 rounded bg-line" />
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <div className="h-20 rounded bg-line" />
-        <div className="h-20 rounded bg-line" />
-        <div className="h-20 rounded bg-line" />
-      </div>
-    </section>
-  )
-}
-
-function AnalystViewpoints({
-  viewpoints,
-  markets,
-}: {
-  viewpoints: ReadonlyArray<AnalystViewpoint>
-  markets?: ReadonlyArray<NavMarket> | undefined
-}) {
-  const { t } = useTranslation()
-  // Viewpoints follow navigation order and only cover navigable markets when
-  // the market list is known; otherwise they are shown as delivered.
-  const visibleViewpoints = markets
-    ? reportNavMarkets(markets).flatMap(market => {
-        const viewpoint = viewpoints.find(v => v.market_code === market.code)
-        return viewpoint ? [viewpoint] : []
-      })
-    : viewpoints
-  const latest = visibleViewpoints[0]
-  if (!latest) return null
-  return (
-    <section className="mb-6" aria-labelledby="analyst-viewpoints-title">
-      <div className="mb-3">
-        <h2
-          id="analyst-viewpoints-title"
-          className="m-0 text-lg font-extrabold tracking-[-0.02em] text-sea-ink"
-        >
-          {t("analystViewpointsTitle")}
-        </h2>
-        <p className="mt-1 mb-0 text-xs text-sea-ink-soft">
-          {t("analystViewpointsUpdated", {
-            timestamp: formatTimestamp(latest.fetched_at),
-          })}
-        </p>
-      </div>
-      <div className="grid gap-3 md:grid-cols-2">
-        {visibleViewpoints.map(viewpoint => (
-          <article
-            key={viewpoint.market_code}
-            className="surface-panel border-t-[3px] border-t-lagoon p-4"
-          >
-            <h3 className="m-0 text-sm font-extrabold text-sea-ink">
-              {t(`reportMarket_${viewpoint.market_code}`)}
-            </h3>
-            <ul className="mt-3 mb-0 grid list-disc gap-2 pl-5 text-sm leading-6 text-sea-ink-soft">
-              {viewpoint.points.map(point => (
-                <li key={point}>{point}</li>
-              ))}
-            </ul>
-          </article>
-        ))}
-      </div>
-    </section>
-  )
-}
-
 /** Notices above the blocks: the partial-status badge and the report-level
  * caveat when the pipeline attached one. Source freshness (the API's stale
  * flag and its reason code) is an operator signal and is never shown here. */
@@ -340,41 +253,6 @@ export function ReportDetail({
         ))}
       </div>
     </>
-  )
-}
-
-/** The upstream analyst's bullets for one market, shown above the numbers so
- * every market page opens with what happened rather than only how much. */
-export function MarketViewpoint({
-  viewpoint,
-}: {
-  viewpoint: AnalystViewpoint
-}) {
-  const { t } = useTranslation()
-  return (
-    <section
-      className="surface-panel mb-4 border-t-[3px] border-t-lagoon p-5"
-      aria-labelledby={`viewpoint-${viewpoint.market_code}`}
-    >
-      <div className="mb-2">
-        <h2
-          id={`viewpoint-${viewpoint.market_code}`}
-          className="m-0 text-base font-extrabold tracking-[-0.015em] text-sea-ink"
-        >
-          {t("marketViewpointTitle")}
-        </h2>
-        <p className="mt-1 mb-0 text-xs text-sea-ink-soft">
-          {t("analystViewpointsUpdated", {
-            timestamp: formatTimestamp(viewpoint.fetched_at),
-          })}
-        </p>
-      </div>
-      <ul className="m-0 grid list-disc gap-2 pl-5 text-sm leading-6 text-sea-ink">
-        {viewpoint.points.map(point => (
-          <li key={point}>{point}</li>
-        ))}
-      </ul>
-    </section>
   )
 }
 
