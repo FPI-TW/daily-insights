@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from daily_insights_api.core.config import Settings
 from daily_insights_api.core.enums import OrganizationStatus, SystemRole, UserStatus
 from daily_insights_api.core.security import (
-    generate_temporary_password,
     hash_password,
     normalize_email,
 )
@@ -25,8 +24,6 @@ from daily_insights_api.modules.admin.schemas import (
     OrganizationCreate,
     OrganizationResponse,
     OrganizationUpdate,
-    ProvisionedInternalUserResponse,
-    ProvisionedMemberResponse,
 )
 from daily_insights_api.modules.audit.api import record_audit_event
 from daily_insights_api.modules.audit.models import AuditEvent
@@ -205,7 +202,7 @@ async def create_organization(
 
 @router.post(
     "/internal-users",
-    response_model=ProvisionedInternalUserResponse,
+    response_model=InternalUserResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def create_internal_user(
@@ -214,7 +211,7 @@ async def create_internal_user(
     response: Response,
     actor: AdminWrite,
     database: Annotated[AsyncSession, Depends(get_database_session)],
-) -> ProvisionedInternalUserResponse:
+) -> InternalUserResponse:
     if payload.system_role not in {SystemRole.ADMIN, SystemRole.ASSET_MANAGER}:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -222,12 +219,11 @@ async def create_internal_user(
         )
     settings: Settings = request.app.state.settings
     assert settings.password_pepper is not None
-    temporary_password = generate_temporary_password()
     user = User(
         email=normalize_email(payload.email),
         display_name=payload.display_name.strip(),
         password_hash=hash_password(
-            temporary_password,
+            payload.password,
             settings.password_pepper.get_secret_value(),
         ),
         must_change_password=True,
@@ -253,10 +249,7 @@ async def create_internal_user(
     await database.commit()
     response.headers["Cache-Control"] = "no-store"
     user_response = _internal_user_response(user)
-    return ProvisionedInternalUserResponse(
-        **user_response.model_dump(),
-        temporary_password=temporary_password,
-    )
+    return user_response
 
 
 @router.get("/internal-users", response_model=list[InternalUserResponse])
@@ -412,7 +405,7 @@ async def archive_organization(
 
 @router.post(
     "/organizations/{organization_id}/members",
-    response_model=ProvisionedMemberResponse,
+    response_model=MemberResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def create_member(
@@ -422,7 +415,7 @@ async def create_member(
     response: Response,
     actor: AdminWrite,
     database: Annotated[AsyncSession, Depends(get_database_session)],
-) -> ProvisionedMemberResponse:
+) -> MemberResponse:
     organization = await _get_organization(database, organization_id, for_update=True)
     if organization.status != OrganizationStatus.ACTIVE:
         raise HTTPException(status.HTTP_409_CONFLICT, "organization is not active")
@@ -465,9 +458,8 @@ async def create_member(
 
     settings: Settings = request.app.state.settings
     assert settings.password_pepper is not None
-    temporary_password = generate_temporary_password()
     password_hash = hash_password(
-        temporary_password,
+        payload.password,
         settings.password_pepper.get_secret_value(),
     )
     if user is None:
@@ -541,11 +533,7 @@ async def create_member(
         await database.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "member could not be provisioned") from error
     response.headers["Cache-Control"] = "no-store"
-    member_response = _member_response(membership, user)
-    return ProvisionedMemberResponse(
-        **member_response.model_dump(),
-        temporary_password=temporary_password,
-    )
+    return _member_response(membership, user)
 
 
 @router.get(

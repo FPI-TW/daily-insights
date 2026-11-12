@@ -7,6 +7,7 @@ import { browserAuthClient, rememberCsrfToken } from "#/lib/auth"
 import { canEnterBackOffice, canEnterCustomer } from "#/lib/authorization"
 import { toast } from "#/lib/motion"
 import { LocaleSwitcher } from "./LocaleSwitcher"
+import { PasswordVisibilityInput } from "./PasswordVisibilityInput"
 
 type Portal = "customer" | "admin"
 
@@ -140,15 +141,15 @@ export function PortalLogin({
             {t("email")}
             <input name="email" type="email" autoComplete="username" required />
           </label>
-          <label>
-            {t("password")}
-            <input
+          <div className="grid gap-2">
+            <label htmlFor="login-password">{t("password")}</label>
+            <PasswordVisibilityInput
+              id="login-password"
               name="password"
-              type="password"
               autoComplete="current-password"
               required
             />
-          </label>
+          </div>
           <AnimatePresence>
             {error ? (
               <motion.p

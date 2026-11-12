@@ -194,6 +194,8 @@ const resources: Resource = {
       createMemberTitle: "建立登入帳號",
       createMember: "建立會員",
       memberCreated: "建立完成",
+      accountPasswordRequirements:
+        "密碼至少 8 碼，僅可使用英文大小寫字母與數字。",
       memberCreateConflict: "此電子郵件已被使用，或已加入其他組織。",
       displayName: "顯示名稱",
       auditReason: "異動原因",
@@ -207,7 +209,7 @@ const resources: Resource = {
       memberReason_support_request: "客戶支援需求",
       temporaryPasswordTitle: "請立即保存臨時密碼",
       temporaryPasswordDescription:
-        "{{email}} 首次登入時需要使用此密碼；關閉後將無法再次查看。",
+        "{{email}} 首次登入時需使用你設定的密碼，登入後需變更。關閉後將無法再次查看。",
       copyPassword: "複製密碼",
       copied: "已複製",
       dismiss: "關閉",
@@ -227,6 +229,8 @@ const resources: Resource = {
         "確定要移除 {{email}} 嗎？該帳號會立即登出並停止存取。",
       email: "電子郵件",
       password: "密碼",
+      showPassword: "顯示密碼",
+      hidePassword: "隱藏密碼",
       currentPassword: "目前密碼",
       newPassword: "新密碼",
       changePassword: "變更密碼",
@@ -1238,6 +1242,8 @@ const resources: Resource = {
       createMemberTitle: "建立登录账号",
       createMember: "建立会员",
       memberCreated: "建立完成",
+      accountPasswordRequirements:
+        "密码至少 8 位，仅可使用英文字母大小写和数字。",
       memberCreateConflict: "此电子邮件已被使用，或已加入其他组织。",
       displayName: "显示名称",
       auditReason: "变更原因",
@@ -1251,7 +1257,7 @@ const resources: Resource = {
       memberReason_support_request: "客户支持需求",
       temporaryPasswordTitle: "请立即保存临时密码",
       temporaryPasswordDescription:
-        "{{email}} 首次登录时需要使用此密码；关闭后将无法再次查看。",
+        "{{email}} 首次登录时需使用你设置的密码，登录后需更改。关闭后将无法再次查看。",
       copyPassword: "复制密码",
       copied: "已复制",
       dismiss: "关闭",
@@ -1271,6 +1277,8 @@ const resources: Resource = {
         "确定要移除 {{email}} 吗？该账号会立即退出并停止访问。",
       email: "电子邮件",
       password: "密码",
+      showPassword: "显示密码",
+      hidePassword: "隐藏密码",
       currentPassword: "当前密码",
       newPassword: "新密码",
       changePassword: "更改密码",
@@ -2287,6 +2295,8 @@ const resources: Resource = {
       createMemberTitle: "Create a sign-in account",
       createMember: "Create member",
       memberCreated: "Member created",
+      accountPasswordRequirements:
+        "Use at least 8 characters: English letters and digits only.",
       memberCreateConflict:
         "This email is already in use or belongs to another organization.",
       displayName: "Display name",
@@ -2301,7 +2311,7 @@ const resources: Resource = {
       memberReason_support_request: "Customer support request",
       temporaryPasswordTitle: "Save the temporary password now",
       temporaryPasswordDescription:
-        "{{email}} needs this password for the first sign-in. It cannot be viewed again after closing.",
+        "{{email}} needs the password you set for the first sign-in and must change it afterward. It cannot be viewed again after closing.",
       copyPassword: "Copy password",
       copied: "Copied",
       dismiss: "Dismiss",
@@ -2321,6 +2331,8 @@ const resources: Resource = {
         "Remove {{email}}? This account will be signed out and lose access immediately.",
       email: "Email",
       password: "Password",
+      showPassword: "Show password",
+      hidePassword: "Hide password",
       currentPassword: "Current password",
       newPassword: "New password",
       changePassword: "Change password",

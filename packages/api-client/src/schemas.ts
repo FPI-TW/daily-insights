@@ -4,7 +4,10 @@ import trackedIndexCatalogContract from "./tracked-index-catalog.json"
 export const localeSchema = z.enum(["zh-hant", "zh-hans", "en"])
 export type Locale = z.infer<typeof localeSchema>
 
-export const launchMarketCodeSchema = z.enum(["global_macro_bonds", "us_equity"])
+export const launchMarketCodeSchema = z.enum([
+  "global_macro_bonds",
+  "us_equity",
+])
 export type LaunchMarketCode = z.infer<typeof launchMarketCodeSchema>
 // Every market in the API catalog; visibility per organization comes from
 // /api/markets, which is what drives customer navigation.
@@ -534,10 +537,10 @@ export const memberSchema = z.object({
 export type Member = z.infer<typeof memberSchema>
 export const memberListSchema = z.array(memberSchema)
 
-export const provisionedMemberSchema = memberSchema.extend({
-  temporary_password: z.string().min(1),
-})
-export type ProvisionedMember = z.infer<typeof provisionedMemberSchema>
+export const accountPasswordSchema = z
+  .string()
+  .min(8)
+  .regex(/^[A-Za-z0-9]+$/)
 
 export type OrganizationCreateInput = {
   name: string
@@ -552,6 +555,7 @@ export type MemberCreateInput = {
   trial_days?: number
   email: string
   display_name: string
+  password: string
   reason: string
 }
 

@@ -692,7 +692,6 @@ describe("API client trust boundary", () => {
           status: "active",
           must_change_password: true,
           joined_at: "2026-07-27T03:00:00Z",
-          temporary_password: "TemporaryPassword123!",
         },
         { status: 201 }
       )
@@ -703,6 +702,7 @@ describe("API client trust boundary", () => {
       {
         email: "member@example.com",
         display_name: "Member",
+        password: "Abcd1234",
         reason: "Provision seat",
       },
       "csrf-token"
@@ -718,9 +718,11 @@ describe("API client trust boundary", () => {
     expect(JSON.parse(String(captured?.body))).toEqual({
       email: "member@example.com",
       display_name: "Member",
+      password: "Abcd1234",
       reason: "Provision seat",
     })
-    expect(result.temporary_password).toBe("TemporaryPassword123!")
+    expect(result.email).toBe("member@example.com")
+    expect(result).not.toHaveProperty("temporary_password")
   })
 
   it("rejects malformed organization responses", async () => {
@@ -985,22 +987,55 @@ it("signs and completes stateless Podcast uploads with validated responses and C
 
 describe("Podcast removal client", () => {
   it("sends a validated DELETE with version and CSRF and accepts empty 204", async () => {
-    const transport = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
-    await expect(createPodcastAdminClient(transport).remove("episode", { expected_version: 2 }, "csrf")).resolves.toBeUndefined()
-    expect(transport).toHaveBeenCalledWith("/api/admin/podcasts/episode", expect.objectContaining({ method: "DELETE", headers: expect.objectContaining({ "X-CSRF-Token": "csrf" }), body: JSON.stringify({ expected_version: 2 }) }))
-    await expect(createPodcastAdminClient(transport).remove("episode", { expected_version: 0 }, "csrf")).rejects.toThrow()
+    const transport = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }))
+    await expect(
+      createPodcastAdminClient(transport).remove(
+        "episode",
+        { expected_version: 2 },
+        "csrf"
+      )
+    ).resolves.toBeUndefined()
+    expect(transport).toHaveBeenCalledWith(
+      "/api/admin/podcasts/episode",
+      expect.objectContaining({
+        method: "DELETE",
+        headers: expect.objectContaining({ "X-CSRF-Token": "csrf" }),
+        body: JSON.stringify({ expected_version: 2 }),
+      })
+    )
+    await expect(
+      createPodcastAdminClient(transport).remove(
+        "episode",
+        { expected_version: 0 },
+        "csrf"
+      )
+    ).rejects.toThrow()
     expect(transport).toHaveBeenCalledTimes(1)
   })
 
   it("retains the incomplete-removal code for retry and rejects premature success", async () => {
     const detail = { code: "episode_removal_incomplete", episode_id: "episode" }
-    const client = createPodcastAdminClient(async () => Response.json({ detail }, { status: 503 }))
-    await expect(client.remove("episode", { expected_version: 2 }, "csrf")).rejects.toMatchObject({ status: 503, detail })
-    await expect(createPodcastAdminClient(async () => Response.json({ status: "pending" })).remove("episode", { expected_version: 2 }, "csrf")).rejects.toThrow("Unexpected Podcast removal response")
+    const client = createPodcastAdminClient(async () =>
+      Response.json({ detail }, { status: 503 })
+    )
+    await expect(
+      client.remove("episode", { expected_version: 2 }, "csrf")
+    ).rejects.toMatchObject({ status: 503, detail })
+    await expect(
+      createPodcastAdminClient(async () =>
+        Response.json({ status: "pending" })
+      ).remove("episode", { expected_version: 2 }, "csrf")
+    ).rejects.toThrow("Unexpected Podcast removal response")
   })
 
   it("exports deletion in generated OpenAPI", () => {
-    expect(openapi.paths["/api/admin/podcasts/{episode_id}"].delete.operationId).toBe("admin_podcasts_remove")
-    expect(openapi.paths["/api/admin/podcasts/{episode_id}"].delete.responses).toHaveProperty("204")
+    expect(
+      openapi.paths["/api/admin/podcasts/{episode_id}"].delete.operationId
+    ).toBe("admin_podcasts_remove")
+    expect(
+      openapi.paths["/api/admin/podcasts/{episode_id}"].delete.responses
+    ).toHaveProperty("204")
   })
 })

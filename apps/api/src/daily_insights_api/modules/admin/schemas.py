@@ -2,9 +2,10 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from daily_insights_api.core.enums import OrganizationStatus, SystemRole, UserStatus
+from daily_insights_api.core.security import validate_account_password
 
 
 class AdminInput(BaseModel):
@@ -43,7 +44,23 @@ class OrganizationResponse(BaseModel):
     updated_at: datetime
 
 
-class MemberCreate(AdminInput):
+class AccountCreate(AdminInput):
+    password: str = Field(
+        min_length=8,
+        pattern=r"^[A-Za-z0-9]+$",
+        repr=False,
+        json_schema_extra={"writeOnly": True},
+    )
+
+    @field_validator("password", mode="before")
+    @classmethod
+    def validate_untrimmed_password(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            validate_account_password(value)
+        return value
+
+
+class MemberCreate(AccountCreate):
     member_type: Literal["regular", "trial"] = "regular"
     trial_days: int | None = Field(default=None, ge=1, strict=True)
 
@@ -90,11 +107,7 @@ class MemberResponse(BaseModel):
     joined_at: datetime
 
 
-class ProvisionedMemberResponse(MemberResponse):
-    temporary_password: str
-
-
-class InternalUserCreate(AdminInput):
+class InternalUserCreate(AccountCreate):
     email: str = Field(min_length=3, max_length=320)
     display_name: str = Field(min_length=1, max_length=200)
     system_role: SystemRole
@@ -108,10 +121,6 @@ class InternalUserResponse(BaseModel):
     system_role: SystemRole
     status: UserStatus
     must_change_password: bool
-
-
-class ProvisionedInternalUserResponse(InternalUserResponse):
-    temporary_password: str
 
 
 class MarketPolicyUpdate(AdminInput):

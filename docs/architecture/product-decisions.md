@@ -37,11 +37,10 @@ not requirements until accepted.
 ### Identity provisioning
 
 - Public self-registration is not allowed.
-- An internal `admin` creates member accounts. The system generates a
-  cryptographically random temporary password; only its hash is persisted and
-  the plaintext is displayed once to the creating admin for delivery through
-  the team's existing secure out-of-band channel. It cannot be retrieved
-  later.
+- An internal `admin` creates member accounts and enters an initial password of
+  at least eight ASCII letters or digits. Only its hash is persisted; the
+  creating admin sees the entered password once for delivery through the team's
+  existing secure out-of-band channel. It cannot be retrieved later.
 - A provisioned account is active but marked as requiring a password change.
   The user must replace the temporary password after the first successful
   login before accessing other product capabilities.

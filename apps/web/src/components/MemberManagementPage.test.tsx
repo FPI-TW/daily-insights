@@ -70,9 +70,9 @@ describe("trial member administration", () => {
   it("creates a trial with default seven days and the same account fields", async () => {
     createMember.mockResolvedValue({
       ...member,
+      email: "new@example.com",
       status: "active",
       trial_expired: false,
-      temporary_password: "Aa12!testpass",
     })
     show()
     fireEvent.change(screen.getByLabelText("Display name"), {
@@ -81,6 +81,22 @@ describe("trial member administration", () => {
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "new@example.com" },
     })
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "Abcd1234" },
+    })
+    expect(screen.getByLabelText("Password")).toHaveAttribute(
+      "type",
+      "password"
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Show password" }))
+    expect(screen.getByLabelText("Password")).toHaveAttribute("type", "text")
+    expect(screen.getByLabelText("Password")).toHaveValue("Abcd1234")
+    expect(createMember).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Hide password" }))
+    expect(screen.getByLabelText("Password")).toHaveAttribute(
+      "type",
+      "password"
+    )
     fireEvent.change(screen.getByLabelText("Member type"), {
       target: { value: "trial" },
     })
@@ -92,6 +108,7 @@ describe("trial member administration", () => {
         {
           display_name: "New Trial",
           email: "new@example.com",
+          password: "Abcd1234",
           member_type: "trial",
           trial_days: 7,
           reason: "new_seat",
@@ -99,8 +116,24 @@ describe("trial member administration", () => {
         "csrf"
       )
     )
-    expect(await screen.findByText("Aa12!testpass")).toBeInTheDocument()
+    expect(await screen.findByText("Abcd1234")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Copy password" })).toBeVisible()
+    expect(screen.getByLabelText("Password")).toHaveValue("")
   })
+  it.each(["short7", "Invalid!123", "Password 123", "密碼123456"])(
+    "rejects an invalid account password: %s",
+    async password => {
+      show()
+      fireEvent.change(screen.getByLabelText("Password"), {
+        target: { value: password },
+      })
+      fireEvent.submit(screen.getByLabelText("Password").closest("form")!)
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Use at least 8 characters: English letters and digits only."
+      )
+      expect(createMember).not.toHaveBeenCalled()
+    }
+  )
   it("filters members and preserves a suspended status while editing the Taipei deadline", async () => {
     updateMember.mockResolvedValue(member)
     show([

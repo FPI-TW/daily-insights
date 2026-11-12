@@ -30,6 +30,8 @@ from daily_insights_api.web.app import create_app
 pytestmark = pytest.mark.integration
 
 MEMBER_PASSWORD = "12345678"
+CREATION_PASSWORD = "InitialPass123"
+RESTORED_PASSWORD = "RestoredPass456"
 
 
 @dataclass
@@ -300,23 +302,27 @@ async def provision_member(
         json={
             "email": email,
             "display_name": email.split("@", maxsplit=1)[0],
+            "password": CREATION_PASSWORD,
             "reason": "Phase 1 integration test",
         },
     )
     assert response.status_code == 201, response.text
-    return cast(dict[str, object], response.json())
+    result = cast(dict[str, object], response.json())
+    assert "password" not in result and "temporary_password" not in result
+    return result
 
 
 async def activate_member(
     harness: Harness,
     provisioned: dict[str, object],
+    password: str = CREATION_PASSWORD,
 ) -> tuple[AsyncClient, str]:
     app = create_app(harness.settings, ready, harness.session_factory)
     client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
     csrf_token = await login(
         client,
         str(provisioned["email"]),
-        str(provisioned["temporary_password"]),
+        password,
     )
     old_session_token = client.cookies.get(harness.settings.session_cookie_name)
     assert old_session_token is not None
@@ -326,7 +332,7 @@ async def activate_member(
         "/api/auth/change-password",
         headers={"X-CSRF-Token": csrf_token},
         json={
-            "current_password": provisioned["temporary_password"],
+            "current_password": password,
             "new_password": MEMBER_PASSWORD,
         },
     )
@@ -403,17 +409,49 @@ async def test_admin_provisioning_forces_password_change_and_csrf(harness: Harne
         json={
             "email": "assets@example.com",
             "display_name": "Asset Manager",
+            "password": CREATION_PASSWORD,
             "system_role": "asset_manager",
             "reason": "Phase 1 role test",
         },
     )
     assert asset_manager.status_code == 201
+    assert "password" not in asset_manager.json()
+    assert "temporary_password" not in asset_manager.json()
     asset_client, _ = await activate_member(harness, asset_manager.json())
     try:
         forbidden = await asset_client.get("/api/admin/organizations")
         assert forbidden.status_code == 403
     finally:
         await asset_client.aclose()
+
+
+async def test_account_creation_requires_explicit_valid_password(harness: Harness) -> None:
+    csrf = await login(harness.client, "admin@example.com", "AdminPassword123!")
+    organization_id = await create_organization(harness, csrf, slug="password-policy", seat_limit=1)
+    requests = [
+        (
+            "/api/admin/internal-users",
+            {
+                "email": "new-admin@example.com",
+                "display_name": "New Admin",
+                "system_role": "asset_manager",
+                "reason": "password policy",
+            },
+        ),
+        (
+            f"/api/admin/organizations/{organization_id}/members",
+            {
+                "email": "new-member@example.com",
+                "display_name": "New Member",
+                "reason": "password policy",
+            },
+        ),
+    ]
+    for path, payload in requests:
+        for password in [None, "short7", "Invalid!123", "Password 123"]:
+            body = {**payload, **({"password": password} if password is not None else {})}
+            response = await harness.client.post(path, headers={"X-CSRF-Token": csrf}, json=body)
+            assert response.status_code == 422, response.text
 
 
 async def test_legacy_index_refresh_endpoint_is_removed(harness: Harness) -> None:
@@ -430,6 +468,7 @@ async def test_legacy_index_refresh_endpoint_is_removed(harness: Harness) -> Non
         json={
             "email": "index-assets@example.com",
             "display_name": "Index Asset Manager",
+            "password": CREATION_PASSWORD,
             "system_role": "asset_manager",
             "reason": "Index refresh authorization test",
         },
@@ -461,6 +500,7 @@ async def test_orchestration_requires_real_admin_session_and_csrf(harness: Harne
         json={
             "email": "orchestration-assets@example.com",
             "display_name": "Orchestration Asset Manager",
+            "password": CREATION_PASSWORD,
             "system_role": "asset_manager",
             "reason": "Orchestration authorization test",
         },
@@ -587,6 +627,7 @@ async def test_suspended_member_occupies_seat_until_membership_removal(
         json={
             "email": "second@example.com",
             "display_name": "Second",
+            "password": CREATION_PASSWORD,
             "reason": "seat test",
         },
     )
@@ -655,7 +696,12 @@ async def test_concurrent_member_creation_cannot_exceed_seat_limit(harness: Harn
         response = await harness.client.post(
             f"/api/admin/organizations/{organization_id}/members",
             headers={"X-CSRF-Token": admin_csrf},
-            json={"email": email, "display_name": email, "reason": "concurrency test"},
+            json={
+                "email": email,
+                "display_name": email,
+                "password": CREATION_PASSWORD,
+                "reason": "concurrency test",
+            },
         )
         return response.status_code
 
@@ -680,6 +726,7 @@ async def test_concurrent_same_email_across_organizations_returns_conflict(
             json={
                 "email": "same-email@example.com",
                 "display_name": "Same Email",
+                "password": CREATION_PASSWORD,
                 "reason": "concurrency conflict test",
             },
         )
@@ -931,13 +978,14 @@ async def test_bootstrap_admin_loads_full_model_registry_and_can_log_in(
 ) -> None:
     monkeypatch.setattr(bootstrap_admin_module, "get_settings", lambda: harness.settings)
 
-    temporary_password = await bootstrap_admin_module.bootstrap_admin(
+    await bootstrap_admin_module.bootstrap_admin(
         "bootstrap@example.com",
         "Bootstrap Admin",
+        CREATION_PASSWORD,
     )
     response = await harness.client.post(
         "/api/auth/login",
-        json={"email": "bootstrap@example.com", "password": temporary_password},
+        json={"email": "bootstrap@example.com", "password": CREATION_PASSWORD},
     )
 
     assert response.status_code == 200
@@ -1100,6 +1148,7 @@ async def provision_trial(
         json={
             "email": email,
             "display_name": "Trial",
+            "password": CREATION_PASSWORD,
             "reason": "trial acceptance",
             "member_type": "trial",
             **fields,
@@ -1107,7 +1156,7 @@ async def provision_trial(
     )
     assert response.status_code == 201, response.text
     result: dict[str, Any] = response.json()
-    assert len(result["temporary_password"]) == 12
+    assert "temporary_password" not in result
     return result
 
 
@@ -1130,7 +1179,7 @@ async def test_trial_login_rolls_back_expiry_during_login_work(
     )
     member = await provision_trial(harness, csrf, organization_id, "login-work@example.com")
     user_id = uuid.UUID(str(member["user_id"]))
-    password = str(member["temporary_password"])
+    password = CREATION_PASSWORD
     clock_time = datetime.now(UTC)
     deadline = clock_time + timedelta(hours=1)
     assert harness.settings.password_pepper is not None
@@ -1216,7 +1265,7 @@ async def test_valid_trial_login_rehashes_legacy_password(
     )
     member = await provision_trial(harness, csrf, organization_id, "legacy-trial@example.com")
     user_id = uuid.UUID(str(member["user_id"]))
-    password = str(member["temporary_password"])
+    password = CREATION_PASSWORD
     assert harness.settings.password_pepper is not None
     pepper = harness.settings.password_pepper.get_secret_value()
     with monkeypatch.context() as temporary:
@@ -1475,7 +1524,7 @@ async def test_password_change_rolls_back_expiry_during_credential_work(
             )
             user_id = uuid.UUID(str(member["user_id"]))
             # Keep the initial-password flag set to verify it also rolls back.
-            current_password = str(member["temporary_password"])
+            current_password = CREATION_PASSWORD
         csrf = await login(client, email, current_password)
 
         clock_time = datetime.now(UTC)
@@ -1629,6 +1678,7 @@ async def test_removed_regular_cannot_be_reprovisioned_as_trial_without_mutation
             json={
                 "email": " REMOVED-REGULAR@example.com ",
                 "display_name": "Must not change",
+                "password": CREATION_PASSWORD,
                 "reason": "try bypassing conversion restriction",
                 "member_type": "trial",
                 "trial_days": 14,
@@ -1658,6 +1708,7 @@ async def test_removed_member_reprovisioning_preserves_credentials_seats_and_aud
     payload = {
         "email": "restore@example.com",
         "display_name": "Original",
+        "password": CREATION_PASSWORD,
         "reason": "original provisioning",
         "member_type": original_type,
         **({"trial_days": 2} if original_type == "trial" else {}),
@@ -1686,6 +1737,7 @@ async def test_removed_member_reprovisioning_preserves_credentials_seats_and_aud
         restore_payload = {
             **payload,
             "display_name": "Restored",
+            "password": RESTORED_PASSWORD,
             "reason": "restore membership",
             "member_type": restored_type,
             **({"trial_days": 11} if restored_type == "trial" else {}),
@@ -1717,7 +1769,7 @@ async def test_removed_member_reprovisioning_preserves_credentials_seats_and_aud
         assert result["member_type"] == restored_type
         assert result["status"] == "active" and result["must_change_password"]
         assert result["display_name"] == "Restored"
-        assert result["temporary_password"] != member["temporary_password"]
+        assert "temporary_password" not in result
         if restored_type == "trial":
             assert datetime.fromisoformat(result["trial_expires_at"]) - datetime.fromisoformat(
                 result["joined_at"]
@@ -1733,7 +1785,7 @@ async def test_removed_member_reprovisioning_preserves_credentials_seats_and_aud
             json={"email": member["email"], "password": MEMBER_PASSWORD},
         )
         assert stale_password.status_code == 401
-        await login(member_client, member["email"], result["temporary_password"])
+        await login(member_client, member["email"], RESTORED_PASSWORD)
         assert (await member_client.get("/api/auth/me")).json()["must_change_password"]
         assert (await member_client.get("/api/markets")).status_code == 403
 
@@ -1824,11 +1876,11 @@ async def test_trial_login_expiry_sessions_seats_and_conversion(harness: Harness
     assert expiry - joined == timedelta(days=7)
     assert trial["member_type"] == "trial" and not trial["trial_expired"]
     admin_cookies = dict(harness.client.cookies)
-    member_csrf = await login(harness.client, "trial@example.com", trial["temporary_password"])
+    member_csrf = await login(harness.client, "trial@example.com", CREATION_PASSWORD)
     changed = await harness.client.post(
         "/api/auth/change-password",
         headers={"X-CSRF-Token": member_csrf},
-        json={"current_password": trial["temporary_password"], "new_password": MEMBER_PASSWORD},
+        json={"current_password": CREATION_PASSWORD, "new_password": MEMBER_PASSWORD},
     )
     assert changed.status_code == 200, changed.text
     member_cookies = dict(harness.client.cookies)
@@ -1956,7 +2008,12 @@ async def test_trial_renewal_and_creation_cannot_take_same_last_seat(harness: Ha
         harness.client.post(
             f"/api/admin/organizations/{org}/members",
             headers={"X-CSRF-Token": csrf},
-            json={"email": "new@example.com", "display_name": "New", "reason": "seat"},
+            json={
+                "email": "new@example.com",
+                "display_name": "New",
+                "password": CREATION_PASSWORD,
+                "reason": "seat",
+            },
         ),
     )
     assert sorted([renew.status_code, create.status_code]) in ([200, 409], [201, 409])
@@ -2049,7 +2106,7 @@ async def test_active_trial_extension_preserves_session_and_immediate_expiry_rev
     org = await create_organization(harness, csrf, slug="active-trial", seat_limit=1)
     trial = await provision_trial(harness, csrf, org, "active-trial@example.com")
     admin_cookies = dict(harness.client.cookies)
-    await login(harness.client, "active-trial@example.com", trial["temporary_password"])
+    await login(harness.client, "active-trial@example.com", CREATION_PASSWORD)
     member_cookies = dict(harness.client.cookies)
     harness.client.cookies.clear()
     harness.client.cookies.update(admin_cookies)

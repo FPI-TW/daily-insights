@@ -6,9 +6,9 @@ from daily_insights_api.core.security import (
     SCRYPT_P,
     SCRYPT_R,
     PasswordPolicyError,
-    generate_temporary_password,
     hash_password,
     password_needs_rehash,
+    validate_account_password,
     validate_password,
     verify_password,
 )
@@ -30,15 +30,15 @@ def test_password_hash_is_salted_and_verifiable() -> None:
     assert password_needs_rehash(first.replace("$5$", "$1$", 1))
 
 
-def test_generated_temporary_password_satisfies_policy() -> None:
-    temporary_password = generate_temporary_password()
+@pytest.mark.parametrize("password", ["abcdefgh", "ABCDEFGH", "12345678", "Abcd1234"])
+def test_account_password_policy_accepts_english_letters_and_digits(password: str) -> None:
+    validate_account_password(password)
 
-    assert len(temporary_password) == 12
-    assert any(c.islower() for c in temporary_password)
-    assert any(c.isupper() for c in temporary_password)
-    assert any(c.isdigit() for c in temporary_password)
-    assert any(c in "!@#$%^&*-_=+" for c in temporary_password)
-    hash_password(temporary_password, "pepper")
+
+@pytest.mark.parametrize("password", ["short7", "Invalid!123", "Password 123", "密碼123456"])
+def test_account_password_policy_rejects_short_or_non_ascii_passwords(password: str) -> None:
+    with pytest.raises(PasswordPolicyError):
+        validate_account_password(password)
 
 
 @pytest.mark.parametrize(

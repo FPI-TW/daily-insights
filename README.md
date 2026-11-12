@@ -86,7 +86,7 @@ make bootstrap-admin EMAIL=admin@example.com NAME="Admin"
 `DAILY_INSIGHTS_ENVIRONMENT`，未設定時視為 development），會使用 Twelve Data 正式 credential 並消耗 API credits；不會
 啟用背景排程。正式環境啟用晨報時只驗證功能開關、provider URL 與 API key。
 
-指令只會顯示一次隨機臨時密碼；管理員登入後必須立即更改。
+指令會提示輸入並確認初始密碼（至少 8 碼，僅限英文字母與數字），不會回顯密碼；管理員登入後必須立即更改。
 
 重點新聞由常駐的 `newsroom-worker` 持續收稿與分析，並在每日 08:00 由統一 routine
 組稿。本地驗證時，先在 `apps/api/.env` 設定 `DAILY_INSIGHTS_NEWSROOM_ENABLED=true`
