@@ -6,10 +6,10 @@ import {
 import { formatDateStamp } from "#/lib/format"
 import {
   ApiError,
+  accountPasswordSchema,
   type Locale,
   type Member,
   type Organization,
-  type ProvisionedMember,
 } from "@daily-insights/api-client"
 import { useForm } from "@tanstack/react-form"
 import { useRouter } from "@tanstack/react-router"
@@ -20,6 +20,7 @@ import { browserAdministrationClient } from "#/lib/admin-members"
 import { requireCsrfToken } from "#/lib/auth"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
 import { hoverLift, reveal, springs, useEnterAnimation } from "#/lib/motion"
+import { PasswordVisibilityInput } from "./PasswordVisibilityInput"
 
 type DirectoryEntry = {
   organization: Organization
@@ -78,8 +79,10 @@ export function MemberManagementPage({
   const [selectedOrganizationId, setSelectedOrganizationId] = useState(
     directory[0]?.organization.id ?? ""
   )
-  const [provisionedMember, setProvisionedMember] =
-    useState<ProvisionedMember | null>(null)
+  const [createdCredentials, setCreatedCredentials] = useState<{
+    email: string
+    password: string
+  } | null>(null)
 
   useEffect(() => {
     const firstOrganization = directory[0]?.organization
@@ -116,10 +119,10 @@ export function MemberManagementPage({
         </p>
       </header>
 
-      {provisionedMember ? (
+      {createdCredentials ? (
         <TemporaryPasswordNotice
-          member={provisionedMember}
-          onDismiss={() => setProvisionedMember(null)}
+          credentials={createdCredentials}
+          onDismiss={() => setCreatedCredentials(null)}
         />
       ) : null}
 
@@ -146,7 +149,7 @@ export function MemberManagementPage({
                 }
                 onClick={() => {
                   setSelectedOrganizationId(organization.id)
-                  setProvisionedMember(null)
+                  setCreatedCredentials(null)
                 }}
               >
                 <span>{organization.name}</span>
@@ -164,7 +167,7 @@ export function MemberManagementPage({
             locale={locale}
             onCreated={organization => {
               setSelectedOrganizationId(organization.id)
-              setProvisionedMember(null)
+              setCreatedCredentials(null)
             }}
           />
         </aside>
@@ -203,7 +206,9 @@ export function MemberManagementPage({
                   selectedEntry.organization.seat_count <
                   selectedEntry.organization.seat_limit
                 }
-                onCreated={setProvisionedMember}
+                onCreated={(member, password) =>
+                  setCreatedCredentials({ email: member.email, password })
+                }
               />
 
               <section className="mt-7" aria-labelledby="member-list-title">
@@ -430,7 +435,7 @@ function CreateMemberForm({
   organizationId: string
   locale: Locale
   seatsAvailable: boolean
-  onCreated: (member: ProvisionedMember) => void
+  onCreated: (member: Member, password: string) => void
 }) {
   const { t } = useTranslation()
   const router = useRouter()
@@ -440,18 +445,24 @@ function CreateMemberForm({
     defaultValues: {
       displayName: "",
       email: "",
+      password: "",
       reason: "new_seat",
       memberType: "regular" as "regular" | "trial",
       trialDays: 7,
     },
     onSubmit: async ({ value }) => {
       setError("")
+      if (!accountPasswordSchema.safeParse(value.password).success) {
+        setError(t("accountPasswordRequirements"))
+        return
+      }
       try {
         const member = await browserAdministrationClient().createMember(
           organizationId,
           {
             display_name: value.displayName,
             email: value.email,
+            password: value.password,
             member_type: value.memberType,
             ...(value.memberType === "trial"
               ? { trial_days: value.trialDays }
@@ -460,7 +471,7 @@ function CreateMemberForm({
           },
           await requireCsrfToken()
         )
-        onCreated(member)
+        onCreated(member, value.password)
         form.reset()
         await router.invalidate({ sync: true })
       } catch (caught) {
@@ -519,6 +530,30 @@ function CreateMemberForm({
                 onChange={event => field.handleChange(event.target.value)}
               />
             </label>
+          )}
+        </form.Field>
+        <form.Field name="password">
+          {field => (
+            <div className="grid gap-2">
+              <label htmlFor="member-password">{t("password")}</label>
+              <PasswordVisibilityInput
+                id="member-password"
+                required
+                autoComplete="new-password"
+                minLength={8}
+                pattern="[A-Za-z0-9]{8,}"
+                aria-describedby="account-password-requirements"
+                value={field.state.value}
+                onBlur={field.handleBlur}
+                onChange={event => field.handleChange(event.target.value)}
+              />
+              <p
+                id="account-password-requirements"
+                className="m-0 text-xs text-sea-ink-soft"
+              >
+                {t("accountPasswordRequirements")}
+              </p>
+            </div>
           )}
         </form.Field>
       </div>
@@ -611,15 +646,14 @@ function CreateMemberForm({
 }
 
 function TemporaryPasswordNotice({
-  member,
+  credentials,
   onDismiss,
 }: {
-  member: ProvisionedMember
+  credentials: { email: string; password: string }
   onDismiss: () => void
 }) {
   const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
-
   return (
     <section
       className="surface-panel mb-5 grid grid-cols-[minmax(0,1fr)_minmax(14rem,0.55fr)] items-center gap-4 border-l-4 border-l-lagoon p-5 max-[42rem]:grid-cols-1"
@@ -628,17 +662,17 @@ function TemporaryPasswordNotice({
       <div>
         <p className="eyebrow">{t("memberCreated")}</p>
         <h2>{t("temporaryPasswordTitle")}</h2>
-        <p>{t("temporaryPasswordDescription", { email: member.email })}</p>
+        <p>{t("temporaryPasswordDescription", { email: credentials.email })}</p>
       </div>
       <code className="row-span-2 select-all rounded-lg border border-line bg-surface px-4 py-3 font-mono text-sm text-sea-ink [overflow-wrap:anywhere] max-[42rem]:row-auto">
-        {member.temporary_password}
+        {credentials.password}
       </code>
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => {
             void navigator.clipboard
-              .writeText(member.temporary_password)
+              .writeText(credentials.password)
               .then(() => setCopied(true))
           }}
         >

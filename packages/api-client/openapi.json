@@ -2306,6 +2306,13 @@
             "title": "Email",
             "type": "string"
           },
+          "password": {
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9]+$",
+            "title": "Password",
+            "type": "string",
+            "writeOnly": true
+          },
           "reason": {
             "maxLength": 500,
             "minLength": 1,
@@ -2316,7 +2323,13 @@
             "$ref": "#/components/schemas/SystemRole"
           }
         },
-        "required": ["email", "display_name", "system_role", "reason"],
+        "required": [
+          "password",
+          "email",
+          "display_name",
+          "system_role",
+          "reason"
+        ],
         "title": "InternalUserCreate",
         "type": "object"
       },
@@ -2931,6 +2944,13 @@
             "title": "Member Type",
             "type": "string"
           },
+          "password": {
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9]+$",
+            "title": "Password",
+            "type": "string",
+            "writeOnly": true
+          },
           "reason": {
             "maxLength": 500,
             "minLength": 1,
@@ -2950,7 +2970,7 @@
             "title": "Trial Days"
           }
         },
-        "required": ["email", "display_name", "reason"],
+        "required": ["password", "email", "display_name", "reason"],
         "title": "MemberCreate",
         "type": "object"
       },
@@ -6165,122 +6185,6 @@
         "title": "ProviderCatalogItem",
         "type": "object"
       },
-      "ProvisionedInternalUserResponse": {
-        "properties": {
-          "display_name": {
-            "title": "Display Name",
-            "type": "string"
-          },
-          "email": {
-            "title": "Email",
-            "type": "string"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "must_change_password": {
-            "title": "Must Change Password",
-            "type": "boolean"
-          },
-          "status": {
-            "$ref": "#/components/schemas/UserStatus"
-          },
-          "system_role": {
-            "$ref": "#/components/schemas/SystemRole"
-          },
-          "temporary_password": {
-            "title": "Temporary Password",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "email",
-          "display_name",
-          "system_role",
-          "status",
-          "must_change_password",
-          "temporary_password"
-        ],
-        "title": "ProvisionedInternalUserResponse",
-        "type": "object"
-      },
-      "ProvisionedMemberResponse": {
-        "properties": {
-          "display_name": {
-            "title": "Display Name",
-            "type": "string"
-          },
-          "email": {
-            "title": "Email",
-            "type": "string"
-          },
-          "joined_at": {
-            "format": "date-time",
-            "title": "Joined At",
-            "type": "string"
-          },
-          "member_type": {
-            "enum": ["regular", "trial"],
-            "title": "Member Type",
-            "type": "string"
-          },
-          "membership_id": {
-            "format": "uuid",
-            "title": "Membership Id",
-            "type": "string"
-          },
-          "must_change_password": {
-            "title": "Must Change Password",
-            "type": "boolean"
-          },
-          "status": {
-            "$ref": "#/components/schemas/UserStatus"
-          },
-          "temporary_password": {
-            "title": "Temporary Password",
-            "type": "string"
-          },
-          "trial_expired": {
-            "title": "Trial Expired",
-            "type": "boolean"
-          },
-          "trial_expires_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trial Expires At"
-          },
-          "user_id": {
-            "format": "uuid",
-            "title": "User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "member_type",
-          "trial_expires_at",
-          "trial_expired",
-          "membership_id",
-          "user_id",
-          "email",
-          "display_name",
-          "status",
-          "must_change_password",
-          "joined_at",
-          "temporary_password"
-        ],
-        "title": "ProvisionedMemberResponse",
-        "type": "object"
-      },
       "PublicationContent": {
         "additionalProperties": false,
         "description": "Locale-neutral application-owned values.\n\nDecimal is intentionally retained in memory and serialized as a JSON string\nby Pydantic. This avoids locale-specific formatting and binary float loss.",
@@ -7881,7 +7785,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProvisionedInternalUserResponse"
+                  "$ref": "#/components/schemas/InternalUserResponse"
                 }
               }
             },
@@ -9969,7 +9873,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProvisionedMemberResponse"
+                  "$ref": "#/components/schemas/MemberResponse"
                 }
               }
             },

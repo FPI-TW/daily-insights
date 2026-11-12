@@ -2260,6 +2260,8 @@ export interface components {
       display_name: string
       /** Email */
       email: string
+      /** Password */
+      password: string
       /** Reason */
       reason: string
       system_role: components["schemas"]["SystemRole"]
@@ -2484,6 +2486,8 @@ export interface components {
        * @enum {string}
        */
       member_type: "regular" | "trial"
+      /** Password */
+      password: string
       /** Reason */
       reason: string
       /** Trial Days */
@@ -3698,60 +3702,6 @@ export interface components {
       /** Ready */
       ready: boolean
     }
-    /** ProvisionedInternalUserResponse */
-    ProvisionedInternalUserResponse: {
-      /** Display Name */
-      display_name: string
-      /** Email */
-      email: string
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string
-      /** Must Change Password */
-      must_change_password: boolean
-      status: components["schemas"]["UserStatus"]
-      system_role: components["schemas"]["SystemRole"]
-      /** Temporary Password */
-      temporary_password: string
-    }
-    /** ProvisionedMemberResponse */
-    ProvisionedMemberResponse: {
-      /** Display Name */
-      display_name: string
-      /** Email */
-      email: string
-      /**
-       * Joined At
-       * Format: date-time
-       */
-      joined_at: string
-      /**
-       * Member Type
-       * @enum {string}
-       */
-      member_type: "regular" | "trial"
-      /**
-       * Membership Id
-       * Format: uuid
-       */
-      membership_id: string
-      /** Must Change Password */
-      must_change_password: boolean
-      status: components["schemas"]["UserStatus"]
-      /** Temporary Password */
-      temporary_password: string
-      /** Trial Expired */
-      trial_expired: boolean
-      /** Trial Expires At */
-      trial_expires_at: string | null
-      /**
-       * User Id
-       * Format: uuid
-       */
-      user_id: string
-    }
     /**
      * PublicationContent
      * @description Locale-neutral application-owned values.
@@ -4489,7 +4439,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          "application/json": components["schemas"]["ProvisionedInternalUserResponse"]
+          "application/json": components["schemas"]["InternalUserResponse"]
         }
       }
       /** @description Validation Error */
@@ -5944,7 +5894,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          "application/json": components["schemas"]["ProvisionedMemberResponse"]
+          "application/json": components["schemas"]["MemberResponse"]
         }
       }
       /** @description Validation Error */

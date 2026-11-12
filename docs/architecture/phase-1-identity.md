@@ -6,11 +6,12 @@ tests.
 ## Authentication boundary
 
 - There is no public registration.
-- An admin or the bootstrap command provisions an account and receives a
-  cryptographically random 12-character temporary password exactly once.
-  The shared generator guarantees lowercase, uppercase, digit and symbol characters
-  for customer members, internal accounts and bootstrap admins; existing passwords
-  and the eight-character minimum for user-selected passwords are unchanged.
+- An admin or the bootstrap command provisions an account with an explicitly
+  entered initial password of at least eight ASCII letters or digits. The
+  bootstrap command prompts without echoing the password; the member form
+  displays the entered password once for secure delivery. The API never returns
+  the plaintext. Existing passwords and the eight-character minimum for later
+  password changes are unchanged.
 - PostgreSQL stores only a versioned scrypt hash. A separate deployment secret
   is appended as a password pepper.
 - A provisioned user may authenticate, inspect their own identity, change the
@@ -136,7 +137,7 @@ all, regular and trial filters; account suspension remains a separate state.
   Reusing a removed regular membership in the same organization as a trial returns
   `409` before changing the account, password, membership or audit trail. Removed
   regular-to-regular, trial-to-trial and trial-to-regular reprovisioning remain
-  supported, with a new temporary password, mandatory first password change and
+  supported, with a newly entered temporary password, mandatory first password change and
   the existing seat checks. A new membership in another organization can be a
   trial even when the account has a removed regular membership elsewhere.
 - `PATCH` on the member accepts a timezone-aware `trial_expires_at` to shorten,

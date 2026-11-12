@@ -102,11 +102,12 @@ the API. The root env file is limited to local Compose infrastructure wiring.
   their contract reference and before/after values.
 - Every existing membership consumes a seat even when its user is suspended.
   Only removing the membership releases the seat.
-- Accounts are admin-provisioned; there is no public registration. A random
-  temporary password is stored only as a hash and must be changed after the
-  first successful login before normal application access is granted. Its
-  plaintext is shown once to the creating admin for secure out-of-band
-  delivery and is never retrievable.
+- Accounts are admin-provisioned; there is no public registration. The creating
+  admin enters a temporary password using at least eight ASCII letters or
+  digits. Only its hash is stored, and the user must change it after the first
+  successful login before normal application access is granted. The creating
+  admin sees the entered password once for secure out-of-band delivery; the API
+  never returns it.
 - Global model configuration is versioned. A generation snapshots all facts
   needed for historical attribution; changing the active pointer never mutates
   past rows.

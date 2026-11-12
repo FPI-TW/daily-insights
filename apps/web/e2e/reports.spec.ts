@@ -51,7 +51,13 @@ test("customer login opens reports, then a market detail without mobile overflow
 }) => {
   await openHydrated(page, "/en/login", 'input[name="email"]')
   await page.getByLabel("Email").fill(customerCredentials.email)
-  await page.getByLabel("Password").fill(customerCredentials.password)
+  const password = page.getByLabel("Password", { exact: true })
+  await expect(password).toHaveAttribute("type", "password")
+  await page.getByRole("button", { name: "Show password" }).click()
+  await expect(password).toHaveAttribute("type", "text")
+  await password.fill(customerCredentials.password)
+  await page.getByRole("button", { name: "Hide password" }).click()
+  await expect(password).toHaveAttribute("type", "password")
   await page.getByRole("button", { name: "Sign in" }).click()
   await expect(page).toHaveURL("/en/reports")
   await page

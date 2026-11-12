@@ -1,8 +1,8 @@
 import base64
 import hashlib
 import hmac
+import re
 import secrets
-import string
 from functools import lru_cache
 
 PASSWORD_MIN_LENGTH = 8
@@ -26,17 +26,11 @@ def validate_password(password: str) -> None:
         )
 
 
-def generate_temporary_password() -> str:
-    characters = [
-        secrets.choice(string.ascii_lowercase),
-        secrets.choice(string.ascii_uppercase),
-        secrets.choice(string.digits),
-        secrets.choice("!@#$%^&*-_=+"),
-    ]
-    alphabet = string.ascii_letters + string.digits + "!@#$%^&*-_=+"
-    characters.extend(secrets.choice(alphabet) for _ in range(8))
-    secrets.SystemRandom().shuffle(characters)
-    return "".join(characters)
+def validate_account_password(password: str) -> None:
+    if re.fullmatch(r"[A-Za-z0-9]{8,}", password) is None:
+        raise PasswordPolicyError(
+            "password must use only English letters and digits, with at least 8 characters"
+        )
 
 
 def hash_password(password: str, pepper: str) -> str:
