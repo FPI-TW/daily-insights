@@ -17,6 +17,7 @@ import { motion } from "motion/react"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { browserAdministrationClient } from "#/lib/admin-members"
+import { memberDirectoryCsv } from "#/lib/member-export"
 import { requireCsrfToken } from "#/lib/auth"
 import { useSessionExpiryRedirect } from "#/lib/useSessionExpiry"
 import { hoverLift, reveal, springs, useEnterAnimation } from "#/lib/motion"
@@ -79,11 +80,6 @@ export function MemberManagementPage({
   const [selectedOrganizationId, setSelectedOrganizationId] = useState(
     directory[0]?.organization.id ?? ""
   )
-  const [createdCredentials, setCreatedCredentials] = useState<{
-    email: string
-    password: string
-  } | null>(null)
-
   useEffect(() => {
     const firstOrganization = directory[0]?.organization
     if (
@@ -103,28 +99,40 @@ export function MemberManagementPage({
       member => memberFilter === "all" || member.member_type === memberFilter
     ) ?? []
 
+  function downloadMemberList() {
+    const csv = memberDirectoryCsv(directory)
+    const url = URL.createObjectURL(
+      new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" })
+    )
+    const link = document.createElement("a")
+    link.href = url
+    link.download = "人員清單.csv"
+    document.body.append(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+
   return (
     <main className="page-shell">
-      <header className="mb-8 max-w-3xl">
-        <p className="eyebrow">{t("adminPortal")}</p>
-        <h1 className="mt-2 mb-3 text-[clamp(1.9rem,4vw,2.5rem)] leading-none font-extrabold tracking-[-0.045em]">
-          {t("memberManagementTitle")}
-        </h1>
-        <span
-          className="mb-4 block h-[3px] w-14 bg-lagoon"
-          aria-hidden="true"
-        />
-        <p className="leading-7 text-sea-ink-soft">
-          {t("memberManagementDescription")}
-        </p>
+      <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
+        <div className="max-w-3xl">
+          <p className="eyebrow">{t("adminPortal")}</p>
+          <h1 className="mt-2 mb-3 text-[clamp(1.9rem,4vw,2.5rem)] leading-none font-extrabold tracking-[-0.045em]">
+            {t("memberManagementTitle")}
+          </h1>
+          <span
+            className="mb-4 block h-[3px] w-14 bg-lagoon"
+            aria-hidden="true"
+          />
+          <p className="leading-7 text-sea-ink-soft">
+            {t("memberManagementDescription")}
+          </p>
+        </div>
+        <button type="button" onClick={downloadMemberList}>
+          {t("downloadMemberListCsv")}
+        </button>
       </header>
-
-      {createdCredentials ? (
-        <TemporaryPasswordNotice
-          credentials={createdCredentials}
-          onDismiss={() => setCreatedCredentials(null)}
-        />
-      ) : null}
 
       <div className="grid grid-cols-[minmax(16rem,0.34fr)_minmax(0,1fr)] items-start gap-5 max-[52rem]:grid-cols-1">
         <aside className="surface-panel sticky top-24 grid gap-4 border-t-[3px] border-t-lagoon p-4 max-[52rem]:static">
@@ -149,7 +157,6 @@ export function MemberManagementPage({
                 }
                 onClick={() => {
                   setSelectedOrganizationId(organization.id)
-                  setCreatedCredentials(null)
                 }}
               >
                 <span>{organization.name}</span>
@@ -167,7 +174,6 @@ export function MemberManagementPage({
             locale={locale}
             onCreated={organization => {
               setSelectedOrganizationId(organization.id)
-              setCreatedCredentials(null)
             }}
           />
         </aside>
@@ -205,9 +211,6 @@ export function MemberManagementPage({
                 seatsAvailable={
                   selectedEntry.organization.seat_count <
                   selectedEntry.organization.seat_limit
-                }
-                onCreated={(member, password) =>
-                  setCreatedCredentials({ email: member.email, password })
                 }
               />
 
@@ -430,12 +433,10 @@ function CreateMemberForm({
   organizationId,
   locale,
   seatsAvailable,
-  onCreated,
 }: {
   organizationId: string
   locale: Locale
   seatsAvailable: boolean
-  onCreated: (member: Member, password: string) => void
 }) {
   const { t } = useTranslation()
   const router = useRouter()
@@ -457,7 +458,7 @@ function CreateMemberForm({
         return
       }
       try {
-        const member = await browserAdministrationClient().createMember(
+        await browserAdministrationClient().createMember(
           organizationId,
           {
             display_name: value.displayName,
@@ -471,7 +472,6 @@ function CreateMemberForm({
           },
           await requireCsrfToken()
         )
-        onCreated(member, value.password)
         form.reset()
         await router.invalidate({ sync: true })
       } catch (caught) {
@@ -642,47 +642,6 @@ function CreateMemberForm({
         )}
       </form.Subscribe>
     </form>
-  )
-}
-
-function TemporaryPasswordNotice({
-  credentials,
-  onDismiss,
-}: {
-  credentials: { email: string; password: string }
-  onDismiss: () => void
-}) {
-  const { t } = useTranslation()
-  const [copied, setCopied] = useState(false)
-  return (
-    <section
-      className="surface-panel mb-5 grid grid-cols-[minmax(0,1fr)_minmax(14rem,0.55fr)] items-center gap-4 border-l-4 border-l-lagoon p-5 max-[42rem]:grid-cols-1"
-      aria-live="polite"
-    >
-      <div>
-        <p className="eyebrow">{t("memberCreated")}</p>
-        <h2>{t("temporaryPasswordTitle")}</h2>
-        <p>{t("temporaryPasswordDescription", { email: credentials.email })}</p>
-      </div>
-      <code className="row-span-2 select-all rounded-lg border border-line bg-surface px-4 py-3 font-mono text-sm text-sea-ink [overflow-wrap:anywhere] max-[42rem]:row-auto">
-        {credentials.password}
-      </code>
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => {
-            void navigator.clipboard
-              .writeText(credentials.password)
-              .then(() => setCopied(true))
-          }}
-        >
-          {copied ? t("copied") : t("copyPassword")}
-        </button>
-        <button type="button" onClick={onDismiss}>
-          {t("dismiss")}
-        </button>
-      </div>
-    </section>
   )
 }
 
