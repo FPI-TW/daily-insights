@@ -116,8 +116,10 @@ describe("trial member administration", () => {
         "csrf"
       )
     )
-    expect(await screen.findByText("Abcd1234")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Copy password" })).toBeVisible()
+    expect(screen.queryByText("Abcd1234")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Copy password" })
+    ).not.toBeInTheDocument()
     expect(screen.getByLabelText("Password")).toHaveValue("")
   })
   it.each(["short7", "Invalid!123", "Password 123", "密碼123456"])(
@@ -166,6 +168,31 @@ describe("trial member administration", () => {
         "csrf"
       )
     )
+  })
+  it("downloads the member list as a CSV file", async () => {
+    const createObjectURL = vi.fn(() => "blob:members")
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL })
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        expect(this.download).toBe("人員清單.csv")
+        expect(this.href).toBe("blob:members")
+      })
+
+    show([member])
+    fireEvent.click(
+      screen.getByRole("button", { name: "Download all members CSV" })
+    )
+
+    expect(createObjectURL).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "text/csv;charset=utf-8" })
+    )
+    expect(click).toHaveBeenCalledOnce()
+    await waitFor(() =>
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:members")
+    )
+    vi.unstubAllGlobals()
   })
   it("explains a capacity conflict when converting an expired trial", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true)
