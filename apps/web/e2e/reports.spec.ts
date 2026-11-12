@@ -151,26 +151,21 @@ test("US market renders a responsive VIX chart with MACD and KD", async ({
     name: "US equities news",
     exact: true,
   })
-  const viewpointHeading = page.getByRole("heading", {
-    name: "Analyst viewpoint",
-    exact: true,
-  })
   const marketHeading = page.getByRole("heading", {
     name: "US five-index performance",
     exact: true,
   })
   await expect(newsHeading).toBeVisible()
-  await expect(viewpointHeading).toBeVisible()
-  const [newsBox, viewpointBox, marketBox] = await Promise.all([
+  await expect(
+    page.getByRole("heading", { name: "Analyst viewpoint", exact: true })
+  ).toHaveCount(0)
+  const [newsBox, marketBox] = await Promise.all([
     newsHeading.boundingBox(),
-    viewpointHeading.boundingBox(),
     marketHeading.boundingBox(),
   ])
   expect(newsBox).not.toBeNull()
-  expect(viewpointBox).not.toBeNull()
   expect(marketBox).not.toBeNull()
-  expect(newsBox!.y).toBeLessThan(viewpointBox!.y)
-  expect(viewpointBox!.y).toBeLessThan(marketBox!.y)
+  expect(newsBox!.y).toBeLessThan(marketBox!.y)
   const indexPanel = page
     .getByRole("heading", { name: "Index performance", exact: true })
     .locator("xpath=ancestor::section[1]")
@@ -229,7 +224,6 @@ for (const [
   indexTitle,
   bias,
   newsTitle,
-  viewpointTitle,
 ] of [
   [
     "zh-hant",
@@ -240,7 +234,6 @@ for (const [
     "台灣加權指數",
     "台股乖離率",
     "台股重點新聞",
-    "分析師觀點",
   ],
   [
     "zh-hans",
@@ -251,7 +244,6 @@ for (const [
     "台湾加权指数",
     "台股乖离率",
     "台股重点新闻",
-    "分析师观点",
   ],
   [
     "en",
@@ -262,7 +254,6 @@ for (const [
     "Taiwan Weighted Index",
     "TAIEX bias",
     "Taiwan equities news",
-    "Analyst viewpoint",
   ],
 ] as const) {
   test(`Taiwan institutional flows render correctly in ${locale}`, async ({
@@ -314,32 +305,24 @@ for (const [
       name: newsTitle,
       exact: true,
     })
-    const viewpointHeading = page.getByRole("heading", {
-      name: viewpointTitle,
-      exact: true,
-    })
     const indexHeading = page.getByRole("heading", {
       name: indexTitle,
       exact: true,
     })
     const biasHeading = page.getByRole("heading", { name: bias, exact: true })
     await expect(newsHeading).toBeVisible()
-    await expect(viewpointHeading).toBeVisible()
     await expect(indexHeading).toBeVisible()
     await expect(biasHeading).toBeVisible()
-    const [newsBox, viewpointBox, indexBox, biasBox, sectionBox] =
-      await Promise.all([
-        newsHeading.boundingBox(),
-        viewpointHeading.boundingBox(),
-        indexHeading.boundingBox(),
-        biasHeading.boundingBox(),
-        section.boundingBox(),
-      ])
-    for (const box of [newsBox, viewpointBox, indexBox, biasBox, sectionBox]) {
+    const [newsBox, indexBox, biasBox, sectionBox] = await Promise.all([
+      newsHeading.boundingBox(),
+      indexHeading.boundingBox(),
+      biasHeading.boundingBox(),
+      section.boundingBox(),
+    ])
+    for (const box of [newsBox, indexBox, biasBox, sectionBox]) {
       expect(box).not.toBeNull()
     }
-    expect(newsBox!.y).toBeLessThan(viewpointBox!.y)
-    expect(viewpointBox!.y).toBeLessThan(indexBox!.y)
+    expect(newsBox!.y).toBeLessThan(indexBox!.y)
     expect(indexBox!.y).toBeLessThan(biasBox!.y)
     expect(biasBox!.y).toBeLessThan(sectionBox!.y)
     await page.setViewportSize({ width: 375, height: 720 })
@@ -410,7 +393,7 @@ test("US shell and price charts render before delayed news, report and moving av
   ).toBeVisible()
   await expect(
     page.getByRole("heading", { name: "Analyst viewpoint", exact: true })
-  ).toBeVisible()
+  ).toHaveCount(0)
   await expect(
     page.getByRole("status", { name: "Loading key news" })
   ).toBeVisible()
@@ -579,7 +562,7 @@ test("hover preloads a market route without browser market API requests", async 
   await page.goto("/en/reports")
   await expect(
     page.getByRole("heading", { name: "Analyst viewpoints", exact: true })
-  ).toBeVisible()
+  ).toHaveCount(0)
   await expect(
     page.getByRole("status", { name: "Loading market navigation" })
   ).toHaveCount(0)

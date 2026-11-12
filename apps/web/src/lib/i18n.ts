@@ -281,9 +281,6 @@ const resources: Resource = {
       requestId: "請求編號：{{id}}",
       submitting: "處理中…",
       reportsNav: "晨間報告",
-      analystViewpointsTitle: "分析師觀點",
-      analystViewpointsLoading: "正在載入分析師觀點。",
-      analystViewpointsUpdated: "更新於 {{timestamp}}",
       analystViewpointsAdminNav: "分析師觀點",
       analystViewpointsAdminTitle: "分析師觀點同步",
       analystViewpointsAdminDescription: "檢視今日上游觀點與手動重新同步狀態。",
@@ -637,7 +634,6 @@ const resources: Resource = {
       reportLabelUsdTwd: "美元兌台幣",
       reportLabelUsdJpy: "美元兌日圓",
       reportLabelEurUsd: "歐元兌美元",
-      marketViewpointTitle: "分析師觀點",
       reportBlockTaiwanTrend: "盤中指數走勢",
       reportBlockDerivativeSnapshot: "期權市場快照",
       reportBlockDerivativeOpenInterest: "三大法人與未平倉",
@@ -809,8 +805,7 @@ const resources: Resource = {
       podcastMissingLocales: "缺少語系：{{locales}}",
       marketNavigationLoading: "正在載入市場導覽。",
       reportNotLaunchedTitle: "報告尚未推出",
-      reportNotLaunchedDescription:
-        "此市場的正式晨間報告仍在準備中，目前先提供分析師觀點與市場新聞。",
+      reportNotLaunchedDescription: "此市場的正式晨間報告仍在準備中。",
       podcastDuration: "約 {{minutes}} 分鐘",
       // Newsroom review console (/admin/newsroom); owned by the admin workstream.
       newsroomAdminNav: "重點新聞審核",
@@ -1330,9 +1325,6 @@ const resources: Resource = {
       requestId: "请求编号：{{id}}",
       submitting: "处理中…",
       reportsNav: "晨间报告",
-      analystViewpointsTitle: "分析师观点",
-      analystViewpointsLoading: "正在加载分析师观点。",
-      analystViewpointsUpdated: "更新于 {{timestamp}}",
       analystViewpointsAdminNav: "分析师观点",
       analystViewpointsAdminTitle: "分析师观点同步",
       analystViewpointsAdminDescription: "查看今日上游观点与手动重新同步状态。",
@@ -1686,7 +1678,6 @@ const resources: Resource = {
       reportLabelUsdTwd: "美元兑台币",
       reportLabelUsdJpy: "美元兑日元",
       reportLabelEurUsd: "欧元兑美元",
-      marketViewpointTitle: "分析师观点",
       reportBlockTaiwanTrend: "盘中指数走势",
       reportBlockDerivativeSnapshot: "期权市场快照",
       reportBlockDerivativeOpenInterest: "三大法人与未平仓",
@@ -1855,8 +1846,7 @@ const resources: Resource = {
       podcastMissingLocales: "缺少语言：{{locales}}",
       marketNavigationLoading: "正在加载市场导航。",
       reportNotLaunchedTitle: "报告尚未推出",
-      reportNotLaunchedDescription:
-        "该市场的正式晨间报告仍在准备中，目前先提供分析师观点与市场新闻。",
+      reportNotLaunchedDescription: "该市场的正式晨间报告仍在准备中。",
       podcastDuration: "约 {{minutes}} 分钟",
       // Newsroom review console (/admin/newsroom); owned by the admin workstream.
       newsroomAdminNav: "重点新闻审核",
@@ -2388,9 +2378,6 @@ const resources: Resource = {
       requestId: "Request ID: {{id}}",
       submitting: "Working…",
       reportsNav: "Reports",
-      analystViewpointsTitle: "Analyst viewpoints",
-      analystViewpointsLoading: "Loading analyst viewpoints.",
-      analystViewpointsUpdated: "Updated {{timestamp}}",
       analystViewpointsAdminNav: "Analyst viewpoints",
       analystViewpointsAdminTitle: "Analyst viewpoint sync",
       analystViewpointsAdminDescription:
@@ -2761,7 +2748,6 @@ const resources: Resource = {
       reportLabelUsdTwd: "USD/TWD",
       reportLabelUsdJpy: "USD/JPY",
       reportLabelEurUsd: "EUR/USD",
-      marketViewpointTitle: "Analyst viewpoint",
       reportBlockTaiwanTrend: "Intraday index trend",
       reportBlockDerivativeSnapshot: "Options market snapshot",
       reportBlockDerivativeOpenInterest:
@@ -2946,7 +2932,7 @@ const resources: Resource = {
       marketNavigationLoading: "Loading market navigation",
       reportNotLaunchedTitle: "Report not launched yet",
       reportNotLaunchedDescription:
-        "The formal morning report for this market is still in preparation; the analyst viewpoint and market news are available now.",
+        "The formal morning report for this market is still in preparation.",
       podcastDuration: "About {{minutes}} min",
       // Newsroom review console (/admin/newsroom); owned by the admin workstream.
       newsroomAdminNav: "Key news review",

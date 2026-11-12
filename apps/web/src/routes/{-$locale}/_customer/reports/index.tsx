@@ -1,9 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
-import {
-  ReportErrorScreen,
-  ReportList,
-  AnalystViewpointsLoading,
-} from "#/components/Reports"
+import { ReportErrorScreen } from "#/components/Reports"
 import { DailyNews, DailyNewsLoading } from "#/components/DailyNews"
 import { useChatPageContext } from "#/components/PageContextChat"
 import { marketQueries, useMarketQuery } from "#/lib/market-queries"
@@ -16,10 +12,8 @@ export const Route = createFileRoute("/{-$locale}/_customer/reports/")({
 function ReportsPage() {
   const { user, locale } = Route.useRouteContext()
   const queries = marketQueries(user, locale)
-  const markets = useMarketQuery(queries.markets(), locale)
   const reports = useMarketQuery(queries.reports(), locale)
   const news = useMarketQuery(queries.news(), locale)
-  const viewpoints = useMarketQuery(queries.viewpoints(), locale)
   const publicationIds = (reports.data ?? []).flatMap(report =>
     report.publicationId ? [report.publicationId] : []
   )
@@ -39,17 +33,6 @@ function ReportsPage() {
       </MarketQuerySection>
       <MarketQuerySection query={reports} loading={null}>
         {() => null}
-      </MarketQuerySection>
-      <MarketQuerySection
-        query={viewpoints}
-        loading={<AnalystViewpointsLoading />}
-      >
-        {data => (
-          <ReportList
-            viewpoints={data ?? []}
-            {...(markets.data ? { markets: markets.data } : {})}
-          />
-        )}
       </MarketQuerySection>
     </>
   )

@@ -8,10 +8,8 @@ import {
 import { I18nextProvider } from "react-i18next"
 import { describe, expect, it, vi } from "vitest"
 import {
-  MarketViewpoint,
   ReportDetail,
   ReportErrorScreen,
-  ReportList,
   ReportLoadingScreen,
   ReportNotGeneratedScreen,
   ReportShell,
@@ -152,7 +150,7 @@ describe("three-market report presentation", () => {
           { code: "forex", name: "Foreign Exchange" },
         ]}
       >
-        <ReportList />
+        {null}
       </ReportShell>,
       "en"
     )
@@ -168,50 +166,6 @@ describe("three-market report presentation", () => {
       "data-params",
       JSON.stringify({ locale: "en", marketCode: "us_equity" })
     )
-  })
-
-  it("shows tab-visible analyst viewpoints in navigation order", async () => {
-    await renderLocalized(
-      <ReportShell locale="en" markets={markets}>
-        <ReportList
-          markets={markets}
-          viewpoints={[
-            {
-              viewpoint_date: "2026-09-02",
-              market_code: "global_macro_bonds",
-              source_market_code: "us_macro",
-              points: ["Bond yields remain range-bound."],
-              fetched_at: "2026-09-02T08:00:00+08:00",
-            },
-            {
-              viewpoint_date: "2026-09-02",
-              market_code: "crypto",
-              source_market_code: "crypto",
-              points: ["Crypto is intentionally hidden from the current tabs."],
-              fetched_at: "2026-09-02T08:00:00+08:00",
-            },
-            {
-              viewpoint_date: "2026-09-02",
-              market_code: "tw_equity",
-              source_market_code: "tw_stocks",
-              points: ["Taiwan breadth is improving."],
-              fetched_at: "2026-09-02T08:00:00+08:00",
-            },
-          ]}
-        />
-      </ReportShell>,
-      "en"
-    )
-
-    const navigation = screen.getByRole("navigation")
-    const section = screen.getByRole("region", { name: "Analyst viewpoints" })
-    expect(navigation.compareDocumentPosition(section)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING
-    )
-    expect(section).toHaveTextContent("Global macro")
-    expect(section).toHaveTextContent("Taiwan equities")
-    expect(section).not.toHaveTextContent("US equities")
-    expect(section).not.toHaveTextContent("Crypto")
   })
 
   it("lets the route hide the not-launched notice while retaining its shared shell", async () => {
@@ -908,7 +862,6 @@ describe("three-market report presentation", () => {
     await renderLocalized(
       <>
         <ReportLoadingScreen />
-        <ReportList locale="en" />
         <ReportErrorScreen error={new Error("fixture failure")} />
       </>
     )
@@ -942,7 +895,7 @@ describe("three-market report presentation", () => {
     }
   )
 
-  it("opens a market page with the analyst viewpoint and widens a lone block", async () => {
+  it("widens a lone market report block", async () => {
     const report = {
       marketCode: "crypto",
       status: "complete",
@@ -973,23 +926,6 @@ describe("three-market report presentation", () => {
       .getByRole("heading", { name: "Crypto market snapshot" })
       .closest("section")
     expect(block).toHaveClass("xl:col-span-2")
-
-    cleanup()
-    await renderLocalized(
-      <MarketViewpoint
-        viewpoint={{
-          viewpoint_date: "2026-09-04",
-          market_code: "forex",
-          source_market_code: "forex",
-          points: ["Dollar softened."],
-          fetched_at: "2026-09-04T02:22:00+00:00",
-        }}
-      />,
-      "zh-hant"
-    )
-    expect(
-      screen.getByRole("region", { name: "分析師觀點" })
-    ).toHaveTextContent("Dollar softened.")
   })
 
   it("keeps the current market code in typed locale-switcher links", async () => {

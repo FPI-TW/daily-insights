@@ -4,7 +4,6 @@ import {
   createMarketClient,
   createReportClient,
   createNewsroomClient,
-  createAnalystViewpointClient,
   launchMarketCodeSchema,
   marketCodeSchema,
   type ApiTransport,
@@ -182,10 +181,6 @@ export function marketQueries(scope: MarketScope, locale: Locale) {
         createNewsroomClient(transport).latestEdition(newsroomMarket, locale)
       )
     },
-    viewpoints: () =>
-      query("viewpoints", [], transport =>
-        createAnalystViewpointClient(transport).today()
-      ),
     history: (marketCode: MarketCode, range: { start: string; end: string }) =>
       query(
         "history",

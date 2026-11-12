@@ -7,12 +7,7 @@ import {
 } from "@daily-insights/api-client"
 import { useEffect, useRef, useState } from "react"
 import { DailyNews, DailyNewsLoading } from "#/components/DailyNews"
-import {
-  AnalystViewpointsLoading,
-  MarketViewpoint,
-  ReportErrorScreen,
-  ReportLoadingScreen,
-} from "#/components/Reports"
+import { ReportErrorScreen, ReportLoadingScreen } from "#/components/Reports"
 import { ReportInformation } from "#/components/MarketInformation"
 import { MarketQuerySection } from "#/components/MarketQuerySection"
 import { marketQueries, useMarketQuery } from "#/lib/market-queries"
@@ -161,7 +156,6 @@ function ReportPage() {
     locale,
     ready && isNewsMarketCode(marketCode)
   )
-  const viewpoints = useMarketQuery(queries.viewpoints(), locale, ready)
   const macro = useMarketQuery(
     queries.macro(),
     locale,
@@ -212,9 +206,6 @@ function ReportPage() {
       !markets.data.some(m => m.code === marketCode))
   )
     throw notFound()
-  const viewpoint = viewpoints.data?.find(
-    item => item.market_code === marketCode
-  )
   // The chart's MarketQuerySection already announces this query's refetch
   // and error once, so the table only picks between skeleton and data.
   const performanceTable = performance ? (
@@ -243,12 +234,6 @@ function ReportPage() {
           )}
         </MarketQuerySection>
       ) : null}
-      <MarketQuerySection
-        query={viewpoints}
-        loading={<AnalystViewpointsLoading />}
-      >
-        {() => (viewpoint ? <MarketViewpoint viewpoint={viewpoint} /> : null)}
-      </MarketQuerySection>
       {blocks.macro ? (
         <MarketQuerySection query={macro} loading={<MacroDashboardLoading />}>
           {data => <MacroDashboard data={data ?? null} locale={locale} />}

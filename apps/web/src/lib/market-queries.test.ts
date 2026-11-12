@@ -149,16 +149,13 @@ describe("market browser queries", () => {
       marketQueries(scope, "zh-hant").latestIndices().queryKey
     )
   })
-  it("isolates user, organization, locale and range; shares viewpoints across locales", () => {
+  it("isolates user, organization, locale and range", () => {
     const en = marketQueries(scope, "en")
     expect(en.reports().queryKey).not.toEqual(
       marketQueries(scope, "zh-hant").reports().queryKey
     )
     expect(en.markets().queryKey).toEqual(
       marketQueries(scope, "en").markets().queryKey
-    )
-    expect(en.viewpoints().queryKey).toEqual(
-      marketQueries(scope, "zh-hant").viewpoints().queryKey
     )
     expect(en.history("tw_equity", range).queryKey).not.toEqual(
       en.history("tw_equity", { ...range, end: "2026-10-04" }).queryKey
